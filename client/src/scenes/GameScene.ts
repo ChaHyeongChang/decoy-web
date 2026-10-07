@@ -28,6 +28,8 @@ export class GameScene extends Phaser.Scene {
   /** 발각: 화면 가장자리 빨간 테두리 + 배너 */
   private spottedEdge!: Phaser.GameObjects.Graphics;
   private spottedBanner!: Phaser.GameObjects.Text;
+  /** 괴물: 감옥 캠핑 · 거점 지키기 경고 (하단 중앙 위) */
+  private warnText!: Phaser.GameObjects.Text;
   /** 괴물 화면: 내 부채꼴 모양 보간 (스냅샷 사이에도 0.4초 전환이 부드럽게) */
   private myBlend = 0;
   drawn: DrawnEntity[] = [];
@@ -65,6 +67,18 @@ export class GameScene extends Phaser.Scene {
         color: '#FFFFFF',
         backgroundColor: '#B91C1C',
         padding: { x: 22, y: 6 },
+      })
+      .setOrigin(0.5)
+      .setDepth(51)
+      .setVisible(false);
+    this.warnText = this.add
+      .text(VIEW_W / 2, VIEW_H - 110, '', {
+        fontFamily: 'sans-serif',
+        fontSize: '26px',
+        fontStyle: 'bold',
+        color: '#0B1622',
+        backgroundColor: '#F59E0B',
+        padding: { x: 16, y: 6 },
       })
       .setOrigin(0.5)
       .setDepth(51)
@@ -174,6 +188,17 @@ export class GameScene extends Phaser.Scene {
       delta,
     );
     this.drawn = this.world.drawn;
+    const mon2 = snap.you.mon;
+    const warn = mon2
+      ? mon2.camp === 2
+        ? UI_TEXT.campSlow
+        : mon2.camp === 1
+          ? UI_TEXT.campWarn
+          : mon2.blockWarn
+            ? UI_TEXT.pointWarn
+            : ''
+      : '';
+    this.warnText.setText(warn).setVisible(warn !== '');
     const spotted = snap.you.surv?.spotted === true;
     this.spottedEdge.setVisible(spotted);
     this.spottedBanner.setVisible(spotted);

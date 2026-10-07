@@ -77,3 +77,32 @@ export function drawMonster(
     py + s * r0 - c * 5,
   );
 }
+
+/** 공격 준비 범위: 전방 arc° · range 타일 부채꼴, 흰색 알파 25% (VISUAL_SPEC 3장) */
+export function drawAttackRange(
+  g: Phaser.GameObjects.Graphics,
+  x: number,
+  y: number,
+  dir: number,
+  range: number,
+  arcDeg: number,
+): void {
+  const half = (arcDeg * Math.PI) / 360;
+  g.fillStyle(0xffffff, 0.25);
+  g.slice(x * T, y * T, range * T, dir - half, dir + half, false);
+  g.fillPath();
+  g.lineStyle(2, 0xffffff, 0.6);
+  g.beginPath();
+  g.arc(x * T, y * T, range * T, dir - half, dir + half, false);
+  g.strokePath();
+}
+
+/** 구조 진행 링 (0~1) */
+export function drawRescueRing(g: Phaser.GameObjects.Graphics, x: number, y: number, progress: number): void {
+  g.lineStyle(3, 0xe2e8f0, 0.35);
+  g.strokeCircle(x * T, y * T, 0.55 * T);
+  g.lineStyle(3, 0x22d3ee, 0.95);
+  g.beginPath();
+  g.arc(x * T, y * T, 0.55 * T, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, progress), false);
+  g.strokePath();
+}

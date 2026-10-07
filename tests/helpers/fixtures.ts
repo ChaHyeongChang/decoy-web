@@ -47,3 +47,19 @@ export class Driver {
     return Math.round(s / this.game.dt);
   }
 }
+
+/** 테스트용 배치: 위치와 방향을 바로 정한다 */
+export function place(game: Game, id: string, x: number, y: number, face?: number): void {
+  const p = game.players.get(id);
+  if (!p) throw new Error(`플레이어 없음 ${id}`);
+  p.move.x = x;
+  p.move.y = y;
+  if (face !== undefined) p.move.face = face;
+}
+
+/** 괴물 시작 대기를 없앤 판 */
+export function readyGame(seed = 1): Game {
+  const game = newGame(seed);
+  game.monster.move.frozen = 0;
+  return game;
+}

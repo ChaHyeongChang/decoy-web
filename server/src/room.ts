@@ -20,6 +20,7 @@ import {
 import { randomBytes } from 'node:crypto';
 import { Game } from './game';
 import { AliasBook, buildSnapshot, computeVisibility } from './interest';
+import { buildResult } from './systems/match';
 
 export interface Conn {
   readonly id: number;
@@ -308,6 +309,19 @@ export class Room {
     this.hooks.log?.(`방 ${this.code} 판 시작 (${setup.map((p) => `${p.name}:${p.role}`).join(', ')})`);
   }
 
+  /** 판이 끝났다: 결과를 보내고 결과 화면 단계로 */
+  finishMatch(game: Game): void {
+    if (this.phase !== 'playing') return;
+    const result = buildResult(game);
+    this.phase = 'result';
+    this.lastResult = { t: 'result', result };
+    for (const s of this.seats) s.conn?.send(this.lastResult);
+    this.sendLobby();
+    this.hooks.log?.(
+      `방 ${this.code} 판 끝: ${result.winner} (${game.end?.reason ?? ''}, 탈출 ${result.escaped})`,
+    );
+  }
+
   backToLobby(): void {
     this.phase = 'lobby';
     this.game = null;
@@ -342,7 +356,7 @@ export class Room {
     if (this.phase !== 'playing' || !game) return;
     game.step();
     this.hooks.recordTruth?.(this);
-    if (this.isSnapshotTick(game.tick)) {
+    if (this.isSnapshotTick(game.tick) || game.end) {
       const facts = computeVisibility(game);
       this.aliases.update(facts.monsterSees);
       for (const s of this.seats) {
@@ -351,6 +365,7 @@ export class Room {
         if (snap) s.conn.send({ t: 'snap', s: snap });
       }
     }
+    if (game.end) this.finishMatch(game);
   }
 
   private dropExpiredLobbySeats(nowMs: number): void {

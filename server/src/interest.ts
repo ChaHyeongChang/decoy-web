@@ -82,7 +82,7 @@ export class AliasBook {
   }
 }
 
-function survivorSelf(s: SurvivorState): SurvivorSelf {
+function survivorSelf(s: SurvivorState, rescueTime: number): SurvivorSelf {
   return {
     status: s.status,
     hp: s.hp,
@@ -90,7 +90,7 @@ function survivorSelf(s: SurvivorState): SurvivorSelf {
     protectLeft: round(s.protectLeft),
     abilityCd: round(s.abilityCd),
     abilityActive: round(s.abilityActive),
-    rescue: round(s.rescueProgress),
+    rescue: round(Math.min(1, s.rescueProgress / rescueTime)),
     spotted: s.spotted,
   };
 }
@@ -122,13 +122,13 @@ function selfView(game: Game, p: GamePlayer): SelfView {
     id: p.id,
     role: p.role,
     move: { ...p.move, dirHist: p.move.dirHist.slice() },
-    surv: p.kind === 'survivor' ? survivorSelf(p) : null,
+    surv: p.kind === 'survivor' ? survivorSelf(p, game.balance.prison.rescueTime) : null,
     mon: p.kind === 'monster' ? monsterSelf(game, p) : null,
   };
 }
 
 /** 생존자 팀이 보는 팀원 정보 (전부) */
-function teammateView(s: SurvivorState): SurvivorView {
+function teammateView(s: SurvivorState, rescueTime: number): SurvivorView {
   return {
     id: s.id,
     x: round(s.move.x),
@@ -140,7 +140,7 @@ function teammateView(s: SurvivorState): SurvivorView {
     hp: s.hp,
     imprisonCount: s.imprisonCount,
     abilityCd: round(s.abilityCd),
-    rescue: round(s.rescueProgress),
+    rescue: round(Math.min(1, s.rescueProgress / rescueTime)),
     spotted: s.spotted,
     connected: s.connected,
   };
@@ -273,7 +273,9 @@ export function buildSnapshot(
     st: Math.round(st),
     ack: me.ack,
     you: selfView(game, me),
-    survivors: game.survivors.filter((s) => s.id !== me.id).map(teammateView),
+    survivors: game.survivors
+      .filter((s) => s.id !== me.id)
+      .map((s) => teammateView(s, game.balance.prison.rescueTime)),
     monster: facts.survivorsSeeMonster ? monsterView(game.monster, seesSomeone) : null,
     marks: survivorMarks(game),
     world: worldView(game, false),

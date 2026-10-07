@@ -22,7 +22,7 @@ import {
   type Vec2,
 } from '@decoy/shared';
 import { MAP_SCALE, MAP_X, MAP_Y } from '../ui/layout';
-import { drawMonster, drawSurvivor } from './characters';
+import { drawAttackRange, drawMonster, drawRescueRing, drawSurvivor } from './characters';
 import { ALPHA, COLOR, ROLE_COLOR } from './colors';
 import { BaseLayer } from './baseLayer';
 import { Badges, type BadgeAlpha } from './objects';
@@ -131,14 +131,23 @@ export class WorldRenderer {
       fillPolygon(this.coneOver, cone, color, alpha);
     }
 
-    // 7. 캐릭터
+    // 7. 캐릭터 · 공격 범위 · 구조 게이지
     const g = this.entities;
     g.clear();
+    const atk = balance.monster.attack;
+    // 공격 준비 범위 (양쪽 화면, 흰색 25%): 괴물을 따라가고 방향은 고정
+    if (isMonster && v.me && (snap.you.mon?.windup ?? 0) > 0)
+      drawAttackRange(g, v.me.x, v.me.y, v.me.face, atk.range, atk.arc);
+    if (!isMonster && v.monster && v.monster.windup > 0)
+      drawAttackRange(g, v.monster.x, v.monster.y, v.monster.aim, atk.range, atk.arc);
+    const blinkFast = Math.floor(v.nowMs / 150) % 2 === 0;
     for (const [id, s] of v.survivors) {
       if (s.status === 'dead' || s.status === 'escaped') continue;
       const color = isMonster || !s.role ? COLOR.hiddenSurvivor : ROLE_COLOR[s.role];
-      const revealColor = isMonster && s.role ? ROLE_COLOR[s.role] : null;
+      const revealColor =
+        isMonster && s.role ? ROLE_COLOR[s.role] : s.protected && blinkFast ? COLOR.white : null;
       drawSurvivor(g, s.x, s.y, s.face, color, s.protected ? ALPHA.protected : 1, revealColor);
+      if (s.rescue !== null && s.rescue > 0) drawRescueRing(g, s.x, s.y, s.rescue);
       drawn.push({ id, kind: 'survivor', x: s.x, y: s.y, face: s.face, layer: 'main' });
     }
     if (!isMonster && v.monster) {
@@ -151,7 +160,17 @@ export class WorldRenderer {
       if (isMonster) drawMonster(g, v.me.x, v.me.y, v.me.face);
       else if (st !== 'dead' && st !== 'escaped') {
         const prot = (snap.you.surv?.protectLeft ?? 0) > 0;
-        drawSurvivor(g, v.me.x, v.me.y, v.me.face, ROLE_COLOR[v.role], prot ? ALPHA.protected : 1);
+        drawSurvivor(
+          g,
+          v.me.x,
+          v.me.y,
+          v.me.face,
+          ROLE_COLOR[v.role],
+          prot ? ALPHA.protected : 1,
+          prot && blinkFast ? COLOR.white : null,
+        );
+        const rescue = snap.you.surv?.rescue ?? 0;
+        if (rescue > 0) drawRescueRing(g, v.me.x, v.me.y, rescue);
       }
       drawn.push({ id: v.selfId, kind: 'self', x: v.me.x, y: v.me.y, face: v.me.face, layer: 'main' });
     }
