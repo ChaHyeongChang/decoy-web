@@ -26,7 +26,9 @@ import type {
   PlayerStats,
   SurvivorState,
 } from './state';
+import { captureTick } from './systems/capture';
 import { combatTick, monsterAttackInput } from './systems/combat';
+import { exitTick } from './systems/exit';
 import { matchTick } from './systems/match';
 import { monsterBlendTick, monsterModeInput } from './systems/monster';
 import { prisonTick } from './systems/prison';
@@ -263,6 +265,8 @@ export class Game {
     monsterBlendTick(this, this.monster);
     combatTick(this);
     prisonTick(this);
+    captureTick(this);
+    exitTick(this);
     matchTick(this);
   }
 

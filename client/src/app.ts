@@ -17,6 +17,7 @@ import { NetClient, defaultWsUrl } from './net';
 import { getAltTokens, getSavedName, getSeatToken, saveName, saveSeatToken } from './session';
 import { Interpolator, Predictor, SnapshotClock, lerpAngle, lerpNum } from './sync';
 import { LobbyUI } from './ui/lobby';
+import { ResultUI } from './ui/result';
 
 export type DebugMode = 'off' | 'hook' | 'overlay';
 
@@ -75,6 +76,7 @@ export type AppEvent =
 export class App {
   readonly net: NetClient;
   readonly lobbyUi: LobbyUI;
+  readonly resultUi: ResultUI;
   balance: Balance | null = null;
   balanceHash = '';
   you: string | null = null;
@@ -127,6 +129,7 @@ export class App {
       },
       params.name ?? getSavedName(),
     );
+    this.resultUi = new ResultUI(uiRoot, () => this.net.send({ t: 'rematch' }));
     this.net.on((msg) => this.onMessage(msg));
     this.net.onOpen = () => {
       if (this.roomCode) this.sendJoin(params.name ?? getSavedName());
@@ -234,6 +237,7 @@ export class App {
         if (msg.lobby.phase === 'lobby') {
           this.match = null;
           this.result = null;
+          this.resultUi.hide();
           this.lobbyUi.renderRoom(msg.lobby);
         }
         this.emit({ kind: 'lobby', lobby: msg.lobby });
@@ -249,6 +253,7 @@ export class App {
         this.monsterInterp.clear();
         this.snapClock.reset();
         this.lobbyUi.hide();
+        this.resultUi.hide();
         this.emit({ kind: 'match', info: msg.info });
         return;
       case 'snap': {
@@ -268,6 +273,7 @@ export class App {
       }
       case 'result':
         this.result = msg.result;
+        this.resultUi.show(msg.result, this.match?.role ?? null);
         this.emit({ kind: 'result', result: msg.result });
         return;
       case 'error':

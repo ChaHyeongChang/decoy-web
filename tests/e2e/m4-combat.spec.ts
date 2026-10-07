@@ -20,7 +20,9 @@ test('괴물이 좌클릭으로 공격하면 생존자가 부상, 두 번째에 
     if (hit === 1) {
       await runner.page.waitForFunction(() => window.__DECOY__?.getLastSnapshot()?.you.surv?.hp === 1);
     } else {
-      await runner.page.waitForFunction(() => window.__DECOY__?.getLastSnapshot()?.you.surv?.status === 'imprisoned');
+      await runner.page.waitForFunction(
+        () => window.__DECOY__?.getLastSnapshot()?.you.surv?.status === 'imprisoned',
+      );
     }
     await monster.page.waitForTimeout(1700);
   }
