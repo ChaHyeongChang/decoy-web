@@ -1,6 +1,8 @@
 import { defineConfig } from '@playwright/test';
 
 const PORT = Number(process.env.DECOY_E2E_PORT ?? 8181);
+/** 서버 정답 기록 (정보 차단 E2E가 대조한다) */
+export const TRUTH_LOG = 'tests/e2e/.results/truth.jsonl';
 
 export default defineConfig({
   testDir: '.',
@@ -24,7 +26,7 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: `node server/dist/index.js --port=${PORT} --test-hooks --seed=12345`,
+    command: `mkdir -p tests/e2e/.results && node server/dist/index.js --port=${PORT} --test-hooks --seed=12345 --truth-log=${TRUTH_LOG}`,
     cwd: '../..',
     url: `http://localhost:${PORT}/healthz`,
     reuseExistingServer: false,

@@ -1,40 +1,51 @@
 // DECOY 클라이언트 진입점
 import Phaser from 'phaser';
+import { App, readParams } from './app';
+import { installDebug } from './debug';
+import { GameScene } from './scenes/GameScene';
+import { VIEW_H, VIEW_W } from './ui/layout';
 
-const params = new URLSearchParams(window.location.search);
+const params = readParams(window.location.search);
+const uiRoot = document.getElementById('ui-root') ?? document.body;
+const app = new App(params, uiRoot);
 
-function pickRenderer(): number {
-  const r = params.get('renderer');
-  if (r === 'canvas') return Phaser.CANVAS;
-  if (r === 'webgl') return Phaser.WEBGL;
+function rendererType(): number {
+  if (params.renderer === 'canvas') return Phaser.CANVAS;
+  if (params.renderer === 'webgl') return Phaser.WEBGL;
   return Phaser.AUTO;
 }
 
-class BootScene extends Phaser.Scene {
+class IdleScene extends Phaser.Scene {
   constructor() {
-    super('boot');
-  }
-  create(): void {
-    this.add
-      .text(960, 540, 'DECOY', { fontFamily: 'sans-serif', fontSize: '96px', color: '#22D3EE' })
-      .setOrigin(0.5);
+    super('idle');
   }
 }
 
 const game = new Phaser.Game({
-  type: pickRenderer(),
+  type: rendererType(),
   parent: 'game-root',
   backgroundColor: '#0B1622',
   banner: false,
+  disableContextMenu: true,
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
-    width: 1920,
-    height: 1080,
+    width: VIEW_W,
+    height: VIEW_H,
   },
-  scene: [BootScene],
+  fps: { target: 60 },
+  scene: [IdleScene, GameScene],
+});
+app.game = game;
+
+app.subscribe((e) => {
+  if (e.kind === 'match') {
+    game.scene.stop('game');
+    game.scene.start('game', { app });
+  } else if (e.kind === 'lobby' && e.lobby.phase === 'lobby') {
+    if (game.scene.isActive('game')) game.scene.stop('game');
+  }
 });
 
-if (params.has('debug')) {
-  (window as unknown as { __DECOY_GAME__: Phaser.Game }).__DECOY_GAME__ = game;
-}
+if (params.debug !== 'off' || import.meta.env.DEV) installDebug(app, params.debug === 'overlay');
+app.start();
