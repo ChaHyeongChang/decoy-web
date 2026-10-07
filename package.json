@@ -1,0 +1,46 @@
+{
+  "name": "decoy-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DECOY v2 — 생존자 3 vs 괴물 1 브라우저 온라인 비대칭 탈출 게임",
+  "workspaces": [
+    "shared",
+    "server",
+    "client",
+    "tests"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "npm run build:client && npm run build:server",
+    "build:client": "vite build --config client/vite.config.ts",
+    "build:server": "node scripts/build-server.mjs",
+    "start": "node server/dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "npm run build && playwright test --config tests/e2e/playwright.config.ts",
+    "typecheck": "tsc -p shared && tsc -p server && tsc -p client && tsc -p tests",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run typecheck && npm run lint && npm run format:check"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@playwright/test": "1.56.1",
+    "@types/node": "22.20.5",
+    "@types/ws": "8.18.2",
+    "esbuild": "0.28.2",
+    "eslint": "9.39.5",
+    "globals": "17.13.0",
+    "prettier": "3.9.9",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.1",
+    "vite": "8.3.3",
+    "vitest": "5.0.3"
+  }
+}

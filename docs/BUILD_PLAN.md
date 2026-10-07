@@ -13,9 +13,9 @@ Claude Code가 한 세션에서 처음부터 끝까지 진행하기 위한 마�
 ---
 
 ## M0 — 뼈대와 도구
-- [ ] npm 워크스페이스(shared · server · client · tests), TypeScript strict, ESLint, Prettier
-- [ ] `npm run dev`, `npm run build`, `npm start`, `npm test`, `npm run test:e2e`
-- [ ] Playwright가 설치된 Chromium으로 빈 페이지를 여는 스모크 테스트
+- [x] npm 워크스페이스(shared · server · client · tests), TypeScript strict, ESLint, Prettier
+- [x] `npm run dev`, `npm run build`, `npm start`, `npm test`, `npm run test:e2e`
+- [x] Playwright가 설치된 Chromium으로 빈 페이지를 여는 스모크 테스트
 - **검증**: 모든 스크립트가 에러 없이 끝난다
 
 ## M1 — 접속과 이동 동기화

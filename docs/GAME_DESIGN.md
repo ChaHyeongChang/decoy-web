@@ -182,3 +182,4 @@
 | 날짜 | 변경 |
 |---|---|
 | 2026.10.07 | v2 작성. 사람 괴물 기준 재설계, 수업 피드백 반영 (`FEEDBACK_REVIEW.md`) |
+| 2026.10.07 | 구현 중 문서에 없던 값 추가 (`DECISIONS.md` 참고): `match.reconnectGrace` 30, `survivor.abilityRevealDuration` 1.0, `monster.turnSlowWindow` 0.25, `monster.attack.windupMoveMultiplier` 1.0, `prison.rescueRadius` 1.2, `capturePoint.monsterBlockGrace` 5 (거점 지키기 방지 — 규칙 추가), `capturePoint.alertCooldown` 8, `exit.pausedWhenMonsterInside` false, `network.lagJitterMs` 20 · `inputQueueMax` 6 · `correctionSmoothMs` 150 · `snapDistance` 1.5. 규칙 보충: 자유 생존자 0명이면 괴물 승리, 감옥 문 · 철창 · 구조 구역, 캠핑 반경 기준 |

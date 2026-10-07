@@ -1,0 +1,34 @@
+:root {
+  --bg: #0b1622;
+  --panel: #111c28;
+  --line: #c8d2dc;
+  --text: #e2e8f0;
+  --accent: #22d3ee;
+  --warn: #f59e0b;
+  --danger: #ef4444;
+  --font: 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  overflow: hidden;
+}
+#game-root {
+  position: fixed;
+  inset: 0;
+}
+#ui-root {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+#ui-root > * {
+  pointer-events: auto;
+}

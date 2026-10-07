@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.env.*
+artifacts/*
+!artifacts/final/
+test-results/
+playwright-report/
+tests/e2e/.results/
+*.log
+.DS_Store

@@ -1,0 +1,10 @@
+{
+  "name": "@decoy/tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@decoy/shared": "0.1.0",
+    "@decoy/server": "0.1.0"
+  }
+}
