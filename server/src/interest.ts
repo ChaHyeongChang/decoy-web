@@ -5,8 +5,10 @@
 //            익명 상태 목록. 생존자 실제 ID · 역할 · 부상 여부 · 탈출구 개방 진행도는 보내지 않는다
 import { randomBytes } from 'node:crypto';
 import {
+  exceeds,
   inCircleVision,
   monsterSees,
+  reached,
   survivorVisionRadius,
   type AnonStatus,
   type ExitView,
@@ -99,11 +101,11 @@ function monsterSelf(game: Game, m: MonsterState): MonsterSelf {
   const b = game.balance;
   const campActive = game.survivors.some((s) => s.status === 'imprisoned');
   let camp: 0 | 1 | 2 = 0;
-  if (campActive && m.move.camp > b.prison.campGrace) camp = 2;
-  else if (campActive && m.move.camp >= b.prison.campWarnAt) camp = 1;
+  if (campActive && exceeds(m.move.camp, b.prison.campGrace)) camp = 2;
+  else if (campActive && reached(m.move.camp, b.prison.campWarnAt)) camp = 1;
   let blockWarn: MonsterSelf['blockWarn'] = null;
   for (const p of game.points) {
-    if (!p.done && m.pointCamp[p.id] >= b.prison.campWarnAt) blockWarn = p.id;
+    if (!p.done && reached(m.pointCamp[p.id], b.prison.campWarnAt)) blockWarn = p.id;
   }
   return {
     attackCd: round(m.attackCd),

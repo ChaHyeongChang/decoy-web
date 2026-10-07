@@ -80,6 +80,17 @@ export const RELEASE_SLOTS: readonly Vec2[] = [
   { x: 24, y: 19.2 },
   { x: 25, y: 18.7 },
 ];
+/** 기본 자리가 괴물 몸과 겹칠 때 쓰는 예비 자리 (문 바깥, 가까운 순) */
+export const RELEASE_SPARES: readonly Vec2[] = [
+  { x: 22, y: 19.3 },
+  { x: 26, y: 19.3 },
+  { x: 23, y: 20.2 },
+  { x: 25, y: 20.2 },
+  { x: 24, y: 20.8 },
+  { x: 22.2, y: 21.2 },
+  { x: 25.8, y: 21.2 },
+  { x: 24, y: 22 },
+];
 export const MONSTER_SPAWN: Vec2 = { x: 45, y: 28 };
 
 export const CAPTURE_POINTS: Readonly<Record<PointId, Vec2>> = {

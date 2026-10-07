@@ -83,6 +83,25 @@ export function bodyRadius(kind: 'survivor' | 'monster', balance: Balance): numb
   return kind === 'monster' ? balance.monster.radius : balance.survivor.radius;
 }
 
+/** 타이머 비교 오차 여유: 1/30을 n번 빼거나 더해도 경계 틱이 밀리지 않게 */
+export const TIMER_EPS = 1e-9;
+
+/** 남은 시간 타이머를 dt만큼 줄인다. 오차만 남으면 0 (예: 4초 보호는 정확히 120틱) */
+export function countdown(v: number, dt: number): number {
+  const r = v - dt;
+  return r <= TIMER_EPS ? 0 : r;
+}
+
+/** 쌓이는 시간이 기준에 닿았는가 (>=, 오차 여유 포함) */
+export function reached(v: number, target: number): boolean {
+  return v >= target - TIMER_EPS;
+}
+
+/** 쌓이는 시간이 한도를 넘었는가 (>, 오차 여유 포함) */
+export function exceeds(v: number, limit: number): boolean {
+  return v > limit + TIMER_EPS;
+}
+
 /** 입력 벡터를 길이 1 이하로 */
 export function normalizeMove(mx: number, my: number): Vec2 {
   const len = Math.hypot(mx, my);
@@ -94,7 +113,7 @@ export function normalizeMove(mx: number, my: number): Vec2 {
 export function monsterSpeedMultiplier(s: MoveState, env: MoveEnv, balance: Balance): number {
   let mult = 1;
   if (s.turnSlow > 0) mult *= balance.monster.turnSlowMultiplier;
-  if (env.campActive && s.camp > balance.prison.campGrace) mult *= balance.prison.campSlowMultiplier;
+  if (env.campActive && exceeds(s.camp, balance.prison.campGrace)) mult *= balance.prison.campSlowMultiplier;
   if (s.aimLock > 0) mult *= balance.monster.attack.windupMoveMultiplier;
   return mult;
 }
@@ -207,11 +226,11 @@ export function stepMovement(
   }
 
   // 타이머 감소 (남은 시간 > 0인 틱까지 효과 유지)
-  s.frozen = Math.max(0, s.frozen - dt);
-  s.stun = Math.max(0, s.stun - dt);
-  s.aimLock = Math.max(0, s.aimLock - dt);
-  s.sprint = Math.max(0, s.sprint - dt);
-  s.turnSlow = Math.max(0, s.turnSlow - dt);
+  s.frozen = countdown(s.frozen, dt);
+  s.stun = countdown(s.stun, dt);
+  s.aimLock = countdown(s.aimLock, dt);
+  s.sprint = countdown(s.sprint, dt);
+  s.turnSlow = countdown(s.turnSlow, dt);
   if (s.dirHist.length > 0) {
     const kept: number[] = [];
     for (let k = 0; k + 2 < s.dirHist.length; k += 3) {

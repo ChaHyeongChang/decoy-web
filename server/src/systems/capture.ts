@@ -3,7 +3,7 @@
 //   괴물이 안에 있으면 멈춘다. 단, 괴물이 monsterBlockGrace(5초) 넘게 연속으로 머물면 정지가 풀린다(DECISIONS)
 //   생존자가 없어도 게이지는 줄지 않는다
 //   점령 시작 → 괴물에게 알림(배지 깜빡임 + 문구), 완료 → 양쪽 배너 + 생존자에게 스토리 메모(점령 순서대로)
-import { CAPTURE_POINTS } from '@decoy/shared';
+import { CAPTURE_POINTS, exceeds, reached } from '@decoy/shared';
 import type { Game } from '../game';
 import type { CapturePointState } from '../state';
 
@@ -26,10 +26,10 @@ export function captureTick(game: Game): void {
       inside.length > 0 &&
       b.pausedWhenMonsterInside &&
       monsterInside &&
-      m.pointCamp[p.id] <= b.monsterBlockGrace;
+      !exceeds(m.pointCamp[p.id], b.monsterBlockGrace);
     p.capturing = inside.length > 0 && !p.blocked;
     if (p.capturing) {
-      if (!p.wasCapturing && game.time - p.lastAlertAt >= b.alertCooldown) {
+      if (!p.wasCapturing && reached(game.time - p.lastAlertAt, b.alertCooldown)) {
         p.lastAlertAt = game.time;
         game.emitTo(m, { k: 'text', id: 'ALERT_CAPTURE_START', point: p.id });
       }

@@ -58,6 +58,8 @@ export interface SurvivorState extends PlayerBase {
   /** 능력 사용 후 정체 노출 남은 시간 */
   revealLeft: number;
   rescueProgress: number;
+  /** 마지막으로 맞은 틱 (맞은 틱의 구조 누름은 진행으로 치지 않는다) */
+  hitTick: number;
   /** 이번 틱에 괴물에게 보이는가 (interest.ts가 채운다) */
   spotted: boolean;
 }

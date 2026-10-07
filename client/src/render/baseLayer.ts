@@ -209,6 +209,11 @@ export class BaseLayer {
     l.restore();
   }
 
+  /** 합성된 바닥 캔버스 (미니맵이 같은 정보로 줄여 그린다) */
+  get canvas(): HTMLCanvasElement {
+    return this.base;
+  }
+
   /** 안개를 곱하고 텍스처에 반영 */
   commit(): void {
     if (this.fog) {

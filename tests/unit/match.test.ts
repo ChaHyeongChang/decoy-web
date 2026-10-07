@@ -101,6 +101,17 @@ describe('승패 조건', () => {
     expect(endingOf(game)).toBe('END_TIMEOUT');
   });
 
+  it('12분 타이머가 0이 되는 바로 그 틱에 끝난다 (한 틱 더 진행하지 않는다)', () => {
+    const game = readyGame();
+    game.timeLeft = game.dt * 3;
+    const d = new Driver(game);
+    d.run(2);
+    expect(game.end).toBeNull();
+    d.run(1);
+    expect(game.timeLeft).toBe(0);
+    expect(game.end).toMatchObject({ winner: 'monster', reason: 'timeout' });
+  });
+
   it('1명 탈출 뒤 시간 초과면 결말은 END_MONSTER', () => {
     const game = readyGame();
     setStatus(game, { p2: 'escaped' });

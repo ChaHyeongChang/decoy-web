@@ -107,3 +107,38 @@ export const UI_TEXT = {
   modeSearch: '탐색',
   modeHunt: '추적',
 } as const;
+
+/** 조작 안내 (첫 판 오버레이 · Tab 화면) */
+export const CONTROLS: Record<'monster' | 'survivor', string[]> = {
+  survivor: [
+    'WASD  이동 (바라보는 방향 = 이동 방향)',
+    'Space  고유 능력',
+    'E (누르고 있기)  감옥 문 앞에서 구조',
+    'Tab (누르고 있기)  점수판 · 상태',
+    '거점 A · B를 점령하고, 두 사람이 함께 탈출구에 3초 서 있으면 문이 열린다',
+  ],
+  monster: [
+    'WASD  이동 · 마우스  조준',
+    '좌클릭  공격 · 우클릭  시야 모드 (탐색 ↔ 추적)',
+    'Shift  돌진 · Q  포효',
+    'Tab (누르고 있기)  점수판 · 상태',
+    '생존자를 두 번 때리면 감옥으로. 두 명을 죽이거나 셋 모두 가두면 승리',
+  ],
+};
+
+export const HUD_TEXT = {
+  status: { normal: '정상', injured: '부상', imprisoned: '수감', dead: '사망', escaped: '탈출' },
+  offline: '연결 끊김',
+  ready: '준비됨',
+  rescuing: '구조 중',
+  imprisonedHint: '수감 중 — 동료가 감옥 문 앞에서 E로 구조하면 풀려난다',
+  spectating: '관전 중',
+  last30: '최후',
+  attack: '공격',
+  dash: '돌진',
+  roar: '포효',
+  mode: '시야',
+  monsterWaking: '괴물이 깨어나는 중',
+  scoreboard: '점수판',
+  closeHint: '아무 키나 누르면 닫힘 · Tab으로 다시 보기',
+} as const;

@@ -9,11 +9,13 @@ import {
   PRISON_RECT,
   PRISON_SLOTS,
   RELEASE_SLOTS,
+  RELEASE_SPARES,
   RESCUE_POINT,
   ZONES,
   blocksMove,
   blocksVision,
   tileAt,
+  tilePenetration,
   type MoverContext,
 } from '@decoy/shared';
 import { loadTestBalance } from '../helpers/fixtures';
@@ -98,8 +100,13 @@ describe('맵 (GAME_DESIGN 10장)', () => {
           }
         }
     }
-    for (const p of [MONSTER_SPAWN, RESCUE_POINT, ...PRISON_SLOTS, ...RELEASE_SLOTS]) {
+    for (const p of [MONSTER_SPAWN, RESCUE_POINT, ...PRISON_SLOTS, ...RELEASE_SLOTS, ...RELEASE_SPARES]) {
       expect(passable(Math.floor(p.x), Math.floor(p.y))).toBe(true);
+    }
+    // 풀려나는 자리는 생존자 몸이 벽 · 철창에 겹치지 않고, 감옥 바깥이다
+    for (const p of [...RELEASE_SLOTS, ...RELEASE_SPARES]) {
+      expect(tilePenetration(p, balance.survivor.radius, (i, j) => !passable(i, j))).toBe(0);
+      expect(p.y).toBeGreaterThan(PRISON_RECT.y1);
     }
   });
 

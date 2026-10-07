@@ -1,18 +1,24 @@
-// 판 화면: 1/30초 고정 간격 입력 → 예측 → 서버 전송, 그리고 렌더링
+// 판 화면: 1/30초 고정 간격 입력 → 예측 → 서버 전송, 그리고 렌더링 · HUD · 배너
 import Phaser from 'phaser';
-import { type DrawnEntity, type InputFrame } from '@decoy/shared';
+import type { DrawnEntity, GameEvent, InputFrame, Role } from '@decoy/shared';
 import type { App } from '../app';
+import { STORY_TEXT, UI_TEXT, formatText } from '../data/storyText';
 import { InputSampler } from '../input';
 import { COLOR } from '../render/colors';
 import { WorldRenderer } from '../render/worldRenderer';
-import { UI_TEXT } from '../data/storyText';
+import { Banners } from '../ui/banners';
+import { Hud } from '../ui/hud';
 import { VIEW_H, VIEW_W, fitCamera, screenToTile } from '../ui/layout';
+import { Minimap } from '../ui/minimap';
+import { Scoreboard, TutorialOverlay } from '../ui/overlays';
 
-/** M3부터 안개를 켠다 */
+/** 안개 (M3부터) */
 export const FOG_ENABLED = true;
-
-/** 입력이 밀렸을 때 한 프레임에 따라잡는 최대 스텝 */
+/** 입력이 밀렸을 때 한 번에 따라잡는 최대 스텝 */
 const MAX_CATCHUP_STEPS = 4;
+/** 첫 판 조작 안내 표시 시간 (VISUAL_SPEC 6장) */
+const TUTORIAL_SECONDS = 5;
+const EXIT_NAMES = { N: '북', S: '남' } as const;
 
 export class GameScene extends Phaser.Scene {
   private app!: App;
@@ -24,10 +30,13 @@ export class GameScene extends Phaser.Scene {
   private lastStepAt = 0;
   private inputTimer: number | null = null;
   private world!: WorldRenderer;
-  private hud!: Phaser.GameObjects.Text;
-  /** 발각: 화면 가장자리 빨간 테두리 + 배너 */
+  private hud!: Hud;
+  private minimap!: Minimap;
+  private banners!: Banners;
+  private tutorial!: TutorialOverlay;
+  private scoreboard!: Scoreboard;
+  /** 발각: 화면 가장자리 빨간 테두리 */
   private spottedEdge!: Phaser.GameObjects.Graphics;
-  private spottedBanner!: Phaser.GameObjects.Text;
   /** 괴물: 감옥 캠핑 · 거점 지키기 경고 (하단 중앙 위) */
   private warnText!: Phaser.GameObjects.Text;
   /** 괴물 화면: 내 부채꼴 모양 보간 (스냅샷 사이에도 0.4초 전환이 부드럽게) */
@@ -51,32 +60,36 @@ export class GameScene extends Phaser.Scene {
     this.acc = 0;
   }
 
+  get minimapDrawn(): DrawnEntity[] {
+    return this.minimap?.drawn ?? [];
+  }
+
+  get bannerTexts(): string[] {
+    return this.banners?.visible ?? [];
+  }
+
   create(): void {
+    const app = this.app;
+    const info = app.match;
+    const balance = app.balance;
+    if (!info || !balance) return;
     this.cameras.main.setBackgroundColor(COLOR.background);
     fitCamera(this.cameras.main);
     this.world = new WorldRenderer(this, FOG_ENABLED);
     this.myBlend = 0;
-    this.hud = this.add.text(24, 18, '', { fontFamily: 'sans-serif', fontSize: '22px', color: '#E2E8F0' });
+    this.hud = new Hud(this, info, balance);
+    this.minimap = new Minimap(this);
+    this.banners = new Banners(this);
+    this.tutorial = new TutorialOverlay(this, info);
+    this.scoreboard = new Scoreboard(this, info, balance);
     this.spottedEdge = this.add.graphics().setDepth(50);
     this.spottedEdge.lineStyle(14, COLOR.monster, 0.75);
     this.spottedEdge.strokeRect(7, 7, VIEW_W - 14, VIEW_H - 14);
     this.spottedEdge.setVisible(false);
-    this.spottedBanner = this.add
-      .text(VIEW_W / 2, 150, UI_TEXT.spotted, {
-        fontFamily: 'sans-serif',
-        fontSize: '40px',
-        fontStyle: 'bold',
-        color: '#FFFFFF',
-        backgroundColor: '#B91C1C',
-        padding: { x: 22, y: 6 },
-      })
-      .setOrigin(0.5)
-      .setDepth(51)
-      .setVisible(false);
     this.warnText = this.add
-      .text(VIEW_W / 2, VIEW_H - 110, '', {
+      .text(VIEW_W / 2, VIEW_H - 112, '', {
         fontFamily: 'sans-serif',
-        fontSize: '26px',
+        fontSize: '24px',
         fontStyle: 'bold',
         color: '#0B1622',
         backgroundColor: '#F59E0B',
@@ -86,19 +99,19 @@ export class GameScene extends Phaser.Scene {
       .setDepth(51)
       .setVisible(false);
 
+    // 판 시작 문구 (괴물 대기 5초 동안)
+    const intro = info.role === 'monster' ? 'INTRO_MONSTER' : 'INTRO_WALL';
+    this.banners.pushNote(formatText(intro), STORY_TEXT[intro].seconds ?? 3);
+    if (info.firstMatch) this.tutorial.show(performance.now(), TUTORIAL_SECONDS);
+
     const host = this.game.canvas.parentElement ?? document.body;
     this.sampler.attach(host);
     this.roarPings = [];
-    this.unsubscribe = this.app.subscribe((e) => {
+    this.unsubscribe = app.subscribe((e) => {
       if (e.kind !== 'snapshot') return;
       if (this.seq < e.snap.ack) this.seq = e.snap.ack;
+      for (const ev of e.snap.events) this.onEvent(ev);
       const now = performance.now();
-      for (const ev of e.snap.events) {
-        if (ev.k === 'roarPings') {
-          const dur = (this.app.balance?.monster.roar.revealDuration ?? 1.5) * 1000;
-          for (const p of ev.pts) this.roarPings.push({ x: p.x, y: p.y, start: now, until: now + dur });
-        }
-      }
       this.roarPings = this.roarPings.filter((p) => p.until > now);
     });
     // 입력 샘플링은 렌더 프레임과 따로 타이머로 돈다 (그리기가 느려도 조작 주기는 1/30초 유지)
@@ -110,6 +123,41 @@ export class GameScene extends Phaser.Scene {
       this.sampler.detach();
       this.unsubscribe?.();
     });
+  }
+
+  /** 서버 이벤트 → 배너 · 메모 · 효과 */
+  private onEvent(ev: GameEvent): void {
+    const now = performance.now();
+    switch (ev.k) {
+      case 'text': {
+        if (ev.id === 'ALERT_LAST_30') return; // 지속형 배너로 따로 그린다
+        const params = { point: ev.point, exit: ev.exit ? EXIT_NAMES[ev.exit] : undefined, code: ev.code };
+        const text = formatText(ev.id, params);
+        const sec = STORY_TEXT[ev.id].seconds ?? 2;
+        if (ev.id === 'NOTE_FIRST' || ev.id === 'NOTE_SECOND' || ev.id.startsWith('INTRO')) {
+          this.banners.pushNote(text, sec);
+        } else {
+          const color =
+            ev.id === 'ALERT_ROAR'
+              ? COLOR.warn
+              : ev.id === 'ALERT_CAPTURE_START'
+                ? COLOR.warn
+                : COLOR.pointRing;
+          this.banners.push(text, sec, color, now);
+        }
+        return;
+      }
+      case 'roarPings': {
+        const dur = (this.app.balance?.monster.roar.revealDuration ?? 1.5) * 1000;
+        for (const p of ev.pts) this.roarPings.push({ x: p.x, y: p.y, start: now, until: now + dur });
+        return;
+      }
+      case 'shoveMiss':
+        this.hud.flash(UI_TEXT.outOfRange, 1000, now);
+        return;
+      default:
+        return;
+    }
   }
 
   /** 지금 내 조준 목표 각도 (괴물: 커서 방향) */
@@ -168,12 +216,13 @@ export class GameScene extends Phaser.Scene {
   private renderFrame(delta: number): void {
     const app = this.app;
     const snap = app.lastSnap;
-    if (!snap || !app.balance) {
+    if (!snap || !app.balance || !app.match) {
       this.drawn = [];
       return;
     }
+    const now = performance.now();
     const renderTime = app.renderTime();
-    const alpha = (performance.now() - this.lastStepAt) / (app.dt * 1000);
+    const alpha = (now - this.lastStepAt) / (app.dt * 1000);
     const me = app.predictor?.renderPos(delta, alpha) ?? null;
     if (me) this.localPos = me;
     const mon = snap.you.mon;
@@ -195,30 +244,38 @@ export class GameScene extends Phaser.Scene {
         monster:
           snap.you.role === 'monster' ? null : (app.monsterInterp.sample(renderTime).get('monster') ?? null),
         myBlend: this.myBlend,
-        nowMs: performance.now(),
+        nowMs: now,
         roarPings: this.roarPings,
       },
       delta,
     );
     this.drawn = this.world.drawn;
-    const mon2 = snap.you.mon;
-    const warn = mon2
-      ? mon2.camp === 2
+    if (this.world.baseRefreshed) this.minimap.refreshBase(this.world.baseCanvas);
+    const roster = app.match.roster;
+    const roleOf = (id: string): Role | null => roster.find((r) => r.id === id)?.role ?? null;
+    this.minimap.update(this.drawn, snap.you.role, roleOf);
+    this.hud.update(snap, now);
+
+    // 경고 · 배너
+    const warn = mon
+      ? mon.camp === 2
         ? UI_TEXT.campSlow
-        : mon2.camp === 1
+        : mon.camp === 1
           ? UI_TEXT.campWarn
-          : mon2.blockWarn
+          : mon.blockWarn
             ? UI_TEXT.pointWarn
             : ''
       : '';
-    this.warnText.setText(warn).setVisible(warn !== '');
+    if (this.warnText.text !== warn) this.warnText.setText(warn);
+    this.warnText.setVisible(warn !== '');
     const spotted = snap.you.surv?.spotted === true;
     this.spottedEdge.setVisible(spotted);
-    this.spottedBanner.setVisible(spotted);
-
-    const t = Math.max(0, Math.ceil(snap.world.timeLeft));
-    const mm = Math.floor(t / 60);
-    const ss = String(t % 60).padStart(2, '0');
-    this.hud.setText(`${mm}:${ss}`);
+    const lastChance = snap.world.grace !== null && snap.you.surv?.status === 'free';
+    const persistent = spotted ? UI_TEXT.spotted : lastChance ? formatText('ALERT_LAST_30') : '';
+    this.banners.update(persistent, spotted ? 0xb91c1c : COLOR.warn, now);
+    const anyKey = this.sampler.anyKeyPressed;
+    this.sampler.anyKeyPressed = false;
+    this.tutorial.update(now, anyKey);
+    this.scoreboard.update(this.sampler.tabHeld, snap);
   }
 }

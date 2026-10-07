@@ -184,6 +184,7 @@ export class Game {
           abilityActive: 0,
           revealLeft: 0,
           rescueProgress: 0,
+          hitTick: -1,
           spotted: false,
         };
         this.survivors.push(s);
@@ -306,7 +307,7 @@ export class Game {
       p.processed += 1;
       p.held = input.held;
       this.handleActions(p, input);
-      stepMovement(p.move, input, this.moveEnvFor(p), this.balance, this.dt);
+      this.stepBody(p, input);
     }
     if (processed > 0) {
       p.starved = 0;
@@ -319,8 +320,14 @@ export class Game {
       // 잠깐 막힌 경우 그동안의 입력이 늦게 올 수 있다: 그만큼을 빚으로 센다. 오래 끊기면(탭 숨김) 빚을 비운다
       p.debt = p.starved > LONG_STARVE_TICKS ? 0 : Math.min(DEBT_CAP, p.debt + 1);
       p.held = 0;
-      stepMovement(p.move, idleInput(p), this.moveEnvFor(p), this.balance, this.dt);
+      this.stepBody(p, idleInput(p));
     }
+  }
+
+  private stepBody(p: GamePlayer, input: InputFrame): void {
+    // 공격 준비 중 조준 고정은 준비 시간(틱마다 줄어듦)을 따른다. 한 틱에 입력이 몰려 처리돼도 타격 전에 풀리지 않게
+    if (p.kind === 'monster' && p.windupLeft > 0) p.move.aimLock = Math.max(p.move.aimLock, p.windupLeft);
+    stepMovement(p.move, input, this.moveEnvFor(p), this.balance, this.dt);
   }
 
   step(): void {
@@ -331,8 +338,8 @@ export class Game {
     // 괴물 먼저, 그다음 생존자 (각자 다른 몸은 이 시점 위치의 정지한 원으로 본다)
     this.processPlayerInputs(this.monster);
     for (const s of this.survivors) this.processPlayerInputs(s);
+    // 12분 타이머는 matchTick 안에서 줄인다 (0이 되는 바로 그 틱에 시간 초과 판정)
     this.runSystems();
-    if (this.grace === null) this.timeLeft = Math.max(0, this.timeLeft - this.dt);
   }
 
   /** 받는 사람별 이벤트를 꺼낸다 */

@@ -70,6 +70,12 @@ export class WorldRenderer {
   /** 부채꼴 색 (노랑 0 ↔ 빨강 1) 보간 상태 */
   private coneRed = 0;
   drawn: DrawnEntity[] = [];
+  /** 이번 프레임에 바닥 합성을 다시 했는가 (미니맵 갱신용) */
+  baseRefreshed = false;
+
+  get baseCanvas(): HTMLCanvasElement {
+    return this.base.canvas;
+  }
 
   constructor(scene: Phaser.Scene, useFog: boolean) {
     this.useFog = useFog;
@@ -101,6 +107,7 @@ export class WorldRenderer {
 
     // 1~6. 바닥 · 거점 · 탈출구 영역 · 시야 원 · (괴물 화면) 부채꼴 · 안개 — 갱신 주기마다 한 장으로 합성
     const fogDue = v.nowMs - this.lastFogAt >= (isMonster ? MONSTER_FOG_MS : SURVIVOR_FOG_MS);
+    this.baseRefreshed = fogDue;
     const eyes = isMonster ? [] : this.survivorEyes(v);
     if (fogDue) {
       this.lastFogAt = v.nowMs;

@@ -5,6 +5,7 @@ import {
   PRISON_SLOTS,
   blocksStrike,
   circleIntersectsSector,
+  countdown,
   inCircleVision,
   segmentBlocked,
   survivorVisionRadius,
@@ -58,11 +59,12 @@ export function cancelWindup(m: MonsterState): void {
 /** 틱마다: 준비가 끝나는 틱에 한 번 타격 판정 */
 export function combatTick(game: Game): void {
   const m = game.monster;
-  m.attackCd = Math.max(0, m.attackCd - game.dt);
+  m.attackCd = countdown(m.attackCd, game.dt);
   if (m.windupLeft <= 0) return;
-  m.windupLeft -= game.dt;
-  if (m.windupLeft > 1e-9) return;
-  m.windupLeft = 0;
+  m.windupLeft = countdown(m.windupLeft, game.dt);
+  if (m.windupLeft > 0) return;
+  // 타격 틱: 조준 고정도 여기서 함께 끝난다 (입력이 밀려 처리된 경우에도 준비 시간과 어긋나지 않게)
+  m.move.aimLock = 0;
   strike(game, m);
 }
 
@@ -90,8 +92,9 @@ export function hitSurvivor(game: Game, s: SurvivorState): boolean {
   if (s.status !== 'free' || s.protectLeft > 0) return false;
   s.hp -= 1;
   s.stats.hitsTaken += 1;
-  // 구조 중 공격받으면 중단
+  // 구조 중 공격받으면 중단 (이 틱의 누름도 진행으로 치지 않는다)
   s.rescueProgress = 0;
+  s.hitTick = game.tick;
   for (const t of game.survivors) game.emitTo(t, { k: 'hit', you: t === s, x: s.move.x, y: s.move.y });
   if (s.hp <= 0) captureSurvivor(game, s);
   return true;

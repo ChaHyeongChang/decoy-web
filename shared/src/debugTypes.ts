@@ -32,6 +32,10 @@ export interface DecoyDebug {
   getRenderPos(): { x: number; y: number; face: number } | null;
   getLastSnapshot(): Snapshot | null;
   getDrawn(): DrawnEntity[];
+  /** 미니맵에 그린 엔티티 */
+  getDrawnMinimap(): DrawnEntity[];
+  /** 지금 보이는 배너 · 메모 문구 */
+  getBanners(): string[];
   getResult(): MatchResult | null;
   getLastInput(): InputFrame | null;
   serverNow(): number;

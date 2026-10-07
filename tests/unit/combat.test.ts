@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BTN, PRISON_RECT, inRect } from '@decoy/shared';
+import { BTN, PRISON_RECT, countdown, inRect } from '@decoy/shared';
 import { Driver, place, readyGame } from '../helpers/fixtures';
 
 const ATTACK = { pressed: BTN.ATTACK };
@@ -47,6 +47,36 @@ describe('괴물 공격 (GAME_DESIGN 5.1)', () => {
     d.run(1, { p1: [0, 0, ATTACK] });
     expect(m.windupLeft).toBeGreaterThan(0);
     void game;
+  });
+
+  it('입력이 한 틱에 몰려 처리돼도 조준 고정은 타격 틱까지 유지되고, 타격 뒤에는 바로 풀린다', () => {
+    const { game, d, m } = setup();
+    const others = (): void => {
+      for (const id of ['p2', 'p3', 'p4']) d.input(id, 0, 0);
+    };
+    // 괴물 입력이 3틱 끊겨 크레딧이 쌓인 뒤, 공격 + 아래쪽 조준 입력 3개가 한 틱에 도착
+    for (let t = 0; t < 3; t += 1) {
+      others();
+      game.step();
+    }
+    d.input('p1', 0, 0, { pressed: BTN.ATTACK, aim: 0 });
+    d.input('p1', 0, 0, { aim: Math.PI / 2 });
+    d.input('p1', 0, 0, { aim: Math.PI / 2 });
+    others();
+    game.step();
+    expect(m.windupLeft).toBeGreaterThan(0);
+    let ticks = 0;
+    while (m.windupLeft > 0 && ticks < 30) {
+      d.input('p1', 0, 0, { aim: Math.PI / 2 });
+      others();
+      game.step();
+      ticks += 1;
+      expect(m.move.face).toBeCloseTo(0, 9);
+    }
+    expect(m.windupLeft).toBe(0);
+    expect(m.move.aimLock).toBe(0);
+    d.run(1, { p1: [0, 0, { aim: Math.PI / 2 }] });
+    expect(m.move.face).toBeGreaterThan(0.1);
   });
 
   it('시작 대기 중에는 공격할 수 없다', () => {
@@ -149,6 +179,44 @@ describe('구조 (GAME_DESIGN 6.2)', () => {
     d.run(d.seconds(0.4), { p4: [0, 0, { held: BTN.RESCUE }] });
     expect(scout.hp).toBe(1);
     expect(scout.rescueProgress).toBeLessThan(0.5);
+  });
+
+  it('맞은 틱의 E 누름은 구조 진행으로 치지 않는다 (진행은 그 틱 끝에 정확히 0)', () => {
+    const { game, d, scout } = prisoners();
+    d.run(d.seconds(2), { p4: [0, 0, { held: BTN.RESCUE }] });
+    place(game, 'p1', 24, 19.8, -Math.PI / 2);
+    d.run(1, { p1: [0, 0, ATTACK], p4: [0, 0, { held: BTN.RESCUE }] });
+    let ticks = 0;
+    while (scout.hp === 2 && ticks < 30) {
+      d.run(1, { p4: [0, 0, { held: BTN.RESCUE }] });
+      ticks += 1;
+    }
+    expect(scout.hp).toBe(1);
+    expect(scout.rescueProgress).toBe(0);
+  });
+
+  it('풀려날 자리가 괴물 몸과 겹치면 예비 자리로 놓인다 (순간이동으로 몸을 통과하지 않는다)', () => {
+    const { game, d, m, runner, guard } = prisoners();
+    // 괴물이 기본 자리 두 곳 사이를 막고 서 있다
+    place(game, 'p1', 23.6, 19.1, -Math.PI / 2);
+    d.run(d.seconds(3), { p4: [0, 0, { held: BTN.RESCUE }] });
+    const gap = game.balance.survivor.radius + game.balance.monster.radius;
+    for (const s of [runner, guard]) {
+      expect(s.status).toBe('free');
+      expect(Math.hypot(s.move.x - m.move.x, s.move.y - m.move.y)).toBeGreaterThanOrEqual(gap);
+      expect(s.move.y).toBeGreaterThan(PRISON_RECT.y1);
+    }
+  });
+
+  it('보호 4초와 시작 대기 5초는 정확히 120틱 · 150틱 (1/30을 빼는 오차로 한 틱 늘지 않는다)', () => {
+    const dt = 1 / 30;
+    let protect = 4;
+    for (let k = 0; k < 119; k += 1) protect = countdown(protect, dt);
+    expect(protect).toBeGreaterThan(0);
+    expect(countdown(protect, dt)).toBe(0);
+    let frozen = 5;
+    for (let k = 0; k < 150; k += 1) frozen = countdown(frozen, dt);
+    expect(frozen).toBe(0);
   });
 
   it('보호 4초 동안은 맞지 않고, 끝나면 다시 맞는다', () => {

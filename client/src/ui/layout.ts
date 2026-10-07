@@ -48,3 +48,16 @@ export function fitCamera(camera: {
   camera.setOrigin(0, 0);
   camera.setZoom(RENDER_SCALE);
 }
+
+/** HUD 배치 (맵 사각형과 겹치지 않게 위 · 아래 띠와 좌우 여백에) */
+export const HUD = {
+  timer: { x: VIEW_W / 2, y: HUD_BAND / 2 },
+  gaugeA: { x: VIEW_W / 2 - 330, y: HUD_BAND / 2, w: 260 },
+  gaugeB: { x: VIEW_W / 2 + 70, y: HUD_BAND / 2, w: 260 },
+  leftCards: { x: 14, y: HUD_BAND + 14, w: SIDE_W - 28, h: 150, gap: 12 },
+  minimap: { x: VIEW_W - SIDE_W + 12, y: HUD_BAND + 14, w: SIDE_W - 24 },
+  bottom: { y: VIEW_H - HUD_BAND / 2 },
+  /** 배너는 북쪽 탈출구 판정 원(맵 y 3타일)보다 아래 */
+  bannerY: MAP_Y + 4.2 * TILE_PX * MAP_SCALE,
+  noteY: MAP_Y + 8 * TILE_PX * MAP_SCALE,
+} as const;

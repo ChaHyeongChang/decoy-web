@@ -6,6 +6,7 @@
 import {
   BTN,
   blocksStrike,
+  countdown,
   monsterSees,
   segmentBlocked,
   type GameEvent,
@@ -105,13 +106,13 @@ export function survivorAbilityInput(game: Game, s: SurvivorState, input: InputF
 export function abilitiesTick(game: Game): void {
   const dt = game.dt;
   const m = game.monster;
-  m.dashCd = Math.max(0, m.dashCd - dt);
-  m.roarCd = Math.max(0, m.roarCd - dt);
-  m.roarRevealLeft = Math.max(0, m.roarRevealLeft - dt);
-  m.trackedLeft = Math.max(0, m.trackedLeft - dt);
+  m.dashCd = countdown(m.dashCd, dt);
+  m.roarCd = countdown(m.roarCd, dt);
+  m.roarRevealLeft = countdown(m.roarRevealLeft, dt);
+  m.trackedLeft = countdown(m.trackedLeft, dt);
   for (const s of game.survivors) {
-    s.abilityCd = Math.max(0, s.abilityCd - dt);
-    s.abilityActive = Math.max(0, s.abilityActive - dt);
-    s.revealLeft = Math.max(0, s.revealLeft - dt);
+    s.abilityCd = countdown(s.abilityCd, dt);
+    s.abilityActive = countdown(s.abilityActive, dt);
+    s.revealLeft = countdown(s.revealLeft, dt);
   }
 }

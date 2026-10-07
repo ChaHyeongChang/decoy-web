@@ -5,7 +5,7 @@
 //   12분 경과 → 탈출 못 한 생존자 사망 처리 후 판정 (= 괴물 승리)
 //   괴물이 재접속 유예 안에 돌아오지 않음 → 무효
 // 판정 순서: 생존자 승리를 먼저, 그다음 괴물 승리
-import type { MatchResult, PlayerRecord, ResultGrade, TextId } from '@decoy/shared';
+import { countdown, type MatchResult, type PlayerRecord, type ResultGrade, type TextId } from '@decoy/shared';
 import type { Game } from '../game';
 import type { MatchOutcomeReason } from '../state';
 
@@ -73,14 +73,14 @@ export function matchTick(game: Game): void {
   evaluate(game);
   if (game.end) return;
   if (game.grace !== null) {
-    game.grace -= game.dt;
-    if (game.grace <= 1e-9) {
-      game.grace = 0;
+    game.grace = countdown(game.grace, game.dt);
+    if (game.grace <= 0) {
       finish(game, 'survivors', 'escaped');
     }
     return;
   }
-  if (game.timeLeft <= 1e-9) {
+  game.timeLeft = countdown(game.timeLeft, game.dt);
+  if (game.timeLeft <= 0) {
     // 시간 초과: 탈출하지 못한 생존자는 사망 처리
     for (const s of game.survivors) if (s.status === 'free' || s.status === 'imprisoned') s.status = 'dead';
     const c = counts(game);

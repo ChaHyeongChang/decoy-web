@@ -63,6 +63,8 @@ export function installDebug(app: App, overlay: boolean): void {
     },
     getLastSnapshot: () => app.lastSnap,
     getDrawn: () => gameScene(app)?.drawn.map((d) => ({ ...d })) ?? [],
+    getDrawnMinimap: () => gameScene(app)?.minimapDrawn.map((d) => ({ ...d })) ?? [],
+    getBanners: () => gameScene(app)?.bannerTexts.slice() ?? [],
     getResult: () => app.result,
     getLastInput: () => gameScene(app)?.lastFrame ?? null,
     serverNow: () => app.net.serverNow(),
