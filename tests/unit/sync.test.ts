@@ -84,3 +84,30 @@ describe('다른 캐릭터 100ms 보간', () => {
     expect(it.sample(1060).has('m')).toBe(false);
   });
 });
+
+describe('스냅샷 시계 (M1 검토 반영)', () => {
+  it('단방향 지연이 커도 보간 시각이 받은 스냅샷 두 개 사이에 떨어진다', async () => {
+    const { SnapshotClock } = await import('../../client/src/sync');
+    const clock = new SnapshotClock();
+    // 서버가 50ms 간격으로 보낸 스냅샷이 100±20ms 늦게 도착
+    let seed = 3;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const arrivals: { st: number; at: number }[] = [];
+    for (let i = 0; i < 80; i += 1)
+      arrivals.push({ st: 10_000 + i * 50, at: 5_000 + i * 50 + 100 + (rnd() * 40 - 20) });
+    let inside = 0;
+    let total = 0;
+    let lastIdx = -1;
+    for (let now = 5_200; now < 9_000; now += 16) {
+      while (lastIdx + 1 < arrivals.length && arrivals[lastIdx + 1]!.at <= now) {
+        lastIdx += 1;
+        clock.add(arrivals[lastIdx]!.st, arrivals[lastIdx]!.at);
+      }
+      if (lastIdx < 2) continue;
+      const renderTime = clock.now(now) - 100;
+      total += 1;
+      if (renderTime >= arrivals[0]!.st && renderTime <= arrivals[lastIdx]!.st) inside += 1;
+    }
+    expect(inside / total).toBeGreaterThan(0.95);
+  });
+});

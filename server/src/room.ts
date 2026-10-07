@@ -19,7 +19,7 @@ import {
 } from '@decoy/shared';
 import { randomBytes } from 'node:crypto';
 import { Game } from './game';
-import { buildSnapshot } from './interest';
+import { AliasBook, buildSnapshot, computeVisibility } from './interest';
 
 export interface Conn {
   readonly id: number;
@@ -64,6 +64,8 @@ export class Room {
   readonly seats: Seat[] = [];
   hostId: string | null = null;
   game: Game | null = null;
+  /** 괴물에게 보낼 생존자 임시 ID */
+  private aliases = new AliasBook();
   matchCount = 0;
   lastResult: ServerMessage | null = null;
   emptySince: number | null = null;
@@ -297,6 +299,7 @@ export class Room {
       .map((s) => ({ id: s.id, name: s.name, role: s.role, bot: s.bot }));
     this.matchCount += 1;
     this.game = new Game(setup, this.config.balance, { seed: this.rng.int(2 ** 31) });
+    this.aliases = new AliasBook();
     this.phase = 'playing';
     this.lastResult = null;
     for (const s of this.seats) s.conn?.send({ t: 'match', info: this.matchInfo(s) });
@@ -332,14 +335,19 @@ export class Room {
   /** 실시간 틱 */
   tick(nowMs: number): void {
     this.dropExpiredLobbySeats(nowMs);
+    // 사람이 아무도 접속해 있지 않으면 (판 중이어도) 빈 방 시계를 돌린다 → RoomManager가 지운다
+    if (this.humanSeats.every((s) => s.conn === null)) this.emptySince ??= nowMs;
+    else this.emptySince = null;
     const game = this.game;
     if (this.phase !== 'playing' || !game) return;
     game.step();
     this.hooks.recordTruth?.(this);
     if (this.isSnapshotTick(game.tick)) {
+      const facts = computeVisibility(game);
+      this.aliases.update(facts.monsterSees);
       for (const s of this.seats) {
         if (!s.conn) continue;
-        const snap = buildSnapshot(game, s.id, nowMs);
+        const snap = buildSnapshot(game, s.id, nowMs, facts, this.aliases);
         if (snap) s.conn.send({ t: 'snap', s: snap });
       }
     }
@@ -362,7 +370,6 @@ export class Room {
       changed = true;
     }
     if (changed) this.sendLobby();
-    if (this.humanSeats.every((s) => s.conn === null)) this.emptySince ??= nowMs;
   }
 
   private applyTest(cmd: TestCommand): void {

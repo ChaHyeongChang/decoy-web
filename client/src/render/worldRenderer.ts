@@ -24,9 +24,8 @@ import {
 import { MAP_SCALE, MAP_X, MAP_Y } from '../ui/layout';
 import { drawMonster, drawSurvivor } from './characters';
 import { ALPHA, COLOR, ROLE_COLOR } from './colors';
-import { FogLayer } from './fog';
-import { drawStaticMap } from './mapCanvas';
-import { Badges, drawExitAreas, drawPointAreas, type BadgeAlpha } from './objects';
+import { BaseLayer } from './baseLayer';
+import { Badges, type BadgeAlpha } from './objects';
 import { fillPolygon, mixColor } from './vision';
 
 export interface FrameView {
@@ -51,9 +50,9 @@ const MONSTER_FOG_MS = 33;
 
 export class WorldRenderer {
   readonly container: Phaser.GameObjects.Container;
-  private readonly areas: Phaser.GameObjects.Graphics;
-  private readonly visionUnder: Phaser.GameObjects.Graphics;
-  private readonly fog: FogLayer | null;
+  /** 바닥 · 영역 · 시야 · 안개 합성 한 장 (레이어 1~6) */
+  private readonly base: BaseLayer;
+  private readonly useFog: boolean;
   private readonly coneOver: Phaser.GameObjects.Graphics;
   private readonly entities: Phaser.GameObjects.Graphics;
   private readonly badges: Badges;
@@ -62,18 +61,10 @@ export class WorldRenderer {
   private coneRed = 0;
   drawn: DrawnEntity[] = [];
 
-  constructor(
-    private readonly scene: Phaser.Scene,
-    useFog: boolean,
-  ) {
-    if (!scene.textures.exists('static-map')) scene.textures.addCanvas('static-map', drawStaticMap());
+  constructor(scene: Phaser.Scene, useFog: boolean) {
+    this.useFog = useFog;
+    this.base = new BaseLayer(scene, useFog);
     this.container = scene.add.container(MAP_X, MAP_Y).setScale(MAP_SCALE);
-    const map = scene.add.image(0, 0, 'static-map').setOrigin(0, 0);
-    this.areas = scene.add.graphics();
-    this.visionUnder = scene.add.graphics();
-    this.container.add([map, this.areas, this.visionUnder]);
-    this.fog = useFog ? new FogLayer(scene) : null;
-    if (this.fog) this.container.add(this.fog.image);
     this.coneOver = scene.add.graphics();
     this.entities = scene.add.graphics();
     this.container.add([this.coneOver, this.entities]);
@@ -98,34 +89,31 @@ export class WorldRenderer {
     const isMonster = v.role === 'monster';
     const drawn: DrawnEntity[] = [];
 
-    // 3. 거점 · 탈출구 영역
-    this.areas.clear();
-    drawPointAreas(this.areas, snap.world.points, balance);
-    drawExitAreas(this.areas, snap.world.exits, balance);
-
-    // 4~6. 시야와 안개
+    // 1~6. 바닥 · 거점 · 탈출구 영역 · 시야 원 · (괴물 화면) 부채꼴 · 안개 — 갱신 주기마다 한 장으로 합성
     const fogDue = v.nowMs - this.lastFogAt >= (isMonster ? MONSTER_FOG_MS : SURVIVOR_FOG_MS);
     const eyes = isMonster ? [] : this.survivorEyes(v);
     if (fogDue) {
       this.lastFogAt = v.nowMs;
-      this.visionUnder.clear();
-      this.fog?.clear();
+      const b = this.base;
+      b.begin();
+      b.drawPoints(snap.world.points, balance);
+      b.drawExits(snap.world.exits, balance);
       if (isMonster && v.me) {
         const near = monsterNearPolygon(balance, v.me);
         const cone = monsterConePolygon(balance, v.me, v.me.face, v.myBlend);
-        fillPolygon(this.visionUnder, near, COLOR.nearCircle, ALPHA.nearCircle);
-        fillPolygon(this.visionUnder, cone, COLOR.coneIdle, ALPHA.coneIdle);
-        this.fog?.addHard(near);
-        this.fog?.addHard(cone);
+        b.fillPoly(near, COLOR.nearCircle, ALPHA.nearCircle);
+        b.fillPoly(cone, COLOR.coneIdle, ALPHA.coneIdle);
+        b.addHardLight(near);
+        b.addHardLight(cone);
       } else {
         for (const e of eyes) {
           const r = survivorVisionRadius(balance, e.role);
           const poly = survivorVisionPolygon(e.pos, r);
-          fillPolygon(this.visionUnder, poly, ROLE_COLOR[e.role], ALPHA.visionCircle);
-          this.fog?.addSoft({ poly, center: e.pos, radius: r, soft: balance.survivor.visionSoftEdge });
+          b.fillPoly(poly, ROLE_COLOR[e.role], ALPHA.visionCircle);
+          b.addSoftLight({ poly, center: e.pos, radius: r, soft: balance.survivor.visionSoftEdge });
         }
       }
-      this.fog?.commit();
+      b.commit();
     }
 
     // 생존자 화면: 괴물 부채꼴 (보일 때만, 안개 위에 전체 모양)
@@ -170,7 +158,7 @@ export class WorldRenderer {
 
     // 8. 항상 표시 배지 (지금 안 보이는 곳이면 45%)
     const seen = (p: Vec2): number => {
-      if (!this.fog) return 1;
+      if (!this.useFog) return 1;
       if (isMonster)
         return v.me && monsterSees(balance, v.me, v.me.face, v.myBlend, p) ? 1 : ALPHA.badgeUnseen;
       for (const e of eyes) if (inCircleVision(e.pos, survivorVisionRadius(balance, e.role), p)) return 1;

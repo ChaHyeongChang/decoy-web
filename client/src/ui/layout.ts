@@ -32,3 +32,19 @@ export const HUD_RECTS = {
   leftSide: { x: 0, y: HUD_BAND, w: SIDE_W, h: VIEW_H - HUD_BAND * 2 },
   rightSide: { x: VIEW_W - SIDE_W, y: HUD_BAND, w: SIDE_W, h: VIEW_H - HUD_BAND * 2 },
 } as const;
+
+/** 내부 렌더 해상도 배율 (?scale=0.5 저사양 모드). main.ts가 시작할 때 정한다 */
+export let RENDER_SCALE = 1;
+
+export function setRenderScale(v: number): void {
+  RENDER_SCALE = v;
+}
+
+/** 장면 카메라를 논리 해상도(1920×1080)에 맞춘다 */
+export function fitCamera(camera: {
+  setZoom(z: number): unknown;
+  setOrigin(x: number, y: number): unknown;
+}): void {
+  camera.setOrigin(0, 0);
+  camera.setZoom(RENDER_SCALE);
+}

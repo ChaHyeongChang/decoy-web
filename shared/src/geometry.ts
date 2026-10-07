@@ -121,6 +121,37 @@ export function resolveCircleVsCircles(p: Vec2, r: number, obstacles: readonly C
   return { x, y };
 }
 
+/** 원이 막힌 타일에 파고든 최대 깊이 (겹치지 않으면 0) */
+export function tilePenetration(p: Vec2, r: number, blocked: BlockFn): number {
+  let worst = 0;
+  const i0 = Math.floor(p.x - r);
+  const i1 = Math.floor(p.x + r);
+  const j0 = Math.floor(p.y - r);
+  const j1 = Math.floor(p.y + r);
+  for (let j = j0; j <= j1; j += 1) {
+    for (let i = i0; i <= i1; i += 1) {
+      if (!blocked(i, j)) continue;
+      const cx = Math.max(i, Math.min(p.x, i + 1));
+      const cy = Math.max(j, Math.min(p.y, j + 1));
+      const d = Math.hypot(p.x - cx, p.y - cy);
+      const inside = p.x > i && p.x < i + 1 && p.y > j && p.y < j + 1;
+      const depth = inside ? r + Math.min(p.x - i, i + 1 - p.x, p.y - j, j + 1 - p.y) : r - d;
+      if (depth > worst) worst = depth;
+    }
+  }
+  return worst;
+}
+
+/** 원이 다른 원들과 겹친 최대 깊이 */
+export function circlesPenetration(p: Vec2, r: number, obstacles: readonly Circle[]): number {
+  let worst = 0;
+  for (const o of obstacles) {
+    const depth = r + o.r - Math.hypot(p.x - o.x, p.y - o.y);
+    if (depth > worst) worst = depth;
+  }
+  return worst;
+}
+
 export interface Circle {
   x: number;
   y: number;

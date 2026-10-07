@@ -1,5 +1,5 @@
 // DECOY 서버 진입점: HTTP(정적 파일) + WebSocket + 30Hz 틱 루프
-import { createServer } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { performance } from 'node:perf_hooks';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { LagQueue, Rng, type ClientMessage, type ServerMessage } from '@decoy/shared';
@@ -24,7 +24,24 @@ const manager = new RoomManager(
 );
 
 const httpServer = createServer((req, res) => {
-  const url = new URL(req.url ?? '/', 'http://localhost');
+  // 요청 하나의 오류(잘못된 URL 등)가 서버 전체를 멈추지 않게
+  try {
+    handleHttp(req, res);
+  } catch (err) {
+    console.error('HTTP 처리 오류', err);
+    if (!res.headersSent) res.writeHead(400);
+    res.end();
+  }
+});
+
+function handleHttp(req: IncomingMessage, res: ServerResponse): void {
+  let url: URL;
+  try {
+    url = new URL(req.url ?? '/', 'http://localhost');
+  } catch {
+    res.writeHead(400).end();
+    return;
+  }
   if (url.pathname === '/healthz') {
     res.writeHead(200, { 'content-type': 'text/plain' }).end('ok');
     return;
@@ -40,8 +57,8 @@ const httpServer = createServer((req, res) => {
     res.end(JSON.stringify(room ? truthOf(room) : null));
     return;
   }
-  serveStatic(options.staticDir, req, res);
-});
+  serveStatic(options.staticDir, url, res);
+}
 
 function actualPort(): number {
   const addr = httpServer.address();
@@ -50,24 +67,51 @@ function actualPort(): number {
 
 let connCounter = 0;
 const wss = new WebSocketServer({ server: httpServer, path: '/ws', maxPayload: 64 * 1024 });
+/** 송신 버퍼 상한 (바이트) */
+const MAX_BUFFERED = 1024 * 1024;
+/** 하트비트: 10초마다 ping, 그사이 pong이 없으면 끊는다 (절전 · 와이파이 끊김 같은 반쯤 열린 연결) */
+const alive = new WeakMap<WebSocket, boolean>();
+setInterval(() => {
+  for (const ws of wss.clients) {
+    if (alive.get(ws) === false) {
+      ws.terminate();
+      continue;
+    }
+    alive.set(ws, false);
+    ws.ping();
+  }
+}, 10_000);
 
 wss.on('connection', (socket: WebSocket) => {
   connCounter += 1;
   const half = options.lag / 2;
   const jitter = options.lag > 0 ? balance.network.lagJitterMs : 0;
-  const outbound = new LagQueue<string>(
+  // null = 닫기 표식. 앞서 보낸 메시지(예: 'replaced' 알림)를 모두 보낸 뒤 닫는다
+  const outbound = new LagQueue<string | null>(
     half,
     jitter,
     (text) => {
-      if (socket.readyState === socket.OPEN) socket.send(text);
+      if (socket.readyState !== socket.OPEN) return;
+      if (text === null) {
+        socket.close();
+        return;
+      }
+      // 받는 쪽이 못 따라오면(반쯤 끊긴 연결) 버퍼가 무한히 쌓이지 않게 끊는다
+      if (socket.bufferedAmount > MAX_BUFFERED) {
+        socket.terminate();
+        return;
+      }
+      socket.send(text);
     },
     () => lagRng.next(),
   );
   const conn: Conn = {
     id: connCounter,
     send: (msg: ServerMessage) => outbound.push(JSON.stringify(msg)),
-    close: () => socket.close(),
+    close: () => outbound.push(null),
   };
+  alive.set(socket, true);
+  socket.on('pong', () => alive.set(socket, true));
   let bound: { room: Room; seat: Seat } | null = null;
   let closed = false;
 
@@ -119,22 +163,20 @@ wss.on('connection', (socket: WebSocket) => {
   socket.on('error', () => socket.close());
 });
 
-// 고정 틱 루프 (누적 시간 방식, 한 번에 최대 5틱까지 따라잡는다)
+// 고정 틱 루프. 틱마다 명목 시각(시작 + n × 틱 길이)을 넘겨 스냅샷 시각 간격이 고르게 한다.
+// 한 번에 최대 5틱까지 따라잡고, 그보다 밀리면 시간을 버린다
 const tickMs = 1000 / balance.network.serverTickHz;
-let last = performance.now();
-let acc = 0;
+let nextTickAt = performance.now() + tickMs;
 setInterval(() => {
   const now = performance.now();
-  acc += now - last;
-  last = now;
   let n = 0;
-  while (acc >= tickMs && n < 5) {
-    manager.tick(performance.now());
-    acc -= tickMs;
+  while (now >= nextTickAt && n < 5) {
+    manager.tick(nextTickAt);
+    nextTickAt += tickMs;
     n += 1;
   }
-  if (n === 5) acc = 0;
-}, tickMs / 2);
+  if (now >= nextTickAt) nextTickAt = now + tickMs;
+}, tickMs / 4);
 
 httpServer.listen(options.port, options.host, () => {
   const lag = options.lag > 0 ? ` (지연 ${options.lag}ms)` : '';

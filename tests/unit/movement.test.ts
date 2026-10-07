@@ -164,3 +164,32 @@ describe('괴물 회전 감속 (GAME_DESIGN 4장)', () => {
     expect(x0 - s.x).toBeCloseTo(dt * b.survivor.moveSpeed, 6);
   });
 });
+
+describe('좁은 틈 통과 금지 (M1 검토 반영)', () => {
+  it('괴물은 나란히 선 두 생존자 사이(틈 0.4)를 지나가지 못한다', () => {
+    const m = createMoveState({ x: 30, y: 20 }, 0);
+    const bodies = [
+      { x: 29.5, y: 18.5, r: b.survivor.radius },
+      { x: 30.5, y: 18.5, r: b.survivor.radius },
+    ];
+    run(m, env('monster', { obstacles: bodies }), 30, 0, -1);
+    expect(m.y).toBeGreaterThan(18.5);
+  });
+
+  it('감옥 문 안쪽에 선 생존자와 철창 사이로 괴물이 비집고 들어가지 못한다', () => {
+    const m = createMoveState({ x: 23.4, y: 19.5 }, 0);
+    const body = { x: 23.7, y: 17.5, r: b.survivor.radius };
+    run(m, env('monster', { obstacles: [body] }), 40, 0, -1);
+    expect(Math.hypot(m.x - body.x, m.y - body.y)).toBeGreaterThanOrEqual(
+      b.monster.radius + b.survivor.radius - 1e-3,
+    );
+    expect(m.y).toBeGreaterThan(17.5);
+  });
+
+  it('몸에 비스듬히 부딪히면 돌아서 지나간다 (막히기만 하지는 않는다)', () => {
+    const m = createMoveState({ x: 30, y: 21 }, 0);
+    const body = { x: 30.2, y: 19, r: b.survivor.radius };
+    run(m, env('monster', { obstacles: [body] }), 30, 0, -1);
+    expect(m.y).toBeLessThan(18);
+  });
+});

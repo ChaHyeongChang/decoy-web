@@ -6,6 +6,8 @@ import type { Balance, RoleId } from './balance';
 import {
   DEG,
   angleBetweenDirs,
+  circlesPenetration,
+  tilePenetration,
   resolveCircleVsCircles,
   resolveCircleVsTiles,
   turnToward,
@@ -114,10 +116,26 @@ function moveBody(
   let blocked = false;
   let moved = 0;
   for (let k = 0; k < steps; k += 1) {
+    const start = { x: s.x, y: s.y };
+    const startPen = Math.max(
+      tilePenetration(start, radius, blockedTile),
+      circlesPenetration(start, radius, env.obstacles),
+    );
     const want = { x: s.x + sx, y: s.y + sy };
-    let p = resolveCircleVsTiles(want, radius, blockedTile);
-    p = resolveCircleVsCircles(p, radius, env.obstacles);
+    // 벽과 몸을 번갈아 풀어 수렴시킨다 (한 번만 풀면 벽 ↔ 몸 사이로 비집고 지나갈 수 있다)
+    let p = want;
+    for (let iter = 0; iter < 4; iter += 1) {
+      p = resolveCircleVsTiles(p, radius, blockedTile);
+      p = resolveCircleVsCircles(p, radius, env.obstacles);
+      if (tilePenetration(p, radius, blockedTile) <= 1e-6) break;
+    }
     p = resolveCircleVsTiles(p, radius, blockedTile);
+    // 그래도 시작보다 더 깊이 겹치면 이번 걸음을 취소한다 (좁은 틈을 통과하지 못하게)
+    const endPen = Math.max(
+      tilePenetration(p, radius, blockedTile),
+      circlesPenetration(p, radius, env.obstacles),
+    );
+    if (endPen > startPen + 1e-4) p = start;
     const err = Math.hypot(p.x - want.x, p.y - want.y);
     moved += Math.hypot(p.x - s.x, p.y - s.y);
     s.x = p.x;

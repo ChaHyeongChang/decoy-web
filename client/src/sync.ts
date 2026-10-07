@@ -14,6 +14,8 @@ import {
 export class Predictor {
   private pending: InputFrame[] = [];
   state: MoveState | null = null;
+  /** 마지막 입력을 적용하기 직전 상태 (틱 사이를 부드럽게 그리기 위해) */
+  private prev: MoveState | null = null;
   /** 보정으로 생긴 화면상 어긋남 (서서히 0으로) */
   private errX = 0;
   private errY = 0;
@@ -29,6 +31,7 @@ export class Predictor {
   reset(): void {
     this.pending = [];
     this.state = null;
+    this.prev = null;
     this.errX = 0;
     this.errY = 0;
   }
@@ -42,6 +45,7 @@ export class Predictor {
     if (!this.state) return;
     this.pending.push(frame);
     if (this.pending.length > 120) this.pending.shift();
+    this.prev = cloneMoveState(this.state);
     stepMovement(this.state, frame, env, this.balance, this.dt);
   }
 
@@ -51,7 +55,12 @@ export class Predictor {
     this.pending = this.pending.filter((f) => f.seq > ack);
     const prev = this.state;
     const next = cloneMoveState(server);
-    for (const f of this.pending) stepMovement(next, f, env, this.balance, this.dt);
+    let before = cloneMoveState(next);
+    for (const f of this.pending) {
+      before = cloneMoveState(next);
+      stepMovement(next, f, env, this.balance, this.dt);
+    }
+    this.prev = before;
     if (prev) {
       const dx = prev.x + this.errX - next.x;
       const dy = prev.y + this.errY - next.y;
@@ -68,8 +77,11 @@ export class Predictor {
     this.state = next;
   }
 
-  /** 화면에 그릴 위치 (보정 어긋남을 correctionSmoothMs 동안 줄인다) */
-  renderPos(frameMs: number): { x: number; y: number; face: number } | null {
+  /**
+   * 화면에 그릴 위치. alpha(0~1)로 직전 틱과 지금 틱 사이를 보간하고(30Hz 계단 방지),
+   * 보정 어긋남은 correctionSmoothMs 동안 줄인다
+   */
+  renderPos(frameMs: number, alpha = 1): { x: number; y: number; face: number } | null {
     if (!this.state) return null;
     const tau = Math.max(1, this.balance.network.correctionSmoothMs);
     const k = Math.exp(-frameMs / (tau / 3));
@@ -77,7 +89,18 @@ export class Predictor {
     this.errY *= k;
     if (Math.abs(this.errX) < 1e-4) this.errX = 0;
     if (Math.abs(this.errY) < 1e-4) this.errY = 0;
-    return { x: this.state.x + this.errX, y: this.state.y + this.errY, face: this.state.face };
+    const a = Math.max(0, Math.min(1, alpha));
+    const p = this.prev ?? this.state;
+    // 순간이동(수감 · 스폰)처럼 크게 바뀐 틱은 보간하지 않는다
+    const jump = Math.hypot(this.state.x - p.x, this.state.y - p.y) > this.balance.network.snapDistance;
+    const base = jump
+      ? this.state
+      : {
+          x: lerpNum(p.x, this.state.x, a),
+          y: lerpNum(p.y, this.state.y, a),
+          face: lerpAngle(p.face, this.state.face, a),
+        };
+    return { x: base.x + this.errX, y: base.y + this.errY, face: base.face };
   }
 }
 
@@ -171,4 +194,30 @@ export function lerpNum(a: number, b: number, k: number): number {
 
 export function lerpAngle(a: number, b: number, k: number): number {
   return normalizeAngle(a + angleDiff(a, b) * k);
+}
+
+/**
+ * 스냅샷 시계: (스냅샷 서버 시각 − 도착 시각)의 최근 2초 최댓값을 오프셋으로 쓴다.
+ * ping으로 잰 서버 시각과 달리 단방향 지연이 포함되므로, renderTime = 지금 + 오프셋 − 100ms 가
+ * 항상 받은 스냅샷 사이에 떨어진다 (lag 200에서도 보간이 꺼지지 않는다).
+ */
+export class SnapshotClock {
+  private samples: { at: number; v: number }[] = [];
+  offset = 0;
+
+  add(serverMs: number, localMs: number): void {
+    this.samples.push({ at: localMs, v: serverMs - localMs });
+    while (this.samples.length > 0 && localMs - (this.samples[0]?.at ?? localMs) > 2000) this.samples.shift();
+    let best = -Infinity;
+    for (const s of this.samples) if (s.v > best) best = s.v;
+    this.offset = best;
+  }
+
+  reset(): void {
+    this.samples = [];
+  }
+
+  now(localMs: number): number {
+    return localMs + this.offset;
+  }
 }

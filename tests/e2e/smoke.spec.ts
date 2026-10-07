@@ -10,8 +10,10 @@ test('빈 페이지가 열리고 캔버스가 그려진다', async ({ page }) =>
     if (msg.type() === 'error' || msg.type() === 'warning') problems.push(`${msg.type()}: ${msg.text()}`);
   });
   page.on('pageerror', (err) => problems.push(`pageerror: ${err.message}`));
-  await page.goto('/');
+  await page.goto('/?debug=hook');
   await expect(page.locator('canvas')).toHaveCount(1);
   await page.waitForTimeout(500);
+  // 기본 렌더러는 WebGL (Canvas 폴백이 아니다)
+  expect(await page.evaluate(() => window.__DECOY__?.renderer)).toBe('webgl');
   expect(problems).toEqual([]);
 });

@@ -44,6 +44,10 @@ const MAX_FRAMES_PER_TICK = 3;
 const CREDIT_CAP = 4;
 /** 이 틱 수 넘게 입력이 없으면 빈 입력으로 시간을 흘린다 (탭이 백그라운드거나 끊김) */
 const STARVE_TICKS = 4;
+/** 이보다 오래 입력이 없으면 늦게 올 입력이 없다고 본다 (1초) */
+const LONG_STARVE_TICKS = 30;
+/** 늦게 온 입력을 이동 없이 처리할 최대 개수 */
+const DEBT_CAP = 8;
 
 function newStats(): PlayerStats {
   return { hitsTaken: 0, hitsLanded: 0, rescues: 0, captureSeconds: 0 };
@@ -126,6 +130,7 @@ export class Game {
           credit: 0,
           starved: 0,
           processed: 0,
+          debt: 0,
           connected: true,
           droppedFor: null,
           outbox: [],
@@ -160,6 +165,7 @@ export class Game {
           credit: 0,
           starved: 0,
           processed: 0,
+          debt: 0,
           connected: true,
           droppedFor: null,
           outbox: [],
@@ -253,14 +259,29 @@ export class Game {
 
   private processPlayerInputs(p: GamePlayer): void {
     if (p.kind === 'survivor' && (p.status === 'dead' || p.status === 'escaped')) {
+      // 관전 중: 입력은 받기만 하고 버린다 (클라이언트 예측이 쌓이지 않게 ack는 올린다)
+      const last = p.queue[p.queue.length - 1];
+      if (last) p.ack = last.seq;
       p.queue.length = 0;
       return;
     }
     p.credit = Math.min(CREDIT_CAP, p.credit + 1);
     let processed = 0;
-    while (p.queue.length > 0 && p.credit >= 1 && processed < MAX_FRAMES_PER_TICK) {
-      const input = p.queue.shift();
+    while (p.queue.length > 0 && processed < MAX_FRAMES_PER_TICK) {
+      const input = p.queue[0];
       if (!input) break;
+      if (p.debt > 0) {
+        // 서버가 이미 빈 입력으로 시간을 흘린 만큼, 늦게 도착한 입력은 이동 없이 처리한다
+        // (안 그러면 입력이 영구히 몇 틱씩 밀린다). 버튼 눌림은 살린다
+        p.queue.shift();
+        p.debt -= 1;
+        p.ack = input.seq;
+        p.held = input.held;
+        this.handleActions(p, input);
+        continue;
+      }
+      if (p.credit < 1) break;
+      p.queue.shift();
       p.credit -= 1;
       processed += 1;
       p.ack = input.seq;
@@ -277,6 +298,8 @@ export class Game {
     if (p.starved > STARVE_TICKS) {
       // 입력이 끊긴 플레이어도 시간은 흐른다 (돌진 · 타이머). 이동 입력은 0, 버튼도 뗀 것으로 본다
       p.credit = Math.max(0, p.credit - 1);
+      // 잠깐 막힌 경우 그동안의 입력이 늦게 올 수 있다: 그만큼을 빚으로 센다. 오래 끊기면(탭 숨김) 빚을 비운다
+      p.debt = p.starved > LONG_STARVE_TICKS ? 0 : Math.min(DEBT_CAP, p.debt + 1);
       p.held = 0;
       stepMovement(p.move, idleInput(p), this.moveEnvFor(p), this.balance, this.dt);
     }

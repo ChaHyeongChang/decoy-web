@@ -1,6 +1,6 @@
 // 빌드된 클라이언트(client/dist)를 서빙한다
 import { createReadStream, existsSync, statSync } from 'node:fs';
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { ServerResponse } from 'node:http';
 import { extname, join, normalize, sep } from 'node:path';
 
 const MIME: Record<string, string> = {
@@ -14,9 +14,14 @@ const MIME: Record<string, string> = {
   '.ico': 'image/x-icon',
 };
 
-export function serveStatic(root: string, req: IncomingMessage, res: ServerResponse): void {
-  const url = new URL(req.url ?? '/', 'http://localhost');
-  let pathname = decodeURIComponent(url.pathname);
+export function serveStatic(root: string, url: URL, res: ServerResponse): void {
+  let pathname: string;
+  try {
+    pathname = decodeURIComponent(url.pathname);
+  } catch {
+    res.writeHead(400).end();
+    return;
+  }
   if (pathname.endsWith('/')) pathname += 'index.html';
   const filePath = normalize(join(root, pathname));
   if (!filePath.startsWith(normalize(root + sep)) && filePath !== normalize(root)) {
@@ -33,5 +38,10 @@ export function serveStatic(root: string, req: IncomingMessage, res: ServerRespo
   const type = MIME[extname(target)] ?? 'application/octet-stream';
   const cache = target.includes(`${sep}assets${sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache';
   res.writeHead(200, { 'content-type': type, 'cache-control': cache });
-  createReadStream(target).pipe(res);
+  const stream = createReadStream(target);
+  stream.on('error', () => {
+    if (!res.headersSent) res.writeHead(500);
+    res.destroy();
+  });
+  stream.pipe(res);
 }

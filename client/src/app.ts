@@ -15,7 +15,7 @@ import {
 } from '@decoy/shared';
 import { NetClient, defaultWsUrl } from './net';
 import { getAltTokens, getSavedName, getSeatToken, saveName, saveSeatToken } from './session';
-import { Interpolator, Predictor, lerpAngle, lerpNum } from './sync';
+import { Interpolator, Predictor, SnapshotClock, lerpAngle, lerpNum } from './sync';
 import { LobbyUI } from './ui/lobby';
 
 export type DebugMode = 'off' | 'hook' | 'overlay';
@@ -26,6 +26,8 @@ export interface AppParams {
   lag: number;
   debug: DebugMode;
   renderer: 'auto' | 'canvas' | 'webgl';
+  /** 내부 렌더 해상도 배율 (0.5 = 저사양 모드). 논리 좌표는 그대로 1920×1080 */
+  renderScale: number;
   name: string | null;
 }
 
@@ -40,8 +42,14 @@ export function readParams(search: string): AppParams {
     lag: Number.isFinite(lag) && lag > 0 ? lag : 0,
     debug: debugRaw === null ? 'off' : debugRaw === 'hook' ? 'hook' : 'overlay',
     renderer: renderer === 'canvas' || renderer === 'webgl' ? renderer : 'auto',
+    renderScale: clampScale(Number(p.get('scale') ?? 1)),
     name: p.get('name'),
   };
+}
+
+function clampScale(v: number): number {
+  if (!Number.isFinite(v)) return 1;
+  return Math.max(0.25, Math.min(1, v));
 }
 
 function lerpSurvivor(a: SurvivorView, b: SurvivorView, k: number): SurvivorView {
@@ -79,6 +87,7 @@ export class App {
   predictor: Predictor | null = null;
   readonly survivorsInterp = new Interpolator<SurvivorView>(lerpSurvivor);
   readonly monsterInterp = new Interpolator<MonsterView>(lerpMonster);
+  readonly snapClock = new SnapshotClock();
   game: Phaser.Game | null = null;
   private readonly listeners = new Set<(e: AppEvent) => void>();
   private reconnectTimer: number | null = null;
@@ -164,6 +173,11 @@ export class App {
     }, 1000);
   }
 
+  /** 다른 캐릭터를 그릴 시각 (스냅샷 시계 − 100ms) */
+  renderTime(): number {
+    return this.snapClock.now(performance.now()) - (this.balance?.network.interpolationDelayMs ?? 100);
+  }
+
   get dt(): number {
     return 1 / (this.balance?.network.serverTickHz ?? 30);
   }
@@ -233,6 +247,7 @@ export class App {
         this.predictor = new Predictor(this.balance, this.dt);
         this.survivorsInterp.clear();
         this.monsterInterp.clear();
+        this.snapClock.reset();
         this.lobbyUi.hide();
         this.emit({ kind: 'match', info: msg.info });
         return;
@@ -240,6 +255,7 @@ export class App {
         const snap = msg.s;
         this.lastSnap = snap;
         this.snapCount += 1;
+        this.snapClock.add(snap.st, performance.now());
         const env = this.moveEnv();
         if (this.predictor && env) this.predictor.reconcile(snap.you.move, snap.ack, env);
         this.survivorsInterp.push(

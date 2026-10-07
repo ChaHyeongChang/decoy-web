@@ -15,28 +15,34 @@ import {
 
 const KEYS: Record<string, string> = { monster: 'KeyW', runner: 'KeyS', guard: 'KeyS', scout: 'KeyS' };
 
-async function drawnErrors(players: Player[], code: string): Promise<{ self: number; others: number }> {
+async function drawnErrors(
+  players: Player[],
+  code: string,
+): Promise<{ self: number; others: number; count: number }> {
   const t = await truth(players[0]!.page, code);
   const pos = new Map(t.players.map((p) => [p.id, p]));
+  const monsterId = t.players.find((q) => q.role === 'monster')!.id;
   let self = 0;
   let others = 0;
+  let count = 0;
   for (const p of players) {
     const drawn = await p.page.evaluate(() => window.__DECOY__?.getDrawn() ?? []);
-    expect(drawn.length).toBe(4);
     for (const d of drawn) {
-      const id = d.kind === 'monster' ? t.players.find((q) => q.role === 'monster')!.id : d.id;
-      const real = pos.get(id);
-      if (d.kind === 'survivor' && !real) {
-        // M3 이전: 생존자 ID는 실제 ID
-        throw new Error(`알 수 없는 엔티티 ${d.id}`);
+      let real = pos.get(d.kind === 'monster' ? monsterId : d.id);
+      if (!real && d.kind === 'survivor') {
+        // 괴물 화면의 생존자는 임시 ID: 가장 가까운 실제 생존자와 비교
+        real = t.players
+          .filter((q) => q.role !== 'monster')
+          .sort((a, b) => Math.hypot(a.x - d.x, a.y - d.y) - Math.hypot(b.x - d.x, b.y - d.y))[0];
       }
-      if (!real) continue;
+      if (!real) throw new Error(`알 수 없는 엔티티 ${d.id}`);
       const err = Math.hypot(real.x - d.x, real.y - d.y);
+      count += 1;
       if (d.kind === 'self') self = Math.max(self, err);
       else others = Math.max(others, err);
     }
   }
-  return { self, others };
+  return { self, others, count };
 }
 
 test('4명이 같은 방에 들어가 시작하고, 움직인 뒤 서버 위치와 화면 위치가 맞는다', async ({ browser }) => {
@@ -57,6 +63,8 @@ test('4명이 같은 방에 들어가 시작하고, 움직인 뒤 서버 위치�
   for (const s of t.players.filter((p) => p.role !== 'monster')) expect(s.y).toBeGreaterThan(17); // 감옥 문 밖으로
 
   const err = await drawnErrors(players, code);
+  // 생존자 셋은 팀원 셋을 항상 그린다 (괴물은 보일 때만)
+  expect(err.count).toBeGreaterThanOrEqual(3 * 3 + 1);
   expect(err.self).toBeLessThan(0.05);
   expect(err.others).toBeLessThan(0.1);
   for (const p of players) expect(p.problems).toEqual([]);
@@ -91,8 +99,8 @@ test('lag=200에서도 내 입력이 즉시 반영되고 최종 위치가 수렴
   const real = t.players.find((p) => p.id === runner.id)!;
   const local = await runner.page.evaluate(() => window.__DECOY__?.getRenderPos());
   expect(Math.hypot(real.x - local!.x, real.y - local!.y)).toBeLessThan(0.05);
-  // 다른 사람 화면에서도 같은 위치로 수렴
-  for (const p of players.filter((q) => q !== runner)) {
+  // 팀원 화면에서도 같은 위치로 수렴 (괴물 화면에는 시야 안일 때만, 임시 ID로 그려진다)
+  for (const p of players.filter((q) => q !== runner && q.role !== 'monster')) {
     const drawn = await p.page.evaluate(() => window.__DECOY__?.getDrawn() ?? []);
     const d = drawn.find((e) => e.id === runner.id);
     expect(d).toBeTruthy();

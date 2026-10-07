@@ -52,3 +52,38 @@ describe('서버 입력 처리 (seq, 틱당 소비)', () => {
     expect(f.held).toBe(63);
   });
 });
+
+describe('입력 막힘 뒤 회복 (M1 검토 반영)', () => {
+  it('200ms 막혔다가 몰려 와도 밀림이 남지 않는다', () => {
+    const game = newGame();
+    const s = game.survivors[0]!;
+    let seq = 0;
+    // 평소: 틱마다 1개
+    for (let t = 0; t < 30; t += 1) {
+      game.queueInput(s.id, [frame(++seq, 0, 0)]);
+      game.step();
+    }
+    // 6틱 동안 막힘 → 7개가 한꺼번에 도착
+    for (let t = 0; t < 6; t += 1) game.step();
+    const burst = [];
+    for (let k = 0; k < 7; k += 1) burst.push(frame(++seq, 0, 0));
+    game.queueInput(s.id, burst);
+    game.step();
+    // 이후 다시 틱마다 1개: 몇 틱 안에 밀림이 0으로 돌아온다
+    for (let t = 0; t < 10; t += 1) {
+      game.queueInput(s.id, [frame(++seq, 0, 0)]);
+      game.step();
+    }
+    expect(seq - s.ack).toBe(0);
+    expect(s.queue.length).toBe(0);
+  });
+
+  it('사망 · 탈출 뒤에는 입력을 버리되 ack는 올린다 (관전 중 예측이 쌓이지 않게)', () => {
+    const game = newGame();
+    const s = game.survivors[0]!;
+    s.status = 'dead';
+    game.queueInput(s.id, [frame(1), frame(2), frame(3)]);
+    game.step();
+    expect(s.ack).toBe(3);
+  });
+});

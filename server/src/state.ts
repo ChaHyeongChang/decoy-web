@@ -35,6 +35,8 @@ interface PlayerBase {
   starved: number;
   /** 지금까지 처리한 입력 수 */
   processed: number;
+  /** 빈 입력으로 흘려보낸 틱 수 (늦게 온 입력은 이만큼 이동 없이 처리) */
+  debt: number;
   connected: boolean;
   /** 접속이 끊긴 뒤 지난 시간 (끊겨 있지 않으면 null) */
   droppedFor: number | null;
