@@ -17,7 +17,11 @@ interface Item {
   text: string;
   color: number;
   until: number;
+  created: number;
 }
+
+/** 대기열에서 이보다 오래 기다린 알림은 버린다 (지난 일) */
+const MAX_QUEUE_WAIT_MS = 6000;
 
 export class Banners {
   private readonly persistent: Phaser.GameObjects.Text;
@@ -73,7 +77,7 @@ export class Banners {
     color: number = COLOR.pointRing,
     nowMs: number = performance.now(),
   ): void {
-    this.queue.push({ text, color, until: nowMs + seconds * 1000 });
+    this.queue.push({ text, color, until: nowMs + seconds * 1000, created: nowMs });
   }
 
   pushNote(text: string, seconds: number): void {
@@ -90,6 +94,7 @@ export class Banners {
       this.persistent.setVisible(false);
     }
     this.shown = this.shown.filter((b) => b.until > nowMs);
+    this.queue = this.queue.filter((b) => nowMs - b.created <= MAX_QUEUE_WAIT_MS);
     while (this.shown.length < this.rows.length && this.queue.length > 0) {
       const next = this.queue.shift();
       if (!next) break;

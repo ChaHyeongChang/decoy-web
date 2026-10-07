@@ -36,6 +36,12 @@ export interface DecoyDebug {
   getDrawnMinimap(): DrawnEntity[];
   /** 지금 보이는 배너 · 메모 문구 */
   getBanners(): string[];
+  /** 지금 보이는 연출 (피격 플래시 · 수감 페이드 · 채도 감소 · 기절 별 · 돌진 잔상 · 공격 범위) */
+  getEffects(): Record<string, number | boolean>;
+  /** 재생 요청한 효과음 이름 (최근 50개) */
+  getSounds(): string[];
+  /** 오디오가 열렸는가 (첫 사용자 입력 뒤) */
+  readonly audioReady: boolean;
   getResult(): MatchResult | null;
   getLastInput(): InputFrame | null;
   serverNow(): number;

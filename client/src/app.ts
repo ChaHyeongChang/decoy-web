@@ -86,6 +86,8 @@ export class App {
   result: MatchResult | null = null;
   lastSnap: Snapshot | null = null;
   snapCount = 0;
+  /** 마지막 스냅샷을 받은 시각 (performance.now) */
+  lastSnapAt = 0;
   predictor: Predictor | null = null;
   readonly survivorsInterp = new Interpolator<SurvivorView>(lerpSurvivor);
   readonly monsterInterp = new Interpolator<MonsterView>(lerpMonster);
@@ -259,6 +261,7 @@ export class App {
       case 'snap': {
         const snap = msg.s;
         this.lastSnap = snap;
+        this.lastSnapAt = performance.now();
         this.snapCount += 1;
         this.snapClock.add(snap.st, performance.now());
         const env = this.moveEnv();

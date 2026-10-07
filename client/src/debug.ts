@@ -2,6 +2,7 @@
 import Phaser from 'phaser';
 import type { DecoyDebug } from '@decoy/shared';
 import type { App } from './app';
+import { sfx } from './audio';
 import type { GameScene } from './scenes/GameScene';
 import { VIEW_H, VIEW_W, tileToScreen } from './ui/layout';
 
@@ -65,6 +66,11 @@ export function installDebug(app: App, overlay: boolean): void {
     getDrawn: () => gameScene(app)?.drawn.map((d) => ({ ...d })) ?? [],
     getDrawnMinimap: () => gameScene(app)?.minimapDrawn.map((d) => ({ ...d })) ?? [],
     getBanners: () => gameScene(app)?.bannerTexts.slice() ?? [],
+    getEffects: () => ({ ...(gameScene(app)?.effects ?? {}) }),
+    getSounds: () => sfx.log.map((s) => s.name),
+    get audioReady() {
+      return sfx.ready;
+    },
     getResult: () => app.result,
     getLastInput: () => gameScene(app)?.lastFrame ?? null,
     serverNow: () => app.net.serverNow(),

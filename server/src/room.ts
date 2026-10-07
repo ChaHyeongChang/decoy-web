@@ -40,6 +40,8 @@ export interface Seat {
   /** 접속이 끊긴 시각 (ms). 연결 중이면 null */
   droppedAt: number | null;
   matchesPlayed: number;
+  /** 마지막으로 보낸 lobby 내용 (판 중 같은 내용은 다시 보내지 않는다) */
+  lastLobby: string | null;
 }
 
 export interface RoomHooks {
@@ -110,6 +112,7 @@ export class Room {
       joinOrder: this.joinCounter,
       droppedAt: null,
       matchesPlayed: 0,
+      lastLobby: null,
     };
     this.seats.push(seat);
     if (!bot && this.hostId === null) this.hostId = seat.id;
@@ -126,6 +129,7 @@ export class Room {
     }
     seat.conn = conn;
     seat.droppedAt = null;
+    seat.lastLobby = null;
     this.emptySince = null;
     const p = this.game?.players.get(seat.id);
     if (p) {
@@ -184,7 +188,12 @@ export class Room {
     const full = this.lobbyState();
     for (const s of this.seats) {
       if (!s.conn) continue;
-      s.conn.send({ t: 'lobby', lobby: this.lobbyFor(s, full) });
+      const lobby = this.lobbyFor(s, full);
+      const json = JSON.stringify(lobby);
+      // 판 중에는 내용이 같으면 보내지 않는다: 괴물에게 "생존자 누군가 끊김 · 재접속"이 메시지 도착 자체로 새지 않게
+      if (this.phase === 'playing' && json === s.lastLobby) continue;
+      s.lastLobby = json;
+      s.conn.send({ t: 'lobby', lobby });
     }
   }
 

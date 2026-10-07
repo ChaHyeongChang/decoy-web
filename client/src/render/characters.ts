@@ -147,3 +147,34 @@ export function drawRoarPing(g: Phaser.GameObjects.Graphics, x: number, y: numbe
   g.fillStyle(COLOR.white, 0.85);
   g.fillCircle(px, py, 4);
 }
+
+/** 기절 별: 머리 위를 도는 노란 별 세 개 (양쪽 화면, 기절 동안) */
+export function drawStunStars(g: Phaser.GameObjects.Graphics, x: number, y: number, nowMs: number): void {
+  const cx = x * T;
+  const cy = y * T - 0.62 * T;
+  const spin = nowMs / 260;
+  for (let k = 0; k < 3; k += 1) {
+    const a = spin + (k * Math.PI * 2) / 3;
+    const sx = cx + Math.cos(a) * 13;
+    const sy = cy + Math.sin(a) * 5;
+    drawStar(g, sx, sy, 5.5, 2.4, COLOR.stunStar);
+  }
+}
+
+function drawStar(
+  g: Phaser.GameObjects.Graphics,
+  x: number,
+  y: number,
+  outer: number,
+  inner: number,
+  color: number,
+): void {
+  const pts: { x: number; y: number }[] = [];
+  for (let i = 0; i < 10; i += 1) {
+    const r = i % 2 === 0 ? outer : inner;
+    const a = -Math.PI / 2 + (i * Math.PI) / 5;
+    pts.push({ x: x + Math.cos(a) * r, y: y + Math.sin(a) * r });
+  }
+  g.fillStyle(color, 1);
+  g.fillPoints(pts, true);
+}

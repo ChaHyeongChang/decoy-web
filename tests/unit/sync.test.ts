@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { MoveEnv } from '@decoy/shared';
+import { BTN, type MoveEnv } from '@decoy/shared';
+import { applyDashStart, applyWindupLock, predictMonsterPress } from '../../client/src/localActions';
 import { Interpolator, Predictor, lerpNum } from '../../client/src/sync';
-import { frame, loadTestBalance, newGame } from '../helpers/fixtures';
+import { frame, loadTestBalance, newGame, readyGame } from '../helpers/fixtures';
 
 const balance = loadTestBalance();
 const dt = 1 / balance.network.serverTickHz;
@@ -36,6 +37,48 @@ describe('내 캐릭터 예측 + 보정', () => {
     expect(Math.hypot(before.x - me.move.x, before.y - me.move.y)).toBeLessThan(1e-9);
   });
 
+  it('괴물이 공격 준비(조준 고정)와 돌진을 서버 확인 전에 먼저 보여 줘도, 예측이 서버 결과와 같다', () => {
+    const game = readyGame();
+    const m = game.monster;
+    m.move.x = 30;
+    m.move.y = 20;
+    const env = (): MoveEnv => game.moveEnvFor(m);
+    const pred = new Predictor(balance, dt);
+    pred.reconcile(m.move, 0, env());
+    const sent = [];
+    const predicted = new Map<number, { x: number; y: number; face: number }>();
+    const server = new Map<number, { x: number; y: number; face: number }>();
+    const stepServer = (frames: ReturnType<typeof frame>[], survSeq: number): void => {
+      game.queueInput(m.id, frames);
+      for (const sv of game.survivors) game.queueInput(sv.id, [frame(survSeq)]);
+      game.step();
+      server.set(m.ack, { x: m.move.x, y: m.move.y, face: m.move.face });
+    };
+    for (let seq = 1; seq <= 50; seq += 1) {
+      const pressed = seq === 3 ? BTN.ATTACK : seq === 30 ? BTN.DASH : 0;
+      const f = frame(seq, 0.3, 1, { aim: seq * 0.08, pressed });
+      if (seq === 3) pred.predictAction(seq, applyWindupLock(balance));
+      if (seq === 30) pred.predictAction(seq, applyDashStart(balance));
+      sent.push(f);
+      pred.applyLocal(f, env());
+      predicted.set(seq, { x: pred.state!.x, y: pred.state!.y, face: pred.state!.face });
+      // 서버는 5프레임 늦게 처리하고, 그 결과로 예측을 보정한다
+      if (seq > 5) {
+        stepServer([sent[seq - 6]!], seq - 5);
+        pred.reconcile(m.move, m.ack, env());
+      }
+    }
+    for (let k = 45; k < 50; k += 1) stepServer([sent[k]!], k + 1);
+    expect(m.ack).toBe(50);
+    expect(m.dashCd).toBeGreaterThan(0);
+    for (let seq = 1; seq <= 50; seq += 1) {
+      const p = predicted.get(seq)!;
+      const sv = server.get(seq)!;
+      expect(Math.hypot(p.x - sv.x, p.y - sv.y), `seq ${seq} 위치`).toBeLessThan(1e-9);
+      expect(Math.abs(p.face - sv.face), `seq ${seq} 조준`).toBeLessThan(1e-9);
+    }
+  });
+
   it('크게 어긋나면(순간이동) 바로 맞추고, 작으면 서서히 줄인다', () => {
     const game = newGame();
     const me = game.survivors[0]!;
@@ -50,6 +93,48 @@ describe('내 캐릭터 예측 + 보정', () => {
     expect(p1).toBeLessThan(near.x);
     for (let i = 0; i < 60; i += 1) pred.renderPos(16);
     expect(pred.renderPos(16)!.x).toBeCloseTo(near.x, 3);
+  });
+});
+
+describe('괴물 행동 즉시 피드백 어림 (M8)', () => {
+  const game = readyGame();
+  const mon = {
+    attackCd: 0,
+    windup: 0,
+    dashCd: 0,
+    roarCd: 0,
+    mode: 'search' as const,
+    blend: 0,
+    camp: 0 as const,
+    blockWarn: null,
+  };
+  const base = { move: game.monster.move, mon, balance, ageSec: 0.05, localWindupActive: false };
+
+  it('쿨타임이 끝났고 행동할 수 있으면 공격 · 돌진을 먼저 보여 준다', () => {
+    expect(predictMonsterPress({ ...base, pressed: BTN.ATTACK })).toEqual({ attack: true, dash: false });
+    expect(predictMonsterPress({ ...base, pressed: BTN.DASH })).toEqual({ attack: false, dash: true });
+  });
+
+  it('같은 입력에 공격과 돌진이 함께 눌리면 서버처럼 공격만 (준비 중 돌진 불가)', () => {
+    expect(predictMonsterPress({ ...base, pressed: BTN.ATTACK | BTN.DASH })).toEqual({
+      attack: true,
+      dash: false,
+    });
+  });
+
+  it('쿨타임 · 시작 대기 · 기절 · 돌진 · 준비 중이면 예측하지 않는다', () => {
+    const p = BTN.ATTACK;
+    expect(predictMonsterPress({ ...base, pressed: p, mon: { ...mon, attackCd: 0.5 } }).attack).toBe(false);
+    expect(predictMonsterPress({ ...base, pressed: p, mon: { ...mon, attackCd: 0.03 } }).attack).toBe(true);
+    expect(predictMonsterPress({ ...base, pressed: p, move: { ...base.move, frozen: 1 } }).attack).toBe(
+      false,
+    );
+    expect(predictMonsterPress({ ...base, pressed: p, move: { ...base.move, stun: 1 } }).attack).toBe(false);
+    expect(predictMonsterPress({ ...base, pressed: p, move: { ...base.move, dash: 0.1 } }).attack).toBe(
+      false,
+    );
+    expect(predictMonsterPress({ ...base, pressed: p, mon: { ...mon, windup: 0.2 } }).attack).toBe(false);
+    expect(predictMonsterPress({ ...base, pressed: p, localWindupActive: true }).attack).toBe(false);
   });
 });
 

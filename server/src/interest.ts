@@ -143,7 +143,8 @@ function teammateView(s: SurvivorState, rescueTime: number): SurvivorView {
     imprisonCount: s.imprisonCount,
     abilityCd: round(s.abilityCd),
     rescue: round(Math.min(1, s.rescueProgress / rescueTime)),
-    spotted: s.spotted,
+    // 발각 여부는 본인 것만 (팀원 것은 괴물이 안 보일 때 괴물 조준 정보가 된다)
+    spotted: null,
     connected: s.connected,
   };
 }
@@ -257,6 +258,8 @@ export function buildSnapshot(
       const alias = aliases.get(s.id);
       if (alias) survivors.push(hiddenSurvivorView(s, alias));
     }
+    // 배열 순서가 자리(입장) 순서를 따르면 로비에서 본 역할과 이어진다: 임시 ID(난수) 순으로 정렬
+    survivors.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     return {
       tick: game.tick,
       st: Math.round(st),

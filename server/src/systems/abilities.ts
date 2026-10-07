@@ -38,7 +38,9 @@ export function monsterAbilityInput(game: Game, m: MonsterState, input: InputFra
           (s.status === 'free' || s.status === 'imprisoned') &&
           Math.hypot(s.move.x - m.move.x, s.move.y - m.move.y) <= b.roar.radius,
       )
-      .map((s) => ({ x: Math.round(s.move.x * 1000) / 1000, y: Math.round(s.move.y * 1000) / 1000 }));
+      .map((s) => ({ x: Math.round(s.move.x * 1000) / 1000, y: Math.round(s.move.y * 1000) / 1000 }))
+      // 자리 순서로 보내면 각 점의 역할이 드러난다: 좌표 순으로
+      .sort((a, b) => a.x - b.x || a.y - b.y);
     game.emitTo(m, { k: 'roarPings', pts });
     // 대가: 생존자 화면에 괴물 위치(발동 순간)를 1초 고정 마커로
     m.roarRevealLeft = b.roar.selfRevealDuration;

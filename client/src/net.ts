@@ -72,6 +72,11 @@ export class NetClient {
     this.outbound.push(JSON.stringify(msg));
   }
 
+  /** ping으로 서버 시계를 한 번이라도 맞췄는가 */
+  get synced(): boolean {
+    return this.samples.length > 0;
+  }
+
   /** 추정한 지금 서버 시각 (ms) */
   serverNow(): number {
     return performance.now() + this.offset;

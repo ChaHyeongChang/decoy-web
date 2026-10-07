@@ -20,6 +20,8 @@ export const COLOR = {
   exitActive: 0x22c55e,
   warn: 0xf59e0b,
   white: 0xffffff,
+  /** 기절 별 (부채꼴 노랑과 같은 값) */
+  stunStar: 0xeab308,
 } as const;
 
 export const ALPHA = {

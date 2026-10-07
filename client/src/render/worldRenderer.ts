@@ -28,9 +28,11 @@ import {
   drawRescueRing,
   drawRoarMark,
   drawRoarPing,
+  drawStunStars,
   drawSurvivor,
   drawTrackMark,
 } from './characters';
+import { DashTrail } from './effects';
 import { ALPHA, COLOR, ROLE_COLOR } from './colors';
 import { BaseLayer } from './baseLayer';
 import { Badges, type BadgeAlpha } from './objects';
@@ -52,6 +54,13 @@ export interface FrameView {
   nowMs: number;
   /** 괴물 화면: 포효로 드러난 생존자 위치 (발동 순간 고정, 1.5초) */
   roarPings: { x: number; y: number; until: number; start: number }[];
+  /** 괴물 화면: 서버 확인 전에 먼저 보여 주는 공격 준비 방향 (없으면 null) */
+  localWindupDir: number | null;
+  /** 괴물 화면: 서버의 준비 값이 이미 예측으로 보여 준 것과 같은 준비라 다시 그리지 않는다 */
+  hideServerWindup: boolean;
+  /** 괴물 화면: 내가 기절 중 / 돌진 중 */
+  myStunned: boolean;
+  myDashing: boolean;
 }
 
 /** 시야 원 · 안개 갱신 주기 (ms). 생존자 시야는 0.1초 이하, 괴물 부채꼴은 판정과 맞게 자주 */
@@ -72,6 +81,9 @@ export class WorldRenderer {
   drawn: DrawnEntity[] = [];
   /** 이번 프레임에 바닥 합성을 다시 했는가 (미니맵 갱신용) */
   baseRefreshed = false;
+  private readonly dashTrail = new DashTrail();
+  /** 디버그 · 테스트: 이번 프레임 연출 */
+  fx = { stunStars: false, dashGhosts: 0, attackRange: false };
 
   get baseCanvas(): HTMLCanvasElement {
     return this.base.canvas;
@@ -152,11 +164,27 @@ export class WorldRenderer {
     const g = this.entities;
     g.clear();
     const atk = balance.monster.attack;
-    // 공격 준비 범위 (양쪽 화면, 흰색 25%): 괴물을 따라가고 방향은 고정
-    if (isMonster && v.me && (snap.you.mon?.windup ?? 0) > 0)
-      drawAttackRange(g, v.me.x, v.me.y, v.me.face, atk.range, atk.arc);
-    if (!isMonster && v.monster && v.monster.windup > 0)
+    // 돌진 잔상 (보이는 화면, 0.25초): 돌진 중 위치를 남기고 옅어진다
+    const dashing = isMonster ? (v.me && v.myDashing ? v.me : null) : v.monster?.dashing ? v.monster : null;
+    if (dashing) {
+      const face = 'aim' in dashing ? dashing.aim : dashing.face;
+      this.dashTrail.sample(dashing.x, dashing.y, face, v.nowMs);
+    }
+    const ghosts = this.dashTrail.live(v.nowMs);
+    for (const { g: gh, alpha } of ghosts) drawMonster(g, gh.x, gh.y, gh.aim, 0.45 * alpha);
+    // 공격 준비 범위 (양쪽 화면, 흰색 25%): 괴물을 따라가고 방향은 고정.
+    // 괴물 화면은 누른 순간부터 (서버 확인 전 예측), 서버가 처리한 뒤에는 서버 값을 따른다
+    let attackRange = false;
+    const serverWindup = (snap.you.mon?.windup ?? 0) > 0 && !v.hideServerWindup;
+    if (isMonster && v.me && (serverWindup || v.localWindupDir !== null)) {
+      const dir = v.localWindupDir ?? v.me.face;
+      drawAttackRange(g, v.me.x, v.me.y, dir, atk.range, atk.arc);
+      attackRange = true;
+    }
+    if (!isMonster && v.monster && v.monster.windup > 0) {
       drawAttackRange(g, v.monster.x, v.monster.y, v.monster.aim, atk.range, atk.arc);
+      attackRange = true;
+    }
     const blinkFast = Math.floor(v.nowMs / 150) % 2 === 0;
     for (const [id, s] of v.survivors) {
       if (s.status === 'dead' || s.status === 'escaped') continue;
@@ -167,15 +195,25 @@ export class WorldRenderer {
       if (s.rescue !== null && s.rescue > 0) drawRescueRing(g, s.x, s.y, s.rescue);
       drawn.push({ id, kind: 'survivor', x: s.x, y: s.y, face: s.face, layer: 'main' });
     }
+    let stunStars = false;
     if (!isMonster && v.monster) {
       const m = v.monster;
       drawMonster(g, m.x, m.y, m.aim);
+      if (m.stunned) {
+        drawStunStars(g, m.x, m.y, v.nowMs);
+        stunStars = true;
+      }
       drawn.push({ id: 'monster', kind: 'monster', x: m.x, y: m.y, face: m.aim, layer: 'main' });
     }
     if (v.me) {
       const st = snap.you.surv?.status;
-      if (isMonster) drawMonster(g, v.me.x, v.me.y, v.me.face);
-      else if (st !== 'dead' && st !== 'escaped') {
+      if (isMonster) {
+        drawMonster(g, v.me.x, v.me.y, v.me.face);
+        if (v.myStunned) {
+          drawStunStars(g, v.me.x, v.me.y, v.nowMs);
+          stunStars = true;
+        }
+      } else if (st !== 'dead' && st !== 'escaped') {
         const prot = (snap.you.surv?.protectLeft ?? 0) > 0;
         drawSurvivor(
           g,
@@ -240,5 +278,6 @@ export class WorldRenderer {
     };
     this.badges.draw(snap.world.points, snap.world.exits, alpha, blink);
     this.drawn = drawn;
+    this.fx = { stunStars, dashGhosts: ghosts.length, attackRange };
   }
 }

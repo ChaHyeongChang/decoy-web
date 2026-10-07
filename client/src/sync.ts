@@ -22,6 +22,11 @@ export class Predictor {
   /** 최근 보정 크기 (디버그용, 타일) */
   lastCorrection = 0;
   lastAck = 0;
+  /**
+   * 서버 판정을 기다리지 않고 내 화면에 먼저 보여 줄 행동 (입력 seq → 이동 상태 변경, 예: 공격 준비 조준 고정 · 돌진).
+   * 그 입력을 서버가 처리했다고 알려 오면 지운다. 판정은 여전히 서버가 하고, 어긋나면 보정된다
+   */
+  private actions = new Map<number, (s: MoveState) => void>();
 
   constructor(
     private readonly balance: Balance,
@@ -30,10 +35,16 @@ export class Predictor {
 
   reset(): void {
     this.pending = [];
+    this.actions.clear();
     this.state = null;
     this.prev = null;
     this.errX = 0;
     this.errY = 0;
+  }
+
+  /** applyLocal 전에 부른다: 이 입력을 적용할 때 이동 상태에 먼저 반영할 행동 */
+  predictAction(seq: number, apply: (s: MoveState) => void): void {
+    this.actions.set(seq, apply);
   }
 
   get pendingCount(): number {
@@ -46,6 +57,7 @@ export class Predictor {
     this.pending.push(frame);
     if (this.pending.length > 120) this.pending.shift();
     this.prev = cloneMoveState(this.state);
+    this.actions.get(frame.seq)?.(this.state);
     stepMovement(this.state, frame, env, this.balance, this.dt);
   }
 
@@ -53,11 +65,13 @@ export class Predictor {
   reconcile(server: MoveState, ack: number, env: MoveEnv): void {
     this.lastAck = ack;
     this.pending = this.pending.filter((f) => f.seq > ack);
+    for (const seq of this.actions.keys()) if (seq <= ack) this.actions.delete(seq);
     const prev = this.state;
     const next = cloneMoveState(server);
     let before = cloneMoveState(next);
     for (const f of this.pending) {
       before = cloneMoveState(next);
+      this.actions.get(f.seq)?.(next);
       stepMovement(next, f, env, this.balance, this.dt);
     }
     this.prev = before;

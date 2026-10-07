@@ -2,9 +2,12 @@
 import Phaser from 'phaser';
 import type { DrawnEntity, GameEvent, InputFrame, Role } from '@decoy/shared';
 import type { App } from '../app';
+import { sfx } from '../audio';
 import { STORY_TEXT, UI_TEXT, formatText } from '../data/storyText';
 import { InputSampler } from '../input';
+import { applyDashStart, applyWindupLock, predictMonsterPress, type LocalWindup } from '../localActions';
 import { COLOR } from '../render/colors';
+import { ScreenEffects } from '../render/effects';
 import { WorldRenderer } from '../render/worldRenderer';
 import { Banners } from '../ui/banners';
 import { Hud } from '../ui/hud';
@@ -19,6 +22,12 @@ const MAX_CATCHUP_STEPS = 4;
 /** 첫 판 조작 안내 표시 시간 (VISUAL_SPEC 6장) */
 const TUTORIAL_SECONDS = 5;
 const EXIT_NAMES = { N: '북', S: '남' } as const;
+/**
+ * 이보다 오래된 스냅샷의 일회성 연출(소리 · 플래시 · 알림 배너 · 핑)은 건너뛴다.
+ * 백그라운드 탭이 멈췄다 돌아오면 밀린 스냅샷이 한꺼번에 처리되는데, 지난 일을 뒤늦게 울리지 않게.
+ * 거점 메모(비밀번호)는 오래돼도 보여 준다
+ */
+const STALE_EVENT_MS = 2000;
 
 export class GameScene extends Phaser.Scene {
   private app!: App;
@@ -49,6 +58,10 @@ export class GameScene extends Phaser.Scene {
   private roarPings: { x: number; y: number; until: number; start: number }[] = [];
   /** 마지막으로 그린 내 위치 (예측) */
   localPos = { x: 0, y: 0, face: 0 };
+  /** 피격 플래시 · 수감 페이드 · 기절 채도 감소 */
+  private screenFx!: ScreenEffects;
+  /** 괴물: 서버 확인 전에 먼저 보여 주는 공격 준비 */
+  private localWindup: LocalWindup | null = null;
 
   constructor() {
     super('game');
@@ -68,6 +81,12 @@ export class GameScene extends Phaser.Scene {
     return this.banners?.visible ?? [];
   }
 
+  /** 디버그 · 테스트: 지금 보이는 연출 */
+  get effects(): Record<string, number | boolean> {
+    if (!this.screenFx || !this.world) return {};
+    return { ...this.screenFx.state, ...this.world.fx };
+  }
+
   create(): void {
     const app = this.app;
     const info = app.match;
@@ -82,6 +101,8 @@ export class GameScene extends Phaser.Scene {
     this.banners = new Banners(this);
     this.tutorial = new TutorialOverlay(this, info);
     this.scoreboard = new Scoreboard(this, info, balance);
+    this.screenFx = new ScreenEffects(this, this.game.renderer.type === Phaser.CANVAS);
+    this.localWindup = null;
     this.spottedEdge = this.add.graphics().setDepth(50);
     this.spottedEdge.lineStyle(14, COLOR.monster, 0.75);
     this.spottedEdge.strokeRect(7, 7, VIEW_W - 14, VIEW_H - 14);
@@ -110,7 +131,11 @@ export class GameScene extends Phaser.Scene {
     this.unsubscribe = app.subscribe((e) => {
       if (e.kind !== 'snapshot') return;
       if (this.seq < e.snap.ack) this.seq = e.snap.ack;
-      for (const ev of e.snap.events) this.onEvent(ev);
+      const stale = app.net.synced && app.net.serverNow() - e.snap.st > STALE_EVENT_MS;
+      for (const ev of e.snap.events) {
+        const note = ev.k === 'text' && (ev.id === 'NOTE_FIRST' || ev.id === 'NOTE_SECOND');
+        if (!stale || note) this.onEvent(ev);
+      }
       const now = performance.now();
       this.roarPings = this.roarPings.filter((p) => p.until > now);
     });
@@ -125,11 +150,37 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  /** 서버 이벤트 → 배너 · 메모 · 효과 */
+  /** 서버 이벤트 → 배너 · 메모 · 효과 · 소리 */
   private onEvent(ev: GameEvent): void {
     const now = performance.now();
+    const isMonster = this.app.match?.role === 'monster';
     switch (ev.k) {
+      case 'attackStart': {
+        // 괴물 본인은 누른 순간 이미 들었다 (즉시 피드백). 예측하지 못한 경우만 여기서
+        const lw = this.localWindup;
+        const predicted = isMonster && lw !== null && now - lw.until < 1000;
+        if (!predicted) sfx.play('windup', isMonster ? 1 : 0.8);
+        return;
+      }
+      case 'attackHit':
+        if (isMonster && ev.hits > 0) sfx.play('hit', 0.7);
+        return;
+      case 'hit':
+        if (ev.you) {
+          this.screenFx.hit(now);
+          sfx.play('hit', 1);
+        } else {
+          sfx.play('hit', 0.4);
+        }
+        return;
+      case 'imprisoned':
+        if (ev.you) this.screenFx.imprison(now);
+        return;
       case 'text': {
+        if (ev.id === 'ALERT_CAPTURE_START') sfx.play('captureStart');
+        else if (ev.id === 'ALERT_CAPTURE_DONE') sfx.play('captureDone');
+        else if (ev.id === 'ALERT_EXIT_OPEN') sfx.play('doorOpen');
+        else if (ev.id === 'ALERT_ROAR') sfx.play('roar', 0.9);
         if (ev.id === 'ALERT_LAST_30') return; // 지속형 배너로 따로 그린다
         const params = { point: ev.point, exit: ev.exit ? EXIT_NAMES[ev.exit] : undefined, code: ev.code };
         const text = formatText(ev.id, params);
@@ -148,6 +199,7 @@ export class GameScene extends Phaser.Scene {
         return;
       }
       case 'roarPings': {
+        sfx.play('roar');
         const dur = (this.app.balance?.monster.roar.revealDuration ?? 1.5) * 1000;
         for (const p of ev.pts) this.roarPings.push({ x: p.x, y: p.y, start: now, until: now + dur });
         return;
@@ -189,12 +241,37 @@ export class GameScene extends Phaser.Scene {
       this.acc -= dtMs;
       this.seq += 1;
       const frame = this.sampler.sample(this.seq, this.aimTarget());
+      if (frame.pressed !== 0 && app.match?.role === 'monster') this.predictMonster(frame);
       app.predictor.applyLocal(frame, env);
       this.lastStepAt = performance.now();
       frames.push(frame);
       this.lastFrame = frame;
     }
     if (frames.length > 0) app.net.send({ t: 'input', frames });
+  }
+
+  /** 괴물: 공격 준비 · 돌진을 서버 확인 전에 먼저 보여 준다 (판정은 서버, 어긋나면 보정) */
+  private predictMonster(frame: InputFrame): void {
+    const app = this.app;
+    const mon = app.lastSnap?.you.mon;
+    const st = app.predictor?.state;
+    const balance = app.balance;
+    if (!mon || !st || !balance || !app.predictor) return;
+    const now = performance.now();
+    const res = predictMonsterPress({
+      pressed: frame.pressed,
+      move: st,
+      mon,
+      balance,
+      ageSec: (now - app.lastSnapAt) / 1000 + app.net.rtt / 2000,
+      localWindupActive: this.localWindup !== null && now < this.localWindup.until,
+    });
+    if (res.attack) {
+      app.predictor.predictAction(frame.seq, applyWindupLock(balance));
+      this.localWindup = { seq: frame.seq, until: now + balance.monster.attack.windup * 1000, dir: st.face };
+      sfx.play('windup');
+    }
+    if (res.dash) app.predictor.predictAction(frame.seq, applyDashStart(balance));
   }
 
   private inputTick(): void {
@@ -207,6 +284,17 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     this.stepInput(delta);
+  }
+
+  /**
+   * 공격 준비 표시: 누른 순간부터 내 시계로 0.4초 (예측). 서버가 그 입력을 처리한 뒤 도착하는 같은 준비(서버 값)는
+   * 이미 보여 줬으므로 다시 그리지 않는다. 예측하지 못한 준비(서버가 받아들인 경우)는 서버 값을 그린다
+   */
+  private windupView(ack: number, now: number): { dir: number | null; hideServer: boolean } {
+    const lw = this.localWindup;
+    if (!lw) return { dir: null, hideServer: false };
+    if (ack < lw.seq) return { dir: now < lw.until ? lw.dir : null, hideServer: false };
+    return { dir: null, hideServer: now < lw.until + this.app.net.rtt + 150 };
   }
 
   override update(_time: number, delta: number): void {
@@ -223,6 +311,7 @@ export class GameScene extends Phaser.Scene {
     const now = performance.now();
     const renderTime = app.renderTime();
     const alpha = (now - this.lastStepAt) / (app.dt * 1000);
+    const windup = this.windupView(snap.ack, now);
     const me = app.predictor?.renderPos(delta, alpha) ?? null;
     if (me) this.localPos = me;
     const mon = snap.you.mon;
@@ -246,10 +335,15 @@ export class GameScene extends Phaser.Scene {
         myBlend: this.myBlend,
         nowMs: now,
         roarPings: this.roarPings,
+        localWindupDir: windup.dir,
+        hideServerWindup: windup.hideServer,
+        myStunned: snap.you.role === 'monster' && (app.predictor?.state?.stun ?? 0) > 0,
+        myDashing: snap.you.role === 'monster' && (app.predictor?.state?.dash ?? 0) > 0,
       },
       delta,
     );
     this.drawn = this.world.drawn;
+    this.screenFx.update(now, snap.you.role === 'monster' && (app.predictor?.state?.stun ?? 0) > 0);
     if (this.world.baseRefreshed) this.minimap.refreshBase(this.world.baseCanvas);
     const roster = app.match.roster;
     const roleOf = (id: string): Role | null => roster.find((r) => r.id === id)?.role ?? null;

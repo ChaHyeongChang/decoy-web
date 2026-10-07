@@ -79,6 +79,44 @@ describe('정보 차단 (server/interest.ts)', () => {
     expect(out.get('p3')!.monster!.seesSomeone).toBe(true);
   });
 
+  it('팀원 스냅샷에는 다른 생존자의 발각 값이 없다 (괴물이 안 보일 때 괴물 조준 정보가 새지 않게)', () => {
+    const game = newGame();
+    // 괴물 (30,18.5) 추적 모드(9타일)로 동쪽, 러너는 8타일 앞 (러너 시야 6타일 밖)
+    place(game, 'p1', 30, 18.5, 0);
+    game.monster.mode = 'hunt';
+    game.monster.blend = 1;
+    place(game, 'p2', 38, 18.5);
+    place(game, 'p3', 8, 16);
+    place(game, 'p4', 8, 17);
+    const { out, facts } = snaps(game);
+    expect(facts.survivorsSeeMonster).toBe(false);
+    expect(out.get('p2')!.you.surv!.spotted).toBe(true);
+    const guard = out.get('p3')!;
+    expect(guard.monster).toBeNull();
+    for (const s of guard.survivors) expect(s.spotted).toBeNull();
+  });
+
+  it('괴물 스냅샷의 생존자 배열 순서는 자리(입장) 순서와 무관하다', () => {
+    const game = newGame();
+    place(game, 'p1', 30, 18.5, 0);
+    place(game, 'p2', 34, 18.5);
+    place(game, 'p3', 33, 19);
+    place(game, 'p4', 32, 18);
+    const who = (x: number): string => (x === 34 ? 'p2' : x === 33 ? 'p3' : 'p4');
+    const orders = new Set<string>();
+    for (let k = 0; k < 30; k += 1) {
+      const { out } = snaps(game, new AliasBook());
+      const list = out.get('p1')!.survivors;
+      expect(list).toHaveLength(3);
+      // 임시 ID 순으로 정렬되어 있다
+      const ids = list.map((s) => s.id);
+      expect(ids).toEqual([...ids].sort());
+      orders.add(list.map((s) => who(s.x)).join(','));
+    }
+    // 임시 ID가 바뀔 때마다 순서도 바뀐다 (자리 순서 p2,p3,p4에 고정되지 않음)
+    expect(orders.size).toBeGreaterThan(1);
+  });
+
   it('임시 ID는 계속 보이는 동안 유지되고, 시야를 벗어났다 돌아오면 바뀐다', () => {
     const game = newGame();
     const aliases = new AliasBook();

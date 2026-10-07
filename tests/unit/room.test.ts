@@ -150,6 +150,22 @@ describe('방 견고성 (M1 검토 반영)', () => {
     expect('seat' in r && r.seat.id).not.toBe(seats[3]!.id);
   });
 
+  it('판 중 생존자가 끊기거나 다시 붙어도 괴물에게는 lobby 메시지가 가지 않는다 (도착 자체가 신호)', () => {
+    const { mgr, room, seats, conns } = playing();
+    const before = conns[0]!.count('lobby');
+    const survivorBefore = conns[1]!.count('lobby');
+    room.detach(seats[3]!, 10);
+    const back = new FakeConn();
+    const r = mgr.join(back, joinMsg(room.code, { token: seats[3]!.token }));
+    expect('seat' in r && r.seat.id).toBe(seats[3]!.id);
+    if ('seat' in r) room.welcome(r.seat);
+    expect(conns[0]!.count('lobby')).toBe(before);
+    // 생존자 팀은 접속 변화를 본다
+    expect(conns[1]!.count('lobby')).toBeGreaterThan(survivorBefore);
+    // 다시 붙은 본인은 로비 상태를 받는다
+    expect(back.count('lobby')).toBeGreaterThan(0);
+  });
+
   it('판 중 로비 메시지는 괴물에게 다른 사람의 역할 · 접속 상태를 보내지 않는다', () => {
     const { room, seats, conns } = playing();
     room.detach(seats[3]!, 10);

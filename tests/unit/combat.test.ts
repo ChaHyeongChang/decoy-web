@@ -181,6 +181,16 @@ describe('구조 (GAME_DESIGN 6.2)', () => {
     expect(scout.rescueProgress).toBeLessThan(0.5);
   });
 
+  it('풀려나는 자리는 감옥 안 위치 순으로 정해진다 (자리 순서로 정해지면 괴물이 정체를 좁힌다)', () => {
+    const { game, d, runner, guard } = prisoners();
+    // 이번에는 가드(뒤 자리)가 서쪽, 러너(앞 자리)가 동쪽에 갇혀 있다
+    place(game, 'p2', 24.5, 15.5);
+    place(game, 'p3', 23.5, 15.5);
+    d.run(d.seconds(3), { p4: [0, 0, { held: BTN.RESCUE }] });
+    expect(guard.status).toBe('free');
+    expect(guard.move.x).toBeLessThan(runner.move.x);
+  });
+
   it('맞은 틱의 E 누름은 구조 진행으로 치지 않는다 (진행은 그 틱 끝에 정확히 0)', () => {
     const { game, d, scout } = prisoners();
     d.run(d.seconds(2), { p4: [0, 0, { held: BTN.RESCUE }] });

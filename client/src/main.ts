@@ -1,6 +1,7 @@
 // DECOY 클라이언트 진입점
 import Phaser from 'phaser';
 import { App, readParams } from './app';
+import { sfx } from './audio';
 import { installDebug } from './debug';
 import { GameScene } from './scenes/GameScene';
 import { VIEW_H, VIEW_W, fitCamera, setRenderScale } from './ui/layout';
@@ -43,6 +44,8 @@ const game = new Phaser.Game({
   scene: [IdleScene, GameScene],
 });
 app.game = game;
+// 효과음: 첫 클릭 · 키 입력에서 오디오를 연다 (브라우저 자동 재생 규칙)
+sfx.attachUnlock(document);
 
 app.subscribe((e) => {
   if (e.kind === 'match') {

@@ -45,8 +45,11 @@ export function releaseAll(game: Game, rescuer: SurvivorState): void {
   const b = game.balance;
   let i = 0;
   const used: Vec2[] = [];
-  for (const s of game.survivors) {
-    if (s.status !== 'imprisoned') continue;
+  // 풀려나는 자리는 감옥 안 위치 순(서쪽부터)으로 준다. 자리(입장) 순서로 주면 괴물이 정체를 좁힐 수 있다
+  const prisoners = game.survivors
+    .filter((s) => s.status === 'imprisoned')
+    .sort((a, b) => a.move.x - b.move.x || a.move.y - b.move.y);
+  for (const s of prisoners) {
     const slot = releaseSpot(game, i, used);
     if (slot) used.push(slot);
     i += 1;

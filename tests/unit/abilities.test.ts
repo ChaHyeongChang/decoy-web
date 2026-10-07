@@ -60,6 +60,8 @@ describe('괴물 포효 (GAME_DESIGN 5.3)', () => {
     const ev = game.drainOutbox('p1').find((e) => e.k === 'roarPings');
     expect(ev && ev.k === 'roarPings' && ev.pts.length).toBe(2);
     expect(JSON.stringify(ev)).not.toContain('p2');
+    // 좌표 순으로 온다 (자리 순서 p2(27) → p4(22)로 오면 각 점의 역할이 드러난다)
+    expect(ev && ev.k === 'roarPings' && ev.pts.map((p) => p.x)).toEqual([22, 27]);
     const sEv = game.drainOutbox('p3');
     expect(sEv.some((e) => e.k === 'text' && e.id === 'ALERT_ROAR')).toBe(true);
     expect(game.monster.roarRevealLeft).toBeGreaterThan(0.9);
@@ -176,11 +178,14 @@ describe('생존자 고유 능력 (GAME_DESIGN 6.3)', () => {
       book.update(facts.monsterSees);
       return buildSnapshot(game, 'p1', 0, facts, book)!;
     };
-    let snap = monsterSnap();
-    expect(snap.survivors[0]!.role).toBe('runner');
+    // 러너는 (23,18.5)에 서 있는 생존자 (배열 순서는 임시 ID 순이라 위치로 찾는다)
+    const runnerView = (snap: ReturnType<typeof monsterSnap>) =>
+      snap.survivors.find((s) => Math.abs(s.x - 23) < 0.01 && Math.abs(s.y - 18.5) < 0.01);
+    expect(runnerView(monsterSnap())!.role).toBe('runner');
     d.run(d.seconds(1.05));
-    snap = monsterSnap();
-    expect(snap.survivors[0]?.role ?? null).toBeNull();
+    const after = monsterSnap();
+    expect(runnerView(after)).toBeDefined();
+    expect(after.survivors.every((s) => s.role === null)).toBe(true);
   });
 
   it('수감 중에는 능력을 쓸 수 없고 쿨타임은 흐른다', () => {
