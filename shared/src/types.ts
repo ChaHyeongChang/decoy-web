@@ -312,7 +312,8 @@ export type ClientMessage =
   | { t: 'rematch' }
   | { t: 'test'; cmd: TestCommand };
 
-export type ErrorCode = 'room-not-found' | 'room-full' | 'in-progress' | 'bad-request' | 'not-allowed';
+export type ErrorCode =
+  'room-not-found' | 'room-full' | 'in-progress' | 'bad-request' | 'not-allowed' | 'replaced';
 
 export type ServerMessage =
   | { t: 'welcome'; you: string; token: string; room: string; balance: Balance; balanceHash: string }

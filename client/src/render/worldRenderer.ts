@@ -1,0 +1,192 @@
+// 월드 렌더링 (TECH_SPEC 5장 순서). 맵 위 레이어를 컨테이너 하나에 담아 0.93배로 그린다.
+//  1 배경 · 2 바닥 · 벽 → 3 거점 · 탈출구 영역 → 4 시야 원 / 근접 원 → 5 괴물 부채꼴(괴물 화면)
+//  → 6 안개 → (생존자 화면: 괴물 부채꼴, DECISIONS D4) → 7 캐릭터 · 효과 → 8 항상 표시 배지
+import type Phaser from 'phaser';
+import {
+  CAPTURE_POINTS,
+  EXITS,
+  PRISON_CENTER,
+  inCircleVision,
+  monsterConePolygon,
+  monsterNearPolygon,
+  monsterSees,
+  survivorVisionPolygon,
+  survivorVisionRadius,
+  type Balance,
+  type DrawnEntity,
+  type MonsterView,
+  type Role,
+  type RoleId,
+  type Snapshot,
+  type SurvivorView,
+  type Vec2,
+} from '@decoy/shared';
+import { MAP_SCALE, MAP_X, MAP_Y } from '../ui/layout';
+import { drawMonster, drawSurvivor } from './characters';
+import { ALPHA, COLOR, ROLE_COLOR } from './colors';
+import { FogLayer } from './fog';
+import { drawStaticMap } from './mapCanvas';
+import { Badges, drawExitAreas, drawPointAreas, type BadgeAlpha } from './objects';
+import { fillPolygon, mixColor } from './vision';
+
+export interface FrameView {
+  balance: Balance;
+  snap: Snapshot;
+  role: Role;
+  selfId: string;
+  /** 예측한 내 위치 */
+  me: { x: number; y: number; face: number } | null;
+  /** 보간한 다른 생존자들 (괴물 화면: 시야 안 생존자만, 임시 ID) */
+  survivors: Map<string, SurvivorView>;
+  /** 보간한 괴물 (생존자 화면: 보일 때만) */
+  monster: MonsterView | null;
+  /** 괴물 화면: 내 부채꼴 모양 보간값 */
+  myBlend: number;
+  nowMs: number;
+}
+
+/** 시야 원 · 안개 갱신 주기 (ms). 생존자 시야는 0.1초 이하, 괴물 부채꼴은 판정과 맞게 자주 */
+const SURVIVOR_FOG_MS = 50;
+const MONSTER_FOG_MS = 33;
+
+export class WorldRenderer {
+  readonly container: Phaser.GameObjects.Container;
+  private readonly areas: Phaser.GameObjects.Graphics;
+  private readonly visionUnder: Phaser.GameObjects.Graphics;
+  private readonly fog: FogLayer | null;
+  private readonly coneOver: Phaser.GameObjects.Graphics;
+  private readonly entities: Phaser.GameObjects.Graphics;
+  private readonly badges: Badges;
+  private lastFogAt = -1e9;
+  /** 부채꼴 색 (노랑 0 ↔ 빨강 1) 보간 상태 */
+  private coneRed = 0;
+  drawn: DrawnEntity[] = [];
+
+  constructor(
+    private readonly scene: Phaser.Scene,
+    useFog: boolean,
+  ) {
+    if (!scene.textures.exists('static-map')) scene.textures.addCanvas('static-map', drawStaticMap());
+    this.container = scene.add.container(MAP_X, MAP_Y).setScale(MAP_SCALE);
+    const map = scene.add.image(0, 0, 'static-map').setOrigin(0, 0);
+    this.areas = scene.add.graphics();
+    this.visionUnder = scene.add.graphics();
+    this.container.add([map, this.areas, this.visionUnder]);
+    this.fog = useFog ? new FogLayer(scene) : null;
+    if (this.fog) this.container.add(this.fog.image);
+    this.coneOver = scene.add.graphics();
+    this.entities = scene.add.graphics();
+    this.container.add([this.coneOver, this.entities]);
+    this.badges = new Badges(scene, this.container);
+  }
+
+  /** 생존자 팀 시야의 눈들 (자기 + 팀원, 사망 · 탈출 제외) */
+  private survivorEyes(v: FrameView): { pos: Vec2; role: RoleId }[] {
+    const eyes: { pos: Vec2; role: RoleId }[] = [];
+    const st = v.snap.you.surv?.status;
+    if (v.me && v.role !== 'monster' && st !== 'dead' && st !== 'escaped')
+      eyes.push({ pos: v.me, role: v.role });
+    for (const s of v.survivors.values()) {
+      if (s.status === 'dead' || s.status === 'escaped' || !s.role) continue;
+      eyes.push({ pos: s, role: s.role });
+    }
+    return eyes;
+  }
+
+  draw(v: FrameView, frameMs: number): void {
+    const { balance, snap } = v;
+    const isMonster = v.role === 'monster';
+    const drawn: DrawnEntity[] = [];
+
+    // 3. 거점 · 탈출구 영역
+    this.areas.clear();
+    drawPointAreas(this.areas, snap.world.points, balance);
+    drawExitAreas(this.areas, snap.world.exits, balance);
+
+    // 4~6. 시야와 안개
+    const fogDue = v.nowMs - this.lastFogAt >= (isMonster ? MONSTER_FOG_MS : SURVIVOR_FOG_MS);
+    const eyes = isMonster ? [] : this.survivorEyes(v);
+    if (fogDue) {
+      this.lastFogAt = v.nowMs;
+      this.visionUnder.clear();
+      this.fog?.clear();
+      if (isMonster && v.me) {
+        const near = monsterNearPolygon(balance, v.me);
+        const cone = monsterConePolygon(balance, v.me, v.me.face, v.myBlend);
+        fillPolygon(this.visionUnder, near, COLOR.nearCircle, ALPHA.nearCircle);
+        fillPolygon(this.visionUnder, cone, COLOR.coneIdle, ALPHA.coneIdle);
+        this.fog?.addHard(near);
+        this.fog?.addHard(cone);
+      } else {
+        for (const e of eyes) {
+          const r = survivorVisionRadius(balance, e.role);
+          const poly = survivorVisionPolygon(e.pos, r);
+          fillPolygon(this.visionUnder, poly, ROLE_COLOR[e.role], ALPHA.visionCircle);
+          this.fog?.addSoft({ poly, center: e.pos, radius: r, soft: balance.survivor.visionSoftEdge });
+        }
+      }
+      this.fog?.commit();
+    }
+
+    // 생존자 화면: 괴물 부채꼴 (보일 때만, 안개 위에 전체 모양)
+    this.coneOver.clear();
+    if (!isMonster && v.monster) {
+      const m = v.monster;
+      const target = m.seesSomeone ? 1 : 0;
+      // 노랑 → 빨강 0.1초, 빨강 → 노랑 0.4초 (VISUAL_SPEC 4장)
+      const rate = target > this.coneRed ? frameMs / 100 : frameMs / 400;
+      this.coneRed =
+        target > this.coneRed ? Math.min(1, this.coneRed + rate) : Math.max(0, this.coneRed - rate);
+      const cone = monsterConePolygon(balance, m, m.aim, m.blend);
+      const color = mixColor(COLOR.coneIdle, COLOR.coneSeen, this.coneRed);
+      const alpha = ALPHA.coneIdle + (ALPHA.coneSeen - ALPHA.coneIdle) * this.coneRed;
+      fillPolygon(this.coneOver, cone, color, alpha);
+    }
+
+    // 7. 캐릭터
+    const g = this.entities;
+    g.clear();
+    for (const [id, s] of v.survivors) {
+      if (s.status === 'dead' || s.status === 'escaped') continue;
+      const color = isMonster || !s.role ? COLOR.hiddenSurvivor : ROLE_COLOR[s.role];
+      const revealColor = isMonster && s.role ? ROLE_COLOR[s.role] : null;
+      drawSurvivor(g, s.x, s.y, s.face, color, s.protected ? ALPHA.protected : 1, revealColor);
+      drawn.push({ id, kind: 'survivor', x: s.x, y: s.y, face: s.face, layer: 'main' });
+    }
+    if (!isMonster && v.monster) {
+      const m = v.monster;
+      drawMonster(g, m.x, m.y, m.aim);
+      drawn.push({ id: 'monster', kind: 'monster', x: m.x, y: m.y, face: m.aim, layer: 'main' });
+    }
+    if (v.me) {
+      const st = snap.you.surv?.status;
+      if (isMonster) drawMonster(g, v.me.x, v.me.y, v.me.face);
+      else if (st !== 'dead' && st !== 'escaped') {
+        const prot = (snap.you.surv?.protectLeft ?? 0) > 0;
+        drawSurvivor(g, v.me.x, v.me.y, v.me.face, ROLE_COLOR[v.role], prot ? ALPHA.protected : 1);
+      }
+      drawn.push({ id: v.selfId, kind: 'self', x: v.me.x, y: v.me.y, face: v.me.face, layer: 'main' });
+    }
+
+    // 8. 항상 표시 배지 (지금 안 보이는 곳이면 45%)
+    const seen = (p: Vec2): number => {
+      if (!this.fog) return 1;
+      if (isMonster)
+        return v.me && monsterSees(balance, v.me, v.me.face, v.myBlend, p) ? 1 : ALPHA.badgeUnseen;
+      for (const e of eyes) if (inCircleVision(e.pos, survivorVisionRadius(balance, e.role), p)) return 1;
+      return ALPHA.badgeUnseen;
+    };
+    const alpha: BadgeAlpha = {
+      points: { A: seen(CAPTURE_POINTS.A), B: seen(CAPTURE_POINTS.B) },
+      exits: { N: seen(EXITS.N.center), S: seen(EXITS.S.center) },
+      prison: seen(PRISON_CENTER),
+    };
+    const blinkOn = Math.floor(v.nowMs / 500) % 2 === 0;
+    const blink = {
+      A: isMonster && blinkOn && snap.world.points.some((p) => p.id === 'A' && p.state === 'capturing'),
+      B: isMonster && blinkOn && snap.world.points.some((p) => p.id === 'B' && p.state === 'capturing'),
+    };
+    this.badges.draw(snap.world.points, snap.world.exits, alpha, blink);
+    this.drawn = drawn;
+  }
+}

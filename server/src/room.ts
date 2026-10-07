@@ -9,6 +9,7 @@ import {
   teamOf,
   type Balance,
   type ClientMessage,
+  type InputFrame,
   type LobbyState,
   type MatchInfo,
   type Role,
@@ -16,6 +17,7 @@ import {
   type ServerMessage,
   type TestCommand,
 } from '@decoy/shared';
+import { randomBytes } from 'node:crypto';
 import { Game } from './game';
 import { buildSnapshot } from './interest';
 
@@ -95,7 +97,8 @@ export class Room {
     this.joinCounter += 1;
     const seat: Seat = {
       id: `p${this.joinCounter}`,
-      token: this.rng.token(24),
+      // 자리 토큰은 예측할 수 없어야 한다 (시드 난수는 시뮬레이션 전용)
+      token: randomBytes(18).toString('base64url'),
       name: cleanName(name) || `플레이어 ${this.joinCounter}`,
       role: null,
       ready: bot,
@@ -113,7 +116,11 @@ export class Room {
 
   /** 기존 자리에 새 연결을 붙인다 (재접속) */
   attach(seat: Seat, conn: Conn): void {
-    if (seat.conn && seat.conn.id !== conn.id) seat.conn.close();
+    if (seat.conn && seat.conn.id !== conn.id) {
+      // 다른 탭이 이 자리를 넘겨받았다: 이전 탭은 재접속하지 않도록 알리고 닫는다
+      seat.conn.send({ t: 'error', code: 'replaced', message: '다른 탭에서 이 자리로 접속했습니다' });
+      seat.conn.close();
+    }
     seat.conn = conn;
     seat.droppedAt = null;
     this.emptySince = null;
@@ -171,8 +178,22 @@ export class Room {
   }
 
   sendLobby(): void {
-    const msg: ServerMessage = { t: 'lobby', lobby: this.lobbyState() };
-    for (const s of this.seats) s.conn?.send(msg);
+    const full = this.lobbyState();
+    for (const s of this.seats) {
+      if (!s.conn) continue;
+      s.conn.send({ t: 'lobby', lobby: this.lobbyFor(s, full) });
+    }
+  }
+
+  /** 판 중에는 괴물에게 다른 사람의 역할 · 접속 상태를 보내지 않는다 (정보 차단) */
+  lobbyFor(seat: Seat, full: LobbyState): LobbyState {
+    if (full.phase === 'lobby' || seat.role !== 'monster') return full;
+    return {
+      ...full,
+      players: full.players.map((p) =>
+        p.id === seat.id ? p : { ...p, role: null, connected: true, ready: true },
+      ),
+    };
   }
 
   /** 시작 가능 여부. 봇 방이면 빈 역할은 봇이 채운다 */
@@ -224,7 +245,10 @@ export class Room {
         return;
       case 'input':
         if (this.phase === 'playing' && this.game && Array.isArray(msg.frames)) {
-          this.game.queueInput(seat.id, msg.frames.slice(0, 16));
+          const frames = msg.frames
+            .slice(0, 16)
+            .filter((f): f is InputFrame => typeof f === 'object' && f !== null && typeof f.seq === 'number');
+          this.game.queueInput(seat.id, frames);
         }
         return;
       case 'ping':
@@ -342,6 +366,7 @@ export class Room {
   }
 
   private applyTest(cmd: TestCommand): void {
+    if (typeof cmd !== 'object' || cmd === null) return;
     const game = this.game;
     if (!game) return;
     switch (cmd.kind) {
@@ -423,7 +448,9 @@ export class RoomManager {
           return { room, seat: own };
         }
         // 2) 이 브라우저의 보조 토큰 (localStorage): 지금 끊겨 있는 자리만
-        for (const t of Array.isArray(msg.altTokens) ? msg.altTokens.slice(0, 8) : []) {
+        const alts = !msg.token && Array.isArray(msg.altTokens) ? msg.altTokens.slice(0, 8) : [];
+        for (const t of alts) {
+          if (typeof t !== 'string') continue;
           const seat = room.seatByToken(t);
           if (seat && !seat.bot && seat.conn === null) {
             room.attach(seat, conn);

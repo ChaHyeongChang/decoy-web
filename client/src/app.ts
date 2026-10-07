@@ -82,6 +82,8 @@ export class App {
   game: Phaser.Game | null = null;
   private readonly listeners = new Set<(e: AppEvent) => void>();
   private reconnectTimer: number | null = null;
+  /** 다른 탭이 이 자리를 넘겨받았다: 다시 연결하지 않는다 */
+  private replaced = false;
 
   constructor(
     readonly params: AppParams,
@@ -121,7 +123,9 @@ export class App {
       if (this.roomCode) this.sendJoin(params.name ?? getSavedName());
       else this.lobbyUi.renderHome();
     };
-    this.net.onClose = () => this.scheduleReconnect();
+    this.net.onClose = () => {
+      if (!this.replaced) this.scheduleReconnect();
+    };
   }
 
   start(): void {
@@ -251,6 +255,11 @@ export class App {
         this.emit({ kind: 'result', result: msg.result });
         return;
       case 'error':
+        if (msg.code === 'replaced') {
+          this.replaced = true;
+          showToast(msg.message, 6000);
+          return;
+        }
         if (msg.code === 'room-not-found' || msg.code === 'in-progress' || msg.code === 'room-full') {
           this.roomCode = null;
           this.lobbyUi.renderHome();

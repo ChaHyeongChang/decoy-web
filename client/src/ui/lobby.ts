@@ -29,6 +29,7 @@ export class LobbyUI {
   private root: HTMLDivElement;
   private errorBox: HTMLDivElement;
   private you: string | null = null;
+  private lastRoom: string | null = null;
 
   constructor(
     host: HTMLElement,
@@ -81,7 +82,10 @@ export class LobbyUI {
       { class: 'btn btn-primary', 'data-testid': 'create-room' },
       UI_TEXT.createRoom,
     );
-    create.addEventListener('click', () => this.actions.create(name.value));
+    create.addEventListener('click', () => {
+      this.errorBox.textContent = '';
+      this.actions.create(name.value);
+    });
     const code = el('input', {
       class: 'input input-code',
       'data-testid': 'room-code-input',
@@ -94,7 +98,9 @@ export class LobbyUI {
     });
     const join = el('button', { class: 'btn', 'data-testid': 'join-room' }, UI_TEXT.joinRoom);
     const doJoin = (): void => {
-      if (code.value.trim().length > 0) this.actions.join(code.value.trim(), name.value);
+      if (code.value.trim().length === 0) return;
+      this.errorBox.textContent = '';
+      this.actions.join(code.value.trim(), name.value);
     };
     join.addEventListener('click', doJoin);
     code.addEventListener('keydown', (e) => {
@@ -110,6 +116,8 @@ export class LobbyUI {
   /** 방 로비 */
   renderRoom(lobby: LobbyState): void {
     this.root.replaceChildren();
+    if (this.lastRoom !== lobby.room) this.errorBox.textContent = '';
+    this.lastRoom = lobby.room;
     const me = lobby.players.find((p) => p.id === this.you);
     const isHost = me?.host ?? false;
 

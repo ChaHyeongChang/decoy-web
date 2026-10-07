@@ -69,8 +69,21 @@ wss.on('connection', (socket: WebSocket) => {
     close: () => socket.close(),
   };
   let bound: { room: Room; seat: Seat } | null = null;
+  let closed = false;
 
   const dispatch = (raw: string): void => {
+    // 지연 큐 때문에 소켓이 닫힌 뒤에 도착한 메시지는 버린다 (유령 자리 방지)
+    if (closed) return;
+    try {
+      handleMessage(raw);
+    } catch (err) {
+      // 메시지 하나의 오류가 서버 전체를 멈추지 않게: 그 연결만 닫는다
+      console.error('메시지 처리 오류', err);
+      socket.close();
+    }
+  };
+
+  const handleMessage = (raw: string): void => {
     let msg: ClientMessage;
     try {
       msg = JSON.parse(raw) as ClientMessage;
@@ -100,6 +113,7 @@ wss.on('connection', (socket: WebSocket) => {
 
   socket.on('message', (data) => inbound.push(data.toString()));
   socket.on('close', () => {
+    closed = true;
     if (bound && bound.seat.conn?.id === conn.id) bound.room.detach(bound.seat, performance.now());
   });
   socket.on('error', () => socket.close());

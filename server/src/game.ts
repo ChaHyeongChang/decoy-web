@@ -26,6 +26,7 @@ import type {
   PlayerStats,
   SurvivorState,
 } from './state';
+import { monsterBlendTick, monsterModeInput } from './systems/monster';
 
 export interface GamePlayerSetup {
   id: string;
@@ -240,11 +241,15 @@ export class Game {
     };
   }
 
-  /** 행동 처리 훅 (능력 · 공격 시작). 이후 마일스톤에서 systems가 채운다 */
-  protected handleActions(_p: GamePlayer, _input: InputFrame): void {}
+  /** 입력 한 개의 눌림 처리 (이동보다 먼저) */
+  private handleActions(p: GamePlayer, input: InputFrame): void {
+    if (p.kind === 'monster') monsterModeInput(this, p, input);
+  }
 
-  /** 틱마다 한 번 도는 규칙 처리 훅 */
-  protected runSystems(): void {}
+  /** 틱마다 한 번 도는 규칙 처리 (DECISIONS: 입력·이동 → 능력 → 공격 → 구조 → 점령 → 탈출 → 승패 → 시간) */
+  private runSystems(): void {
+    monsterBlendTick(this, this.monster);
+  }
 
   private processPlayerInputs(p: GamePlayer): void {
     if (p.kind === 'survivor' && (p.status === 'dead' || p.status === 'escaped')) {

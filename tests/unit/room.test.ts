@@ -102,3 +102,64 @@ describe('방과 로비', () => {
     expect(room.seats).toHaveLength(3);
   });
 });
+
+describe('방 견고성 (M1 검토 반영)', () => {
+  function playing(testHooks = false): ReturnType<typeof setupRoom> {
+    const r = setupRoom();
+    const roles: Role[] = ['monster', 'runner', 'guard', 'scout'];
+    r.seats.forEach((s, i) => r.room.handle(s, { t: 'role', role: roles[i]! }, 0));
+    r.seats.forEach((s) => r.room.handle(s, { t: 'ready', ready: true }, 0));
+    (r.room.config as { testHooks: boolean }).testHooks = testHooks;
+    r.room.handle(r.seats[0]!, { t: 'start' }, 0);
+    return r;
+  }
+
+  it('잘못된 input 프레임(null, 숫자 아님)은 무시하고 서버가 죽지 않는다', () => {
+    const { room, seats } = playing();
+    const bad = { t: 'input', frames: [null, 3, { seq: 'x' }] } as unknown as ClientMessage;
+    expect(() => room.handle(seats[1]!, bad, 0)).not.toThrow();
+    expect(() => room.tick(33)).not.toThrow();
+  });
+
+  it('cmd 없는 test 메시지도 무시한다', () => {
+    const { room, seats } = playing(true);
+    expect(() => room.handle(seats[1]!, { t: 'test' } as unknown as ClientMessage, 0)).not.toThrow();
+  });
+
+  it('자리 토큰은 시드와 무관한 무작위 값이다', () => {
+    const a = setupRoom();
+    const b = setupRoom();
+    expect(a.seats[0]!.token).not.toBe(b.seats[0]!.token);
+    expect(a.seats[0]!.token).toMatch(/^[A-Za-z0-9_-]{24}$/);
+  });
+
+  it('다른 탭이 자리를 넘겨받으면 이전 연결에 알리고 닫는다', () => {
+    const { mgr, room, seats, conns } = setupRoom();
+    mgr.join(new FakeConn(), joinMsg(room.code, { token: seats[2]!.token }));
+    expect(conns[2]!.last('error')?.code).toBe('replaced');
+    expect(conns[2]!.closed).toBe(true);
+  });
+
+  it('주 토큰이 있는 탭은 보조 토큰으로 남의 자리를 가져가지 않는다', () => {
+    const { mgr, room, seats } = setupRoom();
+    room.detach(seats[3]!, 0);
+    const r = mgr.join(
+      new FakeConn(),
+      joinMsg(room.code, { token: 'gone-token', altTokens: [seats[3]!.token] }),
+    );
+    expect('seat' in r && r.seat.id).not.toBe(seats[3]!.id);
+  });
+
+  it('판 중 로비 메시지는 괴물에게 다른 사람의 역할 · 접속 상태를 보내지 않는다', () => {
+    const { room, seats, conns } = playing();
+    room.detach(seats[3]!, 10);
+    const toMonster = conns[0]!.last('lobby')!.lobby;
+    for (const p of toMonster.players) {
+      if (p.id === seats[0]!.id) continue;
+      expect(p.role).toBeNull();
+      expect(p.connected).toBe(true);
+    }
+    const toSurvivor = conns[1]!.last('lobby')!.lobby;
+    expect(toSurvivor.players.find((p) => p.id === seats[3]!.id)?.connected).toBe(false);
+  });
+});
