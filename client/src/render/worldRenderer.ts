@@ -22,7 +22,15 @@ import {
   type Vec2,
 } from '@decoy/shared';
 import { MAP_SCALE, MAP_X, MAP_Y } from '../ui/layout';
-import { drawAttackRange, drawMonster, drawRescueRing, drawSurvivor } from './characters';
+import {
+  drawAttackRange,
+  drawMonster,
+  drawRescueRing,
+  drawRoarMark,
+  drawRoarPing,
+  drawSurvivor,
+  drawTrackMark,
+} from './characters';
 import { ALPHA, COLOR, ROLE_COLOR } from './colors';
 import { BaseLayer } from './baseLayer';
 import { Badges, type BadgeAlpha } from './objects';
@@ -42,6 +50,8 @@ export interface FrameView {
   /** 괴물 화면: 내 부채꼴 모양 보간값 */
   myBlend: number;
   nowMs: number;
+  /** 괴물 화면: 포효로 드러난 생존자 위치 (발동 순간 고정, 1.5초) */
+  roarPings: { x: number; y: number; until: number; start: number }[];
 }
 
 /** 시야 원 · 안개 갱신 주기 (ms). 생존자 시야는 0.1초 이하, 괴물 부채꼴은 판정과 맞게 자주 */
@@ -173,6 +183,34 @@ export class WorldRenderer {
         if (rescue > 0) drawRescueRing(g, v.me.x, v.me.y, rescue);
       }
       drawn.push({ id: v.selfId, kind: 'self', x: v.me.x, y: v.me.y, face: v.me.face, layer: 'main' });
+    }
+
+    // 7-2. 안개 위 마커: 탐지(초록 다이아, 실시간), 포효한 괴물 위치(주황), 포효 핑(흰 원 펄스)
+    for (const mk of snap.marks) {
+      if (mk.kind === 'track') drawTrackMark(g, mk.x, mk.y, v.nowMs);
+      else if (mk.kind === 'roarSelf') drawRoarMark(g, mk.x, mk.y, v.nowMs);
+      drawn.push({
+        id: `mark-${mk.kind}`,
+        kind: 'mark',
+        tag: mk.kind,
+        x: mk.x,
+        y: mk.y,
+        face: 0,
+        layer: 'main',
+      });
+    }
+    for (const p of v.roarPings) {
+      if (v.nowMs > p.until) continue;
+      drawRoarPing(g, p.x, p.y, (v.nowMs - p.start) / (p.until - p.start));
+      drawn.push({
+        id: 'mark-roarPing',
+        kind: 'mark',
+        tag: 'roarPing',
+        x: p.x,
+        y: p.y,
+        face: 0,
+        layer: 'main',
+      });
     }
 
     // 8. 항상 표시 배지 (지금 안 보이는 곳이면 45%)

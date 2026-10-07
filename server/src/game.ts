@@ -26,6 +26,7 @@ import type {
   PlayerStats,
   SurvivorState,
 } from './state';
+import { abilitiesTick, monsterAbilityInput, survivorAbilityInput } from './systems/abilities';
 import { captureTick } from './systems/capture';
 import { combatTick, monsterAttackInput } from './systems/combat';
 import { exitTick } from './systems/exit';
@@ -257,12 +258,16 @@ export class Game {
     if (p.kind === 'monster') {
       monsterModeInput(this, p, input);
       monsterAttackInput(this, p, input);
+      monsterAbilityInput(this, p, input);
+    } else {
+      survivorAbilityInput(this, p, input);
     }
   }
 
   /** 틱마다 한 번 도는 규칙 처리 (DECISIONS: 입력·이동 → 능력 → 공격 → 구조 → 점령 → 탈출 → 승패 → 시간) */
   private runSystems(): void {
     monsterBlendTick(this, this.monster);
+    abilitiesTick(this);
     combatTick(this);
     prisonTick(this);
     captureTick(this);

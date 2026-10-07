@@ -36,6 +36,8 @@ export class GameScene extends Phaser.Scene {
   /** 마지막으로 보낸 입력 (디버그) */
   lastFrame: InputFrame | null = null;
   private unsubscribe: (() => void) | null = null;
+  /** 포효 핑 (괴물 화면) */
+  private roarPings: { x: number; y: number; until: number; start: number }[] = [];
   /** 마지막으로 그린 내 위치 (예측) */
   localPos = { x: 0, y: 0, face: 0 };
 
@@ -86,8 +88,18 @@ export class GameScene extends Phaser.Scene {
 
     const host = this.game.canvas.parentElement ?? document.body;
     this.sampler.attach(host);
+    this.roarPings = [];
     this.unsubscribe = this.app.subscribe((e) => {
-      if (e.kind === 'snapshot' && this.seq < e.snap.ack) this.seq = e.snap.ack;
+      if (e.kind !== 'snapshot') return;
+      if (this.seq < e.snap.ack) this.seq = e.snap.ack;
+      const now = performance.now();
+      for (const ev of e.snap.events) {
+        if (ev.k === 'roarPings') {
+          const dur = (this.app.balance?.monster.roar.revealDuration ?? 1.5) * 1000;
+          for (const p of ev.pts) this.roarPings.push({ x: p.x, y: p.y, start: now, until: now + dur });
+        }
+      }
+      this.roarPings = this.roarPings.filter((p) => p.until > now);
     });
     // 입력 샘플링은 렌더 프레임과 따로 타이머로 돈다 (그리기가 느려도 조작 주기는 1/30초 유지)
     this.lastInputAt = performance.now();
@@ -184,6 +196,7 @@ export class GameScene extends Phaser.Scene {
           snap.you.role === 'monster' ? null : (app.monsterInterp.sample(renderTime).get('monster') ?? null),
         myBlend: this.myBlend,
         nowMs: performance.now(),
+        roarPings: this.roarPings,
       },
       delta,
     );

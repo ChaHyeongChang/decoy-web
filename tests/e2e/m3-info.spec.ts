@@ -74,6 +74,9 @@ async function scenario(players: Player[]): Promise<void> {
   ];
   await runner.page.keyboard.down('KeyD');
   await scout.page.keyboard.down('KeyA');
+  // 능력 노출 · 탐지 · 포효 예외 구간도 함께 검사한다
+  await scout.page.keyboard.press('Space');
+  await runner.page.keyboard.press('Space');
   for (let i = 0; i < aims.length; i += 1) {
     const a = aims[i]!;
     const c = await page.evaluate((t) => window.__DECOY__?.tileToClient(t.x, t.y) ?? null, a);
@@ -82,6 +85,7 @@ async function scenario(players: Player[]): Promise<void> {
       await page.mouse.down({ button: 'right' });
       await page.mouse.up({ button: 'right' });
     }
+    if (i === 2) await page.keyboard.press('KeyQ');
     await guard.page.keyboard.down(i % 2 === 0 ? 'KeyA' : 'KeyD');
     await page.waitForTimeout(900);
     await guard.page.keyboard.up(i % 2 === 0 ? 'KeyA' : 'KeyD');
@@ -158,7 +162,8 @@ test('괴물 · 생존자가 받은 스냅샷 전체에 시야 밖 상대 좌표
       if (v === 'hidden') {
         monsterHidden += 1;
         expect(snap.monster, `틱 ${snap.tick}: 시야 밖 괴물 좌표가 ${p.role}에게 갔다`).toBeNull();
-        expect(snap.marks.length).toBe(0);
+        // 마커는 탐지 · 포효 노출 창에서만 허용
+        if (f.tracked <= 0 && f.roarReveal <= 0) expect(snap.marks.length).toBe(0);
       }
       if (v === 'visible') {
         monsterSeen += 1;
