@@ -234,6 +234,12 @@ export class GameScene extends Phaser.Scene {
       this.acc = 0;
       return;
     }
+    // 괴물 재접속 대기(판 전체 일시정지): 서버가 입력을 처리하지 않으므로 보내지도 예측하지도 않는다
+    if ((app.lastSnap?.world.paused ?? null) !== null) {
+      this.acc = 0;
+      this.sampler.clearPressed();
+      return;
+    }
     const dtMs = app.dt * 1000;
     this.acc = Math.min(this.acc + deltaMs, dtMs * MAX_CATCHUP_STEPS);
     const frames: InputFrame[] = [];
@@ -365,8 +371,16 @@ export class GameScene extends Phaser.Scene {
     const spotted = snap.you.surv?.spotted === true;
     this.spottedEdge.setVisible(spotted);
     const lastChance = snap.world.grace !== null && snap.you.surv?.status === 'free';
-    const persistent = spotted ? UI_TEXT.spotted : lastChance ? formatText('ALERT_LAST_30') : '';
-    this.banners.update(persistent, spotted ? 0xb91c1c : COLOR.warn, now);
+    const paused = snap.world.paused;
+    const persistent =
+      paused !== null
+        ? `${UI_TEXT.monsterReconnect} ${Math.ceil(paused)}초`
+        : spotted
+          ? UI_TEXT.spotted
+          : lastChance
+            ? formatText('ALERT_LAST_30')
+            : '';
+    this.banners.update(persistent, spotted && paused === null ? 0xb91c1c : COLOR.warn, now);
     const anyKey = this.sampler.anyKeyPressed;
     this.sampler.anyKeyPressed = false;
     this.tutorial.update(now, anyKey);

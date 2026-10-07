@@ -48,14 +48,29 @@ export function dist(a: Vec2, b: Vec2): number {
 }
 
 /** 경로를 따라 목표로 가는 입력 */
+/** 도착 판정 여유: 한 번 도착하면 이만큼 더 밀려나야 다시 걷는다 (지연된 스냅샷으로 제자리에서 흔들리지 않게) */
+const HOLD_HYSTERESIS = 0.5;
+/** 목표 이 거리 안에서는 입력 크기를 줄여 천천히 다가간다 (지연 때문에 목표를 지나치지 않게) */
+const SLOW_RADIUS = 1.0;
+
 export class Walker {
   private readonly follower = new PathFollower();
+  private holding = false;
+  private lastTarget: Vec2 | null = null;
 
   toward(snap: Snapshot, target: Vec2, tolerance = 0.25): { mx: number; my: number; arrived: boolean } {
     const me = snap.you.move;
-    if (dist(me, target) <= tolerance) return { mx: 0, my: 0, arrived: true };
+    if (!this.lastTarget || dist(this.lastTarget, target) > 1e-6) this.holding = false;
+    this.lastTarget = target;
+    const d = dist(me, target);
+    if (d <= (this.holding ? tolerance + HOLD_HYSTERESIS : tolerance)) {
+      this.holding = true;
+      return { mx: 0, my: 0, arrived: true };
+    }
+    this.holding = false;
     const v = this.follower.moveToward(me, target, moverOf(snap), snap.tick);
-    return { mx: v.x, my: v.y, arrived: false };
+    const k = Math.max(0.25, Math.min(1, d / SLOW_RADIUS));
+    return { mx: v.x * k, my: v.y * k, arrived: false };
   }
 }
 

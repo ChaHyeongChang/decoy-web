@@ -133,6 +133,11 @@ export class InputSampler {
     return len > 0 ? { x: x / len, y: y / len } : { x: 0, y: 0 };
   }
 
+  /** 보내지 않을 동안 눌린 버튼은 버린다 (판 정지 중 누른 능력이 재개 순간 나가지 않게). 누르고 있는 상태는 둔다 */
+  clearPressed(): void {
+    this.pressed = 0;
+  }
+
   /** 입력 프레임 하나를 만든다. pressed는 한 번 보내면 비운다 */
   sample(seq: number, aim: number): InputFrame {
     const m = this.moveVector();

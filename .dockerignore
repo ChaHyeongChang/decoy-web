@@ -1,0 +1,13 @@
+node_modules
+**/node_modules
+**/dist
+artifacts
+test-results
+playwright-report
+tests/e2e/.results
+.git
+.env
+.env.*
+*.log
+docs/reference
+docs/images/concept_*.png

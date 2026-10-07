@@ -103,6 +103,142 @@ describe('방과 로비', () => {
   });
 });
 
+describe('판 중 접속 끊김 (GAME_DESIGN 9장, DECISIONS D1)', () => {
+  function playingRoom(
+    roles: Role[] = ['monster', 'runner', 'guard', 'scout'],
+  ): ReturnType<typeof setupRoom> {
+    const r = setupRoom();
+    r.seats.forEach((s, i) => r.room.handle(s, { t: 'role', role: roles[i]! }, 0));
+    r.seats.forEach((s) => r.room.handle(s, { t: 'ready', ready: true }, 0));
+    r.room.handle(r.seats[0]!, { t: 'start' }, 0);
+    return r;
+  }
+  const graceTicks = Math.round(balance.match.reconnectGrace * balance.network.serverTickHz);
+  const run = (room: Room, n: number): void => {
+    for (let t = 0; t < n; t += 1) room.tick(t * 33);
+  };
+
+  it('괴물이 끊기면 판 전체가 멈추고(시간 · 타이머), 유예 안에 돌아오면 그대로 이어진다', () => {
+    const { mgr, room, seats, conns } = playingRoom();
+    run(room, 10);
+    const game = room.game!;
+    const t0 = game.time;
+    const left0 = game.timeLeft;
+    room.detach(seats[0]!, 0);
+    run(room, graceTicks - 30);
+    expect(game.time).toBe(t0);
+    expect(game.timeLeft).toBe(left0);
+    expect(game.paused).toBeGreaterThan(0.5);
+    // 생존자 화면에 남은 대기 시간이 간다
+    expect(conns[1]!.last('snap')!.s.world.paused).toBeGreaterThan(0.5);
+    const back = new FakeConn();
+    const r = mgr.join(back, joinMsg(room.code, { token: seats[0]!.token }));
+    expect('seat' in r && r.seat.id).toBe(seats[0]!.id);
+    run(room, 60);
+    expect(game.paused).toBeNull();
+    expect(game.time).toBeGreaterThan(t0 + 1.5);
+    expect(room.phase).toBe('playing');
+  });
+
+  it('괴물이 유예(30초) 안에 돌아오지 않으면 판은 무효', () => {
+    const { room, seats, conns } = playingRoom();
+    run(room, 10);
+    room.detach(seats[0]!, 0);
+    run(room, graceTicks + 2);
+    expect(room.phase).toBe('result');
+    const res = conns[1]!.last('result')!.result;
+    expect(res.winner).toBe('void');
+    expect(res.ending).toBe('END_VOID');
+    expect(res.grade).toBeNull();
+  });
+
+  it('생존자가 끊기면 판은 계속되고 제자리에 남으며, 유예가 지나면 사망 처리된다', () => {
+    const { room, seats } = playingRoom();
+    run(room, 10);
+    const game = room.game!;
+    const runner = game.survivorById(seats[1]!.id)!;
+    room.detach(seats[1]!, 0);
+    const t0 = game.time;
+    run(room, graceTicks - 5);
+    expect(game.paused).toBeNull();
+    expect(game.time).toBeGreaterThan(t0 + balance.match.reconnectGrace - 1);
+    expect(runner.status).toBe('free');
+    run(room, 10);
+    expect(runner.status).toBe('dead');
+    expect(room.phase).toBe('playing');
+  });
+
+  it('모두 함께 끊기면 자리 순서와 상관없이 무효 (괴물을 먼저 본다)', () => {
+    // 괴물이 세 번째 자리, 생존자 하나는 이미 사망
+    const { room, seats } = playingRoom(['runner', 'guard', 'monster', 'scout']);
+    run(room, 10);
+    room.game!.survivorById(seats[3]!.id)!.status = 'dead';
+    for (const s of seats) room.detach(s, 0);
+    run(room, graceTicks + 2);
+    expect(room.phase).toBe('result');
+    expect((room.lastResult as { result: { winner: string } }).result.winner).toBe('void');
+  });
+
+  it('괴물이 없는 동안 생존자 유예가 끝나면 사망 처리만 하고, 판정은 괴물이 돌아와 판이 흐를 때 한다', () => {
+    const { mgr, room, seats } = playingRoom();
+    run(room, 10);
+    const game = room.game!;
+    game.survivorById(seats[3]!.id)!.status = 'dead';
+    room.detach(seats[1]!, 0);
+    run(room, Math.round(graceTicks * 0.6));
+    room.detach(seats[0]!, 0);
+    run(room, Math.round(graceTicks * 0.5));
+    // 러너는 유예가 끝나 사망(사망 2명)이지만 괴물이 없으므로 아직 끝나지 않는다
+    expect(game.survivorById(seats[1]!.id)!.status).toBe('dead');
+    expect(game.end).toBeNull();
+    mgr.join(new FakeConn(), joinMsg(room.code, { token: seats[0]!.token }));
+    run(room, 3);
+    expect(game.end).toMatchObject({ winner: 'monster', reason: 'deaths' });
+  });
+
+  it('괴물의 대기 시간은 판마다 합산한다 (끊고 붙기를 되풀이해 판을 무기한 멈추지 못한다)', () => {
+    const { mgr, room, seats } = playingRoom();
+    run(room, 10);
+    for (let k = 0; k < 3; k += 1) {
+      room.detach(seats[0]!, 0);
+      run(room, Math.round(graceTicks * 0.4));
+      if (room.phase !== 'playing') break;
+      mgr.join(new FakeConn(), joinMsg(room.code, { token: seats[0]!.token }));
+      run(room, 30);
+    }
+    expect(room.phase).toBe('result');
+    expect((room.lastResult as { result: { winner: string } }).result.winner).toBe('void');
+  });
+
+  it('끊기면 큐에 남은 입력을 버리고, 다시 붙으면 끊긴 동안 쌓인 일회성 알림은 버린다 (거점 메모는 남김)', () => {
+    const { mgr, room, seats } = playingRoom();
+    run(room, 10);
+    const game = room.game!;
+    const runner = game.survivorById(seats[1]!.id)!;
+    game.queueInput(runner.id, [{ seq: 999, mx: 1, my: 0, aim: Number.NaN, held: 0, pressed: 8 }]);
+    room.detach(seats[1]!, 0);
+    expect(runner.queue).toHaveLength(0);
+    game.emitTo(runner, { k: 'hit', you: true, x: 1, y: 1 });
+    game.emitTo(runner, { k: 'text', id: 'ALERT_CAPTURE_DONE', point: 'A' });
+    game.emitTo(runner, { k: 'text', id: 'NOTE_FIRST', code: '12' });
+    mgr.join(new FakeConn(), joinMsg(room.code, { token: seats[1]!.token }));
+    expect(runner.outbox).toEqual([{ k: 'text', id: 'NOTE_FIRST', code: '12' }]);
+  });
+
+  it('생존자가 유예 안에 돌아오면 그대로 이어서 한다', () => {
+    const { mgr, room, seats } = playingRoom();
+    run(room, 10);
+    const game = room.game!;
+    const runner = game.survivorById(seats[1]!.id)!;
+    room.detach(seats[1]!, 0);
+    run(room, graceTicks - 30);
+    mgr.join(new FakeConn(), joinMsg(room.code, { token: seats[1]!.token }));
+    run(room, 60);
+    expect(runner.status).toBe('free');
+    expect(runner.connected).toBe(true);
+  });
+});
+
 describe('방 견고성 (M1 검토 반영)', () => {
   function playing(testHooks = false): ReturnType<typeof setupRoom> {
     const r = setupRoom();

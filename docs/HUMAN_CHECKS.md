@@ -6,7 +6,8 @@
 
 - [ ] **GPU가 있는 실제 PC에서 브라우저 탭 4개 평균 FPS 55 이상** (WebGL 기본 렌더러). 컨테이너에는 GPU가 없어 Canvas 렌더러(`?renderer=canvas`)로만 자동 측정했다
 - [ ] 느린 노트북에서 끊기면 주소에 `&scale=0.5`(저사양 모드)를 붙여 나아지는지
-- [ ] 실제 `docker build`와 배포 후 접속 (`docs/DEPLOY.md`)
+- [ ] 실제 서비스(Cloud Run · Fly.io · 가상 서버 등)에 배포 후 접속 (`docs/DEPLOY.md`). 이미지 빌드와 컨테이너 접속은 `npm run verify:deploy`로 자동 확인했지만, 계정 · 결제가 필요한 실제 배포는 하지 않았다
+- [ ] 배포 서비스의 WebSocket 연결 시간 제한(예: Cloud Run 60분)에 걸려 끊겼을 때 자동 재접속이 자연스러운지
 - [ ] 실제 인터넷 핑(한국 · 일본 리전 30~60ms)에서 조작 체감
 - [ ] 발표장 네트워크에서 접속
 

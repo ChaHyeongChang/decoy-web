@@ -13,6 +13,7 @@ import {
   type Snapshot,
   type SurvivorView,
 } from '@decoy/shared';
+import { UI_TEXT } from './data/storyText';
 import { NetClient, defaultWsUrl } from './net';
 import { getAltTokens, getSavedName, getSeatToken, saveName, saveSeatToken } from './session';
 import { Interpolator, Predictor, SnapshotClock, lerpAngle, lerpNum } from './sync';
@@ -171,7 +172,7 @@ export class App {
 
   private scheduleReconnect(): void {
     if (this.reconnectTimer !== null) return;
-    showToast('연결이 끊겼습니다. 다시 연결하는 중…');
+    showToast(UI_TEXT.disconnected);
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = null;
       this.net.connect();

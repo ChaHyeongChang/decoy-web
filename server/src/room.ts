@@ -20,7 +20,7 @@ import {
 import { randomBytes } from 'node:crypto';
 import { Game } from './game';
 import { AliasBook, buildSnapshot, computeVisibility } from './interest';
-import { buildResult } from './systems/match';
+import { applyDropExpired, buildResult } from './systems/match';
 
 export interface Conn {
   readonly id: number;
@@ -69,6 +69,8 @@ export class Room {
   game: Game | null = null;
   /** 괴물에게 보낼 생존자 임시 ID */
   private aliases = new AliasBook();
+  /** 이번 판에 괴물이 끊겨 있던 시간의 합 (초). 재접속해도 줄지 않는다 */
+  private monsterAway = 0;
   matchCount = 0;
   lastResult: ServerMessage | null = null;
   emptySince: number | null = null;
@@ -135,6 +137,8 @@ export class Room {
     if (p) {
       p.connected = true;
       p.droppedFor = null;
+      // 끊긴 동안 쌓인 일회성 알림은 버린다 (돌아온 첫 스냅샷에 지난 소리 · 배너가 몰려 오지 않게). 거점 메모(비밀번호)만 남긴다
+      p.outbox = p.outbox.filter((e) => e.k === 'text' && (e.id === 'NOTE_FIRST' || e.id === 'NOTE_SECOND'));
     }
   }
 
@@ -159,6 +163,8 @@ export class Room {
     if (p) {
       p.connected = false;
       p.droppedFor = 0;
+      // 끊기기 직전 큐에 남은 입력(공격 누름 등)이 돌아온 뒤 뒤늦게 처리되지 않게
+      p.queue.length = 0;
     }
     if (this.phase !== 'playing') seat.ready = false;
     this.sendLobby();
@@ -310,6 +316,7 @@ export class Room {
     this.matchCount += 1;
     this.game = new Game(setup, this.config.balance, { seed: this.rng.int(2 ** 31) });
     this.aliases = new AliasBook();
+    this.monsterAway = 0;
     this.phase = 'playing';
     this.lastResult = null;
     for (const s of this.seats) s.conn?.send({ t: 'match', info: this.matchInfo(s) });
@@ -363,6 +370,7 @@ export class Room {
     else this.emptySince = null;
     const game = this.game;
     if (this.phase !== 'playing' || !game) return;
+    this.updateDrops(game);
     game.step();
     this.hooks.recordTruth?.(this);
     if (this.isSnapshotTick(game.tick) || game.end) {
@@ -375,6 +383,37 @@ export class Room {
       }
     }
     if (game.end) this.finishMatch(game);
+  }
+
+  /**
+   * 판 중 접속 끊김 (GAME_DESIGN 9장, DECISIONS D1): 끊긴 플레이어마다 유예 시간(`match.reconnectGrace`)을 센다.
+   *  - 괴물: 유예 동안 판 전체를 일시정지(타이머 · 쿨 포함), 지나면 무효
+   *  - 생존자: 판은 계속되고 제자리에 남는다(맞을 수 있다), 지나면 사망 처리 후 판정
+   * 돌아오면(attach) 유예가 풀린다. 괴물의 대기 시간은 판마다 합산한다(끊고 붙기를 되풀이해 판을 무기한 멈추지 못하게)
+   * 괴물을 먼저 본다: 모두 함께 끊겨도 결과가 자리 순서에 따라 갈리지 않고 무효가 된다
+   */
+  private updateDrops(game: Game): void {
+    const grace = this.config.balance.match.reconnectGrace;
+    const m = game.monster;
+    if (!m.connected && !game.end) {
+      this.monsterAway += game.dt;
+      if (this.monsterAway >= grace - 1e-9) applyDropExpired(game, m.id);
+    }
+    const monsterAway = !m.connected && !game.end;
+    for (const s of game.survivors) {
+      if (s.connected || s.droppedFor === null || game.end) continue;
+      if (s.status === 'dead' || s.status === 'escaped') {
+        s.droppedFor = null;
+        continue;
+      }
+      s.droppedFor += game.dt;
+      if (s.droppedFor < grace - 1e-9) continue;
+      s.droppedFor = null;
+      // 괴물이 없는 동안(판 정지)에는 사망 처리만 하고, 판정은 판이 다시 흐를 때 한다
+      if (monsterAway) s.status = 'dead';
+      else applyDropExpired(game, s.id);
+    }
+    game.paused = monsterAway && !game.end ? Math.max(0, grace - this.monsterAway) : null;
   }
 
   private dropExpiredLobbySeats(nowMs: number): void {

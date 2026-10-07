@@ -183,3 +183,14 @@ httpServer.listen(options.port, options.host, () => {
   const hooks = options.testHooks ? ' [테스트 훅]' : '';
   console.log(`DECOY 서버 시작: http://localhost:${actualPort()}${lag}${hooks}`);
 });
+
+// 종료 신호: 컨테이너에서 PID 1로 돌면 Node가 SIGTERM · SIGINT를 기본 처리하지 않으므로 직접 끝낸다
+// (docker stop이 10초를 기다렸다 강제 종료하거나, Ctrl+C로 멈추지 않는 문제)
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.on(signal, () => {
+    console.log(`DECOY 서버 종료 (${signal})`);
+    for (const client of wss.clients) client.terminate();
+    httpServer.close();
+    process.exit(0);
+  });
+}

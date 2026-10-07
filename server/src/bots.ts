@@ -1,20 +1,49 @@
 // 개발 · 테스트용 봇. 실제 WebSocket 클라이언트로 접속해 자기에게 온 (걸러진) 스냅샷만 보고 움직인다.
 import WebSocket from 'ws';
 import {
+  cloneMoveState,
+  stepMovement,
   validateBalance,
   type Balance,
   type ClientMessage,
+  type InputFrame,
   type MatchInfo,
+  type MoveEnv,
   type ServerMessage,
   type Snapshot,
 } from '@decoy/shared';
-import { devBotBrain, idleBrain, type BotBrain } from './botBrains';
+import { devBotBrain, idleBrain, moverOf, type BotBrain } from './botBrains';
+
+/** 서버가 아직 처리하지 않은 입력을 이만큼까지 기억한다 (예측용) */
+const MAX_PENDING = 60;
+
+/**
+ * 봇의 내 위치 예측: 마지막 스냅샷(서버가 처리한 입력까지)에 아직 처리 안 된 입력을 같은 이동 코드로 다시 적용한다.
+ * 사람 클라이언트의 예측과 같은 방식이라 지연(lag)이 있어도 목표를 지나쳐 흔들리지 않는다. 다른 몸은 무시한다
+ */
+export function predictSelf(snap: Snapshot, pending: readonly InputFrame[], balance: Balance): Snapshot {
+  const later = pending.filter((f) => f.seq > snap.ack);
+  if (later.length === 0) return snap;
+  const move = cloneMoveState(snap.you.move);
+  const env: MoveEnv = {
+    kind: snap.you.role === 'monster' ? 'monster' : 'survivor',
+    role: snap.you.role === 'monster' ? null : snap.you.role,
+    mover: moverOf(snap),
+    campActive: snap.world.imprisoned > 0,
+    obstacles: [],
+  };
+  const dt = 1 / balance.network.serverTickHz;
+  for (const f of later) stepMovement(move, f, env, balance, dt);
+  return { ...snap, you: { ...snap.you, move } };
+}
 
 export interface BotClientOptions {
   url: string;
   room: string;
   token: string | null;
   name?: string;
+  /** 새 방을 만든다 (room은 무시) */
+  create?: boolean;
   /** 판이 시작되면 역할을 보고 두뇌를 고른다 */
   brain?: (info: MatchInfo) => BotBrain;
   onMessage?: (msg: ServerMessage) => void;
@@ -26,6 +55,7 @@ export class BotClient {
   private seq = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
   private brain: BotBrain = idleBrain;
+  private pending: InputFrame[] = [];
   info: MatchInfo | null = null;
   balance: Balance | null = null;
   lastSnap: Snapshot | null = null;
@@ -37,8 +67,8 @@ export class BotClient {
     this.ws.on('open', () => {
       this.send({
         t: 'join',
-        room: opts.room,
-        create: false,
+        room: opts.create ? null : opts.room,
+        create: opts.create === true,
         name: opts.name ?? '봇',
         token: opts.token,
         altTokens: [],
@@ -63,6 +93,8 @@ export class BotClient {
         return;
       case 'match':
         this.info = msg.info;
+        this.pending = [];
+        this.lastSnap = null;
         this.brain = this.opts.brain ? this.opts.brain(msg.info) : idleBrain;
         this.startLoop();
         return;
@@ -92,7 +124,14 @@ export class BotClient {
   private tick(): void {
     if (!this.info || !this.balance || !this.lastSnap) return;
     this.seq += 1;
-    const input = this.brain.decide(this.lastSnap, this.info, this.balance, this.seq);
+    const snap = this.lastSnap;
+    // 괴물 재접속 대기(판 정지) 중에는 서버가 입력을 처리하지 않으므로 보내지 않는다
+    if (snap.world.paused !== null) return;
+    this.pending = this.pending.filter((f) => f.seq > snap.ack);
+    const view = predictSelf(snap, this.pending, this.balance);
+    const input = this.brain.decide(view, this.info, this.balance, this.seq);
+    this.pending.push(input);
+    if (this.pending.length > MAX_PENDING) this.pending.shift();
     this.send({ t: 'input', frames: [input] });
   }
 
