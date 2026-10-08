@@ -138,6 +138,8 @@ const MONSTER_FOG_MS = 33;
 
 /** 포효 충격파 (괴물 화면, 범위 표시라 이벤트 효과 0.4초 한도 밖) */
 export const ROAR_WAVE_MS = 600;
+/** 늦게 한 번 그리는 공격 준비를 기다리는 최대 시간 (ms): 이보다 오래되면 지난 일이라 그리지 않는다 */
+const OPP_WINDUP_LATCH_MAX_MS = 1500;
 
 const r3 = (v: number): number => Math.round(v * 1000) / 1000;
 /** 방향을 (−π, π]로 접어 반올림 (−π와 π가 같은 값이 되게) */
@@ -243,6 +245,11 @@ export class WorldRenderer {
   private windupStart: number | null = null;
   /** 괴물 화면: 이미 windup만큼 그린 준비의 서버 값 꼬리 (서버 준비가 끝날 때까지 다시 그리지 않는다) */
   private windupTail = false;
+  /**
+   * 생존자 화면: 받은 공격 준비 이벤트 중 아직 한 프레임도 그리지 못한 것(받은 시각 · 방향). 프레임이 준비 시간(0.4초)보다
+   * 느린 기기에서도 예고가 한 번은 보이게, 보간된 준비를 한 번도 못 그린 채 준비 시간이 지나면 다음 프레임에 한 번 그린다
+   */
+  private oppWindupPending: { at: number; dir: number } | null = null;
   fx = {
     stunStars: false,
     dashGhosts: 0,
@@ -374,6 +381,9 @@ export class WorldRenderer {
         // 생존자 화면만 받는다: 맞은 팀원 자리에서 불꽃 + 몸 흰 번쩍 · 찌그러짐
         this.hits.push({ x: ev.x, y: ev.y, you: ev.you, t0: nowMs });
         this.fxs.sparks(ev.x, ev.y, balance ? balance.survivor.radius : 0.3, tS, null, false);
+        return;
+      case 'attackStart':
+        if (!isMonster) this.oppWindupPending = { at: nowMs, dir: ev.dir };
         return;
       case 'attackHit':
         if (isMonster) this.lastStrike = { x: ev.x, y: ev.y, dir: ev.dir, hits: ev.hits, at: nowMs };
@@ -695,10 +705,20 @@ export class WorldRenderer {
         if (this.windupStart === null)
           this.windupStart = v.localWindupDir !== null ? v.nowMs : v.nowMs - (atk.windup - left) * 1000;
       }
-    } else if (!isMonster && oppVisible && v.monster && v.monster.windup > 0) {
-      windupDir = v.monster.aim;
+    }
+    // 생존자 화면: 준비 이벤트를 받았는데 보간된 준비(100ms 늦음)를 준비 시간 안에 한 번도 못 그렸으면 늦게라도 한 번
+    const pend = this.oppWindupPending;
+    if (pend && (!oppVisible || v.nowMs - pend.at > OPP_WINDUP_LATCH_MAX_MS)) this.oppWindupPending = null;
+    const latched =
+      this.oppWindupPending !== null &&
+      v.nowMs - this.oppWindupPending.at > atk.windup * 1000 + balance.network.interpolationDelayMs;
+    if (!isMonster && oppVisible && v.monster && (v.monster.windup > 0 || latched)) {
+      windupDir = v.monster.windup > 0 ? v.monster.aim : (this.oppWindupPending?.dir ?? v.monster.aim);
       windupAt = v.monster;
-      if (this.windupStart === null) this.windupStart = v.nowMs - (atk.windup - v.monster.windup) * 1000;
+      // 늦게 한 번 그리는 준비는 다 찬 모습으로
+      if (this.windupStart === null)
+        this.windupStart = v.nowMs - (atk.windup - (v.monster.windup > 0 ? v.monster.windup : 0)) * 1000;
+      this.oppWindupPending = null;
       oppFx += 1;
     }
     if (windupDir === null || !windupAt) this.windupStart = null;

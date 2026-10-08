@@ -799,3 +799,59 @@ test('가드 밀치기 사거리: 거리 안이어도 철창이 가로막으면 
   for (const pl of players) expect(pl.problems).toEqual([]);
   await closeAll(players);
 });
+
+test('프레임이 공격 준비 시간(0.4초)보다 느려도 생존자 화면에 괴물 공격 예고가 한 번은 그려진다', async ({
+  browser,
+}) => {
+  const q = '&quality=low';
+  const { players } = await startFourPlayerMatch(browser, undefined, [q, q, q, q]);
+  const p = roles(players);
+  const host = p.monster.page;
+  const view = p.guard.page;
+  await settle(p.guard);
+  await place(host, {
+    runner: [p.runner.id, 5, 2, 0],
+    scout: [p.scout.id, 45, 2, 0],
+    guard: [p.guard.id, 30, 19.5, 0],
+  });
+  await sendTest(host, { kind: 'teleport', target: p.monster.id, x: 32, y: 19.5, face: Math.PI / 2 });
+  await aimAt(host, 32, 26);
+  await view.waitForFunction(() => window.__DECOY__?.getLastSnapshot()?.monster != null, null, {
+    timeout: 10_000,
+  });
+  // 괴물 시작 대기(5초)가 끝나야 공격할 수 있다
+  await host.waitForFunction(() => (window.__DECOY__?.getLastSnapshot()?.world.monsterWait ?? 1) <= 0, null, {
+    timeout: 15_000,
+  });
+  // 느린 기기 흉내: 가드 화면의 프레임마다 600ms를 쓴다 (준비 0.4초가 프레임 사이로 빠질 수 있다)
+  await view.evaluate(() => {
+    const orig = window.requestAnimationFrame.bind(window);
+    window.requestAnimationFrame = (cb) =>
+      orig((t) => {
+        const end = performance.now() + 600;
+        while (performance.now() < end) {
+          // 바쁜 대기
+        }
+        cb(t);
+      });
+  });
+  let seen = 0;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await host.mouse.down({ button: 'left' });
+    await host.mouse.up({ button: 'left' });
+    // 프레임마다 그린 정보 레이어를 본다 (느린 프레임 4개 ≈ 2.4초)
+    const hit = await view.evaluate(async () => {
+      for (let i = 0; i < 4; i += 1) {
+        await new Promise<void>((r) => requestAnimationFrame(() => r()));
+        if ((window.__DECOY__?.getInfoLayer() ?? []).some((it) => it.tag === 'attack')) return true;
+      }
+      return false;
+    });
+    if (hit) seen += 1;
+    await host.waitForTimeout(1700);
+  }
+  console.log(`[m10-visual] 느린 프레임(600ms)에서 공격 예고를 본 횟수 ${seen}/3`);
+  expect(seen, '공격 준비 3번을 모두 한 번 이상 그림').toBe(3);
+  for (const pl of players) expect(pl.problems).toEqual([]);
+  await closeAll(players);
+});
