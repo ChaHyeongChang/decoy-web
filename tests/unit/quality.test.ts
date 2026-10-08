@@ -1,16 +1,24 @@
 // 그래픽 품질 자동 선택 · 저장 · 판 중 FPS 감시 (M10a)
 import { describe, expect, it } from 'vitest';
+import type { QualityTier } from '../../client/src/gfx/presets';
 import {
+  AutoDowngrade,
+  DOWNGRADE_CHECK,
+  DowngradeCheck,
   FPS_WATCH,
   FpsWatch,
   QUALITY_STORAGE_KEY,
   detectQuality,
+  downgradeHelped,
   isSoftwareGl,
   isTouchDevice,
   loadSavedQuality,
   parseQuality,
   parseQualityChoice,
   saveQualityChoice,
+  savedForSession,
+  type AutoQualityAction,
+  type QualityChoice,
   type QualityEnv,
   type StorageLike,
 } from '../../client/src/gfx/quality';
@@ -146,6 +154,58 @@ describe('?quality · 저장값', () => {
   });
 });
 
+/** 로비에서 고른 뒤 main.ts가 하는 순서: 저장 → (저장 결과와 상관없이) 이번 세션 값 + 저장소 값으로 다시 정한다 */
+function chooseInLobby(
+  choice: QualityChoice,
+  storage: StorageLike | null,
+  env: QualityEnv = PC,
+): { saved: boolean; tier: QualityTier; source: string } {
+  const saved = saveQualityChoice(choice, storage);
+  const q = detectQuality({ ...env, url: null, saved: savedForSession(choice, loadSavedQuality(storage)) });
+  return { saved, ...q };
+}
+
+/** 쓰기는 실패하고(가득 참) 예전 값은 읽히는 저장소 */
+function fullStorage(old: QualityTier): StorageLike {
+  return {
+    getItem: (k) => (k === QUALITY_STORAGE_KEY ? old : null),
+    setItem: () => {
+      throw new Error('QuotaExceededError');
+    },
+    removeItem: () => {
+      throw new Error('QuotaExceededError');
+    },
+  };
+}
+
+describe('로비 선택은 저장에 실패해도 이번 세션에 적용된다', () => {
+  it("저장소가 없을 때(차단) '낮음'을 고르면 낮음 (하드웨어 WebGL PC의 자동 = 높음이 아니라)", () => {
+    expect(chooseInLobby('low', null)).toEqual({ saved: false, tier: 'low', source: 'saved' });
+  });
+
+  it("쓰기가 실패하고 예전 저장값이 '높음'일 때 '낮음'을 고르면 낮음", () => {
+    expect(chooseInLobby('low', fullStorage('high'))).toEqual({ saved: false, tier: 'low', source: 'saved' });
+  });
+
+  it("쓰기가 실패한 저장소에서 '자동'을 고르면 남은 저장값 '높음'을 무시하고 자동", () => {
+    // 소프트웨어 WebGL이라 자동 = 낮음: 저장값(높음)과 구별된다
+    const env = { ...PC, softwareGl: true };
+    expect(chooseInLobby('auto', fullStorage('high'), env)).toEqual({
+      saved: false,
+      tier: 'low',
+      source: 'auto',
+    });
+  });
+
+  it('고른 적이 없으면 저장소 값, 정상 저장소에서는 저장값과 같다', () => {
+    expect(savedForSession(null, 'medium')).toBe('medium');
+    expect(savedForSession(null, null)).toBeNull();
+    const s = memStorage();
+    expect(chooseInLobby('medium', s)).toEqual({ saved: true, tier: 'medium', source: 'saved' });
+    expect(chooseInLobby('auto', s)).toEqual({ saved: true, tier: 'high', source: 'auto' });
+  });
+});
+
 /** 60fps 간격으로 fps 값을 [from, to) 동안 넣는다. 처음으로 true가 나온 시각(없으면 null) */
 function feed(w: FpsWatch, from: number, to: number, fps: (t: number) => number): number | null {
   let fired: number | null = null;
@@ -217,5 +277,160 @@ describe('판 중 FPS 감시', () => {
     const w = new FpsWatch(0);
     feed(w, 0, 7_000, () => 50);
     expect(w.average).toBeCloseTo(50, 5);
+  });
+});
+
+describe('하향 효과 확인', () => {
+  it('효과 기준: +15% 이상 또는 +5fps 이상이면 효과 있음', () => {
+    expect(downgradeHelped(30, 30)).toBe(false);
+    expect(downgradeHelped(30, 34)).toBe(false); // +13%, +4
+    expect(downgradeHelped(30, 34.5)).toBe(true); // +15%
+    expect(downgradeHelped(20, 23)).toBe(true); // +15% (+3)
+    expect(downgradeHelped(38, 43)).toBe(true); // +5fps (+13%)
+    expect(downgradeHelped(38, 42)).toBe(false);
+    expect(downgradeHelped(30, 20)).toBe(false);
+  });
+
+  it('가라앉는 시간 뒤 정해진 시간 동안 잰 평균으로 판단한다', () => {
+    const c = new DowngradeCheck(0, 30);
+    let verdict: string | null = null;
+    let at = -1;
+    for (let t = 0; t < 30_000 && verdict === null; t += 1000 / 60) {
+      // 가라앉는 동안의 느린 프레임(10fps)은 세지 않는다
+      verdict = c.sample(t, t < DOWNGRADE_CHECK.settleMs ? 10 : 50);
+      at = t;
+    }
+    expect(verdict).toBe('helped');
+    expect(at).toBeGreaterThanOrEqual(DOWNGRADE_CHECK.settleMs + DOWNGRADE_CHECK.measureMs);
+    expect(at).toBeLessThan(DOWNGRADE_CHECK.settleMs + DOWNGRADE_CHECK.measureMs + 100);
+    expect(c.average).toBeCloseTo(50, 5);
+  });
+
+  it('샘플이 오래 끊기면(백그라운드 탭) 가라앉는 시간부터 다시 잰다', () => {
+    const c = new DowngradeCheck(0, 30);
+    for (let t = 0; t < 8_000; t += 1000 / 60) expect(c.sample(t, 30)).toBeNull();
+    // 20초 끊김 뒤에는 60fps: 앞의 30fps는 버리고 다시 잰다
+    let verdict: string | null = null;
+    for (let t = 28_000; t < 60_000 && verdict === null; t += 1000 / 60) verdict = c.sample(t, 60);
+    expect(verdict).toBe('helped');
+    expect(c.average).toBeCloseTo(60, 5);
+  });
+});
+
+/** 세션 하나: 판을 이어서 돌리며 자동 조정을 적용한다 (main.ts의 qualityHooks.auto와 같은 규칙) */
+class Session {
+  tier: QualityTier = 'high';
+  downgrades = 0;
+  readonly log: AutoQualityAction['kind'][] = [];
+  readonly auto = new AutoDowngrade();
+  private t = 0;
+
+  /** 판 하나를 ms 동안 60Hz로 돈다. fps(판 안 경과 ms, 지금 단계) */
+  play(ms: number, fps: (elapsed: number, tier: QualityTier) => number): AutoQualityAction['kind'][] {
+    const start = this.t;
+    const kinds: AutoQualityAction['kind'][] = [];
+    this.auto.beginMatch(start);
+    for (; this.t < start + ms; this.t += 1000 / 60) {
+      const a = this.auto.sample(this.t, fps(this.t - start, this.tier), this.tier);
+      if (!a) continue;
+      kinds.push(a.kind);
+      this.log.push(a.kind);
+      if (a.kind === 'downgrade' && this.tier === a.from) {
+        this.tier = a.to;
+        this.downgrades += 1;
+      } else if (a.kind === 'revert' && this.tier === a.from) {
+        this.tier = a.to;
+      }
+    }
+    this.auto.endMatch();
+    // 판 사이 (결과 화면 · 로비)
+    this.t += 20_000;
+    return kinds;
+  }
+}
+
+describe('판 중 자동 하향 · 효과 확인 · 되돌리기 (세션)', () => {
+  it('화면이 30Hz로 묶이면: 하향 1번 → 효과 없음 → 원래 단계로 → 이번 세션에서는 더 내리지 않는다', () => {
+    const s = new Session();
+    expect(s.play(60_000, () => 30)).toEqual(['downgrade', 'revert']);
+    expect(s.tier).toBe('high');
+    expect(s.downgrades).toBe(1);
+    expect(s.auto.status).toBe('off');
+    // 다음 판들: 계속 30이어도 하향 0번
+    expect(s.play(60_000, () => 30)).toEqual([]);
+    expect(s.play(60_000, () => 30)).toEqual([]);
+    expect(s.tier).toBe('high');
+    expect(s.downgrades).toBe(1);
+  });
+
+  it('되돌리기는 같은 판 안에서 일어난다 (하향 뒤 가라앉는 시간 + 측정 시간)', () => {
+    const s = new Session();
+    const auto = s.auto;
+    auto.beginMatch(0);
+    let downAt = -1;
+    let revertAt = -1;
+    for (let t = 0; t < 60_000; t += 1000 / 60) {
+      const a = auto.sample(t, 30, 'high');
+      if (a?.kind === 'downgrade') downAt = t;
+      if (a?.kind === 'revert') revertAt = t;
+    }
+    expect(downAt).toBeGreaterThan(FPS_WATCH.warmupMs + FPS_WATCH.sustainMs);
+    expect(revertAt - downAt).toBeGreaterThanOrEqual(DOWNGRADE_CHECK.settleMs + DOWNGRADE_CHECK.measureMs);
+    expect(revertAt - downAt).toBeLessThan(DOWNGRADE_CHECK.settleMs + DOWNGRADE_CHECK.measureMs + 100);
+  });
+
+  it('하향 뒤 60fps로 오르면 유지하고, 다음 판도 느리면 한 단계 더 내린다', () => {
+    const s = new Session();
+    // 높음에서는 30, 내리면 60
+    const gpuBound = (_e: number, tier: QualityTier): number => (tier === 'high' ? 30 : 60);
+    expect(s.play(60_000, gpuBound)).toEqual(['downgrade', 'keep']);
+    expect(s.tier).toBe('medium');
+    expect(s.auto.status).toBe('on');
+    // 다음 판: 중간에서도 25 → 한 단계 더(낮음), 낮음에서 45 → 유지
+    expect(s.play(60_000, (_e, tier) => (tier === 'low' ? 45 : 25))).toEqual(['downgrade', 'keep']);
+    expect(s.tier).toBe('low');
+    expect(s.downgrades).toBe(2);
+    // 이미 낮음: 느려도 더 내릴 단계가 없다
+    expect(s.play(60_000, () => 20)).toEqual([]);
+    expect(s.tier).toBe('low');
+  });
+
+  it('판당 하향은 한 번: 효과가 있어도 같은 판에서는 더 내리지 않는다', () => {
+    const s = new Session();
+    // 높음 20 → 중간 30 (+50%, 효과 있음). 중간에서도 40 미만이지만 이번 판에서는 그대로
+    expect(s.play(120_000, (_e, tier) => (tier === 'high' ? 20 : 30))).toEqual(['downgrade', 'keep']);
+    expect(s.tier).toBe('medium');
+  });
+
+  it('확인 전에 판이 끝나면 다음 판 예열 뒤 이어서 확인한다 (그동안 더 내리지 않는다)', () => {
+    const s = new Session();
+    // 하향(약 15초) 직후 판이 끝난다
+    expect(s.play(16_000, () => 30)).toEqual(['downgrade']);
+    expect(s.tier).toBe('medium');
+    expect(s.auto.status).toBe('checking');
+    // 다음 판: 계속 30 → 예열 뒤 확인해서 되돌린다
+    expect(s.play(60_000, () => 30)).toEqual(['revert']);
+    expect(s.tier).toBe('high');
+    expect(s.auto.status).toBe('off');
+  });
+
+  it('사용자가 직접 고르면 확인 중이던 하향은 잊는다', () => {
+    const s = new Session();
+    expect(s.play(16_000, () => 30)).toEqual(['downgrade']);
+    s.auto.cancelPending();
+    s.tier = 'low';
+    expect(s.auto.status).toBe('on');
+    expect(s.play(60_000, () => 60)).toEqual([]);
+    expect(s.tier).toBe('low');
+  });
+
+  it('하향 전 평균은 느린 상태 전체의 평균이다', () => {
+    const w = new FpsWatch(0);
+    let fired = false;
+    for (let t = 0; t < 30_000 && !fired; t += 1000 / 60) fired = w.sample(t, t < 10_000 ? 20 : 30);
+    expect(fired).toBe(true);
+    // 5~10초 20, 10~15초 30
+    expect(w.slowAverage).toBeGreaterThan(24);
+    expect(w.slowAverage).toBeLessThan(26);
   });
 });
