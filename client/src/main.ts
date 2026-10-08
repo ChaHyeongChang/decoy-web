@@ -58,3 +58,15 @@ app.subscribe((e) => {
 
 if (params.debug !== 'off' || import.meta.env.DEV) installDebug(app, params.debug === 'overlay');
 app.start();
+
+// 잠든 서버(무료 호스팅)가 깨어나는 동안 보여 줄 화면을 미리 받아 둔다 (client/public/sw.js · wake.html).
+// 서비스 워커는 HTTPS(또는 localhost)에서만 동작한다. 개발 서버(Vite)에서는 쓰지 않는다
+function registerWakeWorker(): void {
+  navigator.serviceWorker.register('./sw.js').catch(() => {
+    // 등록에 실패해도 게임은 그대로 된다 (깨우는 동안 호스팅 서비스의 기본 화면이 보일 뿐)
+  });
+}
+if ('serviceWorker' in navigator && window.isSecureContext && !import.meta.env.DEV) {
+  if (document.readyState === 'complete') registerWakeWorker();
+  else window.addEventListener('load', registerWakeWorker, { once: true });
+}

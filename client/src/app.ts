@@ -19,6 +19,8 @@ import { getAltTokens, getSavedName, getSeatToken, saveName, saveSeatToken } fro
 import { Interpolator, Predictor, SnapshotClock, lerpAngle, lerpNum } from './sync';
 import { LobbyUI } from './ui/lobby';
 import { ResultUI } from './ui/result';
+import { WakeNoticeUI } from './ui/wakeNotice';
+import { WakeNoticeState } from './wakeNotice';
 
 export type DebugMode = 'off' | 'hook' | 'overlay';
 
@@ -98,6 +100,14 @@ export class App {
   private reconnectTimer: number | null = null;
   /** 다른 탭이 이 자리를 넘겨받았다: 다시 연결하지 않는다 */
   private replaced = false;
+  /** '서버 깨우는 중' 안내 (무료 호스팅의 잠든 서버 · 재시작) */
+  readonly wake = new WakeNoticeState();
+  private readonly wakeUi: WakeNoticeUI;
+  private wakeTimer: number | null = null;
+  /** 지금 연결이 열린 적이 있다 (끊김 알림을 끊길 때 한 번만 띄운다) */
+  private wasOpen = false;
+  /** 마지막 입장 요청이 링크 · 재연결로 자동으로 보낸 것이다 (직접 입력한 코드가 아니다) */
+  private joinFromLink = false;
 
   constructor(
     readonly params: AppParams,
@@ -123,6 +133,7 @@ export class App {
         join: (code, name) => {
           saveName(name);
           this.roomCode = code.toUpperCase();
+          this.joinFromLink = false;
           this.sendJoin(name);
         },
         pickRole: (role: Role | null) => this.net.send({ t: 'role', role }),
@@ -133,18 +144,40 @@ export class App {
       params.name ?? getSavedName(),
     );
     this.resultUi = new ResultUI(uiRoot, () => this.net.send({ t: 'rematch' }));
+    this.wakeUi = new WakeNoticeUI(uiRoot);
     this.net.on((msg) => this.onMessage(msg));
     this.net.onOpen = () => {
-      if (this.roomCode) this.sendJoin(params.name ?? getSavedName());
-      else this.lobbyUi.renderHome();
+      this.wasOpen = true;
+      this.wake.opened();
+      this.renderWake();
+      if (this.roomCode) {
+        this.joinFromLink = true;
+        this.sendJoin(params.name ?? getSavedName());
+      } else this.lobbyUi.renderHome();
     };
     this.net.onClose = () => {
-      if (!this.replaced) this.scheduleReconnect();
+      const wasOpen = this.wasOpen;
+      this.wasOpen = false;
+      if (this.replaced) {
+        this.wake.stop();
+        this.renderWake();
+        return;
+      }
+      if (wasOpen) showToast(UI_TEXT.disconnected);
+      this.wake.closed(performance.now());
+      this.scheduleReconnect();
     };
   }
 
   start(): void {
+    this.wake.connecting(performance.now());
     this.net.connect();
+    // 기다린 시간(초)을 세려고 주기적으로 다시 그린다. 바뀐 게 없으면 DOM을 건드리지 않는다
+    this.wakeTimer ??= window.setInterval(() => this.renderWake(), 250);
+  }
+
+  private renderWake(): void {
+    this.wakeUi.render(this.wake.view(performance.now()));
   }
 
   subscribe(listener: (e: AppEvent) => void): () => void {
@@ -172,7 +205,6 @@ export class App {
 
   private scheduleReconnect(): void {
     if (this.reconnectTimer !== null) return;
-    showToast(UI_TEXT.disconnected);
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = null;
       this.net.connect();
@@ -289,6 +321,11 @@ export class App {
         if (msg.code === 'room-not-found' || msg.code === 'in-progress' || msg.code === 'room-full') {
           this.roomCode = null;
           this.lobbyUi.renderHome();
+        }
+        // 링크 · 재연결로 들어가려던 방이 없으면 대개 서버가 잠들었다 깨어났거나 다시 시작한 것이다 (방은 메모리에만 있다)
+        if (msg.code === 'room-not-found' && this.joinFromLink) {
+          this.lobbyUi.showError(`${msg.message}. ${UI_TEXT.roomGoneHint}`);
+          return;
         }
         this.lobbyUi.showError(msg.message);
         return;

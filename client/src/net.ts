@@ -9,6 +9,9 @@ export interface NetOptions {
   jitterMs: number;
 }
 
+/** 연결이 이만큼 열리지 않으면 끊고 다시 시도한다 (잠든 서버가 깨는 동안 요청이 걸려 있는 경우) */
+export const CONNECT_TIMEOUT_MS = 20_000;
+
 interface ClockSample {
   rtt: number;
   offset: number;
@@ -44,7 +47,11 @@ export class NetClient {
   connect(): void {
     const ws = new WebSocket(this.url);
     this.ws = ws;
+    const timeout = window.setTimeout(() => {
+      if (ws.readyState === WebSocket.CONNECTING) ws.close();
+    }, CONNECT_TIMEOUT_MS);
     ws.addEventListener('open', () => {
+      window.clearTimeout(timeout);
       this.connected = true;
       this.pingCount = 0;
       this.samples = [];
@@ -53,6 +60,7 @@ export class NetClient {
     });
     ws.addEventListener('message', (ev: MessageEvent<string>) => this.inbound.push(ev.data));
     ws.addEventListener('close', () => {
+      window.clearTimeout(timeout);
       this.connected = false;
       if (this.pingTimer !== null) window.clearTimeout(this.pingTimer);
       this.onClose?.();
