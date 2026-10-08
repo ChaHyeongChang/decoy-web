@@ -72,6 +72,8 @@ npm run test:lag       # lag 100 · 200 실서버에 WebSocket 봇 4명으로 �
 npm run verify:deploy  # Docker 이미지(없으면 빌드 결과물)를 띄워 HTTP · WebSocket 접속 확인
 ```
 
+PR마다(그리고 main에 들어갈 때) GitHub Actions(`.github/workflows/ci.yml`)가 위 검사를 모두 돌린다.
+
 ## 문서
 
 | 문서 | 내용 |

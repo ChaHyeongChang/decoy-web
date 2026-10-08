@@ -134,5 +134,6 @@
 | Docker 베이스 이미지 인자 `NODE_IMAGE` | Docker Hub 요청 제한(429)에 걸리면 미러(`mirror.gcr.io/library/node:22-bookworm-slim`)로 바꿔 빌드할 수 있게. 사설 인증서 · 프록시 환경을 위한 선택적 빌드 비밀(`npm_ca`)도 둔다 |
 | `npm run verify:deploy` | 배포는 하지 않으므로, 배포와 같은 방식(Docker 이미지 → 컨테이너, `PORT` 환경 변수)으로 띄워 HTTP · WebSocket 접속과 `docker stop`(SIGTERM) 종료까지 확인하는 스크립트를 둔다. Docker가 없으면 빌드 결과물로 직접 띄운다. 기본 Dockerfile은 BuildKit 없이도 빌드되게 두고, 사설 인증서가 필요한 환경에서만 스크립트가 빌드 비밀을 쓰는 임시 Dockerfile을 만든다 |
 | 서버 종료 신호 처리 | 컨테이너에서 Node가 PID 1이면 SIGTERM · SIGINT를 기본 처리하지 않아 `docker stop`이 10초를 기다렸다. 서버가 직접 받아 끝낸다 |
+| GitHub Actions (`.github/workflows/ci.yml`) | PR마다 · main에 들어갈 때 4개 작업을 따로 돌린다: 타입 · 린트 · 포맷 · 단위, E2E(@playwright/test 버전에 맞는 Chromium을 CI에서 받는다), 지연 봇 전체 판(`test:lag`), 배포 검증(Docker, Hub 요청 제한을 피해 `mirror.gcr.io` 미러 베이스 이미지). 공개 저장소라 비밀 값은 쓰지 않고 권한은 읽기만 |
 | `npm run test:lag` (따로 실행) | lag 100 · 200 실시간 봇 전체 판은 1~2분 걸려 `npm test`(몇 초)와 분리했다 |
 | concurrently 대신 `scripts/dev.mjs` | concurrently 최신이 보안 경고가 있는 의존성을 끌어온다. 20줄짜리 스크립트로 대체 |
