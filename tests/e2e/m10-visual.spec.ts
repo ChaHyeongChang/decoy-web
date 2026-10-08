@@ -816,7 +816,7 @@ test('프레임이 공격 준비 시간(0.4초)보다 느려도 생존자 화면
   });
   await sendTest(host, { kind: 'teleport', target: p.monster.id, x: 32, y: 19.5, face: Math.PI / 2 });
   await aimAt(host, 32, 26);
-  await view.waitForFunction(() => window.__DECOY__?.getLastSnapshot()?.monster != null, null, {
+  await view.waitForFunction(() => (window.__DECOY__?.getLastSnapshot()?.monster ?? null) !== null, null, {
     timeout: 10_000,
   });
   // 괴물 시작 대기(5초)가 끝나야 공격할 수 있다
