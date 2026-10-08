@@ -248,6 +248,11 @@ for (const screen of SCREENS) {
     expectTexts(await textAudit(page), info.gfx.zoom, screen.name);
     expect([info.gfx.backingW, info.gfx.backingH]).toEqual([info.backingW, info.backingH]);
     expect(info.gfx.dpr).toBe(screen.dsf);
+    // 백버퍼가 기기 픽셀과 1:1이면 캔버스 CSS는 최근접 (main.ts placeCanvas)
+    expect(await imageRendering(page)).toBe('pixelated');
+    // 고해상도로 시작하면 WebGL MSAA를 켜지 않는다 (배율 2 4K에서 약 250MiB)
+    if (info.gfx.zoom >= 1.25) expect(info.gfx.features.msaaBytes).toBe(0);
+    expect(Number(info.gfx.features.msaaBytes)).toBeLessThanOrEqual(1920 * 1080 * 4 * 8);
 
     const sharp = await sharpness(page);
     console.log(
@@ -261,6 +266,41 @@ for (const screen of SCREENS) {
     // 맥북 0.97, FHD@1.25 0.99). 중간 밝기 픽셀 비율이 DOM과 같은지도 본다(실측: 고친 뒤 0.96~1.04, 해상도 1이면 0.81~2.13)
     expect(sharp.midRatio, `${screen.name} 중간 밝기 비`).toBeGreaterThanOrEqual(0.83);
     expect(sharp.midRatio, `${screen.name} 중간 밝기 비`).toBeLessThanOrEqual(1.2);
+    expect(problems).toEqual([]);
+    await close();
+  });
+}
+
+async function imageRendering(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const c = document.querySelector<HTMLCanvasElement>('#game-root canvas');
+    return c ? getComputedStyle(c).imageRendering : '';
+  });
+}
+
+// 백버퍼가 기기 픽셀보다 작아 브라우저가 늘려 그리는 경우(품질 해상도 상한 · ?scale): 최근접이면 1.25 · 1.33배에서
+// 4~5칸마다 줄이 복제되어 획 두께가 들쭉날쭉해진다 → 부드럽게 늘린다
+for (const c of [
+  {
+    name: '배율 1.25 · 품질 낮음(상한 1배)',
+    viewport: { width: 1920, height: 1080 },
+    dsf: 1.25,
+    extra: '&quality=low',
+  },
+  {
+    name: '배율 2 · 품질 중간(상한 1.5배)',
+    viewport: { width: 1440, height: 900 },
+    dsf: 2,
+    extra: '&quality=medium',
+  },
+  { name: '배율 1 · ?scale=0.5', viewport: { width: 1280, height: 720 }, dsf: 1, extra: '&scale=0.5' },
+] as const) {
+  test(`늘려 그릴 때는 부드럽게: ${c.name}`, async ({ browser }) => {
+    const { page, problems, close } = await newScreen(browser, c.viewport, c.dsf);
+    await startSolo(page, c.extra, 'runner');
+    const info = await canvasInfo(page);
+    expect(info.backingW).toBeLessThan(Math.round(info.cssW * info.dpr) - 1);
+    expect(await imageRendering(page)).toBe('auto');
     expect(problems).toEqual([]);
     await close();
   });

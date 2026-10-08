@@ -28,9 +28,7 @@ body {
 #game-root > canvas {
   position: absolute;
   display: block;
-  /* 백버퍼는 기기 픽셀과 1:1로 놓는다(render/resolution.ts). 레이아웃 단위(1/64px) 반올림으로 남는 아주 작은 크기 차이를
-     브라우저가 부드럽게 다시 샘플링하면 글자가 흐려지므로 최근접으로 둔다 (텍스처 자체는 게임 설정의 선형 보간) */
-  image-rendering: pixelated;
+  /* image-rendering은 main.ts placeCanvas가 정한다 (백버퍼가 기기 픽셀과 1:1일 때만 최근접) */
 }
 #ui-root {
   position: fixed;

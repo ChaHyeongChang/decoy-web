@@ -128,6 +128,8 @@ function measure(): RenderSize {
 
 const initial = measure();
 setRenderScale(initial.zoom);
+/** 이 zoom(백버퍼 px / 논리 px) 이상으로 시작하면 WebGL MSAA를 켜지 않는다 (1920×1080 @1.25 = 1.25부터) */
+const MSAA_MAX_ZOOM = 1.25;
 
 class IdleScene extends Phaser.Scene {
   constructor() {
@@ -159,7 +161,14 @@ const game = new Phaser.Game({
   // 카메라 배경색이 매 프레임 화면 전체를 칠하므로 따로 지우지 않는다. 정수 좌표로 그려 비트맵 복사를 싸게.
   // pixelArt · antialias를 꼭 적는다: Phaser는 scale.zoom이 1이 아니면(기기 픽셀 배율 ≠ 1) pixelArt를 켜서
   // 모든 텍스처가 NEAREST(회전 스프라이트 계단, 확대한 빛 지도 블록)가 되고 WebGL 안티에일리어싱이 꺼진다
-  render: { clearBeforeRender: false, pixelArt: false, antialias: true, antialiasGL: true },
+  render: {
+    clearBeforeRender: false,
+    pixelArt: false,
+    antialias: true,
+    // WebGL 다중 샘플(MSAA)은 백버퍼가 작을 때만: 기본 프레임버퍼 4× MSAA는 픽셀당 약 32바이트라 배율 2 4K 백버퍼면
+    // 약 250MiB다. 이미 고해상도이면 Graphics 가장자리 계단이 덜 보인다. WebGL 컨텍스트를 만들 때 한 번만 정해진다
+    antialiasGL: initial.zoom < MSAA_MAX_ZOOM,
+  },
   scene: [IdleScene, GameScene],
 });
 app.game = game;
@@ -173,6 +182,13 @@ function placeCanvas(r: Pick<RenderSize, 'dispW' | 'dispH' | 'left' | 'top'>): v
   st.top = `${r.top}px`;
   st.width = `${r.dispW}px`;
   st.height = `${r.dispH}px`;
+  // 백버퍼가 기기 픽셀과 1:1이면 최근접: 배치 단위(1/64px) 반올림으로 남는 아주 작은 크기 차이를 브라우저가 부드럽게
+  // 다시 샘플링하면 글자가 흐려진다(1536×730 @1.25). 1:1이 아니면(품질 해상도 상한 · ?scale · 창 크기를 바꾸는 중)
+  // 최근접은 1.25 · 1.33배에서 4~5칸마다 줄을 복제해 획 두께가 들쭉날쭉해지므로 부드럽게 늘린다
+  const dpr = window.devicePixelRatio || 1;
+  const oneToOne =
+    Math.abs(r.dispW * dpr - game.canvas.width) < 0.5 && Math.abs(r.dispH * dpr - game.canvas.height) < 0.5;
+  st.imageRendering = oneToOne ? 'pixelated' : 'auto';
   game.scale.refresh();
 }
 
@@ -185,6 +201,15 @@ function writeSizeState(r: RenderSize): void {
   gfxState.zoom = r.zoom;
   gfxState.scaleOverride = params.scaleOverride;
   gfxState.textRes = RENDER_SCALE;
+  gfxState.features.msaaBytes = msaaBytes();
+}
+
+/** 기본 프레임버퍼 다중 샘플 메모리 어림 (샘플 × 픽셀 × 색 4 + 깊이 · 스텐실 4바이트). 텍스처 예산과 따로 기록한다 */
+function msaaBytes(): number {
+  const r = game.renderer;
+  if (!(r instanceof Phaser.Renderer.WebGL.WebGLRenderer)) return 0;
+  const samples = Number(r.gl.getParameter(r.gl.SAMPLES)) || 0;
+  return samples > 1 ? samples * gfxState.backingW * gfxState.backingH * 8 : 0;
 }
 
 /**
