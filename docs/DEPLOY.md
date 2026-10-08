@@ -180,7 +180,7 @@ Railway 같은 서비스도 Dockerfile로 배포된다. 다만 아시아 리전�
 1. `https://<주소>/healthz` → `ok`
 2. 방을 만들고 4명이 들어와 역할 선택 · 시작
 3. 주소에 `&debug=1`을 붙이면 왼쪽 아래에 FPS · 핑이 보인다. 핑이 80ms를 넘으면 더 가까운 리전을 고른다
-4. 느린 노트북은 `&scale=0.5`(저사양 모드)
+4. 느린 노트북은 로비의 그래픽 품질을 낮음으로(또는 주소에 `&quality=low`)
 
 ## 6. 문제 해결
 
@@ -194,4 +194,4 @@ Railway 같은 서비스도 Dockerfile로 배포된다. 다만 아시아 리전�
 | 서버는 깨어 있는데 한 번 들어왔던 기기에서만 깨우기 화면이 계속 뜬다 | 화면의 **다시 시도**(90초 뒤 나타남)를 누른다 — 서비스 워커를 지우고 다시 연다. 그래도 같으면 브라우저 설정에서 그 사이트의 데이터를 지운다. 깨우기 화면은 서버 응답의 `x-decoy-server` 표시로 서버가 깨어난 것을 알아보는데, 표시가 없는 서버(이 기능 이전 버전으로 되돌린 경우)를 만나면 스스로 서비스 워커를 지운다 |
 | 깨우기 기능을 아예 빼고 싶다 | `client/public/sw.js`를 지우기만 하면 이미 설치된 기기에 남는다. 대신 내용을 `self.addEventListener('install', () => self.skipWaiting()); self.addEventListener('activate', () => self.registration.unregister());`로 바꿔 배포하고, `client/src/main.ts`의 등록 코드를 뺀다 |
 | Render 배포가 "Waiting for checks"에서 멈춰 있다 | `main`의 GitHub Actions 검사가 실패했거나 아직 도는 중이다 (`autoDeployTrigger: checksPass`). 검사를 고치거나 **Manual Deploy** |
-| 화면이 끊긴다 | `&scale=0.5`, 다른 탭 · 프로그램 닫기, `&debug=1`로 FPS 확인 |
+| 화면이 끊긴다 | 로비의 그래픽 품질을 낮음으로(또는 주소에 `&quality=low`), 다른 탭 · 프로그램 닫기, `&debug=1`로 FPS 확인 |
