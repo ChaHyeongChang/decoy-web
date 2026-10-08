@@ -11,9 +11,13 @@
 // 빛 지도 이미지 하나에만 걸리므로 캐릭터 · 범위 · 마커 · HUD에는 닿지 않는다.
 //
 // 텍스처는 getImageData 사본을 만드는 addCanvas(CanvasTexture) 대신 fogPaint.createCanvasTexture로 올린다.
+//
+// 레이어 순서 (fogRoot 안): 정적 맵 → 발광 번짐(ADD, presets glow = 'sprite') → 공개 동적 레이어 → 빛 지도(MULTIPLY)
+// → 테두리 리프트(ADD, 정적 도형). 발광은 곱하기 앞이라 어둠 속 약 30%, 테두리 리프트는 곱하기 뒤라 시야 밖에서도 구조가 보인다.
 import Phaser from 'phaser';
 import { MAP_H, MAP_W, TILE_PX, type Balance, type ExitView, type PointView, type Vec2 } from '@decoy/shared';
-import { gfxNow } from '../gfx/state';
+import { getGlowMap, getStaticMap, GLOW_SCALE } from '../art/mapArt';
+import { currentPreset, gfxNow, gfxState } from '../gfx/state';
 import { MAP_SCALE, MAP_X, MAP_Y } from '../ui/layout';
 import { FOG } from './colors';
 import type { FogLayer, FogLayerOptions } from './baseLayer';
@@ -22,16 +26,20 @@ import {
   CanvasPen,
   GraphicsPen,
   LightMap,
+  addRimLift,
   createCanvasTexture,
   domLightSurface,
+  drawRimLift,
   nextFogKey,
   paintExits,
   paintPoints,
+  recordFogCommit,
   removeCanvasTexture,
+  resetExitTracking,
+  rimLiftPath,
   uploadCanvasTexture,
   type SoftLight,
 } from './fogPaint';
-import { drawStaticMap } from './mapCanvas';
 
 export const FOG_EDGE_PIPELINE = 'DecoyFogEdge';
 
@@ -76,6 +84,12 @@ export class GpuFog implements FogLayer {
   readonly shader: boolean;
   private readonly staticKey: string;
   private readonly staticImage: Phaser.GameObjects.Image;
+  /** 발광 번짐 (ADD, 곱하기 앞). glow = 'static'이면 정적 맵에 구워 없음 */
+  private readonly glowKey: string | null = null;
+  private readonly glowImage: Phaser.GameObjects.Image | null = null;
+  /** 테두리 리프트 (ADD, 곱하기 뒤) */
+  private readonly lift: Phaser.GameObjects.Graphics;
+  private readonly miniLift: Path2D;
   private readonly dyn: Phaser.GameObjects.Graphics;
   private readonly pen: GraphicsPen;
   private readonly light: LightMap | null;
@@ -97,21 +111,34 @@ export class GpuFog implements FogLayer {
     opts: FogLayerOptions,
   ) {
     const s = opts.compositeScale;
+    const sprite = (opts.glow ?? currentPreset().glow) === 'sprite';
+    const ox = snapToDevice(MAP_X, opts.zoom);
+    const oy = snapToDevice(MAP_Y, opts.zoom);
     this.staticKey = nextFogKey('fog-static');
-    // 정적 맵은 한 번만 올린다 (사본 없이)
-    createCanvasTexture(scene.textures, this.staticKey, drawStaticMap(MAP_SCALE * s));
+    // 정적 맵은 한 번만 올린다 (사본 없이, 같은 배율이면 캐시한 그림)
+    createCanvasTexture(scene.textures, this.staticKey, getStaticMap(MAP_SCALE * s, !sprite));
     this.staticImage = scene.make
-      .image(
-        { x: snapToDevice(MAP_X, opts.zoom), y: snapToDevice(MAP_Y, opts.zoom), key: this.staticKey },
-        false,
-      )
+      .image({ x: ox, y: oy, key: this.staticKey }, false)
       .setOrigin(0, 0)
       .setScale(1 / s);
+    root.add(this.staticImage);
+    if (sprite) {
+      this.glowKey = nextFogKey('fog-glow');
+      createCanvasTexture(scene.textures, this.glowKey, getGlowMap());
+      this.glowImage = scene.make
+        .image({ x: ox, y: oy, key: this.glowKey }, false)
+        .setOrigin(0, 0)
+        .setScale(MAP_SCALE / GLOW_SCALE)
+        .setBlendMode(Phaser.BlendModes.ADD);
+      root.add(this.glowImage);
+    }
+    gfxState.features.glowLayer = sprite ? 'sprite' : 'static';
+    resetExitTracking();
     this.dyn = scene.make.graphics({ x: MAP_X, y: MAP_Y }, false);
     this.pen = new GraphicsPen(this.dyn, TILE_PX * MAP_SCALE);
     const lpt = opts.lightPxPerTile;
     this.light = opts.fog ? new LightMap(lpt, opts.ambientCss, domLightSurface) : null;
-    root.add([this.staticImage, this.dyn]);
+    root.add(this.dyn);
     if (this.light) {
       this.lightKey = nextFogKey('fog-light');
       this.lightTexture = createCanvasTexture(scene.textures, this.lightKey, this.light.canvas);
@@ -127,8 +154,13 @@ export class GpuFog implements FogLayer {
     }
     this.shader = opts.shader && this.lightImage !== null && ensureFogEdgePipeline(scene.game);
     if (this.shader) this.lightImage?.setPipeline(FOG_EDGE_PIPELINE);
+    // 테두리 리프트: 정적 도형이라 한 번만 그려 둔다 (정적 맵 텍셀 경계에 맞춤)
+    this.lift = scene.make.graphics({ x: 0, y: 0 }, false).setBlendMode(Phaser.BlendModes.ADD);
+    drawRimLift(this.lift, s, ox, oy, TILE_PX * MAP_SCALE);
+    root.add(this.lift);
 
-    this.miniStatic = drawStaticMap(lpt / TILE_PX);
+    this.miniStatic = getStaticMap(lpt / TILE_PX, true);
+    this.miniLift = rimLiftPath(lpt);
     this.mini = document.createElement('canvas');
     this.mini.width = this.miniStatic.width;
     this.mini.height = this.miniStatic.height;
@@ -184,14 +216,19 @@ export class GpuFog implements FogLayer {
       c.drawImage(this.light.canvas, 0, 0, this.mini.width, this.mini.height);
       c.restore();
     }
+    addRimLift(this.miniCtx, this.miniLift);
     this.lastCommitMs = performance.now() - this.t0;
+    recordFogCommit(this.lastCommitMs);
   }
 
   destroy(): void {
     this.staticImage.destroy();
+    this.glowImage?.destroy();
     this.dyn.destroy();
     this.lightImage?.destroy();
+    this.lift.destroy();
     removeCanvasTexture(this.scene.textures, this.staticKey);
+    if (this.glowKey) removeCanvasTexture(this.scene.textures, this.glowKey);
     if (this.lightKey) removeCanvasTexture(this.scene.textures, this.lightKey);
   }
 }
