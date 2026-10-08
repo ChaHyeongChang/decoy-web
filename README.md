@@ -72,6 +72,8 @@ npm run test:lag       # lag 100 · 200 실서버에 WebSocket 봇 4명으로 �
 npm run verify:deploy  # Docker 이미지(없으면 빌드 결과물)를 띄워 HTTP · WebSocket 접속 확인
 ```
 
+PR마다(그리고 main에 들어갈 때) GitHub Actions(`.github/workflows/ci.yml`)가 위 검사를 모두 돌린다.
+
 ## 문서
 
 | 문서 | 내용 |
@@ -85,6 +87,8 @@ npm run verify:deploy  # Docker 이미지(없으면 빌드 결과물)를 띄워 
 | [docs/DECISIONS.md](docs/DECISIONS.md) | 설계와 다르게 만든 것 · 문서에 없어 정한 것 |
 | [docs/HUMAN_CHECKS.md](docs/HUMAN_CHECKS.md) | 사람이 직접 확인할 것 |
 | [docs/PROGRESS.md](docs/PROGRESS.md) | 마일스톤별 진행 기록 |
+
+`docs/images/concept_*.png`는 생성형 AI로 만든 분위기 참고용 이미지로, 게임에서는 쓰지 않는다 (게임에 쓰는 이미지는 로고 `docs/images/logo_decoy.png` 하나).
 
 ## 폴더
 

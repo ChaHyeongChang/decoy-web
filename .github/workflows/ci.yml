@@ -1,0 +1,101 @@
+# 자동 검사: PR마다, 그리고 main에 들어갈 때 돈다.
+# 공개 저장소라 비밀 값은 쓰지 않는다 (포크 PR에서도 같은 검사가 돈다).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 브라우저는 E2E 작업에서만 받는다
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+
+jobs:
+  check:
+    name: 타입 · 린트 · 포맷 · 단위 테스트
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+
+  e2e:
+    name: E2E (브라우저 4개 · 정보 차단 · FPS)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # CI에는 설치된 Chromium이 없으므로 @playwright/test 버전에 맞는 Chromium을 받는다
+      - run: npx playwright install --with-deps chromium
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '0'
+      - run: npm run test:e2e
+      - name: 스크린샷 · 실패 기록 올리기
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: |
+            artifacts/screens
+            tests/e2e/.results
+          # 실패 기록 폴더(.results)가 점으로 시작해서, 켜지 않으면 올리지 않는다
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
+
+  lag:
+    name: 지연 봇 전체 판 (lag 100 · 200, 실시간)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:lag
+      - name: 판 진행 기록 올리기
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lag-fullmatch
+          path: artifacts/lag
+          if-no-files-found: ignore
+          retention-days: 7
+
+  deploy:
+    name: 배포 검증 (Docker 이미지 → 컨테이너 접속)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Docker Hub 요청 제한(429)을 피하려고 같은 공식 이미지의 미러를 쓴다
+      - run: npm run verify:deploy
+        env:
+          NODE_IMAGE: mirror.gcr.io/library/node:22-bookworm-slim

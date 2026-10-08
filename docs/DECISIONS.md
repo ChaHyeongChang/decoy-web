@@ -109,7 +109,7 @@
 - 렌더러 기본은 Phaser AUTO(WebGL). `?renderer=canvas`로 Canvas를 강제할 수 있다
 - **바닥 합성 레이어**: 정적 맵 + 거점 · 탈출구 영역 + 시야 원 · 괴물 부채꼴 + 안개를 Canvas2D 한 장에 합성해 그린다. 안개는 검정 "빛 지도"에 시야 다각형을 `lighten`(최댓값)으로 그리고 바닥에 `multiply`로 곱한다(겹쳐도 밝기 누적 없음). 생존자 화면은 20Hz, 괴물 화면은 30Hz로 다시 합성하고(TECH_SPEC의 "0.1초마다"보다 자주), 매 프레임에는 이 한 장과 캐릭터 · 배지만 그린다
 - **저사양 모드 `?scale=0.5`**: 내부 렌더 해상도를 절반으로 줄인다(논리 좌표 1920×1080은 그대로, 카메라 확대로 맞춤). 성능이 낮은 노트북용
-- 헤드리스 성능 측정: 이 컨테이너에는 GPU가 없어 WebGL(SwiftShader) 탭 4개가 1~3FPS, GPU 프로세스를 거치는 Canvas도 7~14FPS였다. 탭의 메인 스레드는 99% 쉬고 있었고(병목은 공유 GPU 프로세스), 소프트웨어 합성(`--disable-gpu`)으로 바꾸면 전체 해상도 42~48FPS, `scale=0.5`에서 60FPS가 나왔다. 그래서 자동 게이트는 "소프트웨어 합성 · Canvas · 4탭 · scale=0.5에서 55 이상"으로 하고 전체 해상도 값은 기록만 한다(하한 30). 실제 GPU PC의 4탭 55FPS는 HUMAN_CHECKS로 넘긴다
+- 헤드리스 성능 측정: 이 컨테이너에는 GPU가 없어 WebGL(SwiftShader) 탭 4개가 1~3FPS, GPU 프로세스를 거치는 Canvas도 7~14FPS였다. 탭의 메인 스레드는 99% 쉬고 있었고(병목은 공유 GPU 프로세스), 소프트웨어 합성(`--disable-gpu`)으로 바꾸면 전체 해상도 42~48FPS, `scale=0.5`에서 60FPS가 나왔다. 그래서 자동 게이트는 "소프트웨어 합성 · Canvas · 4탭 · scale=0.5에서 55 이상"으로 하고 전체 해상도 값은 기록만 한다(큰 회귀만 잡는 하한 20. 처음에는 30이었으나 GitHub Actions 러너에서 약 28이 나와 낮췄다. scale=0.5는 러너에서도 60). 실제 GPU PC의 4탭 55FPS는 HUMAN_CHECKS로 넘긴다
 
 - **HUD 배치(M7)**: 위 띠 = 거점 A · B 게이지 + 남은 시간(최후의 30초면 유예 시간), 왼쪽 띠 = 생존자 팀 카드(역할 아이콘 · 이름 · 상태 · 수감 횟수 · 능력 쿨 · 체력 칸) 또는 괴물의 익명 상태 3칸, 아래 띠 = 행동 칸(생존자: 능력 · 구조, 괴물: 공격 · 돌진 · 포효 · 시야 모드). 맵은 HUD 띠를 피하도록 0.93배로 그린다
 - **미니맵**: 메인 화면의 바닥 합성(안개 포함)을 축소하고, 메인 화면에 실제로 그린 엔티티만 다시 찍는다. 그래서 미니맵이 메인 화면보다 더 많은 것을 보여 줄 수 없다(E2E로 "미니맵 엔티티 ⊆ 메인 엔티티" 확인)
@@ -134,5 +134,6 @@
 | Docker 베이스 이미지 인자 `NODE_IMAGE` | Docker Hub 요청 제한(429)에 걸리면 미러(`mirror.gcr.io/library/node:22-bookworm-slim`)로 바꿔 빌드할 수 있게. 사설 인증서 · 프록시 환경을 위한 선택적 빌드 비밀(`npm_ca`)도 둔다 |
 | `npm run verify:deploy` | 배포는 하지 않으므로, 배포와 같은 방식(Docker 이미지 → 컨테이너, `PORT` 환경 변수)으로 띄워 HTTP · WebSocket 접속과 `docker stop`(SIGTERM) 종료까지 확인하는 스크립트를 둔다. Docker가 없으면 빌드 결과물로 직접 띄운다. 기본 Dockerfile은 BuildKit 없이도 빌드되게 두고, 사설 인증서가 필요한 환경에서만 스크립트가 빌드 비밀을 쓰는 임시 Dockerfile을 만든다 |
 | 서버 종료 신호 처리 | 컨테이너에서 Node가 PID 1이면 SIGTERM · SIGINT를 기본 처리하지 않아 `docker stop`이 10초를 기다렸다. 서버가 직접 받아 끝낸다 |
+| GitHub Actions (`.github/workflows/ci.yml`) | PR마다 · main에 들어갈 때 4개 작업을 따로 돌린다: 타입 · 린트 · 포맷 · 단위, E2E(@playwright/test 버전에 맞는 Chromium을 CI에서 받는다), 지연 봇 전체 판(`test:lag`), 배포 검증(Docker, Hub 요청 제한을 피해 `mirror.gcr.io` 미러 베이스 이미지). 공개 저장소라 비밀 값은 쓰지 않고 권한은 읽기만 |
 | `npm run test:lag` (따로 실행) | lag 100 · 200 실시간 봇 전체 판은 1~2분 걸려 `npm test`(몇 초)와 분리했다 |
 | concurrently 대신 `scripts/dev.mjs` | concurrently 최신이 보안 경고가 있는 의존성을 끌어온다. 20줄짜리 스크립트로 대체 |
