@@ -204,8 +204,9 @@ for (const scale of ['1', '0.5']) {
       `FPS scale=${scale} 탭별 평균: ${avgs.map((v) => v.toFixed(1)).join(', ')} / 전체 ${avg.toFixed(1)}`,
     );
     test.info().annotations.push({ type: `fps-scale-${scale}`, description: avg.toFixed(1) });
-    // 게이트: 저사양 모드(scale 0.5) 55 이상. 전체 해상도는 회귀 감시용 하한 30 (CPU 래스터 4탭 + 서버가 4코어를 나눠 쓴다)
-    expect(avg).toBeGreaterThanOrEqual(scale === '0.5' ? 55 : 30);
+    // 게이트: 저사양 모드(scale 0.5) 55 이상. 전체 해상도는 기록용이고 하한 20은 큰 회귀(GPU 프로세스 병목 때의 1~15FPS 같은)만 잡는다
+    // (CPU 래스터 4탭 + 서버가 4코어를 나눠 쓴다: 개발 컨테이너 약 40, GitHub Actions 러너 약 28)
+    expect(avg).toBeGreaterThanOrEqual(scale === '0.5' ? 55 : 20);
     for (const p of players) expect(p.problems).toEqual([]);
     await closeAll(players);
   });
