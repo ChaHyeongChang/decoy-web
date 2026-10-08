@@ -43,6 +43,7 @@ import {
   ambientRgb,
   compositeScaleFor,
   fogPathFor,
+  nextConeRed,
   opponentFxAllowed,
   rgbCss,
   unionOutline,
@@ -97,15 +98,18 @@ export class WorldRenderer {
   private lastFogAt = -1e9;
   /** 부채꼴 색 (노랑 0 ↔ 빨강 1) 보간 상태 */
   private coneRed = 0;
+  /** 생존자 화면: 지난 프레임에 괴물 부채꼴을 그렸는가 (괴물이 시야에 있었는가) */
+  private coneShown = false;
   drawn: DrawnEntity[] = [];
   /** 이번 프레임에 바닥 합성을 다시 했는가 (미니맵 갱신용) */
   baseRefreshed = false;
   private readonly dashTrail = new DashTrail();
   /**
    * 디버그 · 테스트: 이번 프레임 연출. oppFx = 상대 출처 효과 수
-   * (생존자 화면: 괴물의 잔상 · 공격 준비 범위 · 기절 별, 괴물 화면: 생존자의 구조 링)
+   * (생존자 화면: 괴물의 잔상 · 공격 준비 범위 · 기절 별, 괴물 화면: 생존자의 구조 링),
+   * cone = 생존자 화면에 괴물 부채꼴을 그렸는가, coneRed = 그 색 보간 상태 (노랑 0 ↔ 빨강 1)
    */
-  fx = { stunStars: false, dashGhosts: 0, attackRange: false, oppFx: 0 };
+  fx = { stunStars: false, dashGhosts: 0, attackRange: false, oppFx: 0, cone: false, coneRed: 0 };
 
   /** 미니맵이 줄여 그릴 바닥 합성 (안개 포함) */
   get baseCanvas(): HTMLCanvasElement {
@@ -220,18 +224,20 @@ export class WorldRenderer {
         FOG.outlineAlpha,
         FOG.outlineWidth / MAP_SCALE,
       );
+    const coneShown = !isMonster && v.monster !== null;
     if (!isMonster && v.monster) {
       const m = v.monster;
-      const target = m.seesSomeone ? 1 : 0;
-      // 노랑 → 빨강 0.1초, 빨강 → 노랑 0.4초 (VISUAL_SPEC 4장)
-      const rate = target > this.coneRed ? frameMs / 100 : frameMs / 400;
-      this.coneRed =
-        target > this.coneRed ? Math.min(1, this.coneRed + rate) : Math.max(0, this.coneRed - rate);
+      // 시야에 다시 들어온 첫 프레임은 지금 상태 그대로, 보이는 동안에만 노랑 ↔ 빨강 보간 (fogMath.nextConeRed)
+      this.coneRed = nextConeRed(this.coneRed, this.coneShown, m.seesSomeone, frameMs);
       const cone = monsterConePolygon(balance, m, m.aim, m.blend);
       const color = mixColor(COLOR.coneIdle, COLOR.coneSeen, this.coneRed);
       const alpha = ALPHA.coneIdle + (ALPHA.coneSeen - ALPHA.coneIdle) * this.coneRed;
       fillPolygon(this.coneOver, cone, color, alpha);
+    } else {
+      // 괴물이 안 보이는 동안(생존자 화면) 또는 괴물 화면: 부채꼴 색 상태를 남기지 않는다
+      this.coneRed = 0;
     }
+    this.coneShown = coneShown;
 
     // 7. 캐릭터 · 공격 범위 · 구조 게이지
     const g = this.entities;
@@ -368,6 +374,13 @@ export class WorldRenderer {
     };
     this.badges.draw(snap.world.points, snap.world.exits, alpha, blink);
     this.drawn = drawn;
-    this.fx = { stunStars, dashGhosts: ghosts.length, attackRange, oppFx };
+    this.fx = {
+      stunStars,
+      dashGhosts: ghosts.length,
+      attackRange,
+      oppFx,
+      cone: coneShown,
+      coneRed: this.coneRed,
+    };
   }
 }

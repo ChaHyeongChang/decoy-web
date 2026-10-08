@@ -14,12 +14,15 @@ import {
 import { gfxState, onGfxChange } from '../gfx/state';
 import { COLOR, ROLE_COLOR } from '../render/colors';
 import { minimapScaleFor } from '../render/fogMath';
+import { createCanvasTexture, resizeCanvasTexture, uploadCanvasTexture } from '../render/fogPaint';
 import { HUD } from './layout';
+
+const MINIMAP_KEY = 'minimap';
 
 export class Minimap {
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
-  private readonly texture: Phaser.Textures.CanvasTexture;
+  private readonly texture: Phaser.Textures.Texture;
   private readonly image: Phaser.GameObjects.Image;
   private readonly g: Phaser.GameObjects.Graphics;
   private readonly frame: Phaser.GameObjects.Graphics;
@@ -42,17 +45,15 @@ export class Minimap {
     const ctx = this.canvas.getContext('2d');
     if (!ctx) throw new Error('미니맵 캔버스를 만들 수 없습니다');
     this.ctx = ctx;
-    if (scene.textures.exists('minimap')) scene.textures.remove('minimap');
-    const tex = scene.textures.addCanvas('minimap', this.canvas);
-    if (!tex) throw new Error('미니맵 텍스처를 만들 수 없습니다');
-    this.texture = tex;
+    // 이전 판의 같은 키는 지우고, getImageData 사본을 만드는 addCanvas 대신 사본 없이 올린다
+    this.texture = createCanvasTexture(scene.textures, MINIMAP_KEY, this.canvas);
     this.frame = scene.add.graphics().setDepth(39);
     this.frame.fillStyle(0x0f1b27, 0.95);
     this.frame.fillRoundedRect(HUD.minimap.x - 6, HUD.minimap.y - 6, this.w + 12, this.h + 12, 8);
     this.frame.lineStyle(2, 0x334155, 1);
     this.frame.strokeRoundedRect(HUD.minimap.x - 6, HUD.minimap.y - 6, this.w + 12, this.h + 12, 8);
     this.image = scene.add
-      .image(HUD.minimap.x, HUD.minimap.y, 'minimap')
+      .image(HUD.minimap.x, HUD.minimap.y, MINIMAP_KEY)
       .setOrigin(0, 0)
       .setDepth(40)
       .setScale(this.w / this.canvas.width, this.h / this.canvas.height);
@@ -70,7 +71,13 @@ export class Minimap {
     gfxState.minimapScale = s;
     if (s === this.scale) return;
     this.scale = s;
-    this.texture.setSize(Math.round(this.w * s), Math.round(this.h * s));
+    resizeCanvasTexture(
+      MINIMAP_KEY,
+      this.texture,
+      this.canvas,
+      Math.round(this.w * s),
+      Math.round(this.h * s),
+    );
     this.image.setSizeToFrame(this.texture.get());
     this.image.setScale(this.w / this.canvas.width, this.h / this.canvas.height);
   }
@@ -81,7 +88,7 @@ export class Minimap {
     this.ctx.imageSmoothingEnabled = true;
     this.ctx.imageSmoothingQuality = 'high';
     this.ctx.drawImage(base, 0, 0, this.canvas.width, this.canvas.height);
-    this.texture.refresh();
+    uploadCanvasTexture(this.texture);
   }
 
   private px(x: number): number {
