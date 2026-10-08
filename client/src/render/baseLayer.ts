@@ -15,7 +15,18 @@ import { TILE_PX, type Balance, type ExitView, type PointView, type Vec2 } from 
 import { MAP_SCALE, MAP_X, MAP_Y } from '../ui/layout';
 import { GpuFog } from './fogGpu';
 import { snapToDevice, type FogMode } from './fogMath';
-import { CanvasPen, LightMap, nextFogKey, paintExits, paintPoints, type SoftLight } from './fogPaint';
+import {
+  CanvasPen,
+  LightMap,
+  createCanvasTexture,
+  domLightSurface,
+  nextFogKey,
+  paintExits,
+  paintPoints,
+  removeCanvasTexture,
+  uploadCanvasTexture,
+  type SoftLight,
+} from './fogPaint';
 import { drawStaticMap } from './mapCanvas';
 
 export type { SoftLight } from './fogPaint';
@@ -78,7 +89,7 @@ export class CanvasFog implements FogLayer {
   private readonly light: LightMap | null;
   private readonly pen: CanvasPen;
   private readonly key: string;
-  private readonly texture: Phaser.Textures.CanvasTexture;
+  private readonly texture: Phaser.Textures.Texture;
   private readonly image: Phaser.GameObjects.Image;
   lastCommitMs = 0;
   private t0 = 0;
@@ -97,11 +108,10 @@ export class CanvasFog implements FogLayer {
     if (!ctx) throw new Error('바닥 합성 캔버스를 만들 수 없습니다');
     this.ctx = ctx;
     this.pen = new CanvasPen(ctx, TILE_PX * MAP_SCALE * s, s);
-    this.light = opts.fog ? new LightMap(opts.lightPxPerTile, opts.ambientCss) : null;
+    this.light = opts.fog ? new LightMap(opts.lightPxPerTile, opts.ambientCss, domLightSurface) : null;
     this.key = nextFogKey('fog-base');
-    const tex = scene.textures.addCanvas(this.key, this.base);
-    if (!tex) throw new Error('바닥 텍스처를 만들 수 없습니다');
-    this.texture = tex;
+    // 안개 주기마다 다시 그리므로 addCanvas의 생성자 사본(getImageData)은 바로 쓸모없어진다 → 사본 없이 올린다
+    this.texture = createCanvasTexture(scene.textures, this.key, this.base);
     // 합성 배율 = 백버퍼 배율이면 텍스처 1텍셀 = 기기 1px (위치도 기기 픽셀 정수로)
     this.image = scene.make
       .image({ x: snapToDevice(MAP_X, opts.zoom), y: snapToDevice(MAP_Y, opts.zoom), key: this.key }, false)
@@ -153,12 +163,12 @@ export class CanvasFog implements FogLayer {
       c.drawImage(this.light.canvas, 0, 0, this.base.width, this.base.height);
       c.restore();
     }
-    this.texture.refresh();
+    uploadCanvasTexture(this.texture);
     this.lastCommitMs = performance.now() - this.t0;
   }
 
   destroy(): void {
     this.image.destroy();
-    if (this.scene.textures.exists(this.key)) this.scene.textures.remove(this.key);
+    removeCanvasTexture(this.scene.textures, this.key);
   }
 }

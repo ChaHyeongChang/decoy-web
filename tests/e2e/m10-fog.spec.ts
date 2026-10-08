@@ -1,5 +1,6 @@
 // M10a 안개 방식 (Canvas 렌더러 · 품질 낮음 · 1920×1080 배율 1): 맵 구조는 시야 밖에서도 어둡게 보이고,
-// 시야 안은 2.5배 이상 밝다. 시야 밖 상대는 픽셀로도 없고(서버가 안 보냄), 상대가 사라지면 상대 효과도 바로 없어진다.
+// 시야 안은 2.5배 이상 밝다. 시야 반경 바로 밖은 시야 밖과 같은 밝기다. 시야 밖 상대는 픽셀로도 없고(서버가 안 보냄),
+// 상대가 사라지면 상대 효과도 바로 없어지고 부채꼴 색 상태도 남지 않는다.
 // 화면 픽셀은 스크린샷을 페이지 안에서 디코드해 tileToClient 좌표 주변 9×9 평균으로 잰다.
 import { expect, test, type Page } from '@playwright/test';
 import { closeAll, lastSnapshot, sendTest, startFourPlayerMatch, type Player } from './helpers';
@@ -90,6 +91,11 @@ const P_FLOOR: [number, number] = [21.5, 27.5]; // 바닥 칸
 const P_WALL: [number, number] = [17.5, 27.5]; // 벽 덩어리 한가운데 (16~19 × 26~28)
 const M_SPOT: [number, number] = [38.5, 29.5]; // 숨은 괴물 자리 (바닥)
 const S_SPOT: [number, number] = [31, 30]; // 괴물 등 뒤 생존자 자리 (바닥)
+// 러너 (21.5, 25) 서쪽, 벽 없는 줄(25행 14~22 바닥): 시야 반경 6 바로 밖(r + 0.3)과 완전히 밝은 안쪽(r − 1.5)
+const P_EDGE_OUT: [number, number] = [21.5 - 6.3, 25];
+const P_EDGE_IN: [number, number] = [21.5 - 4.5, 25];
+/** 텍스처 메모리 예산 (MOBILE_PLAN M10 검증: 낮음 8MB) */
+const LOW_TEXTURE_BUDGET = 8 * 1024 * 1024;
 
 test('맵 구조는 시야 밖에서도 어둡게 보이고 시야 안은 2.5배 이상 밝다, 숨은 상대는 픽셀로도 없다', async ({
   browser,
@@ -113,8 +119,8 @@ test('맵 구조는 시야 밖에서도 어둡게 보이고 시야 안은 2.5배
   await aimAt(host, M_SPOT[0] + 4, M_SPOT[1]);
   await runner.page.waitForTimeout(800);
 
-  // 1) 같은 바닥 칸을 시야 안에서
-  const lit = await probe(runner.page, { floor: P_FLOOR });
+  // 1) 같은 바닥 칸을 시야 안에서 (+ 시야 반경 바로 밖과 그 안쪽)
+  const lit = await probe(runner.page, { floor: P_FLOOR, edgeOut: P_EDGE_OUT, edgeIn: P_EDGE_IN });
   // 2) 러너를 멀리 보내 같은 칸을 시야 밖에서 + 시야 밖 벽 · 숨은 괴물 자리
   await sendTest(host, { kind: 'teleport', target: runner.id, x: 5, y: 2 });
   await runner.page.waitForTimeout(800);
@@ -122,7 +128,13 @@ test('맵 구조는 시야 밖에서도 어둡게 보이고 시야 안은 2.5배
   expect(
     (await runner.page.evaluate(() => window.__DECOY__?.getDrawn() ?? [])).some((d) => d.kind === 'monster'),
   ).toBe(false);
-  const dark = await probe(runner.page, { floor: P_FLOOR, wall: P_WALL, hidden: M_SPOT });
+  const dark = await probe(runner.page, {
+    floor: P_FLOOR,
+    wall: P_WALL,
+    hidden: M_SPOT,
+    edgeOut: P_EDGE_OUT,
+    edgeIn: P_EDGE_IN,
+  });
   console.log(
     `[m10-fog] 러너 화면 밝기: 시야 안 바닥 ${lit.floor!.luma}, 시야 밖 바닥 ${dark.floor!.luma} · 벽 ${dark.wall!.luma} · 숨은 괴물 자리 ${dark.hidden!.luma} rgb ${dark.hidden!.rgb.join(',')}`,
   );
@@ -132,6 +144,21 @@ test('맵 구조는 시야 밖에서도 어둡게 보이고 시야 안은 2.5배
   expect(lit.floor!.luma).toBeGreaterThanOrEqual(dark.floor!.luma * 2.5);
   // 시야 밖에서도 벽과 바닥이 구분된다
   expect(Math.abs(dark.wall!.luma - dark.floor!.luma)).toBeGreaterThanOrEqual(5);
+  // 밝게 그린 곳 ⊆ 판정 영역 (화면): 시야 반경 바로 밖(r + 0.3, 벽 없는 쪽)은 시야 밖에서 잰 같은 자리와 채널마다 ±4.
+  // 빈 통과가 아님: 같은 방향 안쪽(r − 1.5)은 실제로 밝다 (그 방향이 벽에 막히지 않았다)
+  console.log(
+    `[m10-fog] 시야 경계: 반경 밖 ${lit.edgeOut!.luma} (시야 밖 ${dark.edgeOut!.luma}), 반경 안 ${lit.edgeIn!.luma} (시야 밖 ${dark.edgeIn!.luma})`,
+  );
+  for (let ch = 0; ch < 3; ch += 1)
+    expect(Math.abs(lit.edgeOut!.rgb[ch]! - dark.edgeOut!.rgb[ch]!)).toBeLessThanOrEqual(4);
+  expect(lit.edgeIn!.luma).toBeGreaterThanOrEqual(dark.edgeIn!.luma * 2);
+  // 텍스처 메모리 (바닥 합성 + 미니맵, getImageData 사본 없음): 낮음 예산 이하
+  const gfx = await runner.page.evaluate(() => window.__DECOY__!.gfx);
+  const texBytes = Number(gfx.features.textureBytes ?? 0);
+  console.log(`[m10-fog] 텍스처 바이트 (낮음 · Canvas · 1920×1080@1): ${texBytes}`);
+  expect(gfx.quality).toBe('low');
+  expect(texBytes).toBeGreaterThan(0);
+  expect(texBytes).toBeLessThanOrEqual(LOW_TEXTURE_BUDGET);
 
   // 3) 숨은 괴물 자리 = 같은 자리 빈 바닥 (괴물을 멀리 보낸 장면)과 채널마다 ±4, 그리고 구조가 보이는 밝기
   expect(dark.hidden!.luma).toBeGreaterThanOrEqual(6);
@@ -156,7 +183,7 @@ test('맵 구조는 시야 밖에서도 어둡게 보이고 시야 안은 2.5배
   await closeAll(players);
 });
 
-test('생존자 시야 안에서 괴물이 돌진해 시야 밖으로 나가면 다음 프레임에 상대 효과(돌진 잔상)가 0', async ({
+test('생존자 시야 안에서 괴물이 돌진해 시야 밖으로 나가면 다음 프레임에 상대 효과(돌진 잔상)가 0, 부채꼴 색도 남지 않는다', async ({
   browser,
 }) => {
   const { players } = await startFourPlayerMatch(browser, undefined, [QUALITY, QUALITY, QUALITY, QUALITY]);
@@ -219,6 +246,77 @@ test('생존자 시야 안에서 괴물이 돌진해 시야 밖으로 나가면 
   expect(res.sawGhosts).toBe(true);
   expect(res.fx!.dashGhosts).toBe(0);
   expect(res.fx!.oppFx).toBe(0);
+
+  // 부채꼴 색 잔여 상태: 러너를 보는 괴물(빨강) → 팀 시야 밖 → 아무도 안 보며 다시 나타난 첫 프레임은 노랑(지금 상태)
+  await sendTest(host, { kind: 'teleport', target: monster.id, x: 20.4, y: 2, face: Math.PI });
+  await aimAt(host, 10, 2);
+  await runner.page.waitForFunction(
+    () => {
+      const fx = window.__DECOY__?.getEffects() ?? {};
+      return (
+        fx.cone === true && fx.coneRed === 1 && window.__DECOY__?.getLastSnapshot()?.monster?.seesSomeone
+      );
+    },
+    null,
+    { timeout: 10_000 },
+  );
+  const watchCone = runner.page.evaluate(
+    () =>
+      new Promise<{
+        hiddenFrames: number;
+        hiddenMaxRed: number;
+        firstRed: number | null;
+        sees: boolean | null;
+        timedOut: boolean;
+      }>((resolve) => {
+        const start = performance.now();
+        let hidden = false;
+        let hiddenFrames = 0;
+        let hiddenMaxRed = 0;
+        const loop = (): void => {
+          const d = window.__DECOY__;
+          const fx = d?.getEffects() ?? {};
+          if (fx.cone === false) {
+            hidden = true;
+            hiddenFrames += 1;
+            hiddenMaxRed = Math.max(hiddenMaxRed, Number(fx.coneRed));
+          } else if (hidden && fx.cone === true) {
+            // 다시 나타난 첫 프레임
+            resolve({
+              hiddenFrames,
+              hiddenMaxRed,
+              firstRed: Number(fx.coneRed),
+              sees: d?.getLastSnapshot()?.monster?.seesSomeone ?? null,
+              timedOut: false,
+            });
+            return;
+          }
+          if (performance.now() - start > 15_000) {
+            resolve({ hiddenFrames, hiddenMaxRed, firstRed: null, sees: null, timedOut: true });
+            return;
+          }
+          requestAnimationFrame(loop);
+        };
+        requestAnimationFrame(loop);
+      }),
+  );
+  // 팀 시야 밖 (러너 · 가드 · 스카우트 모두에서 멀다)
+  await sendTest(host, { kind: 'teleport', target: monster.id, x: 5.5, y: 12, face: 0 });
+  await runner.page.waitForFunction(() => window.__DECOY__?.getLastSnapshot()?.monster === null, null, {
+    timeout: 10_000,
+  });
+  // 다시 나타날 때는 러너 반대쪽(동쪽)을 본다: 커서를 동쪽에 두고 러너 앞 2.5타일로
+  await aimAt(host, 30, 2);
+  await runner.page.waitForTimeout(500);
+  await sendTest(host, { kind: 'teleport', target: monster.id, x: 19.4, y: 2, face: 0 });
+  const cone = await watchCone;
+  console.log(`[m10-fog] 부채꼴 다시 나타남: ${JSON.stringify(cone)}`);
+  expect(cone.timedOut).toBe(false);
+  expect(cone.hiddenFrames).toBeGreaterThan(0);
+  // 사라진 동안 색 상태가 남지 않고, 다시 나타난 첫 프레임 색 = 지금 상태 (아무도 안 봄 → 노랑 0)
+  expect(cone.hiddenMaxRed).toBe(0);
+  expect(cone.sees).toBe(false);
+  expect(cone.firstRed).toBe(0);
   for (const p of players) expect(p.problems).toEqual([]);
   await closeAll(players);
 });

@@ -7,83 +7,33 @@
 // WebGL MULTIPLY = [DST_COLOR, ONE_MINUS_SRC_ALPHA]라 불투명한 빛 지도에서는 Canvas 'multiply'와 같은 값이다.
 //
 // 품질 높음은 빛 지도 이미지에 경계 셰이더(FogEdgePipeline)를 건다. 경계 안쪽 띠만 노이즈로 '어둡게만' 하고
-// 시야 밖(하한)과 완전히 밝은 곳은 바꾸지 않는다(fogMath.edgeDarken과 같은 식). 빛 지도 이미지 하나에만 걸리므로
-// 캐릭터 · 범위 · 마커 · HUD에는 닿지 않는다.
+// 시야 밖(하한)과 완전히 밝은 곳은 바꾸지 않는다(fogMath.edgeDarken과 같은 식, GLSL은 fogMath.FOG_EDGE_FRAG).
+// 빛 지도 이미지 하나에만 걸리므로 캐릭터 · 범위 · 마커 · HUD에는 닿지 않는다.
+//
+// 텍스처는 getImageData 사본을 만드는 addCanvas(CanvasTexture) 대신 fogPaint.createCanvasTexture로 올린다.
 import Phaser from 'phaser';
 import { MAP_H, MAP_W, TILE_PX, type Balance, type ExitView, type PointView, type Vec2 } from '@decoy/shared';
 import { gfxNow } from '../gfx/state';
 import { MAP_SCALE, MAP_X, MAP_Y } from '../ui/layout';
 import { FOG } from './colors';
 import type { FogLayer, FogLayerOptions } from './baseLayer';
-import { snapToDevice } from './fogMath';
+import { FOG_EDGE_FRAG, snapToDevice } from './fogMath';
 import {
   CanvasPen,
   GraphicsPen,
   LightMap,
+  createCanvasTexture,
+  domLightSurface,
   nextFogKey,
   paintExits,
   paintPoints,
+  removeCanvasTexture,
+  uploadCanvasTexture,
   type SoftLight,
 } from './fogPaint';
 import { drawStaticMap } from './mapCanvas';
 
 export const FOG_EDGE_PIPELINE = 'DecoyFogEdge';
-
-// 빛 값 L(하한~1)에서 w = (L − 하한) / (1 − 하한), 띠 = 4w(1 − w)(경계 중간에서 최대, 양 끝 0).
-// 결과 = L − (L − 하한) × 세기 × 띠 × 노이즈 → 항상 [하한, L]. 틴트 처리는 Phaser 기본 셰이더와 같다.
-const FOG_EDGE_FRAG = `
-#define SHADER_NAME DECOY_FOG_EDGE_FS
-#ifdef GL_FRAGMENT_PRECISION_HIGH
-precision highp float;
-#else
-precision mediump float;
-#endif
-
-uniform sampler2D uMainSampler;
-uniform float uTime;
-uniform vec3 uAmbient;
-uniform vec2 uMapSize;
-uniform float uStrength;
-uniform float uNoiseScale;
-uniform float uNoiseSpeed;
-
-varying vec2 outTexCoord;
-varying float outTintEffect;
-varying vec4 outTint;
-
-float hash(vec2 p)
-{
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-}
-
-float noise(vec2 p)
-{
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    float a = hash(i);
-    float b = hash(i + vec2(1.0, 0.0));
-    float c = hash(i + vec2(0.0, 1.0));
-    float d = hash(i + vec2(1.0, 1.0));
-    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
-}
-
-void main ()
-{
-    vec4 light = texture2D(uMainSampler, outTexCoord);
-    vec3 amb = uAmbient;
-    float span = max(0.001, 1.0 - amb.g);
-    float w = clamp((light.g - amb.g) / span, 0.0, 1.0);
-    float band = 4.0 * w * (1.0 - w);
-    vec2 p = outTexCoord * uMapSize * uNoiseScale;
-    float t = uTime * uNoiseSpeed;
-    float n = 0.6 * noise(p + vec2(t, -0.7 * t)) + 0.4 * noise(p * 2.3 + vec2(-0.5 * t, t) + 7.0);
-    float k = clamp(uStrength * band * n, 0.0, 1.0);
-    vec3 rgb = light.rgb - max(light.rgb - amb, vec3(0.0)) * k;
-    vec4 texel = vec4(outTint.bgr * outTint.a, outTint.a);
-    gl_FragColor = vec4(rgb, light.a) * texel;
-}
-`;
 
 /** 경계 셰이더 파이프라인 (빛 지도 이미지 전용). 사전 파이프라인이라 그리는 횟수가 늘지 않는다 */
 export class FogEdgePipeline extends Phaser.Renderer.WebGL.Pipelines.SinglePipeline {
@@ -130,7 +80,7 @@ export class GpuFog implements FogLayer {
   private readonly pen: GraphicsPen;
   private readonly light: LightMap | null;
   private readonly lightKey: string | null = null;
-  private readonly lightTexture: Phaser.Textures.CanvasTexture | null = null;
+  private readonly lightTexture: Phaser.Textures.Texture | null = null;
   private readonly lightImage: Phaser.GameObjects.Image | null = null;
   /** 미니맵용 작은 합성 (빛 지도와 같은 해상도) */
   private readonly mini: HTMLCanvasElement;
@@ -148,8 +98,8 @@ export class GpuFog implements FogLayer {
   ) {
     const s = opts.compositeScale;
     this.staticKey = nextFogKey('fog-static');
-    const tex = scene.textures.addCanvas(this.staticKey, drawStaticMap(MAP_SCALE * s));
-    if (!tex) throw new Error('정적 맵 텍스처를 만들 수 없습니다');
+    // 정적 맵은 한 번만 올린다 (사본 없이)
+    createCanvasTexture(scene.textures, this.staticKey, drawStaticMap(MAP_SCALE * s));
     this.staticImage = scene.make
       .image(
         { x: snapToDevice(MAP_X, opts.zoom), y: snapToDevice(MAP_Y, opts.zoom), key: this.staticKey },
@@ -160,13 +110,11 @@ export class GpuFog implements FogLayer {
     this.dyn = scene.make.graphics({ x: MAP_X, y: MAP_Y }, false);
     this.pen = new GraphicsPen(this.dyn, TILE_PX * MAP_SCALE);
     const lpt = opts.lightPxPerTile;
-    this.light = opts.fog ? new LightMap(lpt, opts.ambientCss) : null;
+    this.light = opts.fog ? new LightMap(lpt, opts.ambientCss, domLightSurface) : null;
     root.add([this.staticImage, this.dyn]);
     if (this.light) {
       this.lightKey = nextFogKey('fog-light');
-      const lt = scene.textures.addCanvas(this.lightKey, this.light.canvas);
-      if (!lt) throw new Error('빛 지도 텍스처를 만들 수 없습니다');
-      this.lightTexture = lt;
+      this.lightTexture = createCanvasTexture(scene.textures, this.lightKey, this.light.canvas);
       this.lightImage = scene.make
         .image({ x: MAP_X, y: MAP_Y, key: this.lightKey }, false)
         .setOrigin(0, 0)
@@ -229,7 +177,7 @@ export class GpuFog implements FogLayer {
 
   commit(): void {
     if (this.light) {
-      this.lightTexture?.refresh();
+      if (this.lightTexture) uploadCanvasTexture(this.lightTexture);
       const c = this.miniCtx;
       c.save();
       c.globalCompositeOperation = 'multiply';
@@ -243,7 +191,7 @@ export class GpuFog implements FogLayer {
     this.staticImage.destroy();
     this.dyn.destroy();
     this.lightImage?.destroy();
-    if (this.scene.textures.exists(this.staticKey)) this.scene.textures.remove(this.staticKey);
-    if (this.lightKey && this.scene.textures.exists(this.lightKey)) this.scene.textures.remove(this.lightKey);
+    removeCanvasTexture(this.scene.textures, this.staticKey);
+    if (this.lightKey) removeCanvasTexture(this.scene.textures, this.lightKey);
   }
 }

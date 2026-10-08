@@ -17,6 +17,7 @@ import {
 import { PRESETS, effectivePreset } from '../../client/src/gfx/presets';
 import { FOG } from '../../client/src/render/colors';
 import {
+  FOG_EDGE_FRAG,
   MAX_MINIMAP_SCALE,
   MIN_COMPOSITE_SCALE,
   ambientRgb,
@@ -27,8 +28,10 @@ import {
   hardLight,
   lightAt,
   minimapScaleFor,
+  nextConeRed,
   opponentFxAllowed,
   snapToDevice,
+  softLightGeometry,
   survivorLight,
   unionOutline,
 } from '../../client/src/render/fogMath';
@@ -85,6 +88,18 @@ describe('안개 밝기 함수 lightAt (시야 밖 = 정확히 하한)', () => {
     expect(lightAt(1, 2, 5, AMB)).toBeCloseTo((1 + AMB) / 2, 6);
   });
 
+  it('흐림 띠 모양: 바깥 반지름 = 판정 반경, 안쪽 = r − soft (빛 지도 그라디언트와 lightAt이 같이 쓴다)', () => {
+    expect(softLightGeometry(r, soft)).toEqual({ inner: r - soft, outer: r });
+    expect(softLightGeometry(7.5, 1.2).outer).toBe(7.5);
+    expect(softLightGeometry(2, 5)).toEqual({ inner: 0, outer: 2 });
+    expect(softLightGeometry(6, 0)).toEqual({ inner: 6, outer: 6 });
+    expect(softLightGeometry(6, -1)).toEqual({ inner: 6, outer: 6 });
+    // lightAt은 이 띠 그대로: 안쪽 원 = 1, 바깥 원 = 하한
+    const g = softLightGeometry(r, soft);
+    expect(lightAt(g.inner, r, soft, AMB)).toBe(1);
+    expect(lightAt(g.outer, r, soft, AMB)).toBe(AMB);
+  });
+
   it('여러 시야는 최댓값으로 합친다 (겹쳐도 더 밝아지지 않음)', () => {
     expect(combineLights([], AMB)).toBe(AMB);
     expect(combineLights([0.7, 1, 0.5], AMB)).toBe(1);
@@ -92,7 +107,8 @@ describe('안개 밝기 함수 lightAt (시야 밖 = 정확히 하한)', () => {
   });
 });
 
-describe('밝게 그린 곳 ⊆ 판정 영역 (무작위 점 1만 개, shared 판정 함수 그대로)', () => {
+// 수식(모델) 쪽. 렌더러가 실제로 칠한 값으로 같은 성질을 보는 테스트는 fog-paint.test.ts
+describe('밝게 그린 곳 ⊆ 판정 영역 — 수식 (무작위 점 1만 개, shared 판정 함수 그대로)', () => {
   it('생존자: 밝기가 하한보다 높으면 inCircleVision이 참', () => {
     const rnd = rng(20261008);
     const roles: RoleId[] = ['runner', 'guard', 'scout'];
@@ -244,6 +260,32 @@ describe('경계 셰이더 식 (어둡게만)', () => {
   });
 });
 
+describe('경계 셰이더 GLSL 소스 (fogGpu.ts가 그대로 쓰는 FOG_EDGE_FRAG)', () => {
+  const src = FOG_EDGE_FRAG.replace(/\s+/g, ' ');
+  const has = (line: string): boolean => src.includes(line.replace(/\s+/g, ' '));
+
+  it('핵심 식이 edgeDarken과 같다: 띠 = 4w(1 − w), k = clamp(세기 × 띠 × 노이즈, 0, 1)', () => {
+    expect(has('float span = max(0.001, 1.0 - amb.g);')).toBe(true);
+    expect(has('float w = clamp((light.g - amb.g) / span, 0.0, 1.0);')).toBe(true);
+    expect(has('float band = 4.0 * w * (1.0 - w);')).toBe(true);
+    expect(has('float k = clamp(uStrength * band * n, 0.0, 1.0);')).toBe(true);
+    // 노이즈는 [0, 1) 값 두 개의 가중 평균(0.6 + 0.4 = 1)이라 [0, 1)
+    expect(has('float n = 0.6 * noise(')).toBe(true);
+    expect(has('+ 0.4 * noise(')).toBe(true);
+    expect(has('return fract(')).toBe(true);
+  });
+
+  it('어둡게만: 결과 = L − max(L − 하한, 0) × k (k ∈ [0, 1]이라 [하한, L] 안), 다른 곳에서 색을 바꾸지 않는다', () => {
+    expect(has('vec3 rgb = light.rgb - max(light.rgb - amb, vec3(0.0)) * k;')).toBe(true);
+    expect(has('gl_FragColor = vec4(rgb, light.a) * texel;')).toBe(true);
+    // rgb · gl_FragColor는 한 번씩만 쓴다 (뒤에서 더하거나 곱하면 하한 · L 범위가 깨질 수 있다)
+    expect(src.match(/\brgb\s*[-+*/]?=/g)).toHaveLength(1);
+    expect(src.match(/gl_FragColor\s*[-+*/]?=/g)).toHaveLength(1);
+    // 하한 = Phaser 기본 셰이더와 같은 틴트 처리 (틴트가 흰색이면 그대로)
+    expect(has('vec4 texel = vec4(outTint.bgr * outTint.a, outTint.a);')).toBe(true);
+  });
+});
+
 describe('하한 색', () => {
   it('0.45 × #A8C4E0 = rgb(76, 88, 101): 빨강을 더 줄여 차갑다', () => {
     expect(ambientRgb(0.45, 0xa8c4e0)).toEqual([76, 88, 101]);
@@ -292,5 +334,27 @@ describe('상대 쪽 잔여 효과 규칙', () => {
   it('출처(상대)가 이번 스냅샷에 없으면 상대 효과를 그리지 않는다', () => {
     expect(opponentFxAllowed(false)).toBe(false);
     expect(opponentFxAllowed(true)).toBe(true);
+  });
+
+  it('괴물 부채꼴 색: 시야에 다시 들어온 첫 프레임은 지금 상태(seesSomeone) 그대로', () => {
+    // 사라지기 전 빨강(1)이었어도, 아무도 안 보며 다시 나타나면 첫 프레임부터 노랑(0)
+    expect(nextConeRed(1, false, false, 16)).toBe(0);
+    expect(nextConeRed(0, false, true, 16)).toBe(1);
+    expect(nextConeRed(0.5, false, false, 0)).toBe(0);
+  });
+
+  it('괴물 부채꼴 색: 보이는 동안에는 노랑 → 빨강 0.1초, 빨강 → 노랑 0.4초', () => {
+    expect(nextConeRed(0, true, true, 50)).toBeCloseTo(0.5, 9);
+    expect(nextConeRed(0.5, true, true, 60)).toBe(1);
+    expect(nextConeRed(1, true, false, 100)).toBeCloseTo(0.75, 9);
+    expect(nextConeRed(0.1, true, false, 100)).toBe(0);
+    expect(nextConeRed(0, true, false, 16)).toBe(0);
+    expect(nextConeRed(1, true, true, 16)).toBe(1);
+    // 시간이 거꾸로 가도 범위를 벗어나지 않는다
+    expect(nextConeRed(0.5, true, true, -100)).toBe(0.5);
+    // 0.4초 동안 프레임마다 내려가면 끝에 정확히 0
+    let v = 1;
+    for (let i = 0; i < 25; i += 1) v = nextConeRed(v, true, false, 16);
+    expect(v).toBe(0);
   });
 });
