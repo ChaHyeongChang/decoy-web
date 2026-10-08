@@ -1,6 +1,7 @@
-// 미니맵 (우측 상단). 메인 화면과 같은 정보 규칙: 바닥은 메인 화면의 합성 캔버스(안개 포함)를 줄여 쓰고,
-// 엔티티는 메인 화면에 실제로 그린 목록만 다시 찍는다. 그래서 메인 화면보다 많은 정보가 나올 수 없다.
-import type Phaser from 'phaser';
+// 미니맵 (우측 상단). 메인 화면과 같은 정보 규칙: 바닥은 메인 화면의 바닥 합성(안개 포함 — 시야 밖은 어두운
+// 구조, 시야 안은 밝게)을 줄여 쓰고, 엔티티는 메인 화면에 실제로 그린 목록만 다시 찍는다. 그래서 메인 화면보다
+// 많은 정보가 나올 수 없다. 캔버스는 백버퍼 배율로 그리고 이미지는 1/배율로 표시해 화면에 1:1로 찍힌다.
+import Phaser from 'phaser';
 import {
   CAPTURE_POINTS,
   EXITS,
@@ -10,7 +11,9 @@ import {
   type DrawnEntity,
   type Role,
 } from '@decoy/shared';
+import { gfxState, onGfxChange } from '../gfx/state';
 import { COLOR, ROLE_COLOR } from '../render/colors';
+import { minimapScaleFor } from '../render/fogMath';
 import { HUD } from './layout';
 
 export class Minimap {
@@ -23,13 +26,19 @@ export class Minimap {
   readonly w: number;
   readonly h: number;
   drawn: DrawnEntity[] = [];
+  /** 캔버스 배율 (백버퍼 px / 논리 px) */
+  private scale: number;
+  /** 백버퍼 배율이 바뀌어 다음 갱신 때 캔버스 크기를 다시 잡는다 */
+  private resizePending = false;
 
   constructor(scene: Phaser.Scene) {
     this.w = HUD.minimap.w;
     this.h = Math.round((this.w * MAP_H) / MAP_W);
+    this.scale = minimapScaleFor(gfxState.zoom);
+    gfxState.minimapScale = this.scale;
     this.canvas = document.createElement('canvas');
-    this.canvas.width = this.w;
-    this.canvas.height = this.h;
+    this.canvas.width = Math.round(this.w * this.scale);
+    this.canvas.height = Math.round(this.h * this.scale);
     const ctx = this.canvas.getContext('2d');
     if (!ctx) throw new Error('미니맵 캔버스를 만들 수 없습니다');
     this.ctx = ctx;
@@ -42,14 +51,36 @@ export class Minimap {
     this.frame.fillRoundedRect(HUD.minimap.x - 6, HUD.minimap.y - 6, this.w + 12, this.h + 12, 8);
     this.frame.lineStyle(2, 0x334155, 1);
     this.frame.strokeRoundedRect(HUD.minimap.x - 6, HUD.minimap.y - 6, this.w + 12, this.h + 12, 8);
-    this.image = scene.add.image(HUD.minimap.x, HUD.minimap.y, 'minimap').setOrigin(0, 0).setDepth(40);
+    this.image = scene.add
+      .image(HUD.minimap.x, HUD.minimap.y, 'minimap')
+      .setOrigin(0, 0)
+      .setDepth(40)
+      .setScale(this.w / this.canvas.width, this.h / this.canvas.height);
     this.g = scene.add.graphics().setDepth(41);
+    const off = onGfxChange(() => {
+      this.resizePending = true;
+    });
+    scene.events.once(Phaser.Scenes.Events.SHUTDOWN, off);
+  }
+
+  /** 백버퍼 배율이 바뀌었으면 캔버스를 그 배율로 다시 잡는다 (다음 바닥 갱신 때 다시 그려진다) */
+  private applyScale(): void {
+    this.resizePending = false;
+    const s = minimapScaleFor(gfxState.zoom);
+    gfxState.minimapScale = s;
+    if (s === this.scale) return;
+    this.scale = s;
+    this.texture.setSize(Math.round(this.w * s), Math.round(this.h * s));
+    this.image.setSizeToFrame(this.texture.get());
+    this.image.setScale(this.w / this.canvas.width, this.h / this.canvas.height);
   }
 
   /** 메인 바닥 합성이 갱신될 때 함께 줄여 그린다 */
   refreshBase(base: HTMLCanvasElement): void {
+    if (this.resizePending) this.applyScale();
     this.ctx.imageSmoothingEnabled = true;
-    this.ctx.drawImage(base, 0, 0, this.w, this.h);
+    this.ctx.imageSmoothingQuality = 'high';
+    this.ctx.drawImage(base, 0, 0, this.canvas.width, this.canvas.height);
     this.texture.refresh();
   }
 

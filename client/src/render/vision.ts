@@ -47,6 +47,24 @@ export function strokePolygon(
   g.strokePath();
 }
 
+/** 선분 여러 개 (점들은 타일 좌표). 괴물 화면 자기 시야 테두리처럼 판정 경계를 그대로 긋는다 */
+export function strokeSegments(
+  g: Phaser.GameObjects.Graphics,
+  segs: readonly (readonly [Vec2, Vec2])[],
+  color: number,
+  alpha: number,
+  width = 2,
+): void {
+  if (segs.length === 0) return;
+  g.lineStyle(width, color, alpha);
+  g.beginPath();
+  for (const [a, b] of segs) {
+    g.moveTo(a.x * T, a.y * T);
+    g.lineTo(b.x * T, b.y * T);
+  }
+  g.strokePath();
+}
+
 /** 두 색 사이 보간 (0xRRGGBB) */
 export function mixColor(a: number, b: number, k: number): number {
   const t = Math.max(0, Math.min(1, k));
