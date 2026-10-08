@@ -295,7 +295,17 @@ async function qualityRun(
     scout: [p.scout.id, 36.2, 12.7, 2.2],
   });
   await place(host, { monster: [p.monster.id, 41.5, 12, Math.PI] }, false);
+  // 괴물 조준이 정확히 서쪽(π)으로 모일 때까지 (창 크기를 바꾼 직후의 커서 좌표가 어긋나지 않게 다시 겨눈다)
+  await host.waitForTimeout(400);
   await aimAt(host, 36, 12);
+  await view.waitForFunction(
+    () => {
+      const a = window.__DECOY__?.getLastSnapshot()?.monster?.aim;
+      return a !== undefined && Math.abs(Math.abs(a) - Math.PI) < 0.005;
+    },
+    null,
+    { timeout: 10_000 },
+  );
   await view.waitForFunction(() => window.__DECOY__?.getEffects().coneRed === 1, null, { timeout: 10_000 });
   // 스카우트 탐지 마커 (안개 위 정보)
   await p.scout.page.keyboard.press('Space');
@@ -316,7 +326,10 @@ async function qualityRun(
   const roleOf: Record<string, string> = Object.fromEntries(players.map((pl) => [pl.id, pl.role]));
   const r3 = (v: number): number => Math.round(v * 1000) / 1000;
   const drawn = c.drawn
-    .map((d) => `${d.kind}:${d.tag ?? roleOf[d.id] ?? d.id}:${r3(d.x)},${r3(d.y)},${r3(d.face)}`)
+    .map(
+      (d) =>
+        `${d.kind}:${d.tag ?? roleOf[d.id] ?? d.id}:${r3(d.x)},${r3(d.y)},${r3(Math.cos(d.face))},${r3(Math.sin(d.face))}`,
+    )
     .sort();
   const fxTargets = await view.evaluate(() => window.__DECOY__?.getFxTargets() ?? []);
   const features = await view.evaluate(() => ({ ...window.__DECOY__!.gfx.features }));

@@ -1,9 +1,11 @@
 // 월드 렌더링 (TECH_SPEC 5장 · VISUAL_SPEC 정보 우선 규칙 R1 순서). 맵 위 레이어를 컨테이너 하나에 담아 0.93배로 그린다.
 //  map · glow (fogRoot: 바닥 · 벽 · 시설 발광 · 거점 · 탈출구 영역 · 시야 채움 · 안개 — baseLayer.ts)
 //  → floorInfo (배지 · 바닥 문양 — objects.ts) → 시야 경계 림 → particles (빛 속 먼지)
-//  → cone (생존자 화면: 괴물 부채꼴 D4 / 괴물 화면: 자기 시야 테두리) → 범위 (공격 준비 · 캠핑 · 구조 구역 · 밀치기 · 포효)
-//  → 이벤트 효과 (불꽃 · 흩어짐 · 발먼지 · 충격파 · 베기 호 · 속도선 · 돌진 줄) → 돌진 잔상
-//  → entities (그림자 → 바닥 링 → 발 · 몸 → 부착 표시) → markers (탐지 · 포효 · 포효 핑)
+//  → cone (생존자 화면: 괴물 부채꼴 D4 / 괴물 화면: 자기 시야 테두리) → 공격 준비 채움
+//  → entities: 캐릭터 그림자 → 돌진 잔상 → 이벤트 효과 (불꽃 · 흩어짐 · 발먼지 · 충격파 · 베기 호 · 속도선 · 돌진 줄)
+//    → 범위 선 (공격 준비 경계 · 캠핑 · 구조 구역 · 밀치기 · 포효) → 바닥 링 → 발 · 몸 → 부착 표시
+//  → markers (탐지 · 포효 · 포효 핑)
+// 그림자(접지 그림자)가 범위 채움 · 부채꼴 위에 깔려 몸과 바깥 링 대비 3:1을 지키고, 범위 경계 선은 그림자 위에 그려 끊기지 않는다
 // 후처리(비네트 · 색보정)는 fogRoot에만 건다(effects.ts WorldPostFx). 캐릭터 · 범위 · 마커 · 배지에는 걸지 않는다.
 // 품질은 장식(먼지 · 발먼지 · 눈빛 · 애니메이션 프레임)만 바꾸고, 정보(info · drawn)는 모든 품질에서 같다.
 import Phaser from 'phaser';
@@ -145,6 +147,13 @@ export const CONE_LOOK = {
 export const ROAR_WAVE_MS = 600;
 
 const r3 = (v: number): number => Math.round(v * 1000) / 1000;
+/** 방향을 (−π, π]로 접어 반올림 (−π와 π가 같은 값이 되게) */
+const ang3 = (a: number): number => {
+  let v = a % (Math.PI * 2);
+  if (v <= -Math.PI) v += Math.PI * 2;
+  if (v > Math.PI) v -= Math.PI * 2;
+  return r3(v);
+};
 
 interface Gait {
   phase: number;
@@ -289,9 +298,9 @@ export class WorldRenderer {
       this.dust,
       this.coneOver,
       this.rangeFill,
-      this.fxUnder,
-      this.ghosts,
       this.layers.shadows,
+      this.ghosts,
+      this.fxUnder,
       this.ranges,
       this.layers.ground,
       this.layers.bodies,
@@ -566,7 +575,7 @@ export class WorldRenderer {
         x: r3(v.me.x),
         y: r3(v.me.y),
         r: r3(shape.range),
-        dir: r3(v.me.face),
+        dir: ang3(v.me.face),
         arc: r3(shape.arc),
         value: v.survivors.size > 0 ? 'seen' : 'idle',
         color: CONE.idle,
@@ -598,7 +607,7 @@ export class WorldRenderer {
         x: r3(m.x),
         y: r3(m.y),
         r: r3(shape.range),
-        dir: r3(m.aim),
+        dir: ang3(m.aim),
         arc: r3(shape.arc),
         value: state,
         color: CONE[state],
@@ -661,7 +670,7 @@ export class WorldRenderer {
         x: r3(windupAt.x),
         y: r3(windupAt.y),
         r: atk.range,
-        dir: r3(windupDir),
+        dir: ang3(windupDir),
         arc: r3((atk.arc * Math.PI) / 180),
         value: null,
         color: ATTACK_RANGE.color,
@@ -796,6 +805,7 @@ export class WorldRenderer {
       if (!r.used) {
         r.destroy();
         this.survivorRigs.delete(id);
+        this.gaits.delete(id);
       }
     for (const [id, r] of this.monsterRigs)
       if (!r.used) {

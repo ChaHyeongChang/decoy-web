@@ -17,7 +17,7 @@ import {
   type WalkPose,
 } from '../art/anim';
 import { CONE, DANGER, OUTLINE, ROLE, WARN } from '../art/palette';
-import { CLAW_ANCHOR, MONSTER_FACE } from '../art/shapes';
+import { CLAW_ANCHOR, CLAW_SPREAD, MONSTER_FACE } from '../art/shapes';
 
 const T = TILE_PX;
 
@@ -289,9 +289,9 @@ export class MonsterRig extends Rig {
   ) {
     super(scene, key);
     this.shadow = this.make(layers.shadows, 'shadow-monster');
+    this.body = this.make(layers.bodies, 'monster-idle-0');
     this.clawA = this.make(layers.bodies, 'claw');
     this.clawB = this.make(layers.bodies, 'claw');
-    this.body = this.make(layers.bodies, 'monster-idle-0');
     this.eyes = this.make(layers.bodies, 'eyes-open');
     this.glow = this.make(layers.bodies, 'eye-glow', Phaser.BlendModes.ADD);
   }
@@ -328,13 +328,13 @@ export function drawMonsterRig(rig: MonsterRig, p: MonsterPose, bodyR: number): 
     py + (lx * sn + ly * c) * rp,
   ];
   put(rig.shadow, 'shadow-monster', px, py, 0, s, s, p.alpha);
-  // 발톱: 망토 밑에서 앞으로. 공격 준비에는 앞으로 내밀고 바깥으로 벌린다
+  put(rig.body, p.frame, px, py, p.aim, sx, sy, p.alpha);
+  // 발톱: 망토 앞 가장자리 위. 공격 준비에는 앞으로 내밀고 더 벌린다
   for (const side of [1, -1] as const) {
     const img = side === 1 ? rig.clawA : rig.clawB;
-    const [cx, cy] = at(CLAW_ANCHOR.x + 0.16 * p.raise, (CLAW_ANCHOR.y + 0.08 * p.raise) * side);
-    put(img, 'claw', cx, cy, p.aim + side * 0.38 * p.raise, s, s * side, p.alpha);
+    const [cx, cy] = at(CLAW_ANCHOR.x + 0.14 * p.raise, (CLAW_ANCHOR.y + 0.06 * p.raise) * side);
+    put(img, 'claw', cx, cy, p.aim + side * (CLAW_SPREAD + 0.3 * p.raise), s, s * side, p.alpha);
   }
-  put(rig.body, p.frame, px, py, p.aim, sx, sy, p.alpha);
   const [ex, ey] = at(MONSTER_FACE.cx, 0);
   put(rig.eyes, `eyes-${p.eyes}`, ex, ey, p.aim, s, s, p.alpha);
   put(rig.glow, 'eye-glow', ex, ey, 0, s, s, p.glow && p.eyes !== 'blink' ? 0.9 * p.alpha : 0);

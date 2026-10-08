@@ -225,21 +225,25 @@ export function cloakOutline(p: CloakPose): Vec2[] {
 /** cloakOutline 점 목록에서 뒤 자락(어깨 → 톱니 → 어깨)이 시작하는 번호 */
 export const CLOAK_TAIL_START = 22;
 
-/** 앞 발톱 하나 (아래쪽 side = 1, 위쪽은 y를 뒤집어 쓴다): 망토 밑에서 앞으로 휘어 나온 갈고리 */
+/**
+ * 앞 발톱 하나 (아래쪽 side = 1, 위쪽은 y를 뒤집어 쓴다): 원점 = 발톱 뿌리(망토 앞 가장자리), +x = 앞.
+ * 끝이 안쪽으로 휘는 갈고리. 뿌리는 CLAW_ANCHOR, 바깥으로 CLAW_SPREAD만큼 벌어져 망토 위에 얹힌다
+ */
 export function clawPoly(): Vec2[] {
   return [
-    pt(0.42, 0.42),
-    pt(0.62, 0.38),
-    pt(0.92, 0.46),
-    pt(1.16, 0.6),
-    pt(0.9, 0.62),
-    pt(0.66, 0.74),
-    pt(0.46, 0.7),
+    pt(-0.05, -0.1),
+    pt(0.18, -0.12),
+    pt(0.33, -0.09),
+    pt(0.43, -0.02),
+    pt(0.29, -0.01),
+    pt(0.14, 0.06),
+    pt(-0.05, 0.1),
   ];
 }
 
-/** 발톱 그림의 중심 (몸 기준) */
-export const CLAW_ANCHOR = { x: 0.74, y: 0.56 } as const;
+/** 발톱 뿌리 (몸 기준, 아래쪽) · 바깥으로 벌어진 각도 (라디안) */
+export const CLAW_ANCHOR = { x: 0.64, y: 0.44 } as const;
+export const CLAW_SPREAD = 0.38;
 
 /** 얼굴 (어두운 타원)과 눈 위치 */
 export const MONSTER_FACE = {

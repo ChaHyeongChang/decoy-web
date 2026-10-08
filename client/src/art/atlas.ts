@@ -17,7 +17,6 @@ import {
   MONSTER_FACE,
   SURVIVOR_SHAPES,
   circlePoly,
-  CLAW_ANCHOR,
   CLOAK_TAIL_START,
   clawPoly,
   cloakOutline,
@@ -36,7 +35,7 @@ export const ART = {
   faceDark: 0x1a0b0e,
   eye: 0xfff1f2,
   eyeGlow: 0xfb7185,
-  claw: 0xe9cdd1,
+  claw: 0xf1e6e8,
   /** 숨은 생존자 음영 (무채색) */
   hiddenRim: 0xc5cad1,
   hiddenFoot: 0x8b939c,
@@ -422,8 +421,17 @@ function drawEyes(ctx: Ctx, mode: 'open' | 'blink' | 'stun', k: number): void {
     ctx.strokeStyle = css(ART.eye);
     ctx.lineCap = 'round';
     if (mode === 'open') {
+      // 얼굴 안의 붉은 눈빛 (구운 것, 모든 품질) + 비스듬한 아몬드 눈
+      const g = ctx.createRadialGradient(x, y, 0, x, y, f.eyeR * k * 2.6);
+      g.addColorStop(0, css(ART.eyeGlow, 0.55));
+      g.addColorStop(1, css(ART.eyeGlow, 0));
       ctx.beginPath();
-      ctx.ellipse(x, y, f.eyeR * k * 0.85, f.eyeR * k * 1.15, 0, 0, Math.PI * 2);
+      ctx.arc(x, y, f.eyeR * k * 2.6, 0, Math.PI * 2);
+      ctx.fillStyle = g;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(x, y, f.eyeR * k * 0.72, f.eyeR * k * 1.45, s * 0.42, 0, Math.PI * 2);
+      ctx.fillStyle = css(ART.eye);
       ctx.fill();
     } else if (mode === 'blink') {
       ctx.beginPath();
@@ -456,12 +464,19 @@ function drawEyeGlow(ctx: Ctx, k: number): void {
 }
 
 function drawClaw(ctx: Ctx, k: number, w: number): void {
-  // 발톱 하나 (아래쪽, side = 1). 그림 중심 = CLAW_ANCHOR
-  const poly = clawPoly().map((p) => ({ x: p.x - CLAW_ANCHOR.x, y: p.y - CLAW_ANCHOR.y }));
-  const g = ctx.createLinearGradient(-0.1 * k, 0, 0.55 * k, 0);
-  g.addColorStop(0, css(shade(ART.claw, 0.45)));
-  g.addColorStop(1, css(tint(ART.claw, 0.3)));
-  silhouette(ctx, [poly], k, g, w * 0.8);
+  // 발톱 하나 (아래쪽, side = 1). 그림 중심 = 발톱 뿌리. 뿌리는 망토 소매(어두운 빨강), 끝은 뼈 색
+  ctx.beginPath();
+  ctx.arc(0, 0, 0.12 * k, 0, Math.PI * 2);
+  ctx.fillStyle = css(shade(ROLE.monster, 0.45));
+  ctx.lineWidth = w * 1.2;
+  ctx.strokeStyle = css(OUTLINE);
+  ctx.stroke();
+  ctx.fill();
+  const g = ctx.createLinearGradient(0, 0, 0.43 * k, 0);
+  g.addColorStop(0, css(shade(ART.claw, 0.3)));
+  g.addColorStop(0.5, css(ART.claw));
+  g.addColorStop(1, css(0xffffff));
+  silhouette(ctx, [clawPoly()], k, g, w * 0.75);
 }
 
 // ───────────────────────── 굽기 ─────────────────────────
@@ -563,7 +578,7 @@ function frameDefs(): FrameDef[] {
   for (const mode of ['open', 'blink', 'stun'] as const)
     defs.push({ name: `eyes-${mode}`, ext: 0.32, unit: 'm', draw: (c, k) => drawEyes(c, mode, k) });
   defs.push({ name: 'eye-glow', ext: 0.36, unit: 'm', draw: (c, k) => drawEyeGlow(c, k * 0.34) });
-  defs.push({ name: 'claw', ext: 0.62, unit: 'm', draw: (c, k, w) => drawClaw(c, k, w) });
+  defs.push({ name: 'claw', ext: 0.5, unit: 'm', draw: (c, k, w) => drawClaw(c, k, w) });
   return defs;
 }
 
