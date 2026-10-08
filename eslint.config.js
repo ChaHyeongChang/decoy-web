@@ -12,6 +12,8 @@ export default tseslint.config(
       'test-results/**',
       'playwright-report/**',
       'tests/e2e/.results/**',
+      // 병렬 작업자의 git worktree (커밋하지 않음)
+      '.claude/**',
     ],
   },
   js.configs.recommended,

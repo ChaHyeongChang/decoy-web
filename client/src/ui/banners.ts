@@ -5,8 +5,7 @@
 import type Phaser from 'phaser';
 import { COLOR, hex } from '../render/colors';
 import { HUD, VIEW_W } from './layout';
-
-const FONT = "'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif";
+import { UI_FONT, makeText } from './text';
 
 /** 배경색이 바뀔 때만 다시 그린다 */
 function setBg(t: Phaser.GameObjects.Text, color: string): void {
@@ -36,36 +35,33 @@ export class Banners {
 
   constructor(scene: Phaser.Scene) {
     const style = (bg: string): Phaser.Types.GameObjects.Text.TextStyle => ({
-      fontFamily: FONT,
+      fontFamily: UI_FONT,
       fontSize: '30px',
       fontStyle: 'bold',
       color: '#FFFFFF',
       backgroundColor: bg,
       padding: { x: 20, y: 6 },
     });
-    this.persistent = scene.add
-      .text(VIEW_W / 2, HUD.bannerY, '', style('#B91C1C'))
+    this.persistent = makeText(scene, VIEW_W / 2, HUD.bannerY, '', style('#B91C1C'))
       .setOrigin(0.5)
       .setDepth(60)
       .setVisible(false);
     this.rows = [0, 1].map((i) =>
-      scene.add
-        .text(VIEW_W / 2, HUD.bannerY + 58 + i * 52, '', { ...style('#0F1B27'), fontSize: '24px' })
+      makeText(scene, VIEW_W / 2, HUD.bannerY + 58 + i * 52, '', { ...style('#0F1B27'), fontSize: '24px' })
         .setOrigin(0.5)
         .setDepth(60)
         .setVisible(false),
     );
-    this.note = scene.add
-      .text(VIEW_W / 2, HUD.noteY, '', {
-        fontFamily: FONT,
-        fontSize: '24px',
-        color: '#E2E8F0',
-        backgroundColor: 'rgba(15,27,39,0.85)',
-        padding: { x: 24, y: 14 },
-        align: 'center',
-        wordWrap: { width: 900, useAdvancedWrap: true },
-        lineSpacing: 8,
-      })
+    this.note = makeText(scene, VIEW_W / 2, HUD.noteY, '', {
+      fontFamily: UI_FONT,
+      fontSize: '24px',
+      color: '#E2E8F0',
+      backgroundColor: 'rgba(15,27,39,0.85)',
+      padding: { x: 24, y: 14 },
+      align: 'center',
+      wordWrap: { width: 900, useAdvancedWrap: true },
+      lineSpacing: 8,
+    })
       .setOrigin(0.5)
       .setDepth(60)
       .setVisible(false);

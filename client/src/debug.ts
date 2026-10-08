@@ -3,8 +3,10 @@ import Phaser from 'phaser';
 import type { DecoyDebug } from '@decoy/shared';
 import type { App } from './app';
 import { sfx } from './audio';
+import { freezeGfxClock, gfxState, probeSlot, setFpsOverride } from './gfx/state';
 import type { GameScene } from './scenes/GameScene';
 import { VIEW_H, VIEW_W, tileToScreen } from './ui/layout';
+import { auditTexts } from './ui/text';
 
 declare global {
   interface Window {
@@ -19,6 +21,13 @@ function gameScene(app: App): GameScene | null {
 
 export function installDebug(app: App, overlay: boolean): void {
   const hook: DecoyDebug = {
+    get gfx() {
+      return { ...gfxState, features: { ...gfxState.features } };
+    },
+    freezeClock: (ms) => freezeGfxClock(ms),
+    injectFps: (fps) => setFpsOverride(fps),
+    probeText: (text, x, y, px) => probeSlot.draw?.(text, x, y, px),
+    textAudit: () => auditTexts(app.game?.scene.getScenes(true) ?? []),
     get role() {
       return app.match?.role ?? null;
     },
@@ -96,6 +105,7 @@ export function installDebug(app: App, overlay: boolean): void {
       `서버 틱 ${snap?.tick ?? '-'}  스냅샷 ${app.snapCount}`,
       `예측 대기 ${hook.pendingInputs}  보정 ${hook.correction.toFixed(3)}타일`,
       `밸런스 ${app.balanceHash}`,
+      `그래픽 ${gfxState.quality}(${gfxState.qualitySource})  배율 ${gfxState.zoom.toFixed(2)}  ${gfxState.backingW}×${gfxState.backingH}  자동 하향 ${String(gfxState.features.autoDowngrade ?? '-')}`,
     ].join('\n');
   }, 250);
 }

@@ -1,7 +1,9 @@
 // 월드 렌더링 (TECH_SPEC 5장 순서). 맵 위 레이어를 컨테이너 하나에 담아 0.93배로 그린다.
 //  1 배경 · 2 바닥 · 벽 → 3 거점 · 탈출구 영역 → 4 시야 원 / 근접 원 → 5 괴물 부채꼴(괴물 화면)
-//  → 6 안개 → (생존자 화면: 괴물 부채꼴, DECISIONS D4) → 7 캐릭터 · 효과 → 8 항상 표시 배지
-import type Phaser from 'phaser';
+//  → 6 안개(시야 밖 = 어두운 구조) → (생존자 화면: 괴물 부채꼴, DECISIONS D4 / 괴물 화면: 자기 시야 테두리)
+//  → 7 캐릭터 · 효과 → 8 항상 표시 배지
+// 1~6은 안개 레이어(baseLayer.ts)가 품질 · 렌더러에 맞는 방식(Canvas 한 장 합성 / GPU 합성)으로 그린다.
+import Phaser from 'phaser';
 import {
   CAPTURE_POINTS,
   EXITS,
@@ -21,6 +23,8 @@ import {
   type SurvivorView,
   type Vec2,
 } from '@decoy/shared';
+import { effectivePreset, type RendererKind } from '../gfx/presets';
+import { gfxState, onGfxChange } from '../gfx/state';
 import { MAP_SCALE, MAP_X, MAP_Y } from '../ui/layout';
 import {
   drawAttackRange,
@@ -33,10 +37,19 @@ import {
   drawTrackMark,
 } from './characters';
 import { DashTrail } from './effects';
-import { ALPHA, COLOR, ROLE_COLOR } from './colors';
-import { BaseLayer } from './baseLayer';
+import { ALPHA, COLOR, FOG, ROLE_COLOR } from './colors';
+import { createFogLayer, type FogLayer } from './baseLayer';
+import {
+  ambientRgb,
+  compositeScaleFor,
+  fogPathFor,
+  nextConeRed,
+  opponentFxAllowed,
+  rgbCss,
+  unionOutline,
+} from './fogMath';
 import { Badges, type BadgeAlpha } from './objects';
-import { fillPolygon, mixColor } from './vision';
+import { fillPolygon, mixColor, strokeSegments } from './vision';
 
 export interface FrameView {
   balance: Balance;
@@ -69,34 +82,86 @@ const MONSTER_FOG_MS = 33;
 
 export class WorldRenderer {
   readonly container: Phaser.GameObjects.Container;
-  /** 바닥 · 영역 · 시야 · 안개 합성 한 장 (레이어 1~6) */
-  private readonly base: BaseLayer;
+  /** 안개 레이어(1~6)를 담는 컨테이너. 캐릭터 컨테이너보다 먼저 만들어 항상 아래에 그린다 */
+  private readonly fogRoot: Phaser.GameObjects.Container;
+  /** 바닥 · 영역 · 시야 · 안개 (레이어 1~6) */
+  private fog: FogLayer;
+  /** 품질 · 렌더 해상도가 바뀌어 다음 프레임에 안개 레이어를 다시 만든다 */
+  private fogDirty = false;
   private readonly useFog: boolean;
+  private readonly scene: Phaser.Scene;
+  /** 괴물 화면: 자기 시야(부채꼴 ∪ 근접 원) 테두리 선분 (안개와 같은 주기로 계산) */
+  private outline: [Vec2, Vec2][] = [];
   private readonly coneOver: Phaser.GameObjects.Graphics;
   private readonly entities: Phaser.GameObjects.Graphics;
   private readonly badges: Badges;
   private lastFogAt = -1e9;
   /** 부채꼴 색 (노랑 0 ↔ 빨강 1) 보간 상태 */
   private coneRed = 0;
+  /** 생존자 화면: 지난 프레임에 괴물 부채꼴을 그렸는가 (괴물이 시야에 있었는가) */
+  private coneShown = false;
   drawn: DrawnEntity[] = [];
   /** 이번 프레임에 바닥 합성을 다시 했는가 (미니맵 갱신용) */
   baseRefreshed = false;
   private readonly dashTrail = new DashTrail();
-  /** 디버그 · 테스트: 이번 프레임 연출 */
-  fx = { stunStars: false, dashGhosts: 0, attackRange: false };
+  /**
+   * 디버그 · 테스트: 이번 프레임 연출. oppFx = 상대 출처 효과 수
+   * (생존자 화면: 괴물의 잔상 · 공격 준비 범위 · 기절 별, 괴물 화면: 생존자의 구조 링),
+   * cone = 생존자 화면에 괴물 부채꼴을 그렸는가, coneRed = 그 색 보간 상태 (노랑 0 ↔ 빨강 1)
+   */
+  fx = { stunStars: false, dashGhosts: 0, attackRange: false, oppFx: 0, cone: false, coneRed: 0 };
 
+  /** 미니맵이 줄여 그릴 바닥 합성 (안개 포함) */
   get baseCanvas(): HTMLCanvasElement {
-    return this.base.canvas;
+    return this.fog.miniSource;
   }
 
   constructor(scene: Phaser.Scene, useFog: boolean) {
+    this.scene = scene;
     this.useFog = useFog;
-    this.base = new BaseLayer(scene, useFog);
+    this.fogRoot = scene.add.container(0, 0);
+    this.fog = this.buildFog();
     this.container = scene.add.container(MAP_X, MAP_Y).setScale(MAP_SCALE);
     this.coneOver = scene.add.graphics();
     this.entities = scene.add.graphics();
     this.container.add([this.coneOver, this.entities]);
     this.badges = new Badges(scene, this.container);
+    const off = onGfxChange(() => {
+      this.fogDirty = true;
+    });
+    scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      off();
+      this.fog.destroy();
+    });
+  }
+
+  /** 지금 품질 · 렌더러 · 해상도에 맞는 안개 레이어 (그래픽 상태에 기록한다) */
+  private buildFog(): FogLayer {
+    const renderer: RendererKind = this.scene.game.renderer.type === Phaser.WEBGL ? 'webgl' : 'canvas';
+    // 품질 표는 실제 렌더러 기준으로 다시 고른다 (Canvas면 WebGL 전용 기능 0개, 합성 1배 이하)
+    const preset = effectivePreset(gfxState.quality, renderer, gfxState.touch);
+    const path = fogPathFor(preset, renderer);
+    const compositeScale = compositeScaleFor(gfxState.zoom, preset.compositeCap);
+    const fog = createFogLayer(this.scene, this.fogRoot, path.mode, {
+      fog: this.useFog,
+      compositeScale,
+      lightPxPerTile: preset.lightPxPerTile,
+      zoom: gfxState.zoom,
+      ambientCss: rgbCss(ambientRgb(FOG.ambient, FOG.tint)),
+      shader: path.shader,
+    });
+    gfxState.fogMode = fog.mode;
+    gfxState.ambient = this.useFog ? FOG.ambient : 1;
+    gfxState.compositeScale = compositeScale;
+    gfxState.features.fogShader = fog.shader;
+    return fog;
+  }
+
+  private rebuildFog(): void {
+    this.fogDirty = false;
+    this.fog.destroy();
+    this.fog = this.buildFog();
+    this.lastFogAt = -1e9;
   }
 
   /** 생존자 팀 시야의 눈들 (자기 + 팀원, 사망 · 탈출 제외) */
@@ -117,16 +182,18 @@ export class WorldRenderer {
     const isMonster = v.role === 'monster';
     const drawn: DrawnEntity[] = [];
 
-    // 1~6. 바닥 · 거점 · 탈출구 영역 · 시야 원 · (괴물 화면) 부채꼴 · 안개 — 갱신 주기마다 한 장으로 합성
+    // 1~6. 바닥 · 거점 · 탈출구 영역 · 시야 원 · (괴물 화면) 부채꼴 · 안개 — 갱신 주기마다 합성
+    if (this.fogDirty) this.rebuildFog();
     const fogDue = v.nowMs - this.lastFogAt >= (isMonster ? MONSTER_FOG_MS : SURVIVOR_FOG_MS);
     this.baseRefreshed = fogDue;
     const eyes = isMonster ? [] : this.survivorEyes(v);
     if (fogDue) {
       this.lastFogAt = v.nowMs;
-      const b = this.base;
+      const b = this.fog;
       b.begin();
       b.drawPoints(snap.world.points, balance);
       b.drawExits(snap.world.exits, balance);
+      this.outline = [];
       if (isMonster && v.me) {
         const near = monsterNearPolygon(balance, v.me);
         const cone = monsterConePolygon(balance, v.me, v.me.face, v.myBlend);
@@ -134,6 +201,8 @@ export class WorldRenderer {
         b.fillPoly(cone, COLOR.coneIdle, ALPHA.coneIdle);
         b.addHardLight(near);
         b.addHardLight(cone);
+        // 딱 잘린 경계는 빛 지도 해상도(타일당 8~16px)에 기대지 않고 판정 다각형 그대로 선을 긋는다
+        if (this.useFog) this.outline = unionOutline([cone, near]);
       } else {
         for (const e of eyes) {
           const r = survivorVisionRadius(balance, e.role);
@@ -147,31 +216,53 @@ export class WorldRenderer {
 
     // 생존자 화면: 괴물 부채꼴 (보일 때만, 안개 위에 전체 모양)
     this.coneOver.clear();
+    if (isMonster && this.outline.length > 0)
+      strokeSegments(
+        this.coneOver,
+        this.outline,
+        COLOR.coneIdle,
+        FOG.outlineAlpha,
+        FOG.outlineWidth / MAP_SCALE,
+      );
+    const coneShown = !isMonster && v.monster !== null;
     if (!isMonster && v.monster) {
       const m = v.monster;
-      const target = m.seesSomeone ? 1 : 0;
-      // 노랑 → 빨강 0.1초, 빨강 → 노랑 0.4초 (VISUAL_SPEC 4장)
-      const rate = target > this.coneRed ? frameMs / 100 : frameMs / 400;
-      this.coneRed =
-        target > this.coneRed ? Math.min(1, this.coneRed + rate) : Math.max(0, this.coneRed - rate);
+      // 시야에 다시 들어온 첫 프레임은 지금 상태 그대로, 보이는 동안에만 노랑 ↔ 빨강 보간 (fogMath.nextConeRed)
+      this.coneRed = nextConeRed(this.coneRed, this.coneShown, m.seesSomeone, frameMs);
       const cone = monsterConePolygon(balance, m, m.aim, m.blend);
       const color = mixColor(COLOR.coneIdle, COLOR.coneSeen, this.coneRed);
       const alpha = ALPHA.coneIdle + (ALPHA.coneSeen - ALPHA.coneIdle) * this.coneRed;
       fillPolygon(this.coneOver, cone, color, alpha);
+    } else {
+      // 괴물이 안 보이는 동안(생존자 화면) 또는 괴물 화면: 부채꼴 색 상태를 남기지 않는다
+      this.coneRed = 0;
     }
+    this.coneShown = coneShown;
 
     // 7. 캐릭터 · 공격 범위 · 구조 게이지
     const g = this.entities;
     g.clear();
     const atk = balance.monster.attack;
+    // 상대 쪽 잔여 효과 규칙: 생존자 화면에서 괴물이 나오는 효과는 이번 스냅샷에 괴물이 있을 때만.
+    // 괴물이 시야를 벗어나면(서버가 좌표를 보내지 않으면) 잔상 · 범위 · 별을 바로 없앤다 (보간된 몸은 약 0.1초 더 남는다)
+    const oppVisible = isMonster || opponentFxAllowed(snap.monster !== null);
+    if (!oppVisible) this.dashTrail.clear();
+    let oppFx = 0;
     // 돌진 잔상 (보이는 화면, 0.25초): 돌진 중 위치를 남기고 옅어진다
-    const dashing = isMonster ? (v.me && v.myDashing ? v.me : null) : v.monster?.dashing ? v.monster : null;
+    const dashing = isMonster
+      ? v.me && v.myDashing
+        ? v.me
+        : null
+      : oppVisible && v.monster?.dashing
+        ? v.monster
+        : null;
     if (dashing) {
       const face = 'aim' in dashing ? dashing.aim : dashing.face;
       this.dashTrail.sample(dashing.x, dashing.y, face, v.nowMs);
     }
     const ghosts = this.dashTrail.live(v.nowMs);
     for (const { g: gh, alpha } of ghosts) drawMonster(g, gh.x, gh.y, gh.aim, 0.45 * alpha);
+    if (!isMonster) oppFx += ghosts.length;
     // 공격 준비 범위 (양쪽 화면, 흰색 25%): 괴물을 따라가고 방향은 고정.
     // 괴물 화면은 누른 순간부터 (서버 확인 전 예측), 서버가 처리한 뒤에는 서버 값을 따른다
     let attackRange = false;
@@ -181,9 +272,10 @@ export class WorldRenderer {
       drawAttackRange(g, v.me.x, v.me.y, dir, atk.range, atk.arc);
       attackRange = true;
     }
-    if (!isMonster && v.monster && v.monster.windup > 0) {
+    if (!isMonster && oppVisible && v.monster && v.monster.windup > 0) {
       drawAttackRange(g, v.monster.x, v.monster.y, v.monster.aim, atk.range, atk.arc);
       attackRange = true;
+      oppFx += 1;
     }
     const blinkFast = Math.floor(v.nowMs / 150) % 2 === 0;
     for (const [id, s] of v.survivors) {
@@ -192,16 +284,20 @@ export class WorldRenderer {
       const revealColor =
         isMonster && s.role ? ROLE_COLOR[s.role] : s.protected && blinkFast ? COLOR.white : null;
       drawSurvivor(g, s.x, s.y, s.face, color, s.protected ? ALPHA.protected : 1, revealColor);
-      if (s.rescue !== null && s.rescue > 0) drawRescueRing(g, s.x, s.y, s.rescue);
+      if (s.rescue !== null && s.rescue > 0) {
+        drawRescueRing(g, s.x, s.y, s.rescue);
+        if (isMonster) oppFx += 1;
+      }
       drawn.push({ id, kind: 'survivor', x: s.x, y: s.y, face: s.face, layer: 'main' });
     }
     let stunStars = false;
     if (!isMonster && v.monster) {
       const m = v.monster;
       drawMonster(g, m.x, m.y, m.aim);
-      if (m.stunned) {
+      if (m.stunned && oppVisible) {
         drawStunStars(g, m.x, m.y, v.nowMs);
         stunStars = true;
+        oppFx += 1;
       }
       drawn.push({ id: 'monster', kind: 'monster', x: m.x, y: m.y, face: m.aim, layer: 'main' });
     }
@@ -278,6 +374,13 @@ export class WorldRenderer {
     };
     this.badges.draw(snap.world.points, snap.world.exits, alpha, blink);
     this.drawn = drawn;
-    this.fx = { stunStars, dashGhosts: ghosts.length, attackRange };
+    this.fx = {
+      stunStars,
+      dashGhosts: ghosts.length,
+      attackRange,
+      oppFx,
+      cone: coneShown,
+      coneRed: this.coneRed,
+    };
   }
 }

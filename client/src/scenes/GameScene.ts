@@ -4,6 +4,8 @@ import type { DrawnEntity, GameEvent, InputFrame, Role } from '@decoy/shared';
 import type { App } from '../app';
 import { sfx } from '../audio';
 import { STORY_TEXT, UI_TEXT, formatText } from '../data/storyText';
+import { qualityHooks, sessionAutoDowngrade } from '../gfx/quality';
+import { getFpsOverride, gfxState, probeSlot } from '../gfx/state';
 import { InputSampler } from '../input';
 import { applyDashStart, applyWindupLock, predictMonsterPress, type LocalWindup } from '../localActions';
 import { COLOR } from '../render/colors';
@@ -14,6 +16,7 @@ import { Hud } from '../ui/hud';
 import { VIEW_H, VIEW_W, fitCamera, screenToTile } from '../ui/layout';
 import { Minimap } from '../ui/minimap';
 import { Scoreboard, TutorialOverlay } from '../ui/overlays';
+import { drawProbeText, makeText } from '../ui/text';
 
 /** 안개 (M3부터) */
 export const FOG_ENABLED = true;
@@ -62,6 +65,8 @@ export class GameScene extends Phaser.Scene {
   private screenFx!: ScreenEffects;
   /** 괴물: 서버 확인 전에 먼저 보여 주는 공격 준비 */
   private localWindup: LocalWindup | null = null;
+  /** 판 중 FPS 감시를 하는가 (세션 상태는 sessionAutoDowngrade: 느리면 한 단계 내리고 효과를 확인한다) */
+  private watchingFps = false;
 
   constructor() {
     super('game');
@@ -107,18 +112,22 @@ export class GameScene extends Phaser.Scene {
     this.spottedEdge.lineStyle(14, COLOR.monster, 0.75);
     this.spottedEdge.strokeRect(7, 7, VIEW_W - 14, VIEW_H - 14);
     this.spottedEdge.setVisible(false);
-    this.warnText = this.add
-      .text(VIEW_W / 2, VIEW_H - 112, '', {
-        fontFamily: 'sans-serif',
-        fontSize: '24px',
-        fontStyle: 'bold',
-        color: '#0B1622',
-        backgroundColor: '#F59E0B',
-        padding: { x: 16, y: 6 },
-      })
+    this.warnText = makeText(this, VIEW_W / 2, VIEW_H - 112, '', {
+      fontFamily: 'sans-serif',
+      fontSize: '24px',
+      fontStyle: 'bold',
+      color: '#0B1622',
+      backgroundColor: '#F59E0B',
+      padding: { x: 16, y: 6 },
+    })
       .setOrigin(0.5)
       .setDepth(51)
       .setVisible(false);
+    // 선명도 검사 글자는 판 동안 이 장면(HUD와 같은 곳)에 그린다. 장면이 끝나면 대기 장면 것으로 돌려놓는다
+    const prevProbe = probeSlot.draw;
+    probeSlot.draw = (text, x, y, px) => drawProbeText(this, text, x, y, px);
+    sessionAutoDowngrade.beginMatch(performance.now());
+    this.watchingFps = true;
 
     // 판 시작 문구 (괴물 대기 5초 동안)
     const intro = info.role === 'monster' ? 'INTRO_MONSTER' : 'INTRO_WALL';
@@ -143,6 +152,9 @@ export class GameScene extends Phaser.Scene {
     this.lastInputAt = performance.now();
     this.inputTimer = window.setInterval(() => this.inputTick(), 4);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      probeSlot.draw = prevProbe;
+      this.watchingFps = false;
+      sessionAutoDowngrade.endMatch();
       if (this.inputTimer !== null) window.clearInterval(this.inputTimer);
       this.inputTimer = null;
       this.sampler.detach();
@@ -305,6 +317,20 @@ export class GameScene extends Phaser.Scene {
 
   override update(_time: number, delta: number): void {
     this.renderFrame(delta);
+    this.watchFps();
+  }
+
+  /**
+   * 판 중(결과 전) 보이는 탭에서만 잰다. 느린 상태가 이어지면 품질을 한 단계 내리고(재연결 · 장면 재시작 없음),
+   * 같은 판에서 효과를 확인해 효과가 없으면 되돌린다 (gfx/quality.ts AutoDowngrade)
+   */
+  private watchFps(): void {
+    if (!this.watchingFps || document.hidden) return;
+    if (!this.app.lastSnap || this.app.result) return;
+    const fps = getFpsOverride() ?? this.game.loop.actualFps;
+    const action = sessionAutoDowngrade.sample(performance.now(), fps, gfxState.quality);
+    gfxState.measuredFps = sessionAutoDowngrade.average;
+    if (action) qualityHooks.auto?.(action);
   }
 
   private renderFrame(delta: number): void {

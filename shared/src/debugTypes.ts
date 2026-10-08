@@ -15,7 +15,74 @@ export interface DrawnEntity {
   tag?: string;
 }
 
+/** 그래픽 상태 (M10: 렌더 해상도 · 품질 · 안개) */
+export interface GfxDebugInfo {
+  quality: 'high' | 'medium' | 'low';
+  /** 품질을 정한 곳: URL(?quality) · 저장된 설정 · 자동 */
+  qualitySource: 'url' | 'saved' | 'auto';
+  renderer: 'webgl' | 'canvas';
+  /** 터치 기기로 판단했는가 */
+  touch: boolean;
+  dpr: number;
+  /** 캔버스 표시 크기 (CSS px) */
+  cssW: number;
+  cssH: number;
+  /** 백버퍼 (캔버스 실제 픽셀) */
+  backingW: number;
+  backingH: number;
+  /** 카메라 zoom = 백버퍼 px / 논리 px (1보다 클 수 있다) */
+  zoom: number;
+  /** ?scale로 준 배율 (없으면 null) */
+  scaleOverride: number | null;
+  /** 새로 만드는 Phaser 글자의 텍스처 해상도 (= zoom). 이미 있는 글자의 실제 값은 textAudit()로 본다 */
+  textRes: number;
+  /** 바닥 합성 캔버스 배율 (논리 px 대비) */
+  compositeScale: number;
+  /** 미니맵 캔버스 배율 */
+  minimapScale: number;
+  /** 안개 합성 방식 */
+  fogMode: 'gpu' | 'canvas';
+  /** 시야 밖 밝기 하한 (0~1) */
+  ambient: number;
+  /** 실제로 켜진 장식 기능 (bloom · vignette · fogShader · particleCap ...)과 autoDowngrade(on · checking · off) */
+  features: Record<string, boolean | number | string>;
+  /** 판 중 자동으로 품질을 내린 횟수 (효과가 없어 되돌려도 줄지 않는다) */
+  downgrades: number;
+  /** 품질 판단에 쓴 최근 FPS */
+  measuredFps: number;
+}
+
+/** 활성 장면의 Phaser 글자 점검 (M10a 선명도: 글자 해상도 = zoom, 격자 맞춤) */
+export interface TextAudit {
+  /** 글자 수 (Container · Layer 안, 숨긴 글자 · 선명도 탐침 포함) */
+  count: number;
+  /** 글자 스타일 해상도 최솟값 · 최댓값 */
+  styleResMin: number;
+  styleResMax: number;
+  /** 텍스처 소스 해상도(Canvas 렌더러가 크기를 나누는 값) 최솟값 · 최댓값 */
+  sourceResMin: number;
+  sourceResMax: number;
+  /** 왼쪽 위 위치 × zoom이 정수(백버퍼 픽셀)에서 벗어난 최댓값 */
+  gridErrMax: number;
+  /** 선명도 탐침 글자의 해상도 (만든 적이 없으면 null) */
+  probeRes: number | null;
+  /** 페이지를 연 뒤 글자 텍스처를 다시 그린 누적 횟수 */
+  redraws: number;
+  /** 그중 글자 · 글꼴 · 해상도처럼 배치가 바뀐 횟수 (같은 색 · 같은 글자로 다시 그리면 redraws만 는다) */
+  relayouts: number;
+}
+
 export interface DecoyDebug {
+  /** 그래픽 상태 (M10) */
+  readonly gfx: Readonly<GfxDebugInfo>;
+  /** 장식 애니메이션 · 입자 시계를 멈춘다(ms) / null이면 다시 흐름. 규칙 · 입력에는 영향 없음 */
+  freezeClock(ms: number | null): void;
+  /** 품질 자동 하향 판단에 쓸 FPS를 덮어쓴다 / null이면 실제 측정값 */
+  injectFps(fps: number | null): void;
+  /** 선명도 검사: HUD에 글자를 그린다 (논리 좌표 x, y, 글자 크기 px) */
+  probeText(text: string, x: number, y: number, px: number): void;
+  /** 활성 장면의 모든 Phaser 글자 해상도 · 격자 어긋남 · 다시 그린 횟수 */
+  textAudit(): TextAudit;
   readonly role: Role | null;
   readonly you: string | null;
   readonly room: string | null;

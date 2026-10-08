@@ -2,6 +2,13 @@
 import type { LobbyState, Role } from '@decoy/shared';
 import logoUrl from '../../../docs/images/logo_decoy.png';
 import { ROLE_CARDS, UI_TEXT } from '../data/storyText';
+import {
+  loadSavedQuality,
+  parseQualityChoice,
+  qualityHooks,
+  saveQualityChoice,
+  type QualityChoice,
+} from '../gfx/quality';
 
 export interface LobbyActions {
   create(name: string): void;
@@ -13,6 +20,17 @@ export interface LobbyActions {
 }
 
 const ROLE_ORDER: Role[] = ['monster', 'runner', 'guard', 'scout'];
+
+/** 저장소가 막히거나 가득 차서 품질 설정을 저장하지 못했을 때 (고른 값은 이번 접속에만 적용된다) */
+const QUALITY_NOT_SAVED = '이 브라우저에서는 설정이 저장되지 않아요(이번 접속에만 적용)';
+
+/** 그래픽 품질 선택지 (M10a. 화면 디자인은 M10c에서 다시 한다) */
+const QUALITY_OPTIONS: readonly { value: QualityChoice; label: string }[] = [
+  { value: 'auto', label: '자동' },
+  { value: 'high', label: '높음' },
+  { value: 'medium', label: '중간' },
+  { value: 'low', label: '낮음' },
+];
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -30,6 +48,8 @@ export class LobbyUI {
   private errorBox: HTMLDivElement;
   private you: string | null = null;
   private lastRoom: string | null = null;
+  /** 이번 접속에서 고른 품질 (저장하지 못했어도 선택 상자를 다시 그릴 때 이 값을 보여 준다) */
+  private qualityChoice: QualityChoice | null = null;
 
   constructor(
     host: HTMLElement,
@@ -108,9 +128,35 @@ export class LobbyUI {
     });
     const joinRow = el('div', { class: 'row' });
     joinRow.append(code, join);
-    box.append(name, create, joinRow, this.errorBox);
+    box.append(name, create, joinRow, ...this.qualityRow(), this.errorBox);
     this.root.append(this.header(true), box);
     this.show();
+  }
+
+  /**
+   * 그래픽: 자동 / 높음 / 중간 / 낮음. 고르면 저장하고 바로 적용한다 (gfx/quality.ts, main.ts).
+   * 저장하지 못해도 이번 접속에는 고른 값이 적용되고, 저장되지 않는다는 안내를 짧게 띄운다
+   */
+  private qualityRow(): HTMLElement[] {
+    const row = el('label', { class: 'row' });
+    const select = el('select', { class: 'input', 'data-testid': 'quality-select' });
+    const current: QualityChoice = this.qualityChoice ?? loadSavedQuality() ?? 'auto';
+    for (const o of QUALITY_OPTIONS) {
+      const opt = el('option', { value: o.value }, o.label);
+      if (o.value === current) opt.selected = true;
+      select.appendChild(opt);
+    }
+    const note = el('div', { class: 'lobby-hint', 'data-testid': 'quality-note' }, QUALITY_NOT_SAVED);
+    note.hidden = true;
+    select.addEventListener('change', () => {
+      const choice = parseQualityChoice(select.value);
+      if (!choice) return;
+      this.qualityChoice = choice;
+      note.hidden = saveQualityChoice(choice);
+      qualityHooks.choose?.(choice);
+    });
+    row.append(el('span', {}, '그래픽'), select);
+    return [row, note];
   }
 
   /** 방 로비 */
