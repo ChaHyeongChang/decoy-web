@@ -1,8 +1,8 @@
 // 안개 아래 그리는 공개 동적 레이어(거점 패드 · 눈금 · 스캔, 탈출구 상태 · 개방 게이지 · 미닫이, 시야 원 채움)와 빛 지도.
-// 같은 그림을 Canvas2D(한 장 합성 · 미니맵)와 Phaser Graphics(GPU 합성)로 똑같이 그리려고 펜을 둘 둔다.
+// 그림은 펜(FogPen) 하나로 그린다: Canvas2D 펜(한 장 합성 · 미니맵 · GPU 합성의 조각 캔버스)과 기록 펜(PenRecord: GPU 합성이
+// 안개 주기마다 기록해 바뀐 조각만 캔버스에 다시 그려 올린다). 프레임마다 다시 테셀레이션하는 Phaser Graphics는 쓰지 않는다.
 // 거점 · 탈출구의 판정 반경(원 · 눈금 위치)은 balance 값 그대로 그린다(범위 표시 = 실제 판정값). 장식 시간(스캔 회전 ·
 // 맥동 · 미닫이)은 그래픽 상수이고 시계는 gfxNow(디버그 훅으로 멈춤)다.
-import type Phaser from 'phaser';
 import {
   CAPTURE_POINTS,
   EXITS,
@@ -12,6 +12,7 @@ import {
   type ExitId,
   type ExitState,
   type ExitView,
+  type PointId,
   type PointView,
   type Vec2,
 } from '@decoy/shared';
@@ -23,6 +24,7 @@ import {
   exitChevrons,
   rimLiftPolys,
   rimLiftRects,
+  type TileRect,
 } from '../art/mapArtGeom';
 import { gfxNow, gfxState } from '../gfx/state';
 import { softLightGeometry } from './fogMath';
@@ -139,21 +141,30 @@ export class CanvasPen implements FogPen {
   }
 }
 
-/** Phaser Graphics 펜 (GPU 합성의 공개 동적 레이어). k = 논리 px / 타일 */
-export class GraphicsPen implements FogPen {
-  constructor(
-    private readonly g: Phaser.GameObjects.Graphics,
-    private readonly k: number,
-  ) {}
+/** 기록 펜의 명령 번호 */
+const OP_FILL_CIRCLE = 0;
+const OP_STROKE_CIRCLE = 1;
+const OP_STROKE_ARC = 2;
+const OP_FILL_POLY = 3;
+const OP_LINE = 4;
+
+/**
+ * 그리기 명령을 숫자 배열로 기록하는 펜 (GPU 합성의 공개 동적 레이어). 안개 주기마다 기록해 지난번과 같으면 캔버스를
+ * 다시 그리지도 올리지도 않고, 다르면 replay로 캔버스 펜(조각 · 미니맵)에 그대로 다시 그린다
+ */
+export class PenRecord implements FogPen {
+  readonly ops: number[] = [];
+
+  reset(): void {
+    this.ops.length = 0;
+  }
 
   fillCircle(x: number, y: number, r: number, color: number, alpha: number): void {
-    this.g.fillStyle(color, alpha);
-    this.g.fillCircle(x * this.k, y * this.k, r * this.k);
+    this.ops.push(OP_FILL_CIRCLE, x, y, r, color, alpha);
   }
 
   strokeCircle(x: number, y: number, r: number, width: number, color: number, alpha: number): void {
-    this.g.lineStyle(width, color, alpha);
-    this.g.strokeCircle(x * this.k, y * this.k, r * this.k);
+    this.ops.push(OP_STROKE_CIRCLE, x, y, r, width, color, alpha);
   }
 
   strokeArc(
@@ -167,32 +178,65 @@ export class GraphicsPen implements FogPen {
     color: number,
     alpha: number,
   ): void {
-    const g = this.g;
-    g.lineStyle(width, color, alpha);
-    g.beginPath();
-    g.arc(x * this.k, y * this.k, Math.max(0, r * this.k - inset), from, to, false);
-    g.strokePath();
+    this.ops.push(OP_STROKE_ARC, x, y, r, inset, from, to, width, color, alpha);
   }
 
   fillPoly(poly: readonly Vec2[], color: number, alpha: number): void {
     if (poly.length < 3) return;
-    const g = this.g;
-    const first = poly[0];
-    if (!first) return;
-    g.fillStyle(color, alpha);
-    g.beginPath();
-    g.moveTo(first.x * this.k, first.y * this.k);
-    for (let i = 1; i < poly.length; i += 1) {
-      const p = poly[i];
-      if (p) g.lineTo(p.x * this.k, p.y * this.k);
-    }
-    g.closePath();
-    g.fillPath();
+    this.ops.push(OP_FILL_POLY, poly.length);
+    for (const p of poly) this.ops.push(p.x, p.y);
+    this.ops.push(color, alpha);
   }
 
   line(x0: number, y0: number, x1: number, y1: number, width: number, color: number, alpha: number): void {
-    this.g.lineStyle(width, color, alpha);
-    this.g.lineBetween(x0 * this.k, y0 * this.k, x1 * this.k, y1 * this.k);
+    this.ops.push(OP_LINE, x0, y0, x1, y1, width, color, alpha);
+  }
+
+  /** 기록이 ops와 같은가 (같으면 다시 그릴 필요가 없다) */
+  sameAs(ops: readonly number[]): boolean {
+    const a = this.ops;
+    if (a.length !== ops.length) return false;
+    for (let i = 0; i < a.length; i += 1) if (a[i] !== ops[i]) return false;
+    return true;
+  }
+
+  /** 기록한 명령을 다른 펜에 같은 순서로 그린다 */
+  replay(pen: FogPen): void {
+    const o = this.ops;
+    const at = (i: number): number => o[i] ?? 0;
+    let i = 0;
+    while (i < o.length) {
+      const op = at(i);
+      if (op === OP_FILL_CIRCLE) {
+        pen.fillCircle(at(i + 1), at(i + 2), at(i + 3), at(i + 4), at(i + 5));
+        i += 6;
+      } else if (op === OP_STROKE_CIRCLE) {
+        pen.strokeCircle(at(i + 1), at(i + 2), at(i + 3), at(i + 4), at(i + 5), at(i + 6));
+        i += 7;
+      } else if (op === OP_STROKE_ARC) {
+        pen.strokeArc(
+          at(i + 1),
+          at(i + 2),
+          at(i + 3),
+          at(i + 4),
+          at(i + 5),
+          at(i + 6),
+          at(i + 7),
+          at(i + 8),
+          at(i + 9),
+        );
+        i += 10;
+      } else if (op === OP_FILL_POLY) {
+        const n = at(i + 1);
+        const poly: Vec2[] = [];
+        for (let k = 0; k < n; k += 1) poly.push({ x: at(i + 2 + k * 2), y: at(i + 3 + k * 2) });
+        pen.fillPoly(poly, at(i + 2 + n * 2), at(i + 3 + n * 2));
+        i += 4 + n * 2;
+      } else {
+        pen.line(at(i + 1), at(i + 2), at(i + 3), at(i + 4), at(i + 5), at(i + 6), at(i + 7));
+        i += 8;
+      }
+    }
   }
 }
 
@@ -278,8 +322,11 @@ export function paintPoints(
   }
 }
 
-/** 탈출구별로 마지막으로 본 상태와 열린 시각 (미닫이 연출용, 장식 시간) */
-const exitSeen = new Map<ExitId, { state: ExitState; openedAt: number }>();
+/**
+ * 탈출구별로 마지막으로 본 상태와 열린 시각 (미닫이 연출용). openedAt은 장식 시계(gfxNow), openedReal은 실제 시계다.
+ * 실제 시계는 '장식 시계가 멈췄는가'를 알아내는 데만 쓴다 (연출 자체는 장식 시계로 움직인다)
+ */
+const exitSeen = new Map<ExitId, { state: ExitState; openedAt: number; openedReal: number }>();
 
 /** 새 안개 레이어(판 시작 · 품질 변경): 처음 보는 열린 문은 연출 없이 다 열린 상태로 */
 export function resetExitTracking(): void {
@@ -287,14 +334,18 @@ export function resetExitTracking(): void {
 }
 
 /** 상태가 open이 된 순간을 기록한다. 처음 본 것이 이미 open이면(재접속 등) 연출 없이 다 열린 상태 */
-export function trackExit(id: ExitId, state: ExitState, now: number): number {
+export function trackExit(id: ExitId, state: ExitState, now: number, real = performance.now()): number {
   const prev = exitSeen.get(id);
   if (!prev) {
-    const rec = { state, openedAt: state === 'open' ? now - OBJ.doorSlideMs : now };
+    const done = state === 'open' ? OBJ.doorSlideMs : 0;
+    const rec = { state, openedAt: now - done, openedReal: real - done };
     exitSeen.set(id, rec);
     return rec.openedAt;
   }
-  if (prev.state !== 'open' && state === 'open') prev.openedAt = now;
+  if (prev.state !== 'open' && state === 'open') {
+    prev.openedAt = now;
+    prev.openedReal = real;
+  }
   prev.state = state;
   return prev.openedAt;
 }
@@ -303,6 +354,18 @@ export function trackExit(id: ExitId, state: ExitState, now: number): number {
 export function doorSlide(openedAt: number, now: number): number {
   const t = clamp01((now - openedAt) / OBJ.doorSlideMs);
   return 1 - (1 - t) ** 3;
+}
+
+/**
+ * 지금 그릴 미닫이 진행. 보통은 장식 시계(doorSlide)이고, 장식 시계가 멈춘 채(디버그 freezeClock) 실제로 미닫이 시간
+ * 이상 흘렀으면 다 열린 그림이다. 멈춘 시계에서 열린 문이 영원히 닫힌(= 활성처럼 보이는) 그림으로 남지 않게 한다
+ */
+export function exitSlide(id: ExitId, now: number, real = performance.now()): number {
+  const rec = exitSeen.get(id);
+  if (!rec) return 1;
+  const t = doorSlide(rec.openedAt, now);
+  const stalled = real - rec.openedReal - (now - rec.openedAt);
+  return stalled >= OBJ.doorSlideMs ? 1 : t;
 }
 
 /** 탈출구 판정 원 중 바닥 쪽 원호의 각 범위 (외벽 칸 위는 그리지 않는다) */
@@ -320,7 +383,13 @@ export function exitArcRange(id: ExitId, r: number): [number, number] {
  * 개방 진행(생존자에게만 오는 값, null이면 그리지 않음) = 문 칸 분할 게이지 + 판정 원 진행 호,
  * 열림 = 0.6초 미닫이 + 바닥으로 초록 빛 번짐
  */
-export function paintExits(pen: FogPen, exits: readonly ExitView[], balance: Balance, now = gfxNow()): void {
+export function paintExits(
+  pen: FogPen,
+  exits: readonly ExitView[],
+  balance: Balance,
+  now = gfxNow(),
+  real = performance.now(),
+): void {
   const r = balance.exit.radius;
   paintedRadii.exit = r;
   const C = OBJ_COLOR;
@@ -330,7 +399,7 @@ export function paintExits(pen: FogPen, exits: readonly ExitView[], balance: Bal
     const north = D.y0 === 0;
     const cx = (D.x0 + D.x1) / 2;
     const on = e.state !== 'inactive';
-    const openedAt = trackExit(e.id, e.state, now);
+    trackExit(e.id, e.state, now, real);
     const color = on ? C.go : C.off;
     // 판정 원 (바닥 쪽만)
     const [a0, a1] = exitArcRange(e.id, r);
@@ -408,7 +477,7 @@ export function paintExits(pen: FogPen, exits: readonly ExitView[], balance: Bal
       }
     } else {
       // 열림: 가운데부터 갈라지는 미닫이 + 문틈 빛 + 바닥 번짐 (반원: 바닥 쪽만)
-      const t = doorSlide(openedAt, now);
+      const t = exitSlide(e.id, now, real);
       const half = ((lx1 - lx0) / 2) * t;
       const ly0 = D.y0 + 0.16;
       const ly1 = D.y1 - 0.16;
@@ -437,7 +506,7 @@ export function paintExits(pen: FogPen, exits: readonly ExitView[], balance: Bal
       }
       band(lx0, lx1, C.go, 0.85);
       const spill: Vec2[] = [];
-      const sr = 1.35;
+      const sr = EXIT_SPILL_R;
       for (let q = 0; q <= 16; q += 1) {
         const a = (Math.PI * q) / 16;
         spill.push({ x: cx + Math.cos(a) * sr, y: edge + inward * Math.sin(a) * sr });
@@ -450,6 +519,46 @@ export function paintExits(pen: FogPen, exits: readonly ExitView[], balance: Bal
       );
     }
   }
+}
+
+/** 열린 문에서 바닥으로 번지는 초록 빛 반원 반지름 (타일) */
+const EXIT_SPILL_R = 1.35;
+/** 그림 범위 여유 (타일): 가장 굵은 선(거점 바깥 번짐 6px)의 반 + 안티에일리어싱 */
+const PAINT_PAD = 0.2;
+
+function padRect(xs: readonly number[], ys: readonly number[]): TileRect {
+  return {
+    x0: Math.min(...xs) - PAINT_PAD,
+    y0: Math.min(...ys) - PAINT_PAD,
+    x1: Math.max(...xs) + PAINT_PAD,
+    y1: Math.max(...ys) + PAINT_PAD,
+  };
+}
+
+/** 거점 하나(paintPoints)가 어떤 상태에서든 그리는 범위 (타일): 판정 원 + 바깥 번짐 선 */
+export function pointPaintBounds(id: PointId, r: number): TileRect {
+  const c = CAPTURE_POINTS[id];
+  return padRect([c.x - r, c.x + r], [c.y - r, c.y + r]);
+}
+
+/** 탈출구 하나(paintExits)가 어떤 상태에서든 그리는 범위 (타일): 판정 원 · 문 · 상태등 · 셰브론 · 열린 문 빛 번짐 */
+export function exitPaintBounds(id: ExitId, r: number): TileRect {
+  const e = EXITS[id];
+  const D = e.door;
+  const north = D.y0 === 0;
+  const edge = north ? D.y1 : D.y0;
+  const cx = (D.x0 + D.x1) / 2;
+  const xs = [e.center.x - r, e.center.x + r, D.x0, D.x1, cx - EXIT_SPILL_R, cx + EXIT_SPILL_R];
+  const ys = [e.center.y - r, e.center.y + r, D.y0, D.y1, edge + (north ? 1 : -1) * EXIT_SPILL_R];
+  for (const l of doorLamps(id)) {
+    xs.push(l.x0, l.x1);
+    ys.push(l.y0, l.y1);
+  }
+  for (const p of exitChevrons(id).flat()) {
+    xs.push(p.x);
+    ys.push(p.y);
+  }
+  return padRect(xs, ys);
 }
 
 // ───────────── 테두리 리프트 (곱하기 뒤에 더하는 정적 구조 색) ─────────────
@@ -484,32 +593,127 @@ export function addRimLift(c: CanvasRenderingContext2D, path: Path2D): void {
   c.restore();
 }
 
+/** 리프트 아틀라스 프레임: 아틀라스 안 자리(ax, ay) · 크기, 다각형이면 합성 px 원점(ox, oy)과 꼭짓점 (사각형은 null = 단색) */
+export interface LiftFrame {
+  readonly name: string;
+  ax: number;
+  ay: number;
+  readonly w: number;
+  readonly h: number;
+  readonly ox: number;
+  readonly oy: number;
+  readonly poly: readonly Vec2[] | null;
+}
+
+/** 리프트 한 조각을 찍는 자리 (합성 배율 px, 정적 맵 텍셀 경계) */
+export interface LiftBob {
+  readonly x: number;
+  readonly y: number;
+  readonly frame: string;
+}
+
+/** 아틀라스 사각형 (px) */
+export interface PxRect {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+}
+
+export interface LiftAtlas {
+  readonly width: number;
+  readonly height: number;
+  /** 리프트 색으로 꽉 채운 막대 (세로 · 가로). 사각형 조각 프레임은 모두 이 막대의 부분이다 */
+  readonly solid: readonly PxRect[];
+  readonly frames: readonly LiftFrame[];
+  readonly bobs: readonly LiftBob[];
+}
+
+/** 긴 테두리 띠를 이 길이(px) 이하로 잘라 찍는다 (단색 막대 길이) */
+export const LIFT_SEG = 256;
+
 /**
- * Phaser Graphics에 테두리 리프트를 그린다 (GPU 합성: ADD 블렌드로 빛 지도 위에 둔다).
- * 좌표는 정적 맵 텍스처(배율 s, 위치 ox · oy)의 텍셀 경계와 같게 맞춘다
+ * GPU 합성의 테두리 리프트: 맵 전체 크기 텍스처(배율 2에서 20.7MiB) 대신 작은 아틀라스와 찍을 자리.
+ * 사각형(벽 · 문 테두리 띠)은 정적 맵과 같은 반올림(기기 픽셀 경계)이고 단색이라, 프레임이 모두 세로 · 가로 단색 막대
+ * 두 개의 부분 사각형이다(긴 띠는 LIFT_SEG로 자른다). 기둥 테두리 사다리꼴은 조각마다 안티에일리어싱해 굽고, 선반 쌓기로
+ * 막대 옆에 둔다(투명 테 1px: 선형 보간이 이웃을 끌어오지 않게). 조각끼리 겹치지 않아(rimLiftRects가 서로소) 더하기가
+ * 두 번 겹치지 않는다. k = 합성 px / 타일
  */
-export function drawRimLift(
-  g: Phaser.GameObjects.Graphics,
-  s: number,
-  ox: number,
-  oy: number,
-  kLogical: number,
-): void {
-  const k = kLogical * s;
-  g.fillStyle(MAP_COLOR.rimLift, 1);
+export function layoutRimLift(k: number): LiftAtlas {
+  const pieces: PxRect[] = [];
   for (const r of rimLiftRects()) {
-    const x0 = Math.round(r.x0 * k) / s;
-    const y0 = Math.round(r.y0 * k) / s;
-    g.fillRect(ox + x0, oy + y0, Math.round(r.x1 * k) / s - x0, Math.round(r.y1 * k) / s - y0);
+    const x0 = Math.round(r.x0 * k);
+    const y0 = Math.round(r.y0 * k);
+    const x1 = Math.round(r.x1 * k);
+    const y1 = Math.round(r.y1 * k);
+    for (let x = x0; x < x1; x += LIFT_SEG)
+      for (let y = y0; y < y1; y += LIFT_SEG)
+        pieces.push({ x, y, w: Math.min(LIFT_SEG, x1 - x), h: Math.min(LIFT_SEG, y1 - y) });
   }
-  for (const q of rimLiftPolys()) {
-    g.beginPath();
-    q.forEach((p, i) => {
-      if (i === 0) g.moveTo(ox + p.x * kLogical, oy + p.y * kLogical);
-      else g.lineTo(ox + p.x * kLogical, oy + p.y * kLogical);
-    });
-    g.closePath();
-    g.fillPath();
+  // 막대 두께 = 가장 두꺼운 띠 (세로 막대는 왼쪽 위, 가로 막대는 그 오른쪽)
+  const t = Math.max(1, ...pieces.map((p) => Math.min(p.w, p.h)));
+  const vert: PxRect = { x: 1, y: 1, w: t, h: LIFT_SEG };
+  const horz: PxRect = { x: t + 3, y: 1, w: LIFT_SEG, h: t };
+  const frames = new Map<string, LiftFrame>();
+  const bobs: LiftBob[] = [];
+  for (const p of pieces) {
+    const v = p.h > p.w;
+    const name = `${v ? 'v' : 'h'}${p.w}x${p.h}`;
+    const bar = v ? vert : horz;
+    if (!frames.has(name))
+      frames.set(name, { name, ax: bar.x, ay: bar.y, w: p.w, h: p.h, ox: 0, oy: 0, poly: null });
+    bobs.push({ x: p.x, y: p.y, frame: name });
+  }
+  const quads: LiftFrame[] = rimLiftPolys().map((q, n) => {
+    const poly = q.map((p) => ({ x: p.x * k, y: p.y * k }));
+    const ox = Math.floor(Math.min(...poly.map((p) => p.x)));
+    const oy = Math.floor(Math.min(...poly.map((p) => p.y)));
+    const w = Math.ceil(Math.max(...poly.map((p) => p.x))) - ox;
+    const h = Math.ceil(Math.max(...poly.map((p) => p.y))) - oy;
+    bobs.push({ x: ox, y: oy, frame: `q${n}` });
+    return { name: `q${n}`, ax: 0, ay: 0, w, h, ox, oy, poly };
+  });
+  // 사다리꼴: 가로 막대 아래 · 세로 막대 오른쪽에 선반 쌓기 (높은 것부터 한 줄씩, 프레임마다 투명 테 1px)
+  const left = horz.x - 1;
+  const right = horz.x + horz.w + 1;
+  let x = left;
+  let y = t + 2;
+  let rowH = 0;
+  for (const f of [...quads].sort((a, b) => b.h - a.h || b.w - a.w)) {
+    if (x > left && x + f.w + 2 > right) {
+      y += rowH;
+      x = left;
+      rowH = 0;
+    }
+    f.ax = x + 1;
+    f.ay = y + 1;
+    x += f.w + 2;
+    rowH = Math.max(rowH, f.h + 2);
+  }
+  return {
+    width: Math.max(right, ...quads.map((f) => f.ax + f.w + 1)),
+    height: Math.max(vert.y + vert.h + 1, y + rowH),
+    solid: [vert, horz],
+    frames: [...frames.values(), ...quads],
+    bobs,
+  };
+}
+
+/** 리프트 아틀라스를 칠하는 2D 컨텍스트 부분 */
+export type LiftAtlasCtx = PathCtx & Pick<CanvasRenderingContext2D, 'fillStyle' | 'fillRect' | 'fill'>;
+
+/** 아틀라스에 리프트 조각을 칠한다 (투명 바탕 위 리프트 색) */
+export function paintRimLiftAtlas(c: LiftAtlasCtx, atlas: LiftAtlas): void {
+  c.fillStyle = rgba(MAP_COLOR.rimLift, 1);
+  for (const r of atlas.solid) c.fillRect(r.x, r.y, r.w, r.h);
+  for (const f of atlas.frames) {
+    if (!f.poly) continue;
+    polyPath(
+      c,
+      f.poly.map((p) => ({ x: p.x - f.ox + f.ax, y: p.y - f.oy + f.ay })),
+      1,
+    );
+    c.fill();
   }
 }
 
@@ -542,14 +746,22 @@ export interface LightSurface<C> {
 /** 폭 · 높이(px)를 받아 빛 지도 표면을 만든다 */
 export type LightSurfaceFactory<C> = (width: number, height: number) => LightSurface<C>;
 
+/** DOM 캔버스와 2D 컨텍스트 (폭 · 높이 px) */
+export function makeCanvas(
+  width: number,
+  height: number,
+): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, width);
+  canvas.height = Math.max(1, height);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('캔버스를 만들 수 없습니다');
+  return { canvas, ctx };
+}
+
 /** 브라우저: DOM 캔버스 */
 export function domLightSurface(width: number, height: number): LightSurface<HTMLCanvasElement> {
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('빛 지도 캔버스를 만들 수 없습니다');
-  return { canvas, ctx };
+  return makeCanvas(width, height);
 }
 
 /**
@@ -635,6 +847,37 @@ export interface CanvasTextureLike {
   add(name: string, sourceIndex: number, x: number, y: number, width: number, height: number): unknown;
   get(name?: string): { setSize(width: number, height: number, x?: number, y?: number): unknown };
   readonly source: readonly { width: number; height: number; isPowerOf2: boolean; update(): void }[];
+}
+
+/** 표시 목록 중 세는 데 쓰는 부분 (Phaser Container.list · Graphics.commandBuffer) */
+interface CountNode {
+  readonly list?: readonly unknown[];
+  readonly commandBuffer?: readonly unknown[];
+}
+
+function asNode(v: unknown): CountNode | null {
+  return typeof v === 'object' && v !== null ? (v as CountNode) : null;
+}
+
+/**
+ * 표시 목록(컨테이너는 안까지)에서 Graphics 명령 버퍼 길이 합. Phaser WebGL Graphics는 이 버퍼를 프레임마다 다시
+ * 풀어 테셀레이션하므로(원호 100분할 · fillPath Earcut) 맵 레이어의 프레임당 비용 지표로 쓴다 (gfx.features.mapGfxCmds)
+ */
+export function countGraphicsCmds(list: readonly unknown[]): { objects: number; cmds: number } {
+  let objects = 0;
+  let cmds = 0;
+  for (const o of list) {
+    const n = asNode(o);
+    if (!n) continue;
+    objects += 1;
+    if (Array.isArray(n.commandBuffer)) cmds += n.commandBuffer.length;
+    if (Array.isArray(n.list)) {
+      const sub = countGraphicsCmds(n.list);
+      objects += sub.objects;
+      cmds += sub.cmds;
+    }
+  }
+  return { objects, cmds };
 }
 
 /** 측정: 안개 합성 1회(begin~commit) 시간의 지수평균 (ms, gfx.features.fogCommitMs) */

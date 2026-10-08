@@ -16,23 +16,39 @@ import {
   pointInPolygon,
   survivorVisionPolygon,
   survivorVisionRadius,
+  TILE_PX,
+  type ExitView,
+  type PointView,
   type RoleId,
   type Vec2,
 } from '@decoy/shared';
+import { rimLiftPolys, rimLiftRects, type TileRect } from '../../client/src/art/mapArtGeom';
 import { gfxState } from '../../client/src/gfx/state';
 import { FOG } from '../../client/src/render/colors';
 import { ambientRgb, rgbCss, survivorLight } from '../../client/src/render/fogMath';
 import {
   LightMap,
+  PenRecord,
+  countGraphicsCmds,
   createCanvasTexture,
+  exitPaintBounds,
+  layoutRimLift,
+  paintExits,
+  paintPoints,
+  paintRimLiftAtlas,
+  pointPaintBounds,
+  resetExitTracking,
   removeCanvasTexture,
   resizeCanvasTexture,
   uploadCanvasTexture,
   type CanvasTextureHost,
   type CanvasTextureLike,
+  type FogPen,
   type LightCtx,
   type LightSurface,
+  type PxRect,
 } from '../../client/src/render/fogPaint';
+import { MAP_SCALE } from '../../client/src/ui/layout';
 import { loadTestBalance } from '../helpers/fixtures';
 
 const b = loadTestBalance();
@@ -459,3 +475,264 @@ describe('캔버스 텍스처를 사본 없이 올린다', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+// ───────────── GPU 합성: 기록 펜 · 조각 범위 · 테두리 리프트 아틀라스 · Graphics 명령 수 (R3) ─────────────
+
+/** 호출을 그대로 받아 적는 펜 */
+class LogPen implements FogPen {
+  readonly calls: [string, ...unknown[]][] = [];
+  fillCircle(...a: number[]): void {
+    this.calls.push(['fillCircle', ...a]);
+  }
+  strokeCircle(...a: number[]): void {
+    this.calls.push(['strokeCircle', ...a]);
+  }
+  strokeArc(...a: number[]): void {
+    this.calls.push(['strokeArc', ...a]);
+  }
+  fillPoly(poly: readonly Vec2[], color: number, alpha: number): void {
+    this.calls.push(['fillPoly', poly.map((p) => [p.x, p.y]), color, alpha]);
+  }
+  line(...a: number[]): void {
+    this.calls.push(['line', ...a]);
+  }
+}
+
+/** 그린 것의 타일 범위 (선 두께는 논리 px → 타일) */
+class BoundsPen implements FogPen {
+  readonly ext = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+  private grow(x: number, y: number, pad: number): void {
+    this.ext.x0 = Math.min(this.ext.x0, x - pad);
+    this.ext.y0 = Math.min(this.ext.y0, y - pad);
+    this.ext.x1 = Math.max(this.ext.x1, x + pad);
+    this.ext.y1 = Math.max(this.ext.y1, y + pad);
+  }
+  fillCircle(x: number, y: number, r: number): void {
+    this.grow(x, y, r);
+  }
+  strokeCircle(x: number, y: number, r: number, w: number): void {
+    this.grow(x, y, r + w / 2 / LOGICAL_K);
+  }
+  // 원호는 보수적으로 원 전체
+  strokeArc(x: number, y: number, r: number, _inset: number, _f: number, _t: number, w: number): void {
+    this.grow(x, y, r + w / 2 / LOGICAL_K);
+  }
+  fillPoly(poly: readonly Vec2[]): void {
+    for (const p of poly) this.grow(p.x, p.y, 0);
+  }
+  line(x0: number, y0: number, x1: number, y1: number, w: number): void {
+    this.grow(x0, y0, w / 2 / LOGICAL_K);
+    this.grow(x1, y1, w / 2 / LOGICAL_K);
+  }
+}
+
+const LOGICAL_K = TILE_PX * MAP_SCALE;
+
+function inside(e: { x0: number; y0: number; x1: number; y1: number }, r: TileRect): boolean {
+  return e.x0 >= r.x0 && e.y0 >= r.y0 && e.x1 <= r.x1 && e.y1 <= r.y1;
+}
+
+describe('기록 펜 (PenRecord): 안개 주기마다 기록해 바뀐 조각만 다시 그린다', () => {
+  const pts: PointView[] = [
+    { id: 'A', progress: 0.37, state: 'capturing' },
+    { id: 'B', progress: 0.5, state: 'blocked' },
+  ];
+  const exits: ExitView[] = [
+    { id: 'N', state: 'active', progress: 0.4 },
+    { id: 'S', state: 'open', progress: null },
+  ];
+
+  it('재생하면 직접 그린 것과 같은 호출 · 같은 순서 (원 · 원호 · 다각형 · 선 다섯 가지 모두)', () => {
+    const direct = new LogPen();
+    const rec = new PenRecord();
+    paintPoints(direct, pts, b, 1234);
+    paintPoints(rec, pts, b, 1234);
+    resetExitTracking();
+    paintExits(direct, exits, b, 5000, 5000);
+    resetExitTracking();
+    paintExits(rec, exits, b, 5000, 5000);
+    const replayed = new LogPen();
+    rec.replay(replayed);
+    expect(replayed.calls).toEqual(direct.calls);
+    expect(new Set(direct.calls.map((c) => c[0]))).toEqual(
+      new Set(['fillCircle', 'strokeCircle', 'strokeArc', 'fillPoly', 'line']),
+    );
+    // 기록을 다시 기록해도 같다
+    const again = new PenRecord();
+    rec.replay(again);
+    expect(again.ops).toEqual(rec.ops);
+  });
+
+  it('sameAs: 같은 그림이면 참, 시각 · 진행이 바뀌거나 길이가 다르면 거짓 (그때만 다시 그려 올린다)', () => {
+    const a = new PenRecord();
+    const c = new PenRecord();
+    paintPoints(a, [{ id: 'A', progress: 0.2, state: 'idle' }], b, 100);
+    paintPoints(c, [{ id: 'A', progress: 0.2, state: 'idle' }], b, 900);
+    // 대기 상태는 시각과 무관한 그림
+    expect(a.sameAs(c.ops)).toBe(true);
+    const d = new PenRecord();
+    paintPoints(d, [{ id: 'A', progress: 0.3, state: 'idle' }], b, 100);
+    expect(a.sameAs(d.ops)).toBe(false);
+    const e = new PenRecord();
+    paintPoints(e, [{ id: 'A', progress: 0.2, state: 'capturing' }], b, 100);
+    const f = new PenRecord();
+    paintPoints(f, [{ id: 'A', progress: 0.2, state: 'capturing' }], b, 400);
+    expect(e.sameAs(f.ops)).toBe(false);
+    expect(a.sameAs(a.ops.slice(0, -1))).toBe(false);
+    a.reset();
+    expect(a.ops).toEqual([]);
+  });
+});
+
+describe('조각 범위: 거점 · 탈출구 하나가 어떤 상태에서든 그리는 것이 조각 캔버스 안이다', () => {
+  it('거점 A · B: 대기 · 점령 중(스캔 여러 각도) · 정지 · 완료', () => {
+    const r = b.capturePoint.radius;
+    for (const id of ['A', 'B'] as const) {
+      const box = pointPaintBounds(id, r);
+      const pen = new BoundsPen();
+      for (const state of ['idle', 'capturing', 'blocked', 'done'] as const)
+        for (const now of [0, 300, 700, 1200, 1900, 2399])
+          for (const progress of [0, 0.5, 1]) paintPoints(pen, [{ id, progress, state }], b, now);
+      expect(inside(pen.ext, box)).toBe(true);
+      // 지나치게 크지 않다 (판정 원 + 여유)
+      expect(box.x1 - box.x0).toBeLessThan(2 * r + 0.6);
+    }
+  });
+
+  it('탈출구 N · S: 비활성 · 활성(진행 없음 · 0.5 · 1) · 열림(처음 본 열림 · 미닫이 중)', () => {
+    const r = b.exit.radius;
+    for (const id of ['N', 'S'] as const) {
+      const box = exitPaintBounds(id, r);
+      const pen = new BoundsPen();
+      resetExitTracking();
+      for (const progress of [null, 0, 0.5, 1])
+        for (const now of [0, 450, 900]) paintExits(pen, [{ id, state: 'active', progress }], b, now, now);
+      paintExits(pen, [{ id, state: 'inactive', progress: null }], b, 1000, 1000);
+      for (const now of [2000, 2200, 2400, 2700])
+        paintExits(pen, [{ id, state: 'open', progress: null }], b, now, now);
+      resetExitTracking();
+      paintExits(pen, [{ id, state: 'open', progress: null }], b, 0, 0);
+      expect(inside(pen.ext, box)).toBe(true);
+      expect((box.x1 - box.x0) * (box.y1 - box.y0)).toBeLessThan(16);
+    }
+    resetExitTracking();
+  });
+});
+
+describe('테두리 리프트 아틀라스 (GPU 합성: 맵 크기 텍스처 대신 조각 + 블리터)', () => {
+  for (const s of [1, 1.5, 2]) {
+    const k = LOGICAL_K * s;
+    it(`합성 배율 ${s}: 사각형 조각이 반올림한 테두리를 빈틈 · 겹침 없이 덮고, 프레임은 단색 막대 · 사다리꼴 칸 안`, () => {
+      const atlas = layoutRimLift(k);
+      const frames = new Map(atlas.frames.map((f) => [f.name, f]));
+      const rounded = rimLiftRects().map((r) => ({
+        x: Math.round(r.x0 * k),
+        y: Math.round(r.y0 * k),
+        w: Math.round(r.x1 * k) - Math.round(r.x0 * k),
+        h: Math.round(r.y1 * k) - Math.round(r.y0 * k),
+      }));
+      const rectBobs = atlas.bobs
+        .map((bb) => ({ bb, f: frames.get(bb.frame)! }))
+        .filter(({ f }) => f.poly === null)
+        .map(({ bb, f }) => ({ x: bb.x, y: bb.y, w: f.w, h: f.h }));
+      const area = (rs: readonly PxRect[]): number => rs.reduce((a, r) => a + r.w * r.h, 0);
+      // 덮는 넓이가 같고, 조각마다 반올림한 테두리 하나 안, 조각끼리 겹치지 않음 → 정확히 덮는다
+      expect(area(rectBobs)).toBe(area(rounded));
+      for (const p of rectBobs)
+        expect(
+          rounded.some((r) => p.x >= r.x && p.y >= r.y && p.x + p.w <= r.x + r.w && p.y + p.h <= r.y + r.h),
+        ).toBe(true);
+      expect(overlaps(rectBobs)).toBe(0);
+      // 사각형 프레임은 단색 막대의 부분, 사다리꼴 프레임 칸은 서로 · 막대와 겹치지 않고 아틀라스 안
+      const cells: PxRect[] = [...atlas.solid];
+      for (const f of atlas.frames) {
+        if (f.poly === null) {
+          expect(
+            atlas.solid.some(
+              (r) => f.ax >= r.x && f.ay >= r.y && f.ax + f.w <= r.x + r.w && f.ay + f.h <= r.y + r.h,
+            ),
+          ).toBe(true);
+          continue;
+        }
+        cells.push({ x: f.ax, y: f.ay, w: f.w, h: f.h });
+        for (const p of f.poly) {
+          expect(p.x - f.ox).toBeGreaterThanOrEqual(0);
+          expect(p.y - f.oy).toBeGreaterThanOrEqual(0);
+          expect(p.x - f.ox).toBeLessThanOrEqual(f.w);
+          expect(p.y - f.oy).toBeLessThanOrEqual(f.h);
+        }
+      }
+      // 칸 사이 투명 테 1px: 1px 넓혀도 겹치지 않는다
+      expect(overlaps(cells.map((c) => ({ x: c.x - 0.5, y: c.y - 0.5, w: c.w + 1, h: c.h + 1 })))).toBe(0);
+      for (const c of cells) {
+        expect(c.x).toBeGreaterThanOrEqual(1);
+        expect(c.y).toBeGreaterThanOrEqual(1);
+        expect(c.x + c.w).toBeLessThanOrEqual(atlas.width - 1);
+        expect(c.y + c.h).toBeLessThanOrEqual(atlas.height - 1);
+      }
+      // 기둥 사다리꼴은 조각마다 하나 (기둥 8변)
+      expect(atlas.bobs.filter((bb) => frames.get(bb.frame)?.poly).length).toBe(rimLiftPolys().length);
+      // 작다: 텍스처 1MiB 이하, 찍는 조각 수 400 이하 (맵 크기 텍스처는 배율 2에서 20.7MiB)
+      expect(atlas.width * atlas.height * 4).toBeLessThanOrEqual(1024 * 1024);
+      expect(atlas.bobs.length).toBeLessThanOrEqual(400);
+    });
+  }
+
+  it('아틀라스 칠하기: 단색 막대는 사각형 채우기, 사다리꼴은 제 칸 안 경로 채우기 (리프트 색)', () => {
+    const atlas = layoutRimLift(LOGICAL_K * 2);
+    const rects: number[][] = [];
+    const fills: Vec2[][] = [];
+    let path: Vec2[] = [];
+    let style = '';
+    const ctx = {
+      set fillStyle(v: string) {
+        style = v;
+      },
+      fillRect: (x: number, y: number, w: number, h: number) => rects.push([x, y, w, h]),
+      beginPath: () => {
+        path = [];
+      },
+      moveTo: (x: number, y: number) => path.push({ x, y }),
+      lineTo: (x: number, y: number) => path.push({ x, y }),
+      closePath: () => undefined,
+      fill: () => fills.push(path),
+    };
+    paintRimLiftAtlas(ctx as never, atlas);
+    expect(style).toBe('rgba(34, 44, 53, 1)');
+    expect(rects).toEqual(atlas.solid.map((r) => [r.x, r.y, r.w, r.h]));
+    const quads = atlas.frames.filter((f) => f.poly);
+    expect(fills.length).toBe(quads.length);
+    fills.forEach((poly, n) => {
+      const f = quads[n]!;
+      for (const p of poly) {
+        expect(p.x).toBeGreaterThanOrEqual(f.ax - 1e-9);
+        expect(p.x).toBeLessThanOrEqual(f.ax + f.w + 1e-9);
+        expect(p.y).toBeGreaterThanOrEqual(f.ay - 1e-9);
+        expect(p.y).toBeLessThanOrEqual(f.ay + f.h + 1e-9);
+      }
+    });
+  });
+});
+
+describe('Graphics 명령 수 (gfx.features.mapGfxCmds)', () => {
+  it('컨테이너 안까지 Graphics 명령 버퍼 길이를 더하고 객체 수를 센다', () => {
+    const g1 = { commandBuffer: [1, 2, 3] };
+    const g2 = { commandBuffer: new Array(10).fill(0) };
+    const img = { type: 'Image' };
+    const inner = { list: [g2, img] };
+    const outer = { list: [inner, { list: [] }] };
+    expect(countGraphicsCmds([g1, outer, null, 3])).toEqual({ objects: 6, cmds: 13 });
+    expect(countGraphicsCmds([img, { list: [img] }])).toEqual({ objects: 3, cmds: 0 });
+  });
+});
+
+function overlaps(rs: readonly PxRect[]): number {
+  let n = 0;
+  for (let i = 0; i < rs.length; i += 1)
+    for (let j = i + 1; j < rs.length; j += 1) {
+      const a = rs[i]!;
+      const c = rs[j]!;
+      if (a.x < c.x + c.w && c.x < a.x + a.w && a.y < c.y + c.h && c.y < a.y + a.h) n += 1;
+    }
+  return n;
+}

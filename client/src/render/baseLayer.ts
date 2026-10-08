@@ -16,7 +16,7 @@
 //  - GpuFog (품질 높음 · 중간 + WebGL, fogGpu.ts): 정적 맵 텍스처 한 번 + 작은 빛 지도만 갱신해 MULTIPLY
 import type Phaser from 'phaser';
 import { TILE_PX, type Balance, type ExitView, type PointView, type Vec2 } from '@decoy/shared';
-import { getGlowMap, getStaticMap } from '../art/mapArt';
+import { getGlowMap, getStaticMap, keepStaticMaps } from '../art/mapArt';
 import { effectivePreset, type RendererKind } from '../gfx/presets';
 import { gfxState } from '../gfx/state';
 import { MAP_SCALE, MAP_X, MAP_Y } from '../ui/layout';
@@ -26,6 +26,7 @@ import {
   CanvasPen,
   LightMap,
   addRimLift,
+  countGraphicsCmds,
   createCanvasTexture,
   domLightSurface,
   nextFogKey,
@@ -101,11 +102,16 @@ export function prebakeFogArt(renderer: RendererKind = gfxState.renderer): numbe
   const s = compositeScaleFor(gfxState.zoom, preset.compositeCap);
   if (path.mode === 'gpu') {
     const sprite = preset.glow === 'sprite';
-    getStaticMap(MAP_SCALE * s, !sprite);
+    const need = [
+      { scale: MAP_SCALE * s, withGlow: !sprite },
+      { scale: preset.lightPxPerTile / TILE_PX, withGlow: true },
+    ];
+    for (const n of need) getStaticMap(n.scale, n.withGlow);
     if (sprite) getGlowMap();
-    getStaticMap(preset.lightPxPerTile / TILE_PX, true);
+    keepStaticMaps(need, sprite);
   } else {
     getStaticMap(MAP_SCALE * s, true);
+    keepStaticMaps([{ scale: MAP_SCALE * s, withGlow: true }], false);
   }
   return performance.now() - t0;
 }
@@ -130,12 +136,14 @@ export class CanvasFog implements FogLayer {
 
   constructor(
     private readonly scene: Phaser.Scene,
-    root: Phaser.GameObjects.Container,
+    private readonly root: Phaser.GameObjects.Container,
     opts: FogLayerOptions,
   ) {
     const s = opts.compositeScale;
-    // 합성 배율로 직접 구운 정적 맵 (발광 번짐 포함, 같은 배율이면 캐시). 1:1로 복사한다
+    // 합성 배율로 직접 구운 정적 맵 (발광 번짐 포함, 같은 배율이면 캐시). 1:1로 복사한다.
+    // 캐시는 이 한 장만 남긴다 (미니맵은 합성 캔버스를 줄여 쓰고, 발광은 구워 넣었으니 따로 들고 있지 않는다)
     this.staticMap = getStaticMap(MAP_SCALE * s, true);
+    keepStaticMaps([{ scale: MAP_SCALE * s, withGlow: true }], false);
     this.lift = rimLiftPath(TILE_PX * MAP_SCALE * s);
     gfxState.features.glowLayer = 'static';
     resetExitTracking();
@@ -203,6 +211,9 @@ export class CanvasFog implements FogLayer {
     }
     addRimLift(this.ctx, this.lift);
     uploadCanvasTexture(this.texture);
+    const n = countGraphicsCmds(this.root.list);
+    gfxState.features.mapGfxCmds = n.cmds;
+    gfxState.features.mapLayerObjects = n.objects;
     this.lastCommitMs = performance.now() - this.t0;
     recordFogCommit(this.lastCommitMs);
   }
