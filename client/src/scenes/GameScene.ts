@@ -1,6 +1,6 @@
 // 판 화면: 1/30초 고정 간격 입력 → 예측 → 서버 전송, 그리고 렌더링 · HUD · 배너
 import Phaser from 'phaser';
-import type { DrawnEntity, GameEvent, InputFrame, Role } from '@decoy/shared';
+import type { DrawnEntity, FxTarget, GameEvent, InfoItem, InputFrame, Role } from '@decoy/shared';
 import type { App } from '../app';
 import { sfx } from '../audio';
 import { STORY_TEXT, UI_TEXT, formatText } from '../data/storyText';
@@ -86,6 +86,16 @@ export class GameScene extends Phaser.Scene {
     return this.banners?.visible ?? [];
   }
 
+  /** 디버그 · 테스트: 이번 프레임의 정보 레이어 (품질과 상관없이 같아야 함) */
+  get infoLayer(): InfoItem[] {
+    return this.world?.info ?? [];
+  }
+
+  /** 디버그 · 테스트: 후처리가 걸린 레이어 */
+  get fxTargets(): FxTarget[] {
+    return this.world?.fxTargets ?? [];
+  }
+
   /** 디버그 · 테스트: 지금 보이는 연출 */
   get effects(): Record<string, number | boolean> {
     if (!this.screenFx || !this.world) return {};
@@ -166,6 +176,8 @@ export class GameScene extends Phaser.Scene {
   private onEvent(ev: GameEvent): void {
     const now = performance.now();
     const isMonster = this.app.match?.role === 'monster';
+    // 월드 연출(불꽃 · 충격파 · 베기 호 등)은 받은 이벤트 좌표에서만 생긴다 (상대 잔여 효과 규칙)
+    this.world.onEvent(ev, now);
     switch (ev.k) {
       case 'attackStart': {
         // 괴물 본인은 누른 순간 이미 들었다 (즉시 피드백). 예측하지 못한 경우만 여기서

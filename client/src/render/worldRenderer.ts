@@ -16,6 +16,9 @@ import {
   survivorVisionRadius,
   type Balance,
   type DrawnEntity,
+  type FxTarget,
+  type GameEvent,
+  type InfoItem,
   type MonsterView,
   type Role,
   type RoleId,
@@ -110,6 +113,10 @@ export class WorldRenderer {
    * cone = 생존자 화면에 괴물 부채꼴을 그렸는가, coneRed = 그 색 보간 상태 (노랑 0 ↔ 빨강 1)
    */
   fx = { stunStars: false, dashGhosts: 0, attackRange: false, oppFx: 0, cone: false, coneRed: 0 };
+  /** 디버그 · 테스트: 이번 프레임의 정보 레이어 (품질과 상관없이 같아야 함, M10b) */
+  info: InfoItem[] = [];
+  /** 디버그 · 테스트: 후처리가 걸린 레이어 (M10b) */
+  fxTargets: FxTarget[] = [];
 
   /** 미니맵이 줄여 그릴 바닥 합성 (안개 포함) */
   get baseCanvas(): HTMLCanvasElement {
@@ -122,10 +129,11 @@ export class WorldRenderer {
     this.fogRoot = scene.add.container(0, 0);
     this.fog = this.buildFog();
     this.container = scene.add.container(MAP_X, MAP_Y).setScale(MAP_SCALE);
+    // 배지(바닥 문양 · 라벨)는 캐릭터보다 먼저 넣어 아래에 그린다 (정보 우선 R15: 배지가 캐릭터를 덮지 않음)
+    this.badges = new Badges(scene, this.container);
     this.coneOver = scene.add.graphics();
     this.entities = scene.add.graphics();
     this.container.add([this.coneOver, this.entities]);
-    this.badges = new Badges(scene, this.container);
     const off = onGfxChange(() => {
       this.fogDirty = true;
     });
@@ -133,6 +141,11 @@ export class WorldRenderer {
       off();
       this.fog.destroy();
     });
+  }
+
+  /** 서버 이벤트 (GameScene이 오래된 스냅샷의 일회성 이벤트를 걸러서 넘긴다). 월드 연출은 이벤트 좌표에서만 생긴다 */
+  onEvent(_ev: GameEvent, _nowMs: number): void {
+    // M10b 캐릭터 · 효과 갈래가 채운다
   }
 
   /** 지금 품질 · 렌더러 · 해상도에 맞는 안개 레이어 (그래픽 상태에 기록한다) */
@@ -373,6 +386,7 @@ export class WorldRenderer {
       B: isMonster && blinkOn && snap.world.points.some((p) => p.id === 'B' && p.state === 'capturing'),
     };
     this.badges.draw(snap.world.points, snap.world.exits, alpha, blink);
+    this.info = [...this.badges.info()];
     this.drawn = drawn;
     this.fx = {
       stunStars,

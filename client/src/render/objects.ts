@@ -7,6 +7,7 @@ import {
   TILE_PX,
   type Balance,
   type ExitView,
+  type InfoItem,
   type PointView,
 } from '@decoy/shared';
 import { MAP_SCALE, tileToScreen } from '../ui/layout';
@@ -124,6 +125,11 @@ export class Badges {
       }).setOrigin(0.5);
       this.labels.push(t);
     }
+  }
+
+  /** 지난 draw의 정보 레이어 항목 (배지 · 진행). 품질과 상관없이 같은 값 (M10b 맵 · 오브젝트 갈래가 채운다) */
+  info(): InfoItem[] {
+    return [];
   }
 
   draw(

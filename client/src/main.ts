@@ -83,6 +83,7 @@ function presetFeatures(p: QualityPreset): Record<string, boolean | number | str
     bloom: p.bloom,
     vignette: p.vignette,
     colorGrade: p.colorGrade,
+    glow: p.glow,
     particleCap: p.particleCap,
     halfFrameAnims: p.halfFrameAnims,
   };

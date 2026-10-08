@@ -13,6 +13,54 @@ export interface DrawnEntity {
   layer?: 'main' | 'minimap';
   /** 마커 종류 등 부가 정보 */
   tag?: string;
+  /**
+   * 캐릭터를 그린 그림(텍스처) 키 (M10b). 괴물 화면의 생존자는 역할과 상관없이 모두 같은 키('survivor-hidden')여야 한다.
+   * 마커처럼 텍스처 없이 그린 것은 없음
+   */
+  sprite?: string;
+}
+
+/**
+ * 화면 레이어 이름 (M10b, VISUAL_SPEC 정보 우선 규칙 R1 순서).
+ * map = 구조(바닥 · 벽 · 기둥 · 시설)와 시야 빛, glow = 시설 발광, floorInfo = 바닥 문양 · 배지,
+ * particles = 장식 입자, cone = 부채꼴, entities = 캐릭터와 부착 표시 · 범위, markers = 안개 위 정보 마커,
+ * screen = 화면 효과(피격 · 발각 테두리 · 페이드), hud = HUD · 배너 · 글자
+ */
+export type LayerName =
+  'map' | 'glow' | 'floorInfo' | 'particles' | 'cone' | 'entities' | 'markers' | 'screen' | 'hud';
+
+/** 후처리가 걸린 레이어 (M10b). 비네트 · 색보정 · 블룸은 map · glow에만 걸려야 한다 */
+export interface FxTarget {
+  layer: LayerName;
+  /** 걸린 효과 이름 (예: 'vignette', 'colorGrade', 'bloom', 'fogEdge', 'vignetteOverlay') */
+  effects: string[];
+}
+
+/**
+ * 정보 레이어 항목 (M10b): 플레이어가 판단에 쓰는 화면 정보. **품질 단계와 상관없이 완전히 같아야 한다**(장식 값을 넣지 않는다).
+ * 좌표 · 반지름은 타일, 각도는 라디안, 색은 0xRRGGBB
+ */
+export interface InfoItem {
+  /**
+   * badge = 거점 · 탈출구 · 감옥 배지, progress = 진행 게이지(거점 점령 · 탈출구 개방 · 구조),
+   * cone = 괴물 부채꼴, range = 범위 표시(공격 준비 · 밀치기 · 포효 · 캠핑 · 근접 원), marker = 안개 위 마커(탐지 · 포효),
+   * reveal = 괴물 화면 능력 노출(역할색 테두리 + 문양)
+   */
+  kind: 'badge' | 'progress' | 'cone' | 'range' | 'marker' | 'reveal';
+  /** 세부 이름 (예: 'point-A', 'exit-N', 'prison', 'attack', 'shove', 'roar', 'camp', 'near', 'track', 'roarSelf', 'roarPing', 'rescue', 'runner') */
+  tag: string;
+  x: number;
+  y: number;
+  /** 반지름 (판정값, 없으면 null) */
+  r: number | null;
+  /** 방향 (부채꼴 · 공격 범위, 없으면 null) */
+  dir: number | null;
+  /** 전체 각도 (부채꼴 · 공격 범위, 없으면 null) */
+  arc: number | null;
+  /** 진행 0~1 또는 상태 이름 (없으면 null) */
+  value: number | string | null;
+  color: number;
+  alpha: number;
 }
 
 /** 그래픽 상태 (M10: 렌더 해상도 · 품질 · 안개) */
@@ -83,6 +131,10 @@ export interface DecoyDebug {
   probeText(text: string, x: number, y: number, px: number): void;
   /** 활성 장면의 모든 Phaser 글자 해상도 · 격자 어긋남 · 다시 그린 횟수 */
   textAudit(): TextAudit;
+  /** 이번 프레임의 정보 레이어 (M10b, 품질과 상관없이 같아야 함) */
+  getInfoLayer(): InfoItem[];
+  /** 후처리가 걸린 레이어와 효과 (M10b) */
+  getFxTargets(): FxTarget[];
   readonly role: Role | null;
   readonly you: string | null;
   readonly room: string | null;

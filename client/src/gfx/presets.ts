@@ -26,6 +26,11 @@ export interface QualityPreset {
   readonly vignette: 'postfx' | 'overlay' | 'none';
   /** 색보정 ColorMatrix (WebGL 전용) */
   readonly colorGrade: boolean;
+  /**
+   * 시설 발광: sprite = 구운 발광 레이어를 따로 더한다(어둠 속에서도 은은히 빛남), static = 정적 맵에 구운 발광만.
+   * 둘 다 정적 그림이라 시간 · 상대 위치에 따라 바뀌지 않는다
+   */
+  readonly glow: 'sprite' | 'static';
   /** 동시 파티클 상한 */
   readonly particleCap: number;
   /** 프레임 애니메이션을 절반 프레임으로 */
@@ -46,6 +51,7 @@ export const PRESETS: Readonly<Record<QualityTier, QualityPreset>> = {
     bloom: false,
     vignette: 'postfx',
     colorGrade: true,
+    glow: 'sprite',
     particleCap: 400,
     halfFrameAnims: false,
   },
@@ -60,6 +66,7 @@ export const PRESETS: Readonly<Record<QualityTier, QualityPreset>> = {
     bloom: false,
     vignette: 'overlay',
     colorGrade: true,
+    glow: 'sprite',
     particleCap: 150,
     halfFrameAnims: false,
   },
@@ -74,6 +81,7 @@ export const PRESETS: Readonly<Record<QualityTier, QualityPreset>> = {
     bloom: false,
     vignette: 'none',
     colorGrade: false,
+    glow: 'static',
     particleCap: 40,
     halfFrameAnims: true,
   },
