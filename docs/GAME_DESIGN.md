@@ -44,9 +44,9 @@
 ## 3. 시야와 정보
 
 ### 3.1 공통
-- 맵은 기본적으로 검게 가려져 있다. **지금 보고 있는 곳만 보인다** (기억 상태 없음)
+- 맵 구조(벽 · 바닥 · 기둥 · 감옥 · 거점 · 탈출구)는 항상 어둡게 보인다. 캐릭터와 움직이는 것은 **지금 보고 있는 곳에서만 보인다** (기억 상태 없음)
 - 벽은 시야를 막는다
-- 감옥, 거점 A · B, 탈출구 두 곳의 위치 배지는 항상 보인다 (주변 지형은 안 보임)
+- 감옥, 거점 A · B, 탈출구 두 곳의 위치 배지는 항상 보인다
 - 서버는 각 플레이어에게 **볼 수 있는 대상만 보낸다.** 안 보이는 상대의 위치는 클라이언트에 아예 오지 않는다
 
 ### 3.2 생존자 화면
@@ -183,3 +183,4 @@
 |---|---|
 | 2026.10.07 | v2 작성. 사람 괴물 기준 재설계, 수업 피드백 반영 (`FEEDBACK_REVIEW.md`) |
 | 2026.10.07 | 구현 중 문서에 없던 값 추가 (`DECISIONS.md` 참고): `match.reconnectGrace` 30, `survivor.abilityRevealDuration` 1.0, `monster.turnSlowWindow` 0.25, `monster.attack.windupMoveMultiplier` 1.0, `prison.rescueRadius` 1.2, `capturePoint.monsterBlockGrace` 5 (거점 지키기 방지 — 규칙 추가), `capturePoint.alertCooldown` 8, `exit.pausedWhenMonsterInside` false, `network.lagJitterMs` 20 · `inputQueueMax` 6 · `correctionSmoothMs` 150 · `snapDistance` 1.5. 규칙 보충: 자유 생존자 0명이면 괴물 승리, 감옥 문 · 철창 · 구조 구역, 캠핑 반경 기준 |
+| 2026.10.08 | 안개 방식 변경(맵 구조 항상 어둡게 보임, 판정 · 정보 차단 동일) — 사용자 요청 |

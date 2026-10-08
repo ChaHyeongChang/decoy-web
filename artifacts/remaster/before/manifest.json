@@ -1,0 +1,301 @@
+{
+  "label": "before",
+  "quality": null,
+  "renderer": "canvas",
+  "baseUrl": "http://localhost:8194",
+  "createdAt": "2026-10-08T13:29:08.652Z",
+  "shots": [
+    {
+      "file": "lobby.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 101794,
+      "scene": "lobby",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "dsf": 1,
+      "tag": "1x",
+      "cssViewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "devicePixelRatio": 1,
+      "hookRenderer": "canvas",
+      "gfx": null
+    },
+    {
+      "file": "result.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 98256,
+      "scene": "result",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "dsf": 1,
+      "tag": "1x",
+      "cssViewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "devicePixelRatio": 1,
+      "hookRenderer": "canvas",
+      "gfx": null
+    },
+    {
+      "file": "role-guard@1x.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 188122,
+      "scene": "role-guard",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "dsf": 1,
+      "tag": "1x",
+      "cssViewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "devicePixelRatio": 1,
+      "hookRenderer": "canvas",
+      "gfx": null
+    },
+    {
+      "file": "role-guard@2x.png",
+      "width": 2880,
+      "height": 1800,
+      "bytes": 414333,
+      "scene": "role-guard",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "dsf": 2,
+      "tag": "2x",
+      "cssViewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "devicePixelRatio": 2,
+      "hookRenderer": "canvas",
+      "gfx": null
+    },
+    {
+      "file": "role-monster@1x.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 75561,
+      "scene": "role-monster",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "dsf": 1,
+      "tag": "1x",
+      "cssViewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "devicePixelRatio": 1,
+      "hookRenderer": "canvas",
+      "gfx": null
+    },
+    {
+      "file": "role-monster@2x.png",
+      "width": 2880,
+      "height": 1800,
+      "bytes": 172945,
+      "scene": "role-monster",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "dsf": 2,
+      "tag": "2x",
+      "cssViewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "devicePixelRatio": 2,
+      "hookRenderer": "canvas",
+      "gfx": null
+    },
+    {
+      "file": "role-runner@1x.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 185958,
+      "scene": "role-runner",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "dsf": 1,
+      "tag": "1x",
+      "cssViewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "devicePixelRatio": 1,
+      "hookRenderer": "canvas",
+      "gfx": null
+    },
+    {
+      "file": "role-runner@2x.png",
+      "width": 2880,
+      "height": 1800,
+      "bytes": 406794,
+      "scene": "role-runner",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "dsf": 2,
+      "tag": "2x",
+      "cssViewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "devicePixelRatio": 2,
+      "hookRenderer": "canvas",
+      "gfx": null
+    },
+    {
+      "file": "role-scout@1x.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 189923,
+      "scene": "role-scout",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "dsf": 1,
+      "tag": "1x",
+      "cssViewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "devicePixelRatio": 1,
+      "hookRenderer": "canvas",
+      "gfx": null
+    },
+    {
+      "file": "role-scout@2x.png",
+      "width": 2880,
+      "height": 1800,
+      "bytes": 388778,
+      "scene": "role-scout",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "dsf": 2,
+      "tag": "2x",
+      "cssViewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "devicePixelRatio": 2,
+      "hookRenderer": "canvas",
+      "gfx": null
+    },
+    {
+      "file": "runner-1366x768.png",
+      "width": 1366,
+      "height": 768,
+      "bytes": 98202,
+      "scene": "small",
+      "viewport": {
+        "width": 1366,
+        "height": 768
+      },
+      "dsf": 1,
+      "cssViewport": {
+        "width": 1366,
+        "height": 768
+      },
+      "devicePixelRatio": 1,
+      "hookRenderer": "canvas",
+      "gfx": null
+    },
+    {
+      "file": "tab-runner.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 214424,
+      "scene": "tab",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "dsf": 1,
+      "tag": "1x",
+      "cssViewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "devicePixelRatio": 1,
+      "hookRenderer": "canvas",
+      "gfx": null
+    },
+    {
+      "file": "zoom-pointA-monster.png",
+      "width": 1440,
+      "height": 810,
+      "bytes": 32211,
+      "scene": "zoom-pointA",
+      "from": "role-monster@2x.png",
+      "x": 486,
+      "y": 765,
+      "w": 480,
+      "h": 270,
+      "k": 3
+    },
+    {
+      "file": "zoom-pointA-runner.png",
+      "width": 1440,
+      "height": 810,
+      "bytes": 83239,
+      "scene": "zoom-pointA",
+      "from": "role-runner@2x.png",
+      "x": 486,
+      "y": 765,
+      "w": 480,
+      "h": 270,
+      "k": 3
+    },
+    {
+      "file": "zoom-prison-monster.png",
+      "width": 1440,
+      "height": 810,
+      "bytes": 64684,
+      "scene": "zoom-prison",
+      "from": "role-monster@2x.png",
+      "x": 1200,
+      "y": 765,
+      "w": 480,
+      "h": 270,
+      "k": 3
+    },
+    {
+      "file": "zoom-prison-runner.png",
+      "width": 1440,
+      "height": 810,
+      "bytes": 137493,
+      "scene": "zoom-prison",
+      "from": "role-runner@2x.png",
+      "x": 1200,
+      "y": 765,
+      "w": 480,
+      "h": 270,
+      "k": 3
+    }
+  ],
+  "problems": []
+}
