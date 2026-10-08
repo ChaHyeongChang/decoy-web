@@ -1,0 +1,46 @@
+{
+  "generatedBy": "scripts/logo-compare.mjs",
+  "original": {
+    "path": "docs/images/logo_decoy.png",
+    "width": 213,
+    "height": 213,
+    "bytes": 77627,
+    "sha256": "94347266c395b9404970bb954b06bf1779c09fe35ddce0c25f6f3005d192b66d"
+  },
+  "svg": {
+    "path": "docs/images/logo_decoy.svg",
+    "publicCopy": "client/public/logo.svg",
+    "identicalCopy": true,
+    "bytes": 9874,
+    "sha256": "02a4cacc52a842542ae601d98d981cb25dd85c0990663bf495641dd302bf61b8",
+    "opaqueRatioAt512": 0.7426
+  },
+  "method": "두 그림을 같은 크기로 그려(원본 PNG는 고품질 보간, SVG는 그 크기로 벡터 래스터화) 비교한다. 알파 실루엣 = 알파 ≥ 128, 네온 선 = G−R > 100 그리고 G > 150, ΔE = 둘 다 알파 ≥ 250인 픽셀의 CIE76(Lab, D65).",
+  "thresholds": {
+    "alphaIoUAt213": 0.9
+  },
+  "sizes": {
+    "32": {
+      "alphaIoU": 0.9691,
+      "neonIoU": 0.5465,
+      "meanDeltaE": 3.9486,
+      "p95DeltaE": 16.0069,
+      "comparedPixels": 707
+    },
+    "64": {
+      "alphaIoU": 0.9912,
+      "neonIoU": 0.8886,
+      "meanDeltaE": 2.3454,
+      "p95DeltaE": 9.0174,
+      "comparedPixels": 2938
+    },
+    "213": {
+      "alphaIoU": 0.9961,
+      "neonIoU": 0.9288,
+      "meanDeltaE": 2.3111,
+      "p95DeltaE": 6.976,
+      "comparedPixels": 33349
+    }
+  },
+  "pass": true
+}
