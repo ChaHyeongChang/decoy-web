@@ -392,6 +392,8 @@ function angDiff(a: number, b: number): number {
 }
 
 test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 맞다', async ({ browser }) => {
+  // 4K 높음 단계가 CI 러너(SwiftShader)에서 느리다
+  test.setTimeout(300_000);
   const { page, problems, close } = await newScreen(browser, { width: 1440, height: 900 }, 2);
   const code = await startSolo(page, '&quality=high', 'monster');
   const me = await page.evaluate(() => window.__DECOY__?.you ?? '');
@@ -422,7 +424,9 @@ test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 �
   };
 
   // 백버퍼가 바뀔 때까지. 시간을 넘기면 그때 상태(창 DPR · 캔버스 · 그래픽 상태)를 오류에 담는다 (부하가 큰 러너에서 원인 구분용)
-  const waitBacking = async (w: number, h: number, timeout = 10_000): Promise<CanvasInfo> => {
+  // 폴링은 rAF가 아니라 시간 간격으로: 4K(3840×2160) 높음은 GitHub Actions 러너의 SwiftShader에서 한 프레임이 수 초라
+  // rAF 폴링이면 확인 자체가 프레임만큼 늦는다(CI에서 바뀐 직후 시간 초과가 난 적이 있다)
+  const waitBacking = async (w: number, h: number, timeout = 30_000): Promise<CanvasInfo> => {
     const t0 = Date.now();
     try {
       await page.waitForFunction(
@@ -431,7 +435,7 @@ test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 �
           return c?.width === bw && c.height === bh;
         },
         [w, h] as const,
-        { timeout },
+        { timeout, polling: 200 },
       );
     } catch (e) {
       const now = await canvasInfo(page);
@@ -496,8 +500,8 @@ test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 �
   });
   // 창 DPR이 먼저 바뀌었는지 따로 본다: 에뮬레이션이 늦은 것과 앱이 변경을 놓친 것을 가른다
   // (부하가 큰 컨테이너에서 이 단계가 한 번 10초를 넘긴 적이 있다. 판 중 하향을 막기 전에는 하향이 백버퍼를 대신 맞춰 가려졌다)
-  await page.waitForFunction(() => window.devicePixelRatio === 1, null, { timeout: 10_000 });
-  const moved = await waitBacking(1920, 1080, 15_000);
+  await page.waitForFunction(() => window.devicePixelRatio === 1, null, { timeout: 20_000, polling: 200 });
+  const moved = await waitBacking(1920, 1080);
   await aimHeld('→ DPR 1');
   expect(moved.dpr).toBe(1);
   expect(moved.gfx.zoom).toBe(1);
