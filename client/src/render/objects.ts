@@ -9,6 +9,8 @@ import {
   type ExitView,
   type PointView,
 } from '@decoy/shared';
+import { MAP_SCALE, tileToScreen } from '../ui/layout';
+import { makeText } from '../ui/text';
 import { COLOR } from './colors';
 
 const T = TILE_PX;
@@ -109,18 +111,18 @@ export class Badges {
   constructor(scene: Phaser.Scene, container: Phaser.GameObjects.Container) {
     this.g = scene.add.graphics();
     container.add(this.g);
+    // A · B 글자는 맵 컨테이너(0.93배) 밖 화면 좌표에 둔다: 컨테이너 배율이 붙으면 글자 텍셀이 화면 픽셀과 1:1이 안 된다.
+    // 크기 · 위치는 컨테이너 안에 있을 때와 같다 (18px × 0.93, 거점 중심). 컨테이너 바로 뒤에 만들어 그리는 순서도 같다
     for (const id of ['A', 'B'] as const) {
       const c = CAPTURE_POINTS[id];
-      const t = scene.add
-        .text(c.x * T, c.y * T, id, {
-          fontFamily: 'sans-serif',
-          fontSize: '18px',
-          fontStyle: 'bold',
-          color: '#E2E8F0',
-        })
-        .setOrigin(0.5);
+      const p = tileToScreen(c.x, c.y);
+      const t = makeText(scene, p.x, p.y, id, {
+        fontFamily: 'sans-serif',
+        fontSize: `${18 * MAP_SCALE}px`,
+        fontStyle: 'bold',
+        color: '#E2E8F0',
+      }).setOrigin(0.5);
       this.labels.push(t);
-      container.add(t);
     }
   }
 

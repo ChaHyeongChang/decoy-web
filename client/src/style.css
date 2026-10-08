@@ -24,6 +24,11 @@ body {
   position: fixed;
   inset: 0;
 }
+/* 캔버스는 main.ts가 기기 픽셀 격자 위치 · 크기로 직접 놓는다 (Scale.NONE, M10a) */
+#game-root > canvas {
+  position: absolute;
+  display: block;
+}
 #ui-root {
   position: fixed;
   inset: 0;

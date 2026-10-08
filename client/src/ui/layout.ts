@@ -33,14 +33,17 @@ export const HUD_RECTS = {
   rightSide: { x: VIEW_W - SIDE_W, y: HUD_BAND, w: SIDE_W, h: VIEW_H - HUD_BAND * 2 },
 } as const;
 
-/** 내부 렌더 해상도 배율 (?scale=0.5 저사양 모드). main.ts가 시작할 때 정한다 */
+/**
+ * 카메라 zoom = 백버퍼 px / 논리 px (M10a). 표시 CSS 크기 × 기기 픽셀 배율(품질 단계 상한 · ?scale 적용)로 정해져
+ * 1보다 클 수 있다(맥북 배율 2 → 1.5). main.ts가 시작할 때와 창 크기 · DPR · 품질이 바뀔 때 정한다 (render/resolution.ts)
+ */
 export let RENDER_SCALE = 1;
 
 export function setRenderScale(v: number): void {
   RENDER_SCALE = v;
 }
 
-/** 장면 카메라를 논리 해상도(1920×1080)에 맞춘다 */
+/** 장면 카메라를 논리 해상도(1920×1080)에 맞춘다: 백버퍼 전체에 논리 화면이 꽉 차게 zoom */
 export function fitCamera(camera: {
   setZoom(z: number): unknown;
   setOrigin(x: number, y: number): unknown;
