@@ -1,7 +1,7 @@
 // 맵 그림의 순수 부분 (M10b, art/mapArtGeom.ts): 칸 분류, 2.5D 면이 칸 밖으로 나가지 않음, 기둥 8각, 접촉 그림자,
 // 데칼 · 네온 배치와 시드 결정성, 테두리 리프트, 구조 색의 대비(빛 속 바닥 휘도 상한 · 어둠 속 테두리 2.5:1), 예약 색.
 // 그리고 동적 오브젝트(fogPaint.paintPoints · paintExits)가 판정 반경을 그대로 그리는지 기록용 펜으로 본다.
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CAPTURE_POINTS,
   EXITS,
@@ -48,13 +48,24 @@ import {
   wallFaces,
   type TileRect,
 } from '../../client/src/art/mapArtGeom';
+import {
+  GLOW_SCALE,
+  bakeGlow,
+  bakeStaticMap,
+  getGlowMap,
+  getStaticMap,
+  keepStaticMaps,
+  staticMapSize,
+} from '../../client/src/art/mapArt';
 import { fbm, hash2, valueNoise } from '../../client/src/art/noise';
+import { gfxState } from '../../client/src/gfx/state';
 import { HIDDEN_SURVIVOR, ROLE, WARN, contrastRatio, relativeLuminance } from '../../client/src/art/palette';
 import { FOG } from '../../client/src/render/colors';
 import { ambientRgb } from '../../client/src/render/fogMath';
 import {
   doorSlide,
   exitArcRange,
+  exitSlide,
   litTicks,
   paintExits,
   paintPoints,
@@ -291,6 +302,30 @@ describe('테두리 리프트 (곱하기 뒤에 더하는 정적 구조 색)', (
     expect(area(rects)).toBeLessThanOrEqual(area(rims) + 1e-6);
   });
 
+  it('리프트 사각형끼리 겹치지 않고(더하기가 두 번 겹치지 않음), 원래 테두리를 모두 덮는다', () => {
+    const rects = rimLiftRects();
+    for (let i = 0; i < rects.length; i += 1)
+      for (let j = i + 1; j < rects.length; j += 1) {
+        const a = rects[i]!;
+        const c = rects[j]!;
+        const ox = Math.min(a.x1, c.x1) - Math.max(a.x0, c.x0);
+        const oy = Math.min(a.y1, c.y1) - Math.max(a.y0, c.y0);
+        expect(ox > EPS && oy > EPS).toBe(false);
+      }
+    const rims = [
+      ...wallCells().flatMap(({ i, j }) => wallFaces(i, j).rims),
+      ...(['N', 'S'] as ExitId[]).flatMap((id) => doorFaces(id).rims),
+    ];
+    // 원래 테두리 안 격자 점이 모두 합친 사각형 안 (합집합이 줄지 않음)
+    for (const r of rims)
+      for (let u = 0.05; u < 1; u += 0.15)
+        for (let v = 0.05; v < 1; v += 0.15) {
+          const x = r.x0 + (r.x1 - r.x0) * u;
+          const y = r.y0 + (r.y1 - r.y0) * v;
+          expect(rects.some((q) => x >= q.x0 && x <= q.x1 && y >= q.y0 && y <= q.y1)).toBe(true);
+        }
+  });
+
   it('기둥 리프트는 기둥 받침 안', () => {
     const blocks = pillarBlocks();
     for (const q of rimLiftPolys()) expect(blocks.some((b) => polyInRect(q, b))).toBe(true);
@@ -467,6 +502,167 @@ describe('동적 오브젝트 (fogPaint): 판정 반경을 그대로 그린다',
     const s = trackExit('S', 'open', 9000);
     expect(doorSlide(s, 9000)).toBe(1);
   });
+
+  it('장식 시계가 멈춘 채(freezeClock) 문이 열려도, 실제 시간이 미닫이 시간만큼 지나면 다 열린 그림이다', () => {
+    resetExitTracking();
+    const openVoid = (pen: RecPen): Call[] =>
+      pen.calls.filter((c) => c.op === 'fillPoly' && c.color === OBJ_COLOR.openVoid);
+    const draw = (state: ExitView['state'], now: number, real: number): RecPen => {
+      const pen = new RecPen();
+      paintExits(pen, [{ id: 'N', state, progress: null }], b, now, real);
+      return pen;
+    };
+    // 시계는 1000에 멈춰 있다. 활성으로 본 뒤 실제 시각 10ms에 열림
+    draw('active', 1000, 0);
+    expect(openVoid(draw('open', 1000, 10)).length).toBe(0);
+    expect(exitSlide('N', 1000, 10 + OBJ.doorSlideMs / 2)).toBe(0);
+    // 실제로 미닫이 시간이 지났다 → 다 열림 (문 칸 가운데가 열린 틈 색)
+    const done = openVoid(draw('open', 1000, 10 + OBJ.doorSlideMs + 1));
+    expect(done.length).toBe(1);
+    const xs = done[0]!.poly!.map((p) => p.x);
+    const d = EXITS.N.door;
+    expect(Math.min(...xs)).toBeLessThan((d.x0 + d.x1) / 2 - 0.5);
+    expect(Math.max(...xs)).toBeGreaterThan((d.x0 + d.x1) / 2 + 0.5);
+    expect(exitSlide('N', 1000, 10 + OBJ.doorSlideMs)).toBe(1);
+    // 시계가 흐르면 장식 시계대로 (실제 시계와 같이 흐름): 중간이면 중간
+    resetExitTracking();
+    trackExit('S', 'active', 0, 0);
+    trackExit('S', 'open', 2000, 2000);
+    expect(exitSlide('S', 2000 + OBJ.doorSlideMs / 2, 2000 + OBJ.doorSlideMs / 2)).toBeCloseTo(
+      doorSlide(2000, 2000 + OBJ.doorSlideMs / 2),
+      9,
+    );
+    expect(exitSlide('S', 2000 + OBJ.doorSlideMs / 2, 2000 + OBJ.doorSlideMs / 2)).toBeLessThan(1);
+    // 기록이 없는 문은 다 열린 것으로
+    expect(exitSlide('N', 0, 0)).toBe(1);
+  });
+});
+
+// ───────────── 굽기: 정적 맵 캐시 (R4) · 시드 결정성 (T7) ─────────────
+
+/** 모든 그리기 호출 · 속성 설정을 글자로 받아 적는 가짜 캔버스 문서 (log = null이면 적지 않는다) */
+function fakeCanvasDoc(log: string[] | null): { createElement: () => unknown } {
+  const fmt = (v: unknown): string => {
+    if (typeof v === 'number') return String(v);
+    if (typeof v === 'string') return v;
+    if (v && typeof v === 'object' && 'width' in v && 'height' in v)
+      return `canvas${String((v as { width: number }).width)}x${String((v as { height: number }).height)}`;
+    return typeof v;
+  };
+  const gradient = {
+    addColorStop: (o: number, c: string): void => {
+      log?.push(`stop(${o},${c})`);
+    },
+  };
+  return {
+    createElement: () => {
+      const canvas: { width: number; height: number; getContext?: () => unknown } = { width: 0, height: 0 };
+      const state: Record<string | symbol, unknown> = {};
+      const ctx = new Proxy(state, {
+        get(t, name) {
+          if (name === 'canvas') return canvas;
+          if (name in t) return t[name];
+          // 픽셀 노이즈: 빈 이미지 데이터를 주고, 올릴 때 내용 해시를 적는다
+          if (name === 'createImageData')
+            return (w: number, h: number) => ({
+              width: w,
+              height: h,
+              data: new Uint8ClampedArray(w * h * 4),
+            });
+          if (name === 'putImageData')
+            return (img: { data: Uint8ClampedArray }, x: number, y: number) => {
+              let hsh = 2166136261;
+              for (const v of img.data) hsh = Math.imul(hsh ^ v, 16777619) >>> 0;
+              log?.push(`putImageData(${img.data.length},${hsh},${x},${y})`);
+            };
+          return (...args: unknown[]) => {
+            log?.push(`${String(name)}(${args.map(fmt).join(',')})`);
+            return gradient;
+          };
+        },
+        set(t, name, v) {
+          t[name] = v;
+          log?.push(`${String(name)}=${fmt(v)}`);
+          return true;
+        },
+      });
+      canvas.getContext = () => ctx;
+      return canvas;
+    },
+  };
+}
+
+describe('정적 맵 캐시: 지금 쓰는 것만 남긴다 (R4)', () => {
+  beforeEach(() => {
+    vi.stubGlobal('document', fakeCanvasDoc(null));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('같은 배율은 다시 굽지 않고, keepStaticMaps 전에도 두 장을 넘기지 않으며, keep 뒤에는 필요한 것만 남는다', () => {
+    const count = (): number => Number(gfxState.features.mapCacheCount);
+    const cacheBytes = (): number => Number(gfxState.features.mapCacheBytes);
+    const a = getStaticMap(0.93, true);
+    expect(getStaticMap(0.93, true)).toBe(a);
+    // 옛 배율 · 다른 경로가 쌓여도 두 장 + 발광
+    getStaticMap(1.86, false);
+    getStaticMap(0.5, true);
+    getStaticMap(1.395, false);
+    expect(count()).toBeLessThanOrEqual(3);
+    // GPU 합성: 메인(발광 따로) + 미니맵 + 발광
+    keepStaticMaps(
+      [
+        { scale: 1.86, withGlow: false },
+        { scale: 0.5, withGlow: true },
+      ],
+      true,
+    );
+    getStaticMap(1.86, false);
+    getStaticMap(0.5, true);
+    getGlowMap();
+    const size = (s: number): number => staticMapSize(s).w * staticMapSize(s).h * 4;
+    const glow = staticMapSize(GLOW_SCALE).w * staticMapSize(GLOW_SCALE).h * 4;
+    expect(count()).toBe(3);
+    expect(cacheBytes()).toBe(size(1.86) + size(0.5) + glow);
+    // Canvas 합성(품질 낮춤): 메인 한 장만, 발광 캔버스도 버린다 (옛 배율 2 메인을 붙잡지 않는다)
+    getStaticMap(0.93, true);
+    keepStaticMaps([{ scale: 0.93, withGlow: true }], false);
+    expect(count()).toBe(1);
+    expect(cacheBytes()).toBe(size(0.93));
+    // 버린 배율은 다시 구우면 새 캔버스
+    expect(getStaticMap(1.86, false)).not.toBe(undefined);
+  });
+});
+
+describe('굽기 결정성 (T7): 같은 배율이면 언제나 같은 그림 (시드 고정, Math.random 없음)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  for (const [scale, withGlow] of [
+    [0.93, true],
+    [1.86, false],
+  ] as const) {
+    it(`정적 맵 배율 ${scale}${withGlow ? ' (발광 포함)' : ''}: 두 번 구운 그리기 명령이 같다`, () => {
+      const bake = (): string[] => {
+        // 발광 캐시는 미리 채워 둔다 (두 번째 굽기만 캐시를 쓰는 차이를 빼고 그림만 비교)
+        vi.stubGlobal('document', fakeCanvasDoc(null));
+        getGlowMap();
+        const log: string[] = [];
+        vi.stubGlobal('document', fakeCanvasDoc(log));
+        bakeStaticMap(scale, withGlow);
+        bakeGlow();
+        return log;
+      };
+      const a = bake();
+      const c = bake();
+      // 빈 통과가 아님: 바닥 칸 톤이 시드 노이즈로 여러 가지이고 명령이 많다
+      expect(a.length).toBeGreaterThan(5000);
+      expect(new Set(a.filter((l) => l.startsWith('fillStyle='))).size).toBeGreaterThan(20);
+      expect(c).toEqual(a);
+    });
+  }
 });
 
 // ───────────── 도우미 ─────────────

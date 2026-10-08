@@ -667,10 +667,22 @@ export function floorDecals(seed: number = MAP_ART.seed): Decal[] {
 
 // ───────────────────────── 테두리 리프트 · 대비 ─────────────────────────
 
-/** 곱하기 뒤에 더하는 테두리 리프트 도형 (타일 좌표 볼록 다각형): 벽 윗면 테두리 + 기둥 윗테두리 + 탈출구 문틀 */
+/**
+ * 곱하기 뒤에 더하는 테두리 리프트 도형 (타일 좌표 볼록 다각형): 벽 윗면 테두리 + 기둥 윗테두리 + 탈출구 문틀.
+ * 서로 겹치지 않는다: 같은 칸의 동 · 서 테두리는 남 · 북 테두리 띠를 빼고 둔다(합집합은 그대로). GPU 합성은 조각마다
+ * 더하기로 찍으므로 겹친 모서리가 두 번 밝아지지 않게 한다 (Canvas 합성은 경로 하나로 칠해 원래 한 번)
+ */
 export function rimLiftRects(): TileRect[] {
   const rects: TileRect[] = [];
-  for (const { i, j } of wallCells()) for (const r of wallFaces(i, j).rims) rects.push(r);
+  for (const { i, j } of wallCells()) {
+    const rims = wallFaces(i, j).rims;
+    const n = rims.find((r) => r.side === 'n');
+    const s = rims.find((r) => r.side === 's');
+    for (const r of rims) {
+      if (r.side === 'n' || r.side === 's') rects.push(r);
+      else rects.push({ ...r, y0: n ? n.y1 : r.y0, y1: s ? s.y0 : r.y1 });
+    }
+  }
   for (const id of Object.keys(EXITS) as ExitId[]) for (const r of doorFaces(id).rims) rects.push(r);
   return mergeRects(rects);
 }

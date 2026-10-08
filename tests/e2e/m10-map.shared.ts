@@ -1,7 +1,16 @@
 // M10b 맵 · 오브젝트 E2E 공용 (m10-map.spec.ts = Canvas 낮음, m10-map.webgl.spec.ts = WebGL 높음).
 // 봇 방 탭 하나로 장면을 놓고 스크린샷 픽셀을 잰다. 대비는 WCAG 상대휘도, 색 차이는 CIE76 ΔE(Lab).
 import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
-import type { InfoItem, TestCommand } from '@decoy/shared';
+import {
+  CAPTURE_POINTS,
+  MAP_H,
+  MAP_W,
+  tileAt,
+  type InfoItem,
+  type TestCommand,
+  type Vec2,
+} from '@decoy/shared';
+import { BADGE, PRISON_LOCK } from '../../client/src/art/mapArtBadges';
 import { watchConsole } from './helpers';
 
 export type Rgb = [number, number, number];
@@ -35,9 +44,13 @@ export async function startBotRoom(browser: Browser, query: string, role = 'runn
   };
   const id = (r: string): string => truth.players.find((p) => p.role === r)?.id ?? '';
   const raw = (cmd: TestCommand): Promise<void> => page.evaluate((c) => window.__DECOY__?.sendTest(c), cmd);
+  // teleport는 멈춤을 푼다: 다시 멈추는 명령을 같은 평가에서 잇달아 보내 서버가 그 사이에 한 틱 움직이지 않게 한다
   const send = async (cmd: TestCommand): Promise<void> => {
-    await raw(cmd);
-    if (cmd.kind === 'teleport') await raw({ kind: 'freeze', target: cmd.target, frozen: true });
+    if (cmd.kind !== 'teleport') return raw(cmd);
+    await page.evaluate((c) => {
+      window.__DECOY__?.sendTest(c);
+      window.__DECOY__?.sendTest({ kind: 'freeze', target: c.target, frozen: true });
+    }, cmd);
   };
   for (const r of ['monster', 'runner', 'guard', 'scout'])
     await raw({ kind: 'freeze', target: id(r), frozen: true });
@@ -255,6 +268,29 @@ export async function darkAndLit(s: Session): Promise<DarkLitResult> {
   };
 }
 
+/** 맵 쪽 레이어(안개 루트: 정적 · 동적, 배지)의 프레임당 Graphics 명령 수 */
+export async function mapGfxCounts(
+  page: Page,
+): Promise<{ map: number; badges: number; objects: number; cacheBytes: number }> {
+  const f = (await page.evaluate(() => window.__DECOY__!.gfx)).features;
+  return {
+    map: Number(f.mapGfxCmds ?? -1),
+    badges: Number(f.badgeGfxCmds ?? -1),
+    objects: Number(f.mapLayerObjects ?? -1),
+    cacheBytes: Number(f.mapCacheBytes ?? -1),
+  };
+}
+
+/**
+ * 맵 쪽 레이어는 프레임마다 다시 테셀레이션하는 Graphics를 쓰지 않는다 (정적 = 구운 텍스처, 동적 = 안개 주기에만 캔버스에
+ * 다시 그려 올린 텍스처, 배지 = 상태가 바뀔 때만 구운 텍스처). 빈 통과가 아님: 세는 대상(안개 루트 안 객체)이 실제로 있다
+ */
+export function expectNoMapGraphics(c: Awaited<ReturnType<typeof mapGfxCounts>>, minObjects: number): void {
+  expect(c.map).toBe(0);
+  expect(c.badges).toBe(0);
+  expect(c.objects).toBeGreaterThanOrEqual(minObjects);
+}
+
 /** 장면 1 판정 (두 렌더러 공통) */
 export function expectDarkAndLit(r: DarkLitResult): void {
   // 시야 밖에서도 구조 테두리가 인접 바닥과 2.5:1 이상
@@ -271,37 +307,258 @@ export function expectDarkAndLit(r: DarkLitResult): void {
   expect(r.bakeMs).toBeLessThan(1000);
 }
 
-/** 장면 2: 배지가 캐릭터를 덮지 않음 (러너 거점 A 중심, 가드 감옥 중심 수감) — 몸 원판 평균색 ΔE */
-export async function bodiesOverBadges(s: Session): Promise<{ runner: number; guard: number }> {
+/** 배지 자리 (mapArtBadges BADGE 상수로 계산, 타일): 거점 A 글자(마름모 가운데) · 마름모 오른쪽 꼭짓점 · 상태 칩 · 감옥 자물쇠 */
+export function badgeSpots(): Record<'letter' | 'diamond' | 'chip' | 'lock', Vec2> {
+  const a = CAPTURE_POINTS.A;
+  const y = a.y + BADGE.pointDy;
+  return {
+    letter: { x: a.x, y },
+    diamond: { x: a.x + BADGE.pointHalf, y },
+    chip: { x: a.x + BADGE.chipDx, y },
+    lock: { x: PRISON_LOCK.x, y: PRISON_LOCK.y },
+  };
+}
+
+/** 몸 원판(0.9r)이 바닥 칸에만 걸리는 기준 자리: 배지 자리에서 정수 기기 픽셀만큼(4 · 8타일 = 119 · 238px) 옮긴 곳 */
+function cleanSpot(p: Vec2, r: number): Vec2 {
+  const floorAround = (q: Vec2): boolean => {
+    for (let j = Math.floor(q.y - r - 0.1); j <= Math.floor(q.y + r + 0.1); j += 1)
+      for (let i = Math.floor(q.x - r - 0.1); i <= Math.floor(q.x + r + 0.1); i += 1)
+        if (tileAt(i, j) !== 'floor') return false;
+    return true;
+  };
+  for (const [dx, dy] of [
+    [-4, 0],
+    [4, 0],
+    [0, 4],
+    [0, -4],
+    [-8, 0],
+    [8, 0],
+  ] as const) {
+    const q = { x: p.x + dx, y: p.y + dy };
+    if (floorAround(q)) return q;
+  }
+  throw new Error(`배지 없는 기준 자리를 못 찾음: ${JSON.stringify(p)}`);
+}
+
+export interface BodyOverBadge {
+  /** 몸 원판 픽셀마다 ΔE(배지 위, 배지 없는 기준) 평균 · 10 넘는 픽셀 비율 */
+  meanDE: number;
+  overFrac: number;
+  /** 빈 통과가 아님: 같은 자리에 캐릭터가 없을 때 배지가 원판 안에서 바닥과 다른 픽셀 비율 */
+  badgeFrac: number;
+  px: number;
+}
+
+/** 원판 픽셀 (중심 · 반지름 px, 정수 오프셋 dx · dy만큼 옮긴 같은 원판) */
+async function discAt(page: Page, c: Vec2, rad: number): Promise<{ px: Rgb[]; rect: Rect }> {
+  const rect: Rect = {
+    x: Math.floor(c.x - rad - 1),
+    y: Math.floor(c.y - rad - 1),
+    w: Math.ceil(2 * rad + 3),
+    h: Math.ceil(2 * rad + 3),
+  };
+  return { px: (await grab(page, { rect })).rect!, rect };
+}
+
+/**
+ * 장면 2 (T2): 배지가 캐릭터를 덮지 않음. 러너(나)를 실제 배지 자리(BADGE로 계산한 글자 · 마름모 · 칩 · 자물쇠)에 세워 몸 원판
+ * (0.9r, 반지름은 balance · tileToClient)을, 같은 몸을 배지 없는 바닥(정수 기기 픽셀만큼 옮긴 곳)에 세운 것과 픽셀마다 비교한다.
+ * 몸 위에 아무것도 없으면 두 원판은 같다. 빈 통과가 아님: 몸이 없을 때 그 원판 안에 배지 픽셀이 실제로 있다
+ */
+export async function bodiesOverBadges(
+  s: Session,
+  survivorR: number,
+): Promise<Record<string, BodyOverBadge>> {
   const { page, send, id } = s;
   await send({ kind: 'teleport', target: id('monster'), x: 44.5, y: 12.5, face: 0 });
-  await send({ kind: 'teleport', target: id('scout'), x: 40, y: 16 });
-  await send({ kind: 'setSurvivor', target: id('guard'), status: 'imprisoned', imprisonCount: 1 });
-  await send({ kind: 'teleport', target: id('guard'), x: 24, y: 16 });
-  await send({ kind: 'teleport', target: id('runner'), x: 8, y: 16 });
-  await page.waitForTimeout(900);
-  const drawn = await page.evaluate(() => window.__DECOY__?.getDrawn() ?? []);
-  const me = drawn.find((d) => d.kind === 'self');
-  const guard = drawn.find((d) => d.kind === 'survivor' && Math.hypot(d.x - 24, d.y - 16) < 0.2);
-  expect(me, '러너(나)').toBeTruthy();
-  expect(guard, '감옥 안 가드').toBeTruthy();
-  const out = { runner: 99, guard: 99 };
-  for (const [name, d, color] of [
-    ['runner', me!, 0x3b82f6],
-    ['guard', guard!, GUARD],
-  ] as const) {
-    const c = await page.evaluate(([x, y]) => window.__DECOY__?.tileToClient(x!, y!), [d.x, d.y]);
-    const rad = 0.45 * 0.3 * 32 * 0.9297;
-    const r: Rect = {
-      x: Math.floor(c!.x - rad - 1),
-      y: Math.floor(c!.y - rad - 1),
-      w: Math.ceil(2 * rad + 3),
-      h: Math.ceil(2 * rad + 3),
+  // 스카우트(봇)가 거점 A 안에 서 있어 A가 점령 중: 상태 칩(▶)이 그려진다
+  await send({ kind: 'teleport', target: id('scout'), x: 7, y: 17.2, face: 0 });
+  await send({ kind: 'teleport', target: id('guard'), x: 40, y: 28, face: 0 });
+  const toClient = async (p: Vec2): Promise<Vec2> => {
+    const c = await page.evaluate(([x, y]) => window.__DECOY__?.tileToClient(x!, y!), [p.x, p.y]);
+    if (!c) throw new Error('tileToClient 없음');
+    return c;
+  };
+  const out: Record<string, BodyOverBadge> = {};
+  for (const [name, spot] of Object.entries(badgeSpots())) {
+    const ref = cleanSpot(spot, survivorR);
+    const c = await toClient(spot);
+    const edge = await toClient({ x: spot.x + survivorR * 0.9, y: spot.y });
+    const rad = edge.x - c.x;
+    const cr = await toClient(ref);
+    // 기준 자리는 정수 픽셀만큼 옮긴 곳 (같은 부분 픽셀 위상 → 같은 몸 그림)
+    expect(Math.abs(cr.x - c.x - Math.round(cr.x - c.x))).toBeLessThan(0.01);
+    expect(Math.abs(cr.y - c.y - Math.round(cr.y - c.y))).toBeLessThan(0.01);
+    // 몸 없는 배지 자리 (러너를 멀리). 점령이 끝나 완료(✓)로 바뀌지 않게 진행을 조금으로 되돌린다
+    await send({ kind: 'setPoint', point: 'A', progress: 0.05 });
+    await send({ kind: 'teleport', target: id('runner'), x: 40, y: 20, face: 0 });
+    await page.waitForTimeout(500);
+    const bare = await discAt(page, c, rad);
+    const bareRef = await discAt(page, cr, rad);
+    await send({ kind: 'teleport', target: id('runner'), x: spot.x, y: spot.y, face: 0 });
+    await page.waitForTimeout(600);
+    const on = await discAt(page, c, rad);
+    await send({ kind: 'teleport', target: id('runner'), x: ref.x, y: ref.y, face: 0 });
+    await page.waitForTimeout(600);
+    const off = await discAt(page, cr, rad);
+    const a = disc(on.px, on.rect, c.x, c.y, rad);
+    const b = disc(off.px, off.rect, cr.x, cr.y, rad);
+    const ba = disc(bare.px, bare.rect, c.x, c.y, rad);
+    const bb = disc(bareRef.px, bareRef.rect, cr.x, cr.y, rad);
+    expect(a.length).toBe(b.length);
+    let sum = 0;
+    let over = 0;
+    let badge = 0;
+    for (let i = 0; i < a.length; i += 1) {
+      const d = deltaE(a[i]!, b[i]!);
+      sum += d;
+      if (d > 10) over += 1;
+      if (deltaE(ba[i]!, bb[i]!) > 10) badge += 1;
+    }
+    out[name] = {
+      meanDE: sum / Math.max(1, a.length),
+      overFrac: over / Math.max(1, a.length),
+      badgeFrac: badge / Math.max(1, a.length),
+      px: a.length,
     };
-    const px = (await grab(page, { r })).r!;
-    out[name] = deltaE(meanRgb(disc(px, r, c!.x, c!.y, rad)), hexRgb(color));
   }
+  await send({ kind: 'teleport', target: id('scout'), x: 40, y: 3, face: 0 });
+  await send({ kind: 'setPoint', point: 'A', progress: 0 });
   return out;
+}
+
+/** 장면 2 판정: 몸이 배지 위에 그대로 (배지 없는 바닥에 선 같은 몸과 같다). 빈 통과가 아님: 배지가 원판 안에 실제로 있다 */
+export function expectBodiesOverBadges(r: Record<string, BodyOverBadge>): void {
+  for (const [name, v] of Object.entries(r)) {
+    expect(v.px, name).toBeGreaterThan(60);
+    expect(v.badgeFrac, `${name}: 몸 원판 안에 배지 픽셀`).toBeGreaterThan(0.05);
+    expect(v.meanDE, `${name}: 몸 원판 평균 ΔE`).toBeLessThanOrEqual(2);
+    expect(v.overFrac, `${name}: ΔE 10 넘는 픽셀 비율`).toBeLessThanOrEqual(0.02);
+  }
+}
+
+/**
+ * R6: 장식 시계가 멈춘 채(freezeClock) 탈출구가 열려도 미닫이가 다 열린 그림이 된다 (닫힌 = 활성처럼 남지 않음).
+ * 두 거점 완료 → 탈출구 활성 → 가드(봇)가 북문 판정 원 안에서 개방 → 열림. 문 칸 가운데 픽셀이 열린 틈(초록) 색인지 본다
+ */
+export async function exitOpensWhileFrozen(
+  s: Session,
+): Promise<{ before: Rgb; after: Rgb; state: string | number | null }> {
+  const { page, send, id } = s;
+  await page.evaluate(() => window.__DECOY__?.freezeClock(4321));
+  await send({ kind: 'teleport', target: id('monster'), x: 44.5, y: 12.5, face: 0 });
+  await send({ kind: 'teleport', target: id('runner'), x: 21, y: 3.5, face: 0 });
+  await send({ kind: 'teleport', target: id('guard'), x: 3, y: 28, face: 0 });
+  const badge = (tag: string): Promise<string | number | null> =>
+    page.evaluate(
+      (t) =>
+        (window.__DECOY__?.getInfoLayer() ?? []).find((i) => i.kind === 'badge' && i.tag === t)?.value ??
+        null,
+      tag,
+    );
+  // 두 거점 완료 (완료는 안에서 점령 중인 생존자가 게이지를 채울 때): 스카우트(봇)가 거의 찬 거점에 차례로 선다
+  for (const [point, x] of [
+    ['A', 8],
+    ['B', 40],
+  ] as const) {
+    await send({ kind: 'setPoint', point, progress: 0.99 });
+    await send({ kind: 'teleport', target: id('scout'), x, y: 16, face: 0 });
+    await expect.poll(() => badge(`point-${point}`), { timeout: 8000 }).toBe('done');
+  }
+  await send({ kind: 'teleport', target: id('scout'), x: 45, y: 28, face: 0 });
+  await expect.poll(() => badge('exit-N'), { timeout: 8000 }).toBe('active');
+  const door = await tileRect(page, 23.8, 0.3, 24.2, 0.5);
+  const mean = async (): Promise<Rgb> => meanRgb((await grab(page, { door })).door!);
+  const noBanner = (): Promise<number> => page.evaluate(() => window.__DECOY__?.getBanners().length ?? 0);
+  await expect.poll(noBanner, { timeout: 15_000 }).toBe(0);
+  const before = await mean();
+  // 개방은 두 사람이 판정 원 안에 있을 때 (가드 · 스카우트 봇)
+  await send({ kind: 'teleport', target: id('guard'), x: 23.5, y: 1.7, face: 0 });
+  await send({ kind: 'teleport', target: id('scout'), x: 24.5, y: 1.7, face: 0 });
+  await expect.poll(() => badge('exit-N'), { timeout: 10_000 }).toBe('open');
+  // 실제 시간이 미닫이(0.6초)보다 흐른 뒤 (장식 시계는 그대로 멈춰 있다)
+  await page.waitForTimeout(1200);
+  await expect.poll(noBanner, { timeout: 15_000 }).toBe(0);
+  const after = await mean();
+  return { before, after, state: await badge('exit-N') };
+}
+
+export interface MapScene {
+  /** 맵 사각형만 찍은 PNG */
+  png: Buffer;
+  rect: Rect;
+  /** 그린 캐릭터 자리 (클라이언트 px): 캐릭터 자세는 맵 그림이 아니라 비교에서 뺀다 */
+  bodies: Vec2[];
+  problems: string[];
+}
+
+/**
+ * T7: 같은 장면을 페이지를 새로 열어 찍은 맵 사각형 (정적 맵 · 발광 굽기가 시드 고정이면 두 번 열어도 같다).
+ * 봇 · 나를 같은 자리 · 같은 방향에 세우고 장식 시계를 멈춘다
+ */
+export async function mapSceneShot(browser: Browser, query: string): Promise<MapScene> {
+  const s = await startBotRoom(browser, query);
+  const { page, send, id } = s;
+  await send({ kind: 'teleport', target: id('monster'), x: 44.5, y: 12.5, face: 0 });
+  await send({ kind: 'teleport', target: id('scout'), x: 45, y: 2, face: Math.PI });
+  await send({ kind: 'teleport', target: id('guard'), x: 3, y: 2, face: 0 });
+  await send({ kind: 'teleport', target: id('runner'), x: 22.5, y: 25.5, face: 0 });
+  await settle(page);
+  // 장식 시계를 먼 미래의 같은 값에: 판 시작 직후 봇이 남긴 입자(발먼지 등)는 모두 수명이 끝나 있고,
+  // 시계로 움직이는 장식(빛 속 먼지 · 경계 노이즈)은 두 번 모두 같은 시각이다
+  await page.evaluate(() => window.__DECOY__?.freezeClock(1e7));
+  await page.waitForTimeout(1000);
+  const rect = await tileRect(page, 0, 0, MAP_W, MAP_H);
+  const png = await page.screenshot({ clip: { x: rect.x, y: rect.y, width: rect.w, height: rect.h } });
+  const bodies = await page.evaluate(() =>
+    (window.__DECOY__?.getDrawn() ?? []).map((d) => window.__DECOY__!.tileToClient(d.x, d.y)!),
+  );
+  await s.context.close();
+  return { png, rect, bodies, problems: s.problems };
+}
+
+/** 두 맵 PNG에서 채널 차가 2를 넘는 픽셀 수 (캐릭터 자리 반지름 rad px 안은 뺀다) · 최대 차 */
+export async function diffMapScenes(
+  page: Page,
+  a: MapScene,
+  b: MapScene,
+  rad: number,
+): Promise<{ diff: number; max: number; px: number }> {
+  const mask = [...a.bodies, ...b.bodies].map((p) => ({ x: p.x - a.rect.x, y: p.y - a.rect.y }));
+  return page.evaluate(
+    async ({ a64, b64, mask, rad }) => {
+      const load = async (s: string): Promise<ImageData> => {
+        const img = new Image();
+        img.src = `data:image/png;base64,${s}`;
+        await img.decode();
+        const c = document.createElement('canvas');
+        c.width = img.width;
+        c.height = img.height;
+        const x = c.getContext('2d', { willReadFrequently: true });
+        if (!x) throw new Error('2D 컨텍스트 없음');
+        x.drawImage(img, 0, 0);
+        return x.getImageData(0, 0, c.width, c.height);
+      };
+      const da = await load(a64);
+      const db = await load(b64);
+      let diff = 0;
+      let max = 0;
+      for (let i = 0; i < da.data.length; i += 4) {
+        const p = i / 4;
+        const x = p % da.width;
+        const y = Math.floor(p / da.width);
+        if (mask.some((m) => Math.hypot(x - m.x, y - m.y) <= rad)) continue;
+        let d = 0;
+        for (let k = 0; k < 3; k += 1)
+          d = Math.max(d, Math.abs((da.data[i + k] ?? 0) - (db.data[i + k] ?? 0)));
+        if (d > 2) diff += 1;
+        max = Math.max(max, d);
+      }
+      return { diff, max, px: da.width * da.height };
+    },
+    { a64: a.png.toString('base64'), b64: b.png.toString('base64'), mask, rad },
+  );
 }
 
 /** 장면 3: 거점 정지 (러너와 괴물이 함께 A 안) — 정보 레이어 + 주황 아이콘 픽셀 */

@@ -1,7 +1,7 @@
 // 정적 맵 굽기 (M10b): 강판 바닥 · 2.5D 벽 · 깎은 8각 기둥 · 감옥 철창 · 거점 단말 · 방폭문 · 청록 네온.
 // 배율 scale(출력 px / 월드 px)로 직접 그리고(이중 리샘플 없음), 칸 채움은 기기 픽셀 정수 경계에 맞춘다.
 // 시드 고정이라 같은 배율이면 언제나 같은 그림이다. 한 번 구워 캐시하고(getStaticMap), 판 시작 때 끊기지 않게
-// 로비에서 미리 구울 수 있다(prebakeStaticMap). 매 프레임에는 이 이미지만 그린다.
+// 로비에서 미리 구울 수 있다(render/baseLayer.ts prebakeFogArt). 매 프레임에는 이 이미지만 그린다.
 //
 // 발광(네온 · 철창 · 단말 화면의 번짐)은 낮은 해상도 캔버스 하나(getGlowMap)에 굽는다.
 //  - 품질 높음 · 중간(GPU 합성, presets glow = 'sprite'): 따로 ADD 이미지로 빛 지도 곱하기 앞에 더한다
@@ -829,13 +829,26 @@ export function bakeStaticMap(scale: number, withGlow: boolean): HTMLCanvasEleme
   return canvas;
 }
 
-/** 굽은 캔버스 캐시 (배율 · 발광 포함 여부). 최근 것만 남겨 메모리를 묶어 두지 않는다 */
+/**
+ * 굽은 캔버스 캐시 (배율 · 발광 포함 여부). 안개 레이어(또는 로비 미리 굽기)가 keepStaticMaps로 지금 쓰는 것만 남긴다:
+ * GPU 합성 = 메인 + 미니맵 두 장 + 발광, Canvas 합성 = 메인 한 장(미니맵은 합성 캔버스를 줄여 쓴다). 창 크기 · 품질이
+ * 바뀐 뒤 옛 배율의 큰 캔버스(배율 2에서 약 22MB)를 붙잡지 않는다. keepStaticMaps 전에도 두 장을 넘기지 않는다
+ */
 const cache = new Map<string, HTMLCanvasElement>();
-const CACHE_MAX = 3;
+const CACHE_MAX = 2;
 let glowCanvas: HTMLCanvasElement | null = null;
 
 function cacheKey(scale: number, withGlow: boolean): string {
   return `${scale.toFixed(5)}|${withGlow ? 'g' : '-'}`;
+}
+
+/** 측정: 캐시가 붙잡은 캔버스 수 · 바이트 (gfx.features.mapCacheCount · mapCacheBytes) */
+function recordCache(): void {
+  let bytes = 0;
+  for (const c of cache.values()) bytes += c.width * c.height * 4;
+  if (glowCanvas) bytes += glowCanvas.width * glowCanvas.height * 4;
+  gfxState.features.mapCacheBytes = bytes;
+  gfxState.features.mapCacheCount = cache.size + (glowCanvas ? 1 : 0);
 }
 
 /** 같은 배율이면 다시 굽지 않는다 */
@@ -855,19 +868,28 @@ export function getStaticMap(scale: number, withGlow: boolean): HTMLCanvasElemen
     if (oldest === undefined) break;
     cache.delete(oldest);
   }
+  recordCache();
   return canvas;
 }
 
-/** 발광 번짐 (배율 고정이라 한 번만) */
+/** 발광 번짐 (배율 고정이라 한 번만, 쓰지 않는 경로로 바뀌면 keepStaticMaps가 버린다) */
 export function getGlowMap(): HTMLCanvasElement {
-  glowCanvas ??= bakeGlow(GLOW_SCALE);
+  if (!glowCanvas) {
+    glowCanvas = bakeGlow(GLOW_SCALE);
+    recordCache();
+  }
   return glowCanvas;
 }
 
-/** 로비 대기 중 미리 굽기 (판 시작 때 끊기지 않게). 걸린 시간(ms)을 돌려준다. 이미 있으면 0에 가깝다 */
-export function prebakeStaticMap(scale: number, withGlow = true): number {
-  const t0 = performance.now();
-  getStaticMap(scale, withGlow);
-  if (!withGlow) getGlowMap();
-  return performance.now() - t0;
+export interface StaticMapNeed {
+  scale: number;
+  withGlow: boolean;
+}
+
+/** 지금 쓰는 정적 맵만 캐시에 남기고 나머지(옛 배율 · 다른 경로)는 버린다. glow = 발광 캔버스를 따로 쓰는가 */
+export function keepStaticMaps(needs: readonly StaticMapNeed[], glow: boolean): void {
+  const keep = new Set(needs.map((n) => cacheKey(n.scale, n.withGlow)));
+  for (const key of [...cache.keys()]) if (!keep.has(key)) cache.delete(key);
+  if (!glow) glowCanvas = null;
+  recordCache();
 }
