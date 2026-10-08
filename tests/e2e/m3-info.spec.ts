@@ -1,10 +1,21 @@
 // M3: 정보 차단. 각 클라이언트가 받은 모든 스냅샷 원문을 서버 정답 기록과 대조한다.
 import { readFileSync } from 'node:fs';
-import { expect, test } from '@playwright/test';
-import { validateBalance, type Balance, type Snapshot } from '@decoy/shared';
+import { expect, test, type Browser } from '@playwright/test';
+import { validateBalance, type Balance, type Role, type Snapshot } from '@decoy/shared';
 import { anyVisible, circleVerdict, monsterVerdict, type Verdict } from './infoCheck';
 import { collectFrames, type CollectedFrames } from './frames';
-import { closeAll, sendTest, startFourPlayerMatch, type Player } from './helpers';
+import {
+  closeAll,
+  createRoom,
+  joinRoom,
+  myId,
+  pickRoleAndReady,
+  sendTest,
+  startFourPlayerMatch,
+  waitForSnapshots,
+  watchConsole,
+  type Player,
+} from './helpers';
 
 const balance: Balance = validateBalance(JSON.parse(readFileSync('config/balance.json', 'utf8')));
 
@@ -191,10 +202,42 @@ async function measureFps(players: Player[]): Promise<number[]> {
   return samples.map((s) => s.reduce((a, b) => a + b, 0) / s.length);
 }
 
+/**
+ * FPS 측정용 4탭. 뷰포트를 1920×1080 배율 1로 고정한다: M10a부터 백버퍼 = 표시 크기 × 기기 배율 × ?scale이라
+ * 다른 E2E의 960×540 창이면 scale=1도 백버퍼 960×540이 된다. 이렇게 두면 scale=1은 이전과 같은 1920×1080, scale=0.5는 960×540
+ */
+const FPS_VIEWPORT = { width: 1920, height: 1080 } as const;
+
+async function startFpsMatch(browser: Browser, q: string): Promise<Player[]> {
+  const roles: Role[] = ['monster', 'runner', 'guard', 'scout'];
+  const players: Player[] = [];
+  let code = '';
+  for (const role of roles) {
+    const context = await browser.newContext({ viewport: FPS_VIEWPORT, deviceScaleFactor: 1 });
+    const page = await context.newPage();
+    const problems: string[] = [];
+    watchConsole(page, problems);
+    if (players.length === 0) code = await createRoom(page, q);
+    else await joinRoom(page, code, q);
+    players.push({ context, page, problems, role, id: await myId(page) });
+  }
+  for (const p of players) await pickRoleAndReady(p.page, p.role);
+  const host = players[0]!;
+  await expect(host.page.getByTestId('start-button')).toBeEnabled();
+  await host.page.getByTestId('start-button').click();
+  for (const p of players) await waitForSnapshots(p.page, 3);
+  return players;
+}
+
 for (const scale of ['1', '0.5']) {
   test(`브라우저 4개 동시 실행 FPS (Canvas 렌더러, 헤드리스, scale=${scale})`, async ({ browser }) => {
     const q = `&scale=${scale}`;
-    const { players } = await startFourPlayerMatch(browser, undefined, [q, q, q, q]);
+    const players = await startFpsMatch(browser, q);
+    const backing = await players[0]!.page.evaluate(() => {
+      const g = window.__DECOY__?.gfx;
+      return g ? [g.backingW, g.backingH] : null;
+    });
+    expect(backing).toEqual(scale === '1' ? [1920, 1080] : [960, 540]);
     // 괴물을 생존자 근처로 옮겨 서로 보이는 상태(가장 많이 그리는 상태)에서 잰다
     const monster = players.find((p) => p.role === 'monster')!;
     await sendTest(monster.page, { kind: 'teleport', target: monster.id, x: 24, y: 21, face: -Math.PI / 2 });

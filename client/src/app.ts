@@ -14,7 +14,10 @@ import {
   type SurvivorView,
 } from '@decoy/shared';
 import { UI_TEXT } from './data/storyText';
+import type { QualityTier } from './gfx/presets';
+import { parseQuality } from './gfx/quality';
 import { NetClient, defaultWsUrl } from './net';
+import { parseScale } from './render/resolution';
 import { getAltTokens, getSavedName, getSeatToken, saveName, saveSeatToken } from './session';
 import { Interpolator, Predictor, SnapshotClock, lerpAngle, lerpNum } from './sync';
 import { LobbyUI } from './ui/lobby';
@@ -30,8 +33,13 @@ export interface AppParams {
   lag: number;
   debug: DebugMode;
   renderer: 'auto' | 'canvas' | 'webgl';
-  /** 내부 렌더 해상도 배율 (0.5 = 저사양 모드). 논리 좌표는 그대로 1920×1080 */
-  renderScale: number;
+  /**
+   * ?scale: 렌더 해상도 배율 (0.25~1). 표시 크기 × 기기 픽셀 배율로 정한 해상도에 곱한다(render/resolution.ts).
+   * 값이 없거나 비었거나 0 · 음수 · 숫자가 아니면 null(지정 없음). 논리 좌표는 그대로 1920×1080
+   */
+  scaleOverride: number | null;
+  /** ?quality=high|medium|low: 그래픽 품질 강제 (저장된 선택 · 자동보다 우선). 없으면 null */
+  quality: QualityTier | null;
   name: string | null;
 }
 
@@ -46,14 +54,10 @@ export function readParams(search: string): AppParams {
     lag: Number.isFinite(lag) && lag > 0 ? lag : 0,
     debug: debugRaw === null ? 'off' : debugRaw === 'hook' ? 'hook' : 'overlay',
     renderer: renderer === 'canvas' || renderer === 'webgl' ? renderer : 'auto',
-    renderScale: clampScale(Number(p.get('scale') ?? 1)),
+    scaleOverride: parseScale(p.get('scale')),
+    quality: parseQuality(p.get('quality')),
     name: p.get('name'),
   };
-}
-
-function clampScale(v: number): number {
-  if (!Number.isFinite(v)) return 1;
-  return Math.max(0.25, Math.min(1, v));
 }
 
 function lerpSurvivor(a: SurvivorView, b: SurvivorView, k: number): SurvivorView {

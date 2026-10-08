@@ -6,8 +6,7 @@ import type { AnonStatus, Balance, MatchInfo, Role, RoleId, Snapshot, SurvivorVi
 import { HUD_TEXT, ROLE_CARDS, UI_TEXT } from '../data/storyText';
 import { COLOR, ROLE_COLOR, hex } from '../render/colors';
 import { HUD, VIEW_W } from './layout';
-
-const FONT = "'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif";
+import { UI_FONT, makeText } from './text';
 
 function txt(
   scene: Phaser.Scene,
@@ -17,8 +16,8 @@ function txt(
   color = '#E2E8F0',
   bold = false,
 ): Phaser.GameObjects.Text {
-  return scene.add.text(x, y, '', {
-    fontFamily: FONT,
+  return makeText(scene, x, y, '', {
+    fontFamily: UI_FONT,
     fontSize: `${size}px`,
     color,
     fontStyle: bold ? 'bold' : 'normal',

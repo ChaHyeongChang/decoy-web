@@ -3,20 +3,18 @@ import type Phaser from 'phaser';
 import type { AnonStatus, Balance, MatchInfo, Snapshot } from '@decoy/shared';
 import { CONTROLS, HUD_TEXT, ROLE_CARDS } from '../data/storyText';
 import { VIEW_H, VIEW_W } from './layout';
-
-const FONT = "'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif";
+import { UI_FONT, makeText } from './text';
 
 function panelText(scene: Phaser.Scene, y: number, size: number): Phaser.GameObjects.Text {
-  return scene.add
-    .text(VIEW_W / 2, y, '', {
-      fontFamily: FONT,
-      fontSize: `${size}px`,
-      color: '#E2E8F0',
-      backgroundColor: 'rgba(11,22,34,0.86)',
-      padding: { x: 28, y: 18 },
-      align: 'left',
-      lineSpacing: 10,
-    })
+  return makeText(scene, VIEW_W / 2, y, '', {
+    fontFamily: UI_FONT,
+    fontSize: `${size}px`,
+    color: '#E2E8F0',
+    backgroundColor: 'rgba(11,22,34,0.86)',
+    padding: { x: 28, y: 18 },
+    align: 'left',
+    lineSpacing: 10,
+  })
     .setOrigin(0.5)
     .setDepth(70)
     .setVisible(false);
