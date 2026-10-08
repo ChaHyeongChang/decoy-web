@@ -15,7 +15,9 @@ import {
   type QualityChoice,
   type QualitySource,
 } from './gfx/quality';
-import { currentPreset, gfxState, notifyGfxChange, probeSlot } from './gfx/state';
+import { currentPreset, gfxState, notifyGfxChange, onGfxChange, probeSlot } from './gfx/state';
+import { prebakeAtlas } from './art/atlas';
+import { prebakeFogArt } from './render/baseLayer';
 import { computeRenderSize, type RenderSize } from './render/resolution';
 import { GameScene } from './scenes/GameScene';
 import { RENDER_SCALE, VIEW_H, VIEW_W, fitCamera, setRenderScale } from './ui/layout';
@@ -154,8 +156,10 @@ const game = new Phaser.Game({
     zoom: 1 / initial.k,
   },
   fps: { target: 60 },
-  // 카메라 배경색이 매 프레임 화면 전체를 칠하므로 따로 지우지 않는다. 정수 좌표로 그려 비트맵 복사를 싸게
-  render: { clearBeforeRender: false },
+  // 카메라 배경색이 매 프레임 화면 전체를 칠하므로 따로 지우지 않는다. 정수 좌표로 그려 비트맵 복사를 싸게.
+  // pixelArt · antialias를 꼭 적는다: Phaser는 scale.zoom이 1이 아니면(기기 픽셀 배율 ≠ 1) pixelArt를 켜서
+  // 모든 텍스처가 NEAREST(회전 스프라이트 계단, 확대한 빛 지도 블록)가 되고 WebGL 안티에일리어싱이 꺼진다
+  render: { clearBeforeRender: false, pixelArt: false, antialias: true, antialiasGL: true },
   scene: [IdleScene, GameScene],
 });
 app.game = game;
@@ -319,12 +323,34 @@ qualityHooks.auto = (a) => {
 // 효과음: 첫 클릭 · 키 입력에서 오디오를 연다 (브라우저 자동 재생 규칙)
 sfx.attachUnlock(document);
 
+/**
+ * 판 그림(정적 맵 · 발광 · 캐릭터 그림)을 로비 대기 중에 미리 굽는다. 판 시작 때 굽으면 배율 2에서 50~80ms 끊긴다.
+ * 같은 품질 · 배율이면 캐시를 쓰므로 여러 번 불러도 싸다. 판 중에는 굽지 않는다(품질이 바뀌면 판 장면이 직접 다시 굽는다)
+ */
+let prebakeTimer: number | null = null;
+function schedulePrebake(): void {
+  if (prebakeTimer !== null) return;
+  const run = (): void => {
+    prebakeTimer = null;
+    if (!game.isBooted || game.scene.isActive('game')) return;
+    prebakeFogArt();
+    const b = app.balance;
+    if (b) prebakeAtlas(game.scene.getScene('idle'), b.survivor.radius, b.monster.radius);
+  };
+  prebakeTimer = window.setTimeout(() => {
+    if ('requestIdleCallback' in window) window.requestIdleCallback(run, { timeout: 1000 });
+    else run();
+  }, 50);
+}
+onGfxChange(schedulePrebake);
+
 app.subscribe((e) => {
   if (e.kind === 'match') {
     game.scene.stop('game');
     game.scene.start('game', { app });
   } else if (e.kind === 'lobby' && e.lobby.phase === 'lobby') {
     if (game.scene.isActive('game')) game.scene.stop('game');
+    schedulePrebake();
   }
 });
 

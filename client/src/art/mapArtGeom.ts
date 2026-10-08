@@ -18,7 +18,17 @@ import {
   type TileKind,
   type Vec2,
 } from '@decoy/shared';
-import { NEON, NEON_DIM, UI, WARN, contrastRatio, multiplyRgb, relativeLuminance } from './palette';
+import {
+  EXIT_GO,
+  NEON,
+  NEON_DIM,
+  PRISON_RED,
+  UI,
+  WARN,
+  contrastRatio,
+  multiplyRgb,
+  relativeLuminance,
+} from './palette';
 
 export interface TileRect {
   readonly x0: number;
@@ -103,7 +113,7 @@ export const MAP_COLOR = {
   grateLine: 0x1a2430,
   barRail: 0x7a2027,
   /** 철창 (감옥 전용 빨강. 괴물 몸 #EF4444와 같은 값은 쓰지 않는다) */
-  bar: 0xdc2626,
+  bar: PRISON_RED,
   barCore: 0xfca5a5,
   prisonDoor: 0x2a1418,
   doorRecess: 0x05090d,
@@ -149,7 +159,7 @@ export const OBJ_COLOR = {
   tickOff: 0x1b3240,
   warn: WARN,
   /** 탈출구 초록 (스카우트 역할색 #22C55E와 같은 값은 맵에 쓰지 않는다: 예약 색) */
-  go: 0x10b981,
+  go: EXIT_GO,
   off: 0x56657a,
   gauge: 0x34d399,
   gaugeOff: 0x12301f,

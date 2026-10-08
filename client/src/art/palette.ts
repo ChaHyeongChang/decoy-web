@@ -39,8 +39,10 @@ export const DANGER = 0xef4444;
 export const DANGER_BANNER = 0xb91c1c;
 /** 정보 배너 바탕 (흰 글자 5.36:1) */
 export const INFO_BANNER = 0x0e7490;
-/** 탈출구 활성 (초록: 탈출 · 문) */
-export const EXIT_GO = 0x22c55e;
+/** 탈출구 활성 (초록: 탈출 · 문). 스카우트 역할색 #22C55E와 겹치지 않는 청록빛 초록 */
+export const EXIT_GO = 0x10b981;
+/** 맵의 감옥 빨강 (괴물 역할색 #EF4444와 겹치지 않게 한 단계 어둡게) */
+export const PRISON_RED = 0xdc2626;
 
 /** UI 공통 */
 export const UI = {
