@@ -86,6 +86,8 @@ npm run verify:deploy  # Docker 이미지(없으면 빌드 결과물)를 띄워 
 | [docs/HUMAN_CHECKS.md](docs/HUMAN_CHECKS.md) | 사람이 직접 확인할 것 |
 | [docs/PROGRESS.md](docs/PROGRESS.md) | 마일스톤별 진행 기록 |
 
+`docs/images/concept_*.png`는 생성형 AI로 만든 분위기 참고용 이미지로, 게임에서는 쓰지 않는다 (게임에 쓰는 이미지는 로고 `docs/images/logo_decoy.png` 하나).
+
 ## 폴더
 
 ```

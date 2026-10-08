@@ -9,3 +9,13 @@ playwright-report/
 tests/e2e/.results/
 *.log
 .DS_Store
+# 공개 저장소: 키 · 인증 파일이 실수로 들어가지 않게
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+.npmrc
+.netrc
+.git-credentials
