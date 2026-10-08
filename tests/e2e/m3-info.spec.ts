@@ -202,23 +202,51 @@ async function measureFps(players: Player[]): Promise<number[]> {
   return samples.map((s) => s.reduce((a, b) => a + b, 0) / s.length);
 }
 
-/**
- * FPS 측정용 4탭. 뷰포트를 1920×1080 배율 1로 고정한다: M10a부터 백버퍼 = 표시 크기 × 기기 배율 × ?scale이라
- * 다른 E2E의 960×540 창이면 scale=1도 백버퍼 960×540이 된다. 이렇게 두면 scale=1은 이전과 같은 1920×1080, scale=0.5는 960×540
- */
-const FPS_VIEWPORT = { width: 1920, height: 1080 } as const;
+interface FpsCase {
+  name: string;
+  viewport: { width: number; height: number };
+  query: string;
+  backing: [number, number];
+  /** 평균 FPS 하한 */
+  min: number;
+}
 
-async function startFpsMatch(browser: Browser, q: string): Promise<Player[]> {
+/**
+ * FPS 측정 조건 (Canvas 렌더러, 소프트웨어 합성, 4탭 + 서버).
+ *  - 게이트(55): 옛 scale=0.5와 화소 단위로 같은 조건. 960×540 창 · 배율 1 · 품질 낮음 → 백버퍼 960×540을 CSS 960×540에
+ *    1:1로 합성하고 카메라 zoom 0.5 (M10a 전 기준값 60.4와 견줄 수 있다). 소프트웨어 합성기(VizCompositorThread)는
+ *    탭 4개 몫을 한 스레드에서 하므로 창을 키워 늘려 보여 주면 백버퍼가 같아도 느려진다(2코어 실측 53~55) → 창 크기를 고정한다
+ *  - 기록(하한 20): 1920×1080 창 · 배율 1 · scale=1 → 백버퍼 1920×1080 1:1. 옛 scale=1(1920×1080을 960×540으로 줄여 표시)은
+ *    새 코드로 재현할 수 없어 옛 값(41.9)과 비교하지 않는다. 큰 회귀(GPU 프로세스 병목 때의 1~15FPS 같은)만 잡는다
+ */
+const FPS_CASES: readonly FpsCase[] = [
+  {
+    name: '게이트: 품질 낮음 · 백버퍼 960×540 (창 960×540 배율 1)',
+    viewport: { width: 960, height: 540 },
+    query: '&quality=low',
+    backing: [960, 540],
+    min: 55,
+  },
+  {
+    name: '기록: 1920×1080 배율 1 · scale=1 (옛 값과 비교하지 않음)',
+    viewport: { width: 1920, height: 1080 },
+    query: '&scale=1',
+    backing: [1920, 1080],
+    min: 20,
+  },
+];
+
+async function startFpsMatch(browser: Browser, c: FpsCase): Promise<Player[]> {
   const roles: Role[] = ['monster', 'runner', 'guard', 'scout'];
   const players: Player[] = [];
   let code = '';
   for (const role of roles) {
-    const context = await browser.newContext({ viewport: FPS_VIEWPORT, deviceScaleFactor: 1 });
+    const context = await browser.newContext({ viewport: c.viewport, deviceScaleFactor: 1 });
     const page = await context.newPage();
     const problems: string[] = [];
     watchConsole(page, problems);
-    if (players.length === 0) code = await createRoom(page, q);
-    else await joinRoom(page, code, q);
+    if (players.length === 0) code = await createRoom(page, c.query);
+    else await joinRoom(page, code, c.query);
     players.push({ context, page, problems, role, id: await myId(page) });
   }
   for (const p of players) await pickRoleAndReady(p.page, p.role);
@@ -229,27 +257,31 @@ async function startFpsMatch(browser: Browser, q: string): Promise<Player[]> {
   return players;
 }
 
-for (const scale of ['1', '0.5']) {
-  test(`브라우저 4개 동시 실행 FPS (Canvas 렌더러, 헤드리스, scale=${scale})`, async ({ browser }) => {
-    const q = `&scale=${scale}`;
-    const players = await startFpsMatch(browser, q);
-    const backing = await players[0]!.page.evaluate(() => {
-      const g = window.__DECOY__?.gfx;
-      return g ? [g.backingW, g.backingH] : null;
-    });
-    expect(backing).toEqual(scale === '1' ? [1920, 1080] : [960, 540]);
+for (const c of FPS_CASES) {
+  test(`브라우저 4개 동시 실행 FPS (Canvas 렌더러, 헤드리스) ${c.name}`, async ({ browser }) => {
+    const players = await startFpsMatch(browser, c);
+    for (const p of players) {
+      const backing = await p.page.evaluate(() => {
+        const g = window.__DECOY__?.gfx;
+        return g ? [g.backingW, g.backingH] : null;
+      });
+      expect(backing, `${p.role} 백버퍼`).toEqual(c.backing);
+    }
     // 괴물을 생존자 근처로 옮겨 서로 보이는 상태(가장 많이 그리는 상태)에서 잰다
     const monster = players.find((p) => p.role === 'monster')!;
     await sendTest(monster.page, { kind: 'teleport', target: monster.id, x: 24, y: 21, face: -Math.PI / 2 });
     const avgs = await measureFps(players);
     const avg = avgs.reduce((a, b) => a + b, 0) / avgs.length;
     console.log(
-      `FPS scale=${scale} 탭별 평균: ${avgs.map((v) => v.toFixed(1)).join(', ')} / 전체 ${avg.toFixed(1)}`,
+      `FPS ${c.name} 탭별 평균: ${avgs.map((v) => v.toFixed(1)).join(', ')} / 전체 ${avg.toFixed(1)}`,
     );
-    test.info().annotations.push({ type: `fps-scale-${scale}`, description: avg.toFixed(1) });
-    // 게이트: 저사양 모드(scale 0.5) 55 이상. 전체 해상도는 기록용이고 하한 20은 큰 회귀(GPU 프로세스 병목 때의 1~15FPS 같은)만 잡는다
-    // (CPU 래스터 4탭 + 서버가 4코어를 나눠 쓴다: 개발 컨테이너 약 40, GitHub Actions 러너 약 28)
-    expect(avg).toBeGreaterThanOrEqual(scale === '0.5' ? 55 : 20);
+    test.info().annotations.push({ type: `fps ${c.name}`, description: avg.toFixed(1) });
+    // (CPU 래스터 4탭 + 서버가 4코어를 나눠 쓴다: 기록 조건은 개발 컨테이너 약 40, GitHub Actions 러너 약 28)
+    expect(avg).toBeGreaterThanOrEqual(c.min);
+    // 재는 동안 조건이 바뀌지 않았다 (두 조건 모두 품질 낮음이라 더 내릴 단계가 없다. 조건을 바꾸면 여기서 드러난다)
+    for (const p of players) {
+      expect(await p.page.evaluate(() => window.__DECOY__?.gfx.downgrades ?? -1), `${p.role} 하향`).toBe(0);
+    }
     for (const p of players) expect(p.problems).toEqual([]);
     await closeAll(players);
   });

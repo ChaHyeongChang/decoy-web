@@ -4,7 +4,7 @@ import type { DrawnEntity, GameEvent, InputFrame, Role } from '@decoy/shared';
 import type { App } from '../app';
 import { sfx } from '../audio';
 import { STORY_TEXT, UI_TEXT, formatText } from '../data/storyText';
-import { FpsWatch, qualityHooks } from '../gfx/quality';
+import { qualityHooks, sessionAutoDowngrade } from '../gfx/quality';
 import { getFpsOverride, gfxState, probeSlot } from '../gfx/state';
 import { InputSampler } from '../input';
 import { applyDashStart, applyWindupLock, predictMonsterPress, type LocalWindup } from '../localActions';
@@ -65,8 +65,8 @@ export class GameScene extends Phaser.Scene {
   private screenFx!: ScreenEffects;
   /** 괴물: 서버 확인 전에 먼저 보여 주는 공격 준비 */
   private localWindup: LocalWindup | null = null;
-  /** 판 중 FPS 감시 (느리면 품질을 한 단계 내린다, 판당 1번) */
-  private fpsWatch: FpsWatch | null = null;
+  /** 판 중 FPS 감시를 하는가 (세션 상태는 sessionAutoDowngrade: 느리면 한 단계 내리고 효과를 확인한다) */
+  private watchingFps = false;
 
   constructor() {
     super('game');
@@ -126,7 +126,8 @@ export class GameScene extends Phaser.Scene {
     // 선명도 검사 글자는 판 동안 이 장면(HUD와 같은 곳)에 그린다. 장면이 끝나면 대기 장면 것으로 돌려놓는다
     const prevProbe = probeSlot.draw;
     probeSlot.draw = (text, x, y, px) => drawProbeText(this, text, x, y, px);
-    this.fpsWatch = new FpsWatch(performance.now());
+    sessionAutoDowngrade.beginMatch(performance.now());
+    this.watchingFps = true;
 
     // 판 시작 문구 (괴물 대기 5초 동안)
     const intro = info.role === 'monster' ? 'INTRO_MONSTER' : 'INTRO_WALL';
@@ -152,7 +153,8 @@ export class GameScene extends Phaser.Scene {
     this.inputTimer = window.setInterval(() => this.inputTick(), 4);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       probeSlot.draw = prevProbe;
-      this.fpsWatch = null;
+      this.watchingFps = false;
+      sessionAutoDowngrade.endMatch();
       if (this.inputTimer !== null) window.clearInterval(this.inputTimer);
       this.inputTimer = null;
       this.sampler.detach();
@@ -318,16 +320,17 @@ export class GameScene extends Phaser.Scene {
     this.watchFps();
   }
 
-  /** 판 중(결과 전) 보이는 탭에서만 잰다. 느린 상태가 이어지면 품질을 한 단계 내린다(재연결 · 장면 재시작 없음) */
+  /**
+   * 판 중(결과 전) 보이는 탭에서만 잰다. 느린 상태가 이어지면 품질을 한 단계 내리고(재연결 · 장면 재시작 없음),
+   * 같은 판에서 효과를 확인해 효과가 없으면 되돌린다 (gfx/quality.ts AutoDowngrade)
+   */
   private watchFps(): void {
-    const watch = this.fpsWatch;
-    if (!watch || watch.fired || document.hidden) return;
+    if (!this.watchingFps || document.hidden) return;
     if (!this.app.lastSnap || this.app.result) return;
     const fps = getFpsOverride() ?? this.game.loop.actualFps;
-    const now = performance.now();
-    const due = watch.sample(now, fps);
-    gfxState.measuredFps = watch.average;
-    if (due) qualityHooks.downgrade?.(watch.average);
+    const action = sessionAutoDowngrade.sample(performance.now(), fps, gfxState.quality);
+    gfxState.measuredFps = sessionAutoDowngrade.average;
+    if (action) qualityHooks.auto?.(action);
   }
 
   private renderFrame(delta: number): void {

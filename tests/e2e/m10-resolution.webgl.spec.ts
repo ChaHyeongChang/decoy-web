@@ -1,7 +1,10 @@
 // M10a 선명도 (WebGL 1탭, SwiftShader): 백버퍼 = 표시 CSS × min(DPR, 상한), 캔버스 위치가 기기 픽셀 정수,
-// 글자 해상도 = zoom, 선명도 탐침(캔버스 글자 / 같은 글꼴 DOM 글자 ≥ 0.9), 창 크기 변경 뒤 백버퍼 · 조준
+// 글자 해상도 = zoom(실제 글자 객체를 잰다: textAudit), 선명도 탐침(캔버스 글자 / 같은 글꼴 DOM 글자 ≥ 0.9),
+// 창 크기 변경 뒤 백버퍼 · 기존 글자 다시 그리기 · 조준, 자동 품질(소프트웨어 GL = 낮음, 하드웨어 GPU PC = 높음)
+// 판 중 자동 하향은 FPS 60을 넣어 막는다 (SwiftShader는 큰 백버퍼에서 40fps 아래라 타이밍에 따라 결과가 달라진다).
+// 하향 자체는 m10-quality · m10-quality.webgl에서 본다
 import { expect, test, type Browser, type Page } from '@playwright/test';
-import type { GfxDebugInfo, Role } from '@decoy/shared';
+import type { GfxDebugInfo, Role, TextAudit } from '@decoy/shared';
 import { PRESETS } from '../../client/src/gfx/presets';
 import { pickRoleAndReady, truth, waitForSnapshots, watchConsole } from './helpers';
 
@@ -49,6 +52,8 @@ async function canvasInfo(page: Page): Promise<CanvasInfo> {
 /** 혼자(봇과) 방을 만들고 판을 시작한다. 방 코드를 돌려준다 */
 async function startSolo(page: Page, extra: string, role: Role): Promise<string> {
   await page.goto(`/${QUERY}${extra}`);
+  // 판 중 자동 하향을 막는다 (덮어쓴 FPS는 페이지 전역이라 판 시작 전에 넣어도 된다. 기록용 __DECOY__.fps는 그대로)
+  await page.evaluate(() => window.__DECOY__?.injectFps(60));
   await page.getByTestId('create-room').click();
   const code = page.getByTestId('room-code');
   await expect(code).toHaveText(/^[A-Z]{4}$/);
@@ -63,6 +68,22 @@ function expectBacking(i: CanvasInfo, label: string): void {
   const k = Math.min(i.dpr, HIGH.dprCap);
   expect(Math.abs(i.backingW - Math.round(i.cssW * k)), `${label} 백버퍼 폭`).toBeLessThanOrEqual(1);
   expect(Math.abs(i.backingH - Math.round(i.cssH * k)), `${label} 백버퍼 높이`).toBeLessThanOrEqual(1);
+}
+
+async function textAudit(page: Page): Promise<TextAudit> {
+  return page.evaluate(() => {
+    const h = window.__DECOY__;
+    if (!h) throw new Error('디버그 훅이 없다');
+    return h.textAudit();
+  });
+}
+
+/** 장면의 모든 글자(숨긴 글자 · 탐침 포함)가 해상도 = zoom이고 왼쪽 위가 백버퍼 픽셀 격자에 있다 */
+function expectTexts(a: TextAudit, zoom: number, label: string): void {
+  expect(a.count, `${label} 글자 수`).toBeGreaterThan(0);
+  expect([a.styleResMin, a.styleResMax], `${label} 글자 해상도`).toEqual([zoom, zoom]);
+  expect([a.sourceResMin, a.sourceResMax], `${label} 텍스처 해상도`).toEqual([zoom, zoom]);
+  expect(a.gridErrMax, `${label} 격자 어긋남`).toBeLessThan(1e-3);
 }
 
 function expectAligned(i: CanvasInfo, label: string): void {
@@ -224,7 +245,7 @@ for (const screen of SCREENS) {
     expect(info.gfx.qualitySource).toBe('url');
     expect(info.gfx.scaleOverride).toBeNull();
     expect(info.gfx.zoom).toBeCloseTo(info.backingW / 1920, 10);
-    expect(info.gfx.textRes).toBe(info.gfx.zoom);
+    expectTexts(await textAudit(page), info.gfx.zoom, screen.name);
     expect([info.gfx.backingW, info.gfx.backingH]).toEqual([info.backingW, info.backingH]);
     expect(info.gfx.dpr).toBe(screen.dsf);
 
@@ -245,22 +266,59 @@ for (const screen of SCREENS) {
   });
 }
 
-test('자동 품질 · ?scale 빈 값', async ({ browser }) => {
-  const { page, problems, close } = await newScreen(browser, { width: 1920, height: 969 }, 1);
-  // 자동: 이 컨테이너는 GPU가 없어 소프트웨어 WebGL(SwiftShader)이므로 낮음. 하드웨어 GPU면 높음이어야 한다
-  await page.goto(`/${QUERY}`);
+/** 하드웨어 GPU PC로 보이게: WebGL 렌더러 이름(RENDERER · UNMASKED_RENDERER_WEBGL)만 바꾼다 */
+const FAKE_GPU = 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)';
+
+test('자동 품질: 하드웨어 GPU PC로 보이면 기본 주소에서 높음 (로비까지)', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
+  await context.addInitScript((name: string) => {
+    const RENDERER = 0x1f01;
+    const UNMASKED_RENDERER_WEBGL = 0x9246;
+    const wrap = (proto: WebGLRenderingContext | WebGL2RenderingContext): void => {
+      const orig = proto.getParameter;
+      proto.getParameter = function (this: WebGLRenderingContext, pname: number): unknown {
+        if (pname === RENDERER || pname === UNMASKED_RENDERER_WEBGL) return name;
+        return orig.call(this, pname) as unknown;
+      };
+    };
+    wrap(WebGLRenderingContext.prototype);
+    if (typeof WebGL2RenderingContext !== 'undefined') wrap(WebGL2RenderingContext.prototype);
+  }, FAKE_GPU);
+  const page = await context.newPage();
+  const problems: string[] = [];
+  watchConsole(page, problems);
+  // 기본 주소: ?quality 없음, 저장값 없음(새 컨텍스트)
+  await page.goto('/?debug=hook');
   await expect(page.getByTestId('create-room')).toBeVisible();
   const glName = await page.evaluate(() => {
     const gl = document.createElement('canvas').getContext('webgl');
-    const ext = gl?.getExtension('WEBGL_debug_renderer_info');
-    return gl && ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+    return gl ? String(gl.getParameter(gl.RENDERER)) : '';
   });
-  const software = /swiftshader|llvmpipe|softpipe|software|basic render/i.test(glName);
+  expect(glName).toBe(FAKE_GPU);
+  expect(await page.evaluate((k) => localStorage.getItem(k), 'decoy:quality')).toBeNull();
+  const info = await canvasInfo(page);
+  expect(info.gfx.renderer).toBe('webgl');
+  expect([info.gfx.quality, info.gfx.qualitySource]).toEqual(['high', 'auto']);
+  expect(info.gfx.touch).toBe(false);
+  expect(info.gfx.scaleOverride).toBeNull();
+  // 높음 상한(배율 2): 1440×810 × 2
+  expectBacking(info, '맥북 1440×900 @2 자동');
+  expect([info.backingW, info.backingH]).toEqual([2880, 1620]);
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
+test('자동 품질(소프트웨어 WebGL = 낮음) · ?scale 빈 값', async ({ browser }) => {
+  const { page, problems, close } = await newScreen(browser, { width: 1920, height: 969 }, 1);
+  // 위장 없음: webgl 프로젝트는 GPU 없는 SwiftShader로 돈다(playwright.config.ts) → 자동 = 낮음
+  await page.goto(`/${QUERY}`);
+  await expect(page.getByTestId('create-room')).toBeVisible();
   const auto = await canvasInfo(page);
   expect(auto.gfx.renderer).toBe('webgl');
-  expect(auto.gfx.qualitySource).toBe('auto');
-  expect(auto.gfx.quality, glName).toBe(software ? 'low' : 'high');
+  expect([auto.gfx.quality, auto.gfx.qualitySource]).toEqual(['low', 'auto']);
+  expect(auto.gfx.touch).toBe(false);
   expect(auto.gfx.scaleOverride).toBeNull();
+  expect([auto.backingW, auto.backingH]).toEqual([1723, 969]);
 
   // ?scale=(빈 값)은 지정 없음과 같다 (예전에는 0.25배 → 480×270)
   await page.goto(`/${QUERY}&quality=high`);
@@ -323,15 +381,26 @@ test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 �
     }
   };
 
-  const waitBacking = async (w: number, h: number): Promise<CanvasInfo> => {
-    await page.waitForFunction(
-      ([bw, bh]) => {
-        const c = document.querySelector<HTMLCanvasElement>('#game-root canvas');
-        return c?.width === bw && c.height === bh;
-      },
-      [w, h] as const,
-      { timeout: 10_000 },
-    );
+  // 백버퍼가 바뀔 때까지. 시간을 넘기면 그때 상태(창 DPR · 캔버스 · 그래픽 상태)를 오류에 담는다 (부하가 큰 러너에서 원인 구분용)
+  const waitBacking = async (w: number, h: number, timeout = 10_000): Promise<CanvasInfo> => {
+    const t0 = Date.now();
+    try {
+      await page.waitForFunction(
+        ([bw, bh]) => {
+          const c = document.querySelector<HTMLCanvasElement>('#game-root canvas');
+          return c?.width === bw && c.height === bh;
+        },
+        [w, h] as const,
+        { timeout },
+      );
+    } catch (e) {
+      const now = await canvasInfo(page);
+      throw new Error(
+        `백버퍼 ${w}×${h}을 ${timeout}ms 동안 기다렸다: 지금 ${now.backingW}×${now.backingH}, ` +
+          `창 DPR ${now.dpr}, gfx.dpr ${now.gfx.dpr}, 품질 ${now.gfx.quality}, 하향 ${now.gfx.downgrades} (${String(e)})`,
+      );
+    }
+    console.log(`백버퍼 ${w}×${h}: ${Date.now() - t0}ms`);
     await settleFrames(page, 2);
     return canvasInfo(page);
   };
@@ -347,6 +416,12 @@ test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 �
 
   const first = await canvasInfo(page);
   expect([first.backingW, first.backingH]).toEqual([2880, 1620]);
+  // 선명도 탐침 글자를 첫 크기 변경 전에 만들어 둔다: 크기가 바뀔 때마다 이 글자도 새 해상도로 다시 그려져야 한다
+  await page.evaluate(() => window.__DECOY__?.probeText('가드 11:55 ABC', 1500.37, 18.41, 28));
+  await settleFrames(page, 2);
+  const firstTexts = await textAudit(page);
+  expectTexts(firstTexts, 1.5, '1440×900 @2');
+  expect(firstTexts.probeRes).toBe(1.5);
   await checkAim('1440×900 @2');
 
   await page.setViewportSize({ width: 1000, height: 700 });
@@ -355,7 +430,10 @@ test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 �
   await aimHeld('→ 1000×700 @2');
   expectBacking(small, '1000×700 @2');
   expectAligned(small, '1000×700 @2');
-  expect(small.gfx.textRes).toBe(small.gfx.zoom);
+  const smallTexts = await textAudit(page);
+  expectTexts(smallTexts, small.gfx.zoom, '→ 1000×700 @2');
+  expect(smallTexts.probeRes).toBe(small.gfx.zoom);
+  expect(small.gfx.zoom).toBeCloseTo(2000 / 1920, 10);
   await checkAim('→ 1000×700 @2');
 
   await page.setViewportSize({ width: 1920, height: 1080 });
@@ -363,7 +441,9 @@ test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 �
   await aimHeld('→ 1920×1080 @2');
   expectBacking(big, '1920×1080 @2');
   expect(big.gfx.zoom).toBe(2);
-  expect(big.gfx.textRes).toBe(2);
+  const bigTexts = await textAudit(page);
+  expectTexts(bigTexts, 2, '→ 1920×1080 @2');
+  expect(bigTexts.probeRes).toBe(2);
   await checkAim('→ 1920×1080 @2');
 
   // DPR만 바뀜(다른 모니터로 옮김): resize 없이 matchMedia로 잡는다
@@ -374,12 +454,23 @@ test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 �
     deviceScaleFactor: 1,
     mobile: false,
   });
-  const moved = await waitBacking(1920, 1080);
+  // 창 DPR이 먼저 바뀌었는지 따로 본다: 에뮬레이션이 늦은 것과 앱이 변경을 놓친 것을 가른다
+  // (부하가 큰 컨테이너에서 이 단계가 한 번 10초를 넘긴 적이 있다. 판 중 하향을 막기 전에는 하향이 백버퍼를 대신 맞춰 가려졌다)
+  await page.waitForFunction(() => window.devicePixelRatio === 1, null, { timeout: 10_000 });
+  const moved = await waitBacking(1920, 1080, 15_000);
   await aimHeld('→ DPR 1');
   expect(moved.dpr).toBe(1);
   expect(moved.gfx.zoom).toBe(1);
   expectAligned(moved, 'DPR 2 → 1');
+  const movedTexts = await textAudit(page);
+  expectTexts(movedTexts, 1, '→ DPR 1');
+  expect(movedTexts.probeRes).toBe(1);
   await checkAim('→ DPR 1');
+  await page.evaluate(() => window.__DECOY__?.probeText('', 0, 0, 10));
+  // 판 중 자동 하향이 끼어들지 않았다 (startSolo의 FPS 60). 빠지면 시간 초과 대신 여기서 원인이 드러난다
+  const end = await canvasInfo(page);
+  expect(end.gfx.downgrades).toBe(0);
+  expect(end.gfx.quality).toBe('high');
   expect(problems).toEqual([]);
   await close();
 });

@@ -3,13 +3,16 @@ import Phaser from 'phaser';
 import { App, readParams } from './app';
 import { sfx } from './audio';
 import { installDebug } from './debug';
-import { lowerTier, type QualityPreset, type QualityTier, type RendererKind } from './gfx/presets';
+import type { QualityPreset, QualityTier, RendererKind } from './gfx/presets';
 import {
   detectQuality,
   isSoftwareGl,
   isTouchDevice,
   loadSavedQuality,
   qualityHooks,
+  savedForSession,
+  sessionAutoDowngrade,
+  type QualityChoice,
   type QualitySource,
 } from './gfx/quality';
 import { currentPreset, gfxState, notifyGfxChange, probeSlot } from './gfx/state';
@@ -43,6 +46,11 @@ const deviceMemory = (navigator as Navigator & { deviceMemory?: unknown }).devic
 const memory = typeof deviceMemory === 'number' ? deviceMemory : null;
 /** ?quality. 로비에서 직접 고르면 이번 세션에서는 그 값이 우선한다 */
 let urlQuality: QualityTier | null = params.quality;
+/**
+ * 이번 세션에서 로비로 고른 값. 저장소가 막히거나(사생활 보호 · 쿠키 차단 · iframe) 가득 차서 저장에 실패해도
+ * 이 값이 적용된다 (저장소를 다시 읽으면 고른 값 대신 예전 저장값이나 자동이 되던 문제)
+ */
+let sessionChoice: QualityChoice | null = null;
 let softwareGl = false;
 
 function rendererType(): number {
@@ -54,7 +62,7 @@ function rendererType(): number {
 function decideQuality(): { tier: QualityTier; source: QualitySource } {
   return detectQuality({
     url: urlQuality,
-    saved: loadSavedQuality(),
+    saved: savedForSession(sessionChoice, loadSavedQuality()),
     renderer: gfxState.renderer,
     softwareGl,
     touch,
@@ -84,6 +92,12 @@ function setQuality(q: { tier: QualityTier; source: QualitySource }): void {
   gfxState.quality = q.tier;
   gfxState.qualitySource = q.source;
   gfxState.features = { ...gfxState.features, ...presetFeatures(currentPreset()) };
+  syncAutoStatus();
+}
+
+/** 판 중 자동 하향 상태 (on · checking · off) 표시 */
+function syncAutoStatus(): void {
+  gfxState.features.autoDowngrade = sessionAutoDowngrade.status;
 }
 
 gfxState.touch = touch;
@@ -270,22 +284,35 @@ function onBooted(): void {
 if (game.isBooted) onBooted();
 else game.events.once(Phaser.Core.Events.READY, onBooted);
 
-// 로비에서 고른 품질(저장은 로비가 이미 했다): 바로 적용 (재연결 · 장면 재시작 없음).
+// 로비에서 고른 품질(저장은 로비가 먼저 했다. 실패해도 이번 세션에는 적용): 바로 적용 (재연결 · 장면 재시작 없음).
 // 이번 세션에서는 주소의 ?quality보다 방금 고른 값이 우선한다
-qualityHooks.choose = () => {
+qualityHooks.choose = (choice) => {
+  sessionChoice = choice;
   urlQuality = null;
+  // 사용자가 정한 단계: 확인 중이던 자동 하향을 되돌릴 대상이 사라진다
+  sessionAutoDowngrade.cancelPending();
   setQuality(decideQuality());
   applyResolution(true);
 };
-// 판 중 자동 하향: 한 단계 내린다. 올리기는 사용자가 고를 때만
-qualityHooks.downgrade = (fps) => {
-  const lower = lowerTier(gfxState.quality);
-  gfxState.measuredFps = fps;
-  if (!lower) return false;
-  gfxState.downgrades += 1;
-  setQuality({ tier: lower, source: gfxState.qualitySource });
-  applyResolution(true);
-  return true;
+// 판 중 자동 조정: 한 단계 내리거나, 내렸는데 FPS가 오르지 않았으면(화면 갱신 상한 등) 원래 단계로 되돌린다.
+// 사용자가 고른 것보다 올리는 일은 없다. downgrades는 실제로 내린 횟수(되돌려도 그대로)
+qualityHooks.auto = (a) => {
+  if (a.kind === 'downgrade') {
+    if (gfxState.quality === a.from) {
+      gfxState.measuredFps = a.fpsBefore;
+      gfxState.downgrades += 1;
+      setQuality({ tier: a.to, source: gfxState.qualitySource });
+      applyResolution(true);
+    } else {
+      // 그사이 단계가 바뀌었다(이론상): 내리지 않았으니 확인할 것도 없다
+      sessionAutoDowngrade.cancelPending();
+    }
+  } else if (a.kind === 'revert' && gfxState.quality === a.from) {
+    gfxState.measuredFps = a.fpsAfter;
+    setQuality({ tier: a.to, source: gfxState.qualitySource });
+    applyResolution(true);
+  }
+  syncAutoStatus();
 };
 
 // 효과음: 첫 클릭 · 키 입력에서 오디오를 연다 (브라우저 자동 재생 규칙)

@@ -36,6 +36,7 @@
 //   manifest.json   파일별 크기 · 뷰포트 · 렌더러 · 그래픽 상태(__DECOY__.gfx가 있으면) · 콘솔 문제
 //
 // 시계: 디버그 훅에 freezeClock이 있으면(M10~) 장식 시계를 고정하고 찍는다. 옛 빌드에는 없어서 건너뛴다.
+// 품질: WebGL 탭은 injectFps(60)이 있으면(M10~) 판 중 자동 하향을 막고 찍는다 (manifest의 gfx.downgrades = 0).
 // 끝나면 띄운 브라우저와 (직접 띄웠다면) 서버를 그 핸들로만 끈다.
 /* global window, document, Image, HTMLButtonElement */
 import { spawn } from 'node:child_process';
@@ -300,6 +301,15 @@ async function startMatch(browsers, base, res, glRoles, lobbyShot) {
   for (const p of players) {
     await p.page.waitForFunction(() => (window.__DECOY__?.snapCount ?? 0) >= 3, undefined, {
       timeout: 20_000,
+    });
+  }
+  // 판 중 자동 품질 하향을 막는다: SwiftShader WebGL 탭은 40fps 아래라 판 시작 약 15초 뒤 한 단계 내려가
+  // 뒤쪽 장면(Tab · 1366 · 결과)이 다른 품질로 찍힌다. 훅이 있을 때만 (옛 빌드에는 injectFps가 없다)
+  for (const p of players) {
+    if (!p.gl) continue;
+    await p.page.evaluate(() => {
+      const h = window.__DECOY__;
+      if (h && typeof h.injectFps === 'function') h.injectFps(60);
     });
   }
   return players;
