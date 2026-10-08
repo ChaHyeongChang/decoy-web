@@ -90,13 +90,13 @@
 | 24 | **"서버에 연결할 수 없어요" 상태**를 "깨우는 중" · "오프라인"과 따로 둔다 | 인터넷은 되는데 서버가 꺼진 경우(운영 종료 포함) "깨우는 중"이 끝없이 올라가지 않게 | M13b · M13d |
 | 25 | **경고 배너 글자색, Tab 점수판 겹침 등 지금 화면의 대비 · 겹침 버그를 리마스터에서 함께 고친다** | 0.1절의 측정값. 리마스터의 불변 항목("정보가 묻히지 않기")과 같은 일 | M10 |
 
-## 2. 정해야 하는 것 (답이 없으면 기본값으로 진행)
+## 2. 정한 것 (2026-10-08 사용자 확인: 모두 기본값)
 
 | 항목 | 기본값 | 다르게 하려면 |
 |---|---|---|
 | **UI 폰트 (CC0가 아님)** | **Noto Sans KR**(SIL OFL 1.1 — 라이선스가 명확하고 앱에 넣어 배포할 수 있다. 조건: 라이선스 전문 동봉, 폰트만 따로 팔지 않기)을 UI 글자 + 상용 한글 2,350자로 줄여 한 파일(약 300KB)로 넣는다. `docs/CREDITS.md`와 `docs/licenses/OFL.txt`에 적는다. 목록에 없는 글자(희귀 한자 닉네임 등)는 시스템 글꼴로 나온다 | "CC0만"이면 시스템 글꼴(맑은 고딕 · Apple SD 고딕 · 안드로이드 Noto)로 간다. OS마다 모양이 다르다 |
 | **CLAUDE.md의 그래픽 규칙** | 요청대로 "코드로 그린 단색 도형만 · 외부 에셋 없음 · 예외는 로고" 문장을 "코드로 그린 그래픽(질감 · 그라디언트 · 셰이더 허용), 외부 에셋은 CC0 또는 이 계획에서 승인한 라이선스만, `CREDITS.md` 기록, VISUAL_SPEC 0장 불변 항목 준수"로 고친다. 같은 파일의 `artifacts/` 커밋 규칙에 `remaster/` · `store/` 예외를 더한다 | — |
-| **로고 해상도** | 213×213 원본을 그대로 쓴다. 로비 큰 로고는 크기를 두고, 아이콘에서는 로고를 60~70% 크기로 놓아 확대율을 1.4~1.7배로 줄인다. HUMAN_CHECKS에 "1024px 이상 원본이 있으면 교체" | 고해상도 원본을 `docs/images/`에 올려 주면 그것으로 만든다 |
+| **로고 해상도** | 더 큰 원본이 없다(사용자 확인). `logo_decoy.png`를 보고 **같은 디자인(원형, 청록 네온 새 문양)을 SVG로 다시 그려** 고해상도 화면(로비 · 결과 큰 로고)과 앱 아이콘(M14)에 쓴다. 원본 PNG는 그대로 보관하고(파비콘 · 작은 크기), 원본과 나란히 비교한 이미지를 `artifacts/remaster/`에 남긴다 | — |
 | **브랜치** | 요청대로 마일스톤(PR)마다 최신 `origin/main`에서 새 브랜치(`m10a-resolution` 등). M10a 시작 때 push가 되는지 시험한다. **막히면** 세션 브랜치(`ccr-3f1d2a38-6pxv7y`) 하나로 PR을 차례로 열고, 병합 뒤 `git merge --ff-only origin/main`으로 맞춘다(`--force` 없음). 결과를 PROGRESS에 적는다 | — |
 | **오프라인 연습의 첫 실행 한계** | 앱을 **한 번은 온라인으로 연 뒤에만** 오프라인 · 서버 잠듦 상태에서 "봇과 연습"이 된다(서비스 워커는 첫 로드 뒤 설치). 설치 직후 첫 실행이 오프라인이거나 Render가 잠들어 있으면 Render 대기 화면만 보인다. 스토어 설명과 가이드에 그대로 적는다 | 비공개 테스트 전에 Render 유료로 바꾸면 "잠든 첫 실행"은 사라진다(오프라인 첫 실행은 여전히 불가) |
 | **가로 고정** | 휴대폰 **브라우저**에서는 화면 회전을 강제할 수 없고(전체 화면일 때만 가능), 사용자가 버튼을 누를 때만 전체 화면에 들어갈 수 있다. 그래서 브라우저에서는 "가로로 돌려주세요" 안내 + "전체 화면" 버튼까지, 확실한 고정은 **설치한 앱**(manifest · TWA)에서 | — |
@@ -192,8 +192,9 @@
 2. HUD 리디자인: 위 띠(거점 게이지 — 점령 중 사선 흐름 · 정지 주황 + 아이콘 · 완료 체크, 타이머 틀), 왼쪽 팀 카드(역할 실루엣 + 쿨타임 링, 이름, 상태 아이콘 + 글자, 체력 칸, 수감 눈금, "나" 표시), 괴물 카드(공통 흰 토큰 · 순서 · 역할 없음 — 지금 규칙 그대로), 아래 행동 칸(아이콘 타일 + 쿨타임 쓸림 + 남은 초 + 키캡), 배너(아이콘 + 리본, 경고 글자 `#0B1622`), 미니맵 틀. 위치는 `layout.ts`에서만 받는다(M12 모바일 배치가 같은 부품을 쓰게). Tab 점수판이 열리면 조작 안내를 숨긴다
 3. 로비 리디자인(설계도 배경, 방 코드 키캡 타일, 역할 카드에 큰 실루엣 + 문양 + 능력 + 키캡, 고른 카드는 테두리 + ✓ + "내 역할", 남이 고른 카드는 해치 + 주인 이름), 결과 화면 리디자인(승리 팀, 등급 배지 — 문 아이콘 3/2/1개 + 글자, 결말은 "기록자 메모" 패널, 플레이어 행에 역할 문양)
 4. `docs/VISUAL_SPEC.md` 새 판: **0장 "바꾸면 안 되는 것"**(항목마다 지키는 테스트 이름), 1 원칙 · 형태 문법, 2 팔레트, 3 재질 · 조명 · 안개, 4 캐릭터 · 괴물, 5 오브젝트, 6 애니메이션 표, 7 효과 표 · 품질별 상한, 8 HUD, 9 로비 · 결과, 10 아이콘 · 폰트 · 패널, 11 외부 에셋 정책. `docs/CREDITS.md`(폰트, "그 밖의 그래픽은 모두 코드로 그림")
-5. **바꾼 뒤 스크린샷**: `artifacts/remaster/after/`에 같은 장면을 품질 높음(WebGL) · 낮음(Canvas)으로, `compare/`에 전 | 후를 나란히(Playwright 페이지 캔버스로 합성, 새 의존성 없음)
-6. HUMAN_CHECKS · DECISIONS(배지 레이어 이동, 부채꼴 알파, 공통 실루엣, 글자용 역할색, 폰트 라이선스, artifacts 예외)
+5. **로고 SVG**: `logo_decoy.png`를 보고 같은 디자인(원형 위장 무늬 원판, 청록 네온 새 문양, X 선)을 `docs/images/logo_decoy.svg`(원본) + `client/public/logo.svg`로 다시 그린다. 로비 · 결과 큰 로고와 DPR 2 이상 화면은 SVG, 파비콘 · 작은 크기는 원본 PNG. 원본 PNG는 지우지 않는다. `artifacts/remaster/logo-compare.png`에 원본(확대) | SVG를 같은 크기로 나란히 · 겹쳐 비교. 검증: SVG를 213px로 그렸을 때 원본과의 픽셀 차이(평균 ΔE)를 기록하고 실루엣 겹침(IoU) 0.9 이상, SVG에 외부 참조 · 스크립트 없음
+6. **바꾼 뒤 스크린샷**: `artifacts/remaster/after/`에 같은 장면을 품질 높음(WebGL) · 낮음(Canvas)으로, `compare/`에 전 | 후를 나란히(Playwright 페이지 캔버스로 합성, 새 의존성 없음)
+7. HUMAN_CHECKS · DECISIONS(배지 레이어 이동, 부채꼴 알파, 공통 실루엣, 글자용 역할색, 폰트 라이선스, artifacts 예외, 로고 SVG)
 
 ### 작업 단위 (파일 소유)
 | PR | 단위 | 파일 |
@@ -204,7 +205,7 @@
 | 10b | A 맵 · 오브젝트 | 새 `client/src/art/mapArt.ts` · `palette.ts`, `client/src/render/objects.ts` · `baseLayer.ts` |
 | 10b | B 캐릭터 · 효과 | 새 `client/src/art/shapes.ts` · `atlas.ts` · `anim.ts` · `fx.ts`, `client/src/render/characters.ts` · `effects.ts` · `worldRenderer.ts` |
 | 10c | A HUD | `client/src/ui/hud.ts` · `banners.ts` · `overlays.ts` · `minimap.ts`, 새 `client/src/art/icons.ts` |
-| 10c | B 로비 · 결과 · 폰트 | `client/src/ui/lobby.ts` · `result.ts`, `client/src/style.css`, `client/index.html`, 폰트 파일 · 스크립트 |
+| 10c | B 로비 · 결과 · 폰트 · 로고 | `client/src/ui/lobby.ts` · `result.ts`, `client/src/style.css`, `client/index.html`, 폰트 파일 · 스크립트, 로고 SVG |
 | 모두 | 메인 | `GameScene.ts`, 문서 전부, 통합, E2E |
 
 ### 자동 검증
@@ -245,7 +246,7 @@
 - 공격 준비 범위가 차오르는 것으로 피할 타이밍이 읽히는지, 가드 방패 · 러너 끝 같은 돌출이 "맞았는데 안 맞았다"는 느낌을 주지 않는지
 - 실제 GPU PC(높음)와 내장 그래픽 노트북에서 FPS, 고DPI 노트북(125% · 150%) · 맥북에서 글자 · 선 선명도
 - 품질 낮음에서도 정보가 다 보이고 높음과 차이가 장식뿐인지
-- 로고(213px)가 고해상도 화면에서 충분히 선명한지
+- 다시 그린 로고 SVG가 원본과 같은 디자인으로 보이는지(`artifacts/remaster/logo-compare.png`)
 
 ---
 
@@ -461,7 +462,7 @@ B는 `haptics.hit()` · `haptics.spotted(bool)`만 내놓고, `GameScene`에서 
 
 ### 작업
 1. **manifest** `client/public/manifest.webmanifest`: `id` · `name "DECOY"` · `short_name` · `description` · `lang "ko"` · `start_url "/?source=pwa"` · `scope "/"` · `display "fullscreen"` · `orientation "landscape"` · `theme_color` · `background_color "#0B1622"` · `categories ["games"]` · 아이콘 `any` 192/512 + `maskable` 192/512. `index.html`에 manifest 링크와 `theme-color`. 서버 MIME 표에 `.webmanifest → application/manifest+json`
-2. **아이콘**: `scripts/make-icons.mjs`가 로고를 M10 배경 위에 놓아(maskable은 가운데 80% 안전 영역 안) 각 크기 PNG를 만든다. 이미 설치된 Playwright로 그려 새 의존성이 없고, 결과 PNG를 커밋한다(Docker 빌드에 영향 없음). 스토어 아이콘 512도(32비트, 불투명)
+2. **아이콘**: `scripts/make-icons.mjs`가 로고 SVG(M10c)를 M10 배경 위에 놓아(maskable은 가운데 80% 안전 영역 안) 각 크기 PNG를 만든다. 이미 설치된 Playwright로 그려 새 의존성이 없고, 결과 PNG를 커밋한다(Docker 빌드에 영향 없음). 스토어 아이콘 512도(32비트, 불투명)
 3. 설치된 앱(전체 화면)에서 오프라인 실행 · "봇과 연습" 진입을 다시 확인하고, 전체 화면이면 "전체 화면" 버튼을 숨긴다
 4. **`/.well-known/assetlinks.json`**: `server/src/index.ts`에 명시 라우트, 새 `server/src/wellKnown.ts`가 환경변수 **`TWA_PACKAGE_NAME`**, **`TWA_SHA256_FINGERPRINTS`**(쉼표로 여러 개 — 업로드 키 + Play 앱 서명 키)로 JSON을 만든다. 지문 형식(대문자 16진수 32쌍, 콜론) 검사, 200 `application/json`, 리다이렉트 없음, 값이 없으면 **404**(게임 HTML로 새지 않게). `render.yaml`에는 값 없이 키 자리만(`sync: false`), `plan: free` 그대로
 5. **서명 키 가드**(제안 21): `.gitignore` 패턴. 키는 만들지도 커밋하지도 않는다
@@ -482,7 +483,7 @@ B는 `haptics.hit()` · `haptics.spotted(bool)`만 내놓고, `GameScene`에서 
 - `verify:deploy`에서 같은 경로 확인 → CI 4작업 → 병합
 
 ### 사람이 확인할 것
-- 아이콘이 휴대폰 홈 화면에서 흐리지 않은지(원본 213px), 원형 · 둥근 사각 마스크에서 잘리지 않는지
+- 아이콘(로고 SVG)이 휴대폰 홈 화면에서 원본 로고와 같은 인상인지, 원형 · 둥근 사각 마스크에서 잘리지 않는지
 - 설치한 PWA가 가로 · 전체 화면으로 열리는지
 
 ---

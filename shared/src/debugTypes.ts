@@ -15,7 +15,52 @@ export interface DrawnEntity {
   tag?: string;
 }
 
+/** 그래픽 상태 (M10: 렌더 해상도 · 품질 · 안개) */
+export interface GfxDebugInfo {
+  quality: 'high' | 'medium' | 'low';
+  /** 품질을 정한 곳: URL(?quality) · 저장된 설정 · 자동 */
+  qualitySource: 'url' | 'saved' | 'auto';
+  renderer: 'webgl' | 'canvas';
+  /** 터치 기기로 판단했는가 */
+  touch: boolean;
+  dpr: number;
+  /** 캔버스 표시 크기 (CSS px) */
+  cssW: number;
+  cssH: number;
+  /** 백버퍼 (캔버스 실제 픽셀) */
+  backingW: number;
+  backingH: number;
+  /** 카메라 zoom = 백버퍼 px / 논리 px (1보다 클 수 있다) */
+  zoom: number;
+  /** ?scale로 준 배율 (없으면 null) */
+  scaleOverride: number | null;
+  /** Phaser 글자 텍스처 해상도 (= zoom) */
+  textRes: number;
+  /** 바닥 합성 캔버스 배율 (논리 px 대비) */
+  compositeScale: number;
+  /** 미니맵 캔버스 배율 */
+  minimapScale: number;
+  /** 안개 합성 방식 */
+  fogMode: 'gpu' | 'canvas';
+  /** 시야 밖 밝기 하한 (0~1) */
+  ambient: number;
+  /** 실제로 켜진 장식 기능 (bloom · vignette · fogShader · particleCap ...) */
+  features: Record<string, boolean | number | string>;
+  /** 판 중 자동으로 품질을 내린 횟수 */
+  downgrades: number;
+  /** 품질 판단에 쓴 최근 FPS */
+  measuredFps: number;
+}
+
 export interface DecoyDebug {
+  /** 그래픽 상태 (M10) */
+  readonly gfx: Readonly<GfxDebugInfo>;
+  /** 장식 애니메이션 · 입자 시계를 멈춘다(ms) / null이면 다시 흐름. 규칙 · 입력에는 영향 없음 */
+  freezeClock(ms: number | null): void;
+  /** 품질 자동 하향 판단에 쓸 FPS를 덮어쓴다 / null이면 실제 측정값 */
+  injectFps(fps: number | null): void;
+  /** 선명도 검사: HUD에 글자를 그린다 (논리 좌표 x, y, 글자 크기 px) */
+  probeText(text: string, x: number, y: number, px: number): void;
   readonly role: Role | null;
   readonly you: string | null;
   readonly room: string | null;

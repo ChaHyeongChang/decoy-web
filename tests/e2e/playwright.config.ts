@@ -4,6 +4,9 @@ const PORT = Number(process.env.DECOY_E2E_PORT ?? 8181);
 /** 서버 정답 기록 (정보 차단 E2E가 대조한다) */
 export const TRUTH_LOG = 'tests/e2e/.results/truth.jsonl';
 
+/** WebGL 프로젝트에서만 도는 파일 */
+const WEBGL_SPECS = /(smoke|\.webgl)\.spec\.ts$/;
+
 const COMMON_ARGS = [
   '--disable-background-timer-throttling',
   '--disable-renderer-backgrounding',
@@ -24,9 +27,10 @@ export default defineConfig({
   },
   projects: [
     {
-      // WebGL 경로 확인 (탭 1개). 컨테이너에는 GPU가 없어 SwiftShader로 돈다
+      // WebGL 경로 확인 (탭 1개). 컨테이너에는 GPU가 없어 SwiftShader로 돈다.
+      // 스모크와 이름이 *.webgl.spec.ts인 파일(M10 해상도 · 품질 · 안개의 WebGL 검사)
       name: 'webgl',
-      testMatch: /smoke\.spec\.ts/,
+      testMatch: WEBGL_SPECS,
       use: {
         launchOptions: { args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', ...COMMON_ARGS] },
       },
@@ -35,7 +39,7 @@ export default defineConfig({
       // 여러 탭 E2E: GPU 프로세스(SwiftShader) 하나를 탭 4개가 나눠 쓰면 1~15FPS밖에 안 나와서
       // 소프트웨어 합성(CPU 래스터)으로 돌린다. 렌더러는 Canvas (helpers.ts BASE_QUERY)
       name: 'multi',
-      testIgnore: /smoke\.spec\.ts/,
+      testIgnore: WEBGL_SPECS,
       use: {
         launchOptions: {
           args: [
