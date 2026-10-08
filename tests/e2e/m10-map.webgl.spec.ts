@@ -28,6 +28,8 @@ const balance = validateBalance(JSON.parse(readFileSync('config/balance.json', '
 test('시야 밖 구조 대비 2.5:1 · 시간 불변 · 시야 안 바닥 밝기 상한 · 배지 아래 캐릭터 · 거점 정지 (WebGL 높음)', async ({
   browser,
 }) => {
+  // 장면 다섯 개를 WebGL 높음(1920×1080)에서 찍는다: GitHub Actions 러너의 SwiftShader에서는 3분을 넘긴 적이 있다
+  test.setTimeout(480_000);
   const s = await startBotRoom(browser, QUERY);
   const r = await darkAndLit(s);
   console.log(`[m10-map.webgl] WebGL 높음: ${JSON.stringify(r)}`);

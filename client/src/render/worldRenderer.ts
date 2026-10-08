@@ -228,8 +228,8 @@ export class WorldRenderer {
   private hits: { x: number; y: number; you: boolean; t0: number }[] = [];
   /** 생존자 화면: 팀원 질주 끝 시각 (performance.now, 규칙 시간 sprintDuration) */
   private sprintUntil = 0;
-  /** 괴물 화면: 포효 충격파 시작 (장식 시계) · 자리 */
-  private roarWave: { t0: number; x: number; y: number } | null = null;
+  /** 괴물 화면: 포효 충격파 시작(처음 그린 프레임에 정함, null = 아직 안 그림) · 자리 */
+  private roarWave: { t0: number | null; x: number; y: number } | null = null;
   /** 괴물 화면: 잡힘 알림 (보이던 자리에서 흩어짐) */
   private captureAt = -1e9;
   /** 기절 별 자리 (괴물 몸 중심에서 본 방향, 기절 중이 아니면 null) */
@@ -408,7 +408,8 @@ export class WorldRenderer {
         if (isMonster) this.captureAt = nowMs;
         return;
       case 'roarPings':
-        if (isMonster && this.lastMe) this.roarWave = { t0: nowMs, x: this.lastMe.x, y: this.lastMe.y };
+        // 시작 시각은 처음 그리는 프레임에서 정한다: 프레임이 느린 기기에서도 충격파 · 범위가 최소 한 번은 보인다
+        if (isMonster && this.lastMe) this.roarWave = { t0: null, x: this.lastMe.x, y: this.lastMe.y };
         return;
       default:
         return;
@@ -737,6 +738,7 @@ export class WorldRenderer {
       drawCampZone(this.ranges, item, PRISON_RECT);
     }
     if (isMonster && this.roarWave) {
+      this.roarWave.t0 ??= v.nowMs;
       const k = (v.nowMs - this.roarWave.t0) / ROAR_WAVE_MS;
       if (k >= 1 || k < 0) this.roarWave = null;
       else {
