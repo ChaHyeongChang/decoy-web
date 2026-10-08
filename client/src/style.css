@@ -263,6 +263,44 @@ body {
   z-index: 60;
 }
 
+/* ───── 서버 깨우기 안내 ───── */
+.wake-notice {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(560px, calc(100% - 32px));
+  padding: 16px 20px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: rgba(17, 28, 40, 0.97);
+  color: var(--text);
+  font-family: var(--font);
+  text-align: center;
+  z-index: 70;
+}
+.wake-logo {
+  display: block;
+  width: 96px;
+  height: 96px;
+  margin: 0 auto 12px;
+}
+.wake-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+.wake-body {
+  font-size: 15px;
+  line-height: 1.5;
+}
+.wake-elapsed {
+  margin-top: 8px;
+  font-size: 14px;
+  color: #94a3b8;
+}
+
 /* ───── 결과 화면 ───── */
 .result {
   position: absolute;

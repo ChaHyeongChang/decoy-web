@@ -1,0 +1,209 @@
+<!doctype html>
+<!--
+  서버 깨우기 화면. 서비스 워커(sw.js)가 미리 받아 두었다가, 잠든 서버가 깨어나는 동안 페이지 대신 보여 준다.
+  서버가 깨어나면(healthz가 이 서버의 표시와 함께 답하면) 스스로 새로고침해 원래 주소(방 코드 포함)로 돌아간다.
+  게임 코드 없이 혼자 도는 페이지라 문구 · 색을 여기 직접 적는다 (문구 원본: docs/STORY_TEXT.md, 색: VISUAL_SPEC)
+-->
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DECOY — 서버를 깨우는 중</title>
+    <style>
+      :root {
+        --bg: #0b1622;
+        --panel: #111c28;
+        --text: #e2e8f0;
+        --accent: #22d3ee;
+        --muted: #94a3b8;
+        --font: 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+      }
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font);
+      }
+      main {
+        box-sizing: border-box;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        padding: 24px 16px;
+        text-align: center;
+      }
+      .pulse {
+        position: relative;
+        width: 72px;
+        height: 72px;
+      }
+      .pulse::before,
+      .pulse::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border: 3px solid var(--accent);
+        border-radius: 50%;
+      }
+      .pulse::after {
+        animation: ring 1.8s ease-out infinite;
+      }
+      @keyframes ring {
+        from {
+          transform: scale(1);
+          opacity: 0.9;
+        }
+        to {
+          transform: scale(1.9);
+          opacity: 0;
+        }
+      }
+      .brand {
+        font-size: 30px;
+        font-weight: 800;
+        letter-spacing: 0.2em;
+        color: var(--accent);
+      }
+      h1 {
+        margin: 0;
+        font-size: 22px;
+      }
+      p {
+        margin: 0;
+        max-width: 480px;
+        line-height: 1.6;
+        font-size: 16px;
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 14px;
+      }
+      .warn {
+        color: #f59e0b;
+      }
+      button {
+        margin-top: 4px;
+        padding: 12px 24px;
+        border: 1px solid var(--accent);
+        border-radius: 8px;
+        background: var(--panel);
+        color: var(--text);
+        font: inherit;
+        font-size: 16px;
+      }
+      [hidden] {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main data-testid="wake-page" role="status" aria-live="polite">
+      <div class="pulse" aria-hidden="true"></div>
+      <div class="brand">DECOY</div>
+      <h1>서버를 깨우는 중…</h1>
+      <p>
+        무료 서버는 15분 동안 아무도 접속하지 않으면 잠들어요. 깨어나는 데 1분쯤 걸릴 수 있어요. 이 화면을
+        그대로 두면 자동으로 연결돼요.
+      </p>
+      <p class="muted" id="elapsed">0초째 기다리는 중</p>
+      <p class="warn" id="offline" hidden>인터넷 연결이 끊겨 있어요. 와이파이나 데이터를 확인해 주세요.</p>
+      <p class="warn" id="slow" hidden>
+        생각보다 오래 걸리고 있어요. 아래 버튼으로 다시 시도하거나, 계속 안 되면 개발자에게 알려 주세요.
+      </p>
+      <button type="button" id="retry" hidden>다시 시도</button>
+    </main>
+    <script>
+      (() => {
+        const MARK_HEADER = 'x-decoy-server';
+        const POLL_MS = 2000;
+        const REQUEST_TIMEOUT_MS = 30000;
+        const SLOW_MS = 180000;
+        // 깨어났다고 보고 새로고침했는데 또 이 화면이 뜨는 일이 짧은 시간에 반복되면 자동 새로고침을 멈춘다
+        const RELOAD_KEY = 'decoy-wake-reloads';
+        const RELOAD_WINDOW_MS = 60000;
+        const MAX_RELOADS = 3;
+        const startedAt = Date.now();
+        const elapsed = document.getElementById('elapsed');
+        const offline = document.getElementById('offline');
+        const slow = document.getElementById('slow');
+        const retry = document.getElementById('retry');
+        let done = false;
+
+        function recentReloads() {
+          try {
+            const list = JSON.parse(sessionStorage.getItem(RELOAD_KEY) || '[]');
+            return Array.isArray(list) ? list.filter((t) => Date.now() - t < RELOAD_WINDOW_MS) : [];
+          } catch {
+            return [];
+          }
+        }
+
+        function reloadOnce() {
+          const list = recentReloads();
+          if (list.length >= MAX_RELOADS) {
+            done = true;
+            slow.hidden = false;
+            retry.hidden = false;
+            return;
+          }
+          try {
+            sessionStorage.setItem(RELOAD_KEY, JSON.stringify([...list, Date.now()]));
+          } catch {
+            // 저장이 안 되면 그냥 새로고침한다
+          }
+          done = true;
+          location.reload();
+        }
+
+        function tick() {
+          const seconds = Math.floor((Date.now() - startedAt) / 1000);
+          elapsed.textContent = `${seconds}초째 기다리는 중`;
+          offline.hidden = navigator.onLine;
+          if (Date.now() - startedAt > SLOW_MS) {
+            slow.hidden = false;
+            retry.hidden = false;
+          }
+        }
+
+        async function awake() {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+          try {
+            const res = await fetch('healthz', { cache: 'no-store', signal: ctrl.signal });
+            return res.ok && res.headers.get(MARK_HEADER) === '1';
+          } catch {
+            return false;
+          } finally {
+            clearTimeout(timer);
+          }
+        }
+
+        async function poll() {
+          if (done) return;
+          if (await awake()) {
+            reloadOnce();
+            return;
+          }
+          setTimeout(poll, POLL_MS);
+        }
+
+        retry.addEventListener('click', () => {
+          try {
+            sessionStorage.removeItem(RELOAD_KEY);
+          } catch {
+            // 무시
+          }
+          location.reload();
+        });
+        tick();
+        setInterval(tick, 500);
+        poll();
+      })();
+    </script>
+  </body>
+</html>

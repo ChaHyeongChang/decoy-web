@@ -3,6 +3,13 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { validateBalance, type Balance } from '@decoy/shared';
 
+/** 헬스 체크 경로 (Docker HEALTHCHECK · render.yaml healthCheckPath · 깨우기 화면이 같이 쓴다) */
+export const HEALTH_PATH = '/healthz';
+/** 이 서버가 보낸 응답이라는 표시. 깨우기 화면(sw.js)이 호스팅 서비스의 로딩 페이지와 구별하는 데 쓴다 */
+export const SERVER_MARK_HEADER = 'x-decoy-server';
+/** 테스트 훅 /test/stall이 붙잡을 수 있는 최대 시간 (ms) */
+export const MAX_STALL_MS = 60_000;
+
 export interface ServerOptions {
   port: number;
   host: string;
@@ -26,10 +33,13 @@ function argValue(argv: string[], name: string): string | undefined {
 
 export function parseOptions(argv: string[], env: NodeJS.ProcessEnv): ServerOptions {
   const num = (v: string | undefined, fallback: number): number => {
+    // 빈 값('')은 Number로 0이 되므로 없는 값으로 본다 (PORT=''이면 아무 포트에나 뜨는 일을 막는다)
+    if (v === undefined || v.trim() === '') return fallback;
     const n = Number(v);
-    return v !== undefined && Number.isFinite(n) ? n : fallback;
+    return Number.isFinite(n) ? n : fallback;
   };
   return {
+    // 호스팅 서비스(Render 등)가 주는 PORT 환경 변수를 쓴다. --port가 있으면 그쪽이 우선
     port: num(argValue(argv, 'port') ?? env.PORT, 8080),
     host: argValue(argv, 'host') ?? env.HOST ?? '0.0.0.0',
     lag: num(argValue(argv, 'lag'), 0),

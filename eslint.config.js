@@ -35,6 +35,11 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.browser, ...globals.node } },
   },
   {
+    // 빌드 없이 그대로 복사되는 서비스 워커 (client/public/sw.js)
+    files: ['client/public/**/*.js'],
+    languageOptions: { sourceType: 'script', globals: { ...globals.serviceworker } },
+  },
+  {
     // shared · server에는 Phaser를 들이지 않는다 (시뮬레이션과 렌더링 분리)
     files: ['shared/**/*.ts', 'server/**/*.ts'],
     rules: {

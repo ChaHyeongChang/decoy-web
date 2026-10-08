@@ -95,6 +95,11 @@ export const UI_TEXT = {
   monsterWait: '괴물이 깨어나기까지',
   monsterReconnect: '괴물 재접속 대기',
   disconnected: '연결이 끊겼습니다. 다시 연결하는 중…',
+  wakingTitle: '서버를 깨우는 중…',
+  reconnectingTitle: '서버에 다시 연결하는 중…',
+  wakingBody:
+    '무료 서버는 15분 동안 아무도 접속하지 않으면 잠들어요. 깨어나는 데 1분쯤 걸릴 수 있어요. 이 화면을 그대로 두면 자동으로 연결돼요.',
+  wakingElapsed: '{n}초째 기다리는 중',
   campWarn: '감옥 근처에 너무 오래 있다 — 곧 느려진다',
   campSlow: '감옥 캠핑 — 이동 속도 감소',
   pointWarn: '거점을 너무 오래 지키고 있다 — 곧 점령이 진행된다',

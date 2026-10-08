@@ -22,7 +22,7 @@ npm start            # http://localhost:8080
 
 - **한 컴퓨터에서 시험**: 브라우저 탭 4개로 같은 방에 들어간다 (탭마다 다른 자리)
 - **같은 와이파이**: `npm start` 한 컴퓨터의 IP로 `http://<IP>:8080/?room=방코드` (자세히: [docs/DEPLOY.md](docs/DEPLOY.md))
-- **인터넷**: Dockerfile로 한국 · 일본 리전에 배포한다 → [docs/DEPLOY.md](docs/DEPLOY.md)
+- **인터넷**: Render 무료 플랜(`render.yaml`, 태블릿 브라우저로도 배포) 또는 Dockerfile로 한국 · 일본 리전에 배포한다 → [docs/DEPLOY.md](docs/DEPLOY.md). 무료 서버가 잠들어 있으면 깨어나는 동안 "서버를 깨우는 중…" 안내가 뜬다
 - **개발 모드**: `npm run dev` (서버 + Vite 핫 리로드, http://localhost:5173)
 
 ### 주소 옵션
@@ -82,7 +82,7 @@ PR마다(그리고 main에 들어갈 때) GitHub Actions(`.github/workflows/ci.y
 | [docs/TECH_SPEC.md](docs/TECH_SPEC.md) | 구조 · 네트워크 · 정보 차단 · 테스트 |
 | [docs/VISUAL_SPEC.md](docs/VISUAL_SPEC.md) | 색 · 형태 · 연출 · HUD |
 | [docs/STORY_TEXT.md](docs/STORY_TEXT.md) | 게임 내 문구 |
-| [docs/DEPLOY.md](docs/DEPLOY.md) | 로컬 · 같은 와이파이 · 인터넷 배포 |
+| [docs/DEPLOY.md](docs/DEPLOY.md) | 로컬 · 같은 와이파이 · 인터넷 배포 (Render 무료 플랜 단계별 절차 포함) |
 | [docs/PLAYTEST_GUIDE.md](docs/PLAYTEST_GUIDE.md) | 테스터용 플레이테스트 방법 |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | 설계와 다르게 만든 것 · 문서에 없어 정한 것 |
 | [docs/HUMAN_CHECKS.md](docs/HUMAN_CHECKS.md) | 사람이 직접 확인할 것 |

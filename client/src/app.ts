@@ -19,6 +19,8 @@ import { getAltTokens, getSavedName, getSeatToken, saveName, saveSeatToken } fro
 import { Interpolator, Predictor, SnapshotClock, lerpAngle, lerpNum } from './sync';
 import { LobbyUI } from './ui/lobby';
 import { ResultUI } from './ui/result';
+import { WakeNoticeUI } from './ui/wakeNotice';
+import { WakeNoticeState } from './wakeNotice';
 
 export type DebugMode = 'off' | 'hook' | 'overlay';
 
@@ -98,6 +100,12 @@ export class App {
   private reconnectTimer: number | null = null;
   /** 다른 탭이 이 자리를 넘겨받았다: 다시 연결하지 않는다 */
   private replaced = false;
+  /** '서버 깨우는 중' 안내 (무료 호스팅의 잠든 서버 · 재시작) */
+  readonly wake = new WakeNoticeState();
+  private readonly wakeUi: WakeNoticeUI;
+  private wakeTimer: number | null = null;
+  /** 지금 연결이 열린 적이 있다 (끊김 알림을 끊길 때 한 번만 띄운다) */
+  private wasOpen = false;
 
   constructor(
     readonly params: AppParams,
@@ -133,18 +141,38 @@ export class App {
       params.name ?? getSavedName(),
     );
     this.resultUi = new ResultUI(uiRoot, () => this.net.send({ t: 'rematch' }));
+    this.wakeUi = new WakeNoticeUI(uiRoot);
     this.net.on((msg) => this.onMessage(msg));
     this.net.onOpen = () => {
+      this.wasOpen = true;
+      this.wake.opened();
+      this.renderWake();
       if (this.roomCode) this.sendJoin(params.name ?? getSavedName());
       else this.lobbyUi.renderHome();
     };
     this.net.onClose = () => {
-      if (!this.replaced) this.scheduleReconnect();
+      const wasOpen = this.wasOpen;
+      this.wasOpen = false;
+      if (this.replaced) {
+        this.wake.stop();
+        this.renderWake();
+        return;
+      }
+      if (wasOpen) showToast(UI_TEXT.disconnected);
+      this.wake.closed(performance.now());
+      this.scheduleReconnect();
     };
   }
 
   start(): void {
+    this.wake.connecting(performance.now());
     this.net.connect();
+    // 기다린 시간(초)을 세려고 주기적으로 다시 그린다. 바뀐 게 없으면 DOM을 건드리지 않는다
+    this.wakeTimer ??= window.setInterval(() => this.renderWake(), 250);
+  }
+
+  private renderWake(): void {
+    this.wakeUi.render(this.wake.view(performance.now()));
   }
 
   subscribe(listener: (e: AppEvent) => void): () => void {
@@ -172,7 +200,6 @@ export class App {
 
   private scheduleReconnect(): void {
     if (this.reconnectTimer !== null) return;
-    showToast(UI_TEXT.disconnected);
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = null;
       this.net.connect();
