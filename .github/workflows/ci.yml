@@ -58,6 +58,8 @@ jobs:
           path: |
             artifacts/screens
             tests/e2e/.results
+          # 실패 기록 폴더(.results)가 점으로 시작해서, 켜지 않으면 올리지 않는다
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
 
