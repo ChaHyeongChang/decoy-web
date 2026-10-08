@@ -33,6 +33,7 @@ import {
   nextFogKey,
   paintExits,
   paintPoints,
+  recordFogCommit,
   removeCanvasTexture,
   resetExitTracking,
   rimLiftPath,
@@ -217,6 +218,7 @@ export class GpuFog implements FogLayer {
     }
     addRimLift(this.miniCtx, this.miniLift);
     this.lastCommitMs = performance.now() - this.t0;
+    recordFogCommit(this.lastCommitMs);
   }
 
   destroy(): void {

@@ -42,6 +42,8 @@ export class Badges {
   private readonly g: Phaser.GameObjects.Graphics;
   private readonly labels = new Map<'A' | 'B', CrispText>();
   private last: InfoItem[] = [];
+  /** 지금 그려 둔 배지의 상태 · 알파 (같으면 다시 그리지 않는다) */
+  private drawnKey = '';
 
   constructor(scene: Phaser.Scene, container: Phaser.GameObjects.Container) {
     this.g = scene.add.graphics();
@@ -73,6 +75,15 @@ export class Badges {
     alpha: BadgeAlpha,
     blink: Record<'A' | 'B', boolean>,
   ): void {
+    this.last = badgeInfo(points, exits, alpha, blink, paintedRadii);
+    // 그림은 상태 · 알파가 바뀔 때만 다시 만든다 (진행 값은 배지 그림에 쓰지 않는다)
+    const key = [
+      ...points.map((p) => `${p.id}${p.state}${pointBadgeAlpha(p.id, alpha, blink)}`),
+      ...exits.map((e) => `${e.id}${e.state}${alpha.exits[e.id]}`),
+      alpha.prison,
+    ].join('|');
+    if (key === this.drawnKey) return;
+    this.drawnKey = key;
     const g = this.g;
     g.clear();
     for (const p of points) {
@@ -86,7 +97,6 @@ export class Badges {
       this.exitBadge(at.x * T, at.y * T, exitColor(e.state), alpha.exits[e.id]);
     }
     this.lockBadge(PRISON_LOCK.x * T, PRISON_LOCK.y * T, alpha.prison);
-    this.last = badgeInfo(points, exits, alpha, blink, paintedRadii);
   }
 
   /** 마름모(글자 자리는 비움: 글자는 컨테이너 아래 화면 글자) + 상태 칩 */

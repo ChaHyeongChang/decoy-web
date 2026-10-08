@@ -79,13 +79,14 @@ export const MAP_COLOR = {
   wallTop: 0x283646,
   wallTopBevel: 0x32445a,
   wallTopShade: 0x1f2b39,
-  wallHatch: 0x2e3e50,
+  wallHatch: 0x324458,
   wallFront: 0x131c26,
   wallFrontLow: 0x0b1118,
   wallRib: 0x0c1219,
   /** 구조 테두리 (윗면 열린 가장자리). 빛이 왼쪽 위에서 오는 것처럼 동쪽 테두리는 조금 어둡게 */
   rim: 0x8ba3ba,
   rimDim: 0x6d8399,
+  rimSpec: 0xb4c6d8,
   /** 곱하기 뒤에 더하는 테두리 리프트: 시야 밖에서도 테두리가 바닥과 2.5:1 이상 (시야와 무관한 정적 색) */
   rimLift: 0x222c35,
   pillarBase: 0x0b1117,

@@ -653,7 +653,12 @@ function paintWalls(P: Painter): void {
   c.restore();
   // 테두리는 모든 면 위에 (모서리에서 겹쳐도 같은 색). 빛이 왼쪽 위에서 오는 것처럼 동쪽은 조금 어둡게
   for (const { i, j } of cells)
-    for (const r of wallFaces(i, j).rims) P.r(r, r.side === 'e' ? MC.rimDim : MC.rim);
+    for (const r of wallFaces(i, j).rims) {
+      P.r(r, r.side === 'e' ? MC.rimDim : MC.rim);
+      // 빛을 받는 북 · 서쪽 테두리의 바깥 끝 1px 반사광
+      if (r.side === 'n') P.dev(P.X(r.x0), P.X(r.y0), P.X(r.x1) - P.X(r.x0), d, MC.rimSpec);
+      else if (r.side === 'w') P.dev(P.X(r.x0), P.X(r.y0), d, P.X(r.y1) - P.X(r.y0), MC.rimSpec);
+    }
 }
 
 function paintPillars(P: Painter): void {

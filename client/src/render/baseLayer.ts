@@ -31,6 +31,7 @@ import {
   nextFogKey,
   paintExits,
   paintPoints,
+  recordFogCommit,
   removeCanvasTexture,
   resetExitTracking,
   rimLiftPath,
@@ -203,6 +204,7 @@ export class CanvasFog implements FogLayer {
     addRimLift(this.ctx, this.lift);
     uploadCanvasTexture(this.texture);
     this.lastCommitMs = performance.now() - this.t0;
+    recordFogCommit(this.lastCommitMs);
   }
 
   destroy(): void {

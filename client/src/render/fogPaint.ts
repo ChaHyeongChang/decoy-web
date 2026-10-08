@@ -245,6 +245,9 @@ export function paintPoints(
     const accent = st === 'blocked' ? C.warn : C.neon;
     // 패드: 반투명 판 (아래 정적 무늬가 비친다) + 안쪽 고리
     pen.fillCircle(cx, cy, r, C.pad, done ? 0.2 : 0.11);
+    // 가운데로 갈수록 조금 밝은 판 (방사 그라디언트 대신 동심원 두 겹: 두 펜이 같은 그림)
+    pen.fillCircle(cx, cy, r * 0.74, C.pad, 0.06);
+    pen.fillCircle(cx, cy, r * 0.46, C.pad, 0.06);
     pen.strokeCircle(cx, cy, r - OBJ.tickIn - 0.12, 1, C.neonDim, 0.55);
     // 판정 경계 (바깥 원): 번짐 + 선
     pen.strokeCircle(cx, cy, r, 6, C.neon, 0.07);
@@ -428,7 +431,7 @@ export function paintExits(pen: FogPen, exits: readonly ExitView[], balance: Bal
             { x: cx - half, y: ly1 },
           ],
           C.go,
-          0.35 * t,
+          0.55 * t,
         );
         for (const x of [cx - half, cx + half]) pen.line(x, ly0, x, ly1, 2, MAP_COLOR.doorLeafHi, 1);
       }
@@ -439,11 +442,11 @@ export function paintExits(pen: FogPen, exits: readonly ExitView[], balance: Bal
         const a = (Math.PI * q) / 16;
         spill.push({ x: cx + Math.cos(a) * sr, y: edge + inward * Math.sin(a) * sr });
       }
-      pen.fillPoly(spill, C.go, 0.09 * t);
+      pen.fillPoly(spill, C.go, 0.13 * t);
       pen.fillPoly(
         spill.map((p) => ({ x: cx + (p.x - cx) * 0.6, y: edge + (p.y - edge) * 0.6 })),
         C.go,
-        0.08 * t,
+        0.12 * t,
       );
     }
   }
@@ -632,6 +635,12 @@ export interface CanvasTextureLike {
   add(name: string, sourceIndex: number, x: number, y: number, width: number, height: number): unknown;
   get(name?: string): { setSize(width: number, height: number, x?: number, y?: number): unknown };
   readonly source: readonly { width: number; height: number; isPowerOf2: boolean; update(): void }[];
+}
+
+/** 측정: 안개 합성 1회(begin~commit) 시간의 지수평균 (ms, gfx.features.fogCommitMs) */
+export function recordFogCommit(ms: number): void {
+  const prev = Number(gfxState.features.fogCommitMs ?? ms);
+  gfxState.features.fogCommitMs = Math.round((prev * 0.9 + ms * 0.1) * 100) / 100;
 }
 
 /** 안개 · 미니맵 텍스처의 source 바이트 (키 → 폭 × 높이 × 4). 합계를 gfxState.features.textureBytes에 기록한다 */
