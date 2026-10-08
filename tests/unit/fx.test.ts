@@ -1,7 +1,9 @@
 // 장식 입자 · 이벤트 효과 · 후처리 수식 (M10b, VISUAL_SPEC 7장 · 정보 우선 R4 · R5 · R9 · 상대 잔여 효과)
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { validateBalance } from '../../shared/src/balance';
 import { survivorVisionPolygon } from '../../shared/src/visibility';
-import { pointInPolygon } from '../../shared/src/geometry';
+import { circleIntersectsSector, pointInPolygon } from '../../shared/src/geometry';
 import {
   DUST,
   FX_LIMITS,
@@ -9,29 +11,35 @@ import {
   FxSystem,
   POST,
   dustMotes,
+  pickDissolveTarget,
   vignetteAt,
   type FxPen,
 } from '../../client/src/art/fx';
 import { PRESETS, QUALITY_TIERS } from '../../client/src/gfx/presets';
 
-/** 그리기 기록 펜 */
-function recorder(): FxPen & { alphas: number[]; widths: number[] } {
+const balance = validateBalance(JSON.parse(readFileSync('config/balance.json', 'utf8')));
+
+/** 그리기 기록 펜 (경로마다 꼭짓점 수를 센다) */
+function recorder(): FxPen & { alphas: number[]; widths: number[]; paths: number[] } {
   const alphas: number[] = [];
   const widths: number[] = [];
+  const paths: number[] = [];
   return {
     alphas,
     widths,
+    paths,
     fillStyle: (_c: number, a = 1) => alphas.push(a),
     lineStyle: (w: number, _c: number, a = 1) => {
       widths.push(w);
       alphas.push(a);
     },
-    fillCircle: () => undefined,
-    strokeCircle: () => undefined,
-    beginPath: () => undefined,
-    moveTo: () => undefined,
-    lineTo: () => undefined,
-    arc: () => undefined,
+    beginPath: () => paths.push(0),
+    moveTo: () => {
+      paths[paths.length - 1] = (paths[paths.length - 1] ?? 0) + 1;
+    },
+    lineTo: () => {
+      paths[paths.length - 1] = (paths[paths.length - 1] ?? 0) + 1;
+    },
     strokePath: () => undefined,
     fillPath: () => undefined,
     closePath: () => undefined,
@@ -95,12 +103,71 @@ describe('효과 한도 (FX_LIMITS)', () => {
       const pen = {
         ...recorder(),
         moveTo: (x: number, y: number) => xs.push(x, y),
-        fillCircle: (x: number, y: number) => xs.push(x, y),
       };
       fx.draw(pen, 0.05, 32);
       return xs;
     };
     expect(draw()).toEqual(draw());
+  });
+});
+
+describe('매 프레임 그리는 점 · 고리는 반지름에 맞춘 다각형 (Phaser 원호 100분할을 쓰지 않는다)', () => {
+  it('발먼지 · 흩어짐 점은 12각, 충격파 고리도 96각 이하', () => {
+    const fx = new FxSystem(5, 400);
+    fx.footDust(3, 3, 0, null, false);
+    fx.dissolve(4, 4, 0.3, 0, null, false);
+    const dots = recorder();
+    fx.draw(dots, 0.05, 32);
+    expect(dots.paths.length).toBeGreaterThan(0);
+    // 온원 = 시작점 + 12분할 → 꼭짓점 13개
+    for (const n of dots.paths) expect(n).toBe(13);
+    const rings = new FxSystem(6, 400);
+    rings.ring('shockwave', 5, 5, 2, 0, null, false);
+    const pen = recorder();
+    rings.draw(pen, 0.2, 32);
+    for (const n of pen.paths) {
+      expect(n).toBeGreaterThanOrEqual(13);
+      expect(n).toBeLessThanOrEqual(97);
+    }
+  });
+});
+
+describe('괴물 화면 수감 흩어짐 자리 (타격 부채꼴 안의 후보만)', () => {
+  const atk = { range: balance.monster.attack.range, arc: (balance.monster.attack.arc * Math.PI) / 180 };
+  const r = balance.survivor.radius;
+  const hit = { x: 42, y: 12, dir: Math.PI, hits: 1 };
+
+  it('같은 순간 시야를 벗어난 다른 생존자(공격 부채꼴 밖)는 고르지 않는다 (검토 장면: 괴물 옆 0.75타일 가드)', () => {
+    const runner = { id: 'r', x: 41, y: 12 };
+    const guard = { id: 'g', x: 42, y: 12.75 };
+    expect(pickDissolveTarget([guard, runner], hit, atk, r)?.id).toBe('r');
+    expect(pickDissolveTarget([runner, guard], hit, atk, r)?.id).toBe('r');
+    // 맞은 사람이 후보에 없으면 (가드만 사라짐) 연출 생략
+    expect(pickDissolveTarget([guard], hit, atk, r)).toBeNull();
+  });
+
+  it('타격이 없거나 빗나갔으면(hits = 0) 생략, 고른 후보는 늘 서버 타격 모양(+여유) 안', () => {
+    const runner = { id: 'r', x: 41, y: 12 };
+    expect(pickDissolveTarget([runner], null, atk, r)).toBeNull();
+    expect(pickDissolveTarget([runner], { ...hit, hits: 0 }, atk, r)).toBeNull();
+    // 격자 위 후보들: 고른 것은 늘 부채꼴(범위 + 몸 반지름 + 여유)과 겹친다. 부채꼴 안 후보가 있으면 반드시 고른다
+    const sector = { dir: hit.dir, arc: atk.arc, range: atk.range };
+    for (let y = 10; y <= 14; y += 0.25)
+      for (let x = 39.5; x <= 44.5; x += 0.25) {
+        const c = { id: `${x},${y}`, x, y };
+        const pick = pickDissolveTarget([c], hit, atk, r);
+        const inside = circleIntersectsSector(hit, sector, c, r);
+        if (inside) expect(pick, c.id).not.toBeNull();
+        if (pick) expect(circleIntersectsSector(hit, sector, c, r + 0.1), c.id).toBe(true);
+        // 뒤쪽 (조준 반대편 1타일 넘게)은 절대 고르지 않는다
+        if (x > 43) expect(pick, c.id).toBeNull();
+      }
+  });
+
+  it('여럿이면 조준 방향에 가까운 것', () => {
+    const a = { id: 'a', x: 41.2, y: 12.5 };
+    const b = { id: 'b', x: 41.1, y: 12.02 };
+    expect(pickDissolveTarget([a, b], hit, atk, r)?.id).toBe('b');
   });
 });
 

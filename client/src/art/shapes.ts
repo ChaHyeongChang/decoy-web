@@ -433,3 +433,180 @@ export function svgPath(polys: readonly Poly[], k = 1, cx = 0, cy = 0, digits = 
   }
   return parts.join('');
 }
+
+// ───────────────────────── 매 프레임 그리는 원 · 호 (Graphics 펜) ─────────────────────────
+// Phaser Graphics의 원호 명령(arc · fillCircle · strokeCircle · slice · 둥근 사각형)은 WebGL에서 크기와 상관없이
+// 매번 100분할로 다시 펴지고, 채우기(fillPath)는 매번 Earcut이다. 매 프레임 다시 그리는 원 · 호는 여기서 반지름에 맞춰
+// 선분으로 편다(현 ≈ 4 월드 px, 온원은 12각 이상): 작은 점은 12각, 범위 원은 판정 반지름 ±0.1px 안이다.
+
+/** 선 그리기 펜 (Phaser Graphics · Canvas2D 경로의 부분 집합) */
+export interface LinePen {
+  moveTo(x: number, y: number): unknown;
+  lineTo(x: number, y: number): unknown;
+}
+
+/** 채우기 · 선 펜 (Phaser Graphics의 부분 집합: 단위 테스트는 기록 펜을 넘긴다) */
+export interface PathPen extends LinePen {
+  fillStyle(color: number, alpha?: number): unknown;
+  lineStyle(width: number, color: number, alpha?: number): unknown;
+  beginPath(): unknown;
+  closePath(): unknown;
+  fillPath(): unknown;
+  strokePath(): unknown;
+}
+
+/** 현 길이 (월드 px) */
+export const ARC_CHORD = 4;
+
+/** 원호 분할 수: 현 ≈ ARC_CHORD, 온원은 12각 이상, 많아야 96 */
+export function arcSteps(r: number, span: number): number {
+  const s = Math.abs(span);
+  const n = Math.ceil((s * Math.abs(r)) / ARC_CHORD);
+  const min = s >= TAU - 1e-9 ? 12 : 1;
+  return Math.max(min, Math.min(96, n));
+}
+
+/** 원호를 선분으로 편다 (a0 → a1). move = true면 시작점으로 moveTo, 아니면 지금 경로에 lineTo로 잇는다 */
+export function penArc(
+  pen: LinePen,
+  cx: number,
+  cy: number,
+  r: number,
+  a0: number,
+  a1: number,
+  move = true,
+): void {
+  const n = arcSteps(r, a1 - a0);
+  for (let i = 0; i <= n; i += 1) {
+    const a = a0 + ((a1 - a0) * i) / n;
+    const x = cx + Math.cos(a) * r;
+    const y = cy + Math.sin(a) * r;
+    if (i === 0 && move) pen.moveTo(x, y);
+    else pen.lineTo(x, y);
+  }
+}
+
+/** 원 경로 (beginPath ~ closePath). 부르는 쪽이 fillPath · strokePath */
+export function circlePath(pen: PathPen, cx: number, cy: number, r: number): void {
+  pen.beginPath();
+  penArc(pen, cx, cy, r, 0, TAU);
+  pen.closePath();
+}
+
+/** 채운 원 */
+export function fillCirclePen(pen: PathPen, cx: number, cy: number, r: number): void {
+  circlePath(pen, cx, cy, r);
+  pen.fillPath();
+}
+
+/** 원 테두리 */
+export function strokeCirclePen(pen: PathPen, cx: number, cy: number, r: number): void {
+  circlePath(pen, cx, cy, r);
+  pen.strokePath();
+}
+
+/** 모서리가 둥근 사각형 경로 (모서리 반지름 rad) */
+export function roundRectPath(pen: PathPen, x: number, y: number, w: number, h: number, rad: number): void {
+  const r = Math.max(0, Math.min(rad, w / 2, h / 2));
+  pen.beginPath();
+  penArc(pen, x + w - r, y + r, r, -Math.PI / 2, 0);
+  penArc(pen, x + w - r, y + h - r, r, 0, Math.PI / 2, false);
+  penArc(pen, x + r, y + h - r, r, Math.PI / 2, Math.PI, false);
+  penArc(pen, x + r, y + r, r, Math.PI, Math.PI * 1.5, false);
+  pen.closePath();
+}
+
+// ───────────────────────── 몸에 붙는 표시의 자리 (노출 문양 · 기절 별) ─────────────────────────
+// 머리 위로 떠 있는 표시는 옆 캐릭터 몸과 그 바깥 링(몸/링 대비 3:1을 재는 r + 8 논리 px)을 비켜 둔다(정보 우선 R3 · R7 · R15:
+// 남의 몸을 덮어 그 사람 역할 · 상태로 잘못 읽히거나 몸 윤곽 대비를 깎지 않게). 표시는 몸 아래 레이어라 다 막혀도 몸을 덮지는 않는다.
+
+/** 원 (중심 · 반지름, 타일) */
+export interface Disc {
+  x: number;
+  y: number;
+  r: number;
+}
+
+/** 옆 몸의 바깥 링까지 비워 둘 여유 (타일): 8 논리 px / (32 × 맵 배율 0.93) */
+export const RING_PAD = 0.27;
+
+/**
+ * 표시를 둘 방향 (라디안): 후보 방향 순서대로, 표시가 차지하는 원들(footprint)이 다른 몸 원 + 바깥 링(RING_PAD)과 겹치지 않는 첫 방향.
+ * 지난 방향이 아직 비어 있으면 그대로 둔다(자리가 깜빡이지 않게). 다 막히면 첫 후보
+ */
+export function pickSlot(
+  slots: readonly number[],
+  footprint: (dir: number) => readonly Disc[],
+  others: readonly Disc[],
+  prev: number | null,
+): number {
+  const free = (a: number): boolean =>
+    footprint(a).every((f) => others.every((o) => Math.hypot(f.x - o.x, f.y - o.y) >= f.r + o.r + RING_PAD));
+  if (prev !== null && free(prev)) return prev;
+  for (const a of slots) if (free(a)) return a;
+  return slots[0] ?? -Math.PI / 2;
+}
+
+/** 괴물 화면 능력 노출 문양 배지 (몸 반지름 배수): 몸 중심에서의 거리 · 배지 반지름 */
+export const GLYPH_PLACE = { dist: 2.35, r: 0.86 } as const;
+
+/** 표시 자리 후보 방향 (위 → 비스듬히 위 → 옆 → 비스듬히 아래 → 아래) */
+export const GLYPH_SLOTS: readonly number[] = [-90, -45, -135, 0, 180, 45, 135, 90].map(
+  (d) => (d * Math.PI) / 180,
+);
+
+/** 노출 문양을 둘 방향 (기본 머리 위). others = 이 화면에 그린 다른 캐릭터 몸 원 */
+export function glyphSlot(self: Vec2, bodyR: number, others: readonly Disc[], prev: number | null): number {
+  const d = GLYPH_PLACE.dist * bodyR;
+  return pickSlot(
+    GLYPH_SLOTS,
+    (a) => [{ x: self.x + Math.cos(a) * d, y: self.y + Math.sin(a) * d, r: GLYPH_PLACE.r * bodyR }],
+    others,
+    prev,
+  );
+}
+
+/** 기절 별 배치 (그래픽 값, 월드 px): 궤도 반지름 가로 · 세로, 별 바깥 · 안 반지름, 외곽선 반폭, 회전 속도 (라디안/초) */
+export const STUN_STARS = { orbitX: 13, orbitY: 5, outer: 6, inner: 2.6, edge: 1.25, spin: 3.85 } as const;
+
+/**
+ * 별 궤도 가운데의 몸 중심에서 거리 (타일, dir 방향): 궤도 타원(orbitX × orbitY)의 그 방향 폭 + 별 반지름만큼 괴물 망토(판정 반지름
+ * × 1.12) 밖에 띄워 자기 몸에도 가리지 않는다 (위 · 아래는 가깝게, 옆은 멀리)
+ */
+export function stunOrbitDist(bodyR: number, tilePx: number, dir = -Math.PI / 2): number {
+  const S = STUN_STARS;
+  const reach = Math.hypot(S.orbitX * Math.cos(dir), S.orbitY * Math.sin(dir));
+  return bodyR * 1.12 + (reach + S.outer + S.edge) / tilePx;
+}
+
+/** 기절 별을 둘 방향 (기본 머리 위, 옆 몸 · 링이 있으면 비어 있는 쪽). 궤도 위 별 자리들이 차지하는 원으로 판단 */
+export function starSlot(
+  center: Vec2,
+  bodyR: number,
+  tilePx: number,
+  others: readonly Disc[],
+  prev: number | null,
+): number {
+  const S = STUN_STARS;
+  const sr = (S.outer + S.edge) / tilePx;
+  return pickSlot(
+    GLYPH_SLOTS,
+    (a) => {
+      const d = stunOrbitDist(bodyR, tilePx, a);
+      const cx = center.x + Math.cos(a) * d;
+      const cy = center.y + Math.sin(a) * d;
+      const out: Disc[] = [];
+      for (let i = 0; i < 12; i += 1) {
+        const t = (i / 12) * TAU;
+        out.push({
+          x: cx + (Math.cos(t) * S.orbitX) / tilePx,
+          y: cy + (Math.sin(t) * S.orbitY) / tilePx,
+          r: sr,
+        });
+      }
+      return out;
+    },
+    others,
+    prev,
+  );
+}

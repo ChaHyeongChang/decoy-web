@@ -75,6 +75,30 @@ describe('장식 곡선', () => {
     expect(footfall(0.1, 0.2)).toBe(false);
   });
 
+  it('발먼지: 한 걸음 주기(두 발, strideTiles)에 정확히 두 번 — 위상 2π → 0 넘김에서 더 생기지 않는다', () => {
+    // 감싼 위상(advanceWalk)을 그대로 이어 붙여 걷는다. 시작 위상 · 프레임 이동 거리를 여러 개로
+    for (const start of [0.05, 1, 2.5, 4, 5.5, 6.2, 6.28]) {
+      for (const step of [0.013, 0.05, 0.11, 0.27, 0.6]) {
+        let phase = start;
+        let walked = 0;
+        let falls = 0;
+        // 한 주기 = strideTiles. 마지막 조각은 남은 거리만큼
+        while (walked < ANIM.strideTiles - 1e-9) {
+          const d = Math.min(step, ANIM.strideTiles - walked);
+          const next = advanceWalk(phase, d);
+          if (footfall(phase, next)) falls += 1;
+          phase = next;
+          walked += d;
+        }
+        expect(falls, `시작 ${start} · 한 프레임 ${step}타일`).toBe(2);
+      }
+    }
+    // 넘김 바로 앞뒤 (π/2 · 3π/2를 지나지 않음)
+    expect(footfall(6.2, 0.05)).toBe(false);
+    // 넘기면서 π/2를 지남
+    expect(footfall(6.2, 1.7)).toBe(true);
+  });
+
   it('피격: 흰 번쩍 80ms · 찌그러짐 120ms 뒤 0', () => {
     expect(hitReact(0).flash).toBe(1);
     expect(hitReact(ANIM.hitFlashMs).flash).toBe(0);

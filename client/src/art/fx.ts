@@ -7,8 +7,9 @@
 //  - 빛 속 먼지는 자기 팀 시야(판정 다각형) 안에서만 보이고, 시계(gfxNow)와 시드 고정 해시로만 움직인다
 //  - 품질은 개수만 바꾼다(FX_LIMITS). 정보(범위 · 링 · 마커)는 이 모듈이 그리지 않는다
 // 난수는 시드 고정(mulberry32, @decoy/shared Rng). Math.random()을 쓰지 않는다.
-import { Rng, pointInPolygon, type Vec2 } from '@decoy/shared';
+import { Rng, angleDiff, circleIntersectsSector, pointInPolygon, type Vec2 } from '@decoy/shared';
 import type { QualityTier } from '../gfx/presets';
+import { fillCirclePen, penArc, strokeCirclePen, type PathPen } from './shapes';
 
 /** 품질별 상한과 규칙 한도 */
 export const FX_LIMITS = {
@@ -71,20 +72,11 @@ export const FX_COLOR = {
   impact: 0xfde68a,
 } as const;
 
-/** 효과를 그리는 펜 (Phaser Graphics의 부분 집합). 좌표는 월드 px */
-export interface FxPen {
-  fillStyle(color: number, alpha?: number): unknown;
-  lineStyle(width: number, color: number, alpha?: number): unknown;
-  fillCircle(x: number, y: number, r: number): unknown;
-  strokeCircle(x: number, y: number, r: number): unknown;
-  beginPath(): unknown;
-  moveTo(x: number, y: number): unknown;
-  lineTo(x: number, y: number): unknown;
-  arc(x: number, y: number, r: number, a0: number, a1: number, anticlockwise?: boolean): unknown;
-  strokePath(): unknown;
-  fillPath(): unknown;
-  closePath(): unknown;
-}
+/**
+ * 효과를 그리는 펜 (Phaser Graphics의 부분 집합). 좌표는 월드 px. 원 · 호는 shapes.ts penArc로 반지름에 맞춰 편다
+ * (Phaser 원호 명령은 크기와 상관없이 100분할이라 매 프레임 그리는 작은 점에 쓰지 않는다)
+ */
+export type FxPen = PathPen;
 
 interface Fx {
   kind: FxKind;
@@ -291,11 +283,11 @@ export class FxSystem {
         }
         case 'dissolve':
           pen.fillStyle(f.color, f.alpha * lk);
-          pen.fillCircle(x, y, f.size * (0.6 + 0.4 * lk));
+          fillCirclePen(pen, x, y, f.size * (0.6 + 0.4 * lk));
           break;
         case 'footDust':
           pen.fillStyle(f.color, Math.min(FX_LIMITS.decorAlphaMax, f.alpha) * lk);
-          pen.fillCircle(x, y, Math.min(FX_LIMITS.decorSizeMaxPx, f.size * (1 + (1 - lk))));
+          fillCirclePen(pen, x, y, Math.min(FX_LIMITS.decorSizeMaxPx, f.size * (1 + (1 - lk))));
           break;
         case 'shockwave':
         case 'shutter':
@@ -303,10 +295,10 @@ export class FxSystem {
           const e = 1 - (1 - (1 - lk)) ** 2; // 빠르게 퍼지고 천천히 멎는다
           const r = (f.kind === 'shutter' ? f.r1 * (1 - 0.65 * e) : f.r1 * (0.15 + 0.85 * e)) * k;
           pen.lineStyle(f.kind === 'shutter' ? 2.5 : 3 * lk + 1, f.color, f.alpha * lk);
-          pen.strokeCircle(x, y, Math.max(1, r));
+          strokeCirclePen(pen, x, y, Math.max(1, r));
           if (f.kind === 'shockwave') {
             pen.lineStyle(1.5, f.color, f.alpha * 0.45 * lk);
-            pen.strokeCircle(x, y, Math.max(1, r * 0.82));
+            strokeCirclePen(pen, x, y, Math.max(1, r * 0.82));
           }
           break;
         }
@@ -319,12 +311,14 @@ export class FxSystem {
           const r = f.r1 * k;
           pen.lineStyle(3.5, f.color, f.alpha * lk);
           pen.beginPath();
-          pen.arc(x, y, r * 0.92, a0, a1, false);
+          penArc(pen, x, y, r * 0.92, a0, a1);
           pen.strokePath();
-          pen.lineStyle(1.5, f.color, f.alpha * 0.6 * lk);
-          pen.beginPath();
-          pen.arc(x, y, r * 0.74, a0 + 0.12, a1, false);
-          pen.strokePath();
+          if (a1 > a0 + 0.12) {
+            pen.lineStyle(1.5, f.color, f.alpha * 0.6 * lk);
+            pen.beginPath();
+            penArc(pen, x, y, r * 0.74, a0 + 0.12, a1);
+            pen.strokePath();
+          }
           break;
         }
         default:
@@ -332,6 +326,43 @@ export class FxSystem {
       }
     }
   }
+}
+
+// ───────────────────────── 수감 흩어짐 자리 (괴물 화면) ─────────────────────────
+
+/** 괴물 타격 이벤트 (attackHit: 타격 순간의 괴물 자리 · 방향 · 맞은 수) */
+export interface StrikeHit {
+  x: number;
+  y: number;
+  dir: number;
+  hits: number;
+}
+
+/** 보간 지연(약 0.1초)만큼 보이던 자리가 서버 자리와 어긋나도 맞은 사람을 놓치지 않는 여유 (타일) */
+export const DISSOLVE_SLACK = 0.1;
+
+/**
+ * 괴물 화면 수감 흩어짐 자리 고르기: 잡힘 알림 직전까지 보이던 생존자(이번에 사라졌거나 더 이상 자유가 아닌 별칭) 중
+ * 같은 순간의 타격 부채꼴(attack.range · arc 라디안, 몸 반지름 겹침 — 서버 타격 판정 circleIntersectsSector와 같은 모양) 안에
+ * 있던 것만 후보로 둔다. 타격이 없거나(hits = 0) 맞는 후보가 없으면 null(연출 생략: 같은 순간 시야를 벗어난 다른 생존자 자리에서
+ * 흩어지지 않게). 여럿이면 조준 방향에 가장 가까운 것 → 타격 중심에 가까운 것
+ */
+export function pickDissolveTarget<T extends { x: number; y: number }>(
+  cands: readonly T[],
+  hit: StrikeHit | null,
+  attack: { range: number; arc: number },
+  bodyR: number,
+): T | null {
+  if (!hit || hit.hits <= 0) return null;
+  const sector = { dir: hit.dir, arc: attack.arc, range: attack.range };
+  let best: { c: T; da: number; d: number } | null = null;
+  for (const c of cands) {
+    if (!circleIntersectsSector(hit, sector, c, bodyR + DISSOLVE_SLACK)) continue;
+    const da = Math.abs(angleDiff(hit.dir, Math.atan2(c.y - hit.y, c.x - hit.x)));
+    const d = Math.hypot(c.x - hit.x, c.y - hit.y);
+    if (!best || da < best.da - 1e-9 || (Math.abs(da - best.da) <= 1e-9 && d < best.d)) best = { c, da, d };
+  }
+  return best ? best.c : null;
 }
 
 // ───────────────────────── 빛 속 먼지 (상태 없음) ─────────────────────────
