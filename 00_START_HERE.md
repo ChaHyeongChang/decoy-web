@@ -17,7 +17,7 @@ decoy_web_kit/
    ├─ VISUAL_SPEC.md        ← 색, 형태, 연출, HUD
    ├─ STORY_TEXT.md         ← 게임 내 문구
    ├─ BUILD_PLAN.md         ← 마일스톤 M0~M9와 자동 검증
-   ├─ PLAYTEST_GUIDE.md     ← 팀원 테스트 방법과 기록 양식
+   ├─ PLAYTEST_GUIDE.md     ← 테스터용 테스트 방법과 기록 양식
    ├─ images/               ← 컨셉 이미지 5장 + 로고
    └─ reference/            ← v1(Unity) 기획서 · 비주얼스펙 (참고용)
 ```

@@ -83,7 +83,7 @@ PR마다(그리고 main에 들어갈 때) GitHub Actions(`.github/workflows/ci.y
 | [docs/VISUAL_SPEC.md](docs/VISUAL_SPEC.md) | 색 · 형태 · 연출 · HUD |
 | [docs/STORY_TEXT.md](docs/STORY_TEXT.md) | 게임 내 문구 |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | 로컬 · 같은 와이파이 · 인터넷 배포 |
-| [docs/PLAYTEST_GUIDE.md](docs/PLAYTEST_GUIDE.md) | 팀원 플레이테스트 방법 |
+| [docs/PLAYTEST_GUIDE.md](docs/PLAYTEST_GUIDE.md) | 테스터용 플레이테스트 방법 |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | 설계와 다르게 만든 것 · 문서에 없어 정한 것 |
 | [docs/HUMAN_CHECKS.md](docs/HUMAN_CHECKS.md) | 사람이 직접 확인할 것 |
 | [docs/PROGRESS.md](docs/PROGRESS.md) | 마일스톤별 진행 기록 |
