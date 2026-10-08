@@ -94,10 +94,15 @@ export function walkPose(phase: number, stepping: number): WalkPose {
   };
 }
 
-/** 발이 땅에 닿는 순간인가 (위상이 0 또는 π를 지났는가) — 발먼지 */
+/**
+ * 발이 땅에 닿는 순간인가 (발이 가장 멀리 나간 위상 π/2 · 3π/2를 지났는가) — 발먼지. 한 걸음 주기(2π)에 정확히 두 번.
+ * 위상은 advanceWalk가 [0, 2π)로 감싸므로 phase < prevPhase면 한 바퀴 넘어간 것으로 펴서 비교한다
+ * (감싼 값을 그대로 비교하면 2π → 0 넘김에서 한 번 더 생긴다). 한 프레임 진행은 한 바퀴 미만(이동 1타일 미만)이다
+ */
 export function footfall(prevPhase: number, phase: number): boolean {
+  const next = phase < prevPhase ? phase + TAU : phase;
   const a = Math.floor((prevPhase + Math.PI / 2) / Math.PI);
-  const b = Math.floor((phase + Math.PI / 2) / Math.PI);
+  const b = Math.floor((next + Math.PI / 2) / Math.PI);
   return a !== b;
 }
 

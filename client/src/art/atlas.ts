@@ -59,6 +59,11 @@ export const ART = {
 
 export const MONSTER_FRAME_KINDS = ['idle', 'move'] as const;
 
+/** 빛 속 먼지 점 ('mote' 프레임) 반지름 (생존자 반지름 배수). 매 프레임 원을 다시 펴지 않고 이 그림을 이미지로 찍는다 */
+export const MOTE_R = 0.25;
+/** 먼지 색 (무채색, art/fx.ts FX_COLOR.dust와 같은 값) */
+const MOTE_COLOR = 0xd6dde6;
+
 export interface AtlasParams {
   zoom: number;
   /** 생존자 · 괴물 판정 반지름 (타일, balance) */
@@ -319,6 +324,19 @@ function drawBubble(ctx: Ctx, k: number): void {
   ctx.stroke();
 }
 
+/** 먼지 점: 가운데는 불투명, 가장자리 1텍셀 남짓만 부드럽게 (알파 · 크기는 이미지에서) */
+function drawMote(ctx: Ctx, k: number): void {
+  const r = MOTE_R * k;
+  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+  g.addColorStop(0, css(MOTE_COLOR));
+  g.addColorStop(Math.max(0, 1 - 1.2 / Math.max(1, r)), css(MOTE_COLOR));
+  g.addColorStop(1, css(MOTE_COLOR, 0));
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.fillStyle = g;
+  ctx.fill();
+}
+
 /** 머리 위 역할 문양 배지 (괴물 화면 능력 노출 · HUD): 어두운 원판 + 역할색 문양(모양이 역할마다 다르다) */
 function drawGlyphBadge(ctx: Ctx, id: GlyphId, k: number, w: number): void {
   const color = ROLE[id];
@@ -554,6 +572,7 @@ function frameDefs(): FrameDef[] {
     });
   }
   defs.push({ name: 'bubble', ext: ART.bubbleR + 0.12, unit: 's', draw: (c, k) => drawBubble(c, k) });
+  defs.push({ name: 'mote', ext: MOTE_R + 0.04, unit: 's', draw: (c, k) => drawMote(c, k) });
   const frames = ANIM.cloakFrames;
   for (const kind of MONSTER_FRAME_KINDS)
     for (let i = 0; i < frames; i += 1)

@@ -1,16 +1,19 @@
 // 화면 연출 (VISUAL_SPEC 4장) 중 화면 좌표로 그리는 것과 월드 후처리 (M10b)
 //  - 피격: 화면 가장자리 붉은 플래시 0.2초 (맞은 생존자)
 //  - 수감: 감옥으로 페이드 0.5초 (갇힌 생존자, 검정에서 밝아짐)
-//  - 기절: 괴물 화면 채도 감소 (기절 동안)
+//  - 기절: 괴물 화면 채도 감소 (기절 동안). 맵(구조 레이어) 바로 위 · 배지와 캐릭터 아래의 막(WorldRenderer.stunVeil)이라
+//    캐릭터 · 노출 링 · 범위 · 마커를 덮지 않는다. 두 렌더러가 같은 방식(보통 섞기 회색 막)이다
 //  - 후처리 (WorldPostFx): 비네트 · 색보정은 구조 레이어(fogRoot: 바닥 · 벽 · 시설 발광)에만 건다.
 //    캐릭터 · 범위 · 마커 · 배지 · 글자 · HUD에는 어떤 후처리도 걸지 않는다(정보 우선 R2)
+//  - 후처리가 실제로 어디에 걸렸는지(collectFxTargets)는 자기 신고가 아니라 장면 표시 목록 · 카메라에서 모은다
 import Phaser from 'phaser';
-import type { FxTarget } from '@decoy/shared';
+import type { FxTarget, LayerName } from '@decoy/shared';
 import type { QualityPreset } from '../gfx/presets';
 import { gfxState } from '../gfx/state';
 import { MAP_RECT, VIEW_H, VIEW_W } from '../ui/layout';
 import { POST, vignetteAt } from '../art/fx';
 import { createCanvasTexture, removeCanvasTexture } from './fogPaint';
+import { FOG_EDGE_PIPELINE } from './fogGpu';
 
 export const HIT_FLASH_MS = 200;
 export const IMPRISON_FADE_MS = 500;
@@ -27,25 +30,30 @@ export interface ScreenEffectState {
   desaturate: boolean;
 }
 
+/**
+ * 기절 채도 감소 막 (괴물 화면, 기절 동안): 맵 위를 반투명 회색으로 덮어 채도 · 밝기를 낮춘다. 두 렌더러가 같은 값이다
+ * (Canvas의 'saturation' 합성은 Phaser가 부팅 때 지원 여부를 보고 'source-over'로 떨어뜨려 85% 회색 막이 됐다)
+ */
+export const STUN_VEIL = { color: 0x4b5563, alpha: 0.38 } as const;
+
+/** 채도 감소 막 (WorldRenderer.stunVeil: 월드 컨테이너 맨 아래) */
+export interface VeilLike {
+  setVisible(on: boolean): unknown;
+}
+
 export class ScreenEffects {
   private readonly edge: Phaser.GameObjects.Graphics;
   private readonly fadeRect: Phaser.GameObjects.Rectangle;
-  private readonly desat: Phaser.GameObjects.Rectangle;
   private hitAt = -1e9;
   private fadeAt = -1e9;
   private lastEdgeAlpha = -1;
   state: ScreenEffectState = { hitFlash: 0, fade: 0, desaturate: false };
 
-  constructor(scene: Phaser.Scene, canvasRenderer: boolean) {
-    // 채도 감소: Canvas는 'saturation' 합성(회색을 덮으면 색조 · 밝기는 두고 채도만 뺀다),
-    // WebGL은 그 합성이 없어 반투명 회색을 덮는다. 맵 영역만 (HUD는 그대로 읽히게)
-    this.desat = scene.add
-      .rectangle(MAP_RECT.x, MAP_RECT.y, MAP_RECT.w, MAP_RECT.h, canvasRenderer ? 0x808080 : 0x4b5563)
-      .setOrigin(0, 0)
-      .setDepth(30)
-      .setAlpha(canvasRenderer ? 0.85 : 0.38)
-      .setVisible(false);
-    if (canvasRenderer) this.desat.setBlendMode(Phaser.BlendModes.SATURATION);
+  /** veil = 맵 바로 위 · 배지와 캐릭터 아래의 채도 감소 막 */
+  constructor(
+    scene: Phaser.Scene,
+    private readonly veil: VeilLike,
+  ) {
     this.edge = scene.add.graphics().setDepth(52);
     this.fadeRect = scene.add
       .rectangle(0, 0, VIEW_W, VIEW_H, 0x000000)
@@ -83,8 +91,13 @@ export class ScreenEffects {
     // 수감: 검정에서 0.5초에 걸쳐 밝아진다 (서버가 위치를 감옥으로 옮긴 바로 그 화면부터)
     const fk = Math.max(0, 1 - (nowMs - this.fadeAt) / IMPRISON_FADE_MS);
     this.fadeRect.setVisible(fk > 0).setAlpha(fk);
-    this.desat.setVisible(desaturate);
+    this.veil.setVisible(desaturate);
     this.state = { hitFlash: hk, fade: fk, desaturate };
+  }
+
+  /** 화면 효과 레이어의 표시 객체 (후처리 검사의 레이어 이름 'screen') */
+  owns(obj: Phaser.GameObjects.GameObject): boolean {
+    return obj === this.edge || obj === this.fadeRect;
   }
 }
 
@@ -176,13 +189,13 @@ class WorldGradePipeline extends Phaser.Renderer.WebGL.Pipelines.PostFXPipeline 
 
 /**
  * 구조 레이어 후처리. 높음(WebGL) = 셰이더 비네트 + 색보정, 중간(WebGL) = 구운 비네트 오버레이 + 색보정,
- * Canvas 렌더러의 높음 · 중간 = 구운 오버레이만, 낮음 = 없음. 실제로 켠 것을 gfxState.features와 fxTargets에 남긴다
+ * Canvas 렌더러의 높음 · 중간 = 구운 오버레이만, 낮음 = 없음. 켠 것을 gfxState.features에 남기고(어디에 걸렸는지는
+ * collectFxTargets가 표시 목록에서 직접 모은다), 파이프라인 렌더 타깃 바이트를 features.postFxBytes에 기록한다
  */
 export class WorldPostFx {
   private overlay: Phaser.GameObjects.Image | null = null;
   private overlayKey: string | null = null;
   private piped = false;
-  targets: FxTarget[] = [];
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -223,7 +236,22 @@ export class WorldPostFx {
     if (fogEdge) effects.push('fogEdge');
     gfxState.features.vignette = vignette;
     gfxState.features.colorGrade = effects.includes('colorGrade');
-    this.targets = effects.length > 0 ? [{ layer: 'map', effects }] : [];
+    this.measure();
+  }
+
+  /**
+   * 후처리 파이프라인이 붙잡은 렌더 타깃 바이트 (백버퍼 크기 RGBA: 1080p 8.3MB · 4K 33.2MB). 창 크기가 바뀌면 렌더 타깃도
+   * 따라 커지므로 매 프레임 다시 잰다(곱셈 몇 번). Canvas · 낮음은 0
+   */
+  measure(): void {
+    let bytes = 0;
+    if (this.piped) {
+      const p = this.root.getPostPipeline(WORLD_GRADE);
+      for (const pipe of Array.isArray(p) ? p : [p])
+        if (pipe instanceof WorldGradePipeline)
+          for (const rt of pipe.renderTargets) bytes += rt.width * rt.height * 4;
+    }
+    gfxState.features.postFxBytes = bytes;
   }
 
   /** 안개 레이어를 다시 만들면 새 그림이 위에 쌓이므로 오버레이를 맨 위로 */
@@ -254,7 +282,8 @@ export class WorldPostFx {
     this.overlay = this.scene.make
       .image({ x: MAP_RECT.x, y: MAP_RECT.y, key: this.overlayKey }, false)
       .setOrigin(0, 0)
-      .setDisplaySize(MAP_RECT.w, MAP_RECT.h);
+      .setDisplaySize(MAP_RECT.w, MAP_RECT.h)
+      .setName(`${FX_TAG}vignetteOverlay`);
     this.root.add(this.overlay);
   }
 
@@ -267,8 +296,113 @@ export class WorldPostFx {
     this.overlay = null;
     if (this.overlayKey) removeCanvasTexture(this.scene.textures, this.overlayKey);
     this.overlayKey = null;
-    this.targets = [];
+    gfxState.features.postFxBytes = 0;
   }
 }
 
 let overlaySeq = 0;
+
+// ───────────────────────── 후처리가 실제로 걸린 곳 (디버그 getFxTargets) ─────────────────────────
+
+/** 후처리 역할을 하는 보통 표시 객체(구운 비네트 오버레이 등)의 이름 머리 */
+export const FX_TAG = 'fx:';
+
+/** Phaser 기본 파이프라인 (효과가 아니다) */
+const BASE_PIPELINES = new Set([
+  'MultiPipeline',
+  'MobilePipeline',
+  'SinglePipeline',
+  'RopePipeline',
+  'GraphicsPipeline',
+  'BitmapMaskPipeline',
+  'UtilityPipeline',
+  'Light2D',
+  'PointLightPipeline',
+  'PostFXPipeline',
+  'FxPipeline',
+]);
+
+/** 모든 레이어 이름 (카메라 후처리는 모든 레이어에 걸린다) */
+const ALL_LAYERS: readonly LayerName[] = [
+  'map',
+  'glow',
+  'floorInfo',
+  'particles',
+  'cone',
+  'entities',
+  'markers',
+  'screen',
+  'hud',
+];
+
+/** 파이프라인 이름 (없으면 '?') */
+function pipeName(p: unknown): string {
+  if (p && typeof p === 'object' && 'name' in p && typeof p.name === 'string') return p.name;
+  return '?';
+}
+
+/** FX 컨트롤러 목록 (preFX · postFX)의 켜진 효과 이름 */
+function fxList(kind: 'preFX' | 'postFX', ctl: unknown): string[] {
+  if (!ctl || typeof ctl !== 'object' || !('list' in ctl) || !Array.isArray(ctl.list)) return [];
+  const out: string[] = [];
+  for (const fx of ctl.list as unknown[]) {
+    if (fx && typeof fx === 'object' && 'active' in fx && fx.active === false) continue;
+    const type = fx && typeof fx === 'object' && 'type' in fx ? String(fx.type) : '?';
+    out.push(`${kind}:${type}`);
+  }
+  return out;
+}
+
+/** 표시 객체 하나에 걸린 후처리 · 효과 셰이더 */
+function fxOf(o: object): string[] {
+  const out: string[] = [];
+  if ('name' in o && typeof o.name === 'string' && o.name.startsWith(FX_TAG))
+    out.push(o.name.slice(FX_TAG.length));
+  if ('postPipelines' in o && Array.isArray(o.postPipelines))
+    for (const p of o.postPipelines as unknown[]) {
+      if (p instanceof WorldGradePipeline) {
+        if (p.vignette > 0) out.push('vignette');
+        if (p.grade > 0) out.push('colorGrade');
+      } else if (pipeName(p) !== 'FxPipeline') out.push(pipeName(p));
+    }
+  if ('pipeline' in o && o.pipeline) {
+    const name = pipeName(o.pipeline);
+    if (name === FOG_EDGE_PIPELINE) out.push('fogEdge');
+    else if (!BASE_PIPELINES.has(name)) out.push(name);
+  }
+  if ('preFX' in o) out.push(...fxList('preFX', o.preFX));
+  if ('postFX' in o) out.push(...fxList('postFX', o.postFX));
+  return out;
+}
+
+/**
+ * 장면에서 후처리(post 파이프라인 · preFX/postFX · 효과 셰이더 · 'fx:' 이름의 오버레이)가 실제로 걸린 곳을 모은다.
+ * layerOf가 표시 객체 → 레이어 이름을 알려 주고(모르면 부모의 레이어, 맨 위는 'hud'), 카메라에 걸린 후처리는 모든 레이어에 걸린 것으로 센다.
+ * 자기 신고가 아니라 표시 목록에서 직접 읽으므로, 후처리를 캐릭터 컨테이너 · 카메라에 걸면 그 레이어가 나온다
+ */
+export function collectFxTargets(
+  scene: Phaser.Scene,
+  layerOf: (obj: Phaser.GameObjects.GameObject) => LayerName | null,
+): FxTarget[] {
+  const found = new Map<LayerName, string[]>();
+  const add = (layer: LayerName, names: readonly string[]): void => {
+    const list = found.get(layer) ?? [];
+    for (const n of names) if (!list.includes(n)) list.push(n);
+    found.set(layer, list);
+  };
+  const walk = (list: readonly Phaser.GameObjects.GameObject[], inherited: LayerName): void => {
+    for (const o of list) {
+      const layer = layerOf(o) ?? inherited;
+      const fx = fxOf(o);
+      if (fx.length > 0) add(layer, fx);
+      if (o instanceof Phaser.GameObjects.Container || o instanceof Phaser.GameObjects.Layer)
+        walk(o.list, layer);
+    }
+  };
+  walk(scene.children.list, 'hud');
+  for (const cam of scene.cameras.cameras) {
+    const names = fxOf(cam).map((n) => `camera:${n}`);
+    if (names.length > 0) for (const l of ALL_LAYERS) add(l, names);
+  }
+  return [...found].map(([layer, effects]) => ({ layer, effects }));
+}

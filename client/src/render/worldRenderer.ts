@@ -1,13 +1,17 @@
 // 월드 렌더링 (TECH_SPEC 5장 · VISUAL_SPEC 정보 우선 규칙 R1 순서). 맵 위 레이어를 컨테이너 하나에 담아 0.93배로 그린다.
 //  map · glow (fogRoot: 바닥 · 벽 · 시설 발광 · 거점 · 탈출구 영역 · 시야 채움 · 안개 — baseLayer.ts)
-//  → floorInfo (배지 · 바닥 문양 — objects.ts) → 시야 경계 림 → particles (빛 속 먼지)
-//  → cone (생존자 화면: 괴물 부채꼴 D4 / 괴물 화면: 자기 시야 테두리) → 공격 준비 채움
+//  → 기절 채도 감소 막 (괴물 화면 기절 중) → floorInfo (배지 · 바닥 문양 — objects.ts) → 시야 경계 림
+//  → particles (빛 속 먼지: 그림 묶음 'mote' 이미지) → cone 채움 · 해치 (생존자 화면: 괴물 부채꼴 D4) → 공격 준비 채움
 //  → entities: 캐릭터 그림자 → 돌진 잔상 → 이벤트 효과 (불꽃 · 흩어짐 · 발먼지 · 충격파 · 베기 호 · 속도선 · 돌진 줄)
-//    → 범위 선 (공격 준비 경계 · 캠핑 · 구조 구역 · 밀치기 · 포효) → 바닥 링 → 발 · 몸 → 부착 표시
+//    → 부채꼴 가장자리 선 · 괴물 화면 자기 시야 테두리 → 범위 선 (공격 준비 경계 · 앞머리 · 캠핑 · 구조 구역 · 밀치기 · 포효)
+//    → 바닥 링 → 몸 아래 표시 (노출 문양 · 기절 별) → 발 · 몸 → 부착 표시 (거품 · 진행 링 · 부상)
 //  → markers (탐지 · 포효 · 포효 핑)
-// 그림자(접지 그림자)가 범위 채움 · 부채꼴 위에 깔려 몸과 바깥 링 대비 3:1을 지키고, 범위 경계 선은 그림자 위에 그려 끊기지 않는다
+// 그림자(접지 그림자)가 범위 채움 · 부채꼴 채움 위에 깔려 몸과 바깥 링 대비 3:1을 지키고, 경계 선은 그림자 위에 그려 끊기지 않는다.
+// 머리 위로 떠 옆 캐릭터에 걸칠 수 있는 표시(노출 문양 · 기절 별)는 모든 몸 아래에 그린다(남의 몸을 덮지 않게, R7 · R15).
 // 후처리(비네트 · 색보정)는 fogRoot에만 건다(effects.ts WorldPostFx). 캐릭터 · 범위 · 마커 · 배지에는 걸지 않는다.
 // 품질은 장식(먼지 · 발먼지 · 눈빛 · 애니메이션 프레임)만 바꾸고, 정보(info · drawn)는 모든 품질에서 같다.
+// 범위 · 부채꼴 정보 항목(info)을 먼저 만들고 그 항목에서 그린다(render/vision.ts): 그림과 정보의 출처가 하나다.
+// 매 프레임 그리는 Graphics는 원호 명령(100분할)을 쓰지 않고 선분으로 편다. 프레임당 원호 · 채우기 수를 features에 남긴다.
 import Phaser from 'phaser';
 import {
   CAPTURE_POINTS,
@@ -15,6 +19,7 @@ import {
   PRISON_CENTER,
   PRISON_RECT,
   RESCUE_POINT,
+  TILE_PX,
   inCircleVision,
   monsterConePolygon,
   monsterConeShape,
@@ -24,9 +29,9 @@ import {
   survivorVisionRadius,
   type Balance,
   type DrawnEntity,
-  type FxTarget,
   type GameEvent,
   type InfoItem,
+  type LayerName,
   type MonsterView,
   type Role,
   type RoleId,
@@ -44,40 +49,35 @@ import {
   fadeOut,
   footfall,
   frameCount,
-  hatchPulse,
   quantizePhase,
   seedOf,
   windupFill,
 } from '../art/anim';
-import { cloakFrameName, ensureAtlas, type AtlasBuild } from '../art/atlas';
-import { FX_LIMITS, FxSystem, dustMotes, type DustEye } from '../art/fx';
+import { MOTE_R, cloakFrameName, ensureAtlas, type AtlasBuild } from '../art/atlas';
+import { starSlot } from '../art/shapes';
+import { FX_LIMITS, FxSystem, dustMotes, pickDissolveTarget, type DustEye, type StrikeHit } from '../art/fx';
 import { CONE, DANGER, NEON, ROLE, WARN } from '../art/palette';
 import { effectivePreset, type QualityPreset, type RendererKind } from '../gfx/presets';
 import { gfxNow, gfxState, onGfxChange } from '../gfx/state';
-import { MAP_SCALE, MAP_X, MAP_Y } from '../ui/layout';
+import { MAP_PX_H, MAP_PX_W, MAP_SCALE, MAP_X, MAP_Y } from '../ui/layout';
 import {
-  ATTACK_RANGE,
   MonsterRig,
   SurvivorRig,
-  drawAttackRange,
-  drawCampZone,
   drawDashStreak,
   drawHiddenSurvivor,
   drawInjury,
   drawMonsterRig,
   drawRescueRing,
-  drawRescueZone,
   drawRoarMark,
   drawRoarPing,
-  drawRoarWave,
-  drawShoveRange,
   drawSpeedLines,
   drawStunStars,
   drawTeamSurvivor,
   drawTrackMark,
+  type BodyDisk,
   type CharacterLayers,
 } from './characters';
-import { DashTrail, WorldPostFx } from './effects';
+import { DashTrail, STUN_VEIL, WorldPostFx } from './effects';
 import { ALPHA, FOG } from './colors';
 import { createFogLayer, type FogLayer } from './baseLayer';
 import {
@@ -90,7 +90,22 @@ import {
   unionOutline,
 } from './fogMath';
 import { Badges, type BadgeAlpha } from './objects';
-import { fillPolygon, mixColor, strokeSegments } from './vision';
+import {
+  ATTACK_RANGE,
+  CONE_LOOK,
+  drawAttackRange,
+  drawCampZone,
+  drawConeEdge,
+  drawConeHatch,
+  drawRescueZone,
+  drawRoarWave,
+  drawShoveRange,
+  fillPolygon,
+  mixColor,
+  shoveBlockPoint,
+  shoveState,
+  strokeSegments,
+} from './vision';
 
 export interface FrameView {
   balance: Balance;
@@ -121,28 +136,6 @@ export interface FrameView {
 const SURVIVOR_FOG_MS = 50;
 const MONSTER_FOG_MS = 33;
 
-/**
- * 부채꼴 · 시야 채움 (그래픽 값). 생존자 화면 괴물 부채꼴 채움 0.20(노랑) / 0.28(빨강) + 가장자리 선 2px 85%,
- * 빨강 상태는 사선 해치 + 0.6초 펄스(색약 대비). 괴물 화면 자기 부채꼴은 낮은 채움 + 판정 경계 선, 근접 원 빨강 8%.
- * 생존자 시야는 따뜻한 중성 틴트 5% + 경계에 그 사람의 역할색 림
- */
-export const CONE_LOOK = {
-  fillIdle: 0.2,
-  fillSeen: 0.28,
-  edgeAlpha: 0.85,
-  edgeWidth: 2,
-  hatchSpacing: 0.42,
-  hatchAlpha: 0.2,
-  hatchPulse: 0.16,
-  hatchWidth: 2,
-  selfFill: 0.11,
-  nearFill: 0.08,
-  visionTint: 0xffe2b8,
-  visionTintAlpha: 0.05,
-  rimAlpha: 0.24,
-  rimWidth: 1.6,
-} as const;
-
 /** 포효 충격파 (괴물 화면, 범위 표시라 이벤트 효과 0.4초 한도 밖) */
 export const ROAR_WAVE_MS = 600;
 
@@ -171,29 +164,10 @@ interface Fade {
   face: number;
 }
 
-/** 선분과 다각형 경계의 교차 구간 (짝홀): 직선 p + t·d 위에서 다각형 안인 [t0, t1] 목록 */
-function clipLine(p: Vec2, d: Vec2, poly: readonly Vec2[]): [number, number][] {
-  const ts: number[] = [];
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i, i += 1) {
-    const a = poly[j];
-    const b = poly[i];
-    if (!a || !b) continue;
-    const ex = b.x - a.x;
-    const ey = b.y - a.y;
-    const den = d.x * ey - d.y * ex;
-    if (Math.abs(den) < 1e-9) continue;
-    const t = ((a.x - p.x) * ey - (a.y - p.y) * ex) / den;
-    const u = ((a.x - p.x) * d.y - (a.y - p.y) * d.x) / den;
-    if (u >= 0 && u < 1) ts.push(t);
-  }
-  ts.sort((x, y) => x - y);
-  const out: [number, number][] = [];
-  for (let i = 0; i + 1 < ts.length; i += 2) {
-    const a = ts[i];
-    const b = ts[i + 1];
-    if (a !== undefined && b !== undefined) out.push([a, b]);
-  }
-  return out;
+/** 프레임당 Graphics 원호 · 채우기(Earcut) 명령 수 (R3: 매 프레임 다시 펴는 원호를 쓰지 않는다) */
+interface GfxCount {
+  arcs: number;
+  fills: number;
 }
 
 export class WorldRenderer {
@@ -209,17 +183,29 @@ export class WorldRenderer {
   /** 괴물 화면: 자기 시야(부채꼴 ∪ 근접 원) 테두리 선분 (안개와 같은 주기로 계산) */
   private outline: [Vec2, Vec2][] = [];
   private readonly rims: Phaser.GameObjects.Graphics;
-  private readonly dust: Phaser.GameObjects.Graphics;
+  /** 빛 속 먼지 (그림 묶음 'mote' 이미지 풀) */
+  private readonly dust: Phaser.GameObjects.Container;
+  private dustImgs: Phaser.GameObjects.Image[] = [];
+  /** 부채꼴 채움 · 해치 (캐릭터 그림자 아래) */
   private readonly coneOver: Phaser.GameObjects.Graphics;
+  /** 부채꼴 가장자리 선 · 괴물 화면 자기 시야 테두리 (그림자 위, 몸 아래) */
+  private readonly coneEdge: Phaser.GameObjects.Graphics;
   private readonly ranges: Phaser.GameObjects.Graphics;
   /** 공격 준비 채움 (캐릭터 그림자 아래) — 경계 선 · 다른 범위는 ranges (그림자 위, 몸 아래) */
   private readonly rangeFill: Phaser.GameObjects.Graphics;
   private readonly fxUnder: Phaser.GameObjects.Graphics;
   private readonly ghosts: Phaser.GameObjects.Container;
   private readonly layers: CharacterLayers;
+  /** 기절 별 (몸 아래 표시 레이어 layers.marks 안) */
+  private readonly starsG: Phaser.GameObjects.Graphics;
   private readonly attachG: Phaser.GameObjects.Graphics;
   private readonly markers: Phaser.GameObjects.Graphics;
   private readonly badges: Badges;
+  /** 기절 채도 감소 막 (괴물 화면): 맵 바로 위 · 배지와 캐릭터 아래. ScreenEffects가 켜고 끈다 */
+  readonly stunVeil: Phaser.GameObjects.Rectangle;
+  private readonly gfxCount: GfxCount = { arcs: 0, fills: 0 };
+  /** 레이어 이름별 표시 객체 (후처리 검사 layerOf) */
+  private readonly layerNames = new Map<Phaser.GameObjects.GameObject, LayerName>();
   private lastFogAt = -1e9;
   private coneRed = 0;
   private coneShown = false;
@@ -246,11 +232,17 @@ export class WorldRenderer {
   private roarWave: { t0: number; x: number; y: number } | null = null;
   /** 괴물 화면: 잡힘 알림 (보이던 자리에서 흩어짐) */
   private captureAt = -1e9;
+  /** 기절 별 자리 (괴물 몸 중심에서 본 방향, 기절 중이 아니면 null) */
+  private starDir: number | null = null;
+  /** 괴물 화면: 마지막 타격 (attackHit 이벤트, 흩어짐 자리를 타격 부채꼴 안으로 좁힌다) */
+  private lastStrike: (StrikeHit & { at: number }) | null = null;
   /** 괴물 화면: 기절 알림 (가드가 안 보이면 괴물 몸 중심에서 방향 없이) */
   private stunnedPending = false;
   private shoveSeen = false;
   /** 공격 준비 채움 시작 (performance.now) */
   private windupStart: number | null = null;
+  /** 괴물 화면: 이미 windup만큼 그린 준비의 서버 값 꼬리 (서버 준비가 끝날 때까지 다시 그리지 않는다) */
+  private windupTail = false;
   fx = {
     stunStars: false,
     dashGhosts: 0,
@@ -263,7 +255,6 @@ export class WorldRenderer {
     reveal: 0,
   };
   info: InfoItem[] = [];
-  fxTargets: FxTarget[] = [];
 
   get baseCanvas(): HTMLCanvasElement {
     return this.fog.miniSource;
@@ -277,20 +268,28 @@ export class WorldRenderer {
     this.fog = this.buildFog();
     this.post = new WorldPostFx(scene, this.fogRoot);
     this.post.apply(this.preset, this.fog.shader);
-    this.fxTargets = this.post.targets;
     this.container = scene.add.container(MAP_X, MAP_Y).setScale(MAP_SCALE);
     // 배지(바닥 문양 · 라벨)는 캐릭터보다 먼저 넣어 아래에 그린다 (정보 우선 R15: 배지가 캐릭터를 덮지 않음)
     this.badges = new Badges(scene, this.container);
-    const gfx = (): Phaser.GameObjects.Graphics => scene.make.graphics({}, false);
+    // 기절 채도 감소 막: 맵 바로 위, 배지 · 캐릭터 · 범위 · 마커 아래 (맨 앞에 끼운다)
+    this.stunVeil = new Phaser.GameObjects.Rectangle(scene, 0, 0, MAP_PX_W, MAP_PX_H, STUN_VEIL.color)
+      .setOrigin(0, 0)
+      .setAlpha(STUN_VEIL.alpha)
+      .setVisible(false);
+    this.container.addAt(this.stunVeil, 0);
+    const gfx = (): Phaser.GameObjects.Graphics => this.counted(scene.make.graphics({}, false));
     const box = (): Phaser.GameObjects.Container => scene.make.container({}, false);
     this.rims = gfx();
-    this.dust = gfx();
+    this.dust = box();
     this.coneOver = gfx();
+    this.coneEdge = gfx();
     this.ranges = gfx();
     this.rangeFill = gfx();
     this.fxUnder = gfx();
     this.ghosts = box();
-    this.layers = { shadows: box(), ground: box(), bodies: box(), attach: box() };
+    this.layers = { shadows: box(), ground: box(), marks: box(), bodies: box(), attach: box() };
+    this.starsG = gfx();
+    this.layers.marks.add(this.starsG);
     this.attachG = gfx();
     this.markers = gfx();
     this.container.add([
@@ -301,13 +300,25 @@ export class WorldRenderer {
       this.layers.shadows,
       this.ghosts,
       this.fxUnder,
+      this.coneEdge,
       this.ranges,
       this.layers.ground,
+      this.layers.marks,
       this.layers.bodies,
       this.layers.attach,
       this.attachG,
       this.markers,
     ]);
+    const named: [LayerName, Phaser.GameObjects.GameObject[]][] = [
+      ['map', [this.fogRoot, this.rims]],
+      ['entities', [this.container, this.rangeFill, this.ghosts, this.fxUnder, this.ranges, this.attachG]],
+      ['entities', Object.values(this.layers)],
+      ['particles', [this.dust]],
+      ['cone', [this.coneOver, this.coneEdge]],
+      ['markers', [this.markers]],
+      ['screen', [this.stunVeil]],
+    ];
+    for (const [name, objs] of named) for (const o of objs) this.layerNames.set(o, name);
     const off = onGfxChange(() => {
       this.fogDirty = true;
     });
@@ -317,6 +328,33 @@ export class WorldRenderer {
       this.fog.destroy();
       this.resetRigs();
     });
+  }
+
+  /**
+   * 후처리 검사(effects.ts collectFxTargets): 이 렌더러의 표시 객체가 속한 레이어 이름. 월드 컨테이너 바로 아래의
+   * 모르는 객체는 배지(objects.ts) → floorInfo. 나머지는 null (부모의 레이어를 따른다)
+   */
+  layerOf(obj: Phaser.GameObjects.GameObject): LayerName | null {
+    const name = this.layerNames.get(obj);
+    if (name) return name;
+    if (obj.parentContainer === this.container) return 'floorInfo';
+    return null;
+  }
+
+  /** Graphics의 원호 · 채우기 명령을 센다 (fillCircle · strokeCircle · slice · 둥근 사각형도 안에서 arc를 부른다) */
+  private counted(g: Phaser.GameObjects.Graphics): Phaser.GameObjects.Graphics {
+    const c = this.gfxCount;
+    const arc = g.arc.bind(g);
+    const fillPath = g.fillPath.bind(g);
+    g.arc = (...args: Parameters<typeof arc>) => {
+      c.arcs += 1;
+      return arc(...args);
+    };
+    g.fillPath = () => {
+      c.fills += 1;
+      return fillPath();
+    };
+    return g;
   }
 
   private currentPreset(): QualityPreset {
@@ -336,6 +374,7 @@ export class WorldRenderer {
         this.fxs.sparks(ev.x, ev.y, balance ? balance.survivor.radius : 0.3, tS, null, false);
         return;
       case 'attackHit':
+        if (isMonster) this.lastStrike = { x: ev.x, y: ev.y, dir: ev.dir, hits: ev.hits, at: nowMs };
         if (balance)
           this.fxs.slash(
             ev.x,
@@ -406,7 +445,6 @@ export class WorldRenderer {
     this.fog = this.buildFog();
     this.post.apply(this.preset, this.fog.shader);
     this.post.raise();
-    this.fxTargets = this.post.targets;
     this.lastFogAt = -1e9;
   }
 
@@ -432,9 +470,11 @@ export class WorldRenderer {
     for (const r of this.survivorRigs.values()) r.destroy();
     for (const r of this.monsterRigs.values()) r.destroy();
     for (const g of this.ghostImgs) g.destroy();
+    for (const d of this.dustImgs) d.destroy();
     this.survivorRigs.clear();
     this.monsterRigs.clear();
     this.ghostImgs = [];
+    this.dustImgs = [];
   }
 
   private survivorRig(id: string): SurvivorRig {
@@ -497,6 +537,8 @@ export class WorldRenderer {
     const drawn: DrawnEntity[] = [];
     const info: InfoItem[] = [];
     const clockMs = gfxNow();
+    this.gfxCount.arcs = 0;
+    this.gfxCount.fills = 0;
     if (this.fogDirty) this.rebuildFog();
     const half = this.preset.halfFrameAnims;
     // 장식 시계 (품질 낮음은 프레임 절반 = 15Hz로 끊는다)
@@ -554,19 +596,16 @@ export class WorldRenderer {
       this.drawRims();
     }
 
-    // 빛 속 먼지 (장식: 자기 팀 시야 안에서만, 시계와 시드만의 함수)
-    this.dust.clear();
+    // 빛 속 먼지 (장식: 자기 팀 시야 안에서만, 시계와 시드만의 함수). 그림 묶음 'mote' 이미지 (원호 테셀레이션 없음)
     const dustN = FX_LIMITS.dust[this.preset.tier];
     const motes = this.useFog ? dustMotes(tS, this.eyes, dustN) : [];
-    for (const m of motes) {
-      this.dust.fillStyle(0xd6dde6, Math.min(FX_LIMITS.decorAlphaMax, m.alpha));
-      this.dust.fillCircle(m.x * 32, m.y * 32, Math.min(FX_LIMITS.decorSizeMaxPx, m.size) / MAP_SCALE);
-    }
+    this.drawDust(motes, balance.survivor.radius);
 
     // 부채꼴
     this.coneOver.clear();
+    this.coneEdge.clear();
     if (isMonster && this.outline.length > 0)
-      strokeSegments(this.coneOver, this.outline, CONE.idle, FOG.outlineAlpha, FOG.outlineWidth / MAP_SCALE);
+      strokeSegments(this.coneEdge, this.outline, CONE.idle, FOG.outlineAlpha, FOG.outlineWidth / MAP_SCALE);
     if (isMonster && v.me) {
       const shape = monsterConeShape(balance, v.myBlend);
       info.push({
@@ -635,14 +674,23 @@ export class WorldRenderer {
     let windupDir: number | null = null;
     let windupAt: Vec2 | null = null;
     if (isMonster && v.me) {
-      const serverWindup = (snap.you.mon?.windup ?? 0) > 0 && !v.hideServerWindup;
+      // 예측한 준비는 누른 순간부터 windup 동안. 서버가 그 입력을 확인하면(hideServerWindup) 예측 표시가 꺼지므로, 이미 그리기 시작한
+      // 준비는 같은 시작 시각으로 windup이 다 찰 때까지 이어 그린다(확인이 첫 프레임보다 먼저 와도 서버 값으로 그린다).
+      // 다 찬 뒤 서버 값의 꼬리(왕복 지연만큼 늦게 끝남)는 다시 그리지 않는다
+      const left = snap.you.mon?.windup ?? 0;
+      if (left <= 0) this.windupTail = false;
+      const shownMs = this.windupStart === null ? null : v.nowMs - this.windupStart;
+      if (v.hideServerWindup && left > 0 && shownMs !== null && shownMs >= atk.windup * 1000)
+        this.windupTail = true;
+      const serverWindup =
+        left > 0 &&
+        (!v.hideServerWindup || (!this.windupTail && (shownMs === null || shownMs < atk.windup * 1000)));
       if (serverWindup || v.localWindupDir !== null) {
         windupDir = v.localWindupDir ?? v.me.face;
         windupAt = v.me;
         // 예측한 준비는 누른 순간부터, 서버 값만 있으면 남은 시간에서
         if (this.windupStart === null)
-          this.windupStart =
-            v.localWindupDir !== null ? v.nowMs : v.nowMs - (atk.windup - (snap.you.mon?.windup ?? 0)) * 1000;
+          this.windupStart = v.localWindupDir !== null ? v.nowMs : v.nowMs - (atk.windup - left) * 1000;
       }
     } else if (!isMonster && oppVisible && v.monster && v.monster.windup > 0) {
       windupDir = v.monster.aim;
@@ -653,18 +701,7 @@ export class WorldRenderer {
     if (windupDir === null || !windupAt) this.windupStart = null;
     else {
       const fill = windupFill((v.nowMs - (this.windupStart ?? v.nowMs)) / 1000, atk.windup);
-      drawAttackRange(
-        this.rangeFill,
-        this.ranges,
-        windupAt.x,
-        windupAt.y,
-        windupDir,
-        atk.range,
-        atk.arc,
-        fill,
-      );
-      attackRange = true;
-      info.push({
+      const item: InfoItem = {
         kind: 'range',
         tag: 'attack',
         x: r3(windupAt.x),
@@ -675,12 +712,14 @@ export class WorldRenderer {
         value: null,
         color: ATTACK_RANGE.color,
         alpha: ATTACK_RANGE.edge,
-      });
+      };
+      info.push(item);
+      drawAttackRange(this.rangeFill, this.ranges, item, fill);
+      attackRange = true;
     }
     const mon = snap.you.mon;
     if (isMonster && mon && mon.camp > 0) {
-      drawCampZone(this.ranges, PRISON_RECT, balance.prison.campRadius, mon.camp);
-      info.push({
+      const item: InfoItem = {
         kind: 'range',
         tag: 'camp',
         x: PRISON_CENTER.x,
@@ -691,14 +730,15 @@ export class WorldRenderer {
         value: mon.camp,
         color: WARN,
         alpha: 0.9,
-      });
+      };
+      info.push(item);
+      drawCampZone(this.ranges, item, PRISON_RECT);
     }
     if (isMonster && this.roarWave) {
       const k = (v.nowMs - this.roarWave.t0) / ROAR_WAVE_MS;
       if (k >= 1 || k < 0) this.roarWave = null;
       else {
-        drawRoarWave(this.ranges, this.roarWave.x, this.roarWave.y, balance.monster.roar.radius, k);
-        info.push({
+        const item: InfoItem = {
           kind: 'range',
           tag: 'roar',
           x: r3(this.roarWave.x),
@@ -709,15 +749,16 @@ export class WorldRenderer {
           value: null,
           color: WARN,
           alpha: 0.22,
-        });
+        };
+        info.push(item);
+        drawRoarWave(this.ranges, item, k);
       }
     }
     const surv = snap.you.surv;
     if (!isMonster && surv?.status === 'free') {
       const anyPrisoner = [...v.survivors.values()].some((s) => s.status === 'imprisoned');
       if (anyPrisoner) {
-        drawRescueZone(this.ranges, RESCUE_POINT.x, RESCUE_POINT.y, balance.prison.rescueRadius, tS * 0.4);
-        info.push({
+        const item: InfoItem = {
           kind: 'range',
           tag: 'rescue',
           x: RESCUE_POINT.x,
@@ -728,15 +769,16 @@ export class WorldRenderer {
           value: null,
           color: NEON,
           alpha: 0.75,
-        });
+        };
+        info.push(item);
+        drawRescueZone(this.ranges, item, tS * 0.4);
       }
-      // 가드: 능력 준비 · 괴물이 보이고 가까우면 밀치기 사거리
+      // 가드: 능력 준비 · 괴물이 보이고 가까우면 밀치기 사거리 (in = 서버 판정처럼 거리 안 + 철창 · 벽에 막히지 않음)
       if (v.role === 'guard' && v.me && surv.abilityCd <= 0 && v.monster && snap.monster) {
         const d = Math.hypot(v.monster.x - v.me.x, v.monster.y - v.me.y);
         const range = balance.roles.guard.shoveRange;
         if (d <= range * 2) {
-          drawShoveRange(this.ranges, v.me.x, v.me.y, range, d <= range);
-          info.push({
+          const item: InfoItem = {
             kind: 'range',
             tag: 'shove',
             x: r3(v.me.x),
@@ -744,10 +786,12 @@ export class WorldRenderer {
             r: range,
             dir: null,
             arc: null,
-            value: d <= range ? 'in' : 'out',
+            value: shoveState(v.me, v.monster, range),
             color: ROLE.guard,
             alpha: 0.95,
-          });
+          };
+          info.push(item);
+          drawShoveRange(this.ranges, item, shoveBlockPoint(v.me, v.monster));
         }
       }
     }
@@ -755,6 +799,7 @@ export class WorldRenderer {
     // 이벤트 효과 · 장식 입자 (캐릭터 아래)
     this.fxUnder.clear();
     this.attachG.clear();
+    this.starsG.clear();
     const footDust = FX_LIMITS.footDust[this.preset.tier];
 
     // 돌진 잔상 (보이는 화면, dash.duration): 돌진 중 위치를 남기고 옅어진다 + 붉은 줄
@@ -888,6 +933,9 @@ export class WorldRenderer {
     this.badges.draw(snap.world.points, snap.world.exits, alpha, blink);
     this.info = [...this.badges.info(), ...info];
     this.drawn = drawn;
+    this.post.measure();
+    gfxState.features.charGfxArcs = this.gfxCount.arcs;
+    gfxState.features.charGfxFills = this.gfxCount.fills;
     this.fx = {
       stunStars: stunStars.any,
       dashGhosts: ghosts.length,
@@ -925,48 +973,46 @@ export class WorldRenderer {
     }
   }
 
-  /** 생존자 화면 괴물 부채꼴: 채움 + 가장자리 선 + (빨강) 꼭짓점에서 퍼지는 사선 해치 · 펄스 */
+  /**
+   * 생존자 화면 괴물 부채꼴: 채움 + (빨강) 꼭짓점에서 퍼지는 사선 해치 · 펄스는 그림자 아래(coneOver),
+   * 가장자리 선은 그림자 위(coneEdge)에 그려 팀원 몸 둘레에서도 끊기지 않는다
+   */
   private drawMonsterCone(balance: Balance, m: MonsterView, tS: number): void {
-    const g = this.coneOver;
     const cone = monsterConePolygon(balance, m, m.aim, m.blend);
     const color = mixColor(CONE.idle, CONE.seen, this.coneRed);
     const fill = CONE_LOOK.fillIdle + (CONE_LOOK.fillSeen - CONE_LOOK.fillIdle) * this.coneRed;
-    fillPolygon(g, cone, color, fill);
-    if (this.coneRed > 0.01) {
-      const pulse = hatchPulse(tS);
-      const a = (CONE_LOOK.hatchAlpha + CONE_LOOK.hatchPulse * pulse) * this.coneRed;
-      // 조준 방향에서 45° 기운 줄들을 꼭짓점에서 바깥으로 흘려 보낸다 (0.6초에 한 칸)
-      const dir = { x: Math.cos(m.aim + Math.PI / 4), y: Math.sin(m.aim + Math.PI / 4) };
-      const n = { x: -dir.y, y: dir.x };
-      const sp = CONE_LOOK.hatchSpacing;
-      const shift = ((tS / ANIM.hatchPulseS) % 1) * sp;
-      let lo = Infinity;
-      let hi = -Infinity;
-      for (const p of cone) {
-        const c = (p.x - m.x) * n.x + (p.y - m.y) * n.y;
-        lo = Math.min(lo, c);
-        hi = Math.max(hi, c);
-      }
-      g.lineStyle(CONE_LOOK.hatchWidth / MAP_SCALE, color, a);
-      g.beginPath();
-      // 흐름 방향: n이 조준 방향과 같은 쪽을 향하면 +, 아니면 −
-      const sign = n.x * Math.cos(m.aim) + n.y * Math.sin(m.aim) >= 0 ? 1 : -1;
-      for (let c = Math.floor(lo / sp) * sp; c <= hi + sp; c += sp) {
-        const off = c + sign * shift;
-        const o = { x: m.x + n.x * off, y: m.y + n.y * off };
-        for (const [t0, t1] of clipLine(o, dir, cone)) {
-          g.moveTo((o.x + dir.x * t0) * 32, (o.y + dir.y * t0) * 32);
-          g.lineTo((o.x + dir.x * t1) * 32, (o.y + dir.y * t1) * 32);
-        }
-      }
-      g.strokePath();
+    fillPolygon(this.coneOver, cone, color, fill);
+    drawConeHatch(this.coneOver, cone, m, m.aim, this.coneRed, tS, color);
+    drawConeEdge(this.coneEdge, cone, color);
+  }
+
+  /** 빛 속 먼지 이미지 (그림 묶음 'mote': 반지름 MOTE_R × 생존자 반지름으로 구운 둥근 점) */
+  private drawDust(
+    motes: readonly { x: number; y: number; alpha: number; size: number }[],
+    sR: number,
+  ): void {
+    while (this.dustImgs.length < motes.length) {
+      const img = this.scene.make.image({ key: this.atlasKey, frame: 'mote' }, false).setVisible(false);
+      this.dust.add(img);
+      this.dustImgs.push(img);
     }
-    // 가장자리 선 (판정 경계 그대로)
-    g.lineStyle(CONE_LOOK.edgeWidth / MAP_SCALE, color, CONE_LOOK.edgeAlpha);
-    g.beginPath();
-    cone.forEach((p, i) => (i === 0 ? g.moveTo(p.x * 32, p.y * 32) : g.lineTo(p.x * 32, p.y * 32)));
-    g.closePath();
-    g.strokePath();
+    const tpw = this.atlas?.texPerWorld ?? 1;
+    const baked = MOTE_R * sR * TILE_PX;
+    this.dustImgs.forEach((img, i) => {
+      const m = motes[i];
+      if (!m) {
+        img.setVisible(false);
+        return;
+      }
+      // 장식 입자 상한: 알파 0.2 · 반지름 2 논리 px
+      const r = Math.min(FX_LIMITS.decorSizeMaxPx, m.size) / MAP_SCALE;
+      const k = r / baked / tpw;
+      img
+        .setPosition(m.x * TILE_PX, m.y * TILE_PX)
+        .setScale(k)
+        .setAlpha(Math.min(FX_LIMITS.decorAlphaMax, m.alpha))
+        .setVisible(true);
+    });
   }
 
   /** 돌진 잔상 이미지 (망토 늘어난 프레임) */
@@ -1045,16 +1091,25 @@ export class WorldRenderer {
     this.hits = this.hits.filter((h) => realMs - h.t0 < 400);
 
     if (isMonster) {
-      // 괴물 화면: 잡힘 알림 직후 사라진(또는 수감된) 생존자는 보이던 자리에서 흩어진다
+      // 괴물 화면: 잡힘 알림 직후 사라진(또는 수감된) 생존자는 보이던 자리에서 흩어진다. 후보는 같은 순간 타격 부채꼴 안에
+      // 있던 생존자뿐이다(같은 순간 시야를 벗어난 다른 생존자 자리에서 흩어지지 않게). 맞는 후보가 없으면 연출을 생략한다
       if (realMs - this.captureAt < 400 && v.me) {
-        let best: { id: string; x: number; y: number; d: number } | null = null;
+        const cands: { id: string; x: number; y: number }[] = [];
         for (const [id, st] of this.lastStatus) {
           if (st.status !== 'free') continue;
           const now = v.survivors.get(id);
           if (now && now.status === 'free') continue;
-          const d = Math.hypot(st.x - v.me.x, st.y - v.me.y);
-          if (!best || d < best.d) best = { id, x: st.x, y: st.y, d };
+          cands.push({ id, x: st.x, y: st.y });
         }
+        const strike =
+          this.lastStrike && Math.abs(this.lastStrike.at - this.captureAt) < 400 ? this.lastStrike : null;
+        const atk = balance.monster.attack;
+        const best = pickDissolveTarget(
+          cands,
+          strike,
+          { range: atk.range, arc: (atk.arc * Math.PI) / 180 },
+          sR,
+        );
         if (best) {
           this.fxs.dissolve(best.x, best.y, sR, nowS, null, true);
           this.lastStatus.delete(best.id);
@@ -1063,6 +1118,25 @@ export class WorldRenderer {
       }
       for (const id of [...this.lastStatus.keys()]) if (!v.survivors.has(id)) this.lastStatus.delete(id);
     }
+
+    // 노출 문양 · 기절 별 자리를 고를 몸 원 (이 화면에 그리는 생존자 · 괴물 화면은 괴물 자신, 생존자 화면은 나)
+    const disks: (BodyDisk & { id: string })[] = [];
+    for (const [id, s] of v.survivors)
+      if (s.status !== 'dead' && s.status !== 'escaped') disks.push({ id, x: s.x, y: s.y, r: sR });
+    const myStatus = snap.you.surv?.status;
+    if (v.me && myStatus !== 'dead' && myStatus !== 'escaped')
+      disks.push({ id: v.selfId, x: v.me.x, y: v.me.y, r: isMonster ? mR : sR });
+    const starDir = (cx: number, cy: number, self: string): number => {
+      this.starDir = starSlot(
+        { x: cx, y: cy },
+        mR,
+        TILE_PX,
+        disks.filter((d) => d.id !== self),
+        this.starDir,
+      );
+      return this.starDir;
+    };
+    let starsDrawn = false;
 
     // 다른 생존자
     for (const [id, s] of v.survivors) {
@@ -1076,7 +1150,20 @@ export class WorldRenderer {
       const rig = this.survivorRig(id);
       if (isMonster) {
         // 흰색 위장: 역할 · 체력 · 능력 인자 없이 (reveal은 서버가 노출 창에 보낸 역할뿐)
-        drawHiddenSurvivor(rig, s.x, s.y, s.face, phaseOf(g), g.stepping, s.protected, s.role, animMs, sR);
+        const others = s.role ? disks.filter((d) => d.id !== id) : [];
+        drawHiddenSurvivor(
+          rig,
+          s.x,
+          s.y,
+          s.face,
+          phaseOf(g),
+          g.stepping,
+          s.protected,
+          s.role,
+          animMs,
+          sR,
+          others,
+        );
         if (s.role) {
           info.push({
             kind: 'reveal',
@@ -1146,7 +1233,8 @@ export class WorldRenderer {
       const pose = this.monsterPose(m.x, m.y, m.aim, m.stunned, m.dashing, m.windup > 0 ? 1 : 0, g, tS, half);
       drawMonsterRig(rig, pose, mR);
       if (m.stunned && oppVisible) {
-        drawStunStars(this.attachG, m.x, m.y, tS);
+        drawStunStars(this.starsG, m.x, m.y, tS, mR, starDir(m.x, m.y, 'monster'));
+        starsDrawn = true;
         stunAny = true;
         stunOpp = true;
       }
@@ -1185,7 +1273,8 @@ export class WorldRenderer {
         );
         drawMonsterRig(rig, pose, mR);
         if (v.myStunned) {
-          drawStunStars(this.attachG, v.me.x, v.me.y, tS);
+          drawStunStars(this.starsG, v.me.x, v.me.y, tS, mR, starDir(v.me.x, v.me.y, v.selfId));
+          starsDrawn = true;
           stunAny = true;
         }
         if (this.stunnedPending) {
@@ -1269,6 +1358,7 @@ export class WorldRenderer {
         }
       }
     }
+    if (!starsDrawn) this.starDir = null;
     // 끝난 페이드 정리
     for (const [id, f] of this.fades) {
       const dur =

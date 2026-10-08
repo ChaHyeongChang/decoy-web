@@ -9,7 +9,7 @@ import { getFpsOverride, gfxState, probeSlot } from '../gfx/state';
 import { InputSampler } from '../input';
 import { applyDashStart, applyWindupLock, predictMonsterPress, type LocalWindup } from '../localActions';
 import { COLOR } from '../render/colors';
-import { ScreenEffects } from '../render/effects';
+import { ScreenEffects, collectFxTargets } from '../render/effects';
 import { WorldRenderer } from '../render/worldRenderer';
 import { Banners } from '../ui/banners';
 import { Hud } from '../ui/hud';
@@ -91,9 +91,17 @@ export class GameScene extends Phaser.Scene {
     return this.world?.info ?? [];
   }
 
-  /** 디버그 · 테스트: 후처리가 걸린 레이어 */
+  /**
+   * 디버그 · 테스트: 후처리가 걸린 레이어. 장면 표시 목록 · 카메라에서 직접 모은다(자기 신고 아님):
+   * 월드 렌더러가 아는 객체는 그 레이어, 화면 효과 · 발각 테두리는 screen, 나머지는 hud
+   */
   get fxTargets(): FxTarget[] {
-    return this.world?.fxTargets ?? [];
+    const world = this.world;
+    if (!world) return [];
+    return collectFxTargets(
+      this,
+      (o) => world.layerOf(o) ?? (o === this.spottedEdge || this.screenFx?.owns(o) ? 'screen' : null),
+    );
   }
 
   /** 디버그 · 테스트: 지금 보이는 연출 */
@@ -116,7 +124,7 @@ export class GameScene extends Phaser.Scene {
     this.banners = new Banners(this);
     this.tutorial = new TutorialOverlay(this, info);
     this.scoreboard = new Scoreboard(this, info, balance);
-    this.screenFx = new ScreenEffects(this, this.game.renderer.type === Phaser.CANVAS);
+    this.screenFx = new ScreenEffects(this, this.world.stunVeil);
     this.localWindup = null;
     this.spottedEdge = this.add.graphics().setDepth(50);
     this.spottedEdge.lineStyle(14, COLOR.monster, 0.75);
