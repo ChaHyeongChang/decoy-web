@@ -22,7 +22,7 @@ npm start            # http://localhost:8080
 
 - **한 컴퓨터에서 시험**: 브라우저 탭 4개로 같은 방에 들어간다 (탭마다 다른 자리)
 - **같은 와이파이**: `npm start` 한 컴퓨터의 IP로 `http://<IP>:8080/?room=방코드` (자세히: [docs/DEPLOY.md](docs/DEPLOY.md))
-- **인터넷**: Render 무료 플랜(`render.yaml`, 태블릿 브라우저로도 배포) 또는 Dockerfile로 한국 · 일본 리전에 배포한다 → [docs/DEPLOY.md](docs/DEPLOY.md). 무료 서버가 잠들어 있으면 깨어나는 동안 "서버를 깨우는 중…" 안내가 뜬다
+- **인터넷**: Render 무료 플랜(싱가포르, `render.yaml` — 태블릿 브라우저만으로 배포)을 쓰거나, Dockerfile로 한국 · 일본 리전 서비스에 배포한다 → [docs/DEPLOY.md](docs/DEPLOY.md). 무료 서버가 잠들어 있으면 깨어나는 동안 "서버를 깨우는 중…" 안내가 뜬다
 - **개발 모드**: `npm run dev` (서버 + Vite 핫 리로드, http://localhost:5173)
 
 ### 주소 옵션

@@ -29,6 +29,8 @@ export class WakeNoticeUI {
     body.textContent = UI_TEXT.wakingBody;
     this.elapsed = document.createElement('div');
     this.elapsed.className = 'wake-elapsed';
+    // 매초 바뀌는 숫자 때문에 스크린 리더가 안내 전체를 계속 다시 읽지 않게
+    this.elapsed.setAttribute('aria-hidden', 'true');
     this.root.append(this.logo, this.title, body, this.elapsed);
     host.appendChild(this.root);
   }

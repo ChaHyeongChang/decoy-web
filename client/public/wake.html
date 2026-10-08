@@ -2,6 +2,8 @@
 <!--
   서버 깨우기 화면. 서비스 워커(sw.js)가 미리 받아 두었다가, 잠든 서버가 깨어나는 동안 페이지 대신 보여 준다.
   서버가 깨어나면(healthz가 이 서버의 표시와 함께 답하면) 스스로 새로고침해 원래 주소(방 코드 포함)로 돌아간다.
+  서버는 깨어 있는데 표시가 없으면(표시를 모르는 예전 버전으로 되돌린 경우 등) 서비스 워커를 지우고 다시 연다.
+  '다시 시도' 버튼도 서비스 워커를 지운다. 이 화면에 갇히는 일이 없게 하는 탈출구다
   게임 코드 없이 혼자 도는 페이지라 문구 · 색을 여기 직접 적는다 (문구 원본: docs/STORY_TEXT.md, 색: VISUAL_SPEC)
 -->
 <html lang="ko">
@@ -102,7 +104,7 @@
     </style>
   </head>
   <body>
-    <main data-testid="wake-page" role="status" aria-live="polite">
+    <main data-testid="wake-page">
       <div class="pulse" aria-hidden="true"></div>
       <div class="brand">DECOY</div>
       <h1>서버를 깨우는 중…</h1>
@@ -110,11 +112,14 @@
         무료 서버는 15분 동안 아무도 접속하지 않으면 잠들어요. 깨어나는 데 1분쯤 걸릴 수 있어요. 이 화면을
         그대로 두면 자동으로 연결돼요.
       </p>
-      <p class="muted" id="elapsed">0초째 기다리는 중</p>
-      <p class="warn" id="offline" hidden>인터넷 연결이 끊겨 있어요. 와이파이나 데이터를 확인해 주세요.</p>
-      <p class="warn" id="slow" hidden>
-        생각보다 오래 걸리고 있어요. 아래 버튼으로 다시 시도하거나, 계속 안 되면 개발자에게 알려 주세요.
-      </p>
+      <!-- 매초 바뀌는 숫자는 스크린 리더가 계속 읽지 않게 숨기고, 경고만 알린다 -->
+      <p class="muted" id="elapsed" aria-hidden="true">0초째 기다리는 중</p>
+      <div role="status" aria-live="polite">
+        <p class="warn" id="offline" hidden>인터넷 연결이 끊겨 있어요. 와이파이나 데이터를 확인해 주세요.</p>
+        <p class="warn" id="slow" hidden>
+          생각보다 오래 걸리고 있어요. 아래 버튼으로 다시 시도하거나, 계속 안 되면 개발자에게 알려 주세요.
+        </p>
+      </div>
       <button type="button" id="retry" hidden>다시 시도</button>
     </main>
     <script>
@@ -122,7 +127,7 @@
         const MARK_HEADER = 'x-decoy-server';
         const POLL_MS = 2000;
         const REQUEST_TIMEOUT_MS = 30000;
-        const SLOW_MS = 180000;
+        const SLOW_MS = 90000;
         // 깨어났다고 보고 새로고침했는데 또 이 화면이 뜨는 일이 짧은 시간에 반복되면 자동 새로고침을 멈춘다
         const RELOAD_KEY = 'decoy-wake-reloads';
         const RELOAD_WINDOW_MS = 60000;
@@ -170,36 +175,54 @@
           }
         }
 
-        async function awake() {
+        /** 'awake' = 이 서버가 깨어 있다, 'unmarked' = 서버는 답하는데 표시가 없다(예전 버전), 'asleep' = 아직 */
+        async function check() {
           const ctrl = new AbortController();
           const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
           try {
             const res = await fetch('healthz', { cache: 'no-store', signal: ctrl.signal });
-            return res.ok && res.headers.get(MARK_HEADER) === '1';
+            if (!res.ok) return 'asleep';
+            if (res.headers.get(MARK_HEADER) === '1') return 'awake';
+            return (await res.text()).trim() === 'ok' ? 'unmarked' : 'asleep';
           } catch {
-            return false;
+            return 'asleep';
           } finally {
             clearTimeout(timer);
           }
         }
 
-        async function poll() {
-          if (done) return;
-          if (await awake()) {
-            reloadOnce();
-            return;
-          }
-          setTimeout(poll, POLL_MS);
-        }
-
-        retry.addEventListener('click', () => {
+        /** 서비스 워커를 지우고 다시 연다. 이후 페이지 이동은 서버로 바로 간다 (게임이 뜨면 워커를 새로 등록한다) */
+        async function bypassWorker() {
+          done = true;
           try {
             sessionStorage.removeItem(RELOAD_KEY);
           } catch {
             // 무시
           }
+          try {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map((r) => r.unregister()));
+          } catch {
+            // 지우지 못해도 새로고침은 한다
+          }
           location.reload();
-        });
+        }
+
+        async function poll() {
+          if (done) return;
+          const state = await check();
+          if (state === 'awake') {
+            reloadOnce();
+            return;
+          }
+          if (state === 'unmarked') {
+            bypassWorker();
+            return;
+          }
+          setTimeout(poll, POLL_MS);
+        }
+
+        retry.addEventListener('click', () => bypassWorker());
         tick();
         setInterval(tick, 500);
         poll();

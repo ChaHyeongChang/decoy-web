@@ -149,6 +149,12 @@ test('방 코드가 틀리면 안내가 나온다', async ({ browser }) => {
   const { context, page } = await newPlayerPage(browser);
   await page.goto('/?room=ZZZZ&debug=hook');
   await expect(page.getByTestId('lobby-error')).toContainText('찾을 수 없습니다');
+  // 링크로 들어가려던 방이 없으면 서버가 잠들었다 깨어났을 수 있다고 알려 준다
+  await expect(page.getByTestId('lobby-error')).toContainText('새 방을 만들어');
+  // 직접 입력한 코드가 틀린 것은 그냥 "찾을 수 없습니다"
+  await page.getByTestId('room-code-input').fill('ZZZY');
+  await page.getByTestId('join-room').click();
+  await expect(page.getByTestId('lobby-error')).toHaveText('방 ZZZY을(를) 찾을 수 없습니다');
   await context.close();
   void waitForSnapshots;
 });

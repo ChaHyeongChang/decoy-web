@@ -12,6 +12,7 @@ async function stall(page: Page, query: string): Promise<void> {
 test.afterEach(async ({ request }) => {
   // 실패해도 다음 테스트가 붙잡힌 서버를 만나지 않게
   await request.get('/test/stall?ms=0');
+  await request.get('/test/unmark?ms=0');
 });
 
 test('처음 접속할 때 서버 연결이 늦으면 로비 자리에 "서버를 깨우는 중" 안내가 뜨고, 연결되면 로비가 나온다', async ({
@@ -80,6 +81,30 @@ test('서버가 깨어 있으면 서비스 워커가 있어도 첫 화면은 서
   await expect(page.getByTestId('room-code')).toHaveText(/^[A-Z]{4}$/);
   expect(Date.now() - t0).toBeLessThan(5000);
   await expect(page.getByTestId('wake-page')).toHaveCount(0);
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
+test('서버는 깨어 있는데 표시가 없으면(예전 버전으로 되돌림) 깨우기 화면에 갇히지 않고 서비스 워커를 지워 게임으로 간다', async ({
+  browser,
+}) => {
+  const { context, page, problems } = await newPlayerPage(browser);
+  await createRoom(page);
+  await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
+  const res = await page.request.get('/test/unmark?ms=20000');
+  expect(res.status()).toBe(200);
+  // 깨우기 화면은 곧바로 빠져나가 눈에 잘 안 잡히므로, 그 화면만 보내는 healthz 요청으로 거쳐 갔는지 확인한다
+  const healthChecks: string[] = [];
+  page.on('request', (r) => {
+    if (new URL(r.url()).pathname === '/healthz') healthChecks.push(r.url());
+  });
+  const t0 = Date.now();
+  await page.reload();
+  // 표시 없는 응답 → 깨우기 화면 → healthz가 표시 없이 ok → 워커를 지우고 다시 연다
+  await expect(page.getByTestId('room-code')).toHaveText(/^[A-Z]{4}$/, { timeout: 10_000 });
+  expect(healthChecks.length).toBeGreaterThan(0);
+  // 표시가 없는 동안(20초) 안에 빠져나왔다
+  expect(Date.now() - t0).toBeLessThan(15_000);
   expect(problems).toEqual([]);
   await context.close();
 });

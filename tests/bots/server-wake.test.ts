@@ -113,12 +113,28 @@ describe('테스트 훅 /test/stall (깨어나는 동안 흉내)', () => {
   });
 });
 
+describe('테스트 훅 /test/unmark (표시를 모르는 예전 버전 흉내)', () => {
+  it('정한 시간 동안 응답에 표시 헤더가 없고, 지나면 다시 붙는다', async () => {
+    const res = await fetch(`${base()}/test/unmark?ms=800`);
+    expect(res.status).toBe(200);
+    const during = await fetch(`${base()}${HEALTH_PATH}`);
+    expect(await during.text()).toBe('ok');
+    expect(during.headers.get(SERVER_MARK_HEADER)).toBeNull();
+    await new Promise((r) => setTimeout(r, 900));
+    const after = await fetch(`${base()}${HEALTH_PATH}`);
+    expect(after.headers.get(SERVER_MARK_HEADER)).toBe('1');
+  });
+});
+
 describe('테스트 훅이 꺼진 서버 (프로덕션)', () => {
-  it('/test/stall이 없다', async () => {
+  it('/test/stall · /test/unmark가 없다', async () => {
     const prod = await startServer();
     try {
       const res = await fetch(`http://127.0.0.1:${prod.port}/test/stall?ms=5000`);
       expect(res.status).toBe(404);
+      const unmark = await fetch(`http://127.0.0.1:${prod.port}/test/unmark?ms=5000`);
+      expect(unmark.status).toBe(404);
+      expect(unmark.headers.get(SERVER_MARK_HEADER)).toBe('1');
       const t0 = performance.now();
       await fetch(`http://127.0.0.1:${prod.port}${HEALTH_PATH}`);
       expect(performance.now() - t0).toBeLessThan(500);

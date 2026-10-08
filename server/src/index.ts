@@ -31,6 +31,8 @@ const manager = new RoomManager(
 let stallUntil = 0;
 /** false면 HTTP는 그대로 두고 새 WebSocket 연결만 붙잡는다 */
 let stallHttp = true;
+/** 테스트 전용: 이 시각까지 응답에 표시 헤더를 붙이지 않는다 (표시를 모르는 예전 버전 서버 흉내) */
+let unmarkUntil = 0;
 
 function stallLeft(pathname: string, kind: 'http' | 'ws'): number {
   if (pathname.startsWith('/test/')) return 0;
@@ -48,7 +50,7 @@ function safePathname(raw: string | undefined): string | null {
 
 const httpServer = createServer((req, res) => {
   // 모든 응답(오류 포함)에 표시를 붙인다. 표시가 없으면 호스팅 서비스(깨우는 중 화면 등)가 대신 답한 것
-  res.setHeader(SERVER_MARK_HEADER, '1');
+  if (performance.now() >= unmarkUntil) res.setHeader(SERVER_MARK_HEADER, '1');
   const wait = stallLeft(safePathname(req.url) ?? '/', 'http');
   if (wait > 0) {
     setTimeout(() => safeHandleHttp(req, res), wait);
@@ -92,6 +94,17 @@ function handleHttp(req: IncomingMessage, res: ServerResponse): void {
     stallHttp = url.searchParams.get('http') !== '0';
     if (url.searchParams.get('drop') === '1') for (const client of wss.clients) client.terminate();
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ stallMs: ms }));
+    return;
+  }
+  if (url.pathname === '/test/unmark') {
+    // 테스트 전용: ms 동안 표시 헤더 없이 답한다 (깨우기 화면의 탈출구 확인용)
+    if (!options.testHooks) {
+      res.writeHead(404).end();
+      return;
+    }
+    const ms = Math.min(MAX_STALL_MS, Math.max(0, Number(url.searchParams.get('ms') ?? 0) || 0));
+    unmarkUntil = performance.now() + ms;
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ unmarkMs: ms }));
     return;
   }
   if (url.pathname === '/test/state') {
