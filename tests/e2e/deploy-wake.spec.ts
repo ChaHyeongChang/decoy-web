@@ -18,7 +18,7 @@ test('처음 접속할 때 서버 연결이 늦으면 로비 자리에 "서버�
   browser,
 }) => {
   const { context, page, problems } = await newPlayerPage(browser);
-  await stall(page, 'ms=7000&http=0');
+  await stall(page, 'ms=9000&http=0');
   await page.goto(`/?${BASE_QUERY.slice(1)}`);
   const notice = page.getByTestId('server-waking');
   await expect(notice).toBeVisible({ timeout: 6000 });
@@ -37,7 +37,7 @@ test('처음 접속할 때 서버 연결이 늦으면 로비 자리에 "서버�
 test('로비에서 연결이 끊기면 "서버에 다시 연결하는 중" 안내 뒤 같은 방으로 돌아온다', async ({ browser }) => {
   const { context, page, problems } = await newPlayerPage(browser);
   const code = await createRoom(page);
-  await stall(page, 'ms=6000&drop=1');
+  await stall(page, 'ms=8000&drop=1');
   const notice = page.getByTestId('server-waking');
   await expect(notice).toBeVisible({ timeout: 6000 });
   await expect(notice).toContainText('서버에 다시 연결하는 중');
@@ -56,7 +56,7 @@ test('서버가 잠든 동안 페이지를 다시 열면 깨우기 화면이 뜨
   expect(page.url()).toContain(`room=${code}`);
   // 첫 접속에서 서비스 워커가 깨우기 화면을 받아 두고 이 페이지를 맡을 때까지
   await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
-  await stall(page, 'ms=9000&drop=1');
+  await stall(page, 'ms=10000&drop=1');
   await page.reload();
   const wake = page.getByTestId('wake-page');
   await expect(wake).toBeVisible();
