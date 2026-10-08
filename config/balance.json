@@ -1,0 +1,85 @@
+{
+  "_comment": "DECOY v2 밸런스 수치. 거리 단위는 타일(1타일=32px), 시간 단위는 초, 각도는 도. 이 파일만 고쳐도 게임 수치가 바뀌어야 한다. 바꾸면 docs/GAME_DESIGN.md 변경 이력에 적는다. players·survivors·count 값은 맵·역할 구조에 묶여 있어 바꾸지 않는다.",
+
+  "match": {
+    "players": 4,
+    "survivors": 3,
+    "timeLimit": 720,
+    "monsterStartDelay": 5,
+    "lastSurvivorGrace": 30,
+    "reconnectGrace": 30
+  },
+
+  "survivor": {
+    "moveSpeed": 5.0,
+    "radius": 0.3,
+    "visionRadius": 6.0,
+    "visionSoftEdge": 1.2,
+    "maxHp": 2,
+    "maxImprisonments": 2,
+    "rescueProtection": 4.0,
+    "abilityRevealDuration": 1.0
+  },
+
+  "roles": {
+    "runner": { "name": "러너", "color": "#3B82F6", "skill": "sprint", "sprintDuration": 3.0, "sprintMultiplier": 1.45, "cooldown": 20 },
+    "guard":  { "name": "가드", "color": "#A855F7", "skill": "shove", "shoveRange": 2.0, "stunDuration": 1.5, "cooldown": 35 },
+    "scout":  { "name": "스카우트", "color": "#22C55E", "skill": "track", "trackDuration": 4.0, "cooldown": 30, "visionRadius": 7.5 }
+  },
+
+  "monster": {
+    "moveSpeed": 5.5,
+    "radius": 0.35,
+    "turnSlowAngle": 90,
+    "turnSlowMultiplier": 0.6,
+    "turnSlowDuration": 0.35,
+    "turnSlowWindow": 0.25,
+    "aimTurnRateDeg": 540,
+    "nearVisionRadius": 1.5,
+    "visionModes": {
+      "search": { "name": "탐색", "angle": 110, "range": 5.0 },
+      "hunt":   { "name": "추적", "angle": 50,  "range": 9.0 }
+    },
+    "visionModeSwitchTime": 0.4,
+    "attack": { "windup": 0.4, "cooldown": 1.5, "range": 1.2, "arc": 90, "windupMoveMultiplier": 1.0 },
+    "dash": { "distance": 4.0, "duration": 0.25, "cooldown": 12 },
+    "roar": { "radius": 10.0, "revealDuration": 1.5, "selfRevealDuration": 1.0, "cooldown": 30 }
+  },
+
+  "prison": {
+    "rescueTime": 3.0,
+    "rescueRadius": 1.2,
+    "campRadius": 4.0,
+    "campGrace": 5.0,
+    "campSlowMultiplier": 0.7,
+    "campWarnAt": 3.0
+  },
+
+  "capturePoint": {
+    "count": 2,
+    "radius": 2.5,
+    "captureTime": 40,
+    "groupMultiplier": 1.5,
+    "pausedWhenMonsterInside": true,
+    "monsterBlockGrace": 5.0,
+    "alertCooldown": 8.0
+  },
+
+  "exit": {
+    "count": 2,
+    "radius": 1.5,
+    "requiredSurvivors": 2,
+    "openTime": 3.0,
+    "pausedWhenMonsterInside": false
+  },
+
+  "network": {
+    "serverTickHz": 30,
+    "snapshotHz": 20,
+    "interpolationDelayMs": 100,
+    "lagJitterMs": 20,
+    "inputQueueMax": 6,
+    "correctionSmoothMs": 150,
+    "snapDistance": 1.5
+  }
+}
