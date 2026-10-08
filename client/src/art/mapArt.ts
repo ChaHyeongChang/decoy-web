@@ -7,7 +7,7 @@
 //  - 품질 높음 · 중간(GPU 합성, presets glow = 'sprite'): 따로 ADD 이미지로 빛 지도 곱하기 앞에 더한다
 //  - 품질 낮음 · Canvas(glow = 'static') · 미니맵: 같은 그림을 정적 맵에 구워 넣는다
 // 둘 다 빛 지도에 곱해지므로 발광은 어둠 속에서 약 30%(하한), 빛 속에서 100%다. 시간 · 상대 위치와 무관한 정적 그림이다.
-// 시야 밖 구조 대비(테두리 ↔ 바닥 2.5:1)는 곱하기 뒤에 더하는 테두리 리프트(baseLayer.ts)가 맡는다.
+// 시야 밖 구조 대비(테두리 ↔ 바닥 2.5:1)는 곱하기 뒤에 더하는 테두리 리프트(render/fogPaint.ts)가 맡는다.
 import {
   CAPTURE_POINTS,
   EXITS,
@@ -47,12 +47,12 @@ import { fbm, hash2, valueNoise } from './noise';
 
 const MC = MAP_COLOR;
 
-export function rgba(c: number, a = 1): string {
+function rgba(c: number, a = 1): string {
   return `rgba(${(c >> 16) & 255}, ${(c >> 8) & 255}, ${c & 255}, ${a})`;
 }
 
 /** 채널마다 d를 더한다 (0~255로 자름) */
-export function shade(c: number, d: number): number {
+function shade(c: number, d: number): number {
   let out = 0;
   for (const s of [16, 8, 0]) out |= Math.max(0, Math.min(255, ((c >> s) & 255) + d)) << s;
   return out;
@@ -199,7 +199,7 @@ function paintFloor(P: Painter, seed: number): void {
       const y0 = P.X(j);
       const h = P.X(j + 1) - y0;
       P.dev(X - d, y0, 2 * d, h, MC.panelSeam);
-      P.dev(X + d, y0, d, h, MC.floorHi, 0.8);
+      P.dev(X + d, y0, d, h, MC.floorHi, 0.55);
     }
   }
   for (let y = 4; y < MAP_H; y += 4) {
@@ -209,7 +209,7 @@ function paintFloor(P: Painter, seed: number): void {
       const x0 = P.X(i);
       const w = P.X(i + 1) - x0;
       P.dev(x0, Y - d, w, 2 * d, MC.panelSeam);
-      P.dev(x0, Y + d, w, d, MC.floorHi, 0.8);
+      P.dev(x0, Y + d, w, d, MC.floorHi, 0.55);
     }
   }
   // 큰 패널 모서리 고정판 (어두운 작은 사각형: 밝은 둥근 장식은 쓰지 않는다)
@@ -230,20 +230,16 @@ function paintFloor(P: Painter, seed: number): void {
   }
 }
 
-/**
- * 시드 고정 노이즈 (±3% 정도) + 큰 패널마다 방향이 바뀌는 헤어라인(브러시드 금속). 낮은 해상도 회색 판을
- * 'overlay'로 덮는다 (어두운 바탕에서 밝기 × (1 ± 2δ)): 어두운 바닥에서는 거의 사라진다
- */
-function paintNoise(P: Painter, seed: number): void {
+let noiseCanvas: HTMLCanvasElement | null = null;
+
+/** 노이즈 판 (배율과 무관해서 한 번만 만든다) */
+function noiseMap(seed: number): HTMLCanvasElement {
+  if (noiseCanvas) return noiseCanvas;
   const N = 8;
   const w = MAP_W * N;
   const h = MAP_H * N;
-  const nc = document.createElement('canvas');
-  nc.width = w;
-  nc.height = h;
-  const nctx = nc.getContext('2d');
-  if (!nctx) return;
-  const img = nctx.createImageData(w, h);
+  const { canvas, ctx } = newCanvas(w, h);
+  const img = ctx.createImageData(w, h);
   for (let y = 0; y < h; y += 1) {
     const ty = y / N;
     for (let x = 0; x < w; x += 1) {
@@ -259,12 +255,21 @@ function paintNoise(P: Painter, seed: number): void {
       img.data[o + 3] = 255;
     }
   }
-  nctx.putImageData(img, 0, 0);
+  ctx.putImageData(img, 0, 0);
+  noiseCanvas = canvas;
+  return canvas;
+}
+
+/**
+ * 시드 고정 노이즈 (±3% 정도) + 큰 패널마다 방향이 바뀌는 헤어라인(브러시드 금속). 낮은 해상도 회색 판을
+ * 'overlay'로 덮는다 (어두운 바탕에서 밝기 × (1 ± 2δ)): 어두운 바닥에서는 거의 사라진다
+ */
+function paintNoise(P: Painter, seed: number): void {
   const c = P.c;
   c.save();
   c.globalCompositeOperation = 'overlay';
   c.imageSmoothingEnabled = true;
-  c.drawImage(nc, 0, 0, c.canvas.width, c.canvas.height);
+  c.drawImage(noiseMap(seed), 0, 0, c.canvas.width, c.canvas.height);
   c.restore();
 }
 
@@ -435,13 +440,13 @@ function paintPrison(P: Painter): void {
         const t = (n + 0.5) / 3;
         if (horiz)
           bars.push([
-            { x: i + t, y: j + 0.2 },
-            { x: i + t, y: j + 0.8 },
+            { x: i + t, y: j + 0.27 },
+            { x: i + t, y: j + 0.73 },
           ]);
         else
           bars.push([
-            { x: i + 0.2, y: j + t },
-            { x: i + 0.8, y: j + t },
+            { x: i + 0.27, y: j + t },
+            { x: i + 0.73, y: j + t },
           ]);
       }
     }
@@ -450,7 +455,7 @@ function paintPrison(P: Painter): void {
   const ring = prisonRing();
   const pcx = (R.x0 + R.x1) / 2;
   const pcy = (R.y0 + R.y1) / 2;
-  for (const off of [-0.3, 0.3]) {
+  for (const off of [-0.33, 0.33]) {
     const pts = ring.map((p, n) => {
       const end = n === 0 || n === ring.length - 1;
       return { x: end ? p.x : p.x + (p.x < pcx ? -off : off), y: p.y + (p.y < pcy ? -off : off) };
@@ -740,18 +745,8 @@ export function allNeon(): NeonRun[] {
 /** 발광 캔버스 배율 (출력 px / 월드 px): 논리 0.5배. 번짐은 부드러워서 낮은 해상도면 충분하다 */
 export const GLOW_SCALE = MAP_SCALE * 0.5;
 
-export interface BakeRecord {
-  kind: 'static' | 'glow';
-  scale: number;
-  ms: number;
-}
-
-/** 굽기 기록 (디버그 · 측정) */
-export const bakeLog: BakeRecord[] = [];
-
-function record(kind: BakeRecord['kind'], scale: number, ms: number): void {
-  bakeLog.push({ kind, scale, ms });
-  if (bakeLog.length > 20) bakeLog.shift();
+/** 굽는 시간을 그래픽 상태에 기록한다 (디버그 · 측정) */
+function record(kind: 'static' | 'glow', scale: number, ms: number): void {
   const r = Math.round(ms * 10) / 10;
   // 측정 기록: 합성용(배율 ≥ 0.6) · 미니맵용(작은 배율) · 발광을 나눠 둔다
   if (kind === 'glow') gfxState.features.glowBakeMs = r;
@@ -770,7 +765,7 @@ function newCanvas(w: number, h: number): { canvas: HTMLCanvasElement; ctx: Canv
   return { canvas, ctx };
 }
 
-/** 발광 번짐 (투명 바탕, 더하기로 겹침). 네온 · 철창 창살 · 거점 단말 화면 · 탈출구 문틈 */
+/** 발광 번짐 (투명 바탕, 더하기로 겹침). 네온 · 철창 창살 · 거점 단말 화면 */
 export function bakeGlow(scale = GLOW_SCALE): HTMLCanvasElement {
   const t0 = performance.now();
   const size = staticMapSize(scale);
