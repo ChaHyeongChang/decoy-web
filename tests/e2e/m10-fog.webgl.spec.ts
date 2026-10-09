@@ -202,6 +202,8 @@ async function measure(browser: Browser, query: string): Promise<Run> {
 }
 
 test('GPU 안개(품질 높음 · 중간)가 Canvas 합성과 같은 밝기를 내고 콘솔이 깨끗하다', async ({ browser }) => {
+  // SwiftShader에서 1920×1080 봇 판 세 개(canvas 낮음 · webgl 높음 · 중간)를 연다 (CI 러너에서 판 하나 최대 약 50초)
+  test.setTimeout(300_000);
   const canvas = await measure(browser, '&renderer=canvas&quality=low');
   expect(canvas.renderer).toBe('canvas');
   expect(canvas.fogMode).toBe('canvas');
@@ -357,8 +359,8 @@ for (const q of ['high', 'medium'] as const) {
   test(`품질 ${q}(WebGL): 시야 밖에서 걷는 상대 자리 픽셀 = 같은 자리 빈 바닥 (발먼지 · 빛 속 먼지 · 눈빛 · 발광 흔적 없음)`, async ({
     browser,
   }) => {
-    // SwiftShader에서 판 두 개(러너 · 괴물 화면)를 연다
-    test.setTimeout(300_000);
+    // SwiftShader에서 판 두 개(러너 · 괴물 화면)를 연다. CI 러너에서 한 번에 2.7~4.2분이 들어 그 두 배 남짓
+    test.setTimeout(600_000);
     const query = `&renderer=webgl&quality=${q}`;
     // 러너 화면: 괴물이 팀 시야 밖에서 걷는다
     const r = await startRunner(browser, query);
