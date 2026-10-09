@@ -28,6 +28,7 @@
     "logo:compare": "node scripts/logo-compare.mjs",
     "font:subset": "node scripts/font-subset.mjs",
     "shots:remaster": "node scripts/remaster-shots.mjs",
+    "shots:compare": "node scripts/remaster-compare.mjs",
     "typecheck": "tsc -p shared && tsc -p server && tsc -p client && tsc -p tests",
     "lint": "eslint .",
     "format": "prettier --write .",
