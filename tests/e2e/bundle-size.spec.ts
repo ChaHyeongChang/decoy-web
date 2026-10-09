@@ -9,7 +9,7 @@ import { expect, test } from '@playwright/test';
 const BEFORE_M10 = 346_679;
 const BUDGET = 40 * 1024;
 
-test('JS 번들 gzip이 리마스터 전보다 40KiB 넘게 늘지 않는다', () => {
+test('JS 번들 gzip이 리마스터 전보다 40KiB 넘게 늘지 않는다', { tag: '@core' }, () => {
   const dir = join(process.cwd(), 'client/dist/assets');
   let total = 0;
   for (const f of readdirSync(dir))

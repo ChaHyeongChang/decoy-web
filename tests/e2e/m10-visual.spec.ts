@@ -127,114 +127,116 @@ function expectSameHidden(c: Capture, label: string): void {
   }
 }
 
-test('괴물 화면 흰색 위장: 부채꼴 · 근접 원 · 공격 범위 안에서도 흰 공통 실루엣, 능력 노출 1초만 역할색 테두리 + 문양', async ({
-  browser,
-}) => {
-  const q = '&quality=low';
-  const { players } = await startFourPlayerMatch(browser, undefined, [q, q, q, q]);
-  const p = roles(players);
-  const host = p.monster.page;
-  const sr = balance.survivor.radius;
-  await settle(p.monster);
-  // B방 북쪽: 러너는 근접 원 · 공격 범위 안, 가드 · 스카우트는 부채꼴 안
-  await place(host, {
-    runner: [p.runner.id, 41, 11, 0.3],
-    guard: [p.guard.id, 39.6, 12, -2.6],
-    scout: [p.scout.id, 38, 10.6, 1.2],
-  });
-  await place(host, { monster: [p.monster.id, 42, 11.4, Math.PI] }, false);
-  await aimAt(host, 36, 11.4);
-  await host.evaluate(() => window.__DECOY__?.freezeClock(1000));
-  await host.waitForTimeout(900);
-  expect((await lastSnapshot(host))!.survivors.length).toBe(3);
+test(
+  '괴물 화면 흰색 위장: 부채꼴 · 근접 원 · 공격 범위 안에서도 흰 공통 실루엣, 능력 노출 1초만 역할색 테두리 + 문양',
+  { tag: '@core' },
+  async ({ browser }) => {
+    const q = '&quality=low';
+    const { players } = await startFourPlayerMatch(browser, undefined, [q, q, q, q]);
+    const p = roles(players);
+    const host = p.monster.page;
+    const sr = balance.survivor.radius;
+    await settle(p.monster);
+    // B방 북쪽: 러너는 근접 원 · 공격 범위 안, 가드 · 스카우트는 부채꼴 안
+    await place(host, {
+      runner: [p.runner.id, 41, 11, 0.3],
+      guard: [p.guard.id, 39.6, 12, -2.6],
+      scout: [p.scout.id, 38, 10.6, 1.2],
+    });
+    await place(host, { monster: [p.monster.id, 42, 11.4, Math.PI] }, false);
+    await aimAt(host, 36, 11.4);
+    await host.evaluate(() => window.__DECOY__?.freezeClock(1000));
+    await host.waitForTimeout(900);
+    expect((await lastSnapshot(host))!.survivors.length).toBe(3);
 
-  // 1) 부채꼴 · 근접 원 안 (그림자 폭은 몸의 옆 축으로 잰다: 세 몸 모두 그 축 위에 다른 캐릭터가 없다)
-  const bodies = await hiddenBodies(host, sr);
-  expect(bodies.length).toBe(3);
-  const ref = { runner: ROLE_HEX.runner, guard: ROLE_HEX.guard, scout: ROLE_HEX.scout };
-  const still = await captureBodies(host, bodies, { refColors: ref });
-  console.log(`[m10-visual] 괴물 화면 (부채꼴 · 근접 원): ${describeCapture(still)}`);
-  expect(still.ok).toBe(true);
-  const sprites = still.drawn.filter((d) => d.kind === 'survivor').map((d) => d.sprite);
-  expect(sprites).toEqual(['survivor-hidden', 'survivor-hidden', 'survivor-hidden']);
-  for (const s of still.stats) {
-    expect(s.whiteFrac, `${s.name} 흰 비율`).toBeGreaterThanOrEqual(0.9);
-    expect(s.minRoleDeltaE, `${s.name} 역할색 ΔE`).toBeGreaterThanOrEqual(40);
-    // 역할색 테두리 · 문양 없음
-    expect(s.ringRoleHits, `${s.name} 링 역할색`).toBeLessThanOrEqual(2);
-  }
-  expect(still.info.filter((i) => i.kind === 'reveal')).toEqual([]);
-  // 같은 실루엣: 세 몸의 흰 폭(바라보는 방향 기준 여러 방향) · 그림자 폭 ±1px, 평균색 ΔE ≤ 1
-  expectSameHidden(still, '괴물 화면 세 몸');
-
-  // 2) 공격 준비 범위 안 (누른 순간부터 예측) + 범위 경계 = 판정값
-  const me = (await host.evaluate(() => window.__DECOY__?.getRenderPos()))!;
-  await host.mouse.down({ button: 'left' });
-  await host.mouse.up({ button: 'left' });
-  const atk = await captureBodies(host, bodies, {
-    waitEffect: 'attackRange',
-    refColors: ref,
-    range: { x: me.x, y: me.y, dir: me.face, tiles: balance.monster.attack.range },
-  });
-  console.log(
-    `[m10-visual] 괴물 화면 (공격 준비): ${describeCapture(atk)} / 범위 경계 ${atk.rangePx?.toFixed(2)}px (판정 ${atk.rangeExpectPx?.toFixed(2)}px)`,
-  );
-  expect(atk.ok).toBe(true);
-  expect(atk.effects.attackRange).toBe(true);
-  for (const s of atk.stats) {
-    expect(s.whiteFrac, `${s.name} 흰 비율 (공격 범위)`).toBeGreaterThanOrEqual(0.9);
-    expect(s.minRoleDeltaE).toBeGreaterThanOrEqual(40);
-  }
-  expect(Math.abs(atk.rangePx! - atk.rangeExpectPx!)).toBeLessThanOrEqual(2);
-  const atkInfo = atk.info.find((i) => i.kind === 'range' && i.tag === 'attack');
-  expect(atkInfo?.r).toBe(balance.monster.attack.range);
-  expect(atkInfo?.arc).toBeCloseTo((balance.monster.attack.arc * Math.PI) / 180, 3);
-  await host.waitForTimeout(1600);
-
-  // 3) 스카우트 능력 노출: 그 한 명만 1초 동안 역할색 테두리 + 머리 위 문양. 몸은 흰색 그대로
-  await p.scout.page.keyboard.press('Space');
-  const rev = await captureBodies(host, bodies, { waitEffect: 'reveal', refColors: ref });
-  console.log(`[m10-visual] 괴물 화면 (스카우트 노출): ${describeCapture(rev)}`);
-  expect(rev.ok).toBe(true);
-  const reveals = rev.info.filter((i) => i.kind === 'reveal');
-  expect(reveals.map((i) => i.tag)).toEqual(['scout']);
-  expect(reveals[0]!.color).toBe(ROLE_HEX.scout);
-  expect(rev.drawn.filter((d) => d.kind === 'survivor').every((d) => d.sprite === 'survivor-hidden')).toBe(
-    true,
-  );
-  for (const s of rev.stats) {
-    expect(s.whiteFrac, `${s.name} 흰 비율 (노출 중)`).toBeGreaterThanOrEqual(0.9);
-    if (s.name === 'scout') {
-      expect(s.ringRoleHits, '스카우트 역할색 테두리').toBeGreaterThan(20);
-      expect(s.glyphRoleHits, '스카우트 머리 위 문양').toBeGreaterThan(8);
-    } else {
-      expect(s.ringRoleHits, `${s.name} 테두리 없음`).toBeLessThanOrEqual(2);
-      expect(s.glyphRoleHits, `${s.name} 문양 없음`).toBeLessThanOrEqual(2);
+    // 1) 부채꼴 · 근접 원 안 (그림자 폭은 몸의 옆 축으로 잰다: 세 몸 모두 그 축 위에 다른 캐릭터가 없다)
+    const bodies = await hiddenBodies(host, sr);
+    expect(bodies.length).toBe(3);
+    const ref = { runner: ROLE_HEX.runner, guard: ROLE_HEX.guard, scout: ROLE_HEX.scout };
+    const still = await captureBodies(host, bodies, { refColors: ref });
+    console.log(`[m10-visual] 괴물 화면 (부채꼴 · 근접 원): ${describeCapture(still)}`);
+    expect(still.ok).toBe(true);
+    const sprites = still.drawn.filter((d) => d.kind === 'survivor').map((d) => d.sprite);
+    expect(sprites).toEqual(['survivor-hidden', 'survivor-hidden', 'survivor-hidden']);
+    for (const s of still.stats) {
+      expect(s.whiteFrac, `${s.name} 흰 비율`).toBeGreaterThanOrEqual(0.9);
+      expect(s.minRoleDeltaE, `${s.name} 역할색 ΔE`).toBeGreaterThanOrEqual(40);
+      // 역할색 테두리 · 문양 없음
+      expect(s.ringRoleHits, `${s.name} 링 역할색`).toBeLessThanOrEqual(2);
     }
-  }
-  // 노출 '1초 동안': 처음 보인 프레임에서 0.8초 뒤에도 테두리 · 문양이 그대로
-  const held = await captureBodies(host, bodies, {
-    waitEffect: 'reveal',
-    refColors: ref,
-    notBefore: rev.tMet + 800,
-  });
-  console.log(
-    `[m10-visual] 괴물 화면 (노출 ${(held.tCapture - rev.tMet).toFixed(0)}ms 뒤): ${describeCapture(held)}`,
-  );
-  expect(held.ok, '노출 0.8초 시점에도 reveal').toBe(true);
-  expect(held.tCapture - rev.tMet).toBeGreaterThanOrEqual(800);
-  const heldScout = held.stats.find((s) => s.name === 'scout')!;
-  expect(heldScout.ringRoleHits, '0.8초 시점 스카우트 테두리').toBeGreaterThan(20);
-  expect(heldScout.glyphRoleHits, '0.8초 시점 스카우트 문양').toBeGreaterThan(8);
-  // 노출 창(abilityRevealDuration) 뒤에는 사라진다
-  await host.waitForTimeout(balance.survivor.abilityRevealDuration * 1000 + 400);
-  const after = await captureBodies(host, bodies, { refColors: ref });
-  expect(after.info.filter((i) => i.kind === 'reveal')).toEqual([]);
-  for (const s of after.stats) expect(s.ringRoleHits, `${s.name} 노출 끝`).toBeLessThanOrEqual(2);
+    expect(still.info.filter((i) => i.kind === 'reveal')).toEqual([]);
+    // 같은 실루엣: 세 몸의 흰 폭(바라보는 방향 기준 여러 방향) · 그림자 폭 ±1px, 평균색 ΔE ≤ 1
+    expectSameHidden(still, '괴물 화면 세 몸');
 
-  for (const pl of players) expect(pl.problems).toEqual([]);
-  await closeAll(players);
-});
+    // 2) 공격 준비 범위 안 (누른 순간부터 예측) + 범위 경계 = 판정값
+    const me = (await host.evaluate(() => window.__DECOY__?.getRenderPos()))!;
+    await host.mouse.down({ button: 'left' });
+    await host.mouse.up({ button: 'left' });
+    const atk = await captureBodies(host, bodies, {
+      waitEffect: 'attackRange',
+      refColors: ref,
+      range: { x: me.x, y: me.y, dir: me.face, tiles: balance.monster.attack.range },
+    });
+    console.log(
+      `[m10-visual] 괴물 화면 (공격 준비): ${describeCapture(atk)} / 범위 경계 ${atk.rangePx?.toFixed(2)}px (판정 ${atk.rangeExpectPx?.toFixed(2)}px)`,
+    );
+    expect(atk.ok).toBe(true);
+    expect(atk.effects.attackRange).toBe(true);
+    for (const s of atk.stats) {
+      expect(s.whiteFrac, `${s.name} 흰 비율 (공격 범위)`).toBeGreaterThanOrEqual(0.9);
+      expect(s.minRoleDeltaE).toBeGreaterThanOrEqual(40);
+    }
+    expect(Math.abs(atk.rangePx! - atk.rangeExpectPx!)).toBeLessThanOrEqual(2);
+    const atkInfo = atk.info.find((i) => i.kind === 'range' && i.tag === 'attack');
+    expect(atkInfo?.r).toBe(balance.monster.attack.range);
+    expect(atkInfo?.arc).toBeCloseTo((balance.monster.attack.arc * Math.PI) / 180, 3);
+    await host.waitForTimeout(1600);
+
+    // 3) 스카우트 능력 노출: 그 한 명만 1초 동안 역할색 테두리 + 머리 위 문양. 몸은 흰색 그대로
+    await p.scout.page.keyboard.press('Space');
+    const rev = await captureBodies(host, bodies, { waitEffect: 'reveal', refColors: ref });
+    console.log(`[m10-visual] 괴물 화면 (스카우트 노출): ${describeCapture(rev)}`);
+    expect(rev.ok).toBe(true);
+    const reveals = rev.info.filter((i) => i.kind === 'reveal');
+    expect(reveals.map((i) => i.tag)).toEqual(['scout']);
+    expect(reveals[0]!.color).toBe(ROLE_HEX.scout);
+    expect(rev.drawn.filter((d) => d.kind === 'survivor').every((d) => d.sprite === 'survivor-hidden')).toBe(
+      true,
+    );
+    for (const s of rev.stats) {
+      expect(s.whiteFrac, `${s.name} 흰 비율 (노출 중)`).toBeGreaterThanOrEqual(0.9);
+      if (s.name === 'scout') {
+        expect(s.ringRoleHits, '스카우트 역할색 테두리').toBeGreaterThan(20);
+        expect(s.glyphRoleHits, '스카우트 머리 위 문양').toBeGreaterThan(8);
+      } else {
+        expect(s.ringRoleHits, `${s.name} 테두리 없음`).toBeLessThanOrEqual(2);
+        expect(s.glyphRoleHits, `${s.name} 문양 없음`).toBeLessThanOrEqual(2);
+      }
+    }
+    // 노출 '1초 동안': 처음 보인 프레임에서 0.8초 뒤에도 테두리 · 문양이 그대로
+    const held = await captureBodies(host, bodies, {
+      waitEffect: 'reveal',
+      refColors: ref,
+      notBefore: rev.tMet + 800,
+    });
+    console.log(
+      `[m10-visual] 괴물 화면 (노출 ${(held.tCapture - rev.tMet).toFixed(0)}ms 뒤): ${describeCapture(held)}`,
+    );
+    expect(held.ok, '노출 0.8초 시점에도 reveal').toBe(true);
+    expect(held.tCapture - rev.tMet).toBeGreaterThanOrEqual(800);
+    const heldScout = held.stats.find((s) => s.name === 'scout')!;
+    expect(heldScout.ringRoleHits, '0.8초 시점 스카우트 테두리').toBeGreaterThan(20);
+    expect(heldScout.glyphRoleHits, '0.8초 시점 스카우트 문양').toBeGreaterThan(8);
+    // 노출 창(abilityRevealDuration) 뒤에는 사라진다
+    await host.waitForTimeout(balance.survivor.abilityRevealDuration * 1000 + 400);
+    const after = await captureBodies(host, bodies, { refColors: ref });
+    expect(after.info.filter((i) => i.kind === 'reveal')).toEqual([]);
+    for (const s of after.stats) expect(s.ringRoleHits, `${s.name} 노출 끝`).toBeLessThanOrEqual(2);
+
+    for (const pl of players) expect(pl.problems).toEqual([]);
+    await closeAll(players);
+  },
+);
 
 test('생존자 화면 역할색 유지: 빛 바닥 · 빨강 · 노랑 부채꼴 · 공격 범위 안에서 팀원 몸 ΔE ≤ 15, 몸/바깥 링 대비 3:1', async ({
   browser,

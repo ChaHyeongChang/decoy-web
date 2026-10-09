@@ -106,89 +106,93 @@ async function scenario(players: Player[]): Promise<void> {
   await page.waitForTimeout(300);
 }
 
-test('괴물 · 생존자가 받은 스냅샷 전체에 시야 밖 상대 좌표가 한 번도 없다', async ({ browser }) => {
-  const { code, players } = await startFourPlayerMatch(browser);
-  const frames = new Map<string, CollectedFrames>();
-  // 이미 열린 소켓은 잡을 수 없으므로 새로고침해서 같은 자리로 다시 들어온다
-  for (const p of players) {
-    frames.set(p.id, collectFrames(p.page));
-    await p.page.reload();
-    await p.page.waitForFunction(() => (window.__DECOY__?.snapCount ?? 0) > 3);
-  }
-  await scenario(players);
-  const truth = loadTruth(code);
-  const survivorIds = players.filter((p) => p.role !== 'monster').map((p) => p.id);
-
-  // ── 괴물이 받은 것 ──
-  const monster = players.find((p) => p.role === 'monster')!;
-  const mFrames = frames.get(monster.id)!;
-  let hiddenFrames = 0;
-  let visibleFrames = 0;
-  let checked = 0;
-  for (const { raw, snap } of mFrames.snaps) {
-    const f = truth.get(snap.tick);
-    if (!f || !f.monster) continue;
-    checked += 1;
-    const verdicts = new Map<string, Verdict>();
-    for (const s of f.players) {
-      if (s.role === 'monster' || s.status === 'dead' || s.status === 'escaped') continue;
-      verdicts.set(s.id, monsterVerdictFor(f, s));
+test(
+  '괴물 · 생존자가 받은 스냅샷 전체에 시야 밖 상대 좌표가 한 번도 없다',
+  { tag: '@core' },
+  async ({ browser }) => {
+    const { code, players } = await startFourPlayerMatch(browser);
+    const frames = new Map<string, CollectedFrames>();
+    // 이미 열린 소켓은 잡을 수 없으므로 새로고침해서 같은 자리로 다시 들어온다
+    for (const p of players) {
+      frames.set(p.id, collectFrames(p.page));
+      await p.page.reload();
+      await p.page.waitForFunction(() => (window.__DECOY__?.snapCount ?? 0) > 3);
     }
-    if ([...verdicts.values()].includes('hidden')) hiddenFrames += 1;
-    if ([...verdicts.values()].includes('visible')) visibleFrames += 1;
-    // 받은 생존자는 모두 실제로 보이는(또는 경계의) 생존자와 위치가 맞아야 한다
-    for (const e of snap.survivors) {
-      const match = f.players.find((p) => p.role !== 'monster' && Math.hypot(p.x - e.x, p.y - e.y) < 0.01);
-      expect(match, `틱 ${snap.tick}: 정답에 없는 위치`).toBeTruthy();
-      expect(
-        verdicts.get(match!.id),
-        `틱 ${snap.tick}: 시야 밖 생존자 ${match!.id} 좌표가 괴물에게 갔다`,
-      ).not.toBe('hidden');
-      // 역할 · 실제 ID 노출 금지 (능력 노출 창 제외)
-      const revealed = (f.reveal.find((r) => r.id === match!.id)?.left ?? 0) > 0;
-      if (!revealed) expect(e.role).toBeNull();
-      expect(survivorIds).not.toContain(e.id);
-    }
-    // 보이는 생존자는 빠짐없이 받는다
-    const visibleCount = [...verdicts.values()].filter((v) => v === 'visible').length;
-    expect(snap.survivors.length).toBeGreaterThanOrEqual(visibleCount);
-    // 원문에도 생존자 실제 ID가 없다
-    for (const id of survivorIds) expect(raw.includes(`"${id}"`), `원문에 ${id}`).toBe(false);
-    expect(snap.monster).toBeNull();
-    expect(snap.world.exits.every((x) => x.progress === null)).toBe(true);
-  }
-  expect(checked).toBeGreaterThan(60);
-  // 빈 통과 방지: 숨은 생존자가 있는 프레임과 보이는 생존자가 있는 프레임이 충분히 있었다
-  expect(hiddenFrames / checked).toBeGreaterThan(0.3);
-  expect(visibleFrames / checked).toBeGreaterThan(0.1);
+    await scenario(players);
+    const truth = loadTruth(code);
+    const survivorIds = players.filter((p) => p.role !== 'monster').map((p) => p.id);
 
-  // ── 생존자가 받은 것 ──
-  let monsterHidden = 0;
-  let monsterSeen = 0;
-  for (const p of players.filter((q) => q.role !== 'monster')) {
-    for (const { snap } of frames.get(p.id)!.snaps) {
+    // ── 괴물이 받은 것 ──
+    const monster = players.find((p) => p.role === 'monster')!;
+    const mFrames = frames.get(monster.id)!;
+    let hiddenFrames = 0;
+    let visibleFrames = 0;
+    let checked = 0;
+    for (const { raw, snap } of mFrames.snaps) {
       const f = truth.get(snap.tick);
-      if (!f) continue;
-      const v = survivorsSeeMonster(f);
-      if (v === 'hidden') {
-        monsterHidden += 1;
-        expect(snap.monster, `틱 ${snap.tick}: 시야 밖 괴물 좌표가 ${p.role}에게 갔다`).toBeNull();
-        // 마커는 탐지 · 포효 노출 창에서만 허용
-        if (f.tracked <= 0 && f.roarReveal <= 0) expect(snap.marks.length).toBe(0);
+      if (!f || !f.monster) continue;
+      checked += 1;
+      const verdicts = new Map<string, Verdict>();
+      for (const s of f.players) {
+        if (s.role === 'monster' || s.status === 'dead' || s.status === 'escaped') continue;
+        verdicts.set(s.id, monsterVerdictFor(f, s));
       }
-      if (v === 'visible') {
-        monsterSeen += 1;
-        expect(snap.monster).not.toBeNull();
+      if ([...verdicts.values()].includes('hidden')) hiddenFrames += 1;
+      if ([...verdicts.values()].includes('visible')) visibleFrames += 1;
+      // 받은 생존자는 모두 실제로 보이는(또는 경계의) 생존자와 위치가 맞아야 한다
+      for (const e of snap.survivors) {
+        const match = f.players.find((p) => p.role !== 'monster' && Math.hypot(p.x - e.x, p.y - e.y) < 0.01);
+        expect(match, `틱 ${snap.tick}: 정답에 없는 위치`).toBeTruthy();
+        expect(
+          verdicts.get(match!.id),
+          `틱 ${snap.tick}: 시야 밖 생존자 ${match!.id} 좌표가 괴물에게 갔다`,
+        ).not.toBe('hidden');
+        // 역할 · 실제 ID 노출 금지 (능력 노출 창 제외)
+        const revealed = (f.reveal.find((r) => r.id === match!.id)?.left ?? 0) > 0;
+        if (!revealed) expect(e.role).toBeNull();
+        expect(survivorIds).not.toContain(e.id);
       }
-      // 팀원은 항상 보인다
-      expect(snap.survivors.length).toBe(2);
+      // 보이는 생존자는 빠짐없이 받는다
+      const visibleCount = [...verdicts.values()].filter((v) => v === 'visible').length;
+      expect(snap.survivors.length).toBeGreaterThanOrEqual(visibleCount);
+      // 원문에도 생존자 실제 ID가 없다
+      for (const id of survivorIds) expect(raw.includes(`"${id}"`), `원문에 ${id}`).toBe(false);
+      expect(snap.monster).toBeNull();
+      expect(snap.world.exits.every((x) => x.progress === null)).toBe(true);
     }
-  }
-  expect(monsterHidden).toBeGreaterThan(20);
-  expect(monsterSeen).toBeGreaterThan(20);
-  for (const p of players) expect(p.problems).toEqual([]);
-  await closeAll(players);
-});
+    expect(checked).toBeGreaterThan(60);
+    // 빈 통과 방지: 숨은 생존자가 있는 프레임과 보이는 생존자가 있는 프레임이 충분히 있었다
+    expect(hiddenFrames / checked).toBeGreaterThan(0.3);
+    expect(visibleFrames / checked).toBeGreaterThan(0.1);
+
+    // ── 생존자가 받은 것 ──
+    let monsterHidden = 0;
+    let monsterSeen = 0;
+    for (const p of players.filter((q) => q.role !== 'monster')) {
+      for (const { snap } of frames.get(p.id)!.snaps) {
+        const f = truth.get(snap.tick);
+        if (!f) continue;
+        const v = survivorsSeeMonster(f);
+        if (v === 'hidden') {
+          monsterHidden += 1;
+          expect(snap.monster, `틱 ${snap.tick}: 시야 밖 괴물 좌표가 ${p.role}에게 갔다`).toBeNull();
+          // 마커는 탐지 · 포효 노출 창에서만 허용
+          if (f.tracked <= 0 && f.roarReveal <= 0) expect(snap.marks.length).toBe(0);
+        }
+        if (v === 'visible') {
+          monsterSeen += 1;
+          expect(snap.monster).not.toBeNull();
+        }
+        // 팀원은 항상 보인다
+        expect(snap.survivors.length).toBe(2);
+      }
+    }
+    expect(monsterHidden).toBeGreaterThan(20);
+    expect(monsterSeen).toBeGreaterThan(20);
+    for (const p of players) expect(p.problems).toEqual([]);
+    await closeAll(players);
+  },
+);
 
 async function measureFps(players: Player[]): Promise<number[]> {
   await players[0]!.page.waitForTimeout(3000);

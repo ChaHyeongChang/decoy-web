@@ -22,6 +22,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "npm run build && playwright test --config tests/e2e/playwright.config.ts",
+    "test:e2e:core": "npm run build && playwright test --config tests/e2e/playwright.config.ts --grep @core",
     "test:lag": "vitest run --config vitest.lag.config.ts",
     "verify:deploy": "node scripts/verify-deploy.mjs",
     "logo:compare": "node scripts/logo-compare.mjs",
