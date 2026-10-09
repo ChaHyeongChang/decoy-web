@@ -220,8 +220,9 @@ interface FpsCase {
  *  - 게이트(55): 옛 scale=0.5와 화소 단위로 같은 조건. 960×540 창 · 배율 1 · 품질 낮음 → 백버퍼 960×540을 CSS 960×540에
  *    1:1로 합성하고 카메라 zoom 0.5 (M10a 전 기준값 60.4와 견줄 수 있다). 소프트웨어 합성기(VizCompositorThread)는
  *    탭 4개 몫을 한 스레드에서 하므로 창을 키워 늘려 보여 주면 백버퍼가 같아도 느려진다(2코어 실측 53~55) → 창 크기를 고정한다
- *  - 기록(하한 20): 1920×1080 창 · 배율 1 · scale=1 → 백버퍼 1920×1080 1:1. 옛 scale=1(1920×1080을 960×540으로 줄여 표시)은
- *    새 코드로 재현할 수 없어 옛 값(41.9)과 비교하지 않는다. 큰 회귀(GPU 프로세스 병목 때의 1~15FPS 같은)만 잡는다
+ *  - 기록(하한 12): 1920×1080 창 · 배율 1 · scale=1 → 백버퍼 1920×1080 1:1. 옛 scale=1(1920×1080을 960×540으로 줄여 표시)은
+ *    새 코드로 재현할 수 없어 옛 값(41.9)과 비교하지 않는다. 큰 회귀(GPU 프로세스 병목 때의 1~10FPS 같은)만 잡는다.
+ *    GitHub Actions 러너는 호스트마다 19~28로 흔들려(하한 20일 때 19.0으로 실패) 하한을 낮췄다. 성능 관문은 위의 게이트다
  */
 const FPS_CASES: readonly FpsCase[] = [
   {
@@ -236,7 +237,7 @@ const FPS_CASES: readonly FpsCase[] = [
     viewport: { width: 1920, height: 1080 },
     query: '&scale=1',
     backing: [1920, 1080],
-    min: 20,
+    min: 12,
   },
 ];
 
@@ -280,7 +281,7 @@ for (const c of FPS_CASES) {
       `FPS ${c.name} 탭별 평균: ${avgs.map((v) => v.toFixed(1)).join(', ')} / 전체 ${avg.toFixed(1)}`,
     );
     test.info().annotations.push({ type: `fps ${c.name}`, description: avg.toFixed(1) });
-    // (CPU 래스터 4탭 + 서버가 4코어를 나눠 쓴다: 기록 조건은 개발 컨테이너 약 40, GitHub Actions 러너 약 28)
+    // (CPU 래스터 4탭 + 서버가 4코어를 나눠 쓴다: 기록 조건은 개발 컨테이너 약 40, GitHub Actions 러너 19~28)
     expect(avg).toBeGreaterThanOrEqual(c.min);
     // 재는 동안 조건이 바뀌지 않았다 (두 조건 모두 품질 낮음이라 더 내릴 단계가 없다. 조건을 바꾸면 여기서 드러난다)
     for (const p of players) {

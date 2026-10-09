@@ -393,7 +393,7 @@ function angDiff(a: number, b: number): number {
 
 test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 맞다', async ({ browser }) => {
   // 4K 높음 단계가 CI 러너(SwiftShader)에서 느리다
-  test.setTimeout(300_000);
+  test.setTimeout(480_000);
   const { page, problems, close } = await newScreen(browser, { width: 1440, height: 900 }, 2);
   const code = await startSolo(page, '&quality=high', 'monster');
   const me = await page.evaluate(() => window.__DECOY__?.you ?? '');
@@ -426,7 +426,7 @@ test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 �
   // 백버퍼가 바뀔 때까지. 시간을 넘기면 그때 상태(창 DPR · 캔버스 · 그래픽 상태)를 오류에 담는다 (부하가 큰 러너에서 원인 구분용)
   // 폴링은 rAF가 아니라 시간 간격으로: 4K(3840×2160) 높음은 GitHub Actions 러너의 SwiftShader에서 한 프레임이 수 초라
   // rAF 폴링이면 확인 자체가 프레임만큼 늦는다(CI에서 바뀐 직후 시간 초과가 난 적이 있다)
-  const waitBacking = async (w: number, h: number, timeout = 30_000): Promise<CanvasInfo> => {
+  const waitBacking = async (w: number, h: number, timeout = 60_000): Promise<CanvasInfo> => {
     const t0 = Date.now();
     try {
       await page.waitForFunction(
@@ -439,6 +439,14 @@ test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 �
       );
     } catch (e) {
       const now = await canvasInfo(page);
+      // 큰 백버퍼 프레임이 수 초씩 걸리면 페이지 안 폴링 자체가 밀려 시간 초과가 날 수 있다: 그 뒤에 이미 바뀌어 있으면 따라간 것이다
+      if (now.backingW === w && now.backingH === h) {
+        console.log(
+          `백버퍼 ${w}×${h}: 폴링이 ${timeout}ms 안에 확인하지 못했지만 그 뒤 바뀌어 있음 (느린 러너)`,
+        );
+        await settleFrames(page, 2);
+        return canvasInfo(page);
+      }
       throw new Error(
         `백버퍼 ${w}×${h}을 ${timeout}ms 동안 기다렸다: 지금 ${now.backingW}×${now.backingH}, ` +
           `창 DPR ${now.dpr}, gfx.dpr ${now.gfx.dpr}, 품질 ${now.gfx.quality}, 하향 ${now.gfx.downgrades} (${String(e)})`,
