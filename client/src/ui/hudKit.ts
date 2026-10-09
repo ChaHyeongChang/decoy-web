@@ -221,6 +221,18 @@ export function setText(t: CrispText, value: string, color?: number): void {
   }
 }
 
+/** 이름이 칸보다 길면 뒤를 줄인다 (이름이 바뀔 때만) */
+export function fitText(t: CrispText, value: string, maxW: number): void {
+  if (t.getData('full') === value) return;
+  t.setData('full', value);
+  t.setText(value);
+  let s = value;
+  while (t.width > maxW && s.length > 1) {
+    s = s.slice(0, -1);
+    t.setText(`${s}…`);
+  }
+}
+
 /** 고정 크기 그림 하나 (기준점 = 프레임의 0, 0) */
 export class Spr implements Prim {
   readonly img: Phaser.GameObjects.Image;

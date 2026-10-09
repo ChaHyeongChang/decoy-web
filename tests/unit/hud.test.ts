@@ -26,6 +26,7 @@ import {
   statusKey,
   teamCards,
   tickAngle,
+  slotIconFrame,
   timerView,
   type ActionSlot,
 } from '../../client/src/ui/hudArt';
@@ -124,6 +125,36 @@ describe('행동 칸 actionSlots (순수 함수, M11 터치 버튼과 공유)', 
     expect(actionSlots(snapshot('scout'), balance, 'scout')[0]?.label).toBe('탐지');
     const a = byId(slots, 'ability');
     expect([a.state, a.fill, a.cd, a.accent, a.icon]).toEqual(['ready', 1, 0, 'runner', 'sprint']);
+  });
+
+  it('나올 수 있는 모든 행동 칸 아이콘(역할 · 탐색/추적 · 네 상태)이 아틀라스에 구워져 있다', () => {
+    const names = new Set(hudSpecs().map((x) => x.name));
+    const cases: [Snapshot['you']['role'], Snapshot][] = [
+      ['runner', snapshot('runner')],
+      ['guard', snapshot('guard')],
+      ['scout', snapshot('scout')],
+      ['monster', snapshot('monster')],
+      [
+        'monster',
+        snapshot('monster', (x) => {
+          if (x.you.mon) x.you.mon.mode = 'hunt';
+        }),
+      ],
+    ];
+    const states: ActionSlot['state'][] = ['ready', 'cooldown', 'active', 'blocked'];
+    const missing: string[] = [];
+    let checked = 0;
+    for (const [role, snap] of cases) {
+      for (const slot of actionSlots(snap, balance, role)) {
+        for (const state of states) {
+          const frame = slotIconFrame({ ...slot, state });
+          checked += 1;
+          if (!names.has(frame)) missing.push(`${role} ${slot.id} ${slot.icon} ${state} → ${frame}`);
+        }
+      }
+    }
+    expect(checked).toBe((2 * 3 + 4 * 2) * states.length);
+    expect(missing).toEqual([]);
   });
 
   it('쿨타임 비율 = 지난 시간 / 쿨타임, 남은 초는 그대로', () => {

@@ -20,6 +20,7 @@ import {
   TICKS,
   TIMER_LOOK,
   actionSlots,
+  slotIconFrame,
   gaugeState,
   litTicks,
   teamCards,
@@ -29,7 +30,7 @@ import {
   type GaugeState,
   type TimerMode,
 } from './hudArt';
-import { Digits, setText, type HudKit, type Slice, type Spr } from './hudKit';
+import { Digits, fitText, setText, type HudKit, type Slice, type Spr } from './hudKit';
 import { HUD, VIEW_W } from './layout';
 import type { CrispText } from './text';
 
@@ -172,18 +173,6 @@ interface CardParts {
   abText: CrispText;
   jailText: CrispText;
   jail: Spr[];
-}
-
-/** 이름이 칸보다 길면 뒤를 줄인다 (이름이 바뀔 때만) */
-function fitText(t: CrispText, value: string, maxW: number): void {
-  if (t.getData('full') === value) return;
-  t.setData('full', value);
-  t.setText(value);
-  let s = value;
-  while (t.width > maxW && s.length > 1) {
-    s = s.slice(0, -1);
-    t.setText(`${s}…`);
-  }
 }
 
 export class Hud {
@@ -480,7 +469,7 @@ export class Hud {
       );
       const lit = s.state === 'blocked' ? 0 : s.fill >= 1 ? TICKS : litTicks(s.fill);
       p.ring.set(s.accent, lit, tx, cy);
-      p.icon.set(FR.icon(s.icon, on ? acc.text : HC.off, 26), tx, cy);
+      p.icon.set(slotIconFrame(s), tx, cy);
       const secs = s.state === 'cooldown' ? String(Math.ceil(s.cd)) : '';
       setText(p.secs, secs);
       p.secs.setPosition(tx, cy).setVisible(secs !== '');

@@ -763,6 +763,12 @@ export const DIAL = { well: 17, body: 10.5, rot: -Math.PI / 3 } as const;
 export const MM_BODY = 4.6;
 
 /** HUD가 쓰는 모든 그림 (아틀라스 한 장). 이름이 겹치지 않는다 */
+/** 행동 칸 아이콘 프레임 이름: 쓸 수 있거나 효과 중이면 강조색, 아니면 꺼진 색 (hud.ts가 그리고, hud.test.ts가 아틀라스에 있는지 본다) */
+export function slotIconFrame(s: ActionSlot): string {
+  const on = s.state === 'ready' || s.state === 'active';
+  return FR.icon(s.icon, on ? ACCENT[s.accent].text : HC.off, 26);
+}
+
 export function hudSpecs(): AtlasSpec[] {
   const out: AtlasSpec[] = [];
   const seen = new Set<string>();
@@ -1077,7 +1083,7 @@ export function hudSpecs(): AtlasSpec[] {
     ['attack', HC.red],
     ['dash', HC.red],
     ['roar', HC.red],
-    ['visionSearch', UI.text],
+    ['visionSearch', HC.cone],
     ['visionHunt', HC.cone],
   ] as const) {
     icon(id, col, 26);

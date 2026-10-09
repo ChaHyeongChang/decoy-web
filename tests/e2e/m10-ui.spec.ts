@@ -307,6 +307,23 @@ test('로비: 보이는 모든 글자 대비 4.5:1(큰 글자 3:1), 고른 카�
   await taken.click({ force: true });
   await expect(mine).toHaveClass(/mine/);
 
+  // 키보드: 고른 카드에 포커스가 오면 테두리가 밝아지고(mine 표시와 달라야 한다), 남이 역할을 골라
+  // 방 화면이 다시 그려져도 포커스가 같은 카드에 남는다
+  await mine.focus();
+  await host.page.keyboard.press('Shift+Tab');
+  await host.page.keyboard.press('Tab');
+  await expect(mine).toBeFocused();
+  expect((await look('role-monster')).ring).toBe('rgb(226, 232, 240)');
+  await p3.page.getByTestId('role-guard').click();
+  await expect(host.page.getByTestId('role-guard')).toHaveClass(/taken/);
+  await expect(host.page.getByTestId('role-monster')).toBeFocused();
+  await host.page.keyboard.press('Tab');
+  await expect(host.page.getByTestId('role-runner')).toBeFocused();
+  // 낭독기 이름: 초대 주소 칸은 '초대 링크'(옆 버튼 '링크 복사'와 다르게), 방장 왕관은 '방장'
+  await expect(host.page.getByTestId('room-link')).toHaveAttribute('aria-label', '초대 링크');
+  await expect(host.page.getByTestId('copy-link')).toHaveText('링크 복사');
+  await expect(host.page.getByTestId('player-list').getByRole('img', { name: '방장' })).toHaveCount(1);
+
   expectAudit(await contrastAudit(host.page, '[data-testid="lobby"]'), '방 화면 (방장)');
   expectAudit(await contrastAudit(p3.page, '[data-testid="lobby"]'), '방 화면 (역할 없음)');
   for (const p of [host, p2, p3]) expect(p.problems).toEqual([]);

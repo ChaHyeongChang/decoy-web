@@ -95,6 +95,8 @@ export const UI_TEXT = {
   emptySlot: '비어 있음',
   me: '나',
   bot: '봇',
+  host: '방장',
+  inviteLink: '초대 링크',
   waiting: '대기',
   botsFill: '빈자리는 봇이 채웁니다',
   graphics: '그래픽',

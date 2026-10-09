@@ -224,7 +224,7 @@ export class LobbyUI {
     const linkText = h('input', {
       readonly: 'true',
       'data-testid': 'room-link',
-      'aria-label': UI_TEXT.copyLink,
+      'aria-label': UI_TEXT.inviteLink,
     });
     linkText.value = link;
     const copyLabel = h('span', {}, UI_TEXT.copyLink);
@@ -249,7 +249,9 @@ export class LobbyUI {
     const list = h('div', { class: 'panel player-list', 'data-testid': 'player-list' });
     for (const p of lobby.players) {
       const name = h('span', { class: 'player-name' });
-      if (p.host) name.append(icon('crown', 16, 'host'));
+      // 왕관은 그림이라 낭독기에 이름을 따로 준다 (아이콘 span은 aria-hidden)
+      if (p.host)
+        name.append(h('span', { role: 'img', 'aria-label': UI_TEXT.host }, icon('crown', 16, 'host')));
       name.append(h('span', { class: 'nm' }, p.name));
       if (p.id === this.you) name.append(h('span', { class: 'tag' }, UI_TEXT.me));
       if (p.bot) name.append(h('span', { class: 'tag tag-bot' }, UI_TEXT.bot));
@@ -301,6 +303,10 @@ export class LobbyUI {
       this.errorBox,
     );
 
+    // 로비 상태가 올 때마다 방 화면을 새로 만든다. 키보드 포커스가 body로 날아가지 않게 같은 요소(data-testid)로 돌려준다
+    const active = document.activeElement;
+    const focusId =
+      active instanceof HTMLElement && this.content.contains(active) ? active.dataset.testid : undefined;
     this.content.replaceChildren(
       h('div', { class: 'lobby-top' }, this.brand(false), invite),
       cards,
@@ -308,6 +314,8 @@ export class LobbyUI {
       actions,
     );
     this.show();
+    if (focusId)
+      this.content.querySelector<HTMLElement>(`[data-testid="${focusId}"]`)?.focus({ preventScroll: true });
   }
 
   /** 역할 카드: 큰 실루엣 + 문양 + 이름 + 소개 + 능력(키캡) + 주인 */

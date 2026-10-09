@@ -15,6 +15,8 @@ import {
 
 type HudInfo = Record<string, number | boolean | string>;
 
+const LONG_NAME = '가나다라마바사아자차카타';
+
 async function hud(page: Page): Promise<HudInfo> {
   return page.evaluate(() => window.__DECOY__?.getHud() ?? {});
 }
@@ -39,6 +41,8 @@ test('생존자 HUD: 맵과 겹치지 않음 · Tab이면 조작 안내가 닫�
   const problems: string[] = [];
   watchConsole(page, problems);
   await page.goto(`/?bots=1${BASE_QUERY}`);
+  // 이름 최대 길이(12자) 한글: 점수판 이름 칸보다 길다
+  await page.getByTestId('name-input').fill(LONG_NAME);
   await page.getByTestId('create-room').click();
   await expect(page.getByTestId('room-code')).toHaveText(/^[A-Z]{4}$/);
   await pickRoleAndReady(page, 'runner');
@@ -53,6 +57,9 @@ test('생존자 HUD: 맵과 겹치지 않음 · Tab이면 조작 안내가 닫�
   const tab = await hud(page);
   expect([tab.scoreboard, tab.help]).toEqual([true, false]);
   expect(String(tab.scoreText)).toMatch(/러너.*가드.*스카우트.*괴물/);
+  // 긴 이름은 상태 아이콘을 덮지 않게 끝을 …로 줄인다
+  expect(String(tab.scoreText)).not.toContain(LONG_NAME);
+  expect(String(tab.scoreText)).toMatch(/러너 가나다라[가-힣]*… /);
   await page.keyboard.up('Tab');
   await page.waitForFunction(() => window.__DECOY__?.getHud().scoreboard === false, null, { polling: 100 });
   expect((await hud(page)).help).toBe(false);

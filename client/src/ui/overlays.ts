@@ -4,7 +4,7 @@ import type { AnonStatus, Balance, MatchInfo, Snapshot } from '@decoy/shared';
 import { CONTROLS, HUD_TEXT, ROLE_CARDS } from '../data/storyText';
 import { UI } from '../art/palette';
 import { ABILITY_ICON, ACCENT, FR, HC, STATUS_LOOK, parseControl, teamCards } from './hudArt';
-import { Slice, Spr, setText, type HudKit } from './hudKit';
+import { Slice, Spr, fitText, setText, type HudKit } from './hudKit';
 import { HUD, VIEW_W } from './layout';
 import type { CrispText } from './text';
 
@@ -346,7 +346,8 @@ export class Scoreboard {
       r.glyph.set(d.glyph, x + PAD + 12, cy).show(true);
       setText(r.role, d.role, d.roleColor);
       r.role.setPosition(x + PAD + 34, ry + 2).setVisible(true);
-      setText(r.name, d.name);
+      // 긴 이름(최대 12자)이 상태 아이콘을 덮지 않게 끝을 줄인다
+      fitText(r.name, d.name, this.cols.st - this.cols.name - 14);
       r.name.setPosition(x + PAD + this.cols.name, ry + 2).setVisible(d.name !== '');
       const look = d.st ? STATUS_LOOK[d.st] : null;
       r.stIcon
