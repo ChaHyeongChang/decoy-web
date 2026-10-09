@@ -51,4 +51,16 @@ describe('서버 깨우기 안내', () => {
     s.closed(61_000);
     expect(s.view(120_000).visible).toBe(false);
   });
+
+  it('오프라인이면 본문을 인터넷 연결 안내로 바꾸라고 알리고, 다시 온라인이면 원래대로 (M12)', () => {
+    const s = new WakeNoticeState();
+    s.connecting(0);
+    expect(s.view(WAKE_NOTICE_DELAY_MS).offline).toBe(false);
+    s.setOffline(true);
+    const v = s.view(WAKE_NOTICE_DELAY_MS + 1000);
+    expect(v.visible).toBe(true);
+    expect(v.offline).toBe(true);
+    s.setOffline(false);
+    expect(s.view(WAKE_NOTICE_DELAY_MS + 2000).offline).toBe(false);
+  });
 });

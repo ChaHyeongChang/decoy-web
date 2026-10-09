@@ -263,7 +263,12 @@ export class App {
   start(): void {
     listenLifecycle({
       visibility: (visible) => this.onVisibility(visible),
-      online: (on) => (on ? this.keeper.kick() : this.keeper.offline()),
+      online: (on) => {
+        this.wake.setOffline(!on);
+        this.renderWake();
+        if (on) this.keeper.kick();
+        else this.keeper.offline();
+      },
       pageshow: () => this.keeper.kick(),
       pagehide: () => this.touchLastRoom(),
       gesture: () => {
@@ -272,6 +277,7 @@ export class App {
       popstate: () => void this.backGuard?.popped(),
     });
     if (this.params.debug !== 'off' || import.meta.env.DEV) this.installLifecycleDebug();
+    this.wake.setOffline(navigator.onLine === false);
     this.wake.connecting(performance.now());
     this.keeper.start();
     // 기다린 시간(초)을 세려고 주기적으로 다시 그린다. 바뀐 게 없으면 DOM을 건드리지 않는다
