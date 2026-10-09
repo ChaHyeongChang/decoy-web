@@ -377,8 +377,11 @@ describe('9조각 · 아틀라스 · 배치', () => {
       }
     }
     // 그림마다 그리기 함수가 실제로 돈다 (가짜 2D 컨텍스트)
-    const calls = paintAll(specs);
-    expect(calls).toBeGreaterThan(specs.length);
+    // 그림마다 칠하기 명령이 하나 이상 (공용 래퍼가 아무것도 그리지 않게 바뀌는 회귀를 잡는다)
+    const painted = paintAll(specs);
+    expect(painted.size).toBe(specs.length);
+    const empty = [...painted].filter(([, n]) => n === 0).map(([name]) => name);
+    expect(empty).toEqual([]);
   });
 
   it('늘 떠 있는 HUD 자리는 맵 사각형과 겹치지 않는다 (위 띠 · 왼쪽 카드 · 아래 띠 · 미니맵)', () => {
@@ -435,7 +438,21 @@ describe('조작 안내 줄 나누기', () => {
 });
 
 /** 모든 그림을 기록용 가짜 컨텍스트로 그려 본다 (예외 없음). 부른 그리기 명령 수를 돌려준다 */
-function paintAll(specs: ReturnType<typeof hudSpecs>): number {
+/** 실제로 칠하는 명령 (경로 만들기 · 상태 저장과 달리 픽셀이 나온다) */
+const PAINT_OPS = new Set([
+  'fill',
+  'stroke',
+  'fillRect',
+  'strokeRect',
+  'drawImage',
+  'fillText',
+  'strokeText',
+  'putImageData',
+]);
+
+/** 그림마다 칠하기 명령 수 (이름 → 수) */
+function paintAll(specs: ReturnType<typeof hudSpecs>): Map<string, number> {
+  const out = new Map<string, number>();
   let calls = 0;
   const gradient = { addColorStop: (): void => {} };
   const ctx = new Proxy(
@@ -444,7 +461,7 @@ function paintAll(specs: ReturnType<typeof hudSpecs>): number {
       get: (_t, key) => {
         if (key === 'createLinearGradient' || key === 'createRadialGradient') return () => gradient;
         return (..._a: unknown[]): void => {
-          calls += 1;
+          if (typeof key === 'string' && PAINT_OPS.has(key)) calls += 1;
         };
       },
       set: () => true,
@@ -457,11 +474,13 @@ function paintAll(specs: ReturnType<typeof hudSpecs>): number {
   };
   try {
     for (const s of specs) {
+      calls = 0;
       if (s.kind === 'frame') s.paint(ctx, 1.5);
       else s.paint(ctx, s.l + s.r + 4, s.v ? s.t + s.b + 4 : s.t, 1.5);
+      out.set(s.name, calls);
     }
   } finally {
     g.Path2D = had;
   }
-  return calls;
+  return out;
 }

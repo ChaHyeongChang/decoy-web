@@ -84,7 +84,7 @@ class Ring {
 class Gauge {
   private readonly frame: Slice;
   private readonly dia: Spr;
-  private readonly chip: Spr;
+  readonly chip: Spr;
   private readonly fill: Spr;
   private readonly stripe: Spr;
   private readonly letter: CrispText;
@@ -110,13 +110,6 @@ class Gauge {
     this.dia = kit.spr(D_ART);
     this.chip = kit.spr(D_ART);
     this.letter = kit.text(this.diaX, o.y, 20, UI.text, D_TEXT, true).setOrigin(0.5, 0.5).setText(id);
-  }
-
-  get bounds(): [number, number, number, number] {
-    const G = HUD.gauge;
-    const x0 = Math.min(this.diaX - G.dia / 2, this.bar.x);
-    const x1 = Math.max(this.diaX + G.dia / 2, this.bar.x + G.barW);
-    return [x0, HUD.gaugeA.y - G.dia / 2, x1 - x0, G.dia];
   }
 
   update(p: PointView | undefined, blinkOff: boolean): void {
@@ -490,10 +483,12 @@ export class Hud {
     return {
       pointA: a?.state ?? 'idle',
       pointB: b?.state ?? 'idle',
-      pointAIcon: GAUGE_ICON[a?.state ?? 'idle'] ?? 'none',
-      pointBIcon: GAUGE_ICON[b?.state ?? 'idle'] ?? 'none',
+      // 상태에서 다시 계산하지 않고 칩에 실제로 건 프레임 (보이지 않으면 '')
+      pointAChip: a?.chip.shown ? a.chip.frameName : '',
+      pointBChip: b?.chip.shown ? b.chip.frameName : '',
       timer: this.timerMode,
       timerText: this.digits.text,
+      timerFontGen: this.digits.measuredGen,
       slots: this.slotState.map((s) => `${s.id}:${s.state}`).join(','),
       hint: this.hintText,
       cardText: this.cards
@@ -506,28 +501,5 @@ export class Hud {
         )
         .join(' | '),
     };
-  }
-
-  /** 늘 떠 있는 HUD 부품의 자리 (논리 px [x, y, w, h]): 맵 사각형과 겹치지 않아야 한다 (E2E) */
-  panels(): [number, number, number, number][] {
-    const out: [number, number, number, number][] = this.gauges.map((g) => g.bounds);
-    const T = HUD.timer;
-    out.push([T.x - T.w / 2, T.y - T.h / 2, T.w, T.h]);
-    for (const p of this.cards)
-      if (p.panel.shown) {
-        const r = p.panel.bounds;
-        out.push([r.x, r.y, r.w, r.h]);
-      }
-    const S = HUD.slot;
-    for (const p of this.slots)
-      if (p.tile.shown) {
-        const r = p.tile.bounds;
-        out.push([r.x, r.y, S.w, r.h]);
-      }
-    if (this.hint.panel.shown) {
-      const r = this.hint.panel.bounds;
-      out.push([r.x, r.y, r.w, r.h]);
-    }
-    return out;
   }
 }

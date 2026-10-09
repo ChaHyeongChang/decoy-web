@@ -7,6 +7,7 @@
 // 정보 = 아이콘 + 청록(#0E7490). 색만으로 구분하지 않는다. 그림은 HUD 아틀라스 9조각이라 글이 바뀌어도 다시 굽지 않는다
 import type { IconId } from '../art/icons';
 import { NEON_DIM, UI } from '../art/palette';
+import { fontGeneration } from './fonts';
 import { FR, TONE, type Tone } from './hudArt';
 import { hexColor, setText, type HudKit, type Slice, type Spr } from './hudKit';
 import { HUD, VIEW_W } from './layout';
@@ -53,7 +54,8 @@ class Ribbon {
       this.text.setVisible(false);
       return;
     }
-    const sig = `${line.tone}|${line.icon}|${line.text}|${cy}`;
+    // 폰트 세대도 넣는다: 늦게 받은 폰트로 글자 폭이 바뀌면 리본 폭을 다시 잰다
+    const sig = `${fontGeneration()}|${line.tone}|${line.icon}|${line.text}|${cy}`;
     if (sig === this.sig) return;
     this.sig = sig;
     const t = TONE[line.tone];
@@ -76,6 +78,8 @@ export class Banners {
   private shown: Item[] = [];
   private notes: { text: string; ms: number }[] = [];
   private noteUntil = 0;
+  /** 메모 상자 폭을 잰 폰트 세대 */
+  private noteGen = 0;
   /** 디버그 · 테스트: 지금 보이는 문구들 (지속형 · 알림 · 메모. 괴물 경고 줄은 넣지 않는다) */
   visible: string[] = [];
 
@@ -130,6 +134,8 @@ export class Banners {
       } else {
         this.showNote('');
       }
+    } else if (this.noteGen !== fontGeneration() && this.note.text.visible) {
+      this.showNote(this.note.text.text);
     }
     this.visible = [
       ...(persistent ? [persistent.text] : []),
@@ -141,6 +147,7 @@ export class Banners {
   /** 메모 상자: 가운데 위, 글자에 맞춘 판 + 왼쪽 연필 아이콘 (벽에 새긴 글) */
   private showNote(text: string): void {
     const N = this.note;
+    this.noteGen = fontGeneration();
     if (!text) {
       N.plate.show(false);
       N.icon.show(false);

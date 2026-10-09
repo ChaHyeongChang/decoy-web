@@ -72,16 +72,51 @@ async function contrastAudit(page: Page, rootSel: string): Promise<Audit> {
         return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
       };
       const hex = (c: C): string => `rgb(${c.slice(0, 3).map(Math.round).join(',')})`;
-      const bgUnder = (el: Element): C => {
-        const layers: C[] = [];
+      // 실효 바탕 후보: 조상 배경색을 합성하고, background-image(그라디언트 · 해치)의 색 정지점마다
+      // 그 색이 깔린 자리도 후보로 둔다(글자가 해치 줄 위에 올 수 있다). 대비는 후보 중 가장 나쁜 값으로 잰다.
+      // 왼쪽 가장자리 띠(linear-gradient(90deg, 색 0 Npx, transparent Npx))는 글자가 그 띠에 걸칠 때만 센다
+      const gradients = (img: string): string[] =>
+        img === 'none'
+          ? []
+          : (img.match(/(?:repeating-)?(?:linear|radial|conic)-gradient\((?:[^()]|\([^()]*\))*\)/g) ?? []);
+      const colorsOf = (g: string): C[] =>
+        (g.match(/rgba?\([^)]+\)/g) ?? []).map(parse).filter((c) => c[3] > 0);
+      /** 왼쪽 가장자리 띠의 폭 (px). 띠가 아니면 null */
+      const edgeBand = (g: string): number | null => {
+        if (!g.startsWith('linear-gradient(90deg,') || g.includes('%')) return null;
+        let band = 0;
+        for (const m of g.matchAll(/(rgba?\([^)]+\))\s+(-?[\d.]+)px/g))
+          if (parse(m[1]!)[3] > 0) band = Math.max(band, Number(m[2]));
+        return band;
+      };
+      const stopsUnder = (layer: Element, text: Element): C[] => {
+        const out: C[] = [];
+        for (const g of gradients(getComputedStyle(layer).backgroundImage)) {
+          const band = edgeBand(g);
+          if (band !== null && text.getBoundingClientRect().left >= layer.getBoundingClientRect().left + band)
+            continue;
+          out.push(...colorsOf(g));
+        }
+        return out;
+      };
+      const bgUnder = (el: Element): C[] => {
+        const layers: { c: C; stops: C[] }[] = [];
         for (let n: Element | null = el; n; n = n.parentElement) {
           const c = parse(getComputedStyle(n).backgroundColor);
-          if (c[3] > 0) layers.push(c);
+          const stops = stopsUnder(n, el);
+          if (c[3] > 0 || stops.length > 0) layers.push({ c, stops });
           if (c[3] >= 1) break;
         }
-        let acc: C = [11, 22, 34, 1];
-        for (const l of layers.reverse()) acc = over(l, acc);
-        return acc;
+        let cands: C[] = [[11, 22, 34, 1]];
+        for (const l of layers.reverse()) {
+          const next = new Map<string, C>();
+          for (const acc of cands) {
+            const base = l.c[3] > 0 ? over(l.c, acc) : acc;
+            for (const v of [base, ...l.stops.map((st) => over(st, base))]) next.set(hex(v), v);
+          }
+          cands = [...next.values()].slice(0, 64);
+        }
+        return cands;
       };
       const opacityOf = (el: Element): number => {
         let o = 1;
@@ -106,10 +141,16 @@ async function contrastAudit(page: Page, rootSel: string): Promise<Audit> {
         const size = parseFloat(cs.fontSize);
         const large = size >= 24 || (size >= 18.66 && Number(cs.fontWeight) >= 700);
         const need = large ? 3 : 4.5;
-        const bg = bgUnder(el);
         const fgRaw = parse(color);
-        const fg = over([fgRaw[0], fgRaw[1], fgRaw[2], fgRaw[3] * opacityOf(el)], bg);
-        const r = ratio(fg, bg);
+        const fgA = fgRaw[3] * opacityOf(el);
+        let bg: C = [0, 0, 0, 1];
+        let fg: C = bg;
+        let r = Infinity;
+        for (const b of bgUnder(el)) {
+          const f = over([fgRaw[0], fgRaw[1], fgRaw[2], fgA], b);
+          const v = ratio(f, b);
+          if (v < r) [r, bg, fg] = [v, b, f];
+        }
         checked += 1;
         if (r < min) {
           min = r;
@@ -232,8 +273,14 @@ test('진행 중인 판에 새로고침으로 다시 들어오면 폰트를 기�
   });
   expect(startedAt).toBeLessThan(3000);
 
+  // 대체 글꼴로 잰 타이머 숫자 칸 (폰트 세대 0)
+  expect((await page.evaluate(() => window.__DECOY__?.getHud() ?? {})).timerFontGen).toBe(0);
   release();
   await expect.poll(() => page.evaluate(() => window.__DECOY__?.fonts.ready ?? false)).toBe(true);
+  // 늦게 받은 폰트로 글자를 다시 그리고, 글자 폭으로 정한 배치(타이머 숫자 칸)도 다시 잰다
+  await expect
+    .poll(() => page.evaluate(() => window.__DECOY__?.getHud().timerFontGen ?? -1), { intervals: [100] })
+    .toBe(1);
   await waitForSnapshots(page, 5);
   expect(problems).toEqual([]);
   await context.close();
@@ -303,9 +350,15 @@ test('로비: 보이는 모든 글자 대비 4.5:1(큰 글자 3:1), 고른 카�
   // 고른 카드의 테두리 = 괴물 역할색
   expect(lm.ring).toBe('rgb(239, 68, 68)');
   expect(lf.ring).not.toBe(lm.ring);
-  // 남의 카드를 눌러도 아무 일 없다
+  // 남의 카드를 눌러도 아무 일 없다. 같은 연결로 왕복(준비)을 하나 끝낸 뒤에 본다
+  // (서버는 한 연결의 메시지를 순서대로 처리하므로, 잘못 보낸 역할 변경이 있었다면 이미 반영되어 있다)
   await taken.click({ force: true });
+  await host.page.getByTestId('ready-button').click();
+  await expect(host.page.getByTestId('ready-button')).toHaveText('준비 취소');
   await expect(mine).toHaveClass(/mine/);
+  await expect(mine).toHaveAttribute('aria-pressed', 'true');
+  await expect(taken).toHaveClass(/taken/);
+  await expect(taken.locator('.role-owner')).toContainText(p2Name);
 
   // 키보드: 고른 카드에 포커스가 오면 테두리가 밝아지고(mine 표시와 달라야 한다), 남이 역할을 골라
   // 방 화면이 다시 그려져도 포커스가 같은 카드에 남는다

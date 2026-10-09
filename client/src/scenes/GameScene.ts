@@ -125,6 +125,16 @@ export class GameScene extends Phaser.Scene {
     const hudGraphics = this.children.list.filter(
       (o) => o instanceof Phaser.GameObjects.Graphics && o.depth >= 38 && !this.screenFx.owns(o),
     ).length;
+    // 늘 떠 있는 HUD(미니맵 39~41 · HUD 40~42)에 실제로 그려진 그림 · 글자의 자리 (논리 px). 부품이 스스로 신고한
+    // 배치 값이 아니라 표시 목록에서 직접 잰다 (E2E: 맵 사각형과 겹치지 않음)
+    const r1 = (v: number): number => Math.round(v * 10) / 10;
+    const drawn: [number, number, number, number][] = [];
+    for (const o of this.children.list) {
+      if (!(o instanceof Phaser.GameObjects.Image || o instanceof Phaser.GameObjects.Text)) continue;
+      if (!o.visible || o.alpha === 0 || o.depth < 39 || o.depth >= 43 || this.screenFx.owns(o)) continue;
+      const b = o.getBounds();
+      if (b.width > 0 && b.height > 0) drawn.push([r1(b.x), r1(b.y), r1(b.width), r1(b.height)]);
+    }
     return {
       bakes: this.kit.bakes,
       ...this.hud.debug(),
@@ -133,7 +143,8 @@ export class GameScene extends Phaser.Scene {
       help: this.tutorial?.visible ?? false,
       spotted: this.spottedEdge.shown,
       hudGraphics,
-      panels: JSON.stringify([...this.hud.panels(), this.minimap.bounds]),
+      panels: JSON.stringify(drawn),
+      missingFrames: [...this.kit.missing].sort().join(','),
     };
   }
 

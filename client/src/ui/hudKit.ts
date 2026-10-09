@@ -8,6 +8,7 @@
 import Phaser from 'phaser';
 import { gfxState } from '../gfx/state';
 import { createCanvasTexture, makeCanvas, nextFogKey, removeCanvasTexture } from '../render/fogPaint';
+import { fontGeneration } from './fonts';
 import { hudSpecs, packShelves, sliceSpans, type AtlasSpec } from './hudArt';
 import { UI_FONT, makeText, type CrispText } from './text';
 
@@ -167,6 +168,9 @@ export class HudKit {
     return this.atlas.zoom;
   }
 
+  /** 아틀라스에 없는 프레임을 요청한 이름들 (조용히 숨겨지므로 디버그 · E2E로 잡는다) */
+  readonly missing = new Set<string>();
+
   /** 페이지를 연 뒤 HUD 아틀라스를 구운 누적 횟수 */
   get bakes(): number {
     return bakeCount;
@@ -223,8 +227,10 @@ export function setText(t: CrispText, value: string, color?: number): void {
 
 /** 이름이 칸보다 길면 뒤를 줄인다 (이름이 바뀔 때만) */
 export function fitText(t: CrispText, value: string, maxW: number): void {
-  if (t.getData('full') === value) return;
-  t.setData('full', value);
+  // 폰트 세대를 열쇠에 넣는다: 늦게 받은 폰트로 폭이 바뀌면 다시 줄인다
+  const key = `${fontGeneration()}|${value}`;
+  if (t.getData('full') === key) return;
+  t.setData('full', key);
   t.setText(value);
   let s = value;
   while (t.width > maxW && s.length > 1) {
@@ -276,6 +282,7 @@ export class Spr implements Prim {
   apply(): void {
     const f = this.kit.frame(this.name);
     const img = this.img;
+    if (this.on && !f) this.kit.missing.add(this.name);
     if (!f || !this.on) {
       img.setVisible(false);
       return;
@@ -347,6 +354,7 @@ export class Slice implements Prim {
 
   apply(): void {
     const k = this.kit.kitInfo(this.name);
+    if (this.on && !k) this.kit.missing.add(this.name);
     if (!k || !this.on) {
       for (const i of this.imgs) i.setVisible(false);
       return;
@@ -409,8 +417,10 @@ export class Slice implements Prim {
 export class Digits {
   private readonly cells: CrispText[] = [];
   private readonly at: number[] = [];
-  private readonly digitW: number;
-  private readonly sepW: number;
+  private digitW = 0;
+  private sepW = 0;
+  /** 칸 폭을 잰 폰트 세대 (늦게 받은 폰트면 다시 잰다) */
+  private gen = -1;
   private value = '';
   private color = -1;
   width = 0;
@@ -420,12 +430,21 @@ export class Digits {
     private readonly size: number,
     private readonly depth: number,
   ) {
+    this.remeasure();
+  }
+
+  /** 지금 글꼴로 숫자 · 구분자 칸 폭을 잰다 (세대가 같으면 그대로) */
+  private remeasure(): void {
+    const gen = fontGeneration();
+    if (gen === this.gen) return;
+    this.gen = gen;
     const { ctx } = makeCanvas(1, 1);
-    ctx.font = `bold ${size}px ${UI_FONT}`;
+    ctx.font = `bold ${this.size}px ${UI_FONT}`;
     let w = 0;
     for (let d = 0; d <= 9; d += 1) w = Math.max(w, ctx.measureText(String(d)).width);
     this.digitW = Math.ceil(w);
-    this.sepW = Math.ceil(ctx.measureText(':').width + size * 0.08);
+    this.sepW = Math.ceil(ctx.measureText(':').width + this.size * 0.08);
+    this.at.length = 0;
   }
 
   private cellW(ch: string): number {
@@ -434,6 +453,7 @@ export class Digits {
 
   /** 글자 폭 (배치 계산용) */
   measure(text: string): number {
+    this.remeasure();
     let w = 0;
     for (const ch of text) w += this.cellW(ch);
     return w;
@@ -441,6 +461,7 @@ export class Digits {
 
   /** 왼쪽 x에서 시작, 세로 가운데 y */
   set(text: string, x: number, y: number, color: number): void {
+    this.remeasure();
     const chars = [...text];
     while (this.cells.length < chars.length)
       this.cells.push(this.kit.text(0, 0, this.size, color, this.depth, true).setOrigin(0.5, 0.5));
@@ -467,6 +488,11 @@ export class Digits {
 
   get text(): string {
     return this.value;
+  }
+
+  /** 칸 폭을 잰 폰트 세대 (디버그 · E2E: 늦게 받은 폰트로 다시 쟀는가) */
+  get measuredGen(): number {
+    return this.gen;
   }
 
   show(on: boolean): void {

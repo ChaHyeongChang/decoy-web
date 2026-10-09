@@ -148,8 +148,11 @@ describe('loadUiFonts', () => {
     expect(f.uiFontsReady()).toBe(false);
     const p = f.loadUiFonts();
     expect(f.loadUiFonts()).toBe(p);
+    expect(f.fontGeneration()).toBe(0);
     expect(await p).toBe(true);
     expect(f.uiFontsReady()).toBe(true);
+    // 받으면 폰트 세대가 한 번 바뀐다 (글자 폭 캐시가 다시 잰다)
+    expect(f.fontGeneration()).toBe(1);
     expect(fake.load).toHaveBeenCalledTimes(f.UI_FONT_WEIGHTS.length);
     for (const w of f.UI_FONT_WEIGHTS)
       expect(fake.load).toHaveBeenCalledWith(`${w} 16px '${UI_FONT_FAMILY}'`, expect.any(String));
@@ -162,6 +165,7 @@ describe('loadUiFonts', () => {
     });
     expect(await f.loadUiFonts()).toBe(false);
     expect(f.uiFontsReady()).toBe(false);
+    expect(f.fontGeneration()).toBe(0);
     f = await freshFonts({ load: vi.fn(() => Promise.resolve([])), check: vi.fn(() => true) });
     expect(await f.loadUiFonts()).toBe(false);
   });
@@ -182,10 +186,16 @@ describe('loadUiFonts', () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(await p).toBe(false);
     expect(f.uiFontsReady()).toBe(false);
+    expect(f.fontGeneration()).toBe(0);
+    let genAtLate = -1;
+    late.mockImplementation(() => (genAtLate = f.fontGeneration()));
     finish([{}]);
     await vi.advanceTimersByTimeAsync(0);
     expect(f.uiFontsReady()).toBe(true);
     expect(late).toHaveBeenCalledTimes(1);
+    // 늦게 받아도 세대가 바뀌고, 알림을 부르기 전에 바뀐다 (다시 그리는 쪽이 새 세대로 다시 잰다)
+    expect(f.fontGeneration()).toBe(1);
+    expect(genAtLate).toBe(1);
   });
 
   it('제한 안에 받으면 onUiFontsLate는 부르지 않는다', async () => {

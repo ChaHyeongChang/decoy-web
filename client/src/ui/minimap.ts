@@ -80,12 +80,6 @@ export class Minimap {
     scene.events.once(Phaser.Scenes.Events.SHUTDOWN, off);
   }
 
-  /** 틀 자리 (논리 px [x, y, w, h]) */
-  get bounds(): [number, number, number, number] {
-    const M = HUD.minimap;
-    return [M.x - M.pad, M.y - M.title, this.w + M.pad * 2, this.h + M.title + M.pad];
-  }
-
   /** 백버퍼 배율이 바뀌었으면 캔버스를 그 배율로 다시 잡는다 (다음 바닥 갱신 때 다시 그려진다) */
   private applyScale(): void {
     this.resizePending = false;

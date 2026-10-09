@@ -4,6 +4,7 @@ import type { AnonStatus, Balance, MatchInfo, Snapshot } from '@decoy/shared';
 import { CONTROLS, HUD_TEXT, ROLE_CARDS } from '../data/storyText';
 import { UI } from '../art/palette';
 import { ABILITY_ICON, ACCENT, FR, HC, STATUS_LOOK, parseControl, teamCards } from './hudArt';
+import { fontGeneration } from './fonts';
 import { Slice, Spr, fitText, setText, type HudKit } from './hudKit';
 import { HUD, VIEW_W } from './layout';
 import type { CrispText } from './text';
@@ -19,77 +20,125 @@ function showPart(p: Part, on: boolean): void {
   else p.setVisible(on);
 }
 
-/** 조작 안내 줄들 (키캡 + 덧말 + 설명, 목표 문장은 아이콘 + 글자). 만들 때 한 번 배치하고 place로 옮긴다 */
-class ControlsBlock {
-  private readonly items: (
-    | { k: 'kc'; s: Slice; dx: number; dy: number; w: number }
-    | { k: 'spr'; s: Spr; frame: string; dx: number; dy: number }
-    | { k: 'txt'; t: CrispText; dx: number; dy: number }
-  )[] = [];
-  readonly width: number;
-  readonly height: number;
+/** 키 조각 하나: 키캡 + 키 글자 + (덧말) + 설명 */
+interface KeyPair {
+  kc: Slice;
+  key: CrispText;
+  note: CrispText | null;
+  desc: CrispText;
+  /** 배치 결과 (블록 왼쪽 위 기준 논리 px) */
+  x: number;
+  kw: number;
+}
 
-  constructor(kit: HudKit, lines: readonly string[], goalIcon: string) {
-    let maxW = 0;
-    /** 줄마다 키 조각 k의 폭 → 열 k의 시작은 모든 줄의 앞 조각이 끝난 뒤 (키캡이 세로로 맞는다) */
-    const colW: number[] = [];
-    const cols: number[] = [];
-    const text = (
-      dx: number,
-      dy: number,
-      size: number,
-      color: number,
-      value: string,
-      bold = false,
-    ): CrispText => {
-      const t = kit.text(0, 0, size, color, DEPTH + 2, bold).setText(value);
-      this.items.push({ k: 'txt', t, dx, dy });
-      return t;
-    };
-    lines.forEach((line, row) => {
-      const dy = row * ROW;
+type ControlLine = { k: 'goal'; spr: Spr; text: CrispText } | { k: 'pairs'; pairs: KeyPair[] };
+
+/**
+ * 조작 안내 줄들 (키캡 + 덧말 + 설명, 목표 문장은 아이콘 + 글자). 글자 폭으로 열을 맞추고 place로 옮긴다.
+ * 폰트가 늦게 오면(세대가 바뀌면) layout()으로 다시 잰다
+ */
+class ControlsBlock {
+  private readonly lines: ControlLine[] = [];
+  private gen = -1;
+  width = 0;
+  height = 0;
+
+  constructor(
+    kit: HudKit,
+    lines: readonly string[],
+    private readonly goalIcon: string,
+  ) {
+    const text = (size: number, color: number, value: string, bold = false): CrispText =>
+      kit.text(0, 0, size, color, DEPTH + 2, bold).setText(value);
+    for (const line of lines) {
       const r = parseControl(line);
       if (r.kind === 'goal') {
-        this.items.push({ k: 'spr', s: kit.spr(DEPTH + 1), frame: goalIcon, dx: 9, dy: dy + 13 });
-        maxW = Math.max(maxW, 28 + text(28, dy + 2, 17, UI.textDim, r.text).width);
-        return;
+        this.lines.push({ k: 'goal', spr: kit.spr(DEPTH + 1), text: text(17, UI.textDim, r.text) });
+        continue;
       }
-      r.pairs.forEach((p, k) => {
-        const from = this.items.length;
-        const key = text(0, dy + 13.5, 15, UI.text, p.key, true).setOrigin(0.5, 0.5);
-        const kw = Math.max(30, Math.ceil(key.width) + 18);
-        const last = this.items[this.items.length - 1];
-        if (last?.k === 'txt') last.dx = kw / 2;
-        this.items.push({ k: 'kc', s: kit.slice(DEPTH + 1), dx: 0, dy: dy + 1, w: kw });
-        let x = kw + 10;
-        if (p.note) x += Math.ceil(text(x, dy + 4, 15, UI.textDim, p.note).width) + 8;
-        x += Math.ceil(text(x, dy + 2, 18, UI.text, p.desc).width);
-        colW[k] = Math.max(colW[k] ?? 0, x);
-        for (let i = from; i < this.items.length; i += 1) cols[i] = k;
+      this.lines.push({
+        k: 'pairs',
+        pairs: r.pairs.map((p) => ({
+          kc: kit.slice(DEPTH + 1),
+          key: text(15, UI.text, p.key, true).setOrigin(0.5, 0.5),
+          note: p.note ? text(15, UI.textDim, p.note) : null,
+          desc: text(18, UI.text, p.desc),
+          x: 0,
+          kw: 0,
+        })),
       });
-    });
+    }
+    this.layout();
+  }
+
+  /** 폰트 세대가 바뀌었으면 다시 잰다 (true = 다시 쟀다) */
+  relayoutIfStale(): boolean {
+    if (this.gen === fontGeneration()) return false;
+    this.layout();
+    return true;
+  }
+
+  /** 줄마다 키 조각 k의 폭 → 열 k의 시작은 모든 줄의 앞 조각이 끝난 뒤 (키캡이 세로로 맞는다) */
+  private layout(): void {
+    this.gen = fontGeneration();
+    let maxW = 0;
+    const colW: number[] = [];
+    for (const line of this.lines) {
+      if (line.k === 'goal') {
+        maxW = Math.max(maxW, 28 + line.text.width);
+        continue;
+      }
+      line.pairs.forEach((p, k) => {
+        p.kw = Math.max(30, Math.ceil(p.key.width) + 18);
+        let x = p.kw + 10;
+        if (p.note) x += Math.ceil(p.note.width) + 8;
+        x += Math.ceil(p.desc.width);
+        colW[k] = Math.max(colW[k] ?? 0, x);
+      });
+    }
     const start = colW.map((_, k) => colW.slice(0, k).reduce((a, w) => a + w + 34, 0));
-    this.items.forEach((it, i) => {
-      const k = cols[i];
-      if (k !== undefined) it.dx += start[k] ?? 0;
-    });
+    for (const line of this.lines)
+      if (line.k === 'pairs') line.pairs.forEach((p, k) => (p.x = start[k] ?? 0));
     const last = colW.length - 1;
     this.width = Math.max(maxW, (start[last] ?? 0) + (colW[last] ?? 0));
-    this.height = lines.length * ROW - 8;
+    this.height = this.lines.length * ROW - 8;
   }
 
   place(x: number, y: number): void {
-    for (const it of this.items) {
-      if (it.k === 'kc') it.s.set('kc', x + it.dx, y + it.dy, it.w, 24);
-      else if (it.k === 'spr') it.s.set(it.frame, x + it.dx, y + it.dy);
-      else it.t.setPosition(x + it.dx, y + it.dy);
-    }
+    this.lines.forEach((line, row) => {
+      const dy = y + row * ROW;
+      if (line.k === 'goal') {
+        line.spr.set(this.goalIcon, x + 9, dy + 13);
+        line.text.setPosition(x + 28, dy + 2);
+        return;
+      }
+      for (const p of line.pairs) {
+        const px = x + p.x;
+        p.kc.set('kc', px, dy + 1, p.kw, 24);
+        p.key.setPosition(px + p.kw / 2, dy + 13.5);
+        let tx = px + p.kw + 10;
+        if (p.note) {
+          p.note.setPosition(tx, dy + 4);
+          tx += Math.ceil(p.note.width) + 8;
+        }
+        p.desc.setPosition(tx, dy + 2);
+      }
+    });
   }
 
   show(on: boolean): void {
-    for (const it of this.items) {
-      if (it.k === 'txt') it.t.setVisible(on);
-      else it.s.show(on);
+    for (const line of this.lines) {
+      if (line.k === 'goal') {
+        line.spr.show(on);
+        line.text.setVisible(on);
+        continue;
+      }
+      for (const p of line.pairs) {
+        p.kc.show(on);
+        p.key.setVisible(on);
+        p.note?.setVisible(on);
+        p.desc.setVisible(on);
+      }
     }
   }
 }
@@ -122,22 +171,40 @@ export class TutorialOverlay {
   private readonly panel: Panel;
   private readonly parts: Part[] = [];
   private readonly controls: ControlsBlock;
+  private readonly glyph: Spr;
+  private readonly name: CrispText;
+  private readonly ability: CrispText;
+  private readonly close: CrispText;
+  private gen = -1;
   private until = 0;
   private on = false;
 
-  constructor(kit: HudKit, info: MatchInfo) {
+  constructor(
+    kit: HudKit,
+    private readonly info: MatchInfo,
+  ) {
     const team = info.role === 'monster' ? 'monster' : 'survivor';
     const card = ROLE_CARDS[info.role];
     this.panel = new Panel(kit);
-    const glyph = kit.spr(DEPTH + 1);
-    const name = kit.text(0, 0, 24, ACCENT[info.role].text, DEPTH + 2, true).setText(card.name);
-    const ability = kit.text(0, 0, 18, UI.text, DEPTH + 2).setText(card.ability);
-    const close = kit.text(0, 0, 15, UI.textDim, DEPTH + 2).setText(HUD_TEXT.closeHint);
+    this.glyph = kit.spr(DEPTH + 1);
+    this.name = kit.text(0, 0, 24, ACCENT[info.role].text, DEPTH + 2, true).setText(card.name);
+    this.ability = kit.text(0, 0, 18, UI.text, DEPTH + 2).setText(card.ability);
+    this.close = kit.text(0, 0, 15, UI.textDim, DEPTH + 2).setText(HUD_TEXT.closeHint);
     this.controls = new ControlsBlock(
       kit,
       CONTROLS[team],
       team === 'monster' ? FR.icon('attack', HC.red, 18) : FR.icon('point', 0x22d3ee, 18),
     );
+    this.layout();
+    this.parts.push(this.glyph, this.name, this.ability, this.close);
+    this.apply(false);
+  }
+
+  /** 글자 폭으로 패널 크기 · 자리를 정한다 (폰트가 늦게 오면 다시) */
+  private layout(): void {
+    this.gen = fontGeneration();
+    this.controls.relayoutIfStale();
+    const { glyph, name, ability, close, info } = this;
     const headW = 44 + Math.ceil(name.width) + 16 + Math.ceil(ability.width);
     const w = Math.max(headW, this.controls.width, close.width) + PAD * 2;
     const h = 22 + 40 + 18 + this.controls.height + 22 + 24 + 22;
@@ -151,8 +218,6 @@ export class TutorialOverlay {
     this.controls.place(x + PAD, y + 22 + 40 + 18);
     this.panel.rule(1, x + PAD - 8, y + h - 22 - 24 - 10, w - PAD * 2 + 16);
     close.setPosition(x + PAD, y + h - 22 - 20);
-    this.parts.push(glyph, name, ability, close);
-    this.apply(false);
   }
 
   private apply(on: boolean): void {
@@ -171,6 +236,7 @@ export class TutorialOverlay {
   update(nowMs: number, close: boolean): void {
     if (!this.on) return;
     if (close || nowMs >= this.until) this.apply(false);
+    else if (this.gen !== fontGeneration()) this.layout();
   }
 
   get visible(): boolean {
@@ -199,7 +265,7 @@ export class Scoreboard {
   private readonly title: CrispText;
   private readonly rows: Row[] = [];
   private readonly controls: ControlsBlock;
-  private readonly w: number;
+  private w: number;
   private readonly cols: typeof COLS_TEAM;
   private on = false;
   private last = '';
@@ -324,6 +390,11 @@ export class Scoreboard {
           ab: '',
           abIcon: '',
         });
+    }
+    // 폰트가 늦게 왔으면 조작 안내 열 · 패널 폭을 다시 재고 전부 다시 놓는다
+    if (this.controls.relayoutIfStale()) {
+      this.w = Math.max(this.cols.w, this.controls.width) + PAD * 2;
+      this.last = '';
     }
     const sig = JSON.stringify(rows);
     if (sig === this.last && this.on) return;

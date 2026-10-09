@@ -13,6 +13,8 @@ export const UI_FONT_WEIGHTS = ['400', '500', '700', '800'] as const;
 const SAMPLE = 'DECOY 생존자 괴물 0123';
 
 let ready = false;
+/** 폰트 세대: 받기 전 0, 받으면 1. 글자 폭으로 배치를 정한 부품은 세대가 바뀌면 다시 잰다(늦게 받은 폰트) */
+let generation = 0;
 
 /** 판 장면을 시작할 때 폰트가 준비되어 있었는가 (디버그 · E2E. 아직 시작 전이면 null) */
 export const fontState: { atSceneStart: boolean | null } = { atSceneStart: null };
@@ -22,6 +24,11 @@ const lateListeners: (() => void)[] = [];
 /** UI 폰트를 다 받았는가 (판 장면은 시작 전에 이것을 확인한다) */
 export function uiFontsReady(): boolean {
   return ready;
+}
+
+/** 지금 폰트 세대 (글자 폭 캐시의 열쇠에 넣는다) */
+export function fontGeneration(): number {
+  return generation;
 }
 
 /**
@@ -52,12 +59,16 @@ export function loadUiFonts(timeoutMs = 3000): Promise<boolean> {
     if (!ok || !settled || ready) return;
     // 시간 제한 뒤에 도착
     ready = true;
+    generation += 1;
     for (const cb of lateListeners.splice(0)) cb();
   });
   const timeout = new Promise<boolean>((resolve) => window.setTimeout(() => resolve(false), timeoutMs));
   pending = Promise.race([load, timeout]).then((ok) => {
     settled = true;
-    if (ok) ready = true;
+    if (ok && !ready) {
+      ready = true;
+      generation += 1;
+    }
     return ok;
   });
   return pending;

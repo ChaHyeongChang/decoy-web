@@ -86,6 +86,8 @@ test('생존자 HUD: 맵과 겹치지 않음 · Tab이면 조작 안내가 닫�
   const resized = await hud(page);
   expect(Number(resized.bakes)).toBe(b0 + 1);
   expectOffMap(resized, '생존자 1280×720');
+  // 아틀라스에 없는 프레임을 요청해 조용히 숨겨진 그림이 없다
+  expect(resized.missingFrames).toBe('');
   expect(problems).toEqual([]);
   await context.close();
 });
@@ -99,6 +101,8 @@ test('괴물 HUD는 익명 · 거점 정지 · 완료 상태 칩 (디버그 값 
   const runner = players.find((p) => p.role === 'runner')!;
   const scout = players.find((p) => p.role === 'scout')!;
   const host = monster.page;
+  // 시작 대기(5초)가 저절로 흐르지 않게 괴물을 붙잡아 둔다 (느린 러너에서 안내 줄을 읽기 전에 깨어나지 않게)
+  await sendTest(host, { kind: 'freeze', target: monster.id, frozen: true });
   for (const p of [monster, runner]) await p.page.setViewportSize({ width: 1920, height: 1080 });
   await sendTest(host, { kind: 'setSurvivor', target: scout.id, hp: 1, imprisonCount: 1 });
 
@@ -118,9 +122,10 @@ test('괴물 HUD는 익명 · 거점 정지 · 완료 상태 칩 (디버그 값 
     expect(String(mon.cardText)).not.toContain(n);
     expect(String(mon.scoreText)).not.toContain(n);
   }
-  // 시작 대기(5초) 동안은 행동 칸 자리에 안내 줄, 끝나면 행동 칸 네 개
+  // 시작 대기 동안은 행동 칸 자리에 안내 줄, 깨어나면 행동 칸 네 개
   expect(String(mon.hint)).toContain('괴물이 깨어나기까지');
   expectOffMap(mon, '괴물 (대기)');
+  await sendTest(host, { kind: 'freeze', target: monster.id, frozen: false });
   await host.waitForFunction(() => window.__DECOY__?.getHud().hint === '', null, {
     polling: 100,
     timeout: 15_000,
@@ -131,6 +136,11 @@ test('괴물 HUD는 익명 · 거점 정지 · 완료 상태 칩 (디버그 값 
   expect(awake.hudGraphics).toBe(0);
 
   // 거점 A 완료(✓ 칩) · B 정지(주황 + ‖ 칩). 정지는 괴물이 들어간 뒤 유예(5초) 전에 잰다 (느린 러너는 다시)
+  // 굽기 기준값: 러너 창을 키운 뒤의 다시 굽기(배율 0.5 → 1)가 끝난 다음에 읽는다
+  await runner.page.waitForFunction(() => window.__DECOY__?.gfx.zoom === 1, null, { polling: 100 });
+  await runner.page.evaluate(
+    () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null)))),
+  );
   const bakes = Number((await hud(runner.page)).bakes);
   // 완료는 안에 생존자가 있어 점령이 진행될 때 판정된다
   await sendTest(host, { kind: 'setPoint', point: 'A', progress: 1 });
@@ -141,44 +151,75 @@ test('괴물 HUD는 익명 · 거점 정지 · 완료 상태 칩 (디버그 값 
   const G = HUD.gauge;
   const chipA = { x: HUD.gaugeA.x + G.dia + G.gap, y: HUD.gaugeA.y - G.chip / 2 };
   const chipB = { x: HUD.gaugeB.x - G.dia - G.gap - G.chip, y: HUD.gaugeB.y - G.chip / 2 };
-  let paused: { info: HudInfo; orange: number; cyanA: number } | null = null;
+  let paused: ({ info: HudInfo } & ChipPixels) | null = null;
   for (let attempt = 1; attempt <= 3 && !paused; attempt += 1) {
     await sendTest(host, { kind: 'teleport', target: monster.id, x: 44.5, y: 12.5, face: 0 });
-    await host.waitForTimeout(300);
+    // 서버가 B 밖 위치로 한 틱을 돌아 지키기 시간이 0으로 돌아간 뒤에 다시 들여보낸다 (고정 대기 대신 스냅샷으로 확인)
+    await host.waitForFunction(
+      () => {
+        const m = window.__DECOY__?.getLastSnapshot()?.you.move;
+        return !!m && Math.abs(m.x - 44.5) < 0.05 && Math.abs(m.y - 12.5) < 0.05;
+      },
+      null,
+      { polling: 50 },
+    );
     await sendTest(host, { kind: 'setPoint', point: 'B', progress: 0.4 });
     await sendTest(host, { kind: 'teleport', target: scout.id, x: 40, y: 14.6 });
     await sendTest(host, { kind: 'teleport', target: monster.id, x: 41.5, y: 17.5, face: Math.PI });
-    await runner.page.waitForFunction(() => window.__DECOY__?.getHud().pointB === 'paused', null, {
-      polling: 100,
-      timeout: 4000,
-    });
+    const seen = await runner.page
+      .waitForFunction(() => window.__DECOY__?.getHud().pointB === 'paused', null, {
+        polling: 100,
+        timeout: 4000,
+      })
+      .then(
+        () => true,
+        () => false,
+      );
+    if (!seen && attempt < 3) continue;
     await runner.page.waitForTimeout(150);
     const png = await runner.page.screenshot();
     const counts = await countChipPixels(runner.page, png, chipA, chipB, G.chip);
     const info = await hud(runner.page);
     if (info.pointB === 'paused' || attempt === 3) paused = { info, ...counts };
   }
-  console.log(`[m10-hud] 정지 칩 주황 픽셀 ${paused?.orange}, 완료 칩 청록 픽셀 ${paused?.cyanA}`);
+  console.log(`[m10-hud] 칩 아이콘 칸 픽셀: ${JSON.stringify(paused && { ...paused, info: undefined })}`);
   expect(paused?.info.pointB).toBe('paused');
-  expect(paused?.info.pointBIcon).toBe('pause');
+  expect(paused?.info.pointBChip).toBe('chip:paused');
   expect(paused?.info.pointA).toBe('done');
-  expect(paused?.info.pointAIcon).toBe('check');
-  expect(paused?.orange ?? 0).toBeGreaterThanOrEqual(20);
-  expect(paused?.cyanA ?? 0).toBeGreaterThanOrEqual(20);
+  expect(paused?.info.pointAChip).toBe('chip:done');
+  // 칩 테두리를 뺀 아이콘 칸만 센다: 정지 ‖ 는 두 막대(가운데 열은 비어 있음), 완료 ✓ 는 청록 선
+  expect(paused?.orange ?? 0).toBeGreaterThanOrEqual(12);
+  expect(paused?.orangeMid ?? 99).toBeLessThanOrEqual(Math.floor((paused?.orange ?? 0) / 6));
+  expect(paused?.cyanA ?? 0).toBeGreaterThanOrEqual(12);
   // 상태가 바뀌어도(점령 완료 · 정지 · 부상) 프레임만 바꾼다
-  expect((await hud(runner.page)).bakes).toBe(bakes);
+  const last = await hud(runner.page);
+  expect(last.bakes).toBe(bakes);
+  expect(last.missingFrames).toBe('');
+  expect((await hud(host)).missingFrames).toBe('');
   for (const p of players) expect(p.problems).toEqual([]);
   await closeAll(players);
 });
 
-/** 칩 자리(논리 = CSS px, 창 1920×1080)의 주황(B 정지) · 청록(A 완료) 픽셀 수 */
+interface ChipPixels {
+  /** B 정지 칩 아이콘 칸의 주황 픽셀 */
+  orange: number;
+  /** 그중 가운데 두 열 (‖ 의 두 막대 사이라 비어 있어야 한다) */
+  orangeMid: number;
+  /** A 완료 칩 아이콘 칸의 청록 픽셀 */
+  cyanA: number;
+}
+
+/**
+ * 칩 자리(논리 = CSS px, 창 1920×1080)의 아이콘 칸만 센다. 칩 테두리(상태색 선)는 빼야 아이콘이 빠져도 잡힌다:
+ * 아이콘은 칩 가운데 ±8에 그린다(hudArt chip)
+ */
 async function countChipPixels(
   page: Page,
   png: Buffer,
   a: { x: number; y: number },
   b: { x: number; y: number },
   size: number,
-): Promise<{ orange: number; cyanA: number }> {
+): Promise<ChipPixels> {
   return page.evaluate(
     async ({ b64, a, b, size }) => {
       const img = await createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob());
@@ -188,17 +229,26 @@ async function countChipPixels(
       const ctx = c.getContext('2d', { willReadFrequently: true });
       if (!ctx) throw new Error('2d 없음');
       ctx.drawImage(img, 0, 0);
+      const ICON = 16;
+      const inset = size / 2 - ICON / 2;
       const count = (
         p: { x: number; y: number },
         test: (r: number, g: number, bl: number) => boolean,
+        cols: [number, number] = [0, ICON],
       ): number => {
-        const d = ctx.getImageData(Math.round(p.x), Math.round(p.y), size, size).data;
+        const d = ctx.getImageData(Math.round(p.x + inset), Math.round(p.y + inset), ICON, ICON).data;
         let n = 0;
-        for (let i = 0; i < d.length; i += 4) if (test(d[i] ?? 0, d[i + 1] ?? 0, d[i + 2] ?? 0)) n += 1;
+        for (let i = 0; i < d.length; i += 4) {
+          const col = (i / 4) % ICON;
+          if (col >= cols[0] && col < cols[1] && test(d[i] ?? 0, d[i + 1] ?? 0, d[i + 2] ?? 0)) n += 1;
+        }
         return n;
       };
+      const orange = (r: number, g: number, bl: number): boolean =>
+        r > 190 && g > 100 && g < 200 && bl < 90 && r - g > 40;
       return {
-        orange: count(b, (r, g, bl) => r > 190 && g > 100 && g < 200 && bl < 90 && r - g > 40),
+        orange: count(b, orange),
+        orangeMid: count(b, orange, [ICON / 2 - 1, ICON / 2 + 1]),
         cyanA: count(a, (r, g, bl) => r < 120 && g > 160 && bl > 190),
       };
     },

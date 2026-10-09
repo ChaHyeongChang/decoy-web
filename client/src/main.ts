@@ -397,7 +397,8 @@ app.subscribe((e) => {
     fromLobby = false;
     void fonts.then((ok) => {
       if (req !== sceneRequest) return;
-      fontState.atSceneStart = ok;
+      // 첫 받기가 시간 초과로 끝난 뒤 늦게 받았으면 loadUiFonts()는 계속 false다. 지금 준비됐는지로 기록한다
+      fontState.atSceneStart = ok || uiFontsReady();
       game.scene.stop('game');
       game.scene.start('game', { app });
     });
