@@ -259,6 +259,8 @@ export class WorldRenderer {
     stunStars: false,
     dashGhosts: 0,
     attackRange: false,
+    /** 공격 준비 채움 (0~1, 범위가 없으면 0). E2E가 차오르는 앞머리 호와 판정 경계를 구별할 때 쓴다 */
+    attackFill: 0,
     oppFx: 0,
     cone: false,
     coneRed: 0,
@@ -689,6 +691,7 @@ export class WorldRenderer {
     this.rangeFill.clear();
     const atk = balance.monster.attack;
     let attackRange = false;
+    let attackFill = 0;
     let windupDir: number | null = null;
     let windupAt: Vec2 | null = null;
     if (isMonster && v.me) {
@@ -744,6 +747,7 @@ export class WorldRenderer {
       info.push(item);
       drawAttackRange(this.rangeFill, this.ranges, item, fill);
       attackRange = true;
+      attackFill = r3(fill);
     }
     const mon = snap.you.mon;
     if (isMonster && mon && mon.camp > 0) {
@@ -969,6 +973,7 @@ export class WorldRenderer {
       stunStars: stunStars.any,
       dashGhosts: ghosts.length,
       attackRange,
+      attackFill,
       oppFx,
       cone: coneShown,
       coneRed: this.coneRed,

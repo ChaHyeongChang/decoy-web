@@ -482,8 +482,18 @@ function expectAttack(c: Capture, it: InfoItem, label: string): void {
 }
 
 /**
+ * 차오르는 앞머리 호(반지름 = 채움 × 사거리, 판정 경계와 같은 색 · 층)가 변을 재는 원 가까이 있으면 그 밝은 호를 변으로
+ * 잘못 잡는다(러너에서 채움 0.87쯤 프레임이 잡혀 변이 ±35°로 재진 적이 있다). 그런 프레임은 쓰지 않는다
+ */
+function frontArcNearProbe(cap: Capture, opts: CaptureOptions): boolean {
+  const front = Number(cap.effects.attackFill ?? 0) * balance.monster.attack.range;
+  return (opts.arcs ?? []).some((a) => Math.abs(front - a.rho) < 0.12);
+}
+
+/**
  * 괴물이 공격을 누르고 보는 화면에서 공격 준비 첫 프레임을 잰다. SwiftShader가 느려(4~10FPS) 0.4초 준비 동안 그린 프레임을
- * 놓칠 수 있으므로 놓치면 쿨타임(1.5초) 뒤 다시 누른다(여섯 번까지, 같은 자리 · 같은 조준이라 정보는 같다)
+ * 놓칠 수 있으므로 놓치면 쿨타임(1.5초) 뒤 다시 누른다(여섯 번까지, 같은 자리 · 같은 조준이라 정보는 같다).
+ * 앞머리 호가 변을 재는 원에 걸친 프레임도 다시 잰다
  */
 async function windupCapture(view: Page, clicker: Page, opts: CaptureOptions): Promise<Capture> {
   let cap: Capture | null = null;
@@ -491,7 +501,11 @@ async function windupCapture(view: Page, clicker: Page, opts: CaptureOptions): P
     await clicker.mouse.down({ button: 'left' });
     await clicker.mouse.up({ button: 'left' });
     cap = await captureBodies(view, [], { ...opts, waitInfo: 'attack', timeoutMs: 2500 });
-    if (cap.ok) return cap;
+    if (cap.ok && !frontArcNearProbe(cap, opts)) return cap;
+    if (cap.ok)
+      console.log(
+        `[m10-visual.webgl] 공격 준비 채움 ${String(cap.effects.attackFill)}: 앞머리 호가 변 측정 원에 걸쳐 다시`,
+      );
     await view.waitForTimeout(1700);
   }
   return cap!;
