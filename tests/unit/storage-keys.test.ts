@@ -15,14 +15,6 @@ const PRIVACY = 'docs/PRIVACY.md';
 /** 여기서만 저장소를 직접 만진다 */
 const ALLOWED = join(SRC, 'storageKeys.ts');
 
-/**
- * 계약(STORAGE_KEYS) 추가를 기다리는 키: 메인이 storageKeys.ts에 넣으면 이 줄을 지운다 (M12 갈래 B contractRequests).
- * 깨우기 화면의 자동 새로고침 기록 — 키는 wake.html에서 'decoy:wakeReloads'로 바꿨다(예전 'decoy-wake-reloads')
- */
-const PENDING_CONTRACT: readonly { key: string; area: StorageArea }[] = [
-  { key: 'decoy:wakeReloads', area: 'session' },
-];
-
 function walk(dir: string, exts: RegExp): string[] {
   const out: string[] = [];
   for (const name of readdirSync(dir)) {
@@ -80,7 +72,7 @@ function publicUses(file: string, src: string): PublicUse[] {
 }
 
 function listed(key: string, area: StorageArea): boolean {
-  const all = [...Object.values(STORAGE_KEYS), ...PENDING_CONTRACT];
+  const all = Object.values(STORAGE_KEYS);
   return all.some((k) =>
     'prefix' in k && k.prefix ? key.startsWith(k.key) && k.area === area : k.key === key && k.area === area,
   );
@@ -143,7 +135,7 @@ describe('기기 저장 키', () => {
       const doc = readFileSync(PRIVACY, 'utf8');
       const sw = readFileSync(join(PUBLIC, 'sw.js'), 'utf8');
       const caches = [...sw.matchAll(/\bconst\s+CACHE\w*\s*=\s*'([^']+)'/g)].map((m) => m[1]!);
-      const keys = [...Object.values(STORAGE_KEYS).map((k) => k.key), ...PENDING_CONTRACT.map((k) => k.key)];
+      const keys = Object.values(STORAGE_KEYS).map((k) => k.key);
       const missing = [...keys, ...caches].filter((k) => !doc.includes(k));
       expect(missing).toEqual([]);
     },

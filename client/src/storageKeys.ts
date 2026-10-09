@@ -61,6 +61,12 @@ export const STORAGE_KEYS = {
     what: '터치 조작 안내를 본 적 있는가',
     keep: '사용자가 다시 보기를 누르거나 브라우저 데이터를 지울 때까지',
   },
+  wakeReloads: {
+    key: 'decoy:wakeReloads',
+    area: 'session',
+    what: '서버 깨우기 화면의 자동 새로고침 시각 (1분 안에 3번 넘으면 멈춤)',
+    keep: '탭을 닫을 때까지',
+  },
   perf: {
     key: 'decoy:perf',
     area: 'local',
