@@ -1,33 +1,39 @@
 // 판 화면: 1/30초 고정 간격 입력 → 예측 → 서버 전송, 그리고 렌더링 · HUD · 배너
 import Phaser from 'phaser';
-import type {
-  DrawnEntity,
-  FxTarget,
-  GameEvent,
-  InfoItem,
-  InputFrame,
-  InputLogEntry,
-  Role,
+import {
+  BTN,
+  type Balance,
+  type DrawnEntity,
+  type FxTarget,
+  type GameEvent,
+  type InfoItem,
+  type InputFrame,
+  type InputLogEntry,
+  type Role,
+  type Snapshot,
 } from '@decoy/shared';
 import type { App } from '../app';
 import { sfx } from '../audio';
 import { STORY_TEXT, UI_TEXT, formatText } from '../data/storyText';
+import { device } from '../device';
 import { qualityHooks, sessionAutoDowngrade } from '../gfx/quality';
 import { getFpsOverride, gfxNow, gfxState, probeSlot } from '../gfx/state';
-import { InputSampler } from '../input';
+import { InputLog, InputSampler } from '../input';
 import { applyDashStart, applyWindupLock, predictMonsterPress, type LocalWindup } from '../localActions';
 import { COLOR } from '../render/colors';
 import { ScreenEffects, collectFxTargets } from '../render/effects';
 import { WorldRenderer } from '../render/worldRenderer';
+import { TouchInput, type TouchFrameCtx } from '../touchInput';
 import type { IconId } from '../art/icons';
 import { Banners, type BannerLine } from '../ui/banners';
 import { Hud } from '../ui/hud';
-import type { Tone } from '../ui/hudArt';
+import { actionSlots, type Tone } from '../ui/hudArt';
 import { HudKit, type Slice } from '../ui/hudKit';
 import { VIEW_H, VIEW_W, fitCamera, screenToTile } from '../ui/layout';
 import { Minimap } from '../ui/minimap';
 import { Scoreboard, TutorialOverlay } from '../ui/overlays';
 import { drawProbeText } from '../ui/text';
+import { TouchControls } from '../ui/touchControls';
 import { staleEventLimitMs, trackFrameMs } from './staleEvents';
 
 /** 안개 (M3부터) */
@@ -52,6 +58,13 @@ const SPOTTED_PULSE_HZ = 1.2;
 export class GameScene extends Phaser.Scene {
   private app!: App;
   private sampler = new InputSampler();
+  /** 터치 모드(device.touch)에서만: 터치 상태 기계와 터치 화면 (M11) */
+  private touch: TouchInput | null = null;
+  private touchControls: TouchControls | null = null;
+  /** 터치 화면이 지금 입력을 받는가 (바뀔 때만 setActive) */
+  private touchActive: boolean | null = null;
+  /** 최근 입력 프레임 (디버그 · E2E) */
+  private readonly inputHistory = new InputLog(120);
   private seq = 0;
   /** 최근 프레임 간격 (ms, 느려지면 바로 · 빨라지면 천천히): 느린 기기에서 오래된 이벤트 한도를 늘린다 */
   private frameMs = 0;
@@ -156,14 +169,14 @@ export class GameScene extends Phaser.Scene {
     };
   }
 
-  /** 디버그 · 테스트: 최근 입력 프레임 120개 (M11 계약: 갈래 A가 채운다) */
+  /** 디버그 · 테스트: 최근 입력 프레임 120개, 오래된 것부터 (pressed는 한 프레임만 살아 lastFrame으로는 놓친다) */
   get inputLog(): InputLogEntry[] {
-    return [];
+    return this.inputHistory.entries();
   }
 
-  /** 디버그 · 테스트: 지금 입력 방식 (M11 계약: 갈래 A가 채운다) */
+  /** 디버그 · 테스트: 지금 입력 방식 (터치 화면이 있으면 'touch') */
   get inputMode(): 'keyboard' | 'touch' {
-    return 'keyboard';
+    return this.sampler.mode;
   }
 
   /** 디버그 · 테스트: 지금 보이는 연출 */
@@ -204,7 +217,15 @@ export class GameScene extends Phaser.Scene {
     this.tutorial?.show(performance.now(), TUTORIAL_SECONDS);
 
     const host = this.game.canvas.parentElement ?? document.body;
-    this.sampler.attach(host);
+    // 터치 모드: 터치 상태 기계를 입력 소스로 붙이고 터치 화면을 만든다. PC에서는 터치 레이어를 만들지 않는다
+    this.inputHistory.clear();
+    this.touch = device.touch ? new TouchInput() : null;
+    this.touchActive = null;
+    this.sampler.attach(host, { touch: this.touch, touchAim: info.role === 'monster' });
+    if (this.touch) {
+      const uiRoot = document.getElementById('ui-root') ?? document.body;
+      this.touchControls = new TouchControls(uiRoot, { role: info.role, feed: this.touch });
+    }
     this.roarPings = [];
     this.unsubscribe = app.subscribe((e) => {
       if (e.kind !== 'snapshot') return;
@@ -228,6 +249,9 @@ export class GameScene extends Phaser.Scene {
       if (this.inputTimer !== null) window.clearInterval(this.inputTimer);
       this.inputTimer = null;
       this.sampler.detach();
+      this.touchControls?.destroy();
+      this.touchControls = null;
+      this.touch = null;
       this.unsubscribe?.();
     });
   }
@@ -291,16 +315,45 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  /** 지금 내 조준 목표 각도 (괴물: 커서 방향) */
+  /** 지금 내 마우스 조준 목표 각도 (괴물: 커서 방향, 생존자: NaN) */
   private aimTarget(): number {
     if (this.app.match?.role !== 'monster') return Number.NaN;
-    const p = this.input.activePointer;
-    const w = this.cameras.main.getWorldPoint(p.x, p.y);
-    const t = screenToTile(w.x, w.y);
     const me = this.app.predictor?.state;
     if (!me) return Number.NaN;
+    // 터치 모드에서 마우스를 쓴 적이 없으면 포인터(0,0 · 마지막 터치 자리)를 따라 돌지 않는다: 지금 방향 유지
+    if (!this.sampler.mouseAimUsable) return me.face;
+    const p = this.touch ? (this.input.mousePointer ?? this.input.activePointer) : this.input.activePointer;
+    const w = this.cameras.main.getWorldPoint(p.x, p.y);
+    const t = screenToTile(w.x, w.y);
     if (Math.hypot(t.x - me.x, t.y - me.y) < 0.05) return me.face;
     return Math.atan2(t.y - me.y, t.x - me.x);
+  }
+
+  /**
+   * 터치 발사 대기에 넘길 상황: 예측한 face, 그리고 지금 공격 · 돌진을 시작할 수 있는가.
+   * 조건은 공격 · 돌진 예측(predictMonsterPress = 서버 monsterCanAct + 쿨타임)과 같다. 생존자는 둘 다 거짓
+   */
+  private touchCtx(): TouchFrameCtx | undefined {
+    if (!this.touch) return undefined;
+    const app = this.app;
+    const nowMs = performance.now();
+    const st = app.predictor?.state;
+    const mon = app.lastSnap?.you.mon;
+    const balance = app.balance;
+    if (!st || !mon || !balance) return { nowMs, face: st?.face ?? 0, canAttack: false, canDash: false };
+    const base = {
+      move: st,
+      mon,
+      balance,
+      ageSec: (nowMs - app.lastSnapAt) / 1000 + app.net.rtt / 2000,
+      localWindupActive: this.localWindup !== null && nowMs < this.localWindup.until,
+    };
+    return {
+      nowMs,
+      face: st.face,
+      canAttack: predictMonsterPress({ ...base, pressed: BTN.ATTACK }).attack,
+      canDash: predictMonsterPress({ ...base, pressed: BTN.DASH }).dash,
+    };
   }
 
   private stepInput(deltaMs: number): void {
@@ -313,8 +366,9 @@ export class GameScene extends Phaser.Scene {
       this.acc = 0;
       return;
     }
-    // 괴물 재접속 대기(판 전체 일시정지): 서버가 입력을 처리하지 않으므로 보내지도 예측하지도 않는다
-    if ((app.lastSnap?.world.paused ?? null) !== null) {
+    // 괴물 재접속 대기(판 전체 일시정지): 서버가 입력을 처리하지 않으므로 보내지도 예측하지도 않는다.
+    // 터치 모드 세로 화면도 입력을 보내지 않는다 (판은 흐른다, 그동안 무방비)
+    if ((app.lastSnap?.world.paused ?? null) !== null || (this.touch !== null && device.portrait)) {
       this.acc = 0;
       this.sampler.clearPressed();
       return;
@@ -325,12 +379,13 @@ export class GameScene extends Phaser.Scene {
     while (this.acc >= dtMs) {
       this.acc -= dtMs;
       this.seq += 1;
-      const frame = this.sampler.sample(this.seq, this.aimTarget());
+      const frame = this.sampler.sample(this.seq, this.aimTarget(), this.touchCtx());
       if (frame.pressed !== 0 && app.match?.role === 'monster') this.predictMonster(frame);
       app.predictor.applyLocal(frame, env);
       this.lastStepAt = performance.now();
       frames.push(frame);
       this.lastFrame = frame;
+      this.inputHistory.push(frame, this.lastStepAt, this.sampler.mode);
     }
     if (frames.length > 0) app.net.send({ t: 'input', frames });
   }
@@ -475,11 +530,34 @@ export class GameScene extends Phaser.Scene {
             ? { text: formatText('ALERT_LAST_30'), tone: 'warn', icon: 'exit' }
             : null;
     this.banners.update(persistent, warn, now);
+    this.updateTouch(snap, app.balance);
     const anyKey = this.sampler.anyKeyPressed;
     this.sampler.anyKeyPressed = false;
-    // Tab 점수판이 열리면 조작 안내를 닫는다 (두 패널이 겹치지 않게)
-    const tab = this.sampler.tabHeld;
+    // Tab 점수판(터치: 점수판 버튼)이 열리면 조작 안내를 닫는다 (두 패널이 겹치지 않게)
+    const tab = this.sampler.tabHeld || (this.touchControls?.scoreboard ?? false);
     this.tutorial?.update(now, anyKey || tab);
     this.scoreboard.update(tab, snap);
+  }
+
+  /**
+   * 터치 화면: 판 중이고 관전 · 결과 · 판 정지 · 세로 화면이 아닐 때만 입력을 받는다. 끄는 순간 손가락 · 발사 대기를 비운다.
+   * 행동 칸은 캔버스 HUD와 같은 actionSlots 결과 (쿨타임 게이지 · 못 씀 표시)
+   */
+  private updateTouch(snap: Snapshot, balance: Balance): void {
+    const controls = this.touchControls;
+    if (!controls) return;
+    const status = snap.you.surv?.status;
+    const active =
+      this.app.result === null &&
+      status !== 'dead' &&
+      status !== 'escaped' &&
+      snap.world.paused === null &&
+      !device.portrait;
+    if (active !== this.touchActive) {
+      this.touchActive = active;
+      controls.setActive(active);
+      if (!active) this.touch?.reset();
+    }
+    if (active) controls.update({ slots: actionSlots(snap, balance, snap.you.role) });
   }
 }

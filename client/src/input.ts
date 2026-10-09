@@ -1,5 +1,8 @@
-// 키보드 · 마우스 → 입력 프레임 (1/30초 고정 간격으로 샘플링)
-import { BTN, type InputFrame } from '@decoy/shared';
+// 입력 → 입력 프레임 (1/30초 고정 간격으로 샘플링). 키보드 · 마우스 소스와 터치 소스(touchInput.ts, 터치 모드에서만)를
+// 합쳐 같은 InputFrame 하나를 만든다: 이동은 키보드가 있으면 키보드, 없으면 터치. held · pressed는 OR.
+// 조준은 터치 모드 괴물이면 터치(정하지 않으면 마우스), 아니면 마우스. 서버는 어느 쪽에서 왔는지 모른다
+import { BTN, type InputFrame, type InputLogEntry } from '@decoy/shared';
+import type { TouchFrameCtx, TouchSource } from './touchInput';
 
 const MOVE_KEYS: Record<string, [number, number]> = {
   KeyW: [0, -1],
@@ -20,17 +23,79 @@ const BUTTON_KEYS: Record<string, number> = {
   KeyQ: BTN.ROAR,
 };
 
+/** 창 단위 이벤트를 받는 곳 (브라우저에서는 window · document · screen.orientation. 단위 테스트는 가짜 EventTarget) */
+export interface InputEnv {
+  /** keydown · keyup · pointerup · blur · orientationchange (터치 모드: pointerdown · pointermove 캡처) */
+  win: EventTarget;
+  /** visibilitychange */
+  doc: EventTarget & { readonly visibilityState: DocumentVisibilityState };
+  /** screen.orientation change (없으면 null) */
+  orientation: EventTarget | null;
+}
+
+export interface AttachOptions {
+  /** 터치 모드의 터치 소스. 없으면 PC 모드(키보드 · 마우스만) */
+  touch?: TouchSource | null;
+  /** 터치가 조준을 정하는가 (괴물). 생존자는 aim을 보내지 않는다(NaN) */
+  touchAim?: boolean;
+  env?: InputEnv;
+}
+
+function browserEnv(): InputEnv {
+  return { win: window, doc: document, orientation: screen.orientation ?? null };
+}
+
+/** 이벤트 하나를 붙이고 떼는 함수를 돌려준다 (이벤트 종류는 type이 정한다) */
+function listen<E extends Event>(
+  target: EventTarget,
+  type: string,
+  fn: (e: E) => void,
+  capture = false,
+): () => void {
+  const h = fn as (e: Event) => void;
+  target.addEventListener(type, h, capture);
+  return () => target.removeEventListener(type, h, capture);
+}
+
 export class InputSampler {
   private keys = new Set<string>();
   private held = 0;
   private pressed = 0;
+  /** 마우스 버튼으로 누르고 있는 비트 (좌클릭 ATTACK · 우클릭 MODE) */
+  private mouse = 0;
+  private touch: TouchSource | null = null;
+  private touchAim = false;
+  /** 터치 모드에서 실제 마우스를 쓴 적이 있다 (그때만 마우스 커서로 조준한다) */
+  private mouseSeen = false;
   /** Tab 누르고 있기 (점수판) */
   tabHeld = false;
   /** 아무 키나 눌림 (안내 오버레이 닫기용) */
   anyKeyPressed = false;
   private readonly cleanup: Array<() => void> = [];
 
-  attach(canvasHost: HTMLElement): void {
+  /** 지금 입력 방식: 터치 소스가 붙어 있으면 'touch' */
+  get mode(): 'keyboard' | 'touch' {
+    return this.touch ? 'touch' : 'keyboard';
+  }
+
+  /** 터치 모드에서 마우스 커서 조준을 쓸 수 있는가 (PC 모드는 늘 참) */
+  get mouseAimUsable(): boolean {
+    return !this.touch || this.mouseSeen;
+  }
+
+  attach(canvasHost: EventTarget, opts: AttachOptions = {}): void {
+    const env = opts.env ?? browserEnv();
+    this.touch = opts.touch ?? null;
+    this.touchAim = opts.touchAim ?? false;
+    this.mouseSeen = false;
+    const touchMode = this.touch !== null;
+    /**
+     * 캔버스 클릭을 공격 · 시야 전환으로 쓰는 포인터: 터치 모드는 마우스만(손가락은 터치 화면이 받는다),
+     * PC 모드는 손가락만 뺀다(터치스크린 노트북에서 손바닥 · 손가락이 닿아 공격이 나가지 않게. 펜은 마우스처럼)
+     */
+    const clicks = (e: PointerEvent): boolean =>
+      touchMode ? e.pointerType === 'mouse' : e.pointerType !== 'touch';
+
     const onKeyDown = (e: KeyboardEvent): void => {
       if (isTyping(e)) return;
       if (e.code === 'Tab') {
@@ -40,6 +105,7 @@ export class InputSampler {
       }
       this.anyKeyPressed = true;
       if (MOVE_KEYS[e.code] || BUTTON_KEYS[e.code] !== undefined) e.preventDefault();
+      // 키 자동 반복은 pressed를 다시 켜지 않는다 (이미 누르고 있는 키)
       if (!this.keys.has(e.code)) {
         const bit = BUTTON_KEYS[e.code];
         if (bit !== undefined) this.pressed |= bit;
@@ -57,17 +123,20 @@ export class InputSampler {
       this.recomputeHeld();
     };
     const onPointerDown = (e: PointerEvent): void => {
-      if (e.button === 0) {
-        this.pressed |= BTN.ATTACK;
-        this.mouse |= BTN.ATTACK;
-      } else if (e.button === 2) {
-        this.pressed |= BTN.MODE;
-        this.mouse |= BTN.MODE;
+      if (clicks(e)) {
+        if (e.button === 0) {
+          this.pressed |= BTN.ATTACK;
+          this.mouse |= BTN.ATTACK;
+        } else if (e.button === 2) {
+          this.pressed |= BTN.MODE;
+          this.mouse |= BTN.MODE;
+        }
       }
       this.anyKeyPressed = true;
       this.recomputeHeld();
     };
     const onPointerUp = (e: PointerEvent): void => {
+      if (!clicks(e)) return;
       if (e.button === 0) this.mouse &= ~BTN.ATTACK;
       else if (e.button === 2) this.mouse &= ~BTN.MODE;
       this.recomputeHeld();
@@ -75,40 +144,49 @@ export class InputSampler {
     const onContext = (e: Event): void => e.preventDefault();
     const onBlur = (): void => this.reset();
     const onVisibility = (): void => {
-      if (document.visibilityState === 'hidden') this.reset();
+      if (env.doc.visibilityState === 'hidden') this.reset();
     };
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-    canvasHost.addEventListener('pointerdown', onPointerDown);
-    window.addEventListener('pointerup', onPointerUp);
-    canvasHost.addEventListener('contextmenu', onContext);
-    window.addEventListener('blur', onBlur);
-    document.addEventListener('visibilitychange', onVisibility);
     this.cleanup.push(
-      () => window.removeEventListener('keydown', onKeyDown),
-      () => window.removeEventListener('keyup', onKeyUp),
-      () => canvasHost.removeEventListener('pointerdown', onPointerDown),
-      () => window.removeEventListener('pointerup', onPointerUp),
-      () => canvasHost.removeEventListener('contextmenu', onContext),
-      () => window.removeEventListener('blur', onBlur),
-      () => document.removeEventListener('visibilitychange', onVisibility),
+      listen(env.win, 'keydown', onKeyDown),
+      listen(env.win, 'keyup', onKeyUp),
+      listen(canvasHost, 'pointerdown', onPointerDown),
+      listen(env.win, 'pointerup', onPointerUp),
+      listen(canvasHost, 'contextmenu', onContext),
+      listen(env.win, 'blur', onBlur),
+      listen(env.doc, 'visibilitychange', onVisibility),
     );
+    if (touchMode) {
+      // 화면 회전: 손가락 자리가 모두 바뀐다. 터치 상태만 비운다 (손가락 하나씩 사라지는 것은 터치 화면이 stickCancel로 넣는다)
+      const onRotate = (): void => this.touch?.reset();
+      // 터치 화면(캔버스 밖 DOM)에 닿아도 조작 안내를 닫는다. 터치 화면이 전파를 막아도 받게 캡처 단계에서
+      const onAnyPointer = (e: PointerEvent): void => {
+        if (e.pointerType === 'mouse') this.mouseSeen = true;
+        else if (e.type === 'pointerdown') this.anyKeyPressed = true;
+      };
+      this.cleanup.push(
+        listen(env.win, 'orientationchange', onRotate),
+        listen(env.win, 'pointerdown', onAnyPointer, true),
+        listen(env.win, 'pointermove', onAnyPointer, true),
+      );
+      if (env.orientation) this.cleanup.push(listen(env.orientation, 'change', onRotate));
+    }
   }
-
-  private mouse = 0;
 
   detach(): void {
     for (const f of this.cleanup.splice(0)) f();
     this.reset();
+    this.touch = null;
+    this.touchAim = false;
   }
 
-  /** 탭 전환 · 창 이탈 때 모든 키를 뗀 것으로 */
+  /** 탭 전환 · 창 이탈 때 모든 키 · 손가락을 뗀 것으로 */
   reset(): void {
     this.keys.clear();
     this.mouse = 0;
     this.held = 0;
     this.pressed = 0;
     this.tabHeld = false;
+    this.touch?.reset();
   }
 
   private recomputeHeld(): void {
@@ -117,7 +195,8 @@ export class InputSampler {
     this.held = h;
   }
 
-  moveVector(): { x: number; y: number } {
+  /** 키보드 이동 (8방향, 길이 0 또는 1) */
+  private keyboardMove(): { x: number; y: number } {
     let x = 0;
     let y = 0;
     for (const k of this.keys) {
@@ -133,21 +212,75 @@ export class InputSampler {
     return len > 0 ? { x: x / len, y: y / len } : { x: 0, y: 0 };
   }
 
-  /** 보내지 않을 동안 눌린 버튼은 버린다 (판 정지 중 누른 능력이 재개 순간 나가지 않게). 누르고 있는 상태는 둔다 */
-  clearPressed(): void {
-    this.pressed = 0;
+  /** 이동: 키보드가 있으면 키보드, 없으면 터치 스틱 */
+  moveVector(): { x: number; y: number } {
+    const k = this.keyboardMove();
+    if (k.x !== 0 || k.y !== 0 || !this.touch) return k;
+    return this.touch.moveVector();
   }
 
-  /** 입력 프레임 하나를 만든다. pressed는 한 번 보내면 비운다 */
-  sample(seq: number, aim: number): InputFrame {
+  /**
+   * 보내지 않을 동안 눌린 버튼은 버린다 (판 정지 · 세로 화면 중 누른 능력이 재개 순간 나가지 않게).
+   * 누르고 있는 키는 둔다. 터치는 그동안 터치 화면이 꺼져 있으므로 손가락 · 발사 대기까지 모두 비운다
+   */
+  clearPressed(): void {
+    this.pressed = 0;
+    this.touch?.reset();
+  }
+
+  /**
+   * 입력 프레임 하나를 만든다. pressed는 한 번 보내면 비운다.
+   * mouseAim은 마우스 커서 조준(괴물, 생존자는 NaN), ctx는 터치 모드에서 발사 대기를 진행할 상황
+   */
+  sample(seq: number, mouseAim: number, ctx?: TouchFrameCtx): InputFrame {
     const m = this.moveVector();
-    const frame: InputFrame = { seq, mx: m.x, my: m.y, aim, held: this.held, pressed: this.pressed };
+    let held = this.held;
+    let pressed = this.pressed;
+    let aim = mouseAim;
+    const touch = this.touch;
+    if (touch && ctx) {
+      // 순서: takePressed 먼저 (발사 대기에서 공격을 낸 프레임까지 aim = θ)
+      const tp = touch.takePressed(ctx);
+      // 터치로 새로 눌린 비트는 그 프레임 held에도 켠다: 키를 한 프레임 누른 것과 같은 값
+      held |= touch.heldBits() | tp;
+      pressed |= tp;
+      if (this.touchAim) aim = touch.aimAngle(ctx) ?? mouseAim;
+    }
+    const frame: InputFrame = { seq, mx: m.x, my: m.y, aim, held, pressed };
     this.pressed = 0;
     return frame;
   }
 }
 
+/** 최근 입력 프레임 기록 (디버그 · E2E: pressed는 한 프레임만 살아 마지막 프레임만으로는 놓친다) */
+export class InputLog {
+  private readonly buf: InputLogEntry[] = [];
+  private head = 0;
+
+  constructor(readonly capacity = 120) {}
+
+  push(frame: InputFrame, t: number, mode: 'keyboard' | 'touch'): void {
+    const e: InputLogEntry = { ...frame, t, mode };
+    if (this.buf.length < this.capacity) this.buf.push(e);
+    else this.buf[this.head] = e;
+    this.head = (this.head + 1) % this.capacity;
+  }
+
+  /** 오래된 것부터 */
+  entries(): InputLogEntry[] {
+    if (this.buf.length < this.capacity) return this.buf.slice();
+    return [...this.buf.slice(this.head), ...this.buf.slice(0, this.head)];
+  }
+
+  clear(): void {
+    this.buf.length = 0;
+    this.head = 0;
+  }
+}
+
 function isTyping(e: KeyboardEvent): boolean {
   const t = e.target;
+  // DOM이 없는 단위 테스트에서도 돌게 (HTMLInputElement가 없으면 입력칸도 없다)
+  if (typeof HTMLElement === 'undefined') return false;
   return t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement;
 }
