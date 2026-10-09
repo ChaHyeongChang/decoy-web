@@ -135,6 +135,10 @@ export interface DecoyDebug {
   getInfoLayer(): InfoItem[];
   /** 후처리가 걸린 레이어와 효과 (M10b) */
   getFxTargets(): FxTarget[];
+  /** UI 폰트(Noto Sans KR 서브셋)를 받았는가, 판 장면을 시작할 때 준비되어 있었는가 (M10c, 시작 전이면 null) */
+  readonly fonts: { ready: boolean; atSceneStart: boolean | null };
+  /** HUD 상태: 다시 굽기 횟수(bakes) · 거점 게이지 상태 · 점수판 · 조작 안내 표시 등 (M10c) */
+  getHud(): Record<string, number | boolean | string>;
   readonly role: Role | null;
   readonly you: string | null;
   readonly room: string | null;

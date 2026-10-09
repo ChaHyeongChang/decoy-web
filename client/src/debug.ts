@@ -6,6 +6,7 @@ import { sfx } from './audio';
 import { freezeGfxClock, gfxState, probeSlot, setFpsOverride } from './gfx/state';
 import type { GameScene } from './scenes/GameScene';
 import { VIEW_H, VIEW_W, tileToScreen } from './ui/layout';
+import { fontState, uiFontsReady } from './ui/fonts';
 import { auditTexts } from './ui/text';
 
 declare global {
@@ -28,6 +29,10 @@ export function installDebug(app: App, overlay: boolean): void {
     injectFps: (fps) => setFpsOverride(fps),
     probeText: (text, x, y, px) => probeSlot.draw?.(text, x, y, px),
     textAudit: () => auditTexts(app.game?.scene.getScenes(true) ?? []),
+    get fonts() {
+      return { ready: uiFontsReady(), atSceneStart: fontState.atSceneStart };
+    },
+    getHud: () => ({ ...(gameScene(app)?.hudDebug ?? {}) }),
     get role() {
       return app.match?.role ?? null;
     },

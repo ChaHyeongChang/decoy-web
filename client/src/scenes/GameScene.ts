@@ -101,6 +101,14 @@ export class GameScene extends Phaser.Scene {
     );
   }
 
+  /**
+   * 디버그 · 테스트: HUD 상태 (M10c). 다시 굽기 횟수(`bakes`) · 거점 게이지 상태 · 점수판 · 조작 안내 표시 등.
+   * 키와 값은 HUD가 정한다(VISUAL_SPEC 8장)
+   */
+  get hudDebug(): Record<string, number | boolean | string> {
+    return {};
+  }
+
   /** 디버그 · 테스트: 지금 보이는 연출 */
   get effects(): Record<string, number | boolean> {
     if (!this.screenFx || !this.world) return {};

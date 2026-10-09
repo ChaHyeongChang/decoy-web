@@ -20,8 +20,9 @@ import { prebakeAtlas } from './art/atlas';
 import { prebakeFogArt } from './render/baseLayer';
 import { computeRenderSize, type RenderSize } from './render/resolution';
 import { GameScene } from './scenes/GameScene';
+import { fontState, loadUiFonts } from './ui/fonts';
 import { RENDER_SCALE, VIEW_H, VIEW_W, fitCamera, setRenderScale } from './ui/layout';
-import { drawProbeText, retextAll } from './ui/text';
+import { drawProbeText, relayoutAll, retextAll } from './ui/text';
 
 /** 창 크기 · DPR이 바뀐 뒤 백버퍼를 다시 만들 때까지 기다리는 시간 (끌어서 바꾸는 동안 매번 만들지 않게) */
 const RESIZE_DEBOUNCE_MS = 150;
@@ -369,11 +370,26 @@ function schedulePrebake(): void {
 }
 onGfxChange(schedulePrebake);
 
+// UI 폰트를 부팅 때부터 받는다. Phaser 글자는 만들 때의 글꼴로 굳으므로, 다 받으면 이미 있는 글자를 다시 그린다
+void loadUiFonts().then((ok) => {
+  if (!ok || !game.isBooted) return;
+  for (const scene of game.scene.getScenes(true)) relayoutAll(scene);
+});
+
+/** 판 장면 시작 요청 번호 (폰트를 기다리는 동안 로비로 돌아가면 시작하지 않는다) */
+let sceneRequest = 0;
 app.subscribe((e) => {
   if (e.kind === 'match') {
-    game.scene.stop('game');
-    game.scene.start('game', { app });
+    const req = ++sceneRequest;
+    // 폰트를 받은 뒤(보통 로비에서 이미 끝남, 최대 loadUiFonts 시간 제한) 판 장면을 만든다
+    void loadUiFonts().then((ok) => {
+      if (req !== sceneRequest) return;
+      fontState.atSceneStart = ok;
+      game.scene.stop('game');
+      game.scene.start('game', { app });
+    });
   } else if (e.kind === 'lobby' && e.lobby.phase === 'lobby') {
+    sceneRequest++;
     if (game.scene.isActive('game')) game.scene.stop('game');
     schedulePrebake();
   }

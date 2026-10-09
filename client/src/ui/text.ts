@@ -6,9 +6,11 @@
 // 직접 scene.add.text를 쓰면 이 처리가 빠진다 → 소스 검사 테스트가 막는다 (tests/unit/resolution.test.ts)
 import Phaser from 'phaser';
 import type { TextAudit } from '@decoy/shared';
+import { UI_FONT } from './fonts';
 import { RENDER_SCALE } from './layout';
 
-export const UI_FONT = "'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif";
+/** UI 글꼴 스택 (원본은 fonts.ts. 기존 import 경로를 지키려고 다시 내보낸다) */
+export { UI_FONT };
 
 /** 선명도 검사 글자의 깊이 (HUD · 배너 · 안내보다 위) */
 export const PROBE_DEPTH = 1000;
@@ -294,4 +296,15 @@ export function drawProbeText(scene: Phaser.Scene, text: string, x: number, y: n
     t.setPosition(x, y);
   }
   t.setVisible(text !== '');
+}
+
+/** 글꼴을 다 받은 뒤 장면의 모든 글자를 다시 재고 그린다 (글꼴 이름이 같아 배치 서명은 그대로라도 글자 폭 · 높이가 바뀐다) */
+export function relayoutAll(scene: Phaser.Scene): number {
+  const texts = crispTexts(scene);
+  for (const o of texts) {
+    const s = states.get(o);
+    if (s) s.sig = '';
+    o.style.update(true);
+  }
+  return texts.length;
 }
