@@ -176,7 +176,8 @@ export class ResultUI {
       head,
       hero,
       memo,
-      table,
+      // 좁은 화면(휴대폰)에서는 표만 가로로 스크롤한다 (M11)
+      h('div', { class: 'table-wrap' }, table),
       h('div', { class: 'result-foot' }, again),
     );
     this.root.replaceChildren(box);

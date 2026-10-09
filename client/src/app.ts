@@ -41,6 +41,8 @@ export interface AppParams {
   /** ?quality=high|medium|low: 그래픽 품질 강제 (저장된 선택 · 자동보다 우선). 없으면 null */
   quality: QualityTier | null;
   name: string | null;
+  /** ?touch=1|0: 터치 화면을 강제로 켜거나 끈다 (M11, device.ts detectTouchMode). 없으면 null(기기로 판단) */
+  touch: string | null;
 }
 
 export function readParams(search: string): AppParams {
@@ -57,6 +59,7 @@ export function readParams(search: string): AppParams {
     scaleOverride: parseScale(p.get('scale')),
     quality: parseQuality(p.get('quality')),
     name: p.get('name'),
+    touch: p.get('touch'),
   };
 }
 

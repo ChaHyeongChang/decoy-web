@@ -74,3 +74,23 @@
 | 결과 | 표 머리 | 플레이어 · 맞은 횟수 · 맞힌 횟수 · 구조 · 점령 기여 · 결과 |
 | 결과 | 생존자 결과 | 생존 · 수감 · 사망 · 탈출 |
 | 결과 | 등급 배지 (문 아이콘 3 / 2 / 1개와 함께, 생존자 화면만) | 완전 탈출 · 탈출 성공 · 탈출 실패 + `n명 탈출` |
+
+## 5. 터치 조작 문구 (M11)
+
+터치 화면(`client/src/ui/touchControls.ts`)의 버튼 이름표 · 읽기 이름과 세로 안내. 행동 버튼 이름은 HUD 행동 칸(`actionSlots`)과 같은 글자를 쓰고, 터치 화면에만 있는 것은 `client/src/data/storyText.ts`의 `TOUCH_TEXT`에 둔다. 세로 안내는 JS 없이도 떠야 해서 `client/index.html`에 같은 문구를 직접 적는다(바꾸면 둘 다, `tests/unit/device.test.ts`가 대조).
+
+| 화면 | 자리 | 문구 | 코드 |
+|---|---|---|---|
+| 판 (괴물) | 조준 스틱 | 공격 | `HUD_TEXT.attack` |
+| 판 (괴물) | 버튼 | 돌진 · 포효 | `HUD_TEXT.dash` · `HUD_TEXT.roar` |
+| 판 (괴물) | 시야 모드 버튼 (지금 모드, 첫 스냅샷 전에는 "시야") | 탐색 · 추적 | `UI_TEXT.modeSearch` · `UI_TEXT.modeHunt` · `HUD_TEXT.mode` |
+| 판 (생존자) | 능력 버튼 | 질주 · 밀치기 · 탐지 | 역할 카드 능력 줄의 이름 (`abilityName`) |
+| 판 (생존자) | 구조 버튼 (누르고 있기) | 구조 · 구조 중 n% | `TOUCH_TEXT.rescue` · `HUD_TEXT.rescuing` |
+| 판 | 이동 스틱 (손가락이 없을 때) | 이동 | `TOUCH_TEXT.move` |
+| 판 | 오른쪽 위 | 점수판 · 전체 화면 | `HUD_TEXT.scoreboard` · `TOUCH_TEXT.fullscreen` |
+| 로비 | 오른쪽 위 (휴대폰 브라우저) | 전체 화면 | `TOUCH_TEXT.fullscreen` |
+| 세로 안내 | 제목 | 가로로 돌려 주세요 | `TOUCH_TEXT.rotateTitle` |
+| 세로 안내 | 본문 | DECOY는 가로 화면에서 합니다. 세로로 두는 동안에는 조작할 수 없고, 판은 계속 흘러가요. | `TOUCH_TEXT.rotateBody` |
+| 세로 안내 | 버튼 (휴대폰 브라우저) | 전체 화면 | `TOUCH_TEXT.fullscreen` |
+
+- "전체 화면" 버튼은 터치 모드이고 브라우저 탭 안일 때만 보인다(설치 앱 · TWA에는 없다). 전체 화면 중에는 숨긴다
