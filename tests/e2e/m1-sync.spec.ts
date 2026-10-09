@@ -11,6 +11,7 @@ import {
   truth,
   waitForSnapshots,
   type Player,
+  type TruthFrame,
 } from './helpers';
 
 const KEYS: Record<string, string> = { monster: 'KeyW', runner: 'KeyS', guard: 'KeyS', scout: 'KeyS' };
@@ -54,9 +55,14 @@ test(
     await sendTest(monster.page, { kind: 'freeze', target: monster.id, frozen: false });
     await players[0]!.page.waitForTimeout(300);
 
-    // 각자 움직이기
+    // 각자 움직이기. 700ms 누르고, 서버에서 아직 덜 갔으면 (CPU가 바빠 입력 프레임이 굶을 때) 최대 5초까지 더 누른다
     await Promise.all(players.map((p) => p.page.keyboard.down(KEYS[p.role] ?? 'KeyS')));
     await players[0]!.page.waitForTimeout(700);
+    const moved = (f: TruthFrame): boolean =>
+      f.players.every((p) => (p.role === 'monster' ? p.y < 26 : p.y > 17));
+    for (let i = 0; i < 25 && !moved(await truth(players[0]!.page, code)); i++) {
+      await players[0]!.page.waitForTimeout(200);
+    }
     await Promise.all(players.map((p) => p.page.keyboard.up(KEYS[p.role] ?? 'KeyS')));
     await players[0]!.page.waitForTimeout(800);
 
