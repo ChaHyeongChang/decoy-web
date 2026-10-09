@@ -202,23 +202,39 @@ test('괴물 화면 흰색 위장 (WebGL 높음: 셰이더 비네트 · 색보�
     expect(Math.abs(b.shadowW! - a0!.shadowW!), `${b.name} 그림자 폭`).toBeLessThanOrEqual(1);
     expect(deltaE(b.mean, a0!.mean), `${b.name} 몸 평균색`).toBeLessThanOrEqual(1);
   }
-  // 공격 준비 (누른 순간부터 예측)
+  // 공격 준비 (누른 순간부터 예측). SwiftShader는 프레임이 몰아서 와(0.6~1초 멈춤) 0.4초 준비를 통째로 놓치거나,
+  // 앞머리 호가 범위 탐침에 걸친 프레임을 잡을 수 있다: 쿨타임 뒤 다시 누른다(windupCapture와 같은 이유, 여섯 번까지)
   const me = (await page.evaluate(() => window.__DECOY__?.getRenderPos()))!;
-  await page.mouse.down({ button: 'left' });
-  await page.mouse.up({ button: 'left' });
-  const atk: Capture = await captureBodies(page, bodies, {
+  const atkOpts: CaptureOptions = {
     waitEffect: 'attackRange',
     range: { x: me.x, y: me.y, dir: me.face, tiles: balance.monster.attack.range },
-  });
+    timeoutMs: 2500,
+  };
+  let atk: Capture | null = null;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    if (attempt > 0) {
+      await page.waitForTimeout(1700);
+      // 러너는 공격 부채꼴 안이라 놓친 회차의 준비에도 맞는다: 두 번 맞아 수감돼 탐침 자리가 비지 않게 체력을 되돌린다
+      // (괴물 화면에는 체력이 오지 않고 흰 실루엣에 체력 인자가 없어 그림은 같다)
+      await send({ kind: 'setSurvivor', target: id('runner'), hp: 2 });
+    }
+    await page.mouse.down({ button: 'left' });
+    await page.mouse.up({ button: 'left' });
+    atk = await captureBodies(page, bodies, atkOpts);
+    if (atk.ok && !frontArcNearProbe(atk, atkOpts)) break;
+    console.log(
+      `[m10-visual.webgl] 공격 준비 ${attempt + 1}번째: ok ${String(atk.ok)} · 채움 ${String(atk.effects.attackFill)} — 다시`,
+    );
+  }
   console.log(
-    `[m10-visual.webgl] 공격 준비: ${describeCapture(atk)} / 범위 경계 ${atk.rangePx?.toFixed(2)}px (판정 ${atk.rangeExpectPx?.toFixed(2)}px) 밝기 ${atk.rangeProfile.join(',')}`,
+    `[m10-visual.webgl] 공격 준비: ${describeCapture(atk!)} / 범위 경계 ${atk!.rangePx?.toFixed(2)}px (판정 ${atk!.rangeExpectPx?.toFixed(2)}px) 밝기 ${atk!.rangeProfile.join(',')}`,
   );
-  expect(atk.ok).toBe(true);
-  for (const b of atk.stats) {
+  expect(atk!.ok).toBe(true);
+  for (const b of atk!.stats) {
     expect(b.whiteFrac).toBeGreaterThanOrEqual(0.9);
     expect(b.minRoleDeltaE).toBeGreaterThanOrEqual(40);
   }
-  expect(Math.abs(atk.rangePx! - atk.rangeExpectPx!)).toBeLessThanOrEqual(2);
+  expect(Math.abs(atk!.rangePx! - atk!.rangeExpectPx!)).toBeLessThanOrEqual(2);
   // 후처리: 높음은 구조 레이어에 셰이더 비네트 + 색보정 (+ 안개 경계 셰이더). 장면 표시 목록 · 카메라에서 직접 모은 값에
   // 캐릭터(entities) · 마커 · HUD · 화면 효과 · 카메라 후처리가 없다
   const targets = await page.evaluate(() => window.__DECOY__?.getFxTargets() ?? []);
@@ -486,7 +502,11 @@ function expectAttack(c: Capture, it: InfoItem, label: string): void {
  * 잘못 잡는다(러너에서 채움 0.87쯤 프레임이 잡혀 변이 ±35°로 재진 적이 있다). 그런 프레임은 쓰지 않는다
  */
 function frontArcNearProbe(cap: Capture, opts: CaptureOptions): boolean {
-  const front = Number(cap.effects.attackFill ?? 0) * balance.monster.attack.range;
+  const fill = Number(cap.effects.attackFill ?? 0);
+  const front = fill * balance.monster.attack.range;
+  // 범위 경계 탐침은 0.7R~1.3R을 바깥에서 훑어 '최댓값 − 25' 이상인 첫 띠를 고른다: 받침 없는 흰 앞머리 호(실측 217)가
+  // 그 안에 있으면 경계(176)가 문턱에서 빠진다(채움 0.82에서 −5.7px). 채움 1(다 참)은 앞머리 호가 경계와 겹쳐 괜찮다
+  if (opts.range && fill >= 0.65 && fill < 0.97) return true;
   return (opts.arcs ?? []).some((a) => Math.abs(front - a.rho) < 0.12);
 }
 

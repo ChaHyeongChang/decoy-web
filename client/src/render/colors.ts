@@ -1,4 +1,4 @@
-// VISUAL_SPEC 2장 색. 숫자형(0xRRGGBB)과 문자열을 함께 둔다.
+// v1 색 (VISUAL_SPEC 2.6 쓰지 않는 옛 값 — 지금은 background만 쓴다). 숫자형(0xRRGGBB)과 문자열을 함께 둔다.
 export const COLOR = {
   background: 0x0b1622,
   floor: 0x1b2733,

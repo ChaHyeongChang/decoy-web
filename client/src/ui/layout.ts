@@ -52,15 +52,41 @@ export function fitCamera(camera: {
   camera.setZoom(RENDER_SCALE);
 }
 
-/** HUD 배치 (맵 사각형과 겹치지 않게 위 · 아래 띠와 좌우 여백에) */
+/**
+ * HUD 배치 (M10c, VISUAL_SPEC 8장). 부품의 위치 · 크기는 여기서만 읽는다(M12 모바일 배치가 같은 부품을 다시 배치한다).
+ * 판에 늘 떠 있는 부품(위 띠 · 팀 카드 · 행동 칸 · 미니맵)은 맵 사각형과 겹치지 않게 위 · 아래 띠와 좌우 여백에 둔다.
+ * 배너 · 메모 · 조작 안내 · 점수판은 잠깐 뜨는 덮개라 맵 위에 둔다(탈출구 · 감옥을 비킨 자리).
+ * 위 띠 오른쪽(x 1490 이후)과 아래 띠 오른쪽은 비워 둔다(선명도 탐침 자리, m10-resolution).
+ */
+const GAUGE = { dia: 38, chip: 24, barW: 212, barH: 22, gap: 6 } as const;
+const GAUGE_W = GAUGE.dia + GAUGE.gap + GAUGE.chip + 8 + GAUGE.barW;
+const TIMER_W = 156;
+
 export const HUD = {
-  timer: { x: VIEW_W / 2, y: HUD_BAND / 2 },
-  gaugeA: { x: VIEW_W / 2 - 330, y: HUD_BAND / 2, w: 260 },
-  gaugeB: { x: VIEW_W / 2 + 70, y: HUD_BAND / 2, w: 260 },
-  leftCards: { x: 14, y: HUD_BAND + 14, w: SIDE_W - 28, h: 150, gap: 12 },
-  minimap: { x: VIEW_W - SIDE_W + 12, y: HUD_BAND + 14, w: SIDE_W - 24 },
+  /** 위 띠 가운데 타이머 틀 (가운데 x, y) */
+  timer: { x: VIEW_W / 2, y: HUD_BAND / 2, w: TIMER_W, h: 44 },
+  /** 거점 게이지: 배지 ◇ · 상태 칩 · 막대. A는 타이머 왼쪽, B는 오른쪽에 좌우 대칭(배지가 바깥) */
+  gauge: { ...GAUGE, w: GAUGE_W },
+  /** 배지 쪽 바깥 끝 x (A = 왼쪽 끝, B = 오른쪽 끝) */
+  gaugeA: { x: VIEW_W / 2 - TIMER_W / 2 - 14 - GAUGE_W, y: HUD_BAND / 2 },
+  gaugeB: { x: VIEW_W / 2 + TIMER_W / 2 + 14 + GAUGE_W, y: HUD_BAND / 2 },
+  /** 왼쪽 팀 카드 (생존자 화면 h, 괴물 화면 익명 카드 hAnon) */
+  leftCards: { x: 14, y: HUD_BAND + 14, w: SIDE_W - 28, h: 124, hAnon: 96, gap: 10 },
+  /** 미니맵 그림 자리 (틀은 바깥으로 pad, 위로 제목 줄 title) */
+  minimap: { x: VIEW_W - SIDE_W + 12, y: HUD_BAND + 38, w: SIDE_W - 24, pad: 6, title: 30 },
+  /** 아래 띠 가운데 y */
   bottom: { y: VIEW_H - HUD_BAND / 2 },
-  /** 배너는 북쪽 탈출구 판정 원(맵 y 3타일)보다 아래 */
+  /** 행동 칸: 아이콘 타일 + 이름 + 키캡 한 칸의 폭 · 간격 · 타일 한 변 */
+  slot: { w: 176, gap: 12, tile: 56 },
+  /** 아래 띠 안내 줄 (수감 · 관전 · 괴물 대기: 행동 칸 대신) 높이 */
+  hint: { h: 42 },
+  /** 배너는 북쪽 탈출구 판정 원(맵 y 3타일)보다 아래. 지속 배너 · 알림 두 줄의 가운데 y와 높이 */
   bannerY: MAP_Y + 4.2 * TILE_PX * MAP_SCALE,
-  noteY: MAP_Y + 8 * TILE_PX * MAP_SCALE,
+  banner: { h: 46, rowH: 40, rowGap: 50 },
+  /** 메모 상자 위쪽 y (알림 두 줄 아래, 감옥(맵 y 14타일)보다 위) · 글자 폭 */
+  noteY: MAP_Y + 8.7 * TILE_PX * MAP_SCALE,
+  noteW: 900,
+  /** 첫 판 조작 안내 (맵 아래쪽 1/3 가운데) · Tab 점수판 (화면 가운데) */
+  tutorialY: VIEW_H * 0.76,
+  scoreY: VIEW_H / 2,
 } as const;

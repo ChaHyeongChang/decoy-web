@@ -232,7 +232,7 @@ export function opponentFxAllowed(sourceInSnapshot: boolean): boolean {
 
 /**
  * 생존자 화면 괴물 부채꼴 색 (노랑 0 ↔ 빨강 1)의 다음 값. 보이는 동안에는 노랑 → 빨강 0.1초, 빨강 → 노랑 0.4초로
- * 보간한다(VISUAL_SPEC 4장). 괴물이 시야에 다시 들어온 첫 프레임(wasShown = false)은 지금 상태(seesSomeone)
+ * 보간한다(VISUAL_SPEC 0장 ⑥ · 6.2). 괴물이 시야에 다시 들어온 첫 프레임(wasShown = false)은 지금 상태(seesSomeone)
  * 그대로다: 사라지기 전 색을 이어 가면 아무도 안 보는 괴물을 '발각 중'(빨강)으로 잘못 보여 준다(잔여 효과 규칙).
  */
 export function nextConeRed(prev: number, wasShown: boolean, seesSomeone: boolean, frameMs: number): number {

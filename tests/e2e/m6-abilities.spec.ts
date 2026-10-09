@@ -1,6 +1,6 @@
 // M6: 능력 — 포효 시 생존자 화면에 괴물 마커 1초, 탐지 · 밀치기 · 질주 · 정체 노출
 import { expect, test } from '@playwright/test';
-import { closeAll, lastSnapshot, sendTest, startFourPlayerMatch } from './helpers';
+import { aimTile, closeAll, lastSnapshot, sendTest, startFourPlayerMatch } from './helpers';
 
 test('포효하면 생존자 화면에 괴물 위치 마커가 1초 뜨고, 괴물 화면에 생존자 핑이 뜬다', async ({
   browser,
@@ -43,6 +43,8 @@ test('스카우트 탐지 · 가드 밀치기 · 러너 질주 · 능력 사용 
   const guard = players.find((p) => p.role === 'guard')!;
   const scout = players.find((p) => p.role === 'scout')!;
   await sendTest(monster.page, { kind: 'teleport', target: monster.id, x: 40, y: 16, face: Math.PI });
+  // 괴물은 서쪽(가드 · 러너가 설 곳)을 본다: 조준은 마우스를 따르므로 판 시작 뒤 직접 정한다
+  await aimTile(monster.page, 34, 16);
   await monster.page.waitForTimeout(400);
   // 탐지: 팀 전원 화면에 초록 다이아
   await scout.page.keyboard.press('Space');

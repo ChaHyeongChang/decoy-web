@@ -115,6 +115,16 @@ export interface TruthFrame {
   monster: { aim: number; blend: number; mode: string; windup: number } | null;
 }
 
+/**
+ * 마우스를 타일 (x, y) 위로 옮긴다. 괴물 조준은 마우스를 따르므로, 판 시작 뒤 조준을 직접 정할 때 쓴다
+ * (로비에서 마지막으로 누른 버튼 자리에 기대면 로비 배치가 바뀔 때마다 조준이 달라진다)
+ */
+export async function aimTile(page: Page, x: number, y: number): Promise<void> {
+  const c = await page.evaluate(([tx, ty]) => window.__DECOY__?.tileToClient(tx!, ty!) ?? null, [x, y]);
+  if (!c) throw new Error('tileToClient 없음');
+  await page.mouse.move(c.x, c.y);
+}
+
 export async function truth(page: Page, code: string): Promise<TruthFrame> {
   const res = await page.request.get(`/test/state?room=${code}`);
   expect(res.ok()).toBe(true);
