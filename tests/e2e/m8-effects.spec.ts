@@ -1,6 +1,6 @@
 // M8: 연출과 소리 — VISUAL_SPEC 4장 연출이 실제로 그려지고, 효과음이 맞는 사람에게 울리고, 콘솔 에러가 없다
 import { expect, test, type Page } from '@playwright/test';
-import { closeAll, lastSnapshot, sendTest, startFourPlayerMatch } from './helpers';
+import { aimTile, closeAll, lastSnapshot, sendTest, startFourPlayerMatch } from './helpers';
 
 async function effects(page: Page): Promise<Record<string, number | boolean>> {
   return page.evaluate(() => window.__DECOY__?.getEffects() ?? {});
@@ -63,6 +63,8 @@ test('공격 준비는 누른 순간 보이고, 피격 플래시 · 수감 페�
   for (let hit = 1; hit <= 2; hit += 1) {
     await sendTest(scout.page, { kind: 'teleport', target: runner.id, x: 31, y: 21 });
     await sendTest(scout.page, { kind: 'teleport', target: monster.id, x: 30, y: 21, face: 0 });
+    // 조준을 먼저 러너 쪽(동쪽)으로 돌려 둔다 (로비 버튼 자리의 마우스에 기대지 않는다)
+    await aimTile(monster.page, 33, 21);
     await monster.page.waitForTimeout(900);
     await clickAt(monster.page, 33, 21);
     // 누른 직후(서버 확인 전, 왕복 400ms): 내 화면에 공격 범위 + 준비 소리

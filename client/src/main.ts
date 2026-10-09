@@ -20,7 +20,8 @@ import { prebakeAtlas } from './art/atlas';
 import { prebakeFogArt } from './render/baseLayer';
 import { computeRenderSize, type RenderSize } from './render/resolution';
 import { GameScene } from './scenes/GameScene';
-import { fontState, loadUiFonts } from './ui/fonts';
+import { fontState, loadUiFonts, onUiFontsLate } from './ui/fonts';
+import { prebakeHud } from './ui/hudKit';
 import { RENDER_SCALE, VIEW_H, VIEW_W, fitCamera, setRenderScale } from './ui/layout';
 import { drawProbeText, relayoutAll, retextAll } from './ui/text';
 
@@ -362,6 +363,8 @@ function schedulePrebake(): void {
     prebakeFogArt();
     const b = app.balance;
     if (b) prebakeAtlas(game.scene.getScene('idle'), b.survivor.radius, b.monster.radius);
+    // HUD 아틀라스도 (배율 2 Canvas에서 약 28ms, 같은 배율이면 아무것도 하지 않는다)
+    prebakeHud(game.textures);
   };
   prebakeTimer = window.setTimeout(() => {
     if ('requestIdleCallback' in window) window.requestIdleCallback(run, { timeout: 1000 });
@@ -371,10 +374,15 @@ function schedulePrebake(): void {
 onGfxChange(schedulePrebake);
 
 // UI 폰트를 부팅 때부터 받는다. Phaser 글자는 만들 때의 글꼴로 굳으므로, 다 받으면 이미 있는 글자를 다시 그린다
-void loadUiFonts().then((ok) => {
-  if (!ok || !game.isBooted) return;
+const relayoutScenes = (): void => {
+  if (!game.isBooted) return;
   for (const scene of game.scene.getScenes(true)) relayoutAll(scene);
+};
+void loadUiFonts().then((ok) => {
+  if (ok) relayoutScenes();
 });
+// 시간 제한(3초)을 넘겨 늦게 받았으면 그때 다시 그린다 (그 사이 판이 대체 글꼴로 시작했을 수 있다)
+onUiFontsLate(relayoutScenes);
 
 /** 판 장면 시작 요청 번호 (폰트를 기다리는 동안 로비로 돌아가면 시작하지 않는다) */
 let sceneRequest = 0;
