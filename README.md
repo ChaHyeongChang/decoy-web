@@ -74,7 +74,7 @@ npm run test:lag       # lag 100 · 200 실서버에 WebSocket 봇 4명으로 �
 npm run verify:deploy  # Docker 이미지(없으면 빌드 결과물)를 띄워 HTTP · WebSocket 접속 확인
 ```
 
-PR마다(그리고 main에 들어갈 때) GitHub Actions(`.github/workflows/ci.yml`)가 빠른 검사(`check` · `test` · `test:e2e:core`, 5분 안팎)를 돌린다. 전체 E2E · 지연 봇 판 · 배포 검증은 `.github/workflows/full.yml`(Actions 탭 → "전체 검사" → Run workflow, 수동 실행)이고 마일스톤의 마지막 병합 전에 한 번 돌린다.
+push · PR마다(그리고 main에 들어갈 때) GitHub Actions(`.github/workflows/ci.yml`)가 빠른 검사(`check` · `test` · `test:e2e:core`, 3분 안팎)를 돌린다. PR을 병합하기 직전에는 같은 워크플로를 그 브랜치에서 수동 실행(Actions 탭 → CI → Run workflow)해 전체 E2E(파일별 러너 시간으로 고르게 나눈 4개 작업, `scripts/e2e-shard.mjs`) · 지연 봇 판 · 배포 검증까지 돌리고, `전체 검사 결과`가 success여야 병합한다.
 
 ## 문서
 

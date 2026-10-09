@@ -390,18 +390,24 @@ export async function bodiesOverBadges(
     // 기준 자리는 정수 픽셀만큼 옮긴 곳 (같은 부분 픽셀 위상 → 같은 몸 그림)
     expect(Math.abs(cr.x - c.x - Math.round(cr.x - c.x))).toBeLessThan(0.01);
     expect(Math.abs(cr.y - c.y - Math.round(cr.y - c.y))).toBeLessThan(0.01);
-    // 몸 없는 배지 자리 (러너를 멀리). 점령이 끝나 완료(✓)로 바뀌지 않게 진행을 조금으로 되돌린다
-    await send({ kind: 'setPoint', point: 'A', progress: 0.05 });
+    // 몸 없는 배지 자리 (러너를 멀리). 점령이 끝나 완료(✓)로 바뀌지 않게 찍을 때마다 진행을 조금으로 되돌린다.
+    // 완료는 되돌릴 수 없고(setPoint는 진행만 바꾼다), 느린 러너에서는 한 자리에 40초 넘게 걸려 점령이 끝난 적이 있다
+    const keepCapturing = (): Promise<void> => send({ kind: 'setPoint', point: 'A', progress: 0.05 });
+    await keepCapturing();
     await send({ kind: 'teleport', target: id('runner'), x: 40, y: 20, face: 0 });
     await page.waitForTimeout(500);
     const bare = await discAt(page, c, rad);
+    await keepCapturing();
     const bareRef = await discAt(page, cr, rad);
+    await keepCapturing();
     await send({ kind: 'teleport', target: id('runner'), x: spot.x, y: spot.y, face: 0 });
     await page.waitForTimeout(600);
     const on = await discAt(page, c, rad);
+    await keepCapturing();
     await send({ kind: 'teleport', target: id('runner'), x: ref.x, y: ref.y, face: 0 });
     await page.waitForTimeout(600);
     const off = await discAt(page, cr, rad);
+    await keepCapturing();
     const a = disc(on.px, on.rect, c.x, c.y, rad);
     const b = disc(off.px, off.rect, cr.x, cr.y, rad);
     const ba = disc(bare.px, bare.rect, c.x, c.y, rad);
@@ -564,25 +570,44 @@ export async function diffMapScenes(
 /** 장면 3: 거점 정지 (러너와 괴물이 함께 A 안) — 정보 레이어 + 주황 아이콘 픽셀 */
 export async function blockedPoint(s: Session): Promise<{ badge: InfoItem | undefined; orange: number }> {
   const { page, send, id } = s;
-  await send({ kind: 'teleport', target: id('scout'), x: 40, y: 16 });
-  await send({ kind: 'teleport', target: id('runner'), x: 7, y: 15 });
-  await send({ kind: 'teleport', target: id('monster'), x: 9.2, y: 17.4, face: Math.PI });
-  // 괴물 정지 유예(monsterBlockGrace) 전에 잰다
-  await page.waitForFunction(
-    () =>
+  const blockedNow = (): Promise<boolean> =>
+    page.evaluate(() =>
       (window.__DECOY__?.getInfoLayer() ?? []).some(
         (i) => i.kind === 'badge' && i.tag === 'point-A' && i.value === 'blocked',
       ),
-    null,
-    { timeout: 4000 },
+    );
+  // 앞 장면에서 스카우트가 A 안에 서 있었다: 느린 러너(SwiftShader)에서 그동안 점령이 끝나(완료) 정지가 나올 수 없던 적이 있다
+  await send({ kind: 'teleport', target: id('scout'), x: 40, y: 16 });
+  const pointA = (await page.evaluate(() => window.__DECOY__?.getLastSnapshot()?.world.points ?? [])).find(
+    (p) => p.id === 'A',
   );
-  await page.waitForTimeout(150);
-  const badge = (await page.evaluate(() => window.__DECOY__?.getInfoLayer() ?? [])).find(
-    (i) => i.kind === 'badge' && i.tag === 'point-A',
-  );
-  // 상태 칩 (A 글자 배지 오른쪽, mapArtBadges BADGE: 중심 + (0.78, −1.62))
-  const chip = await tileRect(page, 8 + 0.78 - 0.26, 16 - 1.62 - 0.26, 8 + 0.78 + 0.26, 16 - 1.62 + 0.26);
-  const px = (await grab(page, { chip })).chip!;
-  const orange = px.filter(([r, g, b]) => r > 190 && g > 100 && g < 200 && b < 90 && r - g > 40).length;
-  return { badge, orange };
+  if (pointA?.state === 'done')
+    throw new Error('거점 A가 이미 완료라 정지를 볼 수 없다 (앞 장면에서 점령이 끝남)');
+  for (let attempt = 1; ; attempt++) {
+    // 괴물을 A 밖에 두었다가 넣어 정지 유예(monsterBlockGrace, 연속으로 머문 시간) 시계를 새로 시작한다
+    await send({ kind: 'teleport', target: id('monster'), x: 44.5, y: 12.5, face: 0 });
+    await page.waitForTimeout(300);
+    await send({ kind: 'setPoint', point: 'A', progress: 0.3 });
+    await send({ kind: 'teleport', target: id('runner'), x: 7, y: 15 });
+    await send({ kind: 'teleport', target: id('monster'), x: 9.2, y: 17.4, face: Math.PI });
+    // 유예 전에 잰다. 프레임이 느려도 놓치지 않게 시간 간격으로 확인한다
+    await page.waitForFunction(
+      () =>
+        (window.__DECOY__?.getInfoLayer() ?? []).some(
+          (i) => i.kind === 'badge' && i.tag === 'point-A' && i.value === 'blocked',
+        ),
+      null,
+      { timeout: 4000, polling: 100 },
+    );
+    await page.waitForTimeout(150);
+    const badge = (await page.evaluate(() => window.__DECOY__?.getInfoLayer() ?? [])).find(
+      (i) => i.kind === 'badge' && i.tag === 'point-A',
+    );
+    // 상태 칩 (A 글자 배지 오른쪽, mapArtBadges BADGE: 중심 + (0.78, −1.62))
+    const chip = await tileRect(page, 8 + 0.78 - 0.26, 16 - 1.62 - 0.26, 8 + 0.78 + 0.26, 16 - 1.62 + 0.26);
+    const px = (await grab(page, { chip })).chip!;
+    const orange = px.filter(([r, g, b]) => r > 190 && g > 100 && g < 200 && b < 90 && r - g > 40).length;
+    // 찍은 뒤에도 정지면 찍은 화면도 정지 중의 프레임이다. 느린 러너에서 찍는 사이 유예가 끝났으면 다시 (최대 3번)
+    if ((await blockedNow()) || attempt === 3) return { badge, orange };
+  }
 }

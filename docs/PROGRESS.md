@@ -2,6 +2,17 @@
 
 `docs/BUILD_PLAN.md` 마일스톤별 결과. 막힌 항목은 `> 보류:`로 표시한다.
 
+## GitHub Actions 사용 분 (마일스톤별, 대략)
+작업마다 시작 ~ 끝을 분 단위로 올려 더한 값(Linux 러너, 큐 대기 제외). private 저장소 무료 한도는 월 2,000분. M10b부터 push · PR마다 빠른 검사, 병합 직전 전체 검사(MOBILE_PLAN 3절)
+
+| 마일스톤 | PR 실행 | main 병합 실행 | 합계 | 비고 |
+|---|---|---|---|---|
+| CI 도입 · 문서 · 배포 준비 (PR #2~#4) | 46분 (5회) | 약 29분 (3회) | 약 75분 | 그 전(M0~M9, PR #1)은 CI가 없었다 |
+| M10a (PR #5) | 19분 (1회) | 약 18분 (1회) | 약 37분 | |
+| M10b (PR #6) | 162분 (7회, 2026-10-09 07:20 UTC까지) | — | 진행 중 | 전체 E2E 한 작업이 30분 제한에 걸려 취소 · 재실행이 겹쳤다(E2E 133분). 그 뒤 CI를 나눴다 |
+
+2026년 10월 합계: 274분 (2026-10-09 07:20 UTC까지)
+
 ## M0 — 뼈대와 도구 (완료)
 - npm 워크스페이스(shared · server · client · tests), TypeScript strict(`noUncheckedIndexedAccess` 포함), ESLint(any 금지, shared/server에서 Phaser import 금지), Prettier
 - 스크립트: `dev`(서버 tsx watch + Vite), `build`(Vite + esbuild 서버 번들), `start`, `test`(Vitest), `test:e2e`(빌드 후 Playwright), `typecheck`, `lint`, `check`
