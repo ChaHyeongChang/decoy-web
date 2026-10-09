@@ -299,14 +299,15 @@ export class GameScene extends Phaser.Scene {
       const now = performance.now();
       this.roarPings = this.roarPings.filter((p) => p.until > now);
     });
-    // 입력 샘플링은 렌더 프레임과 따로 타이머로 돈다 (그리기가 느려도 조작 주기는 1/30초 유지)
+    // 입력 샘플링은 렌더 프레임과 따로 타이머로 돈다 (그리기가 느려도 조작 주기는 1/30초 유지).
+    // 다음 1/30초 경계에 맞춰 깨어난다(M12: 4ms 간격 반복은 초당 250번 깨어나 휴대폰 메인 스레드의 약 14%를 썼다)
     this.lastInputAt = performance.now();
-    this.inputTimer = window.setInterval(() => this.inputTick(), 4);
+    this.scheduleInput();
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       probeSlot.draw = prevProbe;
       this.watchingFps = false;
       sessionAutoDowngrade.endMatch();
-      if (this.inputTimer !== null) window.clearInterval(this.inputTimer);
+      if (this.inputTimer !== null) window.clearTimeout(this.inputTimer);
       this.inputTimer = null;
       this.sampler.detach();
       this.touchControls?.destroy();
@@ -475,6 +476,17 @@ export class GameScene extends Phaser.Scene {
       sfx.play('windup');
     }
     if (res.dash) app.predictor.predictAction(frame.seq, applyDashStart(balance));
+  }
+
+  /** 다음 입력 틱(쌓인 시간이 1/30초가 되는 때)에 깨어나도록 예약한다. 장면이 끝나면 SHUTDOWN에서 취소 */
+  private scheduleInput(): void {
+    const dtMs = this.app.dt * 1000;
+    const wait = Math.max(1, dtMs - this.acc - (performance.now() - this.lastInputAt));
+    this.inputTimer = window.setTimeout(() => {
+      this.inputTimer = null;
+      this.inputTick();
+      if (this.sys.isActive()) this.scheduleInput();
+    }, wait);
   }
 
   private inputTick(): void {
