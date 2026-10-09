@@ -58,7 +58,8 @@ export class GameScene extends Phaser.Scene {
   private hud!: Hud;
   private minimap!: Minimap;
   private banners!: Banners;
-  private tutorial!: TutorialOverlay;
+  /** 첫 판에만 만든다 (두 번째 판부터는 보이지 않으므로 글자 · 이미지를 만들지 않는다) */
+  private tutorial: TutorialOverlay | null = null;
   private scoreboard!: Scoreboard;
   /** 발각: 화면 가장자리 안쪽 빨간 빛 (얇은 테두리 + 안으로 옅어지는 띠, HUD 아래) */
   private spottedEdge!: Slice;
@@ -129,7 +130,7 @@ export class GameScene extends Phaser.Scene {
       ...this.hud.debug(),
       scoreboard: this.scoreboard.visible,
       scoreText: this.scoreboard.text,
-      help: this.tutorial.visible,
+      help: this.tutorial?.visible ?? false,
       spotted: this.spottedEdge.shown,
       hudGraphics,
       panels: JSON.stringify([...this.hud.panels(), this.minimap.bounds]),
@@ -155,7 +156,7 @@ export class GameScene extends Phaser.Scene {
     this.hud = new Hud(this.kit, info, balance);
     this.minimap = new Minimap(this, this.kit);
     this.banners = new Banners(this.kit);
-    this.tutorial = new TutorialOverlay(this.kit, info);
+    this.tutorial = info.firstMatch ? new TutorialOverlay(this.kit, info) : null;
     this.scoreboard = new Scoreboard(this.kit, info, balance);
     this.screenFx = new ScreenEffects(this, this.world.stunVeil);
     this.localWindup = null;
@@ -171,7 +172,7 @@ export class GameScene extends Phaser.Scene {
     // 판 시작 문구 (괴물 대기 5초 동안)
     const intro = info.role === 'monster' ? 'INTRO_MONSTER' : 'INTRO_WALL';
     this.banners.pushNote(formatText(intro), STORY_TEXT[intro].seconds ?? 3);
-    if (info.firstMatch) this.tutorial.show(performance.now(), TUTORIAL_SECONDS);
+    this.tutorial?.show(performance.now(), TUTORIAL_SECONDS);
 
     const host = this.game.canvas.parentElement ?? document.body;
     this.sampler.attach(host);
@@ -449,7 +450,7 @@ export class GameScene extends Phaser.Scene {
     this.sampler.anyKeyPressed = false;
     // Tab 점수판이 열리면 조작 안내를 닫는다 (두 패널이 겹치지 않게)
     const tab = this.sampler.tabHeld;
-    this.tutorial.update(now, anyKey || tab);
+    this.tutorial?.update(now, anyKey || tab);
     this.scoreboard.update(tab, snap);
   }
 }

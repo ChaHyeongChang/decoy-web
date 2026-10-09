@@ -20,7 +20,7 @@ import { prebakeAtlas } from './art/atlas';
 import { prebakeFogArt } from './render/baseLayer';
 import { computeRenderSize, type RenderSize } from './render/resolution';
 import { GameScene } from './scenes/GameScene';
-import { fontState, loadUiFonts, onUiFontsLate } from './ui/fonts';
+import { fontState, loadUiFonts, onUiFontsLate, uiFontsReady } from './ui/fonts';
 import { prebakeHud } from './ui/hudKit';
 import { RENDER_SCALE, VIEW_H, VIEW_W, fitCamera, setRenderScale } from './ui/layout';
 import { drawProbeText, relayoutAll, retextAll } from './ui/text';
@@ -386,11 +386,16 @@ onUiFontsLate(relayoutScenes);
 
 /** 판 장면 시작 요청 번호 (폰트를 기다리는 동안 로비로 돌아가면 시작하지 않는다) */
 let sceneRequest = 0;
+/** 이번 판 전에 로비(대기)를 거쳤는가. 아니면 진행 중인 판에 다시 들어온 것이다 */
+let fromLobby = false;
 app.subscribe((e) => {
   if (e.kind === 'match') {
     const req = ++sceneRequest;
-    // 폰트를 받은 뒤(보통 로비에서 이미 끝남, 최대 loadUiFonts 시간 제한) 판 장면을 만든다
-    void loadUiFonts().then((ok) => {
+    // 로비에서 시작한 판은 폰트를 받은 뒤(보통 로비에서 이미 끝남, 최대 loadUiFonts 시간 제한) 판 장면을 만든다.
+    // 진행 중인 판에 다시 들어왔으면 기다리지 않는다(판은 계속 흐른다). 늦게 받은 폰트는 onUiFontsLate가 다시 그린다
+    const fonts = fromLobby ? loadUiFonts() : Promise.resolve(uiFontsReady());
+    fromLobby = false;
+    void fonts.then((ok) => {
       if (req !== sceneRequest) return;
       fontState.atSceneStart = ok;
       game.scene.stop('game');
@@ -398,6 +403,7 @@ app.subscribe((e) => {
     });
   } else if (e.kind === 'lobby' && e.lobby.phase === 'lobby') {
     sceneRequest++;
+    fromLobby = true;
     if (game.scene.isActive('game')) game.scene.stop('game');
     schedulePrebake();
   }

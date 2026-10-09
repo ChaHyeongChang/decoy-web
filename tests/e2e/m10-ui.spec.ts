@@ -197,6 +197,48 @@ test('폰트: 로비 화면에서 Noto Sans KR이 이미 준비되어 있고, �
   await context.close();
 });
 
+test('진행 중인 판에 새로고침으로 다시 들어오면 폰트를 기다리지 않고 판 화면을 띄우고, 늦게 온 폰트로 다시 그린다', async ({
+  browser,
+}) => {
+  const { context, page, problems } = await newPlayerPage(browser);
+  await page.goto(`/?bots=1${BASE_QUERY}`);
+  await page.getByTestId('create-room').click();
+  await expect(page.getByTestId('room-code')).toHaveText(/^[A-Z]{4}$/);
+  await pickRoleAndReady(page, 'runner');
+  await page.getByTestId('start-button').click();
+  await waitForSnapshots(page, 3);
+
+  // 느린 회선: 폰트 응답을 판 화면이 뜬 것을 본 뒤까지 붙잡아 둔다
+  let release = (): void => undefined;
+  const gate = new Promise<void>((r) => (release = r));
+  await page.route('**/fonts/noto-sans-kr-ui.woff2', async (route) => {
+    await gate;
+    await route.continue();
+  });
+  // 폰트 미리 받기를 붙잡아 두면 load 이벤트가 오지 않는다
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  // 판 장면을 시작한 시각 (페이지 시작 기준). 로비에서 시작한 판처럼 폰트를 기다렸다면
+  // 부팅 때 건 폰트 시간 제한(3초)이 지나야 장면이 생긴다
+  const startedAt = (await (
+    await page.waitForFunction(
+      () => ((window.__DECOY__?.fonts.atSceneStart ?? null) !== null ? performance.now() : 0),
+      undefined,
+      { timeout: 20_000 },
+    )
+  ).jsonValue()) as number;
+  expect(await page.evaluate(() => window.__DECOY__?.fonts ?? null)).toEqual({
+    ready: false,
+    atSceneStart: false,
+  });
+  expect(startedAt).toBeLessThan(3000);
+
+  release();
+  await expect.poll(() => page.evaluate(() => window.__DECOY__?.fonts.ready ?? false)).toBe(true);
+  await waitForSnapshots(page, 5);
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
 test('빌드 결과에 폰트 · 글자 목록 · 라이선스(OFL.txt)가 있고 서버가 내준다', async ({ request }) => {
   const ofl = readFileSync('client/dist/fonts/OFL.txt', 'utf8');
   expect(ofl).toContain('SIL OPEN FONT LICENSE Version 1.1');
