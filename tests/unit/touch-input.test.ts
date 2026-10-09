@@ -127,6 +127,11 @@ describe('터치 입력: 손가락 · 데드존 · 이동', () => {
 });
 
 describe('터치 입력: 조준 스틱 발사 대기', () => {
+  it('계획의 수치 그대로: 데드존 15% · ±10° · 발사 대기 최대 0.35초 · 짧은 탭 0.25초 (MOBILE_PLAN M11 5번)', () => {
+    expect(TOUCH).toMatchObject({ deadZone: 0.15, maxFireWaitMs: 350, shortTapMs: 250 });
+    expect(TOUCH.aimTolerance).toBeCloseTo(10 * DEG, 12);
+  });
+
   /** 조준 스틱을 각도 theta 쪽으로 끌어 둔 상태 (face는 아직 그대로). 스틱이 정한 각도(atan2)를 돌려준다 */
   function aimAt(t: TouchInput, theta: number, nowMs = 0, id = 5): number {
     const x = Math.cos(theta) * 0.8;
@@ -168,8 +173,8 @@ describe('터치 입력: 조준 스틱 발사 대기', () => {
     const r = run(t, { nowMs: 1000, face: 0 }, 30, { turn: false });
     expect(count(r.frames, BTN.ATTACK)).toBe(1);
     const fired = r.frames.find((f) => (f.pressed & BTN.ATTACK) !== 0)!;
-    expect(fired.nowMs - 1000).toBeGreaterThanOrEqual(TOUCH.maxFireWaitMs);
-    expect(fired.nowMs - 1000).toBeLessThan(TOUCH.maxFireWaitMs + FRAME_MS);
+    expect(fired.nowMs - 1000).toBeGreaterThanOrEqual(350);
+    expect(fired.nowMs - 1000).toBeLessThan(350 + FRAME_MS);
   });
 
   it('데드존 안에서는 aim을 갱신하지 않고 마지막 바깥 각도를 유지한다', () => {
