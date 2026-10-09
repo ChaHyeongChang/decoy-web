@@ -90,8 +90,9 @@ test('휴대폰 자동 중간 → 판 중 하향이 효과가 있으면 기억�
   expect(await perfMemory(page)).toEqual({ v: PERF_MEMORY_VERSION, online: { tier: 'low', base: 'medium' } });
 
   // 다시 열기(첫 화면): 기억한 낮음으로 시작 (출처는 자동, 로비 선택은 '자동' 그대로).
-  // 방으로 되돌아가지 않게 마지막 방 기억(터치 기기 30초 복귀)은 지운다
-  await page.evaluate((k) => localStorage.removeItem(k), STORAGE_KEYS.lastRoom.key);
+  // 방으로 되돌아가지 않게 마지막 방 기억(터치 기기 30초 복귀)은 새 문서가 시작될 때 지운다:
+  // 지금 지워도 떠나는 페이지가 pagehide에서 다시 적는다(M12 마지막 방 복귀)
+  await page.addInitScript((k) => localStorage.removeItem(k), STORAGE_KEYS.lastRoom.key);
   await page.goto(QUERY);
   await expect(page.getByTestId('quality-select')).toHaveValue('auto');
   g = await gfx(page);
