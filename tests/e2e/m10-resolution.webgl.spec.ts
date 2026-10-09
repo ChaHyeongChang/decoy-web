@@ -466,10 +466,29 @@ test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 �
     expect(errDeg, `${label} 크기 변경 뒤 조준 유지`).toBeLessThan(2);
   };
 
+  // 느린 러너(2코어 SwiftShader)에서 4K 프레임이 메인 스레드를 오래 붙잡으면 서버가 송신 밀림(1MB)으로 연결을 끊고
+  // 앱이 다시 붙는다. 그러면 판 장면을 새로 만들어 앞서 만든 탐침 글자가 사라진다(M11 전체 검사에서 probeRes null).
+  // 그런 단계는 원인을 적고 탐침을 다시 만든다(새 장면의 글자도 새 해상도인지는 그대로 본다). 빠른 기기에서는 다시 붙지 않는다
+  let sockets = 0;
+  page.on('websocket', () => {
+    sockets += 1;
+  });
+  let seenSockets = 0;
+  const drawProbe = async (): Promise<void> => {
+    await page.evaluate(() => window.__DECOY__?.probeText('가드 11:55 ABC', 1500.37, 18.41, 28));
+  };
+  const reprobeIfReconnected = async (label: string): Promise<void> => {
+    if (sockets === seenSockets) return;
+    seenSockets = sockets;
+    console.log(`${label}: 연결이 다시 맺어졌다(느린 러너의 송신 밀림) → 새 판 장면에 탐침을 다시 만든다`);
+    await drawProbe();
+    await settleFrames(page, 2);
+  };
+
   const first = await canvasInfo(page);
   expect([first.backingW, first.backingH]).toEqual([2880, 1620]);
   // 선명도 탐침 글자를 첫 크기 변경 전에 만들어 둔다: 크기가 바뀔 때마다 이 글자도 새 해상도로 다시 그려져야 한다
-  await page.evaluate(() => window.__DECOY__?.probeText('가드 11:55 ABC', 1500.37, 18.41, 28));
+  await drawProbe();
   await settleFrames(page, 2);
   const firstTexts = await textAudit(page);
   expectTexts(firstTexts, 1.5, '1440×900 @2');
@@ -482,6 +501,7 @@ test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 �
   await aimHeld('→ 1000×700 @2');
   expectBacking(small, '1000×700 @2');
   expectAligned(small, '1000×700 @2');
+  await reprobeIfReconnected('→ 1000×700 @2');
   const smallTexts = await textAudit(page);
   expectTexts(smallTexts, small.gfx.zoom, '→ 1000×700 @2');
   expect(smallTexts.probeRes).toBe(small.gfx.zoom);
@@ -493,6 +513,7 @@ test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 �
   await aimHeld('→ 1920×1080 @2');
   expectBacking(big, '1920×1080 @2');
   expect(big.gfx.zoom).toBe(2);
+  await reprobeIfReconnected('→ 1920×1080 @2');
   const bigTexts = await textAudit(page);
   expectTexts(bigTexts, 2, '→ 1920×1080 @2');
   expect(bigTexts.probeRes).toBe(2);
@@ -514,6 +535,7 @@ test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 �
   expect(moved.dpr).toBe(1);
   expect(moved.gfx.zoom).toBe(1);
   expectAligned(moved, 'DPR 2 → 1');
+  await reprobeIfReconnected('→ DPR 1');
   const movedTexts = await textAudit(page);
   expectTexts(movedTexts, 1, '→ DPR 1');
   expect(movedTexts.probeRes).toBe(1);

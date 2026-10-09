@@ -1,6 +1,6 @@
 // M2: 괴물 조준 각도가 네 클라이언트에서 같다 (서로 보이게 배치한 뒤 비교)
 import { expect, test } from '@playwright/test';
-import { closeAll, sendTest, startFourPlayerMatch, truth } from './helpers';
+import { closeAll, sendTest, startFourPlayerMatch, truth, truthLogSize, truthSince } from './helpers';
 
 function angDiff(a: number, b: number): number {
   let d = (b - a) % (Math.PI * 2);
@@ -49,15 +49,34 @@ test('우클릭으로 시야 모드가 바뀌고 0.4초에 걸쳐 모양이 바�
   await monster.page.waitForTimeout(300);
   const c = await monster.page.evaluate(() => window.__DECOY__?.tileToClient(30, 21) ?? null);
   await monster.page.mouse.move(c!.x, c!.y);
+  const offset = truthLogSize();
   await monster.page.mouse.down({ button: 'right' });
   await monster.page.mouse.up({ button: 'right' });
-  await monster.page.waitForTimeout(150);
-  const mid = await truth(monster.page, code);
-  expect(mid.monster!.mode).toBe('hunt');
-  expect(mid.monster!.blend).toBeGreaterThan(0);
-  expect(mid.monster!.blend).toBeLessThan(1);
-  await monster.page.waitForTimeout(600);
+  // 서버 정답 기록(틱마다)으로 전환을 본다: 고정 대기 뒤 한 번 읽으면 느린 러너(2코어, 4탭)에서는 읽는 사이에
+  // 0.4초 전환이 이미 끝나 있다(M11 전체 검사에서 blend 1로 실패)
+  const hunt = (): { tick: number; blend: number }[] =>
+    truthSince(offset, code)
+      .filter((f) => f.monster?.mode === 'hunt')
+      .map((f) => ({ tick: f.tick, blend: f.monster!.blend }));
+  await expect
+    .poll(() => hunt().some((m) => m.blend === 1), { timeout: 15_000, intervals: [100] })
+    .toBe(true);
+  const ticks = hunt();
+  const firstFull = ticks.findIndex((m) => m.blend === 1);
+  const between = ticks.slice(0, firstFull);
+  // 0.4초 = 30Hz 12틱: 그 사이(0 < blend < 1) 틱이 11개쯤, 이어지는 틱이고 blend가 늘기만 한다
+  expect(between.length, '전환 중 틱 수').toBeGreaterThanOrEqual(10);
+  expect(between.length, '전환 중 틱 수').toBeLessThanOrEqual(13);
+  for (let i = 0; i < between.length; i += 1) {
+    expect(between[i]!.blend).toBeGreaterThan(0);
+    expect(between[i]!.blend).toBeLessThan(1);
+    if (i > 0) {
+      expect(between[i]!.tick).toBe(between[i - 1]!.tick + 1);
+      expect(between[i]!.blend).toBeGreaterThan(between[i - 1]!.blend);
+    }
+  }
   const done = await truth(monster.page, code);
+  expect(done.monster!.mode).toBe('hunt');
   expect(done.monster!.blend).toBe(1);
   const snap = await monster.page.evaluate(() => window.__DECOY__?.getLastSnapshot()?.you.mon ?? null);
   expect(snap!.mode).toBe('hunt');

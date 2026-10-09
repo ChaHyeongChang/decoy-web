@@ -1,5 +1,6 @@
 // E2E 공용 도우미: 여러 브라우저 컨텍스트로 방 만들기 · 입장 · 역할 · 시작.
 // M11: 기기(휴대폰 · 태블릿 가로) 프리셋, 터치 기기는 로비를 탭으로, 입력 기록(getInputLog) 모으기 · 세기
+import { closeSync, openSync, readSync, statSync } from 'node:fs';
 import {
   devices as playwrightDevices,
   expect,
@@ -244,6 +245,40 @@ export async function truth(page: Page, code: string): Promise<TruthFrame> {
   const res = await page.request.get(`/test/state?room=${code}`);
   expect(res.ok()).toBe(true);
   return (await res.json()) as TruthFrame;
+}
+
+/** 서버 정답 기록 (playwright.config.ts의 TRUTH_LOG, 저장소 루트 기준). 서버가 틱마다 한 줄씩 덧붙인다 */
+const TRUTH_LOG_PATH = 'tests/e2e/.results/truth.jsonl';
+
+/** 정답 기록의 지금 크기 (바이트). 어떤 일 직전에 재 두고 truthSince로 그 뒤 틱만 읽는다 */
+export function truthLogSize(): number {
+  return statSync(TRUTH_LOG_PATH).size;
+}
+
+/**
+ * 정답 기록에서 offset 바이트 뒤에 쓰인 이 방의 틱들 (쓰는 중인 마지막 줄은 건너뛴다).
+ * 시간이 걸리는 서버 상태 변화(전환 · 준비 등)를 고정 대기 뒤 한 번 읽지 않고 틱 단위로 확인한다(느린 러너에서도 같은 결과)
+ */
+export function truthSince(offset: number, room: string): TruthFrame[] {
+  const size = truthLogSize();
+  if (size <= offset) return [];
+  const buf = Buffer.alloc(size - offset);
+  const fd = openSync(TRUTH_LOG_PATH, 'r');
+  try {
+    readSync(fd, buf, 0, buf.length, offset);
+  } finally {
+    closeSync(fd);
+  }
+  const out: TruthFrame[] = [];
+  for (const line of buf.toString('utf8').split('\n')) {
+    if (!line.includes(`"room":"${room}"`)) continue;
+    try {
+      out.push(JSON.parse(line) as TruthFrame);
+    } catch {
+      // 아직 다 쓰지 않은 줄
+    }
+  }
+  return out;
 }
 
 export async function closeAll(players: Player[]): Promise<void> {
