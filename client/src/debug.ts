@@ -1,11 +1,11 @@
 // window.__DECOY__ 디버그 훅과 ?debug=1 오버레이 (FPS, 핑, 서버 틱, 예측 오차)
 import Phaser from 'phaser';
-import type { DecoyDebug, TouchTarget } from '@decoy/shared';
+import type { DecoyDebug, HudLayout, TouchTarget } from '@decoy/shared';
 import type { App } from './app';
 import { sfx } from './audio';
 import { freezeGfxClock, gfxState, probeSlot, setFpsOverride } from './gfx/state';
 import type { GameScene } from './scenes/GameScene';
-import { VIEW_H, VIEW_W, tileToScreen } from './ui/layout';
+import { MAP_RECT, VIEW_H, VIEW_W, layout, tileToScreen } from './ui/layout';
 import { fontState, uiFontsReady } from './ui/fonts';
 import { auditTexts } from './ui/text';
 
@@ -44,6 +44,37 @@ function touchTargets(): TouchTarget[] {
     out.push({ id: el.dataset.touchTarget ?? '', kind, x: r.left, y: r.top, w: r.width, h: r.height });
   }
   return out;
+}
+
+/**
+ * 판 화면 HUD 배치 (M12): 판 장면이 표시 목록에서 잰 HUD 글자 · 그림(논리 px)을 캔버스 위치로 CSS px로 바꾼다.
+ * 글자 크기도 CSS px (터치 화면 글자 하한 12px 검사)
+ */
+function hudLayout(app: App): HudLayout | null {
+  const scene = gameScene(app);
+  const canvas = app.game?.canvas;
+  if (!scene || !canvas) return null;
+  const rect = canvas.getBoundingClientRect();
+  const k = rect.height / VIEW_H;
+  const r1 = (v: number): number => Math.round(v * 10) / 10;
+  const box = (b: { x: number; y: number; w: number; h: number }) => ({
+    x: r1(rect.left + b.x * k),
+    y: r1(rect.top + b.y * k),
+    w: r1(b.w * k),
+    h: r1(b.h * k),
+  });
+  return {
+    layout: layout().kind,
+    viewW: VIEW_W,
+    viewH: VIEW_H,
+    cssPerLogical: k,
+    map: box(MAP_RECT),
+    items: scene.hudItems.map((i) => ({
+      ...i,
+      ...box(i),
+      ...(i.fontPx !== undefined ? { fontPx: r1(i.fontPx * k) } : {}),
+    })),
+  };
 }
 
 export function installDebug(app: App, overlay: boolean): void {
@@ -122,6 +153,7 @@ export function installDebug(app: App, overlay: boolean): void {
       return gameScene(app)?.inputMode ?? 'keyboard';
     },
     getTouchTargets: () => touchTargets(),
+    getHudLayout: () => hudLayout(app),
     serverNow: () => app.net.serverNow(),
     sendTest: (cmd) => app.net.send({ t: 'test', cmd }),
     tileToClient: (x, y) => {
