@@ -1,6 +1,14 @@
 // 판 화면: 1/30초 고정 간격 입력 → 예측 → 서버 전송, 그리고 렌더링 · HUD · 배너
 import Phaser from 'phaser';
-import type { DrawnEntity, FxTarget, GameEvent, InfoItem, InputFrame, Role } from '@decoy/shared';
+import type {
+  DrawnEntity,
+  FxTarget,
+  GameEvent,
+  InfoItem,
+  InputFrame,
+  InputLogEntry,
+  Role,
+} from '@decoy/shared';
 import type { App } from '../app';
 import { sfx } from '../audio';
 import { STORY_TEXT, UI_TEXT, formatText } from '../data/storyText';
@@ -146,6 +154,16 @@ export class GameScene extends Phaser.Scene {
       panels: JSON.stringify(drawn),
       missingFrames: [...this.kit.missing].sort().join(','),
     };
+  }
+
+  /** 디버그 · 테스트: 최근 입력 프레임 120개 (M11 계약: 갈래 A가 채운다) */
+  get inputLog(): InputLogEntry[] {
+    return [];
+  }
+
+  /** 디버그 · 테스트: 지금 입력 방식 (M11 계약: 갈래 A가 채운다) */
+  get inputMode(): 'keyboard' | 'touch' {
+    return 'keyboard';
   }
 
   /** 디버그 · 테스트: 지금 보이는 연출 */

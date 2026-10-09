@@ -90,6 +90,12 @@ export function installDebug(app: App, overlay: boolean): void {
     },
     getResult: () => app.result,
     getLastInput: () => gameScene(app)?.lastFrame ?? null,
+    // M11 계약: 구현은 갈래 C (GameScene inputLog · inputMode는 갈래 A, data-touch-target 요소는 갈래 B)
+    getInputLog: () => gameScene(app)?.inputLog.map((e) => ({ ...e })) ?? [],
+    get inputMode() {
+      return gameScene(app)?.inputMode ?? 'keyboard';
+    },
+    getTouchTargets: () => [],
     serverNow: () => app.net.serverNow(),
     sendTest: (cmd) => app.net.send({ t: 'test', cmd }),
     tileToClient: (x, y) => {
