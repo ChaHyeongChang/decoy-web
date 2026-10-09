@@ -195,6 +195,8 @@ export class Hud {
     private readonly kit: HudKit,
     private readonly info: MatchInfo,
     private readonly balance: Balance,
+    /** 터치 모드: 아래 띠 행동 칸(키캡)은 그리지 않는다 — 터치 버튼이 같은 상태를 보인다 (M11) */
+    private readonly touchMode = false,
   ) {
     this.isMonster = info.role === 'monster';
     this.gauges = [new Gauge(kit, 'A', 1), new Gauge(kit, 'B', -1)];
@@ -251,7 +253,9 @@ export class Hud {
     else this.drawTeam(snap);
     const hint = this.persistentHint(snap);
     this.drawHint(hint);
-    this.drawSlots(hint ? [] : actionSlots(snap, this.balance, snap.you.role), nowMs);
+    const slots = hint ? [] : actionSlots(snap, this.balance, snap.you.role);
+    this.drawSlots(this.touchMode ? [] : slots, nowMs);
+    this.slotState = slots;
   }
 
   private persistentHint(snap: Snapshot): { text: string; icon: string } | null {

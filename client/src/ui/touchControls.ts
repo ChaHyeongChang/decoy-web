@@ -243,7 +243,7 @@ export class TouchControls {
         if (this.grab(e, 'hold', rescue.el)) opts.feed.hold(BTN.RESCUE, true);
       });
     }
-    const board = this.part('scoreboard', 'scoreboard', null, HUD_TEXT.scoreboard, 'tc-btn tc-sys');
+    const board = this.part('scoreboard', 'scoreboard', 'scoreboard', HUD_TEXT.scoreboard, 'tc-btn tc-sys');
     board.el.setAttribute('aria-pressed', 'false');
     board.el.addEventListener('pointerdown', (e) => {
       if (!this.grab(e, 'tap', board.el)) return;
@@ -287,11 +287,11 @@ export class TouchControls {
   }
 
   /** 버튼 · 조준 스틱 요소 하나: 면(눈금 링 + 아이콘 + 남은 초) + 이름표 */
-  private part(id: PartId, target: string, icon: IconId | null, label: string, cls = 'tc-btn'): Part {
+  private part(id: PartId, target: string, icon: IconId, label: string, cls = 'tc-btn'): Part {
     const sys = cls.includes('tc-sys');
     const stick = cls === 'tc-aim';
     const ico = h('span', { class: 'tc-ico' });
-    ico.innerHTML = icon ? iconSvg(icon, sys ? 20 : 24) : SCOREBOARD_SVG;
+    ico.innerHTML = iconSvg(icon, sys ? 20 : 24);
     const ring = h('span', { class: 'tc-ring' });
     const secs = sys ? null : h('span', { class: 'tc-secs num' });
     const face = h('span', { class: 'tc-face cut' });
@@ -315,7 +315,7 @@ export class TouchControls {
     el.append(cap);
     if (el instanceof HTMLButtonElement) el.type = 'button';
     this.layer.append(el);
-    const p: Part = { el, face, ico, secs, cap, key: '', accent: '', icon: icon ?? '', label };
+    const p: Part = { el, face, ico, secs, cap, key: '', accent: '', icon, label };
     this.parts.set(id, p);
     return p;
   }
@@ -504,9 +504,3 @@ export class TouchControls {
     this.layer.remove();
   }
 }
-
-/** 점수판 아이콘 (24 격자 · 선 2px, icons.ts와 같은 그림 규칙): 목록 세 줄 + 머리 칸 */
-const SCOREBOARD_SVG =
-  '<svg class="icon icon-scoreboard" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">' +
-  '<path d="M9.5 6.5h10.5M9.5 12h10.5M9.5 17.5h10.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>' +
-  '<path d="M3.5 5h3v3h-3zM3.5 10.5h3v3h-3zM3.5 16h3v3h-3z" fill="currentColor"/></svg>';

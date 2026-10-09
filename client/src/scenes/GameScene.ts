@@ -195,10 +195,11 @@ export class GameScene extends Phaser.Scene {
     this.world = new WorldRenderer(this, FOG_ENABLED);
     this.myBlend = 0;
     this.kit = new HudKit(this);
-    this.hud = new Hud(this.kit, info, balance);
+    this.hud = new Hud(this.kit, info, balance, device.touch);
     this.minimap = new Minimap(this, this.kit);
     this.banners = new Banners(this.kit);
-    this.tutorial = info.firstMatch ? new TutorialOverlay(this.kit, info) : null;
+    // 첫 판 조작 안내는 키보드 · 마우스용이라 터치 모드에서는 만들지 않는다 (터치 안내는 M12, 버튼마다 이름표가 있다)
+    this.tutorial = info.firstMatch && !device.touch ? new TutorialOverlay(this.kit, info) : null;
     this.scoreboard = new Scoreboard(this.kit, info, balance);
     this.screenFx = new ScreenEffects(this, this.world.stunVeil);
     this.localWindup = null;
@@ -308,7 +309,9 @@ export class GameScene extends Phaser.Scene {
         return;
       }
       case 'shoveMiss':
-        this.hud.flash(UI_TEXT.outOfRange, 1000, now);
+        // 터치 모드에는 행동 칸 이름 자리가 없어 경고 배너로 알린다
+        if (device.touch) this.banners.push(UI_TEXT.outOfRange, 1, 'warn', 'warn', now);
+        else this.hud.flash(UI_TEXT.outOfRange, 1000, now);
         return;
       default:
         return;
