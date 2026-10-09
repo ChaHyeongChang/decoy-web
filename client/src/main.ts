@@ -3,6 +3,7 @@ import Phaser from 'phaser';
 import { App, readParams } from './app';
 import { sfx } from './audio';
 import { installDebug } from './debug';
+import { canOfferFullscreen, enterFullscreen, initDevice } from './device';
 import type { QualityPreset, QualityTier, RendererKind } from './gfx/presets';
 import {
   detectQuality,
@@ -29,6 +30,8 @@ import { drawProbeText, relayoutAll, retextAll } from './ui/text';
 const RESIZE_DEBOUNCE_MS = 150;
 
 const params = readParams(window.location.search);
+// 터치 모드 · 세로 · 브라우저 안 (M11). 로비가 전체 화면 버튼을 그리기 전에 정한다
+initDevice(params.touch);
 const uiRoot = document.getElementById('ui-root') ?? document.body;
 const gameRoot = document.getElementById('game-root') ?? document.body;
 const app = new App(params, uiRoot);
@@ -347,8 +350,29 @@ qualityHooks.auto = (a) => {
   syncAutoStatus();
 };
 
-// 효과음: 첫 클릭 · 키 입력에서 오디오를 연다 (브라우저 자동 재생 규칙)
+// 효과음: 첫 클릭 · 키 입력 · 탭에서 오디오를 연다 (브라우저 자동 재생 규칙, 터치는 손을 뗄 때)
 sfx.attachUnlock(document);
+
+// 세로 안내(index.html 정적 마크업)의 "전체 화면" 버튼: 터치 모드이고 브라우저 안일 때만. 누르면 전체 화면 + 가로 고정
+const rotateFs = document.getElementById('rotate-fullscreen');
+if (rotateFs && canOfferFullscreen()) {
+  rotateFs.hidden = false;
+  rotateFs.addEventListener('click', enterFullscreen);
+}
+
+/** 판 중(판 시작 ~ 로비로 돌아감)에는 문서 전체에서 길게 누르기 메뉴를 막는다 (M11) */
+let inMatch = false;
+document.addEventListener('contextmenu', (e) => {
+  if (!inMatch) return;
+  // 로비(판 중에는 숨겨져 있다 — 보이면 판이 끝났거나 방이 사라진 것) · 입력칸은 막지 않는다
+  const t = e.target;
+  if (t instanceof Element && t.closest('.lobby, input, textarea')) return;
+  e.preventDefault();
+});
+app.subscribe((e) => {
+  if (e.kind === 'match') inMatch = true;
+  else if (e.kind === 'lobby' && e.lobby.phase === 'lobby') inMatch = false;
+});
 
 /**
  * 판 그림(정적 맵 · 발광 · 캐릭터 그림)을 로비 대기 중에 미리 굽는다. 판 시작 때 굽으면 배율 2에서 50~80ms 끊긴다.

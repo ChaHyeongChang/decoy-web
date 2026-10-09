@@ -102,6 +102,11 @@ export const ICONS = {
   back: [{ d: 'M20 12H5M11 6l-6 6 6 6' }],
   /** 다시 하기 */
   replay: [{ d: 'M4 12a8 8 0 1 0 2.4-5.7M4 4v5h5' }],
+  /** 점수판 (터치 버튼, M11): 목록 세 줄 + 채운 머리 칸 */
+  scoreboard: [
+    { d: 'M9.5 6.5h10.5M9.5 12h10.5M9.5 17.5h10.5' },
+    { d: 'M3.5 5h3v3h-3zM3.5 10.5h3v3h-3zM3.5 16h3v3h-3z', fill: true },
+  ],
 } as const satisfies Record<string, readonly IconPart[]>;
 
 export type IconId = keyof typeof ICONS;

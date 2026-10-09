@@ -1,11 +1,29 @@
 // 최소 효과음 (BUILD_PLAN M8): 외부 음원 없이 WebAudio로 합성한다.
-// 브라우저 자동 재생 규칙 때문에 AudioContext는 첫 사용자 입력(클릭 · 키)에서 만든다.
+// 브라우저 자동 재생 규칙 때문에 AudioContext는 첫 사용자 입력(클릭 · 키 · 탭)에서 만든다.
+// 터치 · 펜의 pointerdown은 사용자 활성화가 아니다(크롬이 경고를 낸다): 마우스는 pointerdown, 터치 · 펜은 pointerup에서 연다 (M11)
 
 export type SfxName = 'windup' | 'hit' | 'captureStart' | 'captureDone' | 'doorOpen' | 'roar';
 
 const MASTER_GAIN = 0.32;
 /** 같은 소리가 너무 촘촘히 겹치지 않게 (ms) */
 const MIN_GAP_MS = 60;
+
+/**
+ * 이 입력 이벤트에서 오디오를 열어도 되는가 (브라우저의 사용자 활성화 규칙): 키, 마우스 pointerdown,
+ * 마우스가 아닌(터치 · 펜) pointerup
+ */
+export function unlocksAudio(type: string, pointerType: string | undefined): boolean {
+  if (type === 'keydown') return true;
+  if (type === 'pointerdown') return pointerType === 'mouse';
+  if (type === 'pointerup') return pointerType !== undefined && pointerType !== 'mouse';
+  return false;
+}
+
+/** 기본 AudioContext 만들기 (없는 환경이면 null) */
+function newAudioContext(): AudioContext | null {
+  const Ctor = typeof window === 'undefined' ? undefined : window.AudioContext;
+  return typeof Ctor === 'function' ? new Ctor() : null;
+}
 
 export class Sfx {
   private ctx: AudioContext | null = null;
@@ -16,14 +34,18 @@ export class Sfx {
   readonly log: { name: SfxName; at: number }[] = [];
   muted = false;
 
-  /** 첫 사용자 입력에서 AudioContext를 만든다 (그 전의 재생 요청은 기록만 남는다) */
+  /** createContext: 테스트에서 바꿔 끼운다 */
+  constructor(private readonly createContext: () => AudioContext | null = newAudioContext) {}
+
+  /** 첫 사용자 입력에서 AudioContext를 만들거나 다시 켠다 (그 전의 재생 요청은 기록만 남는다) */
   attachUnlock(target: EventTarget): void {
-    const unlock = (): void => {
+    const unlock = (e: Event): void => {
+      if (!unlocksAudio(e.type, (e as Partial<PointerEvent>).pointerType)) return;
       this.ensure();
       if (this.ctx && this.ctx.state === 'suspended') void this.ctx.resume().catch(() => undefined);
     };
-    target.addEventListener('pointerdown', unlock, { capture: true });
-    target.addEventListener('keydown', unlock, { capture: true });
+    for (const type of ['pointerdown', 'pointerup', 'keydown'])
+      target.addEventListener(type, unlock, { capture: true });
   }
 
   get ready(): boolean {
@@ -32,10 +54,9 @@ export class Sfx {
 
   private ensure(): void {
     if (this.ctx) return;
-    const Ctor = window.AudioContext;
-    if (typeof Ctor !== 'function') return;
     try {
-      const ctx = new Ctor();
+      const ctx = this.createContext();
+      if (!ctx) return;
       const master = ctx.createGain();
       master.gain.value = MASTER_GAIN;
       master.connect(ctx.destination);

@@ -120,6 +120,24 @@ export interface TextAudit {
   relayouts: number;
 }
 
+/** 최근 입력 프레임 하나 (M11): pressed는 한 프레임만 살아 getLastInput()으로는 놓친다 */
+export interface InputLogEntry extends InputFrame {
+  /** 만든 시각 (performance.now, ms) */
+  t: number;
+  /** 이 프레임을 만들 때의 입력 방식 */
+  mode: 'keyboard' | 'touch';
+}
+
+/** 화면에 보이는 터치 대상 하나 (M11, CSS px · 창 기준). data-touch-target · data-touch-kind 요소에서 */
+export interface TouchTarget {
+  id: string;
+  kind: 'zone' | 'stick' | 'button';
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export interface DecoyDebug {
   /** 그래픽 상태 (M10) */
   readonly gfx: Readonly<GfxDebugInfo>;
@@ -167,6 +185,12 @@ export interface DecoyDebug {
   readonly audioReady: boolean;
   getResult(): MatchResult | null;
   getLastInput(): InputFrame | null;
+  /** 최근 입력 프레임 120개, 오래된 것부터 (M11) */
+  getInputLog(): InputLogEntry[];
+  /** 지금 입력 방식: 터치 화면이 있으면 'touch' (M11) */
+  readonly inputMode: 'keyboard' | 'touch';
+  /** 보이는 터치 대상 (M11) */
+  getTouchTargets(): TouchTarget[];
   serverNow(): number;
   sendTest(cmd: TestCommand): void;
   /** 타일 좌표 → 브라우저 창 좌표 (E2E에서 마우스를 옮길 때) */

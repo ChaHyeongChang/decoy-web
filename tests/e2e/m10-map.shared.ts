@@ -44,13 +44,32 @@ export async function startBotRoom(browser: Browser, query: string, role = 'runn
   };
   const id = (r: string): string => truth.players.find((p) => p.role === r)?.id ?? '';
   const raw = (cmd: TestCommand): Promise<void> => page.evaluate((c) => window.__DECOY__?.sendTest(c), cmd);
-  // teleport는 멈춤을 푼다: 다시 멈추는 명령을 같은 평가에서 잇달아 보내 서버가 그 사이에 한 틱 움직이지 않게 한다
+  /** 서버 정답의 그 플레이어 자리 */
+  const posOf = async (target: string): Promise<{ x: number; y: number } | null> => {
+    const t = (await (await page.request.get(`/test/state?room=${room}`)).json()) as {
+      players: { id: string; x: number; y: number }[];
+    };
+    return t.players.find((p) => p.id === target) ?? null;
+  };
+  // teleport는 멈춤을 푼다: 다시 멈추는 명령을 같은 평가에서 잇달아 보낸다. 그래도 두 메시지 사이에 서버 틱이 끼면
+  // (느린 러너 · 부하) 봇이 한 틱 움직인 채 멈춰 장면이 달라진다(M11 전체 검사: 가드가 4px 비켜 손전등 빛까지 다름).
+  // 서버 정답에서 정확히 그 자리에 섰는지 확인하고, 아니면 다시 놓는다
   const send = async (cmd: TestCommand): Promise<void> => {
     if (cmd.kind !== 'teleport') return raw(cmd);
-    await page.evaluate((c) => {
-      window.__DECOY__?.sendTest(c);
-      window.__DECOY__?.sendTest({ kind: 'freeze', target: c.target, frozen: true });
-    }, cmd);
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await page.evaluate((c) => {
+        window.__DECOY__?.sendTest(c);
+        window.__DECOY__?.sendTest({ kind: 'freeze', target: c.target, frozen: true });
+      }, cmd);
+      // 명령(WebSocket)이 처리될 때까지: 목표 근처(한 틱 이동 안쪽)에 오면 처리된 것이다
+      let p = await posOf(cmd.target);
+      for (let i = 0; i < 40 && (!p || Math.hypot(p.x - cmd.x, p.y - cmd.y) > 0.5); i += 1) {
+        await page.waitForTimeout(50);
+        p = await posOf(cmd.target);
+      }
+      if (p && p.x === cmd.x && p.y === cmd.y) return;
+    }
+    throw new Error(`teleport ${cmd.target} (${cmd.x}, ${cmd.y}): 5번 놓아도 정확한 자리에 서지 않았다`);
   };
   for (const r of ['monster', 'runner', 'guard', 'scout'])
     await raw({ kind: 'freeze', target: id(r), frozen: true });

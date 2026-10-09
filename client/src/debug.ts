@@ -1,6 +1,6 @@
 // window.__DECOY__ 디버그 훅과 ?debug=1 오버레이 (FPS, 핑, 서버 틱, 예측 오차)
 import Phaser from 'phaser';
-import type { DecoyDebug } from '@decoy/shared';
+import type { DecoyDebug, TouchTarget } from '@decoy/shared';
 import type { App } from './app';
 import { sfx } from './audio';
 import { freezeGfxClock, gfxState, probeSlot, setFpsOverride } from './gfx/state';
@@ -18,6 +18,32 @@ declare global {
 function gameScene(app: App): GameScene | null {
   const scene = app.game?.scene.getScene('game') as GameScene | undefined;
   return scene && scene.sys.isActive() ? scene : null;
+}
+
+const TOUCH_KINDS: readonly TouchTarget['kind'][] = ['zone', 'stick', 'button'];
+
+/**
+ * 손가락이 닿는 터치 대상 (M11): #ui-root 안 [data-touch-target] 중 보이고(크기 > 0 · display · visibility ·
+ * 조상 포함 opacity 0 아님) 입력을 받는(pointer-events none · inert 아님) 요소. 좌표는 CSS px, 창 기준.
+ * data-touch-kind가 없거나 틀리면 'button'으로 본다(가장 엄한 크기 검사를 받게). 테스트에서만 부른다(레이아웃을 읽는다)
+ */
+function touchTargets(): TouchTarget[] {
+  const out: TouchTarget[] = [];
+  const uiRoot = document.getElementById('ui-root');
+  if (!uiRoot) return out;
+  for (const el of uiRoot.querySelectorAll<HTMLElement>('[data-touch-target]')) {
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0 || el.closest('[inert]')) continue;
+    // checkVisibility가 없는 옛 브라우저(크롬 105 미만)는 크기 · pointer-events만 본다
+    const visible =
+      typeof el.checkVisibility !== 'function' ||
+      el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+    if (!visible) continue;
+    if (getComputedStyle(el).pointerEvents === 'none') continue;
+    const kind = TOUCH_KINDS.find((k) => k === el.dataset.touchKind) ?? 'button';
+    out.push({ id: el.dataset.touchTarget ?? '', kind, x: r.left, y: r.top, w: r.width, h: r.height });
+  }
+  return out;
 }
 
 export function installDebug(app: App, overlay: boolean): void {
@@ -90,6 +116,12 @@ export function installDebug(app: App, overlay: boolean): void {
     },
     getResult: () => app.result,
     getLastInput: () => gameScene(app)?.lastFrame ?? null,
+    // M11: 입력 기록 · 방식은 GameScene(판 장면이 없으면 빈 기록 · 'keyboard'), 터치 대상은 #ui-root DOM
+    getInputLog: () => gameScene(app)?.inputLog.map((e) => ({ ...e })) ?? [],
+    get inputMode() {
+      return gameScene(app)?.inputMode ?? 'keyboard';
+    },
+    getTouchTargets: () => touchTargets(),
     serverNow: () => app.net.serverNow(),
     sendTest: (cmd) => app.net.send({ t: 'test', cmd }),
     tileToClient: (x, y) => {
@@ -111,7 +143,7 @@ export function installDebug(app: App, overlay: boolean): void {
       `FPS ${hook.fps.toFixed(0)}  렌더러 ${hook.renderer}`,
       `핑 ${hook.ping.toFixed(0)}ms  지연설정 ${app.params.lag}ms`,
       `서버 틱 ${snap?.tick ?? '-'}  스냅샷 ${app.snapCount}`,
-      `예측 대기 ${hook.pendingInputs}  보정 ${hook.correction.toFixed(3)}타일`,
+      `예측 대기 ${hook.pendingInputs}  보정 ${hook.correction.toFixed(3)}타일  입력 ${hook.inputMode}`,
       `밸런스 ${app.balanceHash}`,
       `그래픽 ${gfxState.quality}(${gfxState.qualitySource})  배율 ${gfxState.zoom.toFixed(2)}  ${gfxState.backingW}×${gfxState.backingH}  자동 하향 ${String(gfxState.features.autoDowngrade ?? '-')}`,
     ].join('\n');
