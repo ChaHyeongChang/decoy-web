@@ -315,6 +315,8 @@ test('생존자 화면: WebGL 높음(후처리 · 먼지 켬)과 Canvas 낮음�
 test('기절 채도 감소 (WebGL 높음): 맵 위 · 캐릭터 아래라 숨은 생존자 흰색 · 몸/링 대비 · 가드 노출 링이 그대로, 별도 몸을 덮지 않는다', async ({
   browser,
 }) => {
+  // 겹치는 프레임을 놓치면 밀치기 쿨타임(35초)을 기다려 다시 민다
+  test.setTimeout(300_000);
   const s = await startRoom(browser, 'monster', '&renderer=webgl&quality=high', 'guard');
   const { send, id } = s;
   const page = s.host.page;
@@ -350,15 +352,38 @@ test('기절 채도 감소 (WebGL 높음): 맵 위 · 캐릭터 아래라 숨은
   console.log(`[m10-visual.webgl] 기절 전: ${describeCapture(before[0]!)}`);
   expect(before.every((c) => c.ok)).toBe(true);
   expect(before[0]!.drawn.filter((d) => d.kind === 'survivor').length).toBe(3);
-  await page.evaluate((ms) => window.__DECOY__?.freezeClock(ms), clocks[0]!);
-  await guard.keyboard.press('Space');
-  // 밀치기 직후(채도 감소 + 별 + 가드 노출)부터 별 위상을 잇달아 훑는다 (SwiftShader는 느려 기절 1.5초 안에 한 번에)
-  const sweep = await captureSweep(page, probes, clocks, {
-    waitEffects: ['desaturate', 'stunStars', 'reveal'],
-    refColors: ref,
-    markColors: [STAR_HEX],
-    firstClockSet: true,
-  });
+  // 밀치기 직후(채도 감소 + 별 + 가드 노출)부터 별 위상을 잇달아 훑는다 (SwiftShader는 느려 기절 1.5초 안에 한 번에).
+  // 노출(1초)과 기절(1.5초)이 겹치는 창은 약 1초라, 러너가 몹시 느려 프레임 간격이 그보다 길면 한 프레임도 못 볼 수 있다:
+  // 그때는 밀치기 쿨타임(35초)을 기다려 자리를 다시 잡고 다시 민다 (최대 3번)
+  let sweep: Awaited<ReturnType<typeof captureSweep>> = [];
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    if (attempt > 1) {
+      await guard.waitForFunction(
+        () => (window.__DECOY__?.getLastSnapshot()?.you.surv?.abilityCd ?? 1) <= 0,
+        null,
+        {
+          timeout: 60_000,
+          polling: 250,
+        },
+      );
+      await send({ kind: 'teleport', target: id('guard'), x: 40.6, y: 12.3, face: 0 });
+      await send({ kind: 'teleport', target: id('monster'), x: M[0], y: M[1], face: Math.PI });
+      await page.waitForTimeout(1500);
+    }
+    await page.evaluate((ms) => window.__DECOY__?.freezeClock(ms), clocks[0]!);
+    await guard.keyboard.press('Space');
+    sweep = await captureSweep(page, probes, clocks, {
+      waitEffects: ['desaturate', 'stunStars', 'reveal'],
+      refColors: ref,
+      markColors: [STAR_HEX],
+      firstClockSet: true,
+    });
+    if (sweep[0]?.ok === true) break;
+    const fps = await page.evaluate(() => window.__DECOY__?.fps ?? 0);
+    console.log(
+      `[m10-visual.webgl] 밀치기 ${attempt}번째: 겹치는 프레임을 못 봄 (괴물 화면 ${fps.toFixed(1)}fps) — 다시`,
+    );
+  }
   let dsatSeen = 0;
   let starSeen = 0;
   for (const [i, c] of sweep.entries()) {
