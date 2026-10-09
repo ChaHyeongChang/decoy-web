@@ -12,13 +12,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>DECOY — 서버를 깨우는 중</title>
     <style>
+      /* 로비와 같은 그래픽 언어 (M10c): 청록 격자 배경 + 비네트, 모서리를 깎은 어두운 유리 패널 + 얇은 청록 테두리 */
       :root {
         --bg: #0b1622;
-        --panel: #111c28;
+        --panel: #0f1b27;
+        --edge: #1e3a4a;
         --text: #e2e8f0;
         --accent: #22d3ee;
+        --accent-text: #67e8f9;
+        --accent-dim: #0e7490;
         --muted: #94a3b8;
-        --font: 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+        --warn: #fbbf24;
+        --font: 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
       }
       html,
       body {
@@ -27,17 +32,74 @@
         background: var(--bg);
         color: var(--text);
         font-family: var(--font);
+        word-break: keep-all;
+        overflow-wrap: break-word;
+      }
+      body {
+        background:
+          radial-gradient(ellipse 80% 75% at 50% 50%, transparent 50%, rgba(5, 8, 12, 0.8) 100%),
+          repeating-linear-gradient(0deg, rgba(34, 211, 238, 0.04) 0 1px, transparent 1px 32px),
+          repeating-linear-gradient(90deg, rgba(34, 211, 238, 0.04) 0 1px, transparent 1px 32px), var(--bg);
       }
       main {
         box-sizing: border-box;
         min-height: 100vh;
         display: flex;
-        flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 14px;
         padding: 24px 16px;
+      }
+      .card {
+        --cut: 14px;
+        position: relative;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+        width: min(560px, 100%);
+        padding: 28px 26px 24px;
         text-align: center;
+        background: rgba(15, 27, 39, 0.96);
+        clip-path: polygon(
+          var(--cut) 0,
+          calc(100% - var(--cut)) 0,
+          100% var(--cut),
+          100% calc(100% - var(--cut)),
+          calc(100% - var(--cut)) 100%,
+          var(--cut) 100%,
+          0 calc(100% - var(--cut)),
+          0 var(--cut)
+        );
+      }
+      /* 1px 청록 테두리 (대각선까지 이어지는 고리) */
+      .card::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: var(--accent-dim);
+        clip-path: polygon(
+          evenodd,
+          14px 0,
+          calc(100% - 14px) 0,
+          100% 14px,
+          100% calc(100% - 14px),
+          calc(100% - 14px) 100%,
+          14px 100%,
+          0 calc(100% - 14px),
+          0 14px,
+          14px 0,
+          14.4px 1px,
+          1px 14.4px,
+          1px calc(100% - 14.4px),
+          14.4px calc(100% - 1px),
+          calc(100% - 14.4px) calc(100% - 1px),
+          calc(100% - 1px) calc(100% - 14.4px),
+          calc(100% - 1px) 14.4px,
+          calc(100% - 14.4px) 1px,
+          14.4px 1px
+        );
       }
       .pulse {
         position: relative;
@@ -51,6 +113,7 @@
         inset: 0;
         border: 3px solid var(--accent);
         border-radius: 50%;
+        box-shadow: 0 0 14px rgba(34, 211, 238, 0.45);
       }
       .pulse::after {
         animation: ring 1.8s ease-out infinite;
@@ -65,15 +128,25 @@
           opacity: 0;
         }
       }
+      @media (prefers-reduced-motion: reduce) {
+        .pulse::after {
+          animation: none;
+        }
+      }
       .brand {
+        margin-right: -0.32em;
         font-size: 30px;
         font-weight: 800;
-        letter-spacing: 0.2em;
-        color: var(--accent);
+        letter-spacing: 0.32em;
+        color: #ecfeff;
+        text-shadow:
+          0 0 2px rgba(34, 211, 238, 0.9),
+          0 0 16px rgba(34, 211, 238, 0.55);
       }
       h1 {
         margin: 0;
         font-size: 22px;
+        color: var(--accent-text);
       }
       p {
         margin: 0;
@@ -84,19 +157,38 @@
       .muted {
         color: var(--muted);
         font-size: 14px;
+        font-variant-numeric: tabular-nums;
       }
       .warn {
-        color: #f59e0b;
+        color: var(--warn);
       }
       button {
+        --cut: 8px;
         margin-top: 4px;
-        padding: 12px 24px;
-        border: 1px solid var(--accent);
-        border-radius: 8px;
-        background: var(--panel);
-        color: var(--text);
+        min-height: 46px;
+        padding: 0 28px;
+        border: 0;
+        background: var(--accent-dim);
+        color: #fff;
         font: inherit;
         font-size: 16px;
+        font-weight: 700;
+        cursor: pointer;
+        clip-path: polygon(
+          var(--cut) 0,
+          calc(100% - var(--cut)) 0,
+          100% var(--cut),
+          100% calc(100% - var(--cut)),
+          calc(100% - var(--cut)) 100%,
+          var(--cut) 100%,
+          0 calc(100% - var(--cut)),
+          0 var(--cut)
+        );
+        box-shadow: inset 0 0 0 1px var(--accent);
+      }
+      button:focus-visible {
+        outline: none;
+        box-shadow: inset 0 0 0 2px #fff;
       }
       [hidden] {
         display: none;
@@ -105,22 +197,26 @@
   </head>
   <body>
     <main data-testid="wake-page">
-      <div class="pulse" aria-hidden="true"></div>
-      <div class="brand">DECOY</div>
-      <h1>서버를 깨우는 중…</h1>
-      <p>
-        무료 서버는 15분 동안 아무도 접속하지 않으면 잠들어요. 깨어나는 데 1분쯤 걸릴 수 있어요. 이 화면을
-        그대로 두면 자동으로 연결돼요.
-      </p>
-      <!-- 매초 바뀌는 숫자는 스크린 리더가 계속 읽지 않게 숨기고, 경고만 알린다 -->
-      <p class="muted" id="elapsed" aria-hidden="true">0초째 기다리는 중</p>
-      <div role="status" aria-live="polite">
-        <p class="warn" id="offline" hidden>인터넷 연결이 끊겨 있어요. 와이파이나 데이터를 확인해 주세요.</p>
-        <p class="warn" id="slow" hidden>
-          생각보다 오래 걸리고 있어요. 아래 버튼으로 다시 시도하거나, 계속 안 되면 개발자에게 알려 주세요.
+      <div class="card">
+        <div class="pulse" aria-hidden="true"></div>
+        <div class="brand">DECOY</div>
+        <h1>서버를 깨우는 중…</h1>
+        <p>
+          무료 서버는 15분 동안 아무도 접속하지 않으면 잠들어요. 깨어나는 데 1분쯤 걸릴 수 있어요. 이 화면을
+          그대로 두면 자동으로 연결돼요.
         </p>
+        <!-- 매초 바뀌는 숫자는 스크린 리더가 계속 읽지 않게 숨기고, 경고만 알린다 -->
+        <p class="muted" id="elapsed" aria-hidden="true">0초째 기다리는 중</p>
+        <div role="status" aria-live="polite">
+          <p class="warn" id="offline" hidden>
+            인터넷 연결이 끊겨 있어요. 와이파이나 데이터를 확인해 주세요.
+          </p>
+          <p class="warn" id="slow" hidden>
+            생각보다 오래 걸리고 있어요. 아래 버튼으로 다시 시도하거나, 계속 안 되면 개발자에게 알려 주세요.
+          </p>
+        </div>
+        <button type="button" id="retry" hidden>다시 시도</button>
       </div>
-      <button type="button" id="retry" hidden>다시 시도</button>
     </main>
     <script>
       (() => {
