@@ -177,3 +177,16 @@ export const HUD_TEXT = {
   me: '나',
   minimap: '지도',
 } as const;
+
+/**
+ * 터치 화면 (M11, docs/STORY_TEXT.md 5절). 행동 버튼 이름(공격 · 돌진 · 포효 · 시야 모드 · 능력 · 구조)은 HUD 행동 칸과 같은
+ * 글자(actionSlots의 label)를 쓰고, 여기에는 터치 화면에만 있는 것을 둔다.
+ * 세로 안내는 JS 없이도 떠야 해서 client/index.html에 같은 문구를 직접 적는다 (바꾸면 둘 다, tests/unit/device.test.ts가 대조)
+ */
+export const TOUCH_TEXT = {
+  move: '이동',
+  rescue: '구조',
+  fullscreen: '전체 화면',
+  rotateTitle: '가로로 돌려 주세요',
+  rotateBody: 'DECOY는 가로 화면에서 합니다. 세로로 두는 동안에는 조작할 수 없고, 판은 계속 흘러가요.',
+} as const;

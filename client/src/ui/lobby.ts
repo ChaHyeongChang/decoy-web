@@ -3,7 +3,8 @@
 // 남이 고른 카드 = 사선 해치 + 주인 이름 — 색만으로 구분하지 않는다
 import type { LobbyPlayer, LobbyState, Role } from '@decoy/shared';
 import type { IconId } from '../art/icons';
-import { HUD_TEXT, ROLE_CARDS, UI_TEXT } from '../data/storyText';
+import { HUD_TEXT, ROLE_CARDS, TOUCH_TEXT, UI_TEXT } from '../data/storyText';
+import { canOfferFullscreen, enterFullscreen } from '../device';
 import {
   loadSavedQuality,
   parseQualityChoice,
@@ -82,6 +83,8 @@ export class LobbyUI {
   private lastRoom: string | null = null;
   /** 이번 접속에서 고른 품질 (저장하지 못했어도 선택 상자를 다시 그릴 때 이 값을 보여 준다) */
   private qualityChoice: QualityChoice | null = null;
+  /** "전체 화면" (휴대폰 브라우저에서만): 첫 화면은 로고 아래, 방 화면은 오른쪽 위 구석 */
+  private readonly fsButton: HTMLButtonElement | null = null;
 
   constructor(
     host: HTMLElement,
@@ -98,6 +101,17 @@ export class LobbyUI {
     this.errorBox = h('div', { class: 'lobby-error', role: 'alert' }, icon('warn', 18), this.errorText);
     this.showError('');
     this.root.append(bg, this.content);
+    // 휴대폰 브라우저: "전체 화면" (누르면 전체 화면 + 가로 고정, M11). 준비 · 코드 입장도 같은 요청을 한다
+    if (canOfferFullscreen()) {
+      this.fsButton = h(
+        'button',
+        { class: 'btn lobby-fs', type: 'button', 'data-testid': 'lobby-fullscreen' },
+        icon('fullscreen', 18),
+        TOUCH_TEXT.fullscreen,
+      );
+      this.fsButton.addEventListener('click', enterFullscreen);
+      this.root.classList.add('has-fs');
+    }
     host.appendChild(this.root);
   }
 
@@ -156,6 +170,7 @@ export class LobbyUI {
     const join = h('button', { class: 'btn', 'data-testid': 'join-room' }, UI_TEXT.joinRoom);
     const doJoin = (): void => {
       if (code.value.trim().length === 0) return;
+      enterFullscreen();
       this.showError('');
       this.actions.join(code.value.trim(), name.value);
     };
@@ -173,7 +188,10 @@ export class LobbyUI {
       ...this.qualityRow(),
       this.errorBox,
     );
-    this.content.replaceChildren(this.brand(true), panel);
+    this.content.className = 'lobby-content lobby-home';
+    const brand = this.brand(true);
+    if (this.fsButton) brand.querySelector('.brand-text')?.append(this.fsButton);
+    this.content.replaceChildren(brand, panel);
     this.show();
   }
 
@@ -279,7 +297,11 @@ export class LobbyUI {
       me?.ready ? UI_TEXT.notReady : UI_TEXT.ready,
     );
     if (!me?.role) ready.setAttribute('disabled', 'true');
-    ready.addEventListener('click', () => this.actions.setReady(!(me?.ready ?? false)));
+    ready.addEventListener('click', () => {
+      // 휴대폰: 판 시작은 서버 메시지라 그때는 전체 화면을 요청할 수 없다. 준비를 누를 때 미리 (M11)
+      if (!me?.ready) enterFullscreen();
+      this.actions.setReady(!(me?.ready ?? false));
+    });
     const buttons = h('div', { class: 'action-row' }, ready);
     if (isHost) {
       const start = h(
@@ -307,6 +329,8 @@ export class LobbyUI {
     const active = document.activeElement;
     const focusId =
       active instanceof HTMLElement && this.content.contains(active) ? active.dataset.testid : undefined;
+    this.content.className = 'lobby-content lobby-room';
+    if (this.fsButton) this.root.append(this.fsButton);
     this.content.replaceChildren(
       h('div', { class: 'lobby-top' }, this.brand(false), invite),
       cards,

@@ -2,7 +2,8 @@
 <html lang="ko">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- 휴대폰: 핀치 · 더블탭 확대를 막는다 (M11). 스크롤이 필요한 로비 · 결과는 touch-action: pan-y -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
     <title>DECOY</title>
     <meta name="theme-color" content="#0b1622" />
     <link rel="icon" type="image/png" href="../docs/images/logo_decoy.png" />
@@ -13,6 +14,37 @@
   <body>
     <div id="game-root"></div>
     <div id="ui-root"></div>
+    <!-- 세로 안내 (M11): JS 없이도 CSS (orientation: portrait) and (pointer: coarse)로 뜬다.
+         문구는 storyText.ts TOUCH_TEXT와 같다 (tests/unit/device.test.ts가 대조) -->
+    <div class="rotate-notice" role="alert" data-testid="rotate-notice">
+      <div class="rotate-card panel">
+        <svg class="rotate-art" viewBox="0 0 96 96" aria-hidden="true">
+          <rect class="rot-ghost" x="24" y="36" width="48" height="28" rx="5" />
+          <g class="rot-phone">
+            <rect x="34" y="26" width="28" height="48" rx="5" />
+            <path d="M44 31h8M48 68v.5" />
+          </g>
+          <path class="rot-arrow" d="M36.4 18.1A34 34 0 0 1 77.4 33M77.4 33l.6-7M77.4 33l-6.3-3" />
+        </svg>
+        <p class="rotate-title">가로로 돌려 주세요</p>
+        <p class="rotate-body">
+          DECOY는 가로 화면에서 합니다. 세로로 두는 동안에는 조작할 수 없고, 판은 계속 흘러가요.
+        </p>
+        <button type="button" class="btn" id="rotate-fullscreen" data-testid="rotate-fullscreen" hidden>
+          <svg class="icon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+          전체 화면
+        </button>
+      </div>
+    </div>
     <script type="module" src="./src/main.ts"></script>
   </body>
 </html>
