@@ -277,11 +277,16 @@ test('감지: 휴대폰은 터치 화면, PC는 터치 대상 0개, ?touch=1 · 
       mode: window.__DECOY__?.inputMode,
       layers: document.querySelectorAll('.touch-layer').length,
       htmlTouch: document.documentElement.classList.contains('touch'),
+      // 문서 전체 글자 선택 막기는 터치 모드에서만 (PC는 방 코드 · 결과 글자를 고르고 복사할 수 있다), 게임 영역은 늘 막는다
+      bodySelect: getComputedStyle(document.body).userSelect,
+      gameSelect: getComputedStyle(document.getElementById('game-root')!).userSelect,
     }));
     expect(state, c.name).toEqual({
       mode: c.touch ? 'touch' : 'keyboard',
       layers: c.touch ? 1 : 0,
       htmlTouch: c.touch,
+      bodySelect: c.touch ? 'none' : 'auto',
+      gameSelect: 'none',
     });
     const ids = (await touchTargets(page)).map((t) => t.id);
     if (c.touch) expect(ids, c.name).toEqual(expect.arrayContaining(SURVIVOR_TARGETS));
@@ -602,7 +607,9 @@ test('기본 동작: meta viewport · 계산된 CSS, 스틱을 끌어도 pointer
   });
   const NO_TAP = 'rgba(0, 0, 0, 0)';
   for (const k of ['html', 'body'] as const)
-    expect(css[k], k).toMatchObject({ userSelect: 'none', overscroll: 'none none', tapHighlight: NO_TAP });
+    expect(css[k], k).toMatchObject({ overscroll: 'none none', tapHighlight: NO_TAP });
+  // 길게 눌러 글자 선택 막기는 터치 모드에서 문서 전체(html.touch body), PC는 게임 영역 · 터치 레이어만 (DECISIONS M11)
+  expect(css.body).toMatchObject({ userSelect: 'none' });
   expect(css.game).toMatchObject({ touchAction: 'none', userSelect: 'none' });
   expect(css.layer).toMatchObject({ touchAction: 'none', userSelect: 'none', tapHighlight: NO_TAP });
   expect(css.targets.length).toBeGreaterThanOrEqual(MONSTER_TARGETS.length);
