@@ -1,12 +1,15 @@
 // 터치 화면 배치 (M11, MOBILE_PLAN M11 4번): 모든 터치 대상 48px 이상 · 서로 8px 이상 · 화면 안 · 가장자리 띠 밖,
 // 이동 스틱은 왼쪽 40% 안, 생존자는 조준 스틱이 없다. 가장자리 띠에서 시작한 터치는 무시, 스틱 값은 길이 1로 자른다
 import { describe, expect, it } from 'vitest';
+import { BTN } from '../../shared/src/types';
+import { TouchInput } from '../../client/src/touchInput';
 import {
   EDGE_BAND,
   MIN_GAP,
   MIN_TARGET,
   MOVE_ZONE_RATIO,
   inEdgeBand,
+  stickCenter,
   stickVector,
   touchLayout,
   type Box,
@@ -135,5 +138,39 @@ describe('스틱 값 stickVector', () => {
     expect(Math.hypot(v.x, v.y)).toBeCloseTo(1, 9);
     expect(v.x / v.y).toBeCloseTo(0.75, 9);
     expect(stickVector(0, 0, 60)).toEqual({ x: 0, y: 0 });
+  });
+});
+
+describe('스틱 중심 (M11 검토): 돌진은 누른 자리, 조준 스틱은 고정 중심', () => {
+  const L = touchLayout(844, 390, { l: 0, r: 0, t: 0, b: 0 }, true, false);
+  const dash = L.buttons.dash;
+  if (!dash || !L.aim) throw new Error('괴물 배치에 돌진 · 조준 스틱이 없음');
+  const off = { x: dash.x + dash.w / 2 + 15, y: dash.y + dash.h / 2 };
+
+  it('돌진 버튼 가운데에서 15px 벗어난 탭: 중심이 누른 자리라 끌기로 잡히지 않는다', () => {
+    const c = stickCenter('dash', L, off.x, off.y);
+    expect(c).toEqual(off);
+    expect(stickVector(off.x - c.x, off.y - c.y, L.dashR)).toEqual({ x: 0, y: 0 });
+  });
+
+  it('그대로 떼면 다음 프레임에 지금 방향으로 돌진 1번, 조준은 돌지 않는다', () => {
+    const t = new TouchInput();
+    const c = stickCenter('dash', L, off.x, off.y);
+    const v = stickVector(off.x - c.x, off.y - c.y, L.dashR);
+    const face = Math.PI / 2;
+    t.stickStart(1, 'dash', 0);
+    t.stickMove(1, v.x, v.y);
+    t.stickEnd(1, 80);
+    const ctx = { nowMs: 100, face, canAttack: true, canDash: true };
+    const pressed = t.takePressed(ctx);
+    expect(pressed & BTN.DASH).toBe(BTN.DASH);
+    const aim = t.aimAngle(ctx);
+    expect(aim === null || Math.abs(aim - face) < 1e-9).toBe(true);
+  });
+
+  it('조준 스틱은 누른 자리와 상관없이 요소 가운데가 중심', () => {
+    const a = L.aim!;
+    expect(stickCenter('aim', L, a.x + 3, a.y + 4)).toEqual({ x: a.x + a.w / 2, y: a.y + a.h / 2 });
+    expect(stickCenter('move', L, 120, 200)).toEqual({ x: 120, y: 200 });
   });
 });

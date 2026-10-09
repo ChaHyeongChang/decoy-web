@@ -47,12 +47,15 @@ body {
   /* 한국어는 낱말(띄어쓰기) 단위로 줄을 바꾼다 */
   word-break: keep-all;
   overflow-wrap: break-word;
-  /* 휴대폰 기본 동작 막기 (M11): 당겨서 새로고침 · 끝 튕김, 길게 눌러 글자 선택 · 메뉴, 탭 강조 */
+  /* 휴대폰 기본 동작 막기 (M11): 당겨서 새로고침 · 끝 튕김, 탭 강조 */
   overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+/* 터치 모드(html.touch)에서만 문서 전체의 길게 눌러 글자 선택 · 메뉴를 막는다. PC는 방 코드 · 결과 글자를 고르고 복사할 수 있다 */
+html.touch body {
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
-  -webkit-tap-highlight-color: transparent;
 }
 /* 입력칸은 글자를 고르고 붙여 넣을 수 있게 */
 input,
@@ -64,8 +67,12 @@ select {
 #game-root {
   position: fixed;
   inset: 0;
-  /* 게임 영역: 끌기 · 핀치 · 더블탭 확대를 브라우저가 가져가지 않게 */
+  /* 게임 영역: 끌기 · 핀치 · 더블탭 확대를 브라우저가 가져가지 않게, 글자 선택 · 메뉴 없음 (PC 포함) */
   touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
 }
 /* 캔버스는 main.ts가 기기 픽셀 격자 위치 · 크기로 직접 놓는다 (Scale.NONE, M10a) */
 #game-root > canvas {
@@ -1421,7 +1428,8 @@ select {
 }
 /* 전체 화면 (휴대폰 브라우저에서만 만든다, 전체 화면 중에는 숨김) */
 .lobby-fs {
-  position: fixed;
+  /* 로비 스크롤 상자(.lobby) 기준: 스크롤하면 위 줄과 함께 사라져 카드 · 목록을 가리지 않는다 */
+  position: absolute;
   top: 10px;
   right: max(12px, env(safe-area-inset-right, 0px));
   z-index: 2;
@@ -1445,6 +1453,10 @@ select {
 /* 방 화면 위 줄은 오른쪽 위 "전체 화면" 자리를 비운다 */
 .lobby.has-fs .lobby-room .lobby-top {
   padding-right: 136px;
+}
+/* 전체 화면 중에는 버튼이 숨으므로 여백도 없앤다 */
+.fs .lobby.has-fs .lobby-room .lobby-top {
+  padding-right: 0;
 }
 /* 손가락 화면 · 낮은 화면: 방 화면 준비 · 시작 줄은 스크롤해도 아래에 남는다 */
 @media (max-height: 500px), (pointer: coarse) {
@@ -1843,6 +1855,11 @@ select {
 .tc-btn.down[data-state='ready'] > .tc-face {
   background-color: var(--acc-a);
 }
+/* 끄는 동안에는 손잡이 전환을 끈다(손가락을 늦게 따라가지 않게). 떼면 가운데로 돌아가는 전환은 남는다 */
+.tc-aim.down > .tc-face,
+.tc-dash.down > .tc-face {
+  transition: none;
+}
 
 /* 이동 스틱: 손가락이 없으면 왼쪽 아래에 흐리게, 누르면 그 자리에 */
 .tc-move {
@@ -1950,15 +1967,18 @@ select {
 .aiming > .tc-dir {
   opacity: 1;
 }
-/* 가운데로 돌아와 떼면 취소: 손잡이가 꺼지고 × */
-.tc-aim.cancel > .tc-face {
+/* 가운데로 돌아와 떼면 취소: 손잡이가 꺼지고 × (조준 스틱 · 돌진) */
+.tc-aim.cancel > .tc-face,
+.tc-btn.tc-dash.cancel > .tc-face {
   --ring: var(--text-faint);
   background-color: rgba(10, 20, 30, 0.8);
 }
-.tc-aim.cancel .tc-ico {
+.tc-aim.cancel .tc-ico,
+.tc-btn.tc-dash.cancel .tc-ico {
   opacity: 0.2;
 }
-.tc-aim.cancel > .tc-face::before {
+.tc-aim.cancel > .tc-face::before,
+.tc-btn.tc-dash.cancel > .tc-face::before {
   content: '';
   position: absolute;
   inset: 30%;

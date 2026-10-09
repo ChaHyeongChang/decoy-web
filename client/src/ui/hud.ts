@@ -189,6 +189,8 @@ export class Hud {
   private slotState: ActionSlot[] = [];
   private readonly hint: { panel: Slice; icon: Spr; text: CrispText };
   private hintText = '';
+  /** 이번 프레임 행동 칸 (안내 줄과 무관하게 계산, 터치 버튼이 같이 쓴다) */
+  lastSlots: ActionSlot[] = [];
   private toast: { text: string; until: number } | null = null;
 
   constructor(
@@ -253,7 +255,8 @@ export class Hud {
     else this.drawTeam(snap);
     const hint = this.persistentHint(snap);
     this.drawHint(hint);
-    const slots = hint ? [] : actionSlots(snap, this.balance, snap.you.role);
+    this.lastSlots = actionSlots(snap, this.balance, snap.you.role);
+    const slots = hint ? [] : this.lastSlots;
     this.drawSlots(this.touchMode ? [] : slots, nowMs);
     this.slotState = slots;
   }

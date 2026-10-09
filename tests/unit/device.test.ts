@@ -79,15 +79,15 @@ describe('브라우저 기본 동작 막기', () => {
     );
   });
 
-  it('html · body는 당겨서 새로고침 · 선택 · 길게 누르기 메뉴 · 탭 강조가 없고, 입력칸은 선택된다', () => {
+  it('html · body는 당겨서 새로고침 · 탭 강조가 없고, 터치 모드에서만 문서 전체 선택 · 길게 누르기 메뉴를 막는다. 입력칸은 선택된다', () => {
     const body = /html,\s*body \{([^}]*)\}/.exec(css)?.[1] ?? '';
-    for (const rule of [
-      'overscroll-behavior: none',
-      'user-select: none',
-      '-webkit-touch-callout: none',
-      '-webkit-tap-highlight-color: transparent',
-    ])
+    for (const rule of ['overscroll-behavior: none', '-webkit-tap-highlight-color: transparent'])
       expect(body, rule).toContain(rule);
+    // PC는 방 코드 · 결과 글자를 고르고 복사할 수 있다 (게임 영역만 막는다)
+    expect(body).not.toContain('user-select: none');
+    const touchBody = /html\.touch body \{([^}]*)\}/.exec(css)?.[1] ?? '';
+    for (const rule of ['user-select: none', '-webkit-touch-callout: none'])
+      expect(touchBody, rule).toContain(rule);
     expect(css).toMatch(/input,\s*select \{\s*user-select: text;/);
   });
 
@@ -95,6 +95,8 @@ describe('브라우저 기본 동작 막기', () => {
     const block = (sel: string): string =>
       new RegExp(`(?:^|\\n)${sel.replace(/[.#]/g, '\\$&')} \\{([^}]*)\\}`).exec(css)?.[1] ?? '';
     expect(block('#game-root')).toContain('touch-action: none');
+    expect(block('#game-root')).toContain('user-select: none');
+    expect(block('#game-root')).toContain('-webkit-touch-callout: none');
     expect(block('.touch-layer')).toContain('touch-action: none');
     expect(block('.touch-layer')).toContain('-webkit-touch-callout: none');
     expect(block('.lobby')).toContain('touch-action: pan-y');

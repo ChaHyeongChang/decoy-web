@@ -52,7 +52,7 @@ export interface TouchSource {
  * 화면 y는 아래가 +다(게임 좌표와 같다)
  */
 export interface TouchFeed {
-  /** 손가락이 스틱에 닿음 (이동 스틱은 누른 자리가 중심, 조준 스틱은 고정 중심, 돌진은 버튼 자리가 중심) */
+  /** 손가락이 스틱에 닿음 (이동 · 돌진은 누른 자리가 중심, 조준 스틱은 고정 중심) */
   stickStart(pointerId: number, kind: StickKind, nowMs: number): void;
   stickMove(pointerId: number, nx: number, ny: number): void;
   /** 손가락을 뗌 (조준 · 돌진은 규칙에 따라 발사 대기로 가거나 취소) */

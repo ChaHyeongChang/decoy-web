@@ -2,7 +2,6 @@
 import Phaser from 'phaser';
 import {
   BTN,
-  type Balance,
   type DrawnEntity,
   type FxTarget,
   type GameEvent,
@@ -27,7 +26,7 @@ import { TouchInput, type TouchFrameCtx } from '../touchInput';
 import type { IconId } from '../art/icons';
 import { Banners, type BannerLine } from '../ui/banners';
 import { Hud } from '../ui/hud';
-import { actionSlots, type Tone } from '../ui/hudArt';
+import type { Tone } from '../ui/hudArt';
 import { HudKit, type Slice } from '../ui/hudKit';
 import { VIEW_H, VIEW_W, fitCamera, screenToTile } from '../ui/layout';
 import { Minimap } from '../ui/minimap';
@@ -533,7 +532,7 @@ export class GameScene extends Phaser.Scene {
             ? { text: formatText('ALERT_LAST_30'), tone: 'warn', icon: 'exit' }
             : null;
     this.banners.update(persistent, warn, now);
-    this.updateTouch(snap, app.balance);
+    this.updateTouch(snap);
     const anyKey = this.sampler.anyKeyPressed;
     this.sampler.anyKeyPressed = false;
     // Tab 점수판(터치: 점수판 버튼)이 열리면 조작 안내를 닫는다 (두 패널이 겹치지 않게)
@@ -544,9 +543,9 @@ export class GameScene extends Phaser.Scene {
 
   /**
    * 터치 화면: 판 중이고 관전 · 결과 · 판 정지 · 세로 화면이 아닐 때만 입력을 받는다. 끄는 순간 손가락 · 발사 대기를 비운다.
-   * 행동 칸은 캔버스 HUD와 같은 actionSlots 결과 (쿨타임 게이지 · 못 씀 표시)
+   * 행동 칸은 이번 프레임 캔버스 HUD가 계산한 actionSlots 결과를 그대로 쓴다 (쿨타임 게이지 · 못 씀 표시)
    */
-  private updateTouch(snap: Snapshot, balance: Balance): void {
+  private updateTouch(snap: Snapshot): void {
     const controls = this.touchControls;
     if (!controls) return;
     const status = snap.you.surv?.status;
@@ -561,6 +560,6 @@ export class GameScene extends Phaser.Scene {
       controls.setActive(active);
       if (!active) this.touch?.reset();
     }
-    if (active) controls.update({ slots: actionSlots(snap, balance, snap.you.role) });
+    if (active) controls.update({ slots: this.hud.lastSlots });
   }
 }

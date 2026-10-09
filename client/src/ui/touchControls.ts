@@ -151,6 +151,15 @@ export function inEdgeBand(x: number, y: number, safe: Box): boolean {
   return x < safe.x || x > safe.x + safe.w || y < safe.y || y > safe.y + safe.h;
 }
 
+/**
+ * 스틱 중심 (CSS px): 조준 스틱은 고정 중심(요소 가운데), 이동 · 돌진은 누른 자리.
+ * 돌진 버튼을 가운데에서 벗어나 탭해도 그 어긋남이 '끌기'로 잡히지 않게 한다(끌지 않은 탭 = 지금 방향)
+ */
+export function stickCenter(kind: StickKind, L: TouchLayout, x: number, y: number): { x: number; y: number } {
+  if (kind === 'aim' && L.aim) return { x: L.aim.x + L.aim.w / 2, y: L.aim.y + L.aim.h / 2 };
+  return { x, y };
+}
+
 /** 스틱 값: 중심에서 손가락까지 / 반지름, 길이 1로 자른다 */
 export function stickVector(dx: number, dy: number, r: number): { x: number; y: number } {
   const len = Math.hypot(dx, dy) / r;
@@ -343,14 +352,13 @@ export class TouchControls {
     return true;
   }
 
-  /** 스틱 시작: 이동은 누른 자리가 중심, 조준 · 돌진은 요소 가운데가 중심. 종류마다 손가락 하나 */
+  /** 스틱 시작: 이동 · 돌진은 누른 자리가 중심, 조준은 고정 중심(stickCenter). 종류마다 손가락 하나 */
   private startStick(e: PointerEvent, kind: StickKind, el: HTMLElement, knob: HTMLElement): void {
     const L = this.layout;
     if (!L) return;
     for (const f of this.fingers.values()) if (f.kind === kind) return;
-    const b = kind === 'aim' ? L.aim : kind === 'dash' ? L.buttons.dash : null;
-    const c = b ? { x: b.x + b.w / 2, y: b.y + b.h / 2 } : { x: e.clientX, y: e.clientY };
-    const r = kind === 'aim' && b ? b.w / 2 : kind === 'dash' ? L.dashR : L.moveR;
+    const c = stickCenter(kind, L, e.clientX, e.clientY);
+    const r = kind === 'aim' && L.aim ? L.aim.w / 2 : kind === 'dash' ? L.dashR : L.moveR;
     if (!this.grab(e, kind, el, { knob, cx: c.x, cy: c.y, r })) return;
     this.opts.feed.stickStart(e.pointerId, kind, performance.now());
     if (kind === 'move') {
@@ -374,12 +382,16 @@ export class TouchControls {
       f.el.style.setProperty('--dir', `${Math.atan2(v.x, -v.y)}rad`);
     }
     f.el.classList.toggle('aiming', outside);
-    f.el.classList.toggle('cancel', f.kind === 'aim' && f.out && !outside);
+    // 데드존 밖에 나갔다가 돌아오면 취소 표시 (조준 · 돌진, 상태 기계도 떼면 취소한다)
+    f.el.classList.toggle('cancel', f.kind !== 'move' && f.out && !outside);
   }
 
   private onUp(e: PointerEvent): void {
-    // 판 안 첫 탭에서 전체 화면 + 가로 고정 (터치의 pointerup은 사용자 활성화다). 전체 화면 버튼은 탭마다
-    if (!this.fsTried || (e.target instanceof Element && e.target.closest('.tc-fs'))) {
+    // 판 안 첫 탭에서 전체 화면 + 가로 고정 (터치의 pointerup은 사용자 활성화다). 전체 화면 버튼은 탭마다.
+    // 다른 손가락을 누르고 있으면 미룬다: 전체 화면 전환의 창 크기 변화가 모든 손가락을 취소하므로(이동 · 구조가 끊김)
+    const others = [...this.fingers.keys()].some((id) => id !== e.pointerId);
+    const fsBtn = e.target instanceof Element && e.target.closest('.tc-fs') !== null;
+    if ((!this.fsTried && !others) || fsBtn) {
       this.fsTried = true;
       enterFullscreen();
     }

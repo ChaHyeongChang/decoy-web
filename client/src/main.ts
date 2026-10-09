@@ -363,7 +363,11 @@ if (rotateFs && canOfferFullscreen()) {
 /** 판 중(판 시작 ~ 로비로 돌아감)에는 문서 전체에서 길게 누르기 메뉴를 막는다 (M11) */
 let inMatch = false;
 document.addEventListener('contextmenu', (e) => {
-  if (inMatch) e.preventDefault();
+  if (!inMatch) return;
+  // 로비(판 중에는 숨겨져 있다 — 보이면 판이 끝났거나 방이 사라진 것) · 입력칸은 막지 않는다
+  const t = e.target;
+  if (t instanceof Element && t.closest('.lobby, input, textarea')) return;
+  e.preventDefault();
 });
 app.subscribe((e) => {
   if (e.kind === 'match') inMatch = true;
