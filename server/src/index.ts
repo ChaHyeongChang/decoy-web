@@ -6,6 +6,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { LagQueue, Rng, type ClientMessage, type ServerMessage } from '@decoy/shared';
 import { HEALTH_PATH, MAX_STALL_MS, SERVER_MARK_HEADER, loadBalance, parseOptions } from './config';
 import { RoomManager, type Conn, type Room, type Seat } from './room';
+import { sendAction } from './sendPolicy';
 import { serveStatic } from './static';
 import { TruthLog, truthOf } from './truth';
 import { spawnLocalBot } from './bots';
@@ -143,8 +144,6 @@ httpServer.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) =>
   if (wait > 0) setTimeout(accept, wait);
   else accept();
 });
-/** 송신 버퍼 상한 (바이트) */
-const MAX_BUFFERED = 1024 * 1024;
 /** 하트비트: 10초마다 ping, 그사이 pong이 없으면 끊는다 (절전 · 와이파이 끊김 같은 반쯤 열린 연결) */
 const alive = new WeakMap<WebSocket, boolean>();
 setInterval(() => {
@@ -163,27 +162,25 @@ wss.on('connection', (socket: WebSocket) => {
   const half = options.lag / 2;
   const jitter = options.lag > 0 ? balance.network.lagJitterMs : 0;
   // null = 닫기 표식. 앞서 보낸 메시지(예: 'replaced' 알림)를 모두 보낸 뒤 닫는다
-  const outbound = new LagQueue<string | null>(
+  const outbound = new LagQueue<{ text: string; snap: boolean } | null>(
     half,
     jitter,
-    (text) => {
+    (out) => {
       if (socket.readyState !== socket.OPEN) return;
-      if (text === null) {
+      if (out === null) {
         socket.close();
         return;
       }
-      // 받는 쪽이 못 따라오면(반쯤 끊긴 연결) 버퍼가 무한히 쌓이지 않게 끊는다
-      if (socket.bufferedAmount > MAX_BUFFERED) {
-        socket.terminate();
-        return;
-      }
-      socket.send(text);
+      // 받는 쪽이 못 따라오면 오래된 스냅샷은 건너뛰고, 그래도 크게 쌓이면 끊는다 (sendPolicy.ts)
+      const action = sendAction(socket.bufferedAmount, out.snap);
+      if (action === 'terminate') socket.terminate();
+      else if (action === 'send') socket.send(out.text);
     },
     () => lagRng.next(),
   );
   const conn: Conn = {
     id: connCounter,
-    send: (msg: ServerMessage) => outbound.push(JSON.stringify(msg)),
+    send: (msg: ServerMessage) => outbound.push({ text: JSON.stringify(msg), snap: msg.t === 'snap' }),
     close: () => outbound.push(null),
   };
   alive.set(socket, true);
