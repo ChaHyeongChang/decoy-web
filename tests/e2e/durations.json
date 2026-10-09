@@ -4,6 +4,7 @@
   "m1-sync.spec.ts": 15,
   "m10-fog.spec.ts": 18,
   "m10-fog.webgl.spec.ts": 607,
+  "m10-hud.spec.ts": 25,
   "m10-logo.spec.ts": 1,
   "m10-map.spec.ts": 46,
   "m10-map.webgl.spec.ts": 275,
