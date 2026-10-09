@@ -148,4 +148,7 @@ export const HUD_TEXT = {
   monsterWaking: '괴물이 깨어나는 중',
   scoreboard: '점수판',
   closeHint: '아무 키나 누르면 닫힘 · Tab으로 다시 보기',
+  /** 내 카드 태그 · 미니맵 제목 (M10c) */
+  me: '나',
+  minimap: '지도',
 } as const;

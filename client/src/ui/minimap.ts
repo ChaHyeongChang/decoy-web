@@ -1,6 +1,8 @@
 // 미니맵 (우측 상단). 메인 화면과 같은 정보 규칙: 바닥은 메인 화면의 바닥 합성(안개 포함 — 시야 밖은 어두운
 // 구조, 시야 안은 밝게)을 줄여 쓰고, 엔티티는 메인 화면에 실제로 그린 목록만 다시 찍는다. 그래서 메인 화면보다
 // 많은 정보가 나올 수 없다. 캔버스는 백버퍼 배율로 그리고 이미지는 1/배율로 표시해 화면에 1:1로 찍힌다.
+// M10c: 깎은 모서리 틀 + 제목, 엔티티는 역할 실루엣 축소판(생존자 화면) / 흰 공통 실루엣(괴물 화면) / 괴물 망토.
+// 엔티티 그림은 HUD 아틀라스 프레임을 쓰는 이미지라 매 프레임 자리 · 방향만 바꾼다 (Graphics 없음)
 import Phaser from 'phaser';
 import {
   CAPTURE_POINTS,
@@ -11,10 +13,13 @@ import {
   type DrawnEntity,
   type Role,
 } from '@decoy/shared';
+import { HUD_TEXT } from '../data/storyText';
+import { NEON } from '../art/palette';
 import { gfxState, onGfxChange } from '../gfx/state';
-import { COLOR, ROLE_COLOR } from '../render/colors';
 import { minimapScaleFor } from '../render/fogMath';
 import { createCanvasTexture, resizeCanvasTexture, uploadCanvasTexture } from '../render/fogPaint';
+import { FR } from './hudArt';
+import type { HudKit, Spr } from './hudKit';
 import { HUD } from './layout';
 
 const MINIMAP_KEY = 'minimap';
@@ -24,8 +29,8 @@ export class Minimap {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly texture: Phaser.Textures.Texture;
   private readonly image: Phaser.GameObjects.Image;
-  private readonly g: Phaser.GameObjects.Graphics;
-  private readonly frame: Phaser.GameObjects.Graphics;
+  /** 엔티티 그림 (재사용) */
+  private readonly pool: Spr[] = [];
   readonly w: number;
   readonly h: number;
   drawn: DrawnEntity[] = [];
@@ -34,8 +39,12 @@ export class Minimap {
   /** 백버퍼 배율이 바뀌어 다음 갱신 때 캔버스 크기를 다시 잡는다 */
   private resizePending = false;
 
-  constructor(scene: Phaser.Scene) {
-    this.w = HUD.minimap.w;
+  constructor(
+    scene: Phaser.Scene,
+    private readonly kit: HudKit,
+  ) {
+    const M = HUD.minimap;
+    this.w = M.w;
     this.h = Math.round((this.w * MAP_H) / MAP_W);
     this.scale = minimapScaleFor(gfxState.zoom);
     gfxState.minimapScale = this.scale;
@@ -47,21 +56,34 @@ export class Minimap {
     this.ctx = ctx;
     // 이전 판의 같은 키는 지우고, getImageData 사본을 만드는 addCanvas 대신 사본 없이 올린다
     this.texture = createCanvasTexture(scene.textures, MINIMAP_KEY, this.canvas);
-    this.frame = scene.add.graphics().setDepth(39);
-    this.frame.fillStyle(0x0f1b27, 0.95);
-    this.frame.fillRoundedRect(HUD.minimap.x - 6, HUD.minimap.y - 6, this.w + 12, this.h + 12, 8);
-    this.frame.lineStyle(2, 0x334155, 1);
-    this.frame.strokeRoundedRect(HUD.minimap.x - 6, HUD.minimap.y - 6, this.w + 12, this.h + 12, 8);
+    // 틀: 깎은 모서리 패널 + 제목 (지도 아이콘 + 글자)
+    kit.slice(39).set('mm', M.x - M.pad, M.y - M.title, this.w + M.pad * 2, this.h + M.title + M.pad);
+    kit.spr(41).set(FR.icon('map', NEON, 18), M.x + 11, M.y - M.title / 2 - 1);
+    kit
+      .text(M.x + 26, M.y - M.title / 2 - 1, 15, NEON, 42, true)
+      .setOrigin(0, 0.5)
+      .setText(HUD_TEXT.minimap);
     this.image = scene.add
-      .image(HUD.minimap.x, HUD.minimap.y, MINIMAP_KEY)
+      .image(M.x, M.y, MINIMAP_KEY)
       .setOrigin(0, 0)
       .setDepth(40)
       .setScale(this.w / this.canvas.width, this.h / this.canvas.height);
-    this.g = scene.add.graphics().setDepth(41);
+    // 늘 표시 위치: 거점 · 감옥 · 탈출구
+    for (const p of Object.values(CAPTURE_POINTS))
+      kit.spr(41).set(FR.mm('point'), this.px(p.x), this.py(p.y));
+    kit.spr(41).set(FR.mm('prison'), this.px(PRISON_CENTER.x), this.py(PRISON_CENTER.y));
+    for (const e of Object.values(EXITS))
+      kit.spr(41).set(FR.mm('exit'), this.px(e.center.x), this.py(e.center.y));
     const off = onGfxChange(() => {
       this.resizePending = true;
     });
     scene.events.once(Phaser.Scenes.Events.SHUTDOWN, off);
+  }
+
+  /** 틀 자리 (논리 px [x, y, w, h]) */
+  get bounds(): [number, number, number, number] {
+    const M = HUD.minimap;
+    return [M.x - M.pad, M.y - M.title, this.w + M.pad * 2, this.h + M.title + M.pad];
   }
 
   /** 백버퍼 배율이 바뀌었으면 캔버스를 그 배율로 다시 잡는다 (다음 바닥 갱신 때 다시 그려진다) */
@@ -99,48 +121,46 @@ export class Minimap {
     return HUD.minimap.y + (y / MAP_H) * this.h;
   }
 
+  private sprite(i: number): Spr {
+    let s = this.pool[i];
+    if (!s) {
+      s = this.kit.spr(42, false);
+      this.pool[i] = s;
+    }
+    return s;
+  }
+
   /** 메인 화면에 그린 엔티티만 다시 찍는다 */
   update(mainDrawn: readonly DrawnEntity[], myRole: Role, roleOf: (id: string) => Role | null): void {
-    const g = this.g;
-    g.clear();
-    // 항상 표시 위치: 거점 · 감옥 · 탈출구
-    g.lineStyle(1, COLOR.pointLine, 0.9);
-    for (const p of Object.values(CAPTURE_POINTS)) g.strokeCircle(this.px(p.x), this.py(p.y), 4);
-    g.fillStyle(COLOR.prison, 0.9);
-    g.fillRect(this.px(PRISON_CENTER.x) - 3, this.py(PRISON_CENTER.y) - 3, 6, 6);
-    g.fillStyle(COLOR.exitActive, 0.9);
-    for (const e of Object.values(EXITS)) g.fillRect(this.px(e.center.x) - 4, this.py(e.center.y) - 2, 8, 4);
     const out: DrawnEntity[] = [];
+    let n = 0;
+    const put = (frame: string, x: number, y: number, rot: number): void => {
+      const s = this.sprite(n);
+      n += 1;
+      s.set(frame, x, y).show(true);
+      s.img.setRotation(rot);
+    };
     for (const d of mainDrawn) {
       if (d.layer === 'minimap') continue;
-      let color: number = COLOR.hiddenSurvivor;
-      if (d.kind === 'monster') color = COLOR.monster;
-      else if (d.kind === 'self') color = ROLE_COLOR[myRole];
-      else if (d.kind === 'mark')
-        color = d.tag === 'track' ? COLOR.scout : d.tag === 'roarSelf' ? COLOR.warn : COLOR.white;
-      else if (myRole !== 'monster') {
-        const r = roleOf(d.id);
-        if (r) color = ROLE_COLOR[r];
+      const x = this.px(d.x);
+      const y = this.py(d.y);
+      if (d.kind === 'mark') {
+        put(FR.mm(d.tag === 'track' || d.tag === 'roarSelf' ? d.tag : 'roarPing'), x, y, 0);
+      } else if (d.kind === 'monster' || (d.kind === 'self' && myRole === 'monster')) {
+        put(FR.mm('monster'), x, y, d.face);
+      } else {
+        // 생존자 화면: 역할 실루엣 (나는 흰 고리를 아래에). 괴물 화면: 흰 공통 실루엣 (역할 · 체력 없음)
+        const role = d.kind === 'self' ? myRole : myRole === 'monster' ? null : roleOf(d.id);
+        if (d.kind === 'self') put(FR.mm('self'), x, y, 0);
+        put(FR.mm(role && role !== 'monster' ? role : 'hidden'), x, y, d.face);
       }
-      g.fillStyle(color, 1);
-      if (d.kind === 'monster' || (d.kind === 'self' && myRole === 'monster'))
-        g.fillTriangle(
-          this.px(d.x),
-          this.py(d.y) - 4,
-          this.px(d.x) - 4,
-          this.py(d.y) + 3,
-          this.px(d.x) + 4,
-          this.py(d.y) + 3,
-        );
-      else g.fillCircle(this.px(d.x), this.py(d.y), d.kind === 'mark' ? 2.5 : 3);
       out.push({ ...d, layer: 'minimap' });
     }
+    for (let i = n; i < this.pool.length; i += 1) this.pool[i]?.show(false);
     this.drawn = out;
   }
 
   destroy(): void {
     this.image.destroy();
-    this.g.destroy();
-    this.frame.destroy();
   }
 }
