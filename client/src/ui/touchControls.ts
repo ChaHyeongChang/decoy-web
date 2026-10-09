@@ -5,6 +5,9 @@
 // 배치는 순수 함수 touchLayout(창 크기 · 안전 영역)이 정하고(단위 테스트), 창 크기가 바뀔 때만 DOM에 쓴다.
 // 판 중에는 바뀐 값만 쓴다: 게이지는 CSS 변수 --lit 하나(24눈금이라 쿨타임 동안 24번), 손잡이는 transform만.
 // 색만으로 구분하지 않기: 준비 = 눈금 가득 + 강조색 아이콘, 쿨타임 = 눈금 일부 + 남은 초, 효과 중 = 채운 면, 못 씀 = 사선 해치
+// M12: 판 HUD(왼쪽 칸 위쪽 타이머 · 게이지 · 팀 카드)와 겹치지 않게 이동 영역을 그 아래에서 시작한다(HUD 자리는 논리 px라
+// 창 크기가 바뀌면 캔버스 위치로 다시 잰다). 첫 판(판 직전 터치 안내를 본 판)은 처음 10초 동안 이동 영역 · 스틱 · 버튼 자리를
+// 반투명 도형 + 이름표로 보인다(입력을 막지 않음). 점수판이 열려 있으면 화면 어디를 눌러도 닫히고 다른 버튼은 흐려진다
 import { BTN, type Role } from '@decoy/shared';
 import { iconSvg, type IconId } from '../art/icons';
 import { hexCss } from '../art/palette';
@@ -12,8 +15,10 @@ import { HUD_TEXT, TOUCH_TEXT } from '../data/storyText';
 import { canOfferFullscreen, device, enterFullscreen, onDeviceChange } from '../device';
 import { TOUCH, type StickKind, type TouchFeed } from '../touchInput';
 import { ABILITY_ICON, ACCENT, TICKS, abilityName, litTicks, type ActionSlot, type SlotId } from './hudArt';
-import { VIEW_H, VIEW_W } from './layout';
+import { EDGE_BAND, MIN_GAP, MIN_TARGET, VIEW_H, VIEW_W, thumbMetrics } from './layout';
 import { h } from './uiArt';
+
+export { EDGE_BAND, MIN_GAP, MIN_TARGET };
 
 /** 프레임마다 GameScene이 넘기는 값. 바뀐 것만 DOM에 반영한다 */
 export interface TouchView {
@@ -24,6 +29,11 @@ export interface TouchView {
 export interface TouchControlsOptions {
   role: Role;
   feed: TouchFeed;
+  /**
+   * 늘 떠 있는 판 HUD 부품 (논리 px)과 지금 캔버스 자리(창 CSS px의 왼쪽 위 · 논리 1px의 CSS px). 이동 영역을 그 아래에서
+   * 시작한다 (M12). 없으면 M11 배치 그대로
+   */
+  hud?: { rects: readonly Box[]; canvas: () => { left: number; top: number; k: number } | null };
 }
 
 // ───────────────────────── 배치 (순수) ─────────────────────────
@@ -45,11 +55,8 @@ export interface Insets {
 
 export type TouchButtonId = 'dash' | 'roar' | 'mode' | 'ability' | 'rescue' | 'scoreboard' | 'fullscreen';
 
-/** 화면 가장자리 제스처 띠 (안드로이드 뒤로 가기 · 홈): 좌우 안전 영역 + 32px, 아래 + 24px. 이 띠에서 시작한 터치는 무시한다 */
-export const EDGE_BAND = { side: 32, bottom: 24 } as const;
-/** 터치 대상 최소 크기 · 간격 (CSS px = dp) */
-export const MIN_TARGET = 48;
-export const MIN_GAP = 8;
+// 화면 가장자리 제스처 띠(EDGE_BAND: 좌우 안전 영역 + 32px, 아래 + 24px — 이 띠에서 시작한 터치는 무시한다) ·
+// 터치 대상 최소 크기 · 간격(MIN_TARGET · MIN_GAP, CSS px = dp)은 layout.ts에 있다 (HUD 배치가 같은 수치로 엄지 자리를 비운다)
 /** 이동 스틱이 생기는 영역: 화면 왼쪽 이 비율 안 */
 export const MOVE_ZONE_RATIO = 0.4;
 
@@ -69,14 +76,14 @@ export interface TouchLayout {
   buttons: Partial<Record<TouchButtonId, Box>>;
 }
 
-const clamp = (v: number, a: number, b: number): number => Math.max(a, Math.min(b, v));
-
 /**
- * 터치 화면 배치 (CSS px). 크기는 창 높이에 비례(휴대폰 293~400px → 0.84~1.05배, 태블릿도 1.05배까지 —
- * dp는 손가락 크기라 큰 화면이라고 키우지 않는다)하되 터치 대상은 48px 이상, 대상끼리 사각형 기준 8px 이상 띄우고,
- * 모두 가장자리 띠 안쪽에 둔다. 오른쪽 아래가 엄지 자리:
+ * 터치 화면 배치 (CSS px). 크기는 안전 영역 안 높이에 비례(휴대폰 293~400px → 0.84~1.05배, 태블릿도 1.05배까지 —
+ * dp는 손가락 크기라 큰 화면이라고 키우지 않는다, layout.thumbMetrics)하되 터치 대상은 48px 이상, 대상끼리 사각형 기준 8px 이상
+ * 띄우고, 모두 가장자리 띠 안쪽에 둔다. 오른쪽 아래가 엄지 자리:
  * 괴물 = 조준 스틱(큰 원) + 왼쪽 돌진 · 위 시야 모드 · 그 왼쪽 포효, 생존자 = 능력(큰 버튼) + 왼쪽 위 구조.
- * 오른쪽 위에 점수판 · 전체 화면(브라우저 안일 때만)
+ * 오른쪽 위에 점수판 · 전체 화면(브라우저 안일 때만).
+ * avoid(M12) = 판 HUD 부품 사각형(창 CSS px): 이동 영역은 그와 가로로 겹치는 부품 아래에서 시작한다(이동 스틱 그림이 들어갈
+ * 높이는 남긴다). 버튼 무리 · 시스템 버튼 자리는 판 HUD 배치(layout.touchHudPlan)가 같은 식으로 비워 두었다
  */
 export function touchLayout(
   w: number,
@@ -84,13 +91,13 @@ export function touchLayout(
   inset: Insets,
   monster: boolean,
   fullscreen: boolean,
+  avoid: readonly Box[] = [],
 ): TouchLayout {
-  const k = clamp(h / 380, 0.84, 1.05);
-  const pad = 6;
-  const gap = Math.round(14 * k);
-  // 줄 사이는 아래 테두리에 걸친 이름표(약 9px)가 다음 줄에 닿지 않게 더 띄운다
-  const rowGap = Math.round(22 * k);
-  const btn = Math.max(52, Math.round(56 * k));
+  const t = thumbMetrics(h - inset.t - inset.b);
+  const pad = t.pad;
+  const gap = t.gap;
+  const rowGap = t.rowGap;
+  const btn = t.btn;
   const safe: Box = {
     x: inset.l + EDGE_BAND.side,
     y: inset.t,
@@ -103,7 +110,7 @@ export function touchLayout(
   const buttons: Partial<Record<TouchButtonId, Box>> = {};
   let aim: Box | null = null;
   if (monster) {
-    const r = Math.round(60 * k);
+    const r = t.aimR;
     aim = sq(right - r * 2, bottom - r * 2, r * 2);
     const top = aim.y - rowGap - btn;
     buttons.dash = sq(aim.x - gap - btn, aim.y + r - btn / 2, btn);
@@ -111,15 +118,15 @@ export function touchLayout(
     // 포효: 시야 모드 바로 왼쪽 (조준 스틱 위 줄이라 사각형이 겹치지 않는다)
     buttons.roar = sq(buttons.mode.x - gap - btn, top, btn);
   } else {
-    const a = Math.round(78 * k);
+    const a = t.ability;
     buttons.ability = sq(right - a, bottom - a, a);
-    const rs = Math.max(52, Math.round(60 * k));
+    const rs = t.rescue;
     buttons.rescue = sq(right - a - gap - rs, bottom - a / 2 - rs / 2 - Math.round(a * 0.3), rs);
   }
   // 오른쪽 위: 점수판(맨 오른쪽 위) · 전체 화면. 전체 화면은 판 화면 옆 빈 띠에 자리가 있으면 점수판 아래(세로 줄),
   // 아니면 점수판 왼쪽
-  const sysH = Math.max(MIN_TARGET, Math.round(50 * k));
-  const sysW = Math.max(64, Math.round(66 * k));
+  const sysH = t.sysH;
+  const sysW = t.sysW;
   const sysY = safe.y + pad + 2;
   buttons.scoreboard = { x: right - sysW, y: sysY, w: sysW, h: sysH };
   if (fullscreen) {
@@ -133,8 +140,19 @@ export function touchLayout(
         ? { x: right - sysW, y: below, w: sysW, h: sysH }
         : { x: right - sysW * 2 - gap, y: sysY, w: sysW, h: sysH };
   }
-  const moveR = Math.round(60 * k);
+  const moveR = t.moveR;
   const zone: Box = { x: safe.x, y: safe.y, w: Math.round(w * MOVE_ZONE_RATIO) - safe.x, h: safe.h };
+  // 판 HUD 아래에서 시작 (이동 스틱 그림 + 위 8px은 남긴다)
+  const safeBottom = safe.y + safe.h;
+  let top = zone.y;
+  for (const r of avoid)
+    if (r.x < zone.x + zone.w && r.x + r.w > zone.x && r.y < safeBottom)
+      top = Math.max(top, r.y + r.h + MIN_GAP);
+  top = Math.min(top, safeBottom - moveR * 2 - 24);
+  if (top > zone.y) {
+    zone.h = safeBottom - top;
+    zone.y = top;
+  }
   return {
     safe,
     zone,
@@ -219,6 +237,9 @@ export class TouchControls {
   private live = true;
   /** 판 안 첫 탭에서 전체 화면을 한 번 요청했다 */
   private fsTried = false;
+  /** 첫 판 위치 표시 (M12): 반투명 도형 + 이름표, 입력을 막지 않는다 */
+  private hints: HTMLDivElement | null = null;
+  private hintTimer: number | null = null;
 
   constructor(
     readonly root: HTMLElement,
@@ -256,8 +277,7 @@ export class TouchControls {
     board.el.setAttribute('aria-pressed', 'false');
     board.el.addEventListener('pointerdown', (e) => {
       if (!this.grab(e, 'tap', board.el)) return;
-      this.scoreboard = !this.scoreboard;
-      board.el.setAttribute('aria-pressed', String(this.scoreboard));
+      this.setBoard(!this.scoreboard);
     });
     if (canOfferFullscreen()) {
       const fs = this.part(
@@ -270,9 +290,9 @@ export class TouchControls {
       fs.el.addEventListener('pointerdown', (e) => this.grab(e, 'tap', fs.el));
     }
 
-    const on = (t: EventTarget, type: string, fn: (e: Event) => void): void => {
-      t.addEventListener(type, fn);
-      this.cleanup.push(() => t.removeEventListener(type, fn));
+    const on = (t: EventTarget, type: string, fn: (e: Event) => void, capture = false): void => {
+      t.addEventListener(type, fn, capture);
+      this.cleanup.push(() => t.removeEventListener(type, fn, capture));
     };
     // 붙잡은 손가락의 이벤트는 그 요소로 와서 레이어까지 올라온다
     on(this.layer, 'pointermove', (e) => this.onMove(e as PointerEvent));
@@ -280,6 +300,20 @@ export class TouchControls {
     on(this.layer, 'pointercancel', (e) => this.drop((e as PointerEvent).pointerId));
     on(this.layer, 'lostpointercapture', (e) => this.drop((e as PointerEvent).pointerId));
     on(this.layer, 'contextmenu', (e) => e.preventDefault());
+    // 점수판이 열려 있으면 화면 어디를 눌러도 닫힌다 (점수판 버튼 자체는 위 핸들러가 끈다). 누른 동작은 그대로 한다
+    on(
+      document,
+      'pointerdown',
+      (e) => {
+        if (
+          !this.scoreboard ||
+          (e.target instanceof Element && e.target.closest('[data-touch-target="scoreboard"]'))
+        )
+          return;
+        this.setBoard(false);
+      },
+      true,
+    );
     // 손가락이 사라지는 경우: 창 이탈 · 숨김 · 화면 회전 · 전체 화면 전환(창 크기가 바뀌면 손가락 좌표 기준이 달라진다)
     on(window, 'blur', () => this.cancelAll());
     on(document, 'visibilitychange', () => {
@@ -434,13 +468,40 @@ export class TouchControls {
     }
   }
 
-  /** 창 크기 · 안전 영역이 바뀌면 다시 배치한다 (읽기 한 번 → 쓰기) */
+  /** 점수판 켜고 끄기 (켜져 있으면 다른 터치 버튼을 흐리게) */
+  private setBoard(on: boolean): void {
+    this.scoreboard = on;
+    this.parts.get('scoreboard')?.el.setAttribute('aria-pressed', String(on));
+    this.layer.classList.toggle('board', on);
+  }
+
+  /** 판 HUD 부품 자리 (창 CSS px). 캔버스 자리를 모르면 빈 목록 */
+  private hudBoxes(): Box[] {
+    const hud = this.opts.hud;
+    const c = hud?.canvas();
+    if (!hud || !c) return [];
+    return hud.rects.map((r) => ({
+      x: c.left + r.x * c.k,
+      y: c.top + r.y * c.k,
+      w: r.w * c.k,
+      h: r.h * c.k,
+    }));
+  }
+
+  /** 창 크기 · 안전 영역이 바뀌면 다시 배치한다 (읽기 → 쓰기) */
   private relayout(): void {
     const w = window.innerWidth;
     const hgt = window.innerHeight;
     const p = this.probe.getBoundingClientRect();
     const inset = { l: p.left, r: w - p.right, t: p.top, b: hgt - p.bottom };
-    const L = touchLayout(w, hgt, inset, this.opts.role === 'monster', this.parts.has('fullscreen'));
+    const L = touchLayout(
+      w,
+      hgt,
+      inset,
+      this.opts.role === 'monster',
+      this.parts.has('fullscreen'),
+      this.hudBoxes(),
+    );
     this.layout = L;
     const place = (el: HTMLElement | undefined, b: Box | null | undefined): void => {
       if (el && b)
@@ -454,6 +515,49 @@ export class TouchControls {
     st.setProperty('--hy', `${L.moveHome.y}px`);
     place(this.parts.get('attack')?.el, L.aim);
     for (const [id, b] of Object.entries(L.buttons)) place(this.parts.get(id as TouchButtonId)?.el, b);
+    if (this.hints) this.drawHints();
+  }
+
+  /**
+   * 첫 판 위치 표시 (M12, TOUCH_HINT_MS 동안): 이동 영역(점선 판 + '여기를 누르고 끌어 이동')과 스틱 · 버튼 둘레의 빛 고리.
+   * 입력을 막지 않고(pointer-events 없음), 이동 영역은 화면 왼쪽 40% 안이라 가운데(감옥 = 생존자 시작 위치)를 가리지 않는다.
+   * 버튼 이름은 버튼 이름표가 이미 보인다
+   */
+  showHints(ms: number): void {
+    if (!this.hints) {
+      this.hints = h('div', { class: 'tc-hints', 'aria-hidden': 'true' });
+      this.layer.append(this.hints);
+    }
+    this.drawHints();
+    this.hints.classList.remove('gone');
+    if (this.hintTimer !== null) window.clearTimeout(this.hintTimer);
+    this.hintTimer = window.setTimeout(() => {
+      this.hintTimer = null;
+      this.hints?.classList.add('gone');
+    }, ms);
+  }
+
+  /** 위치 표시 도형을 지금 배치에 맞춘다 (창 크기가 바뀔 때만) */
+  private drawHints(): void {
+    const L = this.layout;
+    const root = this.hints;
+    if (!L || !root) return;
+    const box = (cls: string, b: Box, label?: string): HTMLElement => {
+      const el = h('div', { class: cls }, ...(label ? [h('span', { class: 'tc-hint-cap' }, label)] : []));
+      Object.assign(el.style, { left: `${b.x}px`, top: `${b.y}px`, width: `${b.w}px`, height: `${b.h}px` });
+      return el;
+    };
+    const ring = (b: Box, cls = ''): HTMLElement =>
+      box(`tc-hint-ring${cls}`, { x: b.x - 6, y: b.y - 6, w: b.w + 12, h: b.h + 12 });
+    const parts: HTMLElement[] = [box('tc-hint-zone', L.zone, TOUCH_TEXT.hintMove)];
+    if (L.aim) parts.push(ring(L.aim, ' round'));
+    for (const [id, b] of Object.entries(L.buttons)) if (b && id !== 'fullscreen') parts.push(ring(b));
+    root.replaceChildren(...parts);
+  }
+
+  /** 디버그 · 테스트: 위치 표시가 보이는가 */
+  get hintsShown(): boolean {
+    return this.hints !== null && !this.hints.classList.contains('gone');
   }
 
   /** 프레임마다: 쿨타임 게이지 · 버튼 상태 (바뀐 것만) */
@@ -504,13 +608,13 @@ export class TouchControls {
     this.live = live;
     if (!live) {
       this.cancelAll();
-      this.scoreboard = false;
-      this.parts.get('scoreboard')?.el.setAttribute('aria-pressed', 'false');
+      this.setBoard(false);
     }
     this.layer.classList.toggle('off', !live);
   }
 
   destroy(): void {
+    if (this.hintTimer !== null) window.clearTimeout(this.hintTimer);
     this.cancelAll();
     for (const f of this.cleanup.splice(0)) f();
     this.layer.remove();

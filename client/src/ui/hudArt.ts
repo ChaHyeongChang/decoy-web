@@ -44,7 +44,7 @@ import {
   blendOver,
   type ContrastPair,
 } from '../art/palette';
-import { HUD } from './layout';
+import { HUD, type HudLayoutSpec } from './layout';
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -73,8 +73,9 @@ export const HC = {
 
 export const NOTE_ALPHA = 0.85;
 
-/** 강조색 (타일 테두리 · 눈금 링). line = 그래픽, text = 글자 · 아이콘 */
-export type Accent = 'runner' | 'guard' | 'scout' | 'monster' | 'neon' | 'cone';
+/** 강조색 (타일 테두리 · 눈금 링). line = 그래픽, text = 글자 · 아이콘. warn은 터치 거점 링 게이지의 정지 눈금만 */
+export type Accent = 'runner' | 'guard' | 'scout' | 'monster' | 'neon' | 'cone' | 'warn';
+/** 행동 타일 · 눈금 링을 굽는 강조색 (warn은 터치 배치에서만 링을 굽는다) */
 export const ACCENTS: readonly Accent[] = ['runner', 'guard', 'scout', 'monster', 'neon', 'cone'];
 export const ACCENT: Readonly<Record<Accent, { line: number; text: number }>> = {
   runner: { line: ROLE.runner, text: ROLE_TEXT.runner },
@@ -83,6 +84,7 @@ export const ACCENT: Readonly<Record<Accent, { line: number; text: number }>> = 
   monster: { line: ROLE.monster, text: ROLE_TEXT.monster },
   neon: { line: NEON, text: NEON },
   cone: { line: CONE.idle, text: CONE.idle },
+  warn: { line: WARN, text: WARN },
 };
 
 /** HUD에서 새로 쓰는 글자 / 바탕 쌍 (palette.TEXT_PAIRS에 없는 것). tests/unit/hud.test.ts가 고정한다 */
@@ -769,8 +771,10 @@ export function slotIconFrame(s: ActionSlot): string {
   return FR.icon(s.icon, on ? ACCENT[s.accent].text : HC.off, 26);
 }
 
-export function hudSpecs(): AtlasSpec[] {
+export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
   const out: AtlasSpec[] = [];
+  /** 터치 배치 (M12): 링 게이지 · 큰 상태 아이콘을 더 굽고, 쓰지 않는 막대 게이지는 굽지 않는다 */
+  const touch = h.touch !== null;
   const seen = new Set<string>();
   const add = (s: AtlasSpec): void => {
     if (seen.has(s.name)) return;
@@ -814,8 +818,8 @@ export function hudSpecs(): AtlasSpec[] {
     ),
   );
   add(
-    kit('hint', { l: 18, r: 14, t: HUD.hint.h, v: false }, (c, w, h, z) =>
-      paintPlate(c, w, h, z, { ...PANEL, cut: [8, 0, 8, 0] }),
+    kit('hint', { l: 18, r: 14, t: h.hint.h, v: false }, (c, w, hh, z) =>
+      paintPlate(c, w, hh, z, { ...PANEL, cut: [8, 0, 8, 0] }),
     ),
   );
   add(
@@ -888,9 +892,9 @@ export function hudSpecs(): AtlasSpec[] {
   }
 
   // ── 위 띠: 게이지 막대 틀 (3조각) · 채움 · 사선 · 배지 · 칩 · 타이머 틀 ──
-  const G = HUD.gauge;
+  const G = h.gauge;
   const gs = G.barH / 2;
-  for (const s of GAUGE_STATES)
+  for (const s of touch ? [] : GAUGE_STATES)
     add(
       kit(`gbar:${s}`, { l: gs + 4, r: gs + 4, t: G.barH, v: false }, (c, w, h, z) =>
         paintHexFrame(c, w, h, z, gs, s === 'idle' ? 0x2c4a5e : gaugeColor(s), s === 'done' ? 0.8 : 0),
@@ -898,10 +902,12 @@ export function hudSpecs(): AtlasSpec[] {
     );
   const fillW = G.barW - 6;
   const fillH = G.barH - 6;
-  for (const [n, col] of [
-    ['neon', NEON],
-    ['warn', WARN],
-  ] as const)
+  for (const [n, col] of touch
+    ? []
+    : ([
+        ['neon', NEON],
+        ['warn', WARN],
+      ] as const))
     add({
       kind: 'frame',
       name: `gfill:${n}`,
@@ -921,27 +927,28 @@ export function hudSpecs(): AtlasSpec[] {
       },
     });
   // 사선 무늬 (주기 STRIPE_P를 기기 픽셀 정수로: 끝없이 흐르게)
-  add({
-    kind: 'frame',
-    name: 'gstripe',
-    x0: 0,
-    y0: 0,
-    x1: fillW + STRIPE_P,
-    y1: fillH,
-    paint: (c, z) => {
-      const p = Math.round(STRIPE_P * z) / z;
-      c.fillStyle = rgba(0xffffff, 0.3);
-      for (let x = -fillH; x < fillW + STRIPE_P + fillH; x += p) {
-        c.beginPath();
-        c.moveTo(x, fillH);
-        c.lineTo(x + p * 0.45, fillH);
-        c.lineTo(x + p * 0.45 + fillH, 0);
-        c.lineTo(x + fillH, 0);
-        c.closePath();
-        c.fill();
-      }
-    },
-  });
+  if (!touch)
+    add({
+      kind: 'frame',
+      name: 'gstripe',
+      x0: 0,
+      y0: 0,
+      x1: fillW + STRIPE_P,
+      y1: fillH,
+      paint: (c, z) => {
+        const p = Math.round(STRIPE_P * z) / z;
+        c.fillStyle = rgba(0xffffff, 0.3);
+        for (let x = -fillH; x < fillW + STRIPE_P + fillH; x += p) {
+          c.beginPath();
+          c.moveTo(x, fillH);
+          c.lineTo(x + p * 0.45, fillH);
+          c.lineTo(x + p * 0.45 + fillH, 0);
+          c.lineTo(x + fillH, 0);
+          c.closePath();
+          c.fill();
+        }
+      },
+    });
   for (const s of GAUGE_STATES) {
     const col = gaugeColor(s);
     add(
@@ -973,15 +980,16 @@ export function hudSpecs(): AtlasSpec[] {
           c.lineWidth = hair(z, 1.5);
           c.strokeStyle = rgba(col);
           c.stroke();
-          drawIcon(c, ic, -8, -8, 16, rgba(col), 1.1);
+          const is = Math.round((G.chip * 2) / 3);
+          drawIcon(c, ic, -is / 2, -is / 2, is, rgba(col), 1.1);
         }),
       );
   }
   for (const m of ['normal', 'low', 'grace'] as const) {
     const col = m === 'normal' ? 0x2c4a5e : TIMER_LOOK[m].color;
     add(
-      kit(`timer:${m}`, { l: 18, r: 18, t: HUD.timer.h, v: false }, (c, w, h, z) =>
-        paintHexFrame(c, w, h, z, 14, col, m === 'normal' ? 0 : 0.7),
+      kit(`timer:${m}`, { l: 18, r: 18, t: h.timer.h, v: false }, (c, w, hh, z) =>
+        paintHexFrame(c, w, hh, z, Math.round((h.timer.h * 14) / 44), col, m === 'normal' ? 0 : 0.7),
       ),
     );
     icon(TIMER_LOOK[m].icon, TIMER_LOOK[m].color, 20);
@@ -1003,7 +1011,7 @@ export function hudSpecs(): AtlasSpec[] {
       }
     };
   add(square(FR.ring('off'), RING.r1 + 0.6, ringPaint(HC.tickOff, 0, TICKS)));
-  for (const a of ACCENTS) {
+  for (const a of touch ? [...ACCENTS, 'warn' as const] : ACCENTS) {
     add(square(FR.ring(a), RING.r1 + 0.6, ringPaint(ACCENT[a].line, 0, TICKS)));
     for (let i = 0; i < TICKS; i += 1) {
       const t = tickAngle(i);
@@ -1092,6 +1100,12 @@ export function hudSpecs(): AtlasSpec[] {
   for (const k of Object.keys(STATUS_LOOK) as StatusKey[])
     icon(STATUS_LOOK[k].icon, STATUS_LOOK[k].color, 16);
   icon('disconnected', UI.textDim, 16);
+  if (touch) {
+    // 터치 팀 카드: 상태 아이콘을 크게 (글자 대신)
+    for (const k of Object.keys(STATUS_LOOK) as StatusKey[])
+      icon(STATUS_LOOK[k].icon, STATUS_LOOK[k].color, 20);
+    icon('disconnected', UI.textDim, 20);
+  }
   icon('prison', UI.textDim, 16);
   for (const [id, col] of BANNER_ICONS) icon(id, col, 24);
   icon('prison', HC.red, 20);
@@ -1218,17 +1232,17 @@ export function hudSpecs(): AtlasSpec[] {
   });
 
   // ── 배너 리본 (3조각): 지속 배너 높이 · 알림 줄 높이 ──
-  const B = HUD.banner;
-  for (const [tone, h] of [
+  const B = h.banner;
+  for (const [tone, rh] of [
     ['danger', B.h],
     ['warn', B.h],
     ['info', B.rowH],
     ['warn', B.rowH],
   ] as const) {
-    const notch = Math.round(h * 0.28);
+    const notch = Math.round(rh * 0.28);
     add(
-      kit(`rb:${tone}:${h}`, { l: notch + 3 + h + 10, r: notch + 6, t: h, v: false }, (c, w, hh, z) =>
-        paintRibbon(c, w, hh, z, TONE[tone].bg, notch, h),
+      kit(`rb:${tone}:${rh}`, { l: notch + 3 + rh + 10, r: notch + 6, t: rh, v: false }, (c, w, hh, z) =>
+        paintRibbon(c, w, hh, z, TONE[tone].bg, notch, rh),
       ),
     );
   }

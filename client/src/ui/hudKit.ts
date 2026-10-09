@@ -5,11 +5,15 @@
 //  - Slice: 늘어나는 패널 (9조각 또는 가로 3조각). 조각 경계도 기기 픽셀 정수라 이음매 · 번짐이 없다
 //  - Digits: 고정폭 숫자 (글자마다 같은 폭 칸, 남은 시간이 흔들리지 않게)
 // 글자는 모두 text.ts makeText (해상도 = zoom)
+// M12: 터치 배치는 그림을 HUD.s배(uiScale)로 키운다. 아틀라스를 zoom × s로 굽고 1텍셀 = 기기 1px로 찍어 선명하다
+// (아틀라스 배율 zoom × s, 기기 배율 dev = zoom. PC는 s = 1이라 둘이 같다).
+// 부품마다 이름(kit.named)을 달아 디버그 getHudLayout이 읽는다 (timer · gaugeA · card0 · minimap · banner …)
 import Phaser from 'phaser';
 import { gfxState } from '../gfx/state';
 import { createCanvasTexture, makeCanvas, nextFogKey, removeCanvasTexture } from '../render/fogPaint';
 import { fontGeneration } from './fonts';
 import { hudSpecs, packShelves, sliceSpans, type AtlasSpec } from './hudArt';
+import { HUD } from './layout';
 import { UI_FONT, makeText, type CrispText } from './text';
 
 /** 프레임 (텍셀): 기준점에서 왼위 모서리까지 X0 · Y0, 크기 W · H */
@@ -35,20 +39,40 @@ const ATLAS_MAX_W = 1024;
 
 interface Atlas {
   key: string;
+  /** 굽는 배율 (텍셀 / 그림 단위) = dev × HUD.s */
   zoom: number;
+  /** 기기 배율 (기기 px / 논리 px) */
+  dev: number;
+  /** 그림 목록 서명 (배치마다 굽는 크기가 다르다) */
+  sig: string;
   frames: Map<string, FrameInfo>;
   kits: Map<string, KitInfo>;
 }
 
-/** 아틀라스는 게임 전역 텍스처라 판이 바뀌어도 같은 배율이면 다시 쓴다 */
+/** 아틀라스는 게임 전역 텍스처라 판이 바뀌어도 같은 배율 · 배치면 다시 쓴다 */
 let shared: Atlas | null = null;
-let specCache: AtlasSpec[] | null = null;
+let specCache: { sig: string; specs: AtlasSpec[] } | null = null;
+
+/** 굽는 그림이 달라지는 배치 값 (터치 · 크기) */
+function specSig(): string {
+  return [
+    HUD.touch ? 't' : 'p',
+    HUD.gauge.dia,
+    HUD.gauge.chip,
+    HUD.timer.h,
+    HUD.hint.h,
+    HUD.banner.h,
+    HUD.banner.rowH,
+  ].join(',');
+}
 /** 누적 굽기 횟수 (디버그 hud.bakes) */
 let bakeCount = 0;
 
-function bakeAtlas(textures: Phaser.Textures.TextureManager, z: number): Atlas {
+function bakeAtlas(textures: Phaser.Textures.TextureManager, dev: number, sig: string): Atlas {
   const t0 = performance.now();
-  const specs = (specCache ??= hudSpecs());
+  const z = dev * HUD.s;
+  if (specCache?.sig !== sig) specCache = { sig, specs: hudSpecs() };
+  const specs = specCache.specs;
   const frames = new Map<string, FrameInfo>();
   const kits = new Map<string, KitInfo>();
   const sizes = specs.map((s) => {
@@ -114,7 +138,7 @@ function bakeAtlas(textures: Phaser.Textures.TextureManager, z: number): Atlas {
   bakeCount += 1;
   gfxState.features.hudBakes = bakeCount;
   gfxState.features.hudBakeMs = Math.round((performance.now() - t0) * 10) / 10;
-  return { key, zoom: z, frames, kits };
+  return { key, zoom: z, dev, sig, frames, kits };
 }
 
 /**
@@ -122,10 +146,18 @@ function bakeAtlas(textures: Phaser.Textures.TextureManager, z: number): Atlas {
  * (같은 동기 흐름이 끝난 뒤) 지운다
  */
 function atlasNow(textures: Phaser.Textures.TextureManager): Atlas {
-  const z = gfxState.zoom;
-  if (shared && shared.zoom === z && textures.exists(shared.key)) return shared;
+  const dev = gfxState.zoom;
+  const sig = specSig();
+  if (
+    shared &&
+    shared.dev === dev &&
+    shared.zoom === dev * HUD.s &&
+    shared.sig === sig &&
+    textures.exists(shared.key)
+  )
+    return shared;
   const old = shared;
-  shared = bakeAtlas(textures, z);
+  shared = bakeAtlas(textures, dev, sig);
   if (old && old.key !== shared.key) {
     const k = old.key;
     queueMicrotask(() => removeCanvasTexture(textures, k));
@@ -164,8 +196,28 @@ export class HudKit {
     return this.atlas.key;
   }
 
+  /** 굽는 배율 (텍셀 / 그림 단위) */
   get zoom(): number {
     return this.atlas.zoom;
+  }
+
+  /** 기기 배율 (기기 px = 텍셀 / 논리 px) */
+  get dev(): number {
+    return this.atlas.dev;
+  }
+
+  /** 지금 만드는 부품의 이름 (named 안에서). 표시 객체 name으로 붙는다 */
+  tag = '';
+
+  /** fn 안에서 만든 부품(그림 · 패널 · 글자)에 이름을 붙인다 */
+  named<T>(tag: string, fn: () => T): T {
+    const prev = this.tag;
+    this.tag = tag;
+    try {
+      return fn();
+    } finally {
+      this.tag = prev;
+    }
   }
 
   /** 아틀라스에 없는 프레임을 요청한 이름들 (조용히 숨겨지므로 디버그 · E2E로 잡는다) */
@@ -206,7 +258,8 @@ export class HudKit {
       color: hexColor(color),
     })
       .setOrigin(0, 0)
-      .setDepth(depth);
+      .setDepth(depth)
+      .setName(this.tag);
   }
 }
 
@@ -255,7 +308,7 @@ export class Spr implements Prim {
     depth: number,
     private readonly snap: boolean,
   ) {
-    this.img = kit.scene.add.image(0, 0, kit.key).setDepth(depth).setVisible(false);
+    this.img = kit.scene.add.image(0, 0, kit.key).setDepth(depth).setVisible(false).setName(kit.tag);
   }
 
   /** 프레임과 기준점 (논리 px)에 보인다. 빈 이름이면 숨긴다 */
@@ -270,7 +323,7 @@ export class Spr implements Prim {
     return this;
   }
 
-  /** 가로로 잘라 기준점에서 from~to(논리 px) 부분만 보인다. dx = 무늬를 흘리는 텍셀 수 (보이는 자리는 그대로) */
+  /** 가로로 잘라 기준점에서 from~to(논리 px) 부분만 보인다. dx = 무늬를 흘리는 텍셀(= 기기 px) 수 (보이는 자리는 그대로) */
   crop(from: number, to: number, dx = 0): this {
     const c = this.cut;
     if (c && c.from === from && c.to === to && c.dx === dx) return this;
@@ -287,7 +340,8 @@ export class Spr implements Prim {
       img.setVisible(false);
       return;
     }
-    const z = this.kit.zoom;
+    // 1텍셀 = 기기 1px (그림은 HUD.s배로 구워져 있다)
+    const z = this.kit.dev;
     if (img.texture.key !== this.kit.key || img.frame.name !== this.name)
       img.setTexture(this.kit.key, this.name);
     img.setOrigin(-f.X0 / f.W, -f.Y0 / f.H).setScale(1 / z);
@@ -331,11 +385,15 @@ export class Slice implements Prim {
   private alpha = 1;
   /** 가운데 조각을 그리지 않는다 (발각 테두리처럼 가운데가 빈 것) */
   hollow = false;
+  /** 조각 이미지 이름 (만들 때의 kit.tag) */
+  private readonly tag: string;
 
   constructor(
     private readonly kit: HudKit,
     private readonly depth: number,
-  ) {}
+  ) {
+    this.tag = kit.tag;
+  }
 
   set(name: string, x: number, y: number, w: number, h: number): this {
     const r = this.rect;
@@ -359,7 +417,7 @@ export class Slice implements Prim {
       for (const i of this.imgs) i.setVisible(false);
       return;
     }
-    const z = this.kit.zoom;
+    const z = this.kit.dev;
     const { x, y, w, h } = this.rect;
     const cols = sliceSpans(Math.round(x * z), Math.round((x + w) * z), k.l, k.r);
     const rows: [number, number][] = k.v
@@ -370,7 +428,11 @@ export class Slice implements Prim {
       cols.forEach(([px, pw], ci) => {
         let img = this.imgs[n];
         if (!img) {
-          img = this.kit.scene.add.image(0, 0, this.kit.key).setOrigin(0, 0).setDepth(this.depth);
+          img = this.kit.scene.add
+            .image(0, 0, this.kit.key)
+            .setOrigin(0, 0)
+            .setDepth(this.depth)
+            .setName(this.tag);
           img.setAlpha(this.alpha);
           this.imgs.push(img);
         }
@@ -423,6 +485,8 @@ export class Digits {
   private gen = -1;
   private value = '';
   private color = -1;
+  /** 칸 글자 이름 (만들 때의 kit.tag) */
+  private readonly tag: string;
   width = 0;
 
   constructor(
@@ -430,6 +494,7 @@ export class Digits {
     private readonly size: number,
     private readonly depth: number,
   ) {
+    this.tag = kit.tag;
     this.remeasure();
   }
 
@@ -464,7 +529,9 @@ export class Digits {
     this.remeasure();
     const chars = [...text];
     while (this.cells.length < chars.length)
-      this.cells.push(this.kit.text(0, 0, this.size, color, this.depth, true).setOrigin(0.5, 0.5));
+      this.cells.push(
+        this.kit.text(0, 0, this.size, color, this.depth, true).setOrigin(0.5, 0.5).setName(this.tag),
+      );
     let cx = x;
     chars.forEach((ch, i) => {
       const t = this.cells[i];
