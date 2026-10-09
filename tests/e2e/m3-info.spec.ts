@@ -1,5 +1,6 @@
 // M3: 정보 차단. 각 클라이언트가 받은 모든 스냅샷 원문을 서버 정답 기록과 대조한다.
 import { readFileSync } from 'node:fs';
+import { availableParallelism } from 'node:os';
 import { expect, test, type Browser } from '@playwright/test';
 import { validateBalance, type Balance, type Role, type Snapshot } from '@decoy/shared';
 import { anyVisible, circleVerdict, monsterVerdict, type Verdict } from './infoCheck';
@@ -217,9 +218,12 @@ interface FpsCase {
 
 /**
  * FPS 측정 조건 (Canvas 렌더러, 소프트웨어 합성, 4탭 + 서버).
- *  - 게이트(55): 옛 scale=0.5와 화소 단위로 같은 조건. 960×540 창 · 배율 1 · 품질 낮음 → 백버퍼 960×540을 CSS 960×540에
- *    1:1로 합성하고 카메라 zoom 0.5 (M10a 전 기준값 60.4와 견줄 수 있다). 소프트웨어 합성기(VizCompositorThread)는
- *    탭 4개 몫을 한 스레드에서 하므로 창을 키워 늘려 보여 주면 백버퍼가 같아도 느려진다(2코어 실측 53~55) → 창 크기를 고정한다
+ *  - 게이트(55, 코어 2개 이하 50): 옛 scale=0.5와 화소 단위로 같은 조건. 960×540 창 · 배율 1 · 품질 낮음 → 백버퍼 960×540을
+ *    CSS 960×540에 1:1로 합성하고 카메라 zoom 0.5 (M10a 전 기준값 60.4와 견줄 수 있다). 소프트웨어 합성기(VizCompositorThread)는
+ *    탭 4개 몫을 한 스레드에서 하므로 창을 키워 늘려 보여 주면 백버퍼가 같아도 느려진다(2코어 실측 53~55) → 창 크기를 고정한다.
+ *    GitHub Actions 러너(private 저장소 = 2코어)는 호스트마다 52.2 ~ 58.9로 흔들려(M11 전체 검사: 같은 코드가 이 컨테이너
+ *    4코어에서 60.0, CPU를 2 · 4배 느리게 한 main 대 M11 비교에서도 차이 없음) 2코어 이하에서는 하한을 50으로 둔다
+ *    (그래도 1할 넘는 회귀는 잡는다. DECISIONS M11 행)
  *  - 기록(하한 12): 1920×1080 창 · 배율 1 · scale=1 → 백버퍼 1920×1080 1:1. 옛 scale=1(1920×1080을 960×540으로 줄여 표시)은
  *    새 코드로 재현할 수 없어 옛 값(41.9)과 비교하지 않는다. 큰 회귀(GPU 프로세스 병목 때의 1~10FPS 같은)만 잡는다.
  *    GitHub Actions 러너는 호스트마다 19~28로 흔들려(하한 20일 때 19.0으로 실패) 하한을 낮췄다. 성능 관문은 위의 게이트다
@@ -230,7 +234,7 @@ const FPS_CASES: readonly FpsCase[] = [
     viewport: { width: 960, height: 540 },
     query: '&quality=low',
     backing: [960, 540],
-    min: 55,
+    min: availableParallelism() <= 2 ? 50 : 55,
   },
   {
     name: '기록: 1920×1080 배율 1 · scale=1 (옛 값과 비교하지 않음)',
