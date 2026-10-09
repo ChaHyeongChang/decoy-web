@@ -25,6 +25,8 @@ import { compositeScaleFor, fogPathFor, snapToDevice, type FogMode } from './fog
 import {
   CanvasPen,
   LightMap,
+  LightRecord,
+  PenRecord,
   addRimLift,
   countGraphicsCmds,
   createCanvasTexture,
@@ -67,6 +69,8 @@ export interface FogLayer {
   readonly miniSource: HTMLCanvasElement;
   /** 측정: 마지막 합성(begin~commit)에 걸린 시간 (ms) */
   readonly lastCommitMs: number;
+  /** 마지막 commit에서 그림이 바뀌었는가 (바뀌지 않았으면 미니맵도 다시 그릴 필요가 없다) */
+  readonly changed: boolean;
   begin(): void;
   /** 바닥 위 다각형 채우기 (시야 원 역할색 12%, 괴물 자기 부채꼴 등) */
   fillPoly(poly: readonly Vec2[], color: number, alpha: number): void;
@@ -126,12 +130,18 @@ export class CanvasFog implements FogLayer {
   private readonly staticMap: HTMLCanvasElement;
   private readonly light: LightMap | null;
   private readonly pen: CanvasPen;
+  /** 이번 주기의 바닥 명령 (거점 · 탈출구 · 시야 채움, 그린 순서대로)과 빛 명령 */
+  private readonly rec = new PenRecord();
+  private readonly lightRec = new LightRecord();
+  /** 마지막으로 합성한 바닥 명령 (null = 아직 없음 — 첫 주기는 늘 합성한다) */
+  private last: number[] | null = null;
   /** 테두리 리프트 (곱하기 뒤 더하기) */
   private readonly lift: Path2D;
   private readonly key: string;
   private readonly texture: Phaser.Textures.Texture;
   private readonly image: Phaser.GameObjects.Image;
   lastCommitMs = 0;
+  changed = true;
   private t0 = 0;
 
   constructor(
@@ -172,45 +182,58 @@ export class CanvasFog implements FogLayer {
     return this.base;
   }
 
+  /**
+   * 안개 주기 시작. 바닥 · 빛 명령은 기록만 하고 commit에서 지난번과 견줘, 같으면 합성도 업로드도 하지 않는다
+   * (M12 휴대폰 성능: 품질 낮음 = 저사양 휴대폰의 가장 비싼 일이 이 전체 합성 + 통째 업로드다). 바뀌었으면 정적 맵 →
+   * 기록한 명령 → 빛 곱하기 → 테두리 리프트로 바로 칠하던 때와 같은 그림을 만든다
+   */
   begin(): void {
     this.t0 = performance.now();
-    const c = this.ctx;
-    c.globalCompositeOperation = 'source-over';
-    c.drawImage(this.staticMap, 0, 0);
-    this.light?.clear();
+    this.rec.reset();
+    this.lightRec.reset();
   }
 
   fillPoly(poly: readonly Vec2[], color: number, alpha: number): void {
-    this.pen.fillPoly(poly, color, alpha);
+    this.rec.fillPoly(poly, color, alpha);
   }
 
   drawPoints(points: readonly PointView[], balance: Balance): void {
-    paintPoints(this.pen, points, balance);
+    paintPoints(this.rec, points, balance);
   }
 
   drawExits(exits: readonly ExitView[], balance: Balance): void {
-    paintExits(this.pen, exits, balance);
+    paintExits(this.rec, exits, balance);
   }
 
   addSoftLight(light: SoftLight): void {
-    this.light?.addSoft(light);
+    if (this.light) this.lightRec.addSoft(light);
   }
 
   addHardLight(poly: readonly Vec2[]): void {
-    this.light?.addHard(poly);
+    if (this.light) this.lightRec.addHard(poly);
   }
 
   commit(): void {
-    if (this.light) {
+    const lightChanged = this.light !== null && this.lightRec.paint(this.light);
+    this.changed = lightChanged || this.last === null || !this.rec.sameAs(this.last);
+    if (this.changed) {
       const c = this.ctx;
-      c.save();
-      c.globalCompositeOperation = 'multiply';
-      c.imageSmoothingEnabled = true;
-      c.drawImage(this.light.canvas, 0, 0, this.base.width, this.base.height);
-      c.restore();
+      c.globalCompositeOperation = 'source-over';
+      c.drawImage(this.staticMap, 0, 0);
+      this.rec.replay(this.pen);
+      if (this.light) {
+        c.save();
+        c.globalCompositeOperation = 'multiply';
+        c.imageSmoothingEnabled = true;
+        c.drawImage(this.light.canvas, 0, 0, this.base.width, this.base.height);
+        c.restore();
+      }
+      addRimLift(c, this.lift);
+      uploadCanvasTexture(this.texture);
+      this.last = this.rec.ops.slice();
+    } else {
+      gfxState.features.fogSkips = Number(gfxState.features.fogSkips ?? 0) + 1;
     }
-    addRimLift(this.ctx, this.lift);
-    uploadCanvasTexture(this.texture);
     const n = countGraphicsCmds(this.root.list);
     gfxState.features.mapGfxCmds = n.cmds;
     gfxState.features.mapLayerObjects = n.objects;

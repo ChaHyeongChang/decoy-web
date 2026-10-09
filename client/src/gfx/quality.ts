@@ -1,8 +1,10 @@
 // 그래픽 품질: 자동 선택 · 저장 · 판 중 FPS 감시 (순수 로직, Phaser를 import하지 않는다).
 // 우선순위: ?quality > 로비에서 고른 값(이번 세션에서 고른 값 > 저장값 'decoy:quality') > 자동
 // (MOBILE_PLAN M10 '그래픽 품질 단계'). 아래 FPS · 기기 기준값은 판정과 무관한 그래픽 값이라 balance.json이 아니라 여기 둔다.
-import { STORAGE_KEYS, browserStorage, type StorageLike } from '../storageKeys';
-import { isQualityTier, lowerTier, type QualityTier, type RendererKind } from './presets';
+// M12: 터치 기기는 판 중 하향 기준이 목표(중간 50fps)에 맞춰 높고(TOUCH_FPS_WATCH), 판 중 하향으로 확인한 단계를
+// 다음 접속에도 쓴다(자동일 때, 온라인 · 연습 따로 'decoy:perf'). PC 규칙 · 값은 M10 그대로(세션 단위, 저장하지 않음).
+import { STORAGE_KEYS, browserStorage, readKey, removeKey, writeKey, type StorageLike } from '../storageKeys';
+import { QUALITY_TIERS, isQualityTier, lowerTier, type QualityTier, type RendererKind } from './presets';
 
 // 저장소 접근은 storageKeys.ts에서만 (M12). 기존 import 경로를 지키려고 다시 내보낸다
 export { browserStorage, type StorageLike };
@@ -35,6 +37,20 @@ export const FPS_WATCH = {
 } as const;
 
 export type FpsWatchConfig = { readonly [K in keyof typeof FPS_WATCH]: number };
+
+/**
+ * 터치 기기의 판 중 자동 하향 기준 (M12 6번). 목표는 중급 휴대폰 품질 중간 평균 50fps · 저사양 낮음 30fps라
+ * 기준 FPS를 중간의 목표 50으로 둔다: 높음 · 중간에서 1초 평균 50 미만이 10초 넘게 이어지면 한 단계 내린다.
+ * PC의 40은 터치에서 너무 낮다(중간 45fps 휴대폰이 그대로 남는다). 낮음은 더 내릴 단계가 없다 — 낮음의 30fps는
+ * 낮음 구성(Canvas 안개 · 효과 없음 · 프레임 절반)과 터치 낮음의 해상도(presets TOUCH_LOW_OVERRIDE)로 맞춘다.
+ * 예열 · 지속 · 평균 구간 · 끊김은 PC와 같고, 효과 확인(DOWNGRADE_CHECK)도 같다(30Hz로 묶인 휴대폰은 되돌린다)
+ */
+export const TOUCH_FPS_WATCH: FpsWatchConfig = { ...FPS_WATCH, minFps: 50 };
+
+/** 기기에 맞는 판 중 하향 기준 */
+export function fpsWatchFor(touch: boolean): FpsWatchConfig {
+  return touch ? TOUCH_FPS_WATCH : FPS_WATCH;
+}
 
 /**
  * 하향 효과 확인: 판 중 자동 하향 뒤 FPS가 실제로 올랐는지 같은 판에서 다시 잰다.
@@ -116,6 +132,8 @@ export interface QualityEnv {
   cores: number | null;
   /** navigator.deviceMemory GB (모르면 null) */
   memory: number | null;
+  /** 판 중 측정으로 기억한 단계 (터치 기기 · 이번 모드, 없으면 null). 자동일 때만 쓴다 */
+  perf?: PerfRecord | null;
 }
 
 /**
@@ -133,10 +151,22 @@ export function autoQuality(env: QualityEnv): QualityTier {
   return 'high';
 }
 
+/**
+ * 시작 단계. 자동이면 기억한 단계(판 중 측정)가 자동보다 낮을 때 그것을 쓴다(출처는 그대로 'auto').
+ * 기억은 그때의 자동 단계(base)와 지금 자동 단계가 같을 때만 쓴다: 렌더러 · 기기 판단이 바뀌었으면 옛 측정이다
+ */
 export function detectQuality(env: QualityEnv): { tier: QualityTier; source: QualitySource } {
   if (env.url) return { tier: env.url, source: 'url' };
   if (env.saved) return { tier: env.saved, source: 'saved' };
-  return { tier: autoQuality(env), source: 'auto' };
+  const auto = autoQuality(env);
+  const perf = env.perf;
+  if (perf && perf.base === auto) return { tier: lowestTier(auto, perf.tier), source: 'auto' };
+  return { tier: auto, source: 'auto' };
+}
+
+/** 두 단계 중 낮은 쪽 */
+export function lowestTier(a: QualityTier, b: QualityTier): QualityTier {
+  return QUALITY_TIERS.indexOf(a) >= QUALITY_TIERS.indexOf(b) ? a : b;
 }
 
 /**
@@ -150,6 +180,79 @@ export function savedForSession(
 ): QualityTier | null {
   if (chosen === null) return stored;
   return chosen === 'auto' ? null : chosen;
+}
+
+// ───────────── 판 중 측정 기억 (터치 기기, M12) ─────────────
+
+/** 판 중 측정을 따로 기억하는 모드: 온라인(서버 판) · 연습(기기 안 시뮬레이션이 CPU를 더 쓴다, M13b). 지금은 온라인만 쓴다 */
+export type PerfMode = 'online' | 'practice';
+export const PERF_MODES: readonly PerfMode[] = ['online', 'practice'];
+
+/** 한 모드의 기억: 판 중 하향으로 효과를 확인한 단계와 그때의 자동 단계(기기 기준) */
+export interface PerfRecord {
+  tier: QualityTier;
+  base: QualityTier;
+}
+
+export type PerfMemory = Partial<Record<PerfMode, PerfRecord>>;
+
+/** 저장 형식 판 (모양이 바뀌면 올리고 옛 값은 버린다) */
+export const PERF_MEMORY_VERSION = 1;
+
+/** 'decoy:perf' 값 해석. 모르는 판 · 깨진 값 · 이상한 단계는 버린다 */
+export function parsePerfMemory(raw: string | null): PerfMemory {
+  if (raw === null) return {};
+  let v: unknown;
+  try {
+    v = JSON.parse(raw);
+  } catch {
+    return {};
+  }
+  if (typeof v !== 'object' || v === null) return {};
+  const o = v as Record<string, unknown>;
+  if (o.v !== PERF_MEMORY_VERSION) return {};
+  const out: PerfMemory = {};
+  for (const mode of PERF_MODES) {
+    const r = o[mode];
+    if (typeof r !== 'object' || r === null) continue;
+    const { tier, base } = r as Record<string, unknown>;
+    if (isQualityTier(tier) && isQualityTier(base)) out[mode] = { tier, base };
+  }
+  return out;
+}
+
+/** 기억 읽기 (없거나 읽을 수 없으면 빈 기억) */
+export function loadPerfMemory(storage: StorageLike | null = browserStorage()): PerfMemory {
+  return parsePerfMemory(readKey('perf', '', storage));
+}
+
+/** 한 모드의 기억을 쓴다 (다른 모드 기억은 그대로). 못 쓰면 false */
+export function rememberPerf(
+  mode: PerfMode,
+  rec: PerfRecord,
+  storage: StorageLike | null = browserStorage(),
+): boolean {
+  const next = { ...loadPerfMemory(storage), [mode]: rec };
+  return writeKey('perf', JSON.stringify({ v: PERF_MEMORY_VERSION, ...next }), '', storage);
+}
+
+/** 기억을 모두 지운다 (사용자가 로비에서 품질을 직접 고를 때) */
+export function forgetPerfMemory(storage: StorageLike | null = browserStorage()): boolean {
+  return removeKey('perf', '', storage);
+}
+
+/**
+ * 판 중 자동 조정 결과를 기억할지: 터치 기기에서 출처가 자동이고, 하향이 효과가 있어 유지한 경우만(keep).
+ * 효과가 없어 되돌린 하향(30Hz로 묶인 화면 등)은 기억하지 않는다 — 다음 접속에서 다시 재고, 기억은 낮추기만 한다
+ */
+export function perfToRemember(
+  action: AutoQualityAction,
+  touch: boolean,
+  source: QualitySource,
+  base: QualityTier,
+): { mode: PerfMode; rec: PerfRecord } | null {
+  if (!touch || source !== 'auto' || action.kind !== 'keep') return null;
+  return { mode: action.mode, rec: { tier: action.tier, base } };
 }
 
 /**
@@ -280,20 +383,28 @@ export class DowngradeCheck {
 
 /** 판 중 자동 조정이 내린 결정 (main.ts가 적용한다) */
 export type AutoQualityAction =
-  | { kind: 'downgrade'; from: QualityTier; to: QualityTier; fpsBefore: number }
-  | { kind: 'keep'; tier: QualityTier; fpsBefore: number; fpsAfter: number }
-  | { kind: 'revert'; from: QualityTier; to: QualityTier; fpsBefore: number; fpsAfter: number };
+  | { kind: 'downgrade'; mode: PerfMode; from: QualityTier; to: QualityTier; fpsBefore: number }
+  | { kind: 'keep'; mode: PerfMode; tier: QualityTier; fpsBefore: number; fpsAfter: number }
+  | {
+      kind: 'revert';
+      mode: PerfMode;
+      from: QualityTier;
+      to: QualityTier;
+      fpsBefore: number;
+      fpsAfter: number;
+    };
 
 /** on = 감시 중, checking = 하향 효과 확인 중, off = 효과가 없어 되돌린 뒤 이번 세션에서 끔 */
 export type AutoDowngradeStatus = 'on' | 'checking' | 'off';
 
 /**
- * 판 중 자동 하향 (세션 단위 상태, 저장하지 않는다).
- *  - 판마다 FpsWatch로 잰다: 예열 5초 뒤 평균 40fps 미만이 10초를 넘으면 한 단계 내린다 (판당 최대 1번)
- *  - 내린 뒤 같은 판에서 DowngradeCheck로 효과를 본다 (판이 먼저 끝나면 다음 판 예열 뒤 이어서)
+ * 판 중 자동 하향 (세션 단위 상태. 기억할 결과는 main.ts가 perfToRemember로 골라 저장한다).
+ *  - 판마다 FpsWatch로 잰다: 예열 5초 뒤 평균이 기준(PC 40 · 터치 50fps) 미만인 상태가 10초를 넘으면 한 단계 내린다 (판당 최대 1번)
+ *  - 내린 뒤 같은 판에서 DowngradeCheck로 효과를 본다 (판이 먼저 끝나면 같은 모드의 다음 판 예열 뒤 이어서)
  *  - 효과 없음 → 원래 단계로 되돌리고 이번 세션에서는 자동 하향을 끈다
  *  - 효과 있음 → 그 단계를 유지하고, 다음 판에서도 느리면 한 단계 더 내릴 수 있다
- * 확인이 끝나기 전에는 더 내리지 않는다.
+ * 확인이 끝나기 전에는 더 내리지 않는다. 판마다 모드(온라인 · 연습)를 받아 결정에 실어 보내고,
+ * 다른 모드의 판으로 넘어가면 확인 중이던 하향은 이어 가지 않는다(부하가 다른 판끼리 FPS를 견주지 않게).
  */
 export class AutoDowngrade {
   private watch: FpsWatch | null = null;
@@ -302,14 +413,25 @@ export class AutoDowngrade {
   private pending: { from: QualityTier; to: QualityTier; fpsBefore: number } | null = null;
   private disabled = false;
   private lastAverage = 0;
+  private mode: PerfMode = 'online';
 
   constructor(
-    private readonly watchCfg: FpsWatchConfig = FPS_WATCH,
+    private watchCfg: FpsWatchConfig = FPS_WATCH,
     private readonly checkCfg: DowngradeCheckConfig = DOWNGRADE_CHECK,
   ) {}
 
   get status(): AutoDowngradeStatus {
     return this.disabled ? 'off' : this.pending ? 'checking' : 'on';
+  }
+
+  /** 지금 쓰는 하향 기준 (디버그 표시) */
+  get config(): FpsWatchConfig {
+    return this.watchCfg;
+  }
+
+  /** 하향 기준을 바꾼다 (부팅 때 기기에 맞춰 한 번: fpsWatchFor(touch)). 다음 판부터 쓴다 */
+  setWatchConfig(cfg: FpsWatchConfig): void {
+    this.watchCfg = cfg;
   }
 
   /** 디버그 표시용 최근 평균 FPS (감시 · 확인이 아직 잰 값이 없으면 마지막 값) */
@@ -318,10 +440,14 @@ export class AutoDowngrade {
     return now > 0 ? now : this.lastAverage;
   }
 
-  /** 판 시작 */
-  beginMatch(nowMs: number): void {
+  /** 판 시작. mode = 이 판의 모드 (지금은 늘 온라인, 연습 판은 M13b) */
+  beginMatch(nowMs: number, mode: PerfMode = 'online'): void {
     this.watch = null;
     this.check = null;
+    if (mode !== this.mode) {
+      this.mode = mode;
+      this.pending = null;
+    }
     if (this.disabled) return;
     if (this.pending) {
       // 지난 판이 확인 전에 끝났다: 이번 판 시작 비용이 가라앉은 뒤(예열) 이어서 잰다
@@ -360,9 +486,10 @@ export class AutoDowngrade {
       const fpsAfter = this.check.average;
       this.pending = null;
       this.check = null;
-      if (verdict === 'helped') return { kind: 'keep', tier: p.to, fpsBefore: p.fpsBefore, fpsAfter };
+      const mode = this.mode;
+      if (verdict === 'helped') return { kind: 'keep', mode, tier: p.to, fpsBefore: p.fpsBefore, fpsAfter };
       this.disabled = true;
-      return { kind: 'revert', from: p.to, to: p.from, fpsBefore: p.fpsBefore, fpsAfter };
+      return { kind: 'revert', mode, from: p.to, to: p.from, fpsBefore: p.fpsBefore, fpsAfter };
     }
     const watch = this.watch;
     if (!watch || !watch.sample(nowMs, fps)) return null;
@@ -378,11 +505,11 @@ export class AutoDowngrade {
       this.checkCfg,
       this.watchCfg.gapMs,
     );
-    return { kind: 'downgrade', from: tier, to: lower, fpsBefore };
+    return { kind: 'downgrade', mode: this.mode, from: tier, to: lower, fpsBefore };
   }
 }
 
-/** 이번 세션(페이지)의 자동 하향 상태. 새로고침하면 처음부터 (저장하지 않는다) */
+/** 이번 세션(페이지)의 자동 하향 상태. 새로고침하면 처음부터 (터치 기기의 유지한 하향만 'decoy:perf'로 남는다) */
 export const sessionAutoDowngrade = new AutoDowngrade();
 
 /**
