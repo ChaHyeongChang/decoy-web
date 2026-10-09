@@ -802,7 +802,7 @@ test('가드 밀치기 사거리: 거리 안이어도 철창이 가로막으면 
   await closeAll(players);
 });
 
-test('프레임이 공격 준비 시간(0.4초)보다 느려도 생존자 화면에 괴물 공격 예고가 한 번은 그려진다', async ({
+test('프레임이 1.5초씩 걸리는 느린 기기에서도 생존자 화면에 괴물 공격 예고가 한 번은 그려진다 (늦게 처리한 이벤트를 버리지 않음)', async ({
   browser,
 }) => {
   const q = '&quality=low';
@@ -825,14 +825,20 @@ test('프레임이 공격 준비 시간(0.4초)보다 느려도 생존자 화면
   await host.waitForFunction(() => (window.__DECOY__?.getLastSnapshot()?.world.monsterWait ?? 1) <= 0, null, {
     timeout: 15_000,
   });
-  // 느린 기기 흉내: 가드 화면의 프레임마다 600ms를 쓴다 (준비 0.4초가 프레임 사이로 빠질 수 있다)
+  // 느린 기기 흉내: 가드 화면의 프레임마다 1.5초를 쓴다(콜백 수와 상관없이 프레임당 한 번).
+  // 준비 0.4초가 프레임 사이로 빠지고, 메시지 처리도 프레임 한두 개만큼 늦는다(이벤트가 서버 시각으로 2초 넘게 오래돼 보임 —
+  // 고정 2초 거르기였을 때 CI 러너에서 3번 중 1~2번을 놓쳤다)
   await view.evaluate(() => {
     const orig = window.requestAnimationFrame.bind(window);
+    let lastFrame = -1;
     window.requestAnimationFrame = (cb) =>
       orig((t) => {
-        const end = performance.now() + 600;
-        while (performance.now() < end) {
-          // 바쁜 대기
+        if (t !== lastFrame) {
+          lastFrame = t;
+          const end = performance.now() + 1500;
+          while (performance.now() < end) {
+            // 바쁜 대기
+          }
         }
         cb(t);
       });
@@ -841,9 +847,9 @@ test('프레임이 공격 준비 시간(0.4초)보다 느려도 생존자 화면
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await host.mouse.down({ button: 'left' });
     await host.mouse.up({ button: 'left' });
-    // 프레임마다 그린 정보 레이어를 본다 (느린 프레임 4개 ≈ 2.4초)
+    // 프레임마다 그린 정보 레이어를 본다 (느린 프레임 5개 ≈ 7.5초)
     const hit = await view.evaluate(async () => {
-      for (let i = 0; i < 4; i += 1) {
+      for (let i = 0; i < 5; i += 1) {
         await new Promise<void>((r) => requestAnimationFrame(() => r()));
         if ((window.__DECOY__?.getInfoLayer() ?? []).some((it) => it.tag === 'attack')) return true;
       }
@@ -852,7 +858,7 @@ test('프레임이 공격 준비 시간(0.4초)보다 느려도 생존자 화면
     if (hit) seen += 1;
     await host.waitForTimeout(1700);
   }
-  console.log(`[m10-visual] 느린 프레임(600ms)에서 공격 예고를 본 횟수 ${seen}/3`);
+  console.log(`[m10-visual] 느린 프레임(1.5초)에서 공격 예고를 본 횟수 ${seen}/3`);
   expect(seen, '공격 준비 3번을 모두 한 번 이상 그림').toBe(3);
   for (const pl of players) expect(pl.problems).toEqual([]);
   await closeAll(players);

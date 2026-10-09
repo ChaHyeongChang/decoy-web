@@ -17,6 +17,7 @@ import { VIEW_H, VIEW_W, fitCamera, screenToTile } from '../ui/layout';
 import { Minimap } from '../ui/minimap';
 import { Scoreboard, TutorialOverlay } from '../ui/overlays';
 import { drawProbeText, makeText } from '../ui/text';
+import { staleEventLimitMs, trackFrameMs } from './staleEvents';
 
 /** 안개 (M3부터) */
 export const FOG_ENABLED = true;
@@ -25,17 +26,13 @@ const MAX_CATCHUP_STEPS = 4;
 /** 첫 판 조작 안내 표시 시간 (VISUAL_SPEC 6장) */
 const TUTORIAL_SECONDS = 5;
 const EXIT_NAMES = { N: '북', S: '남' } as const;
-/**
- * 이보다 오래된 스냅샷의 일회성 연출(소리 · 플래시 · 알림 배너 · 핑)은 건너뛴다.
- * 백그라운드 탭이 멈췄다 돌아오면 밀린 스냅샷이 한꺼번에 처리되는데, 지난 일을 뒤늦게 울리지 않게.
- * 거점 메모(비밀번호)는 오래돼도 보여 준다
- */
-const STALE_EVENT_MS = 2000;
 
 export class GameScene extends Phaser.Scene {
   private app!: App;
   private sampler = new InputSampler();
   private seq = 0;
+  /** 최근 프레임 간격 (ms, 느려지면 바로 · 빨라지면 천천히): 느린 기기에서 오래된 이벤트 한도를 늘린다 */
+  private frameMs = 0;
   private acc = 0;
   private lastInputAt = 0;
   /** 마지막으로 입력 틱을 처리한 시각 (틱 사이 보간 비율) */
@@ -158,7 +155,8 @@ export class GameScene extends Phaser.Scene {
     this.unsubscribe = app.subscribe((e) => {
       if (e.kind !== 'snapshot') return;
       if (this.seq < e.snap.ack) this.seq = e.snap.ack;
-      const stale = app.net.synced && app.net.serverNow() - e.snap.st > STALE_EVENT_MS;
+      // 오래된 스냅샷의 일회성 연출(소리 · 플래시 · 알림 배너 · 핑)은 건너뛴다(staleEvents.ts). 거점 메모(비밀번호)는 오래돼도 보여 준다
+      const stale = app.net.synced && app.net.serverNow() - e.snap.st > staleEventLimitMs(this.frameMs);
       for (const ev of e.snap.events) {
         const note = ev.k === 'text' && (ev.id === 'NOTE_FIRST' || ev.id === 'NOTE_SECOND');
         if (!stale || note) this.onEvent(ev);
@@ -336,6 +334,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   override update(_time: number, delta: number): void {
+    // Phaser의 delta는 200ms(최소 5fps)를 넘으면 이전 값으로 바꿔 넣으므로 느린 기기의 실제 간격은 rawDelta로 잰다
+    this.frameMs = trackFrameMs(this.frameMs, this.game.loop.rawDelta);
     this.renderFrame(delta);
     this.watchFps();
   }

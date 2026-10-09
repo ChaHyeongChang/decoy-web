@@ -53,7 +53,7 @@ describe('ci.yml', () => {
     expect(e['timeout-minutes']).toBeGreaterThanOrEqual(40);
     const run = e.steps.find((s) => s.run?.includes('e2e-shard.mjs'))?.run;
     expect(run).toBe(`node scripts/e2e-shard.mjs \${{ matrix.shard }} ${shards.length}`);
-    expect(e.name).toContain(`/${shards.length}`);
+    expect(e.name).not.toContain('${{');
     const upload = e.steps.find((s) => s.uses?.startsWith('actions/upload-artifact'));
     expect(String(upload?.with?.name)).toContain('${{ matrix.shard }}');
   });

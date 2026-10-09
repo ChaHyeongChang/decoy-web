@@ -59,7 +59,8 @@ jobs:
     # 전체 E2E를 러너에서 잰 파일별 시간(tests/e2e/durations.json)으로 고르게 4묶음 (scripts/e2e-shard.mjs).
     # 한 묶음 8분 안팎, 느린 러너를 생각해 제한은 넉넉히
     if: github.event_name == 'workflow_dispatch'
-    name: 전체 E2E ${{ matrix.shard }}/4
+    # 이름에 matrix를 넣지 않는다: 건너뛸 때(push · PR) 식이 풀리지 않은 채 보인다. GitHub가 "전체 E2E (1)"처럼 붙인다
+    name: 전체 E2E
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
