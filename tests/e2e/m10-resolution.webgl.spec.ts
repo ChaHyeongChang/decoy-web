@@ -466,9 +466,9 @@ test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 �
     expect(errDeg, `${label} 크기 변경 뒤 조준 유지`).toBeLessThan(2);
   };
 
-  // 느린 러너(2코어 SwiftShader)에서 4K 프레임이 메인 스레드를 오래 붙잡으면 서버가 송신 밀림(1MB)으로 연결을 끊고
-  // 앱이 다시 붙는다. 그러면 판 장면을 새로 만들어 앞서 만든 탐침 글자가 사라진다(M11 전체 검사에서 probeRes null).
-  // 그런 단계는 원인을 적고 탐침을 다시 만든다(새 장면의 글자도 새 해상도인지는 그대로 본다). 빠른 기기에서는 다시 붙지 않는다
+  // 느린 러너(2코어 SwiftShader)에서 4K 프레임이 CPU를 다 쓰면 연결이 끊겼다 다시 붙을 수 있다(하트비트 응답 지연으로 본다 —
+  // JS 정지만으로는 재현되지 않음, DECISIONS M12 송신 밀림). 그러면 판 장면을 새로 만들어 앞서 만든 탐침 글자가 사라진다
+  // (M11 전체 검사에서 probeRes null). 그런 단계는 원인을 적고 탐침을 다시 만든다(새 장면의 글자도 새 해상도인지는 그대로 본다)
   let sockets = 0;
   page.on('websocket', () => {
     sockets += 1;
@@ -480,7 +480,7 @@ test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 �
   const reprobeIfReconnected = async (label: string): Promise<void> => {
     if (sockets === seenSockets) return;
     seenSockets = sockets;
-    console.log(`${label}: 연결이 다시 맺어졌다(느린 러너의 송신 밀림) → 새 판 장면에 탐침을 다시 만든다`);
+    console.log(`${label}: 연결이 다시 맺어졌다(느린 러너) → 새 판 장면에 탐침을 다시 만든다`);
     await drawProbe();
     await settleFrames(page, 2);
   };
