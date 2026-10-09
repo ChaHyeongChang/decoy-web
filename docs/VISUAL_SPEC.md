@@ -497,7 +497,7 @@ M10 비주얼 리마스터(어두운 시설 · 청록 네온 · 붉은 괴물) �
 
 | 항목 | 높음 | 중간 | 낮음 |
 |---|---|---|---|
-| 기기 픽셀 배율 · 픽셀 수 상한 | 2배 · 3840 × 2160 | 1.5배 · 2560 × 1440 | 1배 · 1920 × 1080 (터치 기기 1.5배 · 1.2MP) |
+| 기기 픽셀 배율 · 픽셀 수 상한 | 2배 · 3840 × 2160 | 1.5배 · 2560 × 1440 | 1배 · 1920 × 1080 (터치 기기 1.25배 · 1.2MP, 백버퍼 높이 하한 450px — 하한이 올리는 배율은 1.5배까지) |
 | 바닥 합성 배율 상한 | 2 | 1.5 | 1 |
 | 빛 지도 (px/타일) | 16 | 12 | 8 |
 | 안개 | GPU 합성 + 경계 셰이더 | GPU 합성 | Canvas 합성 |
@@ -517,15 +517,21 @@ M10 비주얼 리마스터(어두운 시설 · 청록 네온 · 붉은 괴물) �
 | 낮음 파티클 상한 | `40` | `presets.PRESETS.low.particleCap` |
 | 낮음 프레임 절반 | `true` | `presets.PRESETS.low.halfFrameAnims` |
 | 블룸 (높음) | `false` | `presets.PRESETS.high.bloom` |
+| 터치 낮음 기기 픽셀 배율 | `1.25` | `presets.TOUCH_LOW_OVERRIDE.dprCap` |
+| 터치 낮음 백버퍼 높이 하한(px) | `450` | `presets.TOUCH_LOW_OVERRIDE.minBackingH` |
+| 터치 낮음 하한이 올리는 배율 상한 | `1.5` | `presets.TOUCH_LOW_OVERRIDE.floorDprCap` |
+| 터치 낮음 픽셀 수 상한 | `1200000` | `presets.TOUCH_LOW_OVERRIDE.maxPixels` |
 
 - Canvas 렌더러는 어느 단계든 WebGL 전용 기능(셰이더 · postFX · 색보정 · 블룸)이 0개가 되게 낮추고(postFX 비네트 → 구운 오버레이), 합성 배율을 1 이하로 둔다(`effectivePreset`)
 - 자동 선택: `?quality=` > 로비에서 고른 값(localStorage `decoy:quality`) > 자동(Canvas · 소프트웨어 WebGL = 낮음, 터치 기기 = 중간(코어 4개 이하 또는 메모리 3GB 이하면 낮음), 하드웨어 WebGL PC = 높음 — PC는 코어 · 메모리로 내리지 않는다)
-- 판 중 자동 하향: 예열 5초 뒤 평균 40fps 미만이 10초 넘게 이어지면 한 단계(판당 한 번). 3초 뒤 10초 평균이 15% 또는 5fps 이상 오르지 않으면 되돌리고 그 세션에서 끈다(`quality.FPS_WATCH` · `DOWNGRADE_CHECK`)
+- 판 중 자동 하향: 예열 5초 뒤 평균이 기준(PC 40fps · 터치 기기 50fps) 미만인 상태가 10초 넘게 이어지면 한 단계(판당 한 번). 3초 뒤 10초 평균이 15% 또는 5fps 이상 오르지 않으면 되돌리고 그 세션에서 끈다(`quality.FPS_WATCH` · `TOUCH_FPS_WATCH` · `DOWNGRADE_CHECK`). 터치 기준 50은 성능 목표(중급 휴대폰 품질 중간 평균 50fps · 저사양 낮음 30fps, MOBILE_PLAN M12)의 중간 값이다
+- 판 중 측정 기억 (터치 기기만, M12): 자동 단계에서 내린 뒤 효과를 확인한 단계(유지)는 localStorage `decoy:perf`에 온라인 · 연습 따로 남아 다음 접속을 그 단계로 시작한다(자동보다 낮을 때만, 그때의 자동 단계가 지금과 같을 때만). 로비에서 품질을 직접 고르면(자동 포함) 지운다. PC는 M10 그대로 세션 단위
 
 | 항목 | 값 | 코드 |
 |---|---|---|
 | 자동 하향 예열(ms) | `5000` | `quality.FPS_WATCH.warmupMs` |
 | 자동 하향 기준(fps) | `40` | `quality.FPS_WATCH.minFps` |
+| 터치 기기 자동 하향 기준(fps) | `50` | `quality.TOUCH_FPS_WATCH.minFps` |
 | 자동 하향 지속(ms) | `10000` | `quality.FPS_WATCH.sustainMs` |
 
 ### 7.4 후처리 대상과 레이어 순서 (R1 · R2)

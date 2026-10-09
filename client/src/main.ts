@@ -6,14 +6,22 @@ import { installDebug } from './debug';
 import { canOfferFullscreen, device, enterFullscreen, initDevice } from './device';
 import type { QualityPreset, QualityTier, RendererKind } from './gfx/presets';
 import {
+  autoQuality,
   detectQuality,
+  forgetPerfMemory,
+  fpsWatchFor,
   isSoftwareGl,
   isTouchDevice,
+  loadPerfMemory,
   loadSavedQuality,
+  perfToRemember,
   qualityHooks,
+  rememberPerf,
   savedForSession,
   sessionAutoDowngrade,
+  type PerfMode,
   type QualityChoice,
+  type QualityEnv,
   type QualitySource,
 } from './gfx/quality';
 import { currentPreset, gfxState, notifyGfxChange, onGfxChange, probeSlot } from './gfx/state';
@@ -78,8 +86,15 @@ function rendererType(): number {
   return Phaser.AUTO;
 }
 
-function decideQuality(): { tier: QualityTier; source: QualitySource } {
-  return detectQuality({
+/**
+ * 판 중 측정을 기억 · 적용하는 모드. 지금은 온라인 판만 있다 (M13b 연습 판이 생기면 판 시작 전에 'practice'로 바꾸고
+ * 품질을 다시 정한 뒤 sessionAutoDowngrade.beginMatch에 같은 모드를 넘긴다)
+ */
+const perfMode: PerfMode = 'online';
+
+/** 품질을 정하는 환경. 판 중 측정 기억은 터치 기기에서만 쓴다 (PC는 M10 그대로 세션 단위) */
+function qualityEnv(): QualityEnv {
+  return {
     url: urlQuality,
     saved: savedForSession(sessionChoice, loadSavedQuality()),
     renderer: gfxState.renderer,
@@ -87,7 +102,16 @@ function decideQuality(): { tier: QualityTier; source: QualitySource } {
     touch,
     cores,
     memory,
-  });
+    perf: touch ? (loadPerfMemory()[perfMode] ?? null) : null,
+  };
+}
+
+function decideQuality(): { tier: QualityTier; source: QualitySource } {
+  const env = qualityEnv();
+  const q = detectQuality(env);
+  // 기억한 단계로 시작했는가 (디버그 · E2E: 'none'이면 기기 자동 그대로)
+  gfxState.features.perfTier = q.source === 'auto' && q.tier !== autoQuality(env) ? q.tier : 'none';
+  return q;
 }
 
 /** 품질 단계가 켜는 장식 기능 (디버그 훅 · E2E용. 실제로 켠 결과는 각 렌더 모듈이 덧쓴다) */
@@ -95,6 +119,8 @@ function presetFeatures(p: QualityPreset): Record<string, boolean | number | str
   return {
     dprCap: p.dprCap,
     maxPixels: p.maxPixels,
+    minBackingH: p.minBackingH,
+    floorDprCap: p.floorDprCap,
     compositeCap: p.compositeCap,
     lightPxPerTile: p.lightPxPerTile,
     fog: p.fog,
@@ -115,12 +141,15 @@ function setQuality(q: { tier: QualityTier; source: QualitySource }): void {
   syncAutoStatus();
 }
 
-/** 판 중 자동 하향 상태 (on · checking · off) 표시 */
+/** 판 중 자동 하향 상태 (on · checking · off)와 기준 FPS 표시 */
 function syncAutoStatus(): void {
   gfxState.features.autoDowngrade = sessionAutoDowngrade.status;
+  gfxState.features.autoMinFps = sessionAutoDowngrade.config.minFps;
 }
 
 gfxState.touch = touch;
+// 판 중 하향 기준: 터치 기기는 목표(중간 50fps)에 맞춘 값 (gfx/quality.ts TOUCH_FPS_WATCH)
+sessionAutoDowngrade.setWatchConfig(fpsWatchFor(touch));
 gfxState.scaleOverride = params.scaleOverride;
 // 렌더러는 Phaser가 정한다. 그 전에는 요청대로(AUTO면 WebGL로) 가정하고, 부팅 직후 실제 렌더러로 다시 정한다
 gfxState.renderer = params.renderer === 'canvas' ? 'canvas' : 'webgl';
@@ -336,8 +365,10 @@ else game.events.once(Phaser.Core.Events.READY, onBooted);
 qualityHooks.choose = (choice) => {
   sessionChoice = choice;
   urlQuality = null;
-  // 사용자가 정한 단계: 확인 중이던 자동 하향을 되돌릴 대상이 사라진다
+  // 사용자가 정한 단계: 확인 중이던 자동 하향을 되돌릴 대상이 사라지고, 판 중 측정 기억(온라인 · 연습)도 지운다
+  // ('자동'을 고르면 기기 자동 단계부터 다시 잰다)
   sessionAutoDowngrade.cancelPending();
+  forgetPerfMemory();
   setQuality(decideQuality());
   applyResolution(true);
 };
@@ -359,6 +390,9 @@ qualityHooks.auto = (a) => {
     setQuality({ tier: a.to, source: gfxState.qualitySource });
     applyResolution(true);
   }
+  // 터치 기기 · 자동: 효과를 확인한 하향은 다음 접속에도 그 단계로 시작한다 (같은 모드, 기기 자동 단계가 같을 때만)
+  const remember = perfToRemember(a, touch, gfxState.qualitySource, autoQuality(qualityEnv()));
+  if (remember && rememberPerf(remember.mode, remember.rec)) gfxState.features.perfSaved = remember.rec.tier;
   syncAutoStatus();
 };
 

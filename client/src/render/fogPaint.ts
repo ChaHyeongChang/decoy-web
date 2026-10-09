@@ -829,6 +829,98 @@ export class LightMap<C extends { readonly width: number; readonly height: numbe
   }
 }
 
+// ───────────── 빛 지도 기록 (M12 휴대폰 성능) ─────────────
+
+/** 빛 명령 하나: 부드러운 원형 시야(soft) 또는 딱 잘린 시야(hard). 다각형은 참조로, 나머지는 값으로 담는다 */
+interface LightOp {
+  poly: readonly Vec2[];
+  /** 부드러운 시야만: 중심 · 판정 반경 · 흐림 띠 (딱 잘린 시야는 NaN) */
+  cx: number;
+  cy: number;
+  radius: number;
+  soft: number;
+}
+
+/** 두 다각형이 같은 꼭짓점인가 (같은 참조면 바로 참: 시야 다각형은 만든 뒤 바꾸지 않는다) */
+export function samePoly(a: readonly Vec2[], b: readonly Vec2[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const p = a[i];
+    const q = b[i];
+    if (!p || !q || p.x !== q.x || p.y !== q.y) return false;
+  }
+  return true;
+}
+
+function sameNum(a: number, b: number): boolean {
+  return a === b || (Number.isNaN(a) && Number.isNaN(b));
+}
+
+/**
+ * 빛 지도 명령 기록. 안개 주기마다 기록해 지난번과 같으면(모두 가만히 서 있고 괴물 조준도 그대로) 빛 지도를 다시 칠하지도
+ * GPU에 다시 올리지도 않는다. 다르면 지운 뒤 같은 순서로 칠한다(LightMap에 바로 칠하던 것과 같은 그림)
+ */
+export class LightRecord {
+  private ops: LightOp[] = [];
+  /** 마지막으로 빛 지도에 칠한 기록 (아직 없으면 null — 첫 주기는 늘 칠한다) */
+  private painted: LightOp[] | null = null;
+
+  /** 안개 주기 시작 */
+  reset(): void {
+    this.ops = [];
+  }
+
+  addSoft(light: SoftLight): void {
+    if (light.poly.length < 3) return;
+    this.ops.push({
+      poly: light.poly,
+      cx: light.center.x,
+      cy: light.center.y,
+      radius: light.radius,
+      soft: light.soft,
+    });
+  }
+
+  addHard(poly: readonly Vec2[]): void {
+    if (poly.length < 3) return;
+    this.ops.push({ poly, cx: NaN, cy: NaN, radius: NaN, soft: NaN });
+  }
+
+  /** 지난번에 칠한 기록과 같은가 */
+  get unchanged(): boolean {
+    const a = this.ops;
+    const b = this.painted;
+    if (!b || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      const p = a[i];
+      const q = b[i];
+      if (!p || !q) return false;
+      if (
+        !sameNum(p.cx, q.cx) ||
+        !sameNum(p.cy, q.cy) ||
+        !sameNum(p.radius, q.radius) ||
+        !sameNum(p.soft, q.soft)
+      )
+        return false;
+      if (!samePoly(p.poly, q.poly)) return false;
+    }
+    return true;
+  }
+
+  /** 바뀌었으면 빛 지도를 지우고 기록대로 칠한다. 칠했으면 true (텍스처를 다시 올려야 한다) */
+  paint<C extends { readonly width: number; readonly height: number }>(light: LightMap<C>): boolean {
+    if (this.unchanged) return false;
+    light.clear();
+    for (const op of this.ops) {
+      if (Number.isNaN(op.radius)) light.addHard(op.poly);
+      else light.addSoft({ poly: op.poly, center: { x: op.cx, y: op.cy }, radius: op.radius, soft: op.soft });
+    }
+    this.painted = this.ops;
+    return true;
+  }
+}
+
 // ───────────── 캔버스 텍스처 (getImageData 사본 없이) ─────────────
 // Phaser addCanvas는 CanvasTexture를 만들고, 그 생성자가 getImageData로 캔버스 전체를 읽어 텍스처가 사는 동안 들고 있다
 // (4K 높음 정적 맵 2856×1904이면 21.7MB, 가속 캔버스면 동기 GPU → CPU 읽기). 이 코드는 그 사본을 쓰지 않으므로 일반

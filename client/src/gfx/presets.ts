@@ -12,6 +12,13 @@ export interface QualityPreset {
   readonly dprCap: number;
   /** 백버퍼 픽셀 수 상한 */
   readonly maxPixels: number;
+  /**
+   * 백버퍼 높이 하한 (기기 px, 0이면 없음): 화면이 낮아도 백버퍼가 이 높이보다 작아지지 않게 배율을 dprCap 위로 올린다.
+   * 올려도 floorDprCap · 기기 픽셀 배율 · maxPixels를 넘지 않는다 (render/resolution.ts computeRenderSize)
+   */
+  readonly minBackingH: number;
+  /** 높이 하한이 올릴 수 있는 배율 상한 */
+  readonly floorDprCap: number;
   /** 바닥 합성 캔버스 배율 상한 (Canvas2D 합성 비용이 픽셀 수에 비례한다) */
   readonly compositeCap: number;
   /** 빛 지도 해상도 (타일당 px) */
@@ -44,6 +51,8 @@ export const PRESETS: Readonly<Record<QualityTier, QualityPreset>> = {
     tier: 'high',
     dprCap: 2,
     maxPixels: MP(3840, 2160),
+    minBackingH: 0,
+    floorDprCap: 2,
     compositeCap: 2,
     lightPxPerTile: 16,
     fog: 'gpu',
@@ -59,6 +68,8 @@ export const PRESETS: Readonly<Record<QualityTier, QualityPreset>> = {
     tier: 'medium',
     dprCap: 1.5,
     maxPixels: MP(2560, 1440),
+    minBackingH: 0,
+    floorDprCap: 1.5,
     compositeCap: 1.5,
     lightPxPerTile: 12,
     fog: 'gpu',
@@ -74,6 +85,8 @@ export const PRESETS: Readonly<Record<QualityTier, QualityPreset>> = {
     tier: 'low',
     dprCap: 1,
     maxPixels: MP(1920, 1080),
+    minBackingH: 0,
+    floorDprCap: 1,
     compositeCap: 1,
     lightPxPerTile: 8,
     fog: 'canvas',
@@ -87,8 +100,19 @@ export const PRESETS: Readonly<Record<QualityTier, QualityPreset>> = {
   },
 };
 
-/** 터치 기기의 낮음: DPR 3 휴대폰에서 1배로 내리면 HUD 글자가 뭉개져서 해상도 하한을 따로 둔다 */
-export const TOUCH_LOW_OVERRIDE = { dprCap: 1.5, maxPixels: 1_200_000 } as const;
+/**
+ * 터치 기기의 낮음 (M12): 기기 픽셀 배율 1.25배, 단 백버퍼 높이 450px(높이 360 휴대폰의 1.25배) 아래로는 내리지 않고
+ * 그 하한이 올리는 배율도 중간의 상한 1.5배를 넘지 않는다. PC 낮음(1배)을 DPR 2~3 휴대폰에 쓰면 HUD 글자가 뭉개진다.
+ * M10의 1.5배 고정은 흔한 휴대폰(높이 360~412)에서 중간과 백버퍼가 같아 낮음으로 내려도 픽셀이 줄지 않았다:
+ * 1.25배면 픽셀 수가 약 30% 줄고(바닥 합성 캔버스 · 올리는 텍스처도 같이 준다), 높이 293~320인 낮은 화면은
+ * 하한 덕에 중간과 거의 같게 남는다. 픽셀 수 상한 1.2MP는 태블릿용 (2560×1600 태블릿 → 약 1.2MP)
+ */
+export const TOUCH_LOW_OVERRIDE = {
+  dprCap: 1.25,
+  maxPixels: 1_200_000,
+  minBackingH: 450,
+  floorDprCap: 1.5,
+} as const;
 
 /**
  * 렌더러 · 기기에 맞춘 실제 설정. Canvas 렌더러에서는 WebGL 전용 기능이 0개가 되고,

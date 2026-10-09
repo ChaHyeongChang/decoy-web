@@ -29,6 +29,7 @@ import { FOG_EDGE_FRAG, snapToDevice } from './fogMath';
 import {
   CanvasPen,
   LightMap,
+  LightRecord,
   PenRecord,
   addRimLift,
   countGraphicsCmds,
@@ -271,6 +272,14 @@ export class GpuFog implements FogLayer {
   private tintN = 0;
   private readonly lpt: number;
   private readonly light: LightMap | null;
+  /** 이번 주기의 빛 명령 (지난번과 같으면 빛 지도를 다시 칠하지도 올리지도 않는다) */
+  private readonly lightRec = new LightRecord();
+  /** 이번 주기의 미니맵 합성 명령 (시야 채움 · 조각, 그린 순서대로) */
+  private readonly miniRec = new PenRecord();
+  /** 마지막으로 미니맵에 합성한 명령 (null = 아직 없음 — 첫 주기는 늘 합성한다) */
+  private miniLast: number[] | null = null;
+  /** 마지막 commit에서 화면 · 미니맵 그림이 바뀌었는가 (안 바뀌었으면 미니맵도 다시 그릴 필요가 없다) */
+  changed = true;
   private readonly lightKey: string | null = null;
   private readonly lightTexture: Phaser.Textures.Texture | null = null;
   private readonly lightImage: Phaser.GameObjects.Image | null = null;
@@ -386,12 +395,15 @@ export class GpuFog implements FogLayer {
     return this.mini;
   }
 
+  /**
+   * 안개 주기 시작. 빛 · 미니맵은 바로 칠하지 않고 기록만 한다: commit에서 지난번과 견줘 바뀐 것만 다시 칠하고 올린다
+   * (M12 휴대폰 성능: 다 같이 서 있는 동안 빛 지도 업로드 · 미니맵 합성이 없다). 그림 결과는 바로 칠하던 때와 같다
+   */
   begin(): void {
     this.t0 = performance.now();
     this.tintN = 0;
-    this.light?.clear();
-    this.miniCtx.globalCompositeOperation = 'source-over';
-    this.miniCtx.drawImage(this.miniStatic, 0, 0);
+    this.lightRec.reset();
+    this.miniRec.reset();
   }
 
   fillPoly(poly: readonly Vec2[], color: number, alpha: number): void {
@@ -405,10 +417,10 @@ export class GpuFog implements FogLayer {
     t.rec.fillPoly(poly, color, alpha);
     this.tintBounds[this.tintN] = polyBounds(poly);
     this.tintN += 1;
-    this.miniPen.fillPoly(poly, color, alpha);
+    this.miniRec.fillPoly(poly, color, alpha);
   }
 
-  /** 조각 하나를 기록 → (바뀌었으면) 조각 캔버스에 다시 그리고, 미니맵에는 늘 그린다 */
+  /** 조각 하나를 기록 → (바뀌었으면) 조각 캔버스에 다시 그리고, 미니맵 기록에는 늘 넣는다 */
   private paintPatch(key: string, bounds: TileRect, paint: (pen: PenRecord) => void): void {
     this.rec.reset();
     paint(this.rec);
@@ -422,7 +434,7 @@ export class GpuFog implements FogLayer {
       this.patches.set(key, patch);
     }
     patch.update(this.rec);
-    this.rec.replay(this.miniPen);
+    this.rec.replay(this.miniRec);
   }
 
   drawPoints(points: readonly PointView[], balance: Balance): void {
@@ -445,11 +457,11 @@ export class GpuFog implements FogLayer {
   }
 
   addSoftLight(light: SoftLight): void {
-    this.light?.addSoft(light);
+    if (this.light) this.lightRec.addSoft(light);
   }
 
   addHardLight(poly: readonly Vec2[]): void {
-    this.light?.addHard(poly);
+    if (this.light) this.lightRec.addHard(poly);
   }
 
   commit(): void {
@@ -458,15 +470,27 @@ export class GpuFog implements FogLayer {
       if (i < this.tintN && b) t.update(b);
       else t.hide();
     });
-    if (this.light) {
-      if (this.lightTexture) uploadCanvasTexture(this.lightTexture);
+    const lightChanged = this.light !== null && this.lightRec.paint(this.light);
+    if (lightChanged && this.lightTexture) uploadCanvasTexture(this.lightTexture);
+    // 미니맵 합성: 정적 맵 → 채움 · 조각 → 빛 곱하기 → 테두리 리프트. 빛과 명령이 지난번과 같으면 그대로 둔다
+    const miniChanged = lightChanged || this.miniLast === null || !this.miniRec.sameAs(this.miniLast);
+    if (miniChanged) {
       const c = this.miniCtx;
-      c.save();
-      c.globalCompositeOperation = 'multiply';
-      c.drawImage(this.light.canvas, 0, 0, this.mini.width, this.mini.height);
-      c.restore();
+      c.globalCompositeOperation = 'source-over';
+      c.drawImage(this.miniStatic, 0, 0);
+      this.miniRec.replay(this.miniPen);
+      if (this.light) {
+        c.save();
+        c.globalCompositeOperation = 'multiply';
+        c.drawImage(this.light.canvas, 0, 0, this.mini.width, this.mini.height);
+        c.restore();
+      }
+      addRimLift(c, this.miniLift);
+      this.miniLast = this.miniRec.ops.slice();
     }
-    addRimLift(this.miniCtx, this.miniLift);
+    // 화면 쪽 시야 채움 · 조각 · 빛은 모두 미니맵 기록에도 들어가므로, 미니맵이 그대로면 화면도 그대로다
+    this.changed = miniChanged;
+    gfxState.features.fogSkips = Number(gfxState.features.fogSkips ?? 0) + (miniChanged ? 0 : 1);
     const n = countGraphicsCmds(this.root.list);
     gfxState.features.mapGfxCmds = n.cmds;
     gfxState.features.mapLayerObjects = n.objects;

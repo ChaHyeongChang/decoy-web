@@ -244,3 +244,23 @@ export function nextConeRed(prev: number, wasShown: boolean, seesSomeone: boolea
   if (target < prev) return Math.max(0, prev - ms / 400);
   return prev;
 }
+
+/**
+ * 시야 다각형 캐시 (M12 휴대폰 성능). 눈 이름(역할 · 'cone' · 'near')마다 마지막 입력(자리 x · y와 모양 값 a · b)과
+ * 결과를 하나씩 둔다. 입력이 정확히 같으면 같은 다각형(같은 참조)을 돌려준다 — 결과는 계산한 것과 같고, 같은 참조라서
+ * 안개 레이어가 빛 지도를 다시 칠하지 않아도 되는지 바로 안다. 다각형은 만든 뒤 바꾸지 않는다
+ */
+export class PolyCache {
+  private readonly map = new Map<string, { x: number; y: number; a: number; b: number; poly: Vec2[] }>();
+  /** 계산 횟수 (테스트 · 진단) */
+  misses = 0;
+
+  get(id: string, x: number, y: number, a: number, b: number, make: () => Vec2[]): Vec2[] {
+    const e = this.map.get(id);
+    if (e && e.x === x && e.y === y && e.a === a && e.b === b) return e.poly;
+    const poly = make();
+    this.misses += 1;
+    this.map.set(id, { x, y, a, b, poly });
+    return poly;
+  }
+}
