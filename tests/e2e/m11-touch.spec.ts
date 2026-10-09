@@ -1,12 +1,13 @@
 // M11 터치 기능 시험 (MOBILE_PLAN M11 자동 검증 'E2E m11-touch'): 휴대폰 가로 에뮬레이션(기능 시험은 기기 배율 1)에서
-// 감지 · 멀티터치(왼쪽 이동 + 오른쪽 조준, 조준 스틱만 떼면 공격 1번) · 오입력 회귀 · 터치 대상 크기와 자리 ·
+// 감지 · 멀티터치(왼쪽 이동 + 오른쪽 조준, 조준 스틱만 떼면 공격 1번) · 오입력 회귀 · 버튼 → 입력 비트(돌진 · 포효 ·
+// 시야 · 능력 · 구조) · 손가락이 사라질 때(pointercancel · blur) · 터치 대상 크기와 자리 ·
 // 브라우저 기본 동작 막기 · 세로 안내 · 전체 화면 호출 시점 · 결과 화면 레이어 · 오디오 열기.
 // 혼자 봇 방(?bots=1)에서 판을 시작해 빠르게 돈다. 판정은 서버 정답(/test/state, 틱마다 쓰는 정답 기록 truth.jsonl)으로 본다.
 // 느린 CI 대비: 간격 폴링(100~200ms), 시간 창은 고정 sleep 대신 입력 프레임 수 · 서버 틱 수로 재고, 시간이 지나 바뀌는 판 상태
 // (괴물 위치 · 대기)는 시험 동작 직전에 시험 명령으로 다시 맞춘다
 import { closeSync, openSync, readSync, statSync } from 'node:fs';
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
-import { BTN, angleDiff, type InputLogEntry, type Role } from '@decoy/shared';
+import { BTN, RESCUE_POINT, angleDiff, type InputLogEntry, type Role } from '@decoy/shared';
 import { TOUCH } from '../../client/src/touchInput';
 import {
   LANDSCAPE_DEVICES,
@@ -14,6 +15,7 @@ import {
   PHONE_LANDSCAPE,
   PHONE_SMALL,
   TABLET_LANDSCAPE,
+  countHeld,
   countPressed,
   createRoom,
   dpr1,
@@ -29,6 +31,7 @@ import {
   truth,
   waitForSnapshots,
   type DeviceOptions,
+  type InputRecorder,
   type TruthFrame,
 } from './helpers';
 import {
@@ -61,20 +64,34 @@ const RIGHT_LANE = { x: 4.5, y: 24.5 };
 
 const MONSTER_TARGETS = ['move-zone', 'aim-stick', 'dash', 'roar', 'mode', 'scoreboard'];
 const SURVIVOR_TARGETS = ['move-zone', 'ability', 'rescue', 'scoreboard'];
-/** 브라우저 안 · 전체 화면 API가 있으면 터치 HUD에 더 생긴다 (전체 화면 중에는 숨는다) */
-const OPTIONAL_TARGETS = ['fullscreen'];
+
+/**
+ * 이 페이지가 터치 HUD에 전체 화면 버튼을 낼 수 있는가 (앱의 canOfferFullscreen과 같은 조건: 터치 모드 + 브라우저 안 +
+ * 전체 화면 API). 가짜 전체 화면(stubFullscreen)은 fullscreenElement를 null로 두므로 display-mode 조건이 그대로 맞다
+ */
+async function canOfferFs(page: Page): Promise<boolean> {
+  return page.evaluate(
+    () =>
+      document.fullscreenEnabled === true &&
+      !matchMedia('(display-mode: standalone)').matches &&
+      !matchMedia('(display-mode: fullscreen)').matches,
+  );
+}
 
 // ───────────── 정답 기록 (truth.jsonl, 서버가 틱마다 한 줄씩 덧붙인다) ─────────────
 
 /** playwright.config.ts의 TRUTH_LOG (m3-info와 같은 경로, 저장소 루트 기준) */
 const TRUTH_LOG = 'tests/e2e/.results/truth.jsonl';
 
+/** 정답 기록 한 줄: helpers의 TruthFrame + 포효 노출 남은 시간 (server/src/truth.ts) */
+type TruthTick = TruthFrame & { roarReveal: number };
+
 function truthLogSize(): number {
   return statSync(TRUTH_LOG).size;
 }
 
 /** 정답 기록에서 offset 바이트 뒤에 쓰인 이 방의 틱들 (쓰는 중인 마지막 줄은 건너뛴다) */
-function truthSince(offset: number, room: string): TruthFrame[] {
+function truthSince(offset: number, room: string): TruthTick[] {
   const size = truthLogSize();
   if (size <= offset) return [];
   const buf = Buffer.alloc(size - offset);
@@ -84,11 +101,11 @@ function truthSince(offset: number, room: string): TruthFrame[] {
   } finally {
     closeSync(fd);
   }
-  const out: TruthFrame[] = [];
+  const out: TruthTick[] = [];
   for (const line of buf.toString('utf8').split('\n')) {
     if (!line.includes(`"room":"${room}"`)) continue;
     try {
-      out.push(JSON.parse(line) as TruthFrame);
+      out.push(JSON.parse(line) as TruthTick);
     } catch {
       // 아직 다 쓰지 않은 줄
     }
@@ -435,7 +452,6 @@ test('오입력 회귀: 왼쪽 스틱만 2초 끌어도 ATTACK · MODE 0, 조준
   const upAt = (await rec.entries()).length;
   await expect.poll(async () => (await rec.entries()).length - upAt, POLL).toBeGreaterThanOrEqual(10);
   const frames = (await rec.stop()).slice(start);
-  await t.detach();
 
   expect(frames.length).toBeGreaterThanOrEqual(70);
   for (const bit of [BTN.ATTACK, BTN.MODE, BTN.DASH, BTN.ROAR]) expect(countPressed(frames, bit)).toBe(0);
@@ -455,7 +471,381 @@ test('오입력 회귀: 왼쪽 스틱만 2초 끌어도 ATTACK · MODE 0, 조준
   expect(angleGap(me.face, Math.PI / 2)).toBeLessThan(0.6);
   // 멈춘 뒤에는 마지막 방향(아래)을 계속 본다 (서버가 밀린 입력을 다 처리할 때까지)
   await expect.poll(async () => angleGap((await selfTruth(s)).face, Math.PI / 2), POLL).toBeLessThan(0.05);
+
+  // 터치가 방향을 정하지 않는 프레임(터치 aim null)은 지금 face를 유지한다: 손가락 자리(activePointer)나 화면 왼쪽 위
+  // (마우스를 쓴 적 없는 Phaser mousePointer (0,0))로 돌지 않는다. blur로 터치 상태를 비우면(InputSampler.reset →
+  // TouchInput.reset이 마지막 방향도 지운다) 이동 영역을 데드존 안에서 누르고 있는 동안 터치 aim이 null이라
+  // GameScene.aimTarget(마우스 조준 경로)을 거친다. 기준은 이미 굳은 아래(π/2) — 순간이동 뒤 방향 흐름을 피한다
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  const rec2 = await recordInputs(page, 100);
+  await t.down(2, z.x, z.y);
+  const atHold = (await rec2.entries()).length;
+  // 0.5초 = 입력 프레임 15개 (느린 러너에서도 프레임 수로 잰다)
+  await expect.poll(async () => (await rec2.entries()).length - atHold, POLL).toBeGreaterThanOrEqual(15);
+  const meNow = await selfTruth(s);
+  const view = await page.evaluate(
+    ([x, y]) => {
+      const canvas = document.querySelector('#game-root canvas');
+      const r = canvas?.getBoundingClientRect();
+      const me = window.__DECOY__?.tileToClient(x!, y!) ?? null;
+      return me && r ? { me, corner: { x: r.left, y: r.top } } : null;
+    },
+    [meNow.x, meNow.y],
+  );
+  await t.up(2);
+  const held = await rec2.stop();
+  expect(view).not.toBeNull();
+  const { me: meHold, corner } = view!;
+  const holdBearing = Math.atan2(z.y - meHold.y, z.x - meHold.x);
+  const cornerBearing = Math.atan2(corner.y - meHold.y, corner.x - meHold.x);
+  // 판별할 수 있다: 손가락 쪽 · 왼쪽 위 쪽이 지금 방향(아래)과 충분히 다르다
+  expect(angleGap(holdBearing, Math.PI / 2)).toBeGreaterThan(0.6);
+  expect(angleGap(cornerBearing, Math.PI / 2)).toBeGreaterThan(0.6);
+  expect(held.length).toBeGreaterThanOrEqual(15);
+  for (const f of held) {
+    expect(f.mx === 0 && f.my === 0, `데드존 안 누르기 프레임 이동 (${f.mx}, ${f.my})`).toBe(true);
+    expect(angleGap(f.aim, Math.PI / 2), `aim ${f.aim.toFixed(3)} = 지금 face`).toBeLessThan(0.05);
+    expect(angleGap(f.aim, holdBearing), 'aim이 손가락 쪽이 아님').toBeGreaterThan(0.5);
+    expect(angleGap(f.aim, cornerBearing), 'aim이 화면 왼쪽 위 쪽이 아님').toBeGreaterThan(0.5);
+  }
+  expect(countPressed(held, BTN.ATTACK)).toBe(0);
+  expect(angleGap((await selfTruth(s)).face, Math.PI / 2), '서버 face 그대로').toBeLessThan(0.05);
+
+  await t.detach();
   expect((await pointerCounts(page))['pointercancel:touch'] ?? 0).toBe(0);
+  expect(s.problems).toEqual([]);
+  await s.context.close();
+});
+
+// ───────────── 버튼 → 입력 비트 ─────────────
+
+/** 위로 4타일 넘게 트인 자리: 오른쪽 큰 방(x 34~46 · y 10~22 바닥, 기둥은 x 44~45 · y 15~16)의 아래쪽 */
+const DASH_SPOT = { x: 39.5, y: 20.5 };
+/** 돌진(4타일)으로 보는 거리. 돌진 시험 동안 이동 입력은 0이라 걸어서는 움직이지 않는다 */
+const DASH_MIN = 3;
+/** 돌진 버튼을 비켜 누르는 거리 (CSS px): 버튼 안이고, 버튼 가운데를 스틱 중심으로 쓰면 데드존 밖이 되는 거리 */
+const DASH_OFF = 15;
+
+type Pos = { x: number; y: number };
+
+/** 정답 기록(offset 뒤)에서 내가 from에서 DASH_MIN 넘게 처음 멀어진 자리 (없으면 null) */
+function dashedTo(s: Solo, offset: number, from: Pos): Pos | null {
+  for (const f of truthSince(offset, s.code)) {
+    const me = f.players.find((p) => p.id === s.id);
+    if (me && Math.hypot(me.x - from.x, me.y - from.y) > DASH_MIN) return { x: me.x, y: me.y };
+  }
+  return null;
+}
+
+/** 서버 정답에서 돌진으로 from에서 DASH_MIN 넘게 멀어질 때까지 기다려 그 자리를 돌려준다 (정답 기록은 덧붙기만 한다) */
+async function waitDashedTo(s: Solo, offset: number, from: Pos): Promise<Pos> {
+  await expect.poll(() => dashedTo(s, offset, from) !== null, POLL).toBe(true);
+  return dashedTo(s, offset, from)!;
+}
+
+/**
+ * 손을 뗀 뒤: 이동이 0인 입력 프레임이 나오고, 서버가 마지막으로 움직이는 입력 프레임까지 처리했다(스냅샷 ack)고 알릴 때까지
+ * 기다린다. 그 뒤에는 서버에 이동 입력이 남아 있지 않다
+ */
+async function waitMovesAcked(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const d = window.__DECOY__;
+      const log = d?.getInputLog() ?? [];
+      const lastFrame = log.at(-1);
+      if (!lastFrame || lastFrame.mx !== 0 || lastFrame.my !== 0) return false;
+      const moving = log.filter((f) => f.mx !== 0 || f.my !== 0).at(-1);
+      return (d?.getLastSnapshot()?.ack ?? -1) >= (moving?.seq ?? 0);
+    },
+    null,
+    { polling: 100, timeout: 20_000 },
+  );
+}
+
+/** 서버가 보낸 내 상태에서 돌진이 끝났다 (돌진 중에는 서버가 포효 · 공격을 받지 않는다) */
+async function waitDashOver(page: Page): Promise<void> {
+  await page.waitForFunction(() => (window.__DECOY__?.getLastSnapshot()?.you.move.dash ?? 1) <= 0, null, {
+    polling: 100,
+    timeout: 20_000,
+  });
+}
+
+/** 기록기의 from번째 뒤로 bit가 눌린 프레임이 나오고 그 뒤로 프레임이 more개 넘게 쌓일 때까지 기다려 그 프레임들을 돌려준다 */
+async function framesAfterPress(
+  rec: InputRecorder,
+  from: number,
+  bit: number,
+  more = 10,
+): Promise<InputLogEntry[]> {
+  let out: InputLogEntry[] = [];
+  await expect
+    .poll(async () => {
+      out = (await rec.entries()).slice(from);
+      const i = out.findIndex((f) => (f.pressed & bit) !== 0);
+      return i >= 0 && out.length - i > more;
+    }, POLL)
+    .toBe(true);
+  return out;
+}
+
+const pressedFrame = (frames: readonly InputLogEntry[], bit: number): InputLogEntry => {
+  const f = frames.find((e) => (e.pressed & bit) !== 0);
+  if (!f) throw new Error(`pressed ${bit} 프레임 없음`);
+  return f;
+};
+
+test('버튼(괴물): 돌진 탭은 가운데를 비켜 눌러도 지금 방향, 포효 · 시야 탭 → ROAR · MODE 1번씩, 돌진 끌기 → 끈 방향으로 DASH, 모두 서버 정답에 반영', async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const s = await soloMatch(browser, PHONE, 'monster');
+  const { page } = s;
+  await freezeOthers(s);
+  await placeSelf(s, RIGHT_LANE.x, RIGHT_LANE.y, 0);
+  const zone = await waitForTouchTarget(page, 'move-zone');
+  const dash = await waitForTouchTarget(page, 'dash');
+  const roar = await waitForTouchTarget(page, 'roar');
+  const mode = await waitForTouchTarget(page, 'mode');
+  const t = await MultiTouch.attach(page);
+
+  // 동쪽(0)을 보게 정한다: 이동 스틱을 오른쪽으로 끌면 터치 조준 = 이동 방향이고, 떼도 마지막 방향을 계속 보낸다.
+  // 그래서 제자리로 되돌려도(순간이동) 보내는 aim이 이미 0이라 방향이 흐르지 않는다
+  const z = centerOf(zone);
+  await t.down(1, z.x, z.y);
+  await t.move(1, z.x + 90, z.y, { steps: 6, stepMs: 20 });
+  await expect
+    .poll(async () => {
+      const e = (await inputLog(page)).at(-1);
+      return e ? `${e.mx},${e.my},${e.aim}` : null;
+    }, POLL)
+    .toBe('1,0,0');
+  await t.up(1);
+  // 서버가 움직이는 입력을 다 처리한 뒤에 되돌린다 (밀린 입력이 순간이동 뒤에 처리되면 다시 걸어 나간다)
+  await waitMovesAcked(page);
+  await placeSelf(s, RIGHT_LANE.x, RIGHT_LANE.y, 0);
+  await expect.poll(async () => angleGap((await selfTruth(s)).face, 0), POLL).toBeLessThan(1e-6);
+  const rec = await recordInputs(page, 100);
+
+  // ① 돌진 버튼을 가운데에서 15px 위(지금 방향과 90° 다른 쪽)를 끌지 않고 짧게 탭 → 지금 방향(동쪽)으로 DASH 1번.
+  // 누른 자리가 스틱 중심이라(stickCenter) 비켜 누른 만큼이 끌기로 잡히지 않는다. 버튼 가운데가 중심이면
+  // 15px은 데드존 밖이라(돌진 스틱 반지름은 버튼 변의 0.9배) 위로 돌아서 돌진한다
+  const dc = centerOf(dash);
+  expect(DASH_OFF, '비켜 누른 자리가 버튼 안').toBeLessThan(Math.min(dash.w, dash.h) / 2 - 4);
+  expect(DASH_OFF / dash.w, '버튼 가운데가 중심이면 데드존 밖').toBeGreaterThan(TOUCH.deadZone);
+  const off1 = truthLogSize();
+  const n1 = (await rec.entries()).length;
+  await t.tap(2, dc.x, dc.y - DASH_OFF);
+  const tapFrames = await framesAfterPress(rec, n1, BTN.DASH);
+  expect(countPressed(tapFrames, BTN.DASH)).toBe(1);
+  const tapDash = pressedFrame(tapFrames, BTN.DASH);
+  expect(angleGap(tapDash.aim, 0), '돌진 탭 프레임 aim = 지금 방향').toBeLessThan(AIM_EPS);
+  // 어느 프레임도 비켜 누른 쪽(위)으로 돌지 않았고, 이동 입력도 없다
+  expect(
+    tapFrames.filter((f) => angleGap(f.aim, 0) >= AIM_EPS || f.mx !== 0 || f.my !== 0).map((f) => f.aim),
+  ).toEqual([]);
+  // 서버: 이동 입력 없이 동쪽으로 3타일 넘게 = 지금 방향 돌진
+  const to1 = await waitDashedTo(s, off1, RIGHT_LANE);
+  const dir1 = Math.atan2(to1.y - RIGHT_LANE.y, to1.x - RIGHT_LANE.x);
+  expect(angleGap(dir1, 0), `돌진 탭 방향 ${dir1.toFixed(3)}`).toBeLessThan(0.05);
+
+  // ② 포효 · 시야 모드 탭 (서로 다른 손가락, 탭 사이에 프레임이 쌓이게). 돌진이 끝난 뒤에 누른다
+  await waitDashOver(page);
+  const mode0 = (await truth(page, s.code)).monster?.mode;
+  expect(mode0).toBe('search');
+  const off2 = truthLogSize();
+  const n2 = (await rec.entries()).length;
+  const rc = centerOf(roar);
+  await t.tap(3, rc.x, rc.y);
+  await framesAfterPress(rec, n2, BTN.ROAR, 2);
+  const mc = centerOf(mode);
+  await t.tap(4, mc.x, mc.y);
+  const tapped = await framesAfterPress(rec, n2, BTN.MODE);
+  expect(countPressed(tapped, BTN.ROAR)).toBe(1);
+  expect(countPressed(tapped, BTN.MODE)).toBe(1);
+  for (const bit of [BTN.ATTACK, BTN.DASH, BTN.ABILITY, BTN.RESCUE])
+    expect(countPressed(tapped, bit)).toBe(0);
+  expect(pressedFrame(tapped, BTN.ROAR).seq, '누른 순서대로').toBeLessThan(
+    pressedFrame(tapped, BTN.MODE).seq,
+  );
+  // 서버: 포효 노출(roarReveal)이 생기고, 시야 모드가 탐색 → 추적으로 한 번 바뀐다
+  await expect.poll(() => truthSince(off2, s.code).some((f) => f.roarReveal > 0), POLL).toBe(true);
+  await expect.poll(async () => (await truth(page, s.code)).monster?.mode, POLL).toBe('hunt');
+
+  // ③ 돌진 쿨타임(12초)이 끝나면 위로 트인 자리에서 돌진 버튼을 지금 방향(동쪽)과 90° 다른 위로 끌어서 놓는다
+  // → 그 방향으로 DASH 1번 (끈 방향으로 발사 대기 → face가 따라오면)
+  await page.waitForFunction(() => (window.__DECOY__?.getLastSnapshot()?.you.mon?.dashCd ?? 1) <= 0, null, {
+    polling: 200,
+    timeout: 30_000,
+  });
+  await placeSelf(s, DASH_SPOT.x, DASH_SPOT.y, 0);
+  await expect.poll(async () => angleGap((await selfTruth(s)).face, 0), POLL).toBeLessThan(1e-6);
+  const DRAG = -Math.PI / 2;
+  const off3 = truthLogSize();
+  const n3 = (await rec.entries()).length;
+  await t.down(5, dc.x, dc.y);
+  // 돌진 스틱 반지름(버튼 변의 0.9배)보다 멀리
+  await t.move(5, dc.x, dc.y - 70, { steps: 5, stepMs: 20 });
+  await t.up(5);
+  const dragFrames = await framesAfterPress(rec, n3, BTN.DASH);
+  expect(countPressed(dragFrames, BTN.DASH)).toBe(1);
+  const dragDash = pressedFrame(dragFrames, BTN.DASH);
+  expect(angleGap(dragDash.aim, DRAG), '끌기 돌진 프레임 aim = 끈 방향').toBeLessThan(AIM_EPS);
+  expect(dragFrames.filter((f) => f.mx !== 0 || f.my !== 0)).toEqual([]);
+  // 서버: 이동 입력 없이 위로 3타일 넘게. 서버 face는 발사 대기(±10°) 뒤에 돌진하지만, 느린 러너에서 늦게 온 입력은
+  // 회전 없이 처리될 수 있어 여유를 둔다 (지금 방향 = 동쪽과는 90° 차이라 가릴 수 있다)
+  const to2 = await waitDashedTo(s, off3, DASH_SPOT);
+  const dir2 = Math.atan2(to2.y - DASH_SPOT.y, to2.x - DASH_SPOT.x);
+  expect(angleGap(dir2, DRAG), `끌기 돌진 방향 ${dir2.toFixed(3)}`).toBeLessThan(Math.PI / 4);
+
+  const all = await rec.stop();
+  expect(countPressed(all, BTN.DASH)).toBe(2);
+  expect(countPressed(all, BTN.ROAR)).toBe(1);
+  expect(countPressed(all, BTN.MODE)).toBe(1);
+  expect(countPressed(all, BTN.ATTACK)).toBe(0);
+  await t.detach();
+  expect((await pointerCounts(page))['pointercancel:touch'] ?? 0).toBe(0);
+  console.log(
+    `[m11-touch] 버튼(괴물): 돌진 탭 aim ${tapDash.aim.toFixed(3)} · 서버 방향 ${dir1.toFixed(3)}, ` +
+      `끌기 aim ${dragDash.aim.toFixed(3)} · 서버 방향 ${dir2.toFixed(3)} (끈 방향 ${DRAG.toFixed(3)})`,
+  );
+  expect(s.problems).toEqual([]);
+  await s.context.close();
+});
+
+test('버튼(생존자): 능력 탭 → ABILITY 1번 · 서버 쿨타임, 구조 0.5초 누르기 → 누른 순간 RESCUE 1번 · 누르는 동안 held · 서버 구조 진행, 떼면 held 0', async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const s = await soloMatch(browser, PHONE, 'runner');
+  const { page } = s;
+  await freezeOthers(s);
+  // 동료(봇 가드)를 수감 상태로 두고 구조 자리에 선다: 구조를 누르고 있으면 서버에서 구조가 진행된다
+  const guard = (await truth(page, s.code)).players.find((p) => p.role === 'guard');
+  if (!guard) throw new Error('봇 가드 없음');
+  await sendTest(page, { kind: 'setSurvivor', target: guard.id, status: 'imprisoned' });
+  await placeSelf(s, RESCUE_POINT.x, RESCUE_POINT.y, 0);
+  const ability = await waitForTouchTarget(page, 'ability');
+  const rescue = await waitForTouchTarget(page, 'rescue');
+  const t = await MultiTouch.attach(page);
+  const rec = await recordInputs(page, 100);
+  /** 서버가 보낸 내 생존자 상태 (능력 쿨타임 · 구조 진행 0~1) */
+  const surv = () =>
+    page.evaluate(() => {
+      const v = window.__DECOY__?.getLastSnapshot()?.you.surv;
+      return v ? { abilityCd: v.abilityCd, rescue: v.rescue } : null;
+    });
+
+  // 능력 탭 → ABILITY 1번, 서버에서 질주가 나가 쿨타임이 돈다
+  const ac = centerOf(ability);
+  await t.tap(1, ac.x, ac.y);
+  const abilityFrames = await framesAfterPress(rec, 0, BTN.ABILITY);
+  expect(countPressed(abilityFrames, BTN.ABILITY)).toBe(1);
+  await expect.poll(async () => (await surv())?.abilityCd ?? 0, POLL).toBeGreaterThan(0);
+
+  // 구조 버튼을 0.5초(입력 프레임 15개) 누르고 있다가 뗀다. 누르는 동안 서버에서 구조가 진행된다
+  const n = (await rec.entries()).length;
+  const rc = centerOf(rescue);
+  await t.down(2, rc.x, rc.y);
+  await expect
+    .poll(async () => countHeld((await rec.entries()).slice(n), BTN.RESCUE), POLL)
+    .toBeGreaterThanOrEqual(15);
+  await expect.poll(async () => (await surv())?.rescue ?? 0, POLL).toBeGreaterThan(0);
+  await t.up(2);
+  // 마지막 held 뒤로 프레임이 10개 넘게 쌓일 때까지 (떼어도 held가 남으면 여기서 걸린다)
+  let frames: InputLogEntry[] = [];
+  await expect
+    .poll(async () => {
+      frames = (await rec.entries()).slice(n);
+      const last = frames.map((f) => (f.held & BTN.RESCUE) !== 0).lastIndexOf(true);
+      return last >= 0 && frames.length - 1 - last > 10;
+    }, POLL)
+    .toBe(true);
+  const held = frames.map((f) => (f.held & BTN.RESCUE) !== 0);
+  const first = held.indexOf(true);
+  const last = held.lastIndexOf(true);
+  expect(held.slice(first, last + 1).every(Boolean), '누르는 동안 held가 끊기지 않음').toBe(true);
+  expect(last - first + 1, '연속 held 프레임').toBeGreaterThanOrEqual(12);
+  expect(countPressed(frames, BTN.RESCUE)).toBe(1);
+  expect(frames[first]!.pressed & BTN.RESCUE, '누른 순간 pressed').toBe(BTN.RESCUE);
+  expect(frames.length - 1 - last, '뗀 뒤 held 0 프레임').toBeGreaterThan(10);
+  // 서버: 떼면 구조 진행이 0으로 돌아간다
+  await expect.poll(async () => (await surv())?.rescue ?? -1, POLL).toBe(0);
+
+  const all = await rec.stop();
+  expect(countPressed(all, BTN.ABILITY)).toBe(1);
+  expect(countPressed(all, BTN.RESCUE)).toBe(1);
+  for (const bit of [BTN.ATTACK, BTN.MODE, BTN.DASH, BTN.ROAR]) expect(countPressed(all, bit)).toBe(0);
+  await t.detach();
+  expect((await pointerCounts(page))['pointercancel:touch'] ?? 0).toBe(0);
+  console.log(
+    `[m11-touch] 버튼(생존자): 구조 held ${last - first + 1}프레임 연속, 뗀 뒤 ${frames.length - 1 - last}프레임 held 0`,
+  );
+  expect(s.problems).toEqual([]);
+  await s.context.close();
+});
+
+// ───────────── 손가락이 사라질 때 ─────────────
+
+test('손가락이 사라지면(pointercancel · blur) 이동 · 구조가 멈추고, 다시 누른 이동 스틱이 잡힌다', async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const s = await soloMatch(browser, PHONE, 'runner');
+  const { page } = s;
+  await freezeOthers(s);
+  await placeSelf(s, RIGHT_LANE.x, RIGHT_LANE.y, 0);
+  const zone = await waitForTouchTarget(page, 'move-zone');
+  const rescue = await waitForTouchTarget(page, 'rescue');
+  const t = await MultiTouch.attach(page);
+  const z = centerOf(zone);
+  const rc = centerOf(rescue);
+  /** 마지막 입력 프레임: 이동 + 구조 held */
+  const moveRescue = async (): Promise<string | null> => {
+    const e = (await inputLog(page)).at(-1);
+    return e ? `${e.mx},${e.my},${e.held & BTN.RESCUE}` : null;
+  };
+  /** 마지막 입력 프레임: 이동 + 입력 방식 */
+  const moveMode = async (): Promise<string | null> => {
+    const e = (await inputLog(page)).at(-1);
+    return e ? `${e.mx},${e.my},${e.mode}` : null;
+  };
+  const HOLDING = `1,0,${BTN.RESCUE}`;
+  /** 이동 스틱을 오른쪽으로 끌고 구조를 누른다 (두 손가락) */
+  const moveAndRescue = async (moveId: number, rescueId: number): Promise<void> => {
+    await t.down(moveId, z.x, z.y);
+    await t.move(moveId, z.x + 90, z.y, { steps: 6, stepMs: 20 });
+    await t.down(rescueId, rc.x, rc.y);
+    await expect.poll(moveRescue, POLL).toBe(HOLDING);
+  };
+  /** 이동 스틱을 새로 눌러 오른쪽으로 끌면 다시 잡힌다 */
+  const moveAgain = async (id: number): Promise<void> => {
+    await t.down(id, z.x, z.y);
+    await t.move(id, z.x + 90, z.y, { steps: 6, stepMs: 20 });
+    await expect.poll(moveMode, POLL).toBe('1,0,touch');
+  };
+  const cancels = async (): Promise<number> => (await pointerCounts(page))['pointercancel:touch'] ?? 0;
+
+  // ① pointercancel (시스템 제스처 등): 두 손가락이 모두 취소되면 이동 0 · 구조 held 0
+  await moveAndRescue(1, 2);
+  const before = await cancels();
+  await t.cancel();
+  await expect.poll(async () => (await cancels()) - before, POLL).toBe(2);
+  await expect.poll(moveRescue, POLL).toBe('0,0,0');
+  // 터치 화면에 취소된 손가락이 남아 있지 않다: 이동 스틱을 다시 잡을 수 있다
+  await moveAgain(3);
+  await t.up(3);
+  await expect.poll(moveRescue, POLL).toBe('0,0,0');
+
+  // ② blur (창 이탈): 같은 순서. 손가락 4 · 5는 누른 채로 손가락 6을 눌러 본다 — 4 · 5를 먼저 떼면 그 pointerup이
+  // 터치 화면의 손가락 기록을 지워서, blur 처리(터치 화면 cancelAll)가 빠져도 통과해 버린다
+  await moveAndRescue(4, 5);
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  await expect.poll(moveRescue, POLL).toBe('0,0,0');
+  await moveAgain(6);
+  await t.upAll();
+  await expect.poll(moveRescue, POLL).toBe('0,0,0');
+  await t.detach();
+  expect(await cancels(), 'pointercancel은 ①의 두 손가락뿐').toBe(before + 2);
   expect(s.problems).toEqual([]);
   await s.context.close();
 });
@@ -493,9 +883,16 @@ test('크기 · 위치: 휴대폰 4종 · 태블릿 가로에서 모든 터치 �
     expect(layout.insets, label).toEqual({ top: 0, right: 0, bottom: 0, left: 0, ...c.safeArea });
     expect(touchLayoutProblems(layout), label).toEqual([]);
     const ids = layout.targets.map((t) => t.id);
-    const want = c.role === 'monster' ? MONSTER_TARGETS : SURVIVOR_TARGETS;
+    // 브라우저 안 · 전체 화면 API가 있으면 터치 HUD에 전체 화면 버튼이 반드시 있다(MOBILE_PLAN M11 6번). 시험 환경은
+    // 그런 경우라서(가짜 전체 화면) 전체 화면 버튼까지 든 더 빽빽한 배치를 본다
+    const offerFs = await canOfferFs(s.page);
+    expect(offerFs, `${label}: 전체 화면 버튼을 낼 수 있는 환경`).toBe(true);
+    const want = [
+      ...(c.role === 'monster' ? MONSTER_TARGETS : SURVIVOR_TARGETS),
+      ...(offerFs ? ['fullscreen'] : []),
+    ];
     expect(ids, label).toEqual(expect.arrayContaining(want));
-    for (const id of ids) expect([...want, ...OPTIONAL_TARGETS], `${label}: ${id}`).toContain(id);
+    for (const id of ids) expect(want, `${label}: ${id}`).toContain(id);
     // 생존자는 조준 스틱이 없다 (스틱은 괴물 조준 스틱 하나뿐)
     const sticks = layout.targets.filter((t) => t.kind === 'stick').map((t) => t.id);
     expect(sticks, label).toEqual(c.role === 'monster' ? ['aim-stick'] : []);
@@ -874,10 +1271,14 @@ test('전체 화면 + 가로 고정: 서버 match를 받을 때는 부르지 않
   await page.waitForFunction(() => window.__DECOY__?.getHud().scoreboard === true, null, { polling: 100 });
   expect((await fsCalls(page)).length - atStart.length).toBe(2);
 
-  // 터치 HUD의 전체 화면 버튼(브라우저 안 · 전체 화면이 아닐 때만 보임): 누를 때마다
+  // 터치 HUD의 전체 화면 버튼(브라우저 안 · 전체 화면 API가 있고 전체 화면이 아닐 때 보임): 그런 환경이면 반드시 있고,
+  // 누를 때마다 부른다. 시험 환경은 그런 경우다(가짜 전체 화면은 fullscreenElement를 null로 둔다)
+  const offerFs = await canOfferFs(page);
+  expect(offerFs, '전체 화면 버튼을 낼 수 있는 환경').toBe(true);
   const fsButton = (await touchTargets(page)).find((q) => q.id === 'fullscreen');
-  if (fsButton) {
-    const f = centerOf(fsButton);
+  if (offerFs) {
+    expect(fsButton, '터치 HUD 전체 화면 버튼').toBeDefined();
+    const f = centerOf(fsButton!);
     await t.tap(4, f.x, f.y);
     await expect.poll(async () => (await fsCalls(page)).length - atStart.length, POLL).toBe(4);
     expect((await fsCalls(page)).at(-2)).toMatchObject({ kind: 'fullscreen', ev: 'pointerup', inGame: true });
