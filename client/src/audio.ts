@@ -52,6 +52,21 @@ export class Sfx {
     return this.ctx !== null && this.ctx.state === 'running';
   }
 
+  /**
+   * 화면이 다시 보이면(M12) 멈춘 AudioContext를 다시 켠다: 휴대폰은 앱을 바꾸거나 화면을 끄면 오디오를 멈추고
+   * (아이폰은 'interrupted') 돌아와도 저절로 켜지지 않는다. 아직 만든 적이 없으면(첫 입력 전) 아무것도 하지 않는다 —
+   * 사용자 입력 없이 만들면 크롬이 경고한다. 실패하면 다음 입력(attachUnlock)에서 다시 켠다
+   */
+  resume(): void {
+    const ctx = this.ctx;
+    if (!ctx || ctx.state === 'running' || ctx.state === 'closed') return;
+    try {
+      void ctx.resume().catch(() => undefined);
+    } catch {
+      // 아래 입력에서 다시
+    }
+  }
+
   private ensure(): void {
     if (this.ctx) return;
     try {

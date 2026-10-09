@@ -37,10 +37,24 @@ export class WakeNoticeState {
     this.waitingSince ??= nowMs;
   }
 
+  /**
+   * 연결은 됐지만 아직 자리로 돌아가지 못했다 (M12 마지막 방 복귀: 옛 연결이 남아 거절되어 2초마다 다시 시도하는 중).
+   * 끊겼을 때처럼 '다시 연결하는 중'으로 보이고, 자리로 돌아가면(opened) 사라진다
+   */
+  rejoining(nowMs: number): void {
+    if (this.stopped) return;
+    this.waitingSince ??= nowMs;
+  }
+
   /** 다시 연결하지 않는다 (다른 탭이 자리를 가져감) */
   stop(): void {
     this.stopped = true;
     this.waitingSince = null;
+  }
+
+  /** stop 뒤 다시 연결한다 ("여기서 계속하기") */
+  resume(): void {
+    this.stopped = false;
   }
 
   view(nowMs: number): WakeView {
