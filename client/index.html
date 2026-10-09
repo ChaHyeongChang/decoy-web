@@ -2,8 +2,11 @@
 <html lang="ko">
   <head>
     <meta charset="utf-8" />
-    <!-- 휴대폰: 핀치 · 더블탭 확대를 막는다 (M11). 스크롤이 필요한 로비 · 결과는 touch-action: pan-y -->
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <!-- 휴대폰: 핀치 · 더블탭 확대를 막는다 (M11). 스크롤이 필요한 로비 · 결과는 touch-action: pan-y.
+         viewport-fit=cover (M12): 노치 쪽까지 화면을 쓰고, 게임 영역 · 터치 화면 · 로비 · 결과 · 알림은 style.css가
+         env(safe-area-inset-*)만큼 안쪽에 둔다 -->
+    <!-- prettier-ignore -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <title>DECOY</title>
     <meta name="theme-color" content="#0b1622" />
     <link rel="icon" type="image/png" href="../docs/images/logo_decoy.png" />

@@ -29,6 +29,11 @@
   --danger: #ef4444;
   --danger-dark: #b91c1c;
   --danger-text: #f87171;
+  /* 안전 영역 (M12, 노치 · 둥근 모서리 · 제스처 막대): index.html viewport-fit=cover. PC는 0 */
+  --sa-t: env(safe-area-inset-top, 0px);
+  --sa-r: env(safe-area-inset-right, 0px);
+  --sa-b: env(safe-area-inset-bottom, 0px);
+  --sa-l: env(safe-area-inset-left, 0px);
   /* client/src/ui/fonts.ts UI_FONT와 같은 스택 (fonts.test.ts) */
   --font: 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
 }
@@ -66,7 +71,8 @@ select {
 }
 #game-root {
   position: fixed;
-  inset: 0;
+  /* 안전 영역 안 (M12): 캔버스 크기 · 판 배치는 이 사각형으로 정한다 */
+  inset: var(--sa-t) var(--sa-r) var(--sa-b) var(--sa-l);
   /* 게임 영역: 끌기 · 핀치 · 더블탭 확대를 브라우저가 가져가지 않게, 글자 선택 · 메뉴 없음 (PC 포함) */
   touch-action: none;
   user-select: none;
@@ -357,7 +363,8 @@ select {
 /* 쌓는 순서 (M11): 캔버스 < 터치 레이어(5) < 로비 · 결과(20) < 토스트(60) · 깨우기(70) · 세로 안내(80) */
 .lobby {
   position: absolute;
-  inset: 0;
+  /* 안전 영역 안 (M12). 바깥 띠는 같은 바탕색(body)과 고정 배경(.lobby-bg)이 채운다 */
+  inset: var(--sa-t) var(--sa-r) var(--sa-b) var(--sa-l);
   z-index: 20;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -1062,10 +1069,11 @@ select {
   --cut: 7px;
   --ring: var(--danger);
   position: fixed;
-  top: 14px;
-  left: 50%;
+  /* 안전 영역 안 가운데 (M12) */
+  top: calc(14px + var(--sa-t));
+  left: calc(50% + (var(--sa-l) - var(--sa-r)) / 2);
   transform: translateX(-50%);
-  max-width: calc(100% - 32px);
+  max-width: calc(100% - 32px - var(--sa-l) - var(--sa-r));
   padding: 10px 18px 10px 22px;
   background-color: #1c0d12;
   background-image: linear-gradient(90deg, var(--danger) 0 5px, transparent 5px);
@@ -1080,10 +1088,10 @@ select {
   --cut: 14px;
   --ring: var(--neon-dim);
   position: fixed;
-  left: 50%;
+  left: calc(50% + (var(--sa-l) - var(--sa-r)) / 2);
   top: 50%;
   transform: translate(-50%, -50%);
-  width: min(560px, calc(100% - 32px));
+  width: min(560px, calc(100% - 32px - var(--sa-l) - var(--sa-r)));
   padding: 22px 26px 20px;
   background-color: rgba(15, 27, 39, 0.97);
   background-image: linear-gradient(180deg, rgba(103, 232, 249, 0.05), transparent 40%);
@@ -1150,7 +1158,8 @@ select {
 /* ───── 결과 화면 ───── */
 .result {
   position: absolute;
-  inset: 0;
+  /* 안전 영역 안 (M12). 바깥 띠도 같은 막으로 덮는다(그림자 — 배치에 영향 없음) */
+  inset: var(--sa-t) var(--sa-r) var(--sa-b) var(--sa-l);
   z-index: 20;
   display: flex;
   padding: 16px;
@@ -1158,6 +1167,7 @@ select {
   overscroll-behavior: contain;
   touch-action: pan-y;
   background: rgba(5, 8, 12, 0.92);
+  box-shadow: 0 0 0 100vmax rgba(5, 8, 12, 0.92);
 }
 /* margin: auto — 화면이 넉넉하면 가운데, 모자라면 위에서부터(위가 잘리지 않게) 스크롤 */
 .result-box {
@@ -1431,7 +1441,7 @@ select {
   /* 로비 스크롤 상자(.lobby) 기준: 스크롤하면 위 줄과 함께 사라져 카드 · 목록을 가리지 않는다 */
   position: absolute;
   top: 10px;
-  right: max(12px, env(safe-area-inset-right, 0px));
+  right: 12px;
   z-index: 2;
   padding: 0 14px;
   font-size: 14px;
@@ -1466,7 +1476,7 @@ select {
     z-index: 1;
     gap: 2px;
     margin-top: auto;
-    padding: 10px 0 max(6px, env(safe-area-inset-bottom, 0px));
+    padding: 10px 0 6px;
     background: linear-gradient(180deg, rgba(11, 22, 34, 0), rgba(11, 22, 34, 0.94) 22%);
   }
 }
@@ -1474,7 +1484,7 @@ select {
 @media (max-height: 500px) {
   .lobby-content {
     gap: 8px;
-    padding: 8px max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px));
+    padding: 8px 16px 0;
   }
   .lobby-home {
     flex-direction: row;
@@ -1567,7 +1577,7 @@ select {
     font-size: 12px;
   }
   .result {
-    padding: 8px max(12px, env(safe-area-inset-right, 0px)) 8px max(12px, env(safe-area-inset-left, 0px));
+    padding: 8px 12px;
   }
   .result-box {
     gap: 8px;
@@ -2036,10 +2046,81 @@ select {
   color: #fff;
 }
 
+/* 점수판이 열려 있으면 (M12) 다른 터치 버튼은 흐리게 — 화면 어디를 눌러도 닫히고 누른 동작은 그대로 한다 */
+.touch-layer.board .tc-btn:not(.tc-sys),
+.touch-layer.board .tc-aim,
+.touch-layer.board .tc-move {
+  opacity: 0.28;
+}
+
+/* 첫 판 위치 표시 (M12, 처음 10초): 이동 영역 점선 판 + 이름표, 스틱 · 버튼 둘레 빛 고리. 입력을 막지 않는다 */
+.tc-hints {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transition: opacity 0.6s;
+}
+.tc-hints.gone {
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.6s,
+    visibility 0s 0.6s;
+}
+.tc-hints > * {
+  position: absolute;
+  pointer-events: none;
+}
+.tc-hint-zone {
+  border: 1.5px dashed rgba(103, 232, 249, 0.6);
+  border-radius: 18px;
+  background: rgba(34, 211, 238, 0.07);
+}
+.tc-hint-cap {
+  position: absolute;
+  left: 50%;
+  top: 10px;
+  transform: translateX(-50%);
+  padding: 3px 10px 4px;
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
+  background: rgba(8, 18, 27, 0.92);
+  color: var(--neon-text);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 17px;
+  white-space: nowrap;
+}
+.tc-hint-ring {
+  border: 2px solid rgba(103, 232, 249, 0.75);
+  border-radius: 32%;
+  box-shadow:
+    0 0 12px rgba(34, 211, 238, 0.45),
+    inset 0 0 10px rgba(34, 211, 238, 0.25);
+  animation: tc-hint-pulse 1.2s ease-in-out infinite;
+}
+.tc-hint-ring.round {
+  border-radius: 50%;
+}
+@keyframes tc-hint-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tc-hint-ring {
+    animation: none;
+    opacity: 0.8;
+  }
+}
+
 #debug-overlay {
   position: fixed;
-  left: 8px;
-  bottom: 8px;
+  left: calc(8px + var(--sa-l));
+  bottom: calc(8px + var(--sa-b));
   padding: 6px 8px;
   background: rgba(0, 0, 0, 0.7);
   color: #a7f3d0;
