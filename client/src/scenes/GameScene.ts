@@ -1,6 +1,6 @@
 // 판 화면: 1/30초 고정 간격 입력 → 예측 → 서버 전송, 그리고 렌더링 · HUD · 배너
 import Phaser from 'phaser';
-import type { DrawnEntity, GameEvent, InputFrame, Role } from '@decoy/shared';
+import type { DrawnEntity, FxTarget, GameEvent, InfoItem, InputFrame, Role } from '@decoy/shared';
 import type { App } from '../app';
 import { sfx } from '../audio';
 import { STORY_TEXT, UI_TEXT, formatText } from '../data/storyText';
@@ -9,7 +9,7 @@ import { getFpsOverride, gfxState, probeSlot } from '../gfx/state';
 import { InputSampler } from '../input';
 import { applyDashStart, applyWindupLock, predictMonsterPress, type LocalWindup } from '../localActions';
 import { COLOR } from '../render/colors';
-import { ScreenEffects } from '../render/effects';
+import { ScreenEffects, collectFxTargets } from '../render/effects';
 import { WorldRenderer } from '../render/worldRenderer';
 import { Banners } from '../ui/banners';
 import { Hud } from '../ui/hud';
@@ -17,6 +17,7 @@ import { VIEW_H, VIEW_W, fitCamera, screenToTile } from '../ui/layout';
 import { Minimap } from '../ui/minimap';
 import { Scoreboard, TutorialOverlay } from '../ui/overlays';
 import { drawProbeText, makeText } from '../ui/text';
+import { staleEventLimitMs, trackFrameMs } from './staleEvents';
 
 /** 안개 (M3부터) */
 export const FOG_ENABLED = true;
@@ -25,17 +26,13 @@ const MAX_CATCHUP_STEPS = 4;
 /** 첫 판 조작 안내 표시 시간 (VISUAL_SPEC 6장) */
 const TUTORIAL_SECONDS = 5;
 const EXIT_NAMES = { N: '북', S: '남' } as const;
-/**
- * 이보다 오래된 스냅샷의 일회성 연출(소리 · 플래시 · 알림 배너 · 핑)은 건너뛴다.
- * 백그라운드 탭이 멈췄다 돌아오면 밀린 스냅샷이 한꺼번에 처리되는데, 지난 일을 뒤늦게 울리지 않게.
- * 거점 메모(비밀번호)는 오래돼도 보여 준다
- */
-const STALE_EVENT_MS = 2000;
 
 export class GameScene extends Phaser.Scene {
   private app!: App;
   private sampler = new InputSampler();
   private seq = 0;
+  /** 최근 프레임 간격 (ms, 느려지면 바로 · 빨라지면 천천히): 느린 기기에서 오래된 이벤트 한도를 늘린다 */
+  private frameMs = 0;
   private acc = 0;
   private lastInputAt = 0;
   /** 마지막으로 입력 틱을 처리한 시각 (틱 사이 보간 비율) */
@@ -86,6 +83,24 @@ export class GameScene extends Phaser.Scene {
     return this.banners?.visible ?? [];
   }
 
+  /** 디버그 · 테스트: 이번 프레임의 정보 레이어 (품질과 상관없이 같아야 함) */
+  get infoLayer(): InfoItem[] {
+    return this.world?.info ?? [];
+  }
+
+  /**
+   * 디버그 · 테스트: 후처리가 걸린 레이어. 장면 표시 목록 · 카메라에서 직접 모은다(자기 신고 아님):
+   * 월드 렌더러가 아는 객체는 그 레이어, 화면 효과 · 발각 테두리는 screen, 나머지는 hud
+   */
+  get fxTargets(): FxTarget[] {
+    const world = this.world;
+    if (!world) return [];
+    return collectFxTargets(
+      this,
+      (o) => world.layerOf(o) ?? (o === this.spottedEdge || this.screenFx?.owns(o) ? 'screen' : null),
+    );
+  }
+
   /** 디버그 · 테스트: 지금 보이는 연출 */
   get effects(): Record<string, number | boolean> {
     if (!this.screenFx || !this.world) return {};
@@ -106,7 +121,7 @@ export class GameScene extends Phaser.Scene {
     this.banners = new Banners(this);
     this.tutorial = new TutorialOverlay(this, info);
     this.scoreboard = new Scoreboard(this, info, balance);
-    this.screenFx = new ScreenEffects(this, this.game.renderer.type === Phaser.CANVAS);
+    this.screenFx = new ScreenEffects(this, this.world.stunVeil);
     this.localWindup = null;
     this.spottedEdge = this.add.graphics().setDepth(50);
     this.spottedEdge.lineStyle(14, COLOR.monster, 0.75);
@@ -140,7 +155,8 @@ export class GameScene extends Phaser.Scene {
     this.unsubscribe = app.subscribe((e) => {
       if (e.kind !== 'snapshot') return;
       if (this.seq < e.snap.ack) this.seq = e.snap.ack;
-      const stale = app.net.synced && app.net.serverNow() - e.snap.st > STALE_EVENT_MS;
+      // 오래된 스냅샷의 일회성 연출(소리 · 플래시 · 알림 배너 · 핑)은 건너뛴다(staleEvents.ts). 거점 메모(비밀번호)는 오래돼도 보여 준다
+      const stale = app.net.synced && app.net.serverNow() - e.snap.st > staleEventLimitMs(this.frameMs);
       for (const ev of e.snap.events) {
         const note = ev.k === 'text' && (ev.id === 'NOTE_FIRST' || ev.id === 'NOTE_SECOND');
         if (!stale || note) this.onEvent(ev);
@@ -166,6 +182,8 @@ export class GameScene extends Phaser.Scene {
   private onEvent(ev: GameEvent): void {
     const now = performance.now();
     const isMonster = this.app.match?.role === 'monster';
+    // 월드 연출(불꽃 · 충격파 · 베기 호 등)은 받은 이벤트 좌표에서만 생긴다 (상대 잔여 효과 규칙)
+    this.world.onEvent(ev, now);
     switch (ev.k) {
       case 'attackStart': {
         // 괴물 본인은 누른 순간 이미 들었다 (즉시 피드백). 예측하지 못한 경우만 여기서
@@ -316,6 +334,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   override update(_time: number, delta: number): void {
+    // Phaser의 delta는 200ms(최소 5fps)를 넘으면 이전 값으로 바꿔 넣으므로 느린 기기의 실제 간격은 rawDelta로 잰다
+    this.frameMs = trackFrameMs(this.frameMs, this.game.loop.rawDelta);
     this.renderFrame(delta);
     this.watchFps();
   }

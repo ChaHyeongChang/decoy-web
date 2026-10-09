@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { chromium, expect, test } from '@playwright/test';
 
-test('설치된 Chromium을 쓴다 (다시 받지 않음)', () => {
+test('설치된 Chromium을 쓴다 (다시 받지 않음)', { tag: '@core' }, () => {
   const path = chromium.executablePath();
   // 브라우저 설치 경로가 정해진 환경(개발 컨테이너의 /opt/pw-browsers)이면 그 안의 것을 쓴다.
   // CI처럼 지정이 없으면 @playwright/test 버전에 맞게 미리 받아 둔 기본 경로의 것을 쓴다
@@ -10,7 +10,7 @@ test('설치된 Chromium을 쓴다 (다시 받지 않음)', () => {
   expect(existsSync(path)).toBe(true);
 });
 
-test('빈 페이지가 열리고 캔버스가 그려진다', async ({ page }) => {
+test('빈 페이지가 열리고 캔버스가 그려진다', { tag: '@core' }, async ({ page }) => {
   const problems: string[] = [];
   page.on('console', (msg) => {
     if (msg.type() === 'error' || msg.type() === 'warning') problems.push(`${msg.type()}: ${msg.text()}`);

@@ -2,7 +2,7 @@
 import { expect, test } from '@playwright/test';
 import { closeAll, lastSnapshot, sendTest, startFourPlayerMatch } from './helpers';
 
-test('거점 점령 → 탈출구 개방 → 2명 탈출 → 결과 화면 → 다시 하기', async ({ browser }) => {
+test('거점 점령 → 탈출구 개방 → 2명 탈출 → 결과 화면 → 다시 하기', { tag: '@core' }, async ({ browser }) => {
   const { players } = await startFourPlayerMatch(browser);
   const [monster, runner, guard, scout] = players as [
     (typeof players)[0],

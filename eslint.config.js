@@ -37,6 +37,25 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.browser, ...globals.node } },
   },
   {
+    // 그림 · 연출은 결정적이어야 한다 (스크린샷 · 픽셀 검사 · 전후 비교가 흔들리지 않게): 시드 고정 난수와 gfxNow만
+    files: ['client/src/art/**/*.ts', 'client/src/render/**/*.ts'],
+    rules: {
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'Math',
+          property: 'random',
+          message: '그림 · 연출에는 시드 고정 난수(@decoy/shared Rng · art/noise)를 쓴다',
+        },
+        {
+          object: 'Date',
+          property: 'now',
+          message: '장식 시계는 gfxNow(), 연출 시간은 FrameView.nowMs를 쓴다',
+        },
+      ],
+    },
+  },
+  {
     // 빌드 없이 그대로 복사되는 서비스 워커 (client/public/sw.js)
     files: ['client/public/**/*.js'],
     languageOptions: { sourceType: 'script', globals: { ...globals.serviceworker } },

@@ -55,7 +55,9 @@ function angDiff(a: number, b: number): number {
 test('판 중 하향: 백버퍼 · zoom · 글자 · 안개 합성이 1.5배로 바뀌고 입력이 끊기지 않는다', async ({
   browser,
 }) => {
-  const context = await browser.newContext({ viewport: { width: 960, height: 540 }, deviceScaleFactor: 2 });
+  // 작은 창(640×360 @2 → 백버퍼 1280×720): GitHub Actions 러너의 SwiftShader에서 높음 한 프레임이 1초를 넘으면
+  // FPS 감시가 끊김으로 보고 처음부터 다시 재서(gapMs) 하향이 늦어진다. 전환 자체는 크기와 상관없다
+  const context = await browser.newContext({ viewport: { width: 640, height: 360 }, deviceScaleFactor: 2 });
   const page = await context.newPage();
   const problems: string[] = [];
   watchConsole(page, problems);
@@ -78,12 +80,12 @@ test('판 중 하향: 백버퍼 · zoom · 글자 · 안개 합성이 1.5배로 
   const me = await page.evaluate(() => window.__DECOY__?.you ?? '');
 
   const before = await state(page);
-  expect([before.canvasW, before.canvasH]).toEqual([1920, 1080]);
+  expect([before.canvasW, before.canvasH]).toEqual([1280, 720]);
   expect(before.gfx.quality).toBe('high');
-  expect(before.gfx.zoom).toBe(1);
-  expect(before.gfx.compositeScale).toBe(1);
+  expect(before.gfx.zoom).toBeCloseTo(1280 / 1920, 10);
+  expect(before.gfx.compositeScale).toBeCloseTo(1280 / 1920, 10);
   expect(before.gfx.downgrades).toBe(0);
-  expectTexts(before.texts, 1, '하향 전');
+  expectTexts(before.texts, before.gfx.zoom, '하향 전');
 
   // 조준을 둔다 (괴물 대기 시간에도 서버는 목표 각도를 받는다). 이후 마우스는 움직이지 않는다
   await page.evaluate(
@@ -103,28 +105,33 @@ test('판 중 하향: 백버퍼 · zoom · 글자 · 안개 합성이 1.5배로 
   const errBefore = await aimErr();
   expect(errBefore, '하향 전 조준 오차').toBeLessThan(2);
 
+  // 폴링은 rAF가 아니라 시간 간격으로 (느린 프레임에서도 하향을 바로 알아채고 FPS 60을 넣어야 효과 확인이 맞다)
   await page.waitForFunction(() => (window.__DECOY__?.gfx.downgrades ?? 0) >= 1, null, {
-    timeout: FPS_WATCH.warmupMs + FPS_WATCH.sustainMs + 15_000,
+    timeout: FPS_WATCH.warmupMs + FPS_WATCH.sustainMs + 30_000,
+    polling: 100,
   });
   // 하향이 효과가 있었던 것으로 (FPS 60): 효과 확인 뒤에도 중간으로 남는다
   await page.evaluate(() => window.__DECOY__?.injectFps(60));
   console.log(`FPS 20 주입 뒤 ${((Date.now() - startedAt) / 1000).toFixed(1)}초에 한 단계 내림`);
 
-  // 백버퍼 960×540 × 1.5 (applyResolution), 안개 재구성은 다음 그리기에서
+  // 백버퍼 640×360 × 1.5 (applyResolution), 안개 재구성은 다음 그리기에서
   await page.waitForFunction(
-    () => document.querySelector<HTMLCanvasElement>('#game-root canvas')?.width === 1440,
+    () => document.querySelector<HTMLCanvasElement>('#game-root canvas')?.width === 960,
     null,
-    { timeout: 10_000 },
+    { timeout: 20_000, polling: 100 },
   );
-  await page.waitForFunction(() => window.__DECOY__?.gfx.compositeScale === 0.75, null, { timeout: 10_000 });
+  await page.waitForFunction(() => window.__DECOY__?.gfx.compositeScale === 0.5, null, {
+    timeout: 20_000,
+    polling: 100,
+  });
   const after = await state(page);
-  expect([after.canvasW, after.canvasH]).toEqual([1440, 810]);
+  expect([after.canvasW, after.canvasH]).toEqual([960, 540]);
   expect(after.gfx.quality).toBe('medium');
   expect(after.gfx.downgrades).toBe(1);
-  expect(after.gfx.zoom).toBe(0.75);
-  expect(after.gfx.compositeScale).toBe(0.75);
+  expect(after.gfx.zoom).toBe(0.5);
+  expect(after.gfx.compositeScale).toBe(0.5);
   expect(after.gfx.features.autoDowngrade).toBe('checking');
-  expectTexts(after.texts, 0.75, '하향 뒤');
+  expectTexts(after.texts, 0.5, '하향 뒤');
 
   // 마우스를 움직이지 않았는데 조준이 그대로 (포인터 좌표를 새 백버퍼 배율로 옮겼다)
   await page.waitForTimeout(700);
@@ -153,10 +160,11 @@ test('판 중 하향: 백버퍼 · zoom · 글자 · 안개 합성이 1.5배로 
 
   // 효과 확인: FPS가 올랐으니 중간을 유지하고 자동 하향은 다시 감시 상태
   await page.waitForFunction(() => window.__DECOY__?.gfx.features.autoDowngrade === 'on', null, {
-    timeout: DOWNGRADE_CHECK.settleMs + DOWNGRADE_CHECK.measureMs + 15_000,
+    timeout: DOWNGRADE_CHECK.settleMs + DOWNGRADE_CHECK.measureMs + 30_000,
+    polling: 200,
   });
   const kept = await state(page);
-  expect([kept.gfx.quality, kept.gfx.downgrades, kept.canvasW]).toEqual(['medium', 1, 1440]);
+  expect([kept.gfx.quality, kept.gfx.downgrades, kept.canvasW]).toEqual(['medium', 1, 960]);
 
   await page.evaluate(() => window.__DECOY__?.injectFps(null));
   expect(problems).toEqual([]);

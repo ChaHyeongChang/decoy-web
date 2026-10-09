@@ -76,6 +76,9 @@ export function installDebug(app: App, overlay: boolean): void {
     getDrawnMinimap: () => gameScene(app)?.minimapDrawn.map((d) => ({ ...d })) ?? [],
     getBanners: () => gameScene(app)?.bannerTexts.slice() ?? [],
     getEffects: () => ({ ...(gameScene(app)?.effects ?? {}) }),
+    getInfoLayer: () => gameScene(app)?.infoLayer.map((i) => ({ ...i })) ?? [],
+    getFxTargets: () =>
+      gameScene(app)?.fxTargets.map((t) => ({ layer: t.layer, effects: t.effects.slice() })) ?? [],
     getSounds: () => sfx.log.map((s) => s.name),
     get audioReady() {
       return sfx.ready;

@@ -1,4 +1,8 @@
-# 자동 검사: PR마다, 그리고 main에 들어갈 때 돈다.
+# 자동 검사.
+# - push · PR마다(그리고 main에 들어갈 때): 빠른 검사 작업 하나 (타입 · 린트 · 포맷 · 단위 · 핵심 E2E @core, 3분 안팎)
+# - PR 병합 직전 수동 실행(workflow_dispatch, 그 PR 브랜치에서): 빠른 검사 + 전체 E2E(4개 작업으로 나눠 동시에) +
+#   지연 봇 전체 판 + 배포 검증. 모두 success여야 병합한다 (docs/MOBILE_PLAN.md 3절, DECISIONS 4절 "CI 나누기")
+#   Actions 탭 → CI → Run workflow → 브랜치 고르기 (또는 API workflow_dispatch, ref = PR 브랜치)
 # private 저장소지만 비밀 값은 쓰지 않는다 (포크 PR에서도 같은 검사가 돈다).
 name: CI
 
@@ -12,18 +16,20 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  # 수동 전체 검사와 PR 빠른 검사는 서로 취소하지 않는다
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
-  # 브라우저는 E2E 작업에서만 받는다
+  # 브라우저는 E2E 단계 직전에만 받는다
   PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
 
 jobs:
-  check:
-    name: 타입 · 린트 · 포맷 · 단위 테스트
+  quick:
+    # 작업 하나로 묶는다: Actions는 작업마다 분 단위로 올려 세므로 나누면 그만큼 더 든다
+    name: 빠른 검사 (타입 · 린트 · 단위 · 핵심 E2E)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -33,11 +39,34 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm test
+      # CI에는 설치된 Chromium이 없으므로 @playwright/test 버전에 맞는 Chromium을 받는다
+      - run: npx playwright install --with-deps chromium
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '0'
+      - run: npm run test:e2e:core
+      - name: 실패 기록 올리기
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-core-results
+          path: tests/e2e/.results
+          # 실패 기록 폴더(.results)가 점으로 시작해서, 켜지 않으면 올리지 않는다
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
 
   e2e:
-    name: E2E (브라우저 4개 · 정보 차단 · FPS)
+    # 전체 E2E를 러너에서 잰 파일별 시간(tests/e2e/durations.json)으로 고르게 4묶음 (scripts/e2e-shard.mjs).
+    # 한 묶음 8분 안팎, 느린 러너를 생각해 제한은 넉넉히
+    if: github.event_name == 'workflow_dispatch'
+    # 이름에 matrix를 넣지 않는다: 건너뛸 때(push · PR) 식이 풀리지 않은 채 보인다. GitHub가 "전체 E2E (1)"처럼 붙인다
+    name: 전체 E2E
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -45,28 +74,28 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      # CI에는 설치된 Chromium이 없으므로 @playwright/test 버전에 맞는 Chromium을 받는다
       - run: npx playwright install --with-deps chromium
         env:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '0'
-      - run: npm run test:e2e
+      - run: npm run build
+      - run: node scripts/e2e-shard.mjs ${{ matrix.shard }} 4
       - name: 스크린샷 · 실패 기록 올리기
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-results
+          name: e2e-results-${{ matrix.shard }}
           path: |
             artifacts/screens
             tests/e2e/.results
-          # 실패 기록 폴더(.results)가 점으로 시작해서, 켜지 않으면 올리지 않는다
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
 
   lag:
+    if: github.event_name == 'workflow_dispatch'
     name: 지연 봇 전체 판 (lag 100 · 200, 실시간)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -85,6 +114,7 @@ jobs:
           retention-days: 7
 
   deploy:
+    if: github.event_name == 'workflow_dispatch'
     name: 배포 검증 (Docker 이미지 → 컨테이너 접속)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -99,3 +129,23 @@ jobs:
       - run: npm run verify:deploy
         env:
           NODE_IMAGE: mirror.gcr.io/library/node:22-bookworm-slim
+
+  full:
+    # 병합 판단은 이 한 줄로: 위 작업이 모두 success일 때만 success (취소 · 시간 초과 · 건너뜀도 실패)
+    if: always() && github.event_name == 'workflow_dispatch'
+    needs: [quick, e2e, lag, deploy]
+    name: 전체 검사 결과
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 모든 작업 success 확인
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "작업 결과: $RESULTS"
+          for r in $RESULTS; do
+            if [ "$r" != "success" ]; then
+              echo "::error::success가 아닌 작업이 있다 ($r)"
+              exit 1
+            fi
+          done

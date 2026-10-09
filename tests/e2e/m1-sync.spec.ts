@@ -45,31 +45,35 @@ async function drawnErrors(
   return { self, others, count };
 }
 
-test('4명이 같은 방에 들어가 시작하고, 움직인 뒤 서버 위치와 화면 위치가 맞는다', async ({ browser }) => {
-  const { code, players } = await startFourPlayerMatch(browser);
-  const monster = players.find((p) => p.role === 'monster')!;
-  await sendTest(monster.page, { kind: 'freeze', target: monster.id, frozen: false });
-  await players[0]!.page.waitForTimeout(300);
+test(
+  '4명이 같은 방에 들어가 시작하고, 움직인 뒤 서버 위치와 화면 위치가 맞는다',
+  { tag: '@core' },
+  async ({ browser }) => {
+    const { code, players } = await startFourPlayerMatch(browser);
+    const monster = players.find((p) => p.role === 'monster')!;
+    await sendTest(monster.page, { kind: 'freeze', target: monster.id, frozen: false });
+    await players[0]!.page.waitForTimeout(300);
 
-  // 각자 움직이기
-  await Promise.all(players.map((p) => p.page.keyboard.down(KEYS[p.role] ?? 'KeyS')));
-  await players[0]!.page.waitForTimeout(700);
-  await Promise.all(players.map((p) => p.page.keyboard.up(KEYS[p.role] ?? 'KeyS')));
-  await players[0]!.page.waitForTimeout(800);
+    // 각자 움직이기
+    await Promise.all(players.map((p) => p.page.keyboard.down(KEYS[p.role] ?? 'KeyS')));
+    await players[0]!.page.waitForTimeout(700);
+    await Promise.all(players.map((p) => p.page.keyboard.up(KEYS[p.role] ?? 'KeyS')));
+    await players[0]!.page.waitForTimeout(800);
 
-  const t = await truth(players[0]!.page, code);
-  const m = t.players.find((p) => p.role === 'monster')!;
-  expect(m.y).toBeLessThan(26); // 괴물이 위로 움직였다 (y=24 벽에서 멈춤)
-  for (const s of t.players.filter((p) => p.role !== 'monster')) expect(s.y).toBeGreaterThan(17); // 감옥 문 밖으로
+    const t = await truth(players[0]!.page, code);
+    const m = t.players.find((p) => p.role === 'monster')!;
+    expect(m.y).toBeLessThan(26); // 괴물이 위로 움직였다 (y=24 벽에서 멈춤)
+    for (const s of t.players.filter((p) => p.role !== 'monster')) expect(s.y).toBeGreaterThan(17); // 감옥 문 밖으로
 
-  const err = await drawnErrors(players, code);
-  // 생존자 셋은 팀원 셋을 항상 그린다 (괴물은 보일 때만)
-  expect(err.count).toBeGreaterThanOrEqual(3 * 3 + 1);
-  expect(err.self).toBeLessThan(0.05);
-  expect(err.others).toBeLessThan(0.1);
-  for (const p of players) expect(p.problems).toEqual([]);
-  await closeAll(players);
-});
+    const err = await drawnErrors(players, code);
+    // 생존자 셋은 팀원 셋을 항상 그린다 (괴물은 보일 때만)
+    expect(err.count).toBeGreaterThanOrEqual(3 * 3 + 1);
+    expect(err.self).toBeLessThan(0.05);
+    expect(err.others).toBeLessThan(0.1);
+    for (const p of players) expect(p.problems).toEqual([]);
+    await closeAll(players);
+  },
+);
 
 test('lag=200에서도 내 입력이 즉시 반영되고 최종 위치가 수렴한다', async ({ browser }) => {
   const { code, players } = await startFourPlayerMatch(

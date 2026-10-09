@@ -28,6 +28,7 @@ body {
 #game-root > canvas {
   position: absolute;
   display: block;
+  /* image-rendering은 main.ts placeCanvas가 정한다 (백버퍼가 기기 픽셀과 1:1일 때만 최근접) */
 }
 #ui-root {
   position: fixed;

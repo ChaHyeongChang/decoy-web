@@ -248,6 +248,11 @@ for (const screen of SCREENS) {
     expectTexts(await textAudit(page), info.gfx.zoom, screen.name);
     expect([info.gfx.backingW, info.gfx.backingH]).toEqual([info.backingW, info.backingH]);
     expect(info.gfx.dpr).toBe(screen.dsf);
+    // 백버퍼가 기기 픽셀과 1:1이면 캔버스 CSS는 최근접 (main.ts placeCanvas)
+    expect(await imageRendering(page)).toBe('pixelated');
+    // 고해상도로 시작하면 WebGL MSAA를 켜지 않는다 (배율 2 4K에서 약 250MiB)
+    if (info.gfx.zoom >= 1.25) expect(info.gfx.features.msaaBytes).toBe(0);
+    expect(Number(info.gfx.features.msaaBytes)).toBeLessThanOrEqual(1920 * 1080 * 4 * 8);
 
     const sharp = await sharpness(page);
     console.log(
@@ -261,6 +266,41 @@ for (const screen of SCREENS) {
     // 맥북 0.97, FHD@1.25 0.99). 중간 밝기 픽셀 비율이 DOM과 같은지도 본다(실측: 고친 뒤 0.96~1.04, 해상도 1이면 0.81~2.13)
     expect(sharp.midRatio, `${screen.name} 중간 밝기 비`).toBeGreaterThanOrEqual(0.83);
     expect(sharp.midRatio, `${screen.name} 중간 밝기 비`).toBeLessThanOrEqual(1.2);
+    expect(problems).toEqual([]);
+    await close();
+  });
+}
+
+async function imageRendering(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const c = document.querySelector<HTMLCanvasElement>('#game-root canvas');
+    return c ? getComputedStyle(c).imageRendering : '';
+  });
+}
+
+// 백버퍼가 기기 픽셀보다 작아 브라우저가 늘려 그리는 경우(품질 해상도 상한 · ?scale): 최근접이면 1.25 · 1.33배에서
+// 4~5칸마다 줄이 복제되어 획 두께가 들쭉날쭉해진다 → 부드럽게 늘린다
+for (const c of [
+  {
+    name: '배율 1.25 · 품질 낮음(상한 1배)',
+    viewport: { width: 1920, height: 1080 },
+    dsf: 1.25,
+    extra: '&quality=low',
+  },
+  {
+    name: '배율 2 · 품질 중간(상한 1.5배)',
+    viewport: { width: 1440, height: 900 },
+    dsf: 2,
+    extra: '&quality=medium',
+  },
+  { name: '배율 1 · ?scale=0.5', viewport: { width: 1280, height: 720 }, dsf: 1, extra: '&scale=0.5' },
+] as const) {
+  test(`늘려 그릴 때는 부드럽게: ${c.name}`, async ({ browser }) => {
+    const { page, problems, close } = await newScreen(browser, c.viewport, c.dsf);
+    await startSolo(page, c.extra, 'runner');
+    const info = await canvasInfo(page);
+    expect(info.backingW).toBeLessThan(Math.round(info.cssW * info.dpr) - 1);
+    expect(await imageRendering(page)).toBe('auto');
     expect(problems).toEqual([]);
     await close();
   });
@@ -352,6 +392,8 @@ function angDiff(a: number, b: number): number {
 }
 
 test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 맞다', async ({ browser }) => {
+  // 4K 높음 단계가 CI 러너(SwiftShader)에서 느리다
+  test.setTimeout(480_000);
   const { page, problems, close } = await newScreen(browser, { width: 1440, height: 900 }, 2);
   const code = await startSolo(page, '&quality=high', 'monster');
   const me = await page.evaluate(() => window.__DECOY__?.you ?? '');
@@ -382,7 +424,9 @@ test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 �
   };
 
   // 백버퍼가 바뀔 때까지. 시간을 넘기면 그때 상태(창 DPR · 캔버스 · 그래픽 상태)를 오류에 담는다 (부하가 큰 러너에서 원인 구분용)
-  const waitBacking = async (w: number, h: number, timeout = 10_000): Promise<CanvasInfo> => {
+  // 폴링은 rAF가 아니라 시간 간격으로: 4K(3840×2160) 높음은 GitHub Actions 러너의 SwiftShader에서 한 프레임이 수 초라
+  // rAF 폴링이면 확인 자체가 프레임만큼 늦는다(CI에서 바뀐 직후 시간 초과가 난 적이 있다)
+  const waitBacking = async (w: number, h: number, timeout = 60_000): Promise<CanvasInfo> => {
     const t0 = Date.now();
     try {
       await page.waitForFunction(
@@ -391,10 +435,18 @@ test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 �
           return c?.width === bw && c.height === bh;
         },
         [w, h] as const,
-        { timeout },
+        { timeout, polling: 200 },
       );
     } catch (e) {
       const now = await canvasInfo(page);
+      // 큰 백버퍼 프레임이 수 초씩 걸리면 페이지 안 폴링 자체가 밀려 시간 초과가 날 수 있다: 그 뒤에 이미 바뀌어 있으면 따라간 것이다
+      if (now.backingW === w && now.backingH === h) {
+        console.log(
+          `백버퍼 ${w}×${h}: 폴링이 ${timeout}ms 안에 확인하지 못했지만 그 뒤 바뀌어 있음 (느린 러너)`,
+        );
+        await settleFrames(page, 2);
+        return canvasInfo(page);
+      }
       throw new Error(
         `백버퍼 ${w}×${h}을 ${timeout}ms 동안 기다렸다: 지금 ${now.backingW}×${now.backingH}, ` +
           `창 DPR ${now.dpr}, gfx.dpr ${now.gfx.dpr}, 품질 ${now.gfx.quality}, 하향 ${now.gfx.downgrades} (${String(e)})`,
@@ -456,8 +508,8 @@ test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 �
   });
   // 창 DPR이 먼저 바뀌었는지 따로 본다: 에뮬레이션이 늦은 것과 앱이 변경을 놓친 것을 가른다
   // (부하가 큰 컨테이너에서 이 단계가 한 번 10초를 넘긴 적이 있다. 판 중 하향을 막기 전에는 하향이 백버퍼를 대신 맞춰 가려졌다)
-  await page.waitForFunction(() => window.devicePixelRatio === 1, null, { timeout: 10_000 });
-  const moved = await waitBacking(1920, 1080, 15_000);
+  await page.waitForFunction(() => window.devicePixelRatio === 1, null, { timeout: 20_000, polling: 200 });
+  const moved = await waitBacking(1920, 1080);
   await aimHeld('→ DPR 1');
   expect(moved.dpr).toBe(1);
   expect(moved.gfx.zoom).toBe(1);

@@ -1,6 +1,10 @@
 // 바닥 합성 레이어: 정적 맵 + 거점 · 탈출구 영역 + 시야 원/부채꼴 채움 + 안개(빛 지도 곱하기).
 // 안개 갱신 주기(20~30Hz)에만 다시 그리고, 매 프레임에는 결과만 그린다 (헤드리스 · 저사양 성능).
 //
+// 정적 맵은 art/mapArt.ts가 굽는다(강판 바닥 · 2.5D 벽 · 기둥 · 감옥 · 거점 단말 · 방폭문 · 네온, 배율별 캐시).
+// 합성 순서: 정적 맵 (+ 발광 번짐) → 공개 동적 레이어(거점 · 탈출구 상태, 시야 채움) → 빛 지도 곱하기 → 테두리 리프트 더하기.
+// 발광은 곱하기 앞이라 어둠 속 약 30% · 빛 속 100%, 테두리 리프트는 곱하기 뒤라 시야 밖에서도 구조 테두리가 2.5:1 이상 보인다.
+//
 // 안개 원리 (M10): 빛 지도 바탕이 '하한 × 청회색 틴트'(colors.ts FOG)라서 시야 밖은 맵 구조가 어둡게 보이고,
 // 시야 다각형은 'lighten'(최댓값)으로 흰색을 그려 원래 색이 된다. 세 생존자의 시야가 겹쳐도 더 밝아지지 않는다.
 // 생존자 시야는 판정 반경 안쪽 1.2타일에서 하한으로 흐려지고(밝게 그린 곳 ⊆ 판정 영역), 괴물 부채꼴은 판정과
@@ -12,22 +16,29 @@
 //  - GpuFog (품질 높음 · 중간 + WebGL, fogGpu.ts): 정적 맵 텍스처 한 번 + 작은 빛 지도만 갱신해 MULTIPLY
 import type Phaser from 'phaser';
 import { TILE_PX, type Balance, type ExitView, type PointView, type Vec2 } from '@decoy/shared';
+import { getGlowMap, getStaticMap, keepStaticMaps } from '../art/mapArt';
+import { effectivePreset, type RendererKind } from '../gfx/presets';
+import { gfxState } from '../gfx/state';
 import { MAP_SCALE, MAP_X, MAP_Y } from '../ui/layout';
 import { GpuFog } from './fogGpu';
-import { snapToDevice, type FogMode } from './fogMath';
+import { compositeScaleFor, fogPathFor, snapToDevice, type FogMode } from './fogMath';
 import {
   CanvasPen,
   LightMap,
+  addRimLift,
+  countGraphicsCmds,
   createCanvasTexture,
   domLightSurface,
   nextFogKey,
   paintExits,
   paintPoints,
+  recordFogCommit,
   removeCanvasTexture,
+  resetExitTracking,
+  rimLiftPath,
   uploadCanvasTexture,
   type SoftLight,
 } from './fogPaint';
-import { drawStaticMap } from './mapCanvas';
 
 export type { SoftLight } from './fogPaint';
 
@@ -44,6 +55,8 @@ export interface FogLayerOptions {
   ambientCss: string;
   /** 경계 셰이더 (GPU 경로에서만) */
   shader: boolean;
+  /** 발광: sprite = 따로 ADD 이미지(GPU 경로), static = 정적 맵에 구움. 없으면 지금 품질 표를 따른다 (Canvas 경로는 늘 static) */
+  glow?: 'sprite' | 'static';
 }
 
 /** 안개 아래 바닥 레이어. 갱신 주기마다 begin → 채우기 · 빛 → commit */
@@ -78,6 +91,31 @@ export function createFogLayer(
   return mode === 'gpu' ? new GpuFog(scene, root, opts) : new CanvasFog(scene, root, opts);
 }
 
+/**
+ * 지금 그래픽 상태(품질 · 렌더러 · 백버퍼 배율)로 안개 레이어가 쓸 맵 그림을 미리 굽는다 (로비 대기 중에 부르면 판 시작 때
+ * 굽지 않는다). 안개 레이어를 만들 때와 같은 배율 · 발광 방식을 고른다. 걸린 시간(ms)을 돌려준다
+ */
+export function prebakeFogArt(renderer: RendererKind = gfxState.renderer): number {
+  const t0 = performance.now();
+  const preset = effectivePreset(gfxState.quality, renderer, gfxState.touch);
+  const path = fogPathFor(preset, renderer);
+  const s = compositeScaleFor(gfxState.zoom, preset.compositeCap);
+  if (path.mode === 'gpu') {
+    const sprite = preset.glow === 'sprite';
+    const need = [
+      { scale: MAP_SCALE * s, withGlow: !sprite },
+      { scale: preset.lightPxPerTile / TILE_PX, withGlow: true },
+    ];
+    for (const n of need) getStaticMap(n.scale, n.withGlow);
+    if (sprite) getGlowMap();
+    keepStaticMaps(need, sprite);
+  } else {
+    getStaticMap(MAP_SCALE * s, true);
+    keepStaticMaps([{ scale: MAP_SCALE * s, withGlow: true }], false);
+  }
+  return performance.now() - t0;
+}
+
 /** Canvas2D 한 장 합성 (품질 낮음 · Canvas 렌더러) */
 export class CanvasFog implements FogLayer {
   readonly mode = 'canvas' as const;
@@ -88,6 +126,8 @@ export class CanvasFog implements FogLayer {
   private readonly staticMap: HTMLCanvasElement;
   private readonly light: LightMap | null;
   private readonly pen: CanvasPen;
+  /** 테두리 리프트 (곱하기 뒤 더하기) */
+  private readonly lift: Path2D;
   private readonly key: string;
   private readonly texture: Phaser.Textures.Texture;
   private readonly image: Phaser.GameObjects.Image;
@@ -96,11 +136,17 @@ export class CanvasFog implements FogLayer {
 
   constructor(
     private readonly scene: Phaser.Scene,
-    root: Phaser.GameObjects.Container,
+    private readonly root: Phaser.GameObjects.Container,
     opts: FogLayerOptions,
   ) {
     const s = opts.compositeScale;
-    this.staticMap = drawStaticMap(MAP_SCALE * s);
+    // 합성 배율로 직접 구운 정적 맵 (발광 번짐 포함, 같은 배율이면 캐시). 1:1로 복사한다.
+    // 캐시는 이 한 장만 남긴다 (미니맵은 합성 캔버스를 줄여 쓰고, 발광은 구워 넣었으니 따로 들고 있지 않는다)
+    this.staticMap = getStaticMap(MAP_SCALE * s, true);
+    keepStaticMaps([{ scale: MAP_SCALE * s, withGlow: true }], false);
+    this.lift = rimLiftPath(TILE_PX * MAP_SCALE * s);
+    gfxState.features.glowLayer = 'static';
+    resetExitTracking();
     this.base = document.createElement('canvas');
     this.base.width = this.staticMap.width;
     this.base.height = this.staticMap.height;
@@ -163,8 +209,13 @@ export class CanvasFog implements FogLayer {
       c.drawImage(this.light.canvas, 0, 0, this.base.width, this.base.height);
       c.restore();
     }
+    addRimLift(this.ctx, this.lift);
     uploadCanvasTexture(this.texture);
+    const n = countGraphicsCmds(this.root.list);
+    gfxState.features.mapGfxCmds = n.cmds;
+    gfxState.features.mapLayerObjects = n.objects;
     this.lastCommitMs = performance.now() - this.t0;
+    recordFogCommit(this.lastCommitMs);
   }
 
   destroy(): void {

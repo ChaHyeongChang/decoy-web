@@ -69,9 +69,18 @@ test('역할별 스크린샷 4장 + 미니맵도 같은 정보 규칙', async ({
     await p.page.screenshot({ path: `${OUT}/role-${p.role}.png` });
     await minimapSubsetOfMain(p);
   }
-  // 괴물 미니맵: 시야 밖 생존자(러너 · 스카우트) 없음
-  const mm = await host.evaluate(() => window.__DECOY__?.getDrawnMinimap() ?? []);
-  expect(mm.filter((d) => d.kind === 'survivor').length).toBe(1);
+  // 괴물 미니맵: 시야 밖 생존자(러너 · 스카우트) 없음, 시야 안 가드 하나.
+  // 다른 탭을 찍는 동안 이 탭이 멈췄다 돌아온 첫 프레임은 보간 버퍼가 비어 생존자를 아직 안 그릴 수 있어 잠깐 기다린다
+  // (시야 밖 생존자가 그려지는지는 바로 위 minimapSubsetOfMain과 m3-info가 매 프레임 본다)
+  await expect
+    .poll(
+      async () =>
+        (await host.evaluate(() => window.__DECOY__?.getDrawnMinimap() ?? [])).filter(
+          (d) => d.kind === 'survivor',
+        ).length,
+      { timeout: 5_000 },
+    )
+    .toBe(1);
   // 생존자 미니맵: 괴물이 보일 때만
   const snap = await lastSnapshot(runner.page);
   const runnerMini = await runner.page.evaluate(() => window.__DECOY__?.getDrawnMinimap() ?? []);

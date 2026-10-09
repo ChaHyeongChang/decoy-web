@@ -68,12 +68,13 @@ npm start            # http://localhost:8080
 ```bash
 npm run check          # 타입 · 린트 · 포맷
 npm test               # 단위 + 봇 시나리오 (규칙 · 정보 차단 · 동기화)
-npm run test:e2e       # 빌드 후 브라우저 4개 E2E (Playwright, 스크린샷은 artifacts/)
+npm run test:e2e       # 빌드 후 브라우저 4개 E2E 전체 (Playwright, 스크린샷은 artifacts/)
+npm run test:e2e:core  # 핵심 E2E만 (@core 태그, PR CI가 돌리는 것)
 npm run test:lag       # lag 100 · 200 실서버에 WebSocket 봇 4명으로 실시간 전체 판 (몇 분)
 npm run verify:deploy  # Docker 이미지(없으면 빌드 결과물)를 띄워 HTTP · WebSocket 접속 확인
 ```
 
-PR마다(그리고 main에 들어갈 때) GitHub Actions(`.github/workflows/ci.yml`)가 위 검사를 모두 돌린다.
+push · PR마다(그리고 main에 들어갈 때) GitHub Actions(`.github/workflows/ci.yml`)가 빠른 검사(`check` · `test` · `test:e2e:core`, 3분 안팎)를 돌린다. PR을 병합하기 직전에는 같은 워크플로를 그 브랜치에서 수동 실행(Actions 탭 → CI → Run workflow)해 전체 E2E(파일별 러너 시간으로 고르게 나눈 4개 작업, `scripts/e2e-shard.mjs`) · 지연 봇 판 · 배포 검증까지 돌리고, `전체 검사 결과`가 success여야 병합한다.
 
 ## 문서
 
