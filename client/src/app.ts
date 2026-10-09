@@ -1,4 +1,4 @@
-// 클라이언트 상태와 흐름: 연결 → 로비 → 판 → 결과
+// 클라이언트 상태와 흐름: 연결 → 로비 → 판 → 결과. 앱 생명주기(숨김 · 재접속 · 마지막 방 · 뒤로 가기 · 화면 꺼짐 방지)는 M12
 import type Phaser from 'phaser';
 import {
   validateBalance,
@@ -13,13 +13,37 @@ import {
   type Snapshot,
   type SurvivorView,
 } from '@decoy/shared';
+import { sfx } from './audio';
 import { UI_TEXT } from './data/storyText';
+import { device } from './device';
 import type { QualityTier } from './gfx/presets';
 import { parseQuality } from './gfx/quality';
+import { haptics } from './haptics';
+import {
+  BackGuard,
+  LinkKeeper,
+  ScreenAwake,
+  browserClock,
+  browserWakeLock,
+  listenLifecycle,
+  rejoinRetryDelay,
+  type LastRoom,
+  type LifecycleDebug,
+} from './lifecycle';
 import { NetClient, defaultWsUrl } from './net';
 import { parseScale } from './render/resolution';
-import { getAltTokens, getSavedName, getSeatToken, saveName, saveSeatToken } from './session';
+import {
+  clearLastRoom,
+  getAltTokens,
+  getSavedName,
+  getSeatToken,
+  loadLastRoom,
+  saveLastRoom,
+  saveName,
+  saveSeatToken,
+} from './session';
 import { Interpolator, Predictor, SnapshotClock, lerpAngle, lerpNum } from './sync';
+import { LeaveDialog, ReplacedNotice } from './ui/lifecycleUi';
 import { LobbyUI } from './ui/lobby';
 import { ResultUI } from './ui/result';
 import { WakeNoticeUI } from './ui/wakeNotice';
@@ -83,6 +107,12 @@ export type AppEvent =
   | { kind: 'result'; result: MatchResult }
   | { kind: 'lobby'; lobby: LobbyState };
 
+declare global {
+  interface Window {
+    __DECOY_LIFE__?: LifecycleDebug;
+  }
+}
+
 export class App {
   readonly net: NetClient;
   readonly lobbyUi: LobbyUI;
@@ -104,8 +134,7 @@ export class App {
   readonly snapClock = new SnapshotClock();
   game: Phaser.Game | null = null;
   private readonly listeners = new Set<(e: AppEvent) => void>();
-  private reconnectTimer: number | null = null;
-  /** 다른 탭이 이 자리를 넘겨받았다: 다시 연결하지 않는다 */
+  /** 다른 탭이 이 자리를 넘겨받았다: "여기서 계속하기"를 누를 때까지 다시 연결하지 않는다 */
   private replaced = false;
   /** '서버 깨우는 중' 안내 (무료 호스팅의 잠든 서버 · 재시작) */
   readonly wake = new WakeNoticeState();
@@ -115,13 +144,50 @@ export class App {
   private wasOpen = false;
   /** 마지막 입장 요청이 링크 · 재연결로 자동으로 보낸 것이다 (직접 입력한 코드가 아니다) */
   private joinFromLink = false;
+  // ── 앱 생명주기 (M12) ──
+  /** 연결 유지: 재연결 간격 · 숨김 · 오프라인 · 수신 감시 */
+  private readonly keeper: LinkKeeper;
+  /** 판 중 화면 꺼짐 방지 */
+  private readonly awake = new ScreenAwake(browserWakeLock, () => document.visibilityState === 'visible');
+  /** 터치 모드 또는 설치 앱: 마지막 방 복귀 · 뒤로 가기 확인을 쓴다 (PC 브라우저는 지금 동작 그대로) */
+  readonly lifeApp: boolean;
+  private readonly backGuard: BackGuard | null;
+  private readonly leaveDialog: LeaveDialog;
+  private readonly replacedNotice: ReplacedNotice;
+  /** 마지막 방으로 돌아가는 중 (주소에 ?room= 없이 30초 안에 다시 연 앱) */
+  private returning: LastRoom | null = null;
+  private rejoinTimer: number | null = null;
+  /** 다음 끊김은 일부러 낸 것이다 (나가기): 끊김 알림을 띄우지 않는다 */
+  private quietClose = false;
+  /** 첫 화면 방 코드 칸에 미리 넣을 것 (판에서 나간 방: 30초 안에 입장을 누르면 같은 자리) */
+  private homePrefill = '';
 
   constructor(
     readonly params: AppParams,
     uiRoot: HTMLElement,
   ) {
+    this.lifeApp = device.touch || !device.inBrowser;
     this.roomCode = params.room;
+    if (this.roomCode === null && this.lifeApp) {
+      this.returning = loadLastRoom();
+      this.roomCode = this.returning?.room ?? null;
+    }
     this.net = new NetClient(defaultWsUrl(), { lag: params.lag, jitterMs: 20 });
+    this.keeper = new LinkKeeper(
+      {
+        connect: () => {
+          this.wake.connecting(performance.now());
+          this.net.connect();
+        },
+        drop: () => this.net.drop(),
+        resync: () => this.net.resync(),
+      },
+      {
+        visible: () => document.visibilityState === 'visible',
+        online: () => navigator.onLine !== false,
+      },
+      browserClock,
+    );
     this.lobbyUi = new LobbyUI(
       uiRoot,
       {
@@ -141,6 +207,7 @@ export class App {
           saveName(name);
           this.roomCode = code.toUpperCase();
           this.joinFromLink = false;
+          this.returning = null;
           this.sendJoin(name);
         },
         pickRole: (role: Role | null) => this.net.send({ t: 'role', role }),
@@ -152,33 +219,61 @@ export class App {
     );
     this.resultUi = new ResultUI(uiRoot, () => this.net.send({ t: 'rematch' }));
     this.wakeUi = new WakeNoticeUI(uiRoot);
+    this.leaveDialog = new LeaveDialog(uiRoot, {
+      stay: () => {
+        // "계속"을 누른 이 핸들러(사용자 활성화)에서 뒤로 가기 항목을 다시 넣는다
+        this.leaveDialog.close();
+        this.backGuard?.gesture();
+      },
+      leave: () => this.leaveRoom(),
+    });
+    this.replacedNotice = new ReplacedNotice(uiRoot, () => this.continueHere());
+    this.backGuard = this.lifeApp ? new BackGuard(window.history, () => this.leaveDialog.open()) : null;
     this.net.on((msg) => this.onMessage(msg));
+    this.net.onHeard = () => this.keeper.heard();
+    this.net.onResynced = () => haptics.clockSynced();
     this.net.onOpen = () => {
       this.wasOpen = true;
+      this.keeper.opened();
       this.wake.opened();
       this.renderWake();
       if (this.roomCode) {
         this.joinFromLink = true;
         this.sendJoin(params.name ?? getSavedName());
-      } else this.lobbyUi.renderHome();
+      } else if (!this.lobbyUi.atHome) this.lobbyUi.renderHome(this.homePrefill);
     };
     this.net.onClose = () => {
       const wasOpen = this.wasOpen;
       this.wasOpen = false;
+      this.clearRejoin();
       if (this.replaced) {
+        this.keeper.stop();
         this.wake.stop();
         this.renderWake();
         return;
       }
-      if (wasOpen) showToast(UI_TEXT.disconnected);
+      if (wasOpen && !this.quietClose) showToast(UI_TEXT.disconnected);
+      this.quietClose = false;
       this.wake.closed(performance.now());
-      this.scheduleReconnect();
+      this.renderWake();
+      this.keeper.closed();
     };
   }
 
   start(): void {
+    listenLifecycle({
+      visibility: (visible) => this.onVisibility(visible),
+      online: (on) => (on ? this.keeper.kick() : this.keeper.offline()),
+      pageshow: () => this.keeper.kick(),
+      pagehide: () => this.touchLastRoom(),
+      gesture: () => {
+        if (!this.leaveDialog.isOpen) this.backGuard?.gesture();
+      },
+      popstate: () => void this.backGuard?.popped(),
+    });
+    if (this.params.debug !== 'off' || import.meta.env.DEV) this.installLifecycleDebug();
     this.wake.connecting(performance.now());
-    this.net.connect();
+    this.keeper.start();
     // 기다린 시간(초)을 세려고 주기적으로 다시 그린다. 바뀐 게 없으면 DOM을 건드리지 않는다
     this.wakeTimer ??= window.setInterval(() => this.renderWake(), 250);
   }
@@ -210,12 +305,126 @@ export class App {
     });
   }
 
-  private scheduleReconnect(): void {
-    if (this.reconnectTimer !== null) return;
-    this.reconnectTimer = window.setTimeout(() => {
-      this.reconnectTimer = null;
-      this.net.connect();
-    }, 1000);
+  // ───────────── 앱 생명주기 (M12) ─────────────
+
+  /** 화면이 숨겨짐 · 보임: 감시 멈춤 · 재개(즉시 ping + 시계 다시 맞추기), 화면 꺼짐 방지 다시 요청, 오디오 다시 켜기 */
+  private onVisibility(visible: boolean): void {
+    this.keeper.visibility(visible);
+    if (visible) {
+      this.awake.shown();
+      sfx.resume();
+    } else {
+      haptics.holdClock();
+      this.touchLastRoom();
+    }
+  }
+
+  /** 판 중인가 (화면 꺼짐 방지 · 뒤로 가기 확인) */
+  private setPlaying(on: boolean): void {
+    this.awake.set(on);
+    if (on) this.backGuard?.arm();
+    else {
+      this.leaveDialog.close();
+      this.backGuard?.disarm();
+    }
+  }
+
+  /** 마지막 방 시각을 지금으로 (터치 · 설치 앱만, 방에 들어가 있을 때) */
+  private touchLastRoom(): void {
+    if (this.lifeApp && this.roomCode && this.lobby?.room === this.roomCode) saveLastRoom(this.roomCode);
+  }
+
+  private clearRejoin(): void {
+    if (this.rejoinTimer !== null) window.clearTimeout(this.rejoinTimer);
+    this.rejoinTimer = null;
+  }
+
+  /**
+   * 마지막 방 복귀가 거절됐다 (옛 소켓이 아직 붙어 있어 in-progress · room-full): 30초 창 안이면 2초 뒤 다시.
+   * 다시 시도하면 true, 창이 지났으면 그만두고 false
+   */
+  private retryReturn(): boolean {
+    const last = this.returning;
+    if (!last) return false;
+    const ms = rejoinRetryDelay(last, Date.now());
+    if (ms === null) {
+      this.returning = null;
+      clearLastRoom();
+      return false;
+    }
+    this.wake.rejoining(performance.now());
+    this.renderWake();
+    this.clearRejoin();
+    this.rejoinTimer = window.setTimeout(() => {
+      this.rejoinTimer = null;
+      this.sendJoin(this.params.name ?? getSavedName());
+    }, ms);
+    return true;
+  }
+
+  /** 판 중 뒤로 가기 확인에서 "나가기": 방에서 나가 첫 화면으로 (서버는 끊김으로 보고 30초 유예를 센다) */
+  private leaveRoom(): void {
+    const code = this.roomCode ?? '';
+    this.setPlaying(false);
+    clearLastRoom();
+    this.clearRejoin();
+    this.roomCode = null;
+    this.returning = null;
+    this.you = null;
+    this.lobby = null;
+    this.match = null;
+    this.result = null;
+    this.lastSnap = null;
+    this.homePrefill = code;
+    const url = new URL(window.location.href);
+    url.searchParams.delete('room');
+    window.history.replaceState(window.history.state, '', url.toString());
+    this.resultUi.hide();
+    this.lobbyUi.renderHome(code);
+    // 판 장면을 멈추게 한다 (main.ts는 로비 단계 이벤트로 판 장면을 끝낸다)
+    this.emit({
+      kind: 'lobby',
+      lobby: { room: code, phase: 'lobby', players: [], bots: false, canStart: false, waitingFor: null },
+    });
+    // 이 소켓은 그 자리에 묶여 있다: 버리고 새로 연결해 첫 화면에서 쓴다
+    this.quietClose = true;
+    this.keeper.restart();
+  }
+
+  /** 다른 탭 안내의 "여기서 계속하기": 이 기기로 다시 들어온다 (서버는 저쪽에 'replaced'를 보낸다) */
+  private continueHere(): void {
+    this.replaced = false;
+    this.replacedNotice.hide();
+    this.wake.resume();
+    this.keeper.resume();
+  }
+
+  private installLifecycleDebug(): void {
+    const keeper = this.keeper;
+    const guard = this.backGuard;
+    const net = this.net;
+    const lifeApp = this.lifeApp;
+    window.__DECOY_LIFE__ = {
+      get link() {
+        return keeper.status;
+      },
+      get connects() {
+        return keeper.connects;
+      },
+      get watchdogDrops() {
+        return keeper.watchdogDrops;
+      },
+      get guarding() {
+        return guard?.guarding ?? false;
+      },
+      lifeApp,
+      get clockFresh() {
+        return net.clockFresh;
+      },
+      hapticHit: (ageMs) => haptics.hit(ageMs),
+      hapticSpotted: (on, ageMs) => haptics.spotted(on, ageMs),
+      hapticLog: () => haptics.log.map((e) => e.pattern.slice()),
+    };
   }
 
   /** 다른 캐릭터를 그릴 시각 (스냅샷 시계 − 100ms) */
@@ -267,11 +476,18 @@ export class App {
         this.balanceHash = msg.balanceHash;
         this.you = msg.you;
         this.roomCode = msg.room;
+        this.returning = null;
+        this.homePrefill = '';
+        this.clearRejoin();
+        // 마지막 방 복귀로 기다리던 안내를 내린다
+        this.wake.opened();
+        this.renderWake();
         this.lobbyUi.setYou(msg.you);
         saveSeatToken(msg.room, msg.token);
+        if (this.lifeApp) saveLastRoom(msg.room);
         const url = new URL(window.location.href);
         url.searchParams.set('room', msg.room);
-        window.history.replaceState(null, '', url.toString());
+        window.history.replaceState(window.history.state, '', url.toString());
         return;
       }
       case 'lobby':
@@ -279,6 +495,7 @@ export class App {
         if (msg.lobby.phase === 'lobby') {
           this.match = null;
           this.result = null;
+          this.setPlaying(false);
           this.resultUi.hide();
           this.lobbyUi.renderRoom(msg.lobby);
         }
@@ -294,8 +511,11 @@ export class App {
         this.survivorsInterp.clear();
         this.monsterInterp.clear();
         this.snapClock.reset();
+        haptics.reset();
+        this.lobbyUi.matchStarting();
         this.lobbyUi.hide();
         this.resultUi.hide();
+        this.setPlaying(true);
         this.emit({ kind: 'match', info: msg.info });
         return;
       case 'snap': {
@@ -316,17 +536,29 @@ export class App {
       }
       case 'result':
         this.result = msg.result;
+        this.setPlaying(false);
         this.resultUi.show(msg.result, this.match?.role ?? null);
         this.emit({ kind: 'result', result: msg.result });
         return;
       case 'error':
         if (msg.code === 'replaced') {
+          // 다른 탭(기기)이 이 자리를 가져갔다: 다시 연결하지 않고 "여기서 계속하기"를 기다린다
           this.replaced = true;
-          showToast(msg.message, 6000);
+          this.keeper.stop();
+          this.setPlaying(false);
+          this.replacedNotice.show(msg.message);
           return;
+        }
+        // 마지막 방 복귀: 옛 소켓이 아직 그 자리에 붙어 있으면 30초 창 안에서 2초마다 다시
+        if ((msg.code === 'in-progress' || msg.code === 'room-full') && this.retryReturn()) return;
+        if (this.returning && msg.code === 'room-not-found') {
+          this.returning = null;
+          clearLastRoom();
         }
         if (msg.code === 'room-not-found' || msg.code === 'in-progress' || msg.code === 'room-full') {
           this.roomCode = null;
+          this.wake.opened();
+          this.renderWake();
           this.lobbyUi.renderHome();
         }
         // 링크 · 재연결로 들어가려던 방이 없으면 대개 서버가 잠들었다 깨어났거나 다시 시작한 것이다 (방은 메모리에만 있다)

@@ -9,7 +9,7 @@
 <html lang="ko">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>DECOY — 서버를 깨우는 중</title>
     <style>
       /* 로비와 같은 그래픽 언어 (M10c): 청록 격자 배경 + 비네트, 모서리를 깎은 어두운 유리 패널 + 얇은 청록 테두리 */
@@ -41,13 +41,15 @@
           repeating-linear-gradient(0deg, rgba(34, 211, 238, 0.04) 0 1px, transparent 1px 32px),
           repeating-linear-gradient(90deg, rgba(34, 211, 238, 0.04) 0 1px, transparent 1px 32px), var(--bg);
       }
+      /* 노치 · 둥근 모서리 · 제스처 띠(안전 영역) 안쪽에 둔다 (M12) */
       main {
         box-sizing: border-box;
         min-height: 100vh;
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 24px 16px;
+        padding: max(24px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px))
+          max(24px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
       }
       .card {
         --cut: 14px;
@@ -224,8 +226,9 @@
         const POLL_MS = 2000;
         const REQUEST_TIMEOUT_MS = 30000;
         const SLOW_MS = 90000;
-        // 깨어났다고 보고 새로고침했는데 또 이 화면이 뜨는 일이 짧은 시간에 반복되면 자동 새로고침을 멈춘다
-        const RELOAD_KEY = 'decoy-wake-reloads';
+        // 깨어났다고 보고 새로고침했는데 또 이 화면이 뜨는 일이 짧은 시간에 반복되면 자동 새로고침을 멈춘다.
+        // 기기 저장 키 목록(client/src/storageKeys.ts)의 wakeReloads와 같은 키 (tests/unit/storage-keys.test.ts가 대조)
+        const RELOAD_KEY = 'decoy:wakeReloads';
         const RELOAD_WINDOW_MS = 60000;
         const MAX_RELOADS = 3;
         const startedAt = Date.now();
