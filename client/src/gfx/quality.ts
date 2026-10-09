@@ -1,13 +1,17 @@
 // 그래픽 품질: 자동 선택 · 저장 · 판 중 FPS 감시 (순수 로직, Phaser를 import하지 않는다).
-// 우선순위: ?quality > 로비에서 고른 값(이번 세션에서 고른 값 > localStorage 'decoy:quality') > 자동
+// 우선순위: ?quality > 로비에서 고른 값(이번 세션에서 고른 값 > 저장값 'decoy:quality') > 자동
 // (MOBILE_PLAN M10 '그래픽 품질 단계'). 아래 FPS · 기기 기준값은 판정과 무관한 그래픽 값이라 balance.json이 아니라 여기 둔다.
+import { STORAGE_KEYS, browserStorage, type StorageLike } from '../storageKeys';
 import { isQualityTier, lowerTier, type QualityTier, type RendererKind } from './presets';
+
+// 저장소 접근은 storageKeys.ts에서만 (M12). 기존 import 경로를 지키려고 다시 내보낸다
+export { browserStorage, type StorageLike };
 
 /** 로비 선택지: 자동 또는 단계 하나 */
 export type QualityChoice = 'auto' | QualityTier;
 export type QualitySource = 'url' | 'saved' | 'auto';
 
-export const QUALITY_STORAGE_KEY = 'decoy:quality';
+export const QUALITY_STORAGE_KEY = STORAGE_KEYS.quality.key;
 
 /** 터치 기기에서 낮음으로 시작하는 기준 (이하이면 낮음) */
 export const LOW_END_CORES = 4;
@@ -63,21 +67,6 @@ export function parseQuality(raw: string | null): QualityTier | null {
 /** 로비 선택지 해석 */
 export function parseQualityChoice(raw: string): QualityChoice | null {
   return raw === 'auto' ? 'auto' : parseQuality(raw);
-}
-
-export interface StorageLike {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-  removeItem(key: string): void;
-}
-
-/** 브라우저 localStorage (사생활 보호 모드 · 차단된 저장소에서는 접근만으로 예외가 날 수 있다) */
-export function browserStorage(): StorageLike | null {
-  try {
-    return typeof localStorage === 'undefined' ? null : localStorage;
-  } catch {
-    return null;
-  }
 }
 
 /** 저장된 품질 (없거나 읽을 수 없으면 null) */

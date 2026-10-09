@@ -5,6 +5,7 @@ import {
   type DrawnEntity,
   type FxTarget,
   type GameEvent,
+  type HudLayoutItem,
   type InfoItem,
   type InputFrame,
   type InputLogEntry,
@@ -31,7 +32,7 @@ import { HudKit, type Slice } from '../ui/hudKit';
 import { VIEW_H, VIEW_W, fitCamera, screenToTile } from '../ui/layout';
 import { Minimap } from '../ui/minimap';
 import { Scoreboard, TutorialOverlay } from '../ui/overlays';
-import { drawProbeText } from '../ui/text';
+import { PROBE_DEPTH, drawProbeText } from '../ui/text';
 import { TouchControls } from '../ui/touchControls';
 import { staleEventLimitMs, trackFrameMs } from './staleEvents';
 
@@ -166,6 +167,40 @@ export class GameScene extends Phaser.Scene {
       panels: JSON.stringify(drawn),
       missingFrames: [...this.kit.missing].sort().join(','),
     };
+  }
+
+  /**
+   * 디버그 · 테스트: 보이는 HUD 글자 · 그림 (M12 getHudLayout, 논리 px). 깊이 39 이상(미니맵 · HUD · 배너 · 안내 · 점수판)에서
+   * 화면 효과 · 발각 테두리 · 선명도 탐침을 뺀다. 글자 크기 = 글꼴 px × 세로 배율. 표시 목록에서 직접 잰다(자기 신고 아님)
+   */
+  get hudItems(): HudLayoutItem[] {
+    const items: HudLayoutItem[] = [];
+    if (!this.hud) return items;
+    const r1 = (v: number): number => Math.round(v * 10) / 10;
+    let n = 0;
+    for (const o of this.children.list) {
+      const text = o instanceof Phaser.GameObjects.Text;
+      if (!(text || o instanceof Phaser.GameObjects.Image)) continue;
+      if (!o.visible || o.alpha === 0 || o.depth < 39 || o.depth >= PROBE_DEPTH) continue;
+      if (this.screenFx.owns(o) || this.spottedEdge.owns(o)) continue;
+      const b = o.getBounds();
+      if (b.width <= 0 || b.height <= 0) continue;
+      n += 1;
+      const item: HudLayoutItem = {
+        id: o.name || `${text ? 'text' : 'image'}${n}`,
+        kind: text ? 'text' : 'image',
+        x: r1(b.x),
+        y: r1(b.y),
+        w: r1(b.width),
+        h: r1(b.height),
+      };
+      if (text) {
+        item.fontPx = r1(parseFloat(String(o.style.fontSize)) * Math.abs(o.scaleY));
+        item.text = o.text;
+      }
+      items.push(item);
+    }
+    return items;
   }
 
   /** 디버그 · 테스트: 최근 입력 프레임 120개, 오래된 것부터 (pressed는 한 프레임만 살아 lastFrame으로는 놓친다) */

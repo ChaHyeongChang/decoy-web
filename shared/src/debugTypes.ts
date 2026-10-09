@@ -71,6 +71,11 @@ export interface GfxDebugInfo {
   renderer: 'webgl' | 'canvas';
   /** 터치 기기로 판단했는가 */
   touch: boolean;
+  /** 판 배치 (M12): PC 1920×1080 · 터치 넓은 화면(2:1 이상) · 터치 16:9 */
+  layout: 'pc' | 'touchWide' | 'touchNarrow';
+  /** 논리 해상도 (M12, PC 1920×1080) */
+  viewW: number;
+  viewH: number;
   dpr: number;
   /** 캔버스 표시 크기 (CSS px) */
   cssW: number;
@@ -138,6 +143,35 @@ export interface TouchTarget {
   h: number;
 }
 
+/** 판 화면의 HUD 부품 하나 (M12, CSS px · 창 기준). 표시 목록에서 직접 모은다(자기 신고 아님) */
+export interface HudLayoutItem {
+  /** 부품 이름 (Phaser 객체 name, 없으면 종류 + 순번) */
+  id: string;
+  kind: 'text' | 'image';
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** 글자: 화면에 그려지는 글자 크기 (CSS px = 글꼴 px × 배율 × 논리 → CSS) */
+  fontPx?: number;
+  /** 글자 내용 */
+  text?: string;
+}
+
+/** 판 화면 HUD 배치 (M12): 터치 글자 크기 · HUD와 터치 컨트롤 겹침 검사용 */
+export interface HudLayout {
+  layout: 'pc' | 'touchWide' | 'touchNarrow';
+  /** 논리 해상도 */
+  viewW: number;
+  viewH: number;
+  /** 논리 1px이 몇 CSS px인가 */
+  cssPerLogical: number;
+  /** 맵 사각형 (CSS px · 창 기준) */
+  map: { x: number; y: number; w: number; h: number };
+  /** 보이는 HUD 글자 · 그림 (월드 · 화면 효과 제외) */
+  items: HudLayoutItem[];
+}
+
 export interface DecoyDebug {
   /** 그래픽 상태 (M10) */
   readonly gfx: Readonly<GfxDebugInfo>;
@@ -191,6 +225,8 @@ export interface DecoyDebug {
   readonly inputMode: 'keyboard' | 'touch';
   /** 보이는 터치 대상 (M11) */
   getTouchTargets(): TouchTarget[];
+  /** 판 화면 HUD 배치 (M12, 판 장면이 없으면 null) */
+  getHudLayout(): HudLayout | null;
   serverNow(): number;
   sendTest(cmd: TestCommand): void;
   /** 타일 좌표 → 브라우저 창 좌표 (E2E에서 마우스를 옮길 때) */

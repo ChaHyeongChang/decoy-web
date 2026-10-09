@@ -3,7 +3,7 @@ import Phaser from 'phaser';
 import { App, readParams } from './app';
 import { sfx } from './audio';
 import { installDebug } from './debug';
-import { canOfferFullscreen, enterFullscreen, initDevice } from './device';
+import { canOfferFullscreen, device, enterFullscreen, initDevice } from './device';
 import type { QualityPreset, QualityTier, RendererKind } from './gfx/presets';
 import {
   detectQuality,
@@ -23,11 +23,23 @@ import { computeRenderSize, type RenderSize } from './render/resolution';
 import { GameScene } from './scenes/GameScene';
 import { fontState, loadUiFonts, onUiFontsLate, uiFontsReady } from './ui/fonts';
 import { prebakeHud } from './ui/hudKit';
-import { RENDER_SCALE, VIEW_H, VIEW_W, fitCamera, setRenderScale } from './ui/layout';
+import {
+  RENDER_SCALE,
+  VIEW_H,
+  VIEW_W,
+  configureLayout,
+  fitCamera,
+  layout,
+  setRenderScale,
+} from './ui/layout';
 import { drawProbeText, relayoutAll, retextAll } from './ui/text';
 
 /** 창 크기 · DPR이 바뀐 뒤 백버퍼를 다시 만들 때까지 기다리는 시간 (끌어서 바꾸는 동안 매번 만들지 않게) */
 const RESIZE_DEBOUNCE_MS = 150;
+/** 터치 모드 판 시작: 가로 · 전체 화면 전환에 따른 크기 변화를 기다리는 최대 시간 (MOBILE_PLAN M12 1번) */
+const LAYOUT_SETTLE_MAX_MS = 300;
+/** 이 시간 동안 크기가 그대로면 전환이 끝난 것으로 본다 */
+const LAYOUT_SETTLE_QUIET_MS = 100;
 
 const params = readParams(window.location.search);
 // 터치 모드 · 세로 · 브라우저 안 (M11). 로비가 전체 화면 버튼을 그리기 전에 정한다
@@ -408,6 +420,47 @@ void loadUiFonts().then((ok) => {
 // 시간 제한(3초)을 넘겨 늦게 받았으면 그때 다시 그린다 (그 사이 판이 대체 글꼴로 시작했을 수 있다)
 onUiFontsLate(relayoutScenes);
 
+/**
+ * 터치 모드에서 판을 시작하기 전에 화면 크기가 자리 잡기를 기다린다 (가로 고정 · 전체 화면 전환, 세로로 열었다 돌린 경우).
+ * 크기가 LAYOUT_SETTLE_QUIET_MS 동안 그대로이고 가로면 바로, 아니면 최대 LAYOUT_SETTLE_MAX_MS. PC는 기다리지 않는다
+ */
+function settleViewport(): Promise<void> {
+  if (!device.touch) return Promise.resolve();
+  return new Promise((resolve) => {
+    const start = performance.now();
+    let last = '';
+    let quietSince = start;
+    const tick = (): void => {
+      const now = performance.now();
+      const r = gameRoot.getBoundingClientRect();
+      const key = `${Math.round(r.width)}x${Math.round(r.height)}`;
+      if (key !== last) {
+        last = key;
+        quietSince = now;
+      }
+      const landscape = r.width >= r.height;
+      if (now - start >= LAYOUT_SETTLE_MAX_MS || (landscape && now - quietSince >= LAYOUT_SETTLE_QUIET_MS))
+        resolve();
+      else window.setTimeout(tick, 16);
+    };
+    tick();
+  });
+}
+
+/**
+ * 판 배치를 정하고(PC는 언제나 1920×1080) 논리 크기가 바뀌었으면 백버퍼 · 카메라를 다시 맞춘다.
+ * 판 장면을 만들기 직전에만 부른다(판 중 크기 변화는 논리 크기를 두고 zoom만 다시 맞춘다)
+ */
+function applyMatchLayout(): void {
+  const r = gameRoot.getBoundingClientRect();
+  const before = layout();
+  const next = configureLayout(r.width, r.height, device.touch);
+  gfxState.layout = next.kind;
+  gfxState.viewW = next.viewW;
+  gfxState.viewH = next.viewH;
+  if (next.viewW !== before.viewW || next.viewH !== before.viewH) applyResolution(true);
+}
+
 /** 판 장면 시작 요청 번호 (폰트를 기다리는 동안 로비로 돌아가면 시작하지 않는다) */
 let sceneRequest = 0;
 /** 이번 판 전에 로비(대기)를 거쳤는가. 아니면 진행 중인 판에 다시 들어온 것이다 */
@@ -419,11 +472,12 @@ app.subscribe((e) => {
     // 진행 중인 판에 다시 들어왔으면 기다리지 않는다(판은 계속 흐른다). 늦게 받은 폰트는 onUiFontsLate가 다시 그린다
     const fonts = fromLobby ? loadUiFonts() : Promise.resolve(uiFontsReady());
     fromLobby = false;
-    void fonts.then((ok) => {
+    void Promise.all([fonts, settleViewport()]).then(([ok]) => {
       if (req !== sceneRequest) return;
       // 첫 받기가 시간 초과로 끝난 뒤 늦게 받았으면 loadUiFonts()는 계속 false다. 지금 준비됐는지로 기록한다
       fontState.atSceneStart = ok || uiFontsReady();
       game.scene.stop('game');
+      applyMatchLayout();
       game.scene.start('game', { app });
     });
   } else if (e.kind === 'lobby' && e.lobby.phase === 'lobby') {
