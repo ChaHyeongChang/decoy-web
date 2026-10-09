@@ -26,7 +26,7 @@ import { staleEventLimitMs, trackFrameMs } from './staleEvents';
 export const FOG_ENABLED = true;
 /** 입력이 밀렸을 때 한 번에 따라잡는 최대 스텝 */
 const MAX_CATCHUP_STEPS = 4;
-/** 첫 판 조작 안내 표시 시간 (VISUAL_SPEC 6장) */
+/** 첫 판 조작 안내 표시 시간 (VISUAL_SPEC 8.3) */
 const TUTORIAL_SECONDS = 5;
 const EXIT_NAMES = { N: '북', S: '남' } as const;
 /** 알림 배너의 톤 · 아이콘 (색만으로 구분하지 않기: 아이콘이 같이 바뀐다) */

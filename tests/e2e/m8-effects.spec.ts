@@ -1,4 +1,4 @@
-// M8: 연출과 소리 — VISUAL_SPEC 4장 연출이 실제로 그려지고, 효과음이 맞는 사람에게 울리고, 콘솔 에러가 없다
+// M8: 연출과 소리 — VISUAL_SPEC 6.2 연출이 실제로 그려지고, 효과음이 맞는 사람에게 울리고, 콘솔 에러가 없다
 import { expect, test, type Page } from '@playwright/test';
 import { aimTile, closeAll, lastSnapshot, sendTest, startFourPlayerMatch } from './helpers';
 

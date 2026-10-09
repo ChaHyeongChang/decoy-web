@@ -83,6 +83,7 @@ push · PR마다(그리고 main에 들어갈 때) GitHub Actions(`.github/workfl
 | [docs/GAME_DESIGN.md](docs/GAME_DESIGN.md) | 규칙의 원본 |
 | [docs/TECH_SPEC.md](docs/TECH_SPEC.md) | 구조 · 네트워크 · 정보 차단 · 테스트 |
 | [docs/VISUAL_SPEC.md](docs/VISUAL_SPEC.md) | 색 · 형태 · 연출 · HUD |
+| [docs/CREDITS.md](docs/CREDITS.md) | 외부 에셋(폰트 · 로고 · 이미지) 출처와 라이선스 |
 | [docs/STORY_TEXT.md](docs/STORY_TEXT.md) | 게임 내 문구 |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | 로컬 · 같은 와이파이 · 인터넷 배포 (Render 무료 플랜 단계별 절차 포함) |
 | [docs/PLAYTEST_GUIDE.md](docs/PLAYTEST_GUIDE.md) | 테스터용 플레이테스트 방법 |
@@ -90,7 +91,7 @@ push · PR마다(그리고 main에 들어갈 때) GitHub Actions(`.github/workfl
 | [docs/HUMAN_CHECKS.md](docs/HUMAN_CHECKS.md) | 사람이 직접 확인할 것 |
 | [docs/PROGRESS.md](docs/PROGRESS.md) | 마일스톤별 진행 기록 |
 
-`docs/images/concept_*.png`는 생성형 AI로 만든 분위기 참고용 이미지로, 게임에서는 쓰지 않는다 (게임에 쓰는 이미지는 로고 `docs/images/logo_decoy.png` 하나).
+`docs/images/concept_*.png`는 생성형 AI로 만든 분위기 참고용 이미지로, 게임에서는 쓰지 않는다. 게임에 실리는 외부 파일은 로고(원본 `docs/images/logo_decoy.png`는 파비콘 · 작은 크기, 같은 디자인으로 다시 그린 SVG는 큰 화면)와 UI 폰트(Noto Sans KR 서브셋, SIL OFL 1.1)뿐이고, 출처 · 라이선스는 [docs/CREDITS.md](docs/CREDITS.md)에 적는다.
 
 ## 폴더
 
