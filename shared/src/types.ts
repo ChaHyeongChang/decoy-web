@@ -286,6 +286,8 @@ export interface PlayerRecord {
   /** 점령 기여 (거점 안에서 게이지를 올린 초) */
   captureSeconds: number;
   status: SurvivorStatus | null;
+  /** 봇 자리 (M13c: 빠른 매칭은 봇 표시를 결과 화면에서만 한다). 방이 보낼 때 채운다 */
+  bot?: boolean;
 }
 
 export interface MatchResult {
@@ -333,7 +335,14 @@ export type ClientMessage =
   | { t: 'test'; cmd: TestCommand };
 
 export type ErrorCode =
-  'room-not-found' | 'room-full' | 'in-progress' | 'bad-request' | 'not-allowed' | 'replaced';
+  | 'room-not-found'
+  | 'room-full'
+  | 'in-progress'
+  | 'bad-request'
+  | 'not-allowed'
+  | 'replaced'
+  /** 빠른 매칭 대기열에서 빠졌다 (자동 시작 순간 3초 넘게 소식이 없던 자리, M13c) */
+  | 'queue-dropped';
 
 export type ServerMessage =
   | { t: 'welcome'; you: string; token: string; room: string; balance: Balance; balanceHash: string }

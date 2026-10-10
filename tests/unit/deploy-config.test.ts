@@ -2,7 +2,12 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
-import { HEALTH_PATH, SERVER_MARK_HEADER, parseOptions } from '../../server/src/config';
+import {
+  DEFAULT_MAX_BOT_ROOMS,
+  HEALTH_PATH,
+  SERVER_MARK_HEADER,
+  parseOptions,
+} from '../../server/src/config';
 
 interface RenderEnvVar {
   key: string;
@@ -69,6 +74,16 @@ describe('서버 포트 · 주소 옵션', () => {
     expect(parseOptions([], { PORT: '' }).port).toBe(8080);
     expect(parseOptions([], { PORT: '  ' }).port).toBe(8080);
     expect(parseOptions([], { PORT: 'abc' }).port).toBe(8080);
+  });
+
+  it('동시 봇 방 상한 (M13c): 기본값, DECOY_MAX_BOT_ROOMS · --max-bot-rooms로 바꾸고, 잘못된 값은 기본값 · 음수는 0', () => {
+    expect(parseOptions([], {}).maxBotRooms).toBe(DEFAULT_MAX_BOT_ROOMS);
+    expect(parseOptions([], { DECOY_MAX_BOT_ROOMS: '12' }).maxBotRooms).toBe(12);
+    expect(parseOptions(['--max-bot-rooms=3'], { DECOY_MAX_BOT_ROOMS: '12' }).maxBotRooms).toBe(3);
+    expect(parseOptions([], { DECOY_MAX_BOT_ROOMS: '' }).maxBotRooms).toBe(DEFAULT_MAX_BOT_ROOMS);
+    expect(parseOptions([], { DECOY_MAX_BOT_ROOMS: 'x' }).maxBotRooms).toBe(DEFAULT_MAX_BOT_ROOMS);
+    expect(parseOptions([], { DECOY_MAX_BOT_ROOMS: '-2' }).maxBotRooms).toBe(0);
+    expect(parseOptions([], { DECOY_MAX_BOT_ROOMS: '2.7' }).maxBotRooms).toBe(2);
   });
 
   it('컨테이너 밖에서 접속할 수 있게 기본 주소는 0.0.0.0', () => {

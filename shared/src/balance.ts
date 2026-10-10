@@ -101,6 +101,11 @@ export interface Balance {
     openTime: number;
     pausedWhenMonsterInside: boolean;
   };
+  /** 빠른 매칭 (M13c, GAME_DESIGN 11장) */
+  matchmaking: {
+    /** 첫 사람이 들어온 뒤 이 시간(초)이 지나면 4명이 안 돼도 빈자리를 봇으로 채워 시작한다 */
+    quickMatchWait: number;
+  };
   network: {
     serverTickHz: number;
     snapshotHz: number;
@@ -208,6 +213,9 @@ const SCHEMA: Shape = {
     requiredSurvivors: 'int',
     openTime: 'nonneg',
     pausedWhenMonsterInside: 'bool',
+  },
+  matchmaking: {
+    quickMatchWait: 'pos',
   },
   network: {
     serverTickHz: 'pos',

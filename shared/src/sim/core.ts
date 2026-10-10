@@ -48,9 +48,12 @@ export class ServerCore {
       }
       if (typeof msg !== 'object' || msg === null || typeof msg.t !== 'string') return;
       const now = this.now();
-      if (msg.t === 'join') {
-        if (bound) return;
-        const r = this.manager.join(conn, msg);
+      // 지금도 이 연결이 그 자리에 붙어 있는가 (다른 연결이 넘겨받았거나 대기열에서 빠졌으면 풀린 것으로 본다)
+      const live = bound && bound.seat.conn?.id === conn.id ? bound : null;
+      if (msg.t === 'join' || msg.t === 'quick') {
+        if (live) return;
+        const r =
+          msg.t === 'join' ? this.manager.join(conn, msg, now) : this.manager.quick(conn, msg.name, now);
         if ('error' in r) {
           conn.send(r.error);
           return;
@@ -59,12 +62,21 @@ export class ServerCore {
         r.room.welcome(r.seat);
         return;
       }
-      if (msg.t === 'ping' && !bound) {
+      if (msg.t === 'ping' && !live) {
         conn.send({ t: 'pong', c: msg.c, s: now });
         return;
       }
-      if (!bound || bound.seat.conn?.id !== conn.id) return;
-      bound.room.handle(bound.seat, msg, now);
+      if (!live) return;
+      // 빠른 매칭은 판 뒤 방을 해산한다: 다시 하기는 누른 사람만 다시 대기열로 (다른 사람은 결과에 그대로, M13c)
+      if (msg.t === 'rematch' && live.room.kind === 'quick' && live.room.phase === 'result') {
+        const name = live.seat.name;
+        live.room.leave(live.seat, now);
+        const r = this.manager.quick(conn, name, now);
+        bound = r;
+        r.room.welcome(r.seat);
+        return;
+      }
+      live.room.handle(live.seat, msg, now);
       // 나가기: 자리와의 묶음을 푼다 (같은 연결로 다른 방에 들어갈 수 있다)
       if (msg.t === 'leave') bound = null;
     };
