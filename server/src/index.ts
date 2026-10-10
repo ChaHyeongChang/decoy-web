@@ -16,9 +16,17 @@ const balance = loadBalance(options.balancePath);
 const truthLog = options.truthLogPath ? new TruthLog(options.truthLogPath) : null;
 const lagRng = new Rng(options.seed ^ 0x5bd1e995);
 
-// 빠른 매칭 빈자리 봇 (M13c): 같은 프로세스 실전 봇 (기기 안 연습과 같은 두뇌 · 드라이버, 소켓 없음)
+/** 방 코드 → 정수 (한 방의 봇이 같은 시드를 쓰게) */
+function codeSeed(code: string): number {
+  let h = options.seed | 0;
+  for (let i = 0; i < code.length; i += 1) h = (Math.imul(h, 31) + code.charCodeAt(i)) | 0;
+  return h;
+}
+
+// 빠른 매칭 빈자리 봇 (M13c): 같은 프로세스 실전 봇 (기기 안 연습과 같은 두뇌 · 드라이버, 소켓 없음).
+// 한 방의 봇은 같은 시드 (생존자 봇의 점령 계획이 서로 맞물린다), 판마다 다르게 판 수를 섞는다
 const quickBots = new BotDriver(
-  (info, seat) => practiceBrain(info.role, (options.seed + seat.joinOrder * 7919) | 0),
+  (info, _seat, room) => practiceBrain(info.role, (codeSeed(room.code) + room.matchCount * 7919) | 0),
   balance,
 );
 
