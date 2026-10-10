@@ -187,7 +187,8 @@ test('괴물로 연습할 때 받은 스냅샷에 시야 밖 생존자가 0명�
   await page.getByTestId('practice').click();
   await page.getByTestId('practice-role-monster').click();
   await expect.poll(async () => (await practiceState(page)).phase, { timeout: 10_000 }).toBe('playing');
-  // 생존자 봇 하나를 괴물 앞에, 하나를 벽 뒤에, 하나를 멀리 세워 둔다 (봇이 걷기 시작해도 시야 안팎이 섞이게)
+  // 생존자 봇 하나를 괴물 앞에, 하나를 벽 뒤에, 하나를 멀리 세우고 멈춘다. 실전 봇은 괴물을 보면 바로 달아나서
+  // 멈추지 않으면 부하가 걸린 러너에서 '보인 생존자' 표본이 몇 개밖에 안 남는다 (시야 안팎 대조가 비지 않게)
   const t = await localTruth(page);
   const mon = t.players.find((p) => p.role === 'monster');
   const survivors = t.players.filter((p) => p.role !== 'monster');
@@ -200,6 +201,7 @@ test('괴물로 연습할 때 받은 스냅샷에 시야 밖 생존자가 0명�
       d.sendTest({ kind: 'teleport', target: s[0] ?? '', x: 24, y: 20.5 });
       d.sendTest({ kind: 'teleport', target: s[1] ?? '', x: 8, y: 16 });
       d.sendTest({ kind: 'teleport', target: s[2] ?? '', x: 31, y: 21 });
+      for (const id of s) d.sendTest({ kind: 'freeze', target: id, frozen: true });
     },
     [mon.id, survivors.map((p) => p.id)] as const,
   );
