@@ -73,6 +73,10 @@
     "pausedWhenMonsterInside": false
   },
 
+  "matchmaking": {
+    "quickMatchWait": 20
+  },
+
   "network": {
     "serverTickHz": 30,
     "snapshotHz": 20,

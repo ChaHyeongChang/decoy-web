@@ -428,8 +428,10 @@ function runScenario(): RunResult {
     hash.update(line);
     hash.update('\n');
   };
-  // 수치(balance.json)도 판정의 일부다: 시나리오에 드러나지 않는 값(예: 공격 사거리)을 바꿔도 해시가 바뀌게
-  hash.update(JSON.stringify(game.balance));
+  // 수치(balance.json)도 판정의 일부다: 시나리오에 드러나지 않는 값(예: 공격 사거리)을 바꿔도 해시가 바뀌게.
+  // 빠른 매칭 대기(matchmaking, M13c)는 판 밖 대기열 수치라 뺀다 (판정과 무관, 바꿔도 해시가 그대로)
+  const { matchmaking: _lobbyOnly, ...judged } = game.balance;
+  hash.update(JSON.stringify(judged));
   hash.update('\n');
   record();
   for (let t = 0; t < TOTAL_TICKS; t += 1) {
