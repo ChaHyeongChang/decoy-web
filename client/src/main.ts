@@ -3,7 +3,7 @@ import Phaser from 'phaser';
 import { App, readParams } from './app';
 import { sfx } from './audio';
 import { installDebug } from './debug';
-import { canOfferFullscreen, device, enterFullscreen, initDevice } from './device';
+import { canOfferFullscreen, device, enterFullscreen, initDevice, onDeviceChange } from './device';
 import type { QualityPreset, QualityTier, RendererKind } from './gfx/presets';
 import {
   autoQuality,
@@ -28,6 +28,7 @@ import { currentPreset, gfxState, notifyGfxChange, onGfxChange, probeSlot } from
 import { prebakeAtlas } from './art/atlas';
 import { prebakeFogArt } from './render/baseLayer';
 import { computeRenderSize, type RenderSize } from './render/resolution';
+import { settleSize } from './render/settle';
 import { GameScene } from './scenes/GameScene';
 import { fontState, loadUiFonts, onUiFontsLate, uiFontsReady } from './ui/fonts';
 import { prebakeHud } from './ui/hudKit';
@@ -44,10 +45,6 @@ import { drawProbeText, relayoutAll, retextAll } from './ui/text';
 
 /** 창 크기 · DPR이 바뀐 뒤 백버퍼를 다시 만들 때까지 기다리는 시간 (끌어서 바꾸는 동안 매번 만들지 않게) */
 const RESIZE_DEBOUNCE_MS = 150;
-/** 터치 모드 판 시작: 가로 · 전체 화면 전환에 따른 크기 변화를 기다리는 최대 시간 (MOBILE_PLAN M12 1번) */
-const LAYOUT_SETTLE_MAX_MS = 300;
-/** 이 시간 동안 크기가 그대로면 전환이 끝난 것으로 본다 */
-const LAYOUT_SETTLE_QUIET_MS = 100;
 
 const params = readParams(window.location.search);
 // 터치 모드 · 세로 · 브라우저 안 (M11). 로비가 전체 화면 버튼을 그리기 전에 정한다
@@ -353,6 +350,8 @@ function onBooted(): void {
   setQuality(decideQuality());
   applyResolution(true);
   window.addEventListener('resize', onViewportChange);
+  // 가로 180° 뒤집기: 창 크기는 그대로라 resize가 없고 안전 영역(#game-root 자리)만 바뀐다
+  screen.orientation?.addEventListener('change', onViewportChange);
   watchDpr();
 }
 // 문서가 이미 준비되어 있으면(모듈 스크립트는 늘 그렇다) Phaser는 생성자 안에서 바로 부팅한다.
@@ -430,6 +429,8 @@ function schedulePrebake(): void {
   const run = (): void => {
     prebakeTimer = null;
     if (!game.isBooted || game.scene.isActive('game')) return;
+    // 터치: 판 배치(논리 크기 → 배율 · HUD 서명)로 굽는다. 아니면 첫 판 시작 때 맵 · 캐릭터 · HUD를 모두 다시 굽는다
+    if (device.touch) applyMatchLayout();
     prebakeFogArt();
     const b = app.balance;
     if (b) prebakeAtlas(game.scene.getScene('idle'), b.survivor.radius, b.monster.radius);
@@ -454,36 +455,36 @@ void loadUiFonts().then((ok) => {
 // 시간 제한(3초)을 넘겨 늦게 받았으면 그때 다시 그린다 (그 사이 판이 대체 글꼴로 시작했을 수 있다)
 onUiFontsLate(relayoutScenes);
 
+/** 판 시작 전 크기 대기를 멈춘다 (로비 복귀 · 결과 · 새 판: 그 판 장면은 시작하지 않는다) */
+let stopSettle = (): void => undefined;
+
 /**
  * 터치 모드에서 판을 시작하기 전에 화면 크기가 자리 잡기를 기다린다 (가로 고정 · 전체 화면 전환, 세로로 열었다 돌린 경우).
- * 크기가 LAYOUT_SETTLE_QUIET_MS 동안 그대로이고 가로면 바로, 아니면 최대 LAYOUT_SETTLE_MAX_MS. PC는 기다리지 않는다
+ * 세로 안내가 덮고 있으면 가로가 될 때까지 기다린다 (render/settle.ts). PC는 기다리지 않는다
  */
 function settleViewport(): Promise<void> {
+  stopSettle();
   if (!device.touch) return Promise.resolve();
   return new Promise((resolve) => {
-    const start = performance.now();
-    let last = '';
-    let quietSince = start;
-    const tick = (): void => {
-      const now = performance.now();
-      const r = gameRoot.getBoundingClientRect();
-      const key = `${Math.round(r.width)}x${Math.round(r.height)}`;
-      if (key !== last) {
-        last = key;
-        quietSince = now;
-      }
-      const landscape = r.width >= r.height;
-      if (now - start >= LAYOUT_SETTLE_MAX_MS || (landscape && now - quietSince >= LAYOUT_SETTLE_QUIET_MS))
-        resolve();
-      else window.setTimeout(tick, 16);
-    };
-    tick();
+    stopSettle = settleSize(
+      {
+        size: () => gameRoot.getBoundingClientRect(),
+        portrait: () => device.portrait,
+        onTurn: onDeviceChange,
+        now: () => performance.now(),
+        later: (fn, ms) => {
+          const t = window.setTimeout(fn, ms);
+          return () => window.clearTimeout(t);
+        },
+      },
+      resolve,
+    );
   });
 }
 
 /**
  * 판 배치를 정하고(PC는 언제나 1920×1080) 논리 크기가 바뀌었으면 백버퍼 · 카메라를 다시 맞춘다.
- * 판 장면을 만들기 직전에만 부른다(판 중 크기 변화는 논리 크기를 두고 zoom만 다시 맞춘다)
+ * 판 장면을 만들기 직전과 터치 로비의 미리 굽기 앞에서만 부른다(판 중 크기 변화는 논리 크기를 두고 zoom만 다시 맞춘다)
  */
 function applyMatchLayout(): void {
   const r = gameRoot.getBoundingClientRect();
@@ -492,7 +493,11 @@ function applyMatchLayout(): void {
   gfxState.layout = next.kind;
   gfxState.viewW = next.viewW;
   gfxState.viewH = next.viewH;
-  if (next.viewW !== before.viewW || next.viewH !== before.viewH) applyResolution(true);
+  // 논리 크기가 그대로여도 지금 크기로 맞춘다: 디바운스를 기다리는 크기 변화(회전 · 전체 화면)가 있으면 판 장면이 낡은 배율로
+  // 굽고 곧바로 다시 굽는다. 바뀐 것이 없으면 캔버스 자리만 다시 놓는다
+  if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+  resizeTimer = null;
+  applyResolution(next.viewW !== before.viewW || next.viewH !== before.viewH);
 }
 
 /** 판 장면 시작 요청 번호 (폰트를 기다리는 동안 로비로 돌아가면 시작하지 않는다) */
@@ -514,7 +519,9 @@ app.subscribe((e) => {
       applyMatchLayout();
       game.scene.start('game', { app });
     });
-  } else if (e.kind === 'lobby' && e.lobby.phase === 'lobby') {
+  } else if (e.kind === 'result') stopSettle();
+  else if (e.kind === 'lobby' && e.lobby.phase === 'lobby') {
+    stopSettle();
     sceneRequest++;
     fromLobby = true;
     if (game.scene.isActive('game')) game.scene.stop('game');
