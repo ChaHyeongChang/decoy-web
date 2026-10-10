@@ -12,6 +12,7 @@ import {
   type InputFrame,
   type MatchInfo,
   type MoverContext,
+  type Role,
   type Snapshot,
   type SurvivorView,
   type Vec2,
@@ -53,6 +54,11 @@ const HOLD_HYSTERESIS = 0.5;
 /** 목표 이 거리 안에서는 입력 크기를 줄여 천천히 다가간다 (지연 때문에 목표를 지나치지 않게) */
 const SLOW_RADIUS = 1.0;
 
+function unit(dx: number, dy: number): Vec2 {
+  const d = Math.hypot(dx, dy);
+  return d < 0.08 ? { x: 0, y: 0 } : { x: dx / d, y: dy / d };
+}
+
 export class Walker {
   private readonly follower = new PathFollower();
   private holding = false;
@@ -68,7 +74,11 @@ export class Walker {
       return { mx: 0, my: 0, arrived: true };
     }
     this.holding = false;
-    const v = this.follower.moveToward(me, target, moverOf(snap), snap.tick);
+    const ctx = moverOf(snap);
+    // 수감 중에는 감옥 밖 목표로 가는 길이 없다: 탐색하지 않고 곧장 (예전에는 매 틱 맵 전체를 뒤진 끝에 곧장 갔다)
+    const v = ctx.imprisoned
+      ? unit(target.x - me.x, target.y - me.y)
+      : this.follower.moveToward(me, target, ctx, snap.tick);
     const k = Math.max(0.25, Math.min(1, d / SLOW_RADIUS));
     return { mx: v.x * k, my: v.y * k, arrived: false };
   }
@@ -76,22 +86,46 @@ export class Walker {
 
 // ───────────────────────── 개발용 봇 (?bots=1) ─────────────────────────
 
+/**
+ * 개발용 봇 순찰 지점 (?bots=1). 모두 바닥 타일 위다 (M13a: 괴물 (24,24) · 러너 (8,26)이 기둥 위라 닿지 못하고
+ * 매 틱 맵 전체를 탐색했다 → (24,22) · (10,26)으로 옮김. 시험이 모든 점이 이동 가능 · 도달 가능한지 확인한다)
+ */
+export const DEV_PATROLS: Readonly<Record<Role, readonly Vec2[]>> = {
+  monster: [
+    { x: 40, y: 16 },
+    { x: 34, y: 26 },
+    { x: 24, y: 22 },
+    { x: 14, y: 26 },
+    { x: 8, y: 16 },
+    { x: 14, y: 6 },
+    { x: 24, y: 9 },
+    { x: 34, y: 6 },
+  ],
+  runner: [
+    { x: 24, y: 20 },
+    { x: 14, y: 22 },
+    { x: 10, y: 26 },
+    { x: 4, y: 16 },
+  ],
+  guard: [
+    { x: 24, y: 20 },
+    { x: 34, y: 18 },
+    { x: 40, y: 12 },
+    { x: 44, y: 20 },
+  ],
+  scout: [
+    { x: 24, y: 20 },
+    { x: 24, y: 26 },
+    { x: 18, y: 29 },
+    { x: 30, y: 29 },
+  ],
+};
+
 /** 괴물 봇: 순찰 지점을 돌면서 조준을 천천히 돌린다. 공격하지 않는다 */
 export class PatrolMonsterBrain implements BotBrain {
   private readonly walker = new Walker();
   private idx = 0;
-  constructor(
-    private readonly points: Vec2[] = [
-      { x: 40, y: 16 },
-      { x: 34, y: 26 },
-      { x: 24, y: 24 },
-      { x: 14, y: 26 },
-      { x: 8, y: 16 },
-      { x: 14, y: 6 },
-      { x: 24, y: 9 },
-      { x: 34, y: 6 },
-    ],
-  ) {}
+  constructor(private readonly points: readonly Vec2[] = DEV_PATROLS.monster) {}
 
   decide(snap: Snapshot, _info: MatchInfo, _b: Balance, seq: number): InputFrame {
     const target = this.points[this.idx % this.points.length] ?? { x: 24, y: 24 };
@@ -106,7 +140,7 @@ export class PatrolMonsterBrain implements BotBrain {
 export class PatrolSurvivorBrain implements BotBrain {
   private readonly walker = new Walker();
   private idx = 0;
-  constructor(private readonly points: Vec2[]) {}
+  constructor(private readonly points: readonly Vec2[]) {}
 
   decide(snap: Snapshot, _info: MatchInfo, _b: Balance, seq: number): InputFrame {
     const target = this.points[this.idx % this.points.length] ?? { x: 24, y: 20 };
@@ -121,26 +155,11 @@ export function devBotBrain(role: string): BotBrain {
     case 'monster':
       return new PatrolMonsterBrain();
     case 'runner':
-      return new PatrolSurvivorBrain([
-        { x: 24, y: 20 },
-        { x: 14, y: 22 },
-        { x: 8, y: 26 },
-        { x: 4, y: 16 },
-      ]);
+      return new PatrolSurvivorBrain(DEV_PATROLS.runner);
     case 'guard':
-      return new PatrolSurvivorBrain([
-        { x: 24, y: 20 },
-        { x: 34, y: 18 },
-        { x: 40, y: 12 },
-        { x: 44, y: 20 },
-      ]);
+      return new PatrolSurvivorBrain(DEV_PATROLS.guard);
     default:
-      return new PatrolSurvivorBrain([
-        { x: 24, y: 20 },
-        { x: 24, y: 26 },
-        { x: 18, y: 29 },
-        { x: 30, y: 29 },
-      ]);
+      return new PatrolSurvivorBrain(DEV_PATROLS.scout);
   }
 }
 
