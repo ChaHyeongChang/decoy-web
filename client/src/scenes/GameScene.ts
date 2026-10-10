@@ -293,8 +293,8 @@ export class GameScene extends Phaser.Scene {
       if (e.kind !== 'snapshot') return;
       if (this.seq < e.snap.ack) this.seq = e.snap.ack;
       // 오래된 스냅샷의 일회성 연출(소리 · 플래시 · 알림 배너 · 핑)은 건너뛴다(staleEvents.ts). 거점 메모(비밀번호)는 오래돼도 보여 준다
-      const age = app.net.synced ? Math.max(0, app.net.serverNow() - e.snap.st) : 0;
-      const stale = app.net.synced && age > staleEventLimitMs(this.frameMs);
+      const age = app.link.synced ? Math.max(0, app.link.serverNow() - e.snap.st) : 0;
+      const stale = app.link.synced && age > staleEventLimitMs(this.frameMs);
       this.eventAgeMs = age;
       // 진동 (터치 기기): 발각 꺼짐 → 켜짐 전환만 울린다(판단은 haptics, 지난 일은 그 시간으로 거른다)
       if (device.touch) haptics.spotted(e.snap.you.surv?.spotted === true, age);
@@ -414,7 +414,7 @@ export class GameScene extends Phaser.Scene {
       move: st,
       mon,
       balance,
-      ageSec: (nowMs - app.lastSnapAt) / 1000 + app.net.rtt / 2000,
+      ageSec: (nowMs - app.lastSnapAt) / 1000 + app.link.rtt / 2000,
       localWindupActive: this.localWindup !== null && nowMs < this.localWindup.until,
     };
     return {
@@ -456,7 +456,7 @@ export class GameScene extends Phaser.Scene {
       this.lastFrame = frame;
       this.inputHistory.push(frame, this.lastStepAt, this.sampler.mode);
     }
-    if (frames.length > 0) app.net.send({ t: 'input', frames });
+    if (frames.length > 0) app.link.send({ t: 'input', frames });
   }
 
   /** 괴물: 공격 준비 · 돌진을 서버 확인 전에 먼저 보여 준다 (판정은 서버, 어긋나면 보정) */
@@ -472,7 +472,7 @@ export class GameScene extends Phaser.Scene {
       move: st,
       mon,
       balance,
-      ageSec: (now - app.lastSnapAt) / 1000 + app.net.rtt / 2000,
+      ageSec: (now - app.lastSnapAt) / 1000 + app.link.rtt / 2000,
       localWindupActive: this.localWindup !== null && now < this.localWindup.until,
     });
     if (res.attack) {
@@ -514,7 +514,7 @@ export class GameScene extends Phaser.Scene {
     const lw = this.localWindup;
     if (!lw) return { dir: null, hideServer: false };
     if (ack < lw.seq) return { dir: now < lw.until ? lw.dir : null, hideServer: false };
-    return { dir: null, hideServer: now < lw.until + this.app.net.rtt + 150 };
+    return { dir: null, hideServer: now < lw.until + this.app.link.rtt + 150 };
   }
 
   override update(_time: number, delta: number): void {

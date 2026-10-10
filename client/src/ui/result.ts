@@ -51,6 +51,8 @@ export class ResultUI {
   constructor(
     host: HTMLElement,
     private readonly onRematch: () => void,
+    /** "홈으로" (M13b): 방에서 나가 첫 화면으로 */
+    private readonly onHome: () => void,
   ) {
     this.root = h('div', { class: 'result', 'data-testid': 'result' });
     this.root.style.display = 'none';
@@ -170,6 +172,8 @@ export class ResultUI {
       UI_TEXT.rematch,
     );
     again.addEventListener('click', () => this.onRematch());
+    const home = h('button', { class: 'btn', 'data-testid': 'result-home' }, icon('back', 20), UI_TEXT.home);
+    home.addEventListener('click', () => this.onHome());
     const box = h(
       'div',
       { class: 'panel result-box' },
@@ -178,7 +182,7 @@ export class ResultUI {
       memo,
       // 좁은 화면(휴대폰)에서는 표만 가로로 스크롤한다 (M11)
       h('div', { class: 'table-wrap' }, table),
-      h('div', { class: 'result-foot' }, again),
+      h('div', { class: 'result-foot' }, home, again),
     );
     this.root.replaceChildren(box);
     this.root.style.display = '';

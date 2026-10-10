@@ -18,26 +18,26 @@ export interface WakeView {
 
 export class WakeNoticeState {
   private everOpened = false;
-  private waitingSince: number | null = null;
+  private waitStart: number | null = null;
   private stopped = false;
   private isOffline = false;
 
   /** 연결을 시도하기 시작했다 (이미 기다리는 중이면 처음 시각을 유지한다) */
   connecting(nowMs: number): void {
     if (this.stopped) return;
-    this.waitingSince ??= nowMs;
+    this.waitStart ??= nowMs;
   }
 
   /** 연결됐다 */
   opened(): void {
     this.everOpened = true;
-    this.waitingSince = null;
+    this.waitStart = null;
   }
 
   /** 연결이 끊겼다 (다시 연결을 시도한다) */
   closed(nowMs: number): void {
     if (this.stopped) return;
-    this.waitingSince ??= nowMs;
+    this.waitStart ??= nowMs;
   }
 
   /**
@@ -46,7 +46,7 @@ export class WakeNoticeState {
    */
   rejoining(nowMs: number): void {
     if (this.stopped) return;
-    this.waitingSince ??= nowMs;
+    this.waitStart ??= nowMs;
   }
 
   /** 기기 온라인 상태 (online · offline 이벤트, 처음에는 navigator.onLine) */
@@ -57,7 +57,7 @@ export class WakeNoticeState {
   /** 다시 연결하지 않는다 (다른 탭이 자리를 가져감) */
   stop(): void {
     this.stopped = true;
-    this.waitingSince = null;
+    this.waitStart = null;
   }
 
   /** stop 뒤 다시 연결한다 ("여기서 계속하기") */
@@ -65,11 +65,21 @@ export class WakeNoticeState {
     this.stopped = false;
   }
 
+  /** 연결을 기다리기 시작한 시각 (ms). 기다리는 중이 아니거나 멈췄으면 null (첫 화면 상태 줄, M13b) */
+  get waitingSince(): number | null {
+    return this.stopped ? null : this.waitStart;
+  }
+
+  /** 기기가 오프라인이다 */
+  get offline(): boolean {
+    return this.isOffline;
+  }
+
   view(nowMs: number): WakeView {
     const variant: WakeVariant = this.everOpened ? 'reconnecting' : 'waking';
     const offline = this.isOffline;
-    if (this.stopped || this.waitingSince === null) return { visible: false, variant, seconds: 0, offline };
-    const waited = Math.max(0, nowMs - this.waitingSince);
+    if (this.stopped || this.waitStart === null) return { visible: false, variant, seconds: 0, offline };
+    const waited = Math.max(0, nowMs - this.waitStart);
     return { visible: waited >= WAKE_NOTICE_DELAY_MS, variant, seconds: Math.floor(waited / 1000), offline };
   }
 }

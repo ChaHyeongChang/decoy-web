@@ -1,0 +1,282 @@
+// M13b 봇과 연습 · 로비 홈 (MOBILE_PLAN M13b 검증):
+//  - 서버 연결이 막혀도 첫 화면은 바로 그려지고, 상태 줄과 "봇과 연습"으로 탭 두 번 만에 기기 안 판이 시작된다
+//  - 연습 중에는 새 WebSocket을 열지 않고, 봇이 움직이고, 기기 안 테스트 훅으로 판을 끝까지 → 결과 → 다시 하기 → 홈으로
+//  - 연습 중 숨김 → 복귀하면 같은 판(정지 · 다른 탭 안내 없음), 주소에 room이 없고 새로고침하면 첫 화면
+//  - 괴물로 연습할 때 받은 스냅샷을 독립 판정기와 기기 안 정답으로 대조: 시야 밖 생존자 0
+//  - 서버 방 결과 화면의 "홈으로"는 자리를 비우고 같은 연결로 첫 화면에서 다시 방을 만든다
+import { readFileSync } from 'node:fs';
+import { expect, test, type Page } from '@playwright/test';
+import { validateBalance, type Balance, type Snapshot } from '@decoy/shared';
+import type { TruthFrame } from '@decoy/shared/sim';
+import { monsterVerdict } from './infoCheck';
+import { PHONE_LANDSCAPE, dpr1, newPlayerPage, press } from './helpers';
+
+const balance: Balance = validateBalance(JSON.parse(readFileSync('config/balance.json', 'utf8')));
+const QUERY = '/?debug=hook&renderer=canvas';
+
+/** 서버 WebSocket을 모두 막는다 (연결 실패처럼 열리지 않고 닫힘). 막힌 시도 수를 센다 */
+async function blockServer(page: Page): Promise<{ attempts: () => number }> {
+  let n = 0;
+  await page.routeWebSocket(/\/ws$/, (ws) => {
+    n += 1;
+    ws.close({ code: 1011, reason: 'blocked' });
+  });
+  return { attempts: () => n };
+}
+
+/** 페이지가 연 WebSocket 수 (막힌 것 포함) */
+function countSockets(page: Page): () => number {
+  let n = 0;
+  page.on('websocket', () => {
+    n += 1;
+  });
+  return () => n;
+}
+
+async function practiceState(page: Page): Promise<{
+  transport: string | undefined;
+  practiceRoom: string | null | undefined;
+  phase: string | null | undefined;
+  role: string | null | undefined;
+  snapCount: number | undefined;
+}> {
+  return page.evaluate(() => ({
+    transport: window.__DECOY__?.transport,
+    practiceRoom: window.__DECOY__?.practiceRoom,
+    phase: window.__DECOY__?.phase,
+    role: window.__DECOY__?.role,
+    snapCount: window.__DECOY__?.snapCount,
+  }));
+}
+
+async function localTruth(page: Page): Promise<TruthFrame> {
+  const t = await page.evaluate(() => window.__DECOY__?.getTruth() ?? null);
+  if (!t) throw new Error('기기 안 정답 없음');
+  return t;
+}
+
+test('서버 연결이 막혀도 3초 안에 상태 줄 · 봇과 연습이 보이고, 탭 두 번으로 기기 안 판을 끝까지 → 다시 하기 → 홈으로', async ({
+  browser,
+}) => {
+  const { context, page, problems } = await newPlayerPage(browser, dpr1(PHONE_LANDSCAPE));
+  const blocked = await blockServer(page);
+  const sockets = countSockets(page);
+  const t0 = Date.now();
+  await page.goto(QUERY);
+  const status = page.getByTestId('server-status');
+  await expect(status).toBeVisible({ timeout: 3000 });
+  await expect(page.getByTestId('practice')).toBeVisible({ timeout: 3000 });
+  expect(Date.now() - t0).toBeLessThan(3000 + 1500);
+  await expect(status).toHaveAttribute('data-state', 'waking');
+  await expect(status).toContainText('서버를 깨우는 중');
+  await expect(status).toContainText('봇과 연습');
+  // 연결이 필요한 버튼은 꺼져 있고, 첫 화면에서는 가운데 깨우기 패널 대신 상태 줄
+  await expect(page.getByTestId('create-room')).toBeDisabled();
+  await expect(page.getByTestId('join-room')).toBeDisabled();
+  await expect(page.getByTestId('server-waking')).toBeHidden();
+  await page.waitForTimeout(2800);
+  await expect(page.getByTestId('server-waking')).toBeHidden();
+  expect(blocked.attempts()).toBeGreaterThan(0);
+
+  // 탭 두 번: 봇과 연습 → 역할
+  await press(page.getByTestId('practice'));
+  await press(page.getByTestId('practice-role-runner'));
+  const tapAt = sockets();
+  await expect.poll(async () => (await practiceState(page)).phase, { timeout: 10_000 }).toBe('playing');
+  const st = await practiceState(page);
+  expect(st.transport).toBe('local');
+  expect(st.role).toBe('runner');
+  expect(st.practiceRoom).toMatch(/^P-[A-Z]{4}$/);
+  await expect.poll(async () => (await practiceState(page)).snapCount ?? 0).toBeGreaterThan(20);
+
+  // 봇이 움직인다 (기기 안 정답에서 봇 자리 위치가 바뀜, 괴물 대기 5초 뒤)
+  const me = await page.evaluate(() => window.__DECOY__?.you ?? '');
+  const first = await localTruth(page);
+  await page.waitForTimeout(6500);
+  const later = await localTruth(page);
+  const moved = later.players.filter((p) => {
+    const q = first.players.find((x) => x.id === p.id);
+    return p.id !== me && q !== undefined && Math.hypot(p.x - q.x, p.y - q.y) > 1;
+  });
+  expect(moved.length).toBeGreaterThanOrEqual(2);
+  expect(later.tick - first.tick).toBeGreaterThan(150);
+
+  // 기기 안 테스트 훅으로 판을 끝까지 → 결과
+  await page.evaluate(() => window.__DECOY__?.sendTest({ kind: 'setTime', timeLeft: 0.1 }));
+  await expect(page.getByTestId('result')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId('result-home')).toBeVisible();
+  // 다시 하기 → 같은 역할로 바로 두 번째 판
+  await press(page.getByTestId('rematch'));
+  await expect.poll(async () => (await practiceState(page)).phase, { timeout: 10_000 }).toBe('playing');
+  await expect(page.getByTestId('result')).toBeHidden();
+  expect((await practiceState(page)).role).toBe('runner');
+  await expect.poll(async () => (await practiceState(page)).snapCount ?? 0).toBeGreaterThan(10);
+  // 연습을 시작한 뒤로 새 WebSocket을 열지 않았다
+  expect(sockets()).toBe(tapAt);
+  expect(page.url()).not.toContain('room=');
+
+  // 끝내고 홈으로: 첫 화면 · 상태 줄, 서버 연결을 다시 시도한다
+  await page.evaluate(() => window.__DECOY__?.sendTest({ kind: 'setTime', timeLeft: 0.1 }));
+  await expect(page.getByTestId('result')).toBeVisible({ timeout: 10_000 });
+  await press(page.getByTestId('result-home'));
+  await expect(page.getByTestId('practice')).toBeVisible();
+  await expect(page.getByTestId('server-status')).toBeVisible();
+  expect(await page.evaluate(() => window.__DECOY__?.transport)).toBe('net');
+  await expect.poll(() => sockets(), { timeout: 8000 }).toBeGreaterThan(tapAt);
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
+test('연습 중 10초 숨겼다 돌아오면 같은 판이 그대로 이어지고(정지 · 다른 탭 안내 없음), 새로고침하면 첫 화면', async ({
+  browser,
+}) => {
+  const { context, page, problems } = await newPlayerPage(browser);
+  await context.addInitScript(() => {
+    let vis: DocumentVisibilityState = 'visible';
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => vis });
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => vis === 'hidden' });
+    (window as unknown as { __e2eSetVisible: (on: boolean) => void }).__e2eSetVisible = (on) => {
+      vis = on ? 'visible' : 'hidden';
+      document.dispatchEvent(new Event('visibilitychange'));
+    };
+  });
+  await page.goto(QUERY);
+  await page.getByTestId('practice').click();
+  await page.getByTestId('practice-role-guard').click();
+  await expect.poll(async () => (await practiceState(page)).phase, { timeout: 10_000 }).toBe('playing');
+  await expect.poll(async () => (await practiceState(page)).snapCount ?? 0).toBeGreaterThan(30);
+  const room = (await practiceState(page)).practiceRoom;
+  const before = await localTruth(page);
+  await page.evaluate(() =>
+    (window as unknown as { __e2eSetVisible: (on: boolean) => void }).__e2eSetVisible(false),
+  );
+  await page.waitForTimeout(10_000);
+  const hidden = await localTruth(page);
+  // 숨긴 동안 기기 안 판은 멈춰 있다 (틱이 거의 오르지 않음)
+  expect(hidden.tick - before.tick).toBeLessThan(10);
+  await page.evaluate(() =>
+    (window as unknown as { __e2eSetVisible: (on: boolean) => void }).__e2eSetVisible(true),
+  );
+  const back = await localTruth(page);
+  await page.waitForTimeout(1000);
+  const after = await localTruth(page);
+  // 돌아온 뒤 따라잡기 없이 이어 간다: 1초에 약 30틱 (몰아서 수백 틱을 돌리지 않음)
+  expect(after.tick - back.tick).toBeGreaterThan(15);
+  expect(after.tick - back.tick).toBeLessThan(45);
+  const st = await practiceState(page);
+  expect(st.phase).toBe('playing');
+  expect(st.practiceRoom).toBe(room);
+  const snap = (await page.evaluate(() => window.__DECOY__?.getLastSnapshot() ?? null)) as Snapshot | null;
+  expect(snap?.world.paused).toBeNull();
+  await expect(page.getByTestId('replaced-notice')).toHaveCount(0);
+  expect(page.url()).not.toContain('room=');
+  // 새로고침하면 연습은 사라지고 첫 화면
+  await page.reload();
+  await expect(page.getByTestId('practice')).toBeVisible();
+  await expect(page.getByTestId('create-room')).toBeVisible();
+  expect(await page.evaluate(() => window.__DECOY__?.transport)).toBe('net');
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
+test('괴물로 연습할 때 받은 스냅샷에 시야 밖 생존자가 0명이다 (독립 판정기 · 기기 안 정답 대조)', async ({
+  browser,
+}) => {
+  const { context, page, problems } = await newPlayerPage(browser);
+  await page.goto(QUERY);
+  await page.getByTestId('practice').click();
+  await page.getByTestId('practice-role-monster').click();
+  await expect.poll(async () => (await practiceState(page)).phase, { timeout: 10_000 }).toBe('playing');
+  // 생존자 봇 하나를 괴물 앞에, 하나를 벽 뒤에, 하나를 멀리 세워 둔다 (봇이 걷기 시작해도 시야 안팎이 섞이게)
+  const t = await localTruth(page);
+  const mon = t.players.find((p) => p.role === 'monster');
+  const survivors = t.players.filter((p) => p.role !== 'monster');
+  if (!mon) throw new Error('괴물 없음');
+  await page.evaluate(
+    ([m, s]) => {
+      const d = window.__DECOY__;
+      if (!d) return;
+      d.sendTest({ kind: 'teleport', target: m, x: 24, y: 23, face: -Math.PI / 2 });
+      d.sendTest({ kind: 'teleport', target: s[0] ?? '', x: 24, y: 20.5 });
+      d.sendTest({ kind: 'teleport', target: s[1] ?? '', x: 8, y: 16 });
+      d.sendTest({ kind: 'teleport', target: s[2] ?? '', x: 31, y: 21 });
+    },
+    [mon.id, survivors.map((p) => p.id)] as const,
+  );
+  // 같은 틱의 (스냅샷, 기기 안 정답) 쌍을 모은다: 기기 안 서버는 틱 사이에 메시지를 마이크로태스크로 넘기므로
+  // 스냅샷을 받은 프레임의 정답 틱이 스냅샷 틱과 같으면 같은 순간이다
+  const pairs = await page.evaluate(async () => {
+    const out: { snap: Snapshot; truth: TruthFrame }[] = [];
+    const end = performance.now() + 12_000;
+    let last = -1;
+    while (performance.now() < end) {
+      await new Promise((r) => requestAnimationFrame(r));
+      const d = window.__DECOY__;
+      const snap = d?.getLastSnapshot() ?? null;
+      const truth = d?.getTruth() ?? null;
+      if (!snap || !truth || snap.tick === last || snap.tick !== truth.tick) continue;
+      last = snap.tick;
+      out.push({ snap: JSON.parse(JSON.stringify(snap)) as Snapshot, truth });
+    }
+    return out;
+  });
+  expect(pairs.length).toBeGreaterThan(40);
+  let seen = 0;
+  let hiddenTruth = 0;
+  for (const { snap, truth } of pairs) {
+    const m = truth.players.find((p) => p.role === 'monster');
+    if (!m || !truth.monster) continue;
+    for (const v of snap.survivors) {
+      // 스냅샷의 생존자(임시 ID)는 그 틱 정답의 어느 생존자 자리와 같고, 그 자리는 괴물 시야에서 '안 보임'이 아니다
+      const real = truth.players.find((p) => p.role !== 'monster' && Math.hypot(p.x - v.x, p.y - v.y) < 0.01);
+      expect(real, `틱 ${snap.tick} 스냅샷 생존자 (${v.x}, ${v.y})`).toBeDefined();
+      if (!real) continue;
+      expect(
+        monsterVerdict(balance, m.x, m.y, truth.monster.aim, truth.monster.blend, real.x, real.y),
+      ).not.toBe('hidden');
+      expect(survivors.some((s) => s.id === v.id)).toBe(false);
+      seen += 1;
+    }
+    for (const p of truth.players)
+      if (
+        p.role !== 'monster' &&
+        p.status === 'free' &&
+        monsterVerdict(balance, m.x, m.y, truth.monster.aim, truth.monster.blend, p.x, p.y) === 'hidden'
+      )
+        hiddenTruth += 1;
+  }
+  // 대조가 비지 않았다: 보이는 생존자도, 시야 밖 생존자도 있었다
+  expect(seen).toBeGreaterThan(10);
+  expect(hiddenTruth).toBeGreaterThan(10);
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
+test('서버 방 결과 화면의 "홈으로"는 자리를 비우고, 같은 연결로 첫 화면에서 새 방을 만든다', async ({
+  browser,
+}) => {
+  const { context, page, problems } = await newPlayerPage(browser);
+  const sockets = countSockets(page);
+  await page.goto(`${QUERY}&bots=1`);
+  await page.getByTestId('create-room').click();
+  await expect(page.getByTestId('room-code')).toHaveText(/^[A-Z]{4}$/);
+  const code = (await page.getByTestId('room-code').textContent()) ?? '';
+  await page.getByTestId('role-runner').click();
+  await page.getByTestId('ready-button').click();
+  await page.getByTestId('start-button').click();
+  await expect.poll(async () => (await practiceState(page)).phase, { timeout: 10_000 }).toBe('playing');
+  expect((await practiceState(page)).transport).toBe('net');
+  await page.evaluate(() => window.__DECOY__?.sendTest({ kind: 'setTime', timeLeft: 0.1 }));
+  await expect(page.getByTestId('result')).toBeVisible({ timeout: 10_000 });
+  const opened = sockets();
+  await page.getByTestId('result-home').click();
+  await expect(page.getByTestId('create-room')).toBeEnabled();
+  expect(page.url()).not.toContain('room=');
+  await page.getByTestId('create-room').click();
+  await expect(page.getByTestId('room-code')).not.toHaveText(code);
+  await expect(page.getByTestId('room-code')).toHaveText(/^[A-Z]{4}$/);
+  // 같은 연결로 (새 WebSocket 없이)
+  expect(sockets()).toBe(opened);
+  expect(problems).toEqual([]);
+  await context.close();
+});

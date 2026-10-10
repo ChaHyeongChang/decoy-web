@@ -106,10 +106,10 @@ export function installDebug(app: App, overlay: boolean): void {
       return app.game?.loop.actualFps ?? 0;
     },
     get ping() {
-      return app.net.rtt;
+      return app.link.rtt;
     },
     get serverOffset() {
-      return app.net.offset;
+      return app.link.offset;
     },
     get pendingInputs() {
       return app.predictor?.pendingCount ?? 0;
@@ -154,8 +154,15 @@ export function installDebug(app: App, overlay: boolean): void {
     },
     getTouchTargets: () => touchTargets(),
     getHudLayout: () => hudLayout(app),
-    serverNow: () => app.net.serverNow(),
-    sendTest: (cmd) => app.net.send({ t: 'test', cmd }),
+    serverNow: () => app.link.serverNow(),
+    sendTest: (cmd) => app.link.send({ t: 'test', cmd }),
+    get transport() {
+      return app.link.kind;
+    },
+    get practiceRoom() {
+      return app.practiceRoom;
+    },
+    getTruth: () => app.localTruth(),
     tileToClient: (x, y) => {
       const canvas = app.game?.canvas;
       if (!canvas) return null;
