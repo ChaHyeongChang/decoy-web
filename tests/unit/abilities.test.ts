@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BTN } from '@decoy/shared';
-import { AliasBook, buildSnapshot, computeVisibility } from '../../server/src/interest';
+import { AliasBook, buildSnapshot, computeVisibility } from '@decoy/shared/sim';
 import { Driver, place, readyGame } from '../helpers/fixtures';
 
 const SPACE = { pressed: BTN.ABILITY };

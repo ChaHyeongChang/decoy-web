@@ -5,8 +5,7 @@
 // DOM 없이(jsdom 없음) 최소한의 EventTarget으로 이벤트를 보낸다
 import { describe, expect, it } from 'vitest';
 import { BTN, type InputFrame } from '@decoy/shared';
-import { sanitizeInput, type Game } from '../../server/src/game';
-import { monsterCanAct } from '../../server/src/systems/combat';
+import { monsterCanAct, sanitizeInput, type Game } from '@decoy/shared/sim';
 import { InputLog, InputSampler, type InputEnv } from '../../client/src/input';
 import { TouchInput, type TouchFrameCtx } from '../../client/src/touchInput';
 import { place, readyGame } from '../helpers/fixtures';

@@ -1,5 +1,5 @@
 // 봇용 길찾기: 타일 격자 A* (8방향, 모서리 끼어 지나가기 금지) → 웨이포인트(타일 중심)
-import { MAP_H, MAP_W, blocksMove, type MoverContext, type Vec2 } from '@decoy/shared';
+import { MAP_H, MAP_W, blocksMove, type MoverContext, type Vec2 } from '../index';
 
 interface Node {
   i: number;

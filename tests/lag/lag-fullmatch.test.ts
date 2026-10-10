@@ -10,7 +10,7 @@ import {
   PhasedBrain,
   SPOTS,
   type BotBrain,
-} from '../../server/src/botBrains';
+} from '@decoy/shared/sim';
 import { BotClient } from '../../server/src/bots';
 import { startServer, type RunningServer } from '../helpers/serverProcess';
 

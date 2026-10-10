@@ -1,5 +1,5 @@
 // 괴물 조작 규칙: 시야 모드 전환 (우클릭, 0.4초 보간)
-import { BTN, type InputFrame } from '@decoy/shared';
+import { BTN, type InputFrame } from '../../index';
 import type { Game } from '../game';
 import type { MonsterState } from '../state';
 

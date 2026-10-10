@@ -26,14 +26,22 @@ decoy-web/
 │  ├─ map.ts                  ← 48×32 타일 맵 데이터, 구역 · 스폰 · 거점 · 탈출구 좌표
 │  ├─ geometry.ts             ← 원-사각 충돌, 레이캐스트, 시야 다각형, 부채꼴 판정
 │  ├─ movement.ts             ← 입력 → 이동 (서버와 클라이언트 예측이 같은 함수를 쓴다)
-│  └─ visibility.ts           ← "누가 무엇을 볼 수 있는가" 판정
-├─ server/src/
-│  ├─ index.ts                ← HTTP(정적 파일) + WebSocket
-│  ├─ room.ts                 ← 방, 로비, 역할 선택, 재접속
-│  ├─ game.ts                 ← 고정 틱 시뮬레이션과 규칙
-│  ├─ systems/                ← combat, prison, capture, exit, abilities, match
-│  ├─ interest.ts             ← 플레이어별로 볼 수 있는 것만 담은 스냅샷 생성
-│  └─ bots.ts                 ← 개발 · 테스트용 봇
+│  ├─ visibility.ts           ← "누가 무엇을 볼 수 있는가" 판정
+│  └─ sim/                    ← 시뮬레이션 (`@decoy/shared/sim`, M13a에 server에서 옮김. 서버와 기기 안 연습이 같이 쓴다)
+│     ├─ core.ts              ← ServerCore: 연결 처리(join 묶기 · ping · 바뀐 연결 무시 · 닫힌 뒤 버림 · detach) + 명목 시각 틱 스케줄러
+│     ├─ room.ts              ← 방, 로비, 역할 선택, 재접속
+│     ├─ game.ts · state.ts   ← 고정 틱 시뮬레이션과 규칙, 서버 상태 타입
+│     ├─ systems/             ← combat, prison, capture, exit, abilities, match, monster
+│     ├─ interest.ts          ← 플레이어별로 볼 수 있는 것만 담은 스냅샷 생성
+│     ├─ botBrains.ts · pathfind.ts · predict.ts ← 봇 두뇌(자기 스냅샷만), 길찾기, 봇의 내 위치 예측
+│     ├─ simMatch.ts · truth.ts ← 소켓 없는 봇 판(테스트), 테스트 전용 정답 상태
+│     └─ random.ts            ← 자리 토큰 · 임시 ID (Web Crypto `globalThis.crypto`)
+├─ server/src/                ← Node 전용 바깥 일만 (shared에는 `node:*` · `ws` · `fs` import 금지, eslint)
+│  ├─ index.ts                ← HTTP(정적 파일 · 테스트 훅) + ws 소켓 + setInterval → ServerCore
+│  ├─ config.ts · static.ts   ← 실행 옵션 · balance.json 읽기, 정적 파일(gzip)
+│  ├─ sendPolicy.ts           ← 연결별 송신 큐 · 밀림 처리
+│  ├─ truthLog.ts             ← 정답 상태 파일 기록 (--truth-log)
+│  └─ bots.ts                 ← 개발 · 테스트용 WebSocket 봇
 ├─ client/src/
 │  ├─ main.ts, net.ts         ← 연결, 예측 · 보정, 보간
 │  ├─ scenes/                 ← Lobby, Game, Result
@@ -60,7 +68,7 @@ decoy-web/
 - **지연 시뮬레이션**: 서버 실행 옵션 `--lag=100` 또는 `?lag=100`으로 송수신에 인위적 지연과 ±20ms 흔들림을 건다. 100ms, 200ms에서 테스트한다
 
 ### 3.3 관심 영역 (정보 필터링)
-`server/interest.ts`가 플레이어마다 스냅샷을 따로 만든다.
+`shared/src/sim/interest.ts`가 플레이어마다 스냅샷을 따로 만든다.
 
 | 받는 쪽 | 포함 | 제외 |
 |---|---|---|

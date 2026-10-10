@@ -11,7 +11,7 @@ import {
   survivorVisionRadius,
   type GameEvent,
   type InputFrame,
-} from '@decoy/shared';
+} from '../../index';
 import type { Game } from '../game';
 import type { MonsterState, SurvivorState } from '../state';
 

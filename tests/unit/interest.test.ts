@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AliasBook, buildSnapshot, computeVisibility } from '../../server/src/interest';
+import { AliasBook, buildSnapshot, computeVisibility } from '@decoy/shared/sim';
 import { newGame } from '../helpers/fixtures';
 
 function place(game: ReturnType<typeof newGame>, id: string, x: number, y: number, face = 0): void {
@@ -17,7 +17,7 @@ function snaps(game: ReturnType<typeof newGame>, aliases = new AliasBook()) {
   return { facts, out, aliases };
 }
 
-describe('정보 차단 (server/interest.ts)', () => {
+describe('정보 차단 (shared/src/sim/interest.ts)', () => {
   it('괴물에게는 부채꼴 · 근접 원 안 생존자만, 임시 ID로, 역할 없이 간다', () => {
     const game = newGame();
     // 괴물 (30,18.5) 동쪽을 봄. p2는 앞 3타일(보임), p3은 등 뒤 4타일(안 보임), p4는 등 뒤 1타일(근접 원)

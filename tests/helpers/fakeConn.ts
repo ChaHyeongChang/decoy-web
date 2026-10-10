@@ -1,6 +1,6 @@
 // 소켓 없이 방 로직을 시험하기 위한 가짜 연결
 import type { ServerMessage } from '@decoy/shared';
-import type { Conn } from '../../server/src/room';
+import type { Conn } from '@decoy/shared/sim';
 
 let counter = 1000;
 

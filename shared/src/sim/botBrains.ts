@@ -15,7 +15,7 @@ import {
   type Snapshot,
   type SurvivorView,
   type Vec2,
-} from '@decoy/shared';
+} from '../index';
 import { PathFollower } from './pathfind';
 
 /** 봇 두뇌: 스냅샷을 보고 다음 입력을 정한다 */

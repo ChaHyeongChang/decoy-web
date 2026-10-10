@@ -96,8 +96,8 @@ push · PR마다(그리고 main에 들어갈 때) GitHub Actions(`.github/workfl
 ## 폴더
 
 ```
-shared/   서버와 클라이언트가 같이 쓰는 코드 (이동 · 충돌 · 시야 · 맵 · 메시지 타입). Phaser 없음
-server/   권한 서버 (방 · 틱 · 규칙 시스템 · 플레이어별 스냅샷 server/src/interest.ts · 봇)
+shared/   서버와 클라이언트가 같이 쓰는 코드 (이동 · 충돌 · 시야 · 맵 · 메시지 타입, sim/ 판정 · 방 · 정보 차단 · 봇). Phaser · Node 전용 모듈 없음
+server/   권한 서버 (HTTP · WebSocket · 틱 타이머, 판정 코드는 shared/src/sim)
 client/   Phaser 클라이언트 (예측 · 보간 · 렌더링 · HUD · 효과음)
 config/   balance.json (수치의 원본)
 tests/    unit · bots · e2e · lag

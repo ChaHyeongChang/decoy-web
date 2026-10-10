@@ -10,7 +10,7 @@ import {
   type ServerMessage,
   type Snapshot,
 } from '@decoy/shared';
-import { RoomManager, type Conn, type Room, type Seat } from '../../server/src/room';
+import { RoomManager, type Conn, type Room, type Seat } from '@decoy/shared/sim';
 import {
   SKIP_SNAPSHOTS_ABOVE,
   TERMINATE_ABOVE,

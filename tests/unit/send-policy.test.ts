@@ -2,7 +2,7 @@
 // 거점 메모(비밀번호)가 든 스냅샷은 건너뛰지 않는다 (실제 송신 경로는 send-path.test.ts)
 import { describe, expect, it } from 'vitest';
 import { isKeptNote, type GameEvent, type ServerMessage } from '@decoy/shared';
-import { AliasBook, buildSnapshot, computeVisibility } from '../../server/src/interest';
+import { AliasBook, buildSnapshot, computeVisibility } from '@decoy/shared/sim';
 import {
   SKIP_SNAPSHOTS_ABOVE,
   TERMINATE_ABOVE,

@@ -1,6 +1,6 @@
 // 승패 조건 표 (GAME_DESIGN 9장)의 모든 줄 + DECISIONS 보충 규칙
 import { describe, expect, it } from 'vitest';
-import { applyDropExpired, buildResult, endingOf, evaluate, matchTick } from '../../server/src/systems/match';
+import { applyDropExpired, buildResult, endingOf, evaluate, matchTick } from '@decoy/shared/sim';
 import { Driver, readyGame } from '../helpers/fixtures';
 
 function setStatus(

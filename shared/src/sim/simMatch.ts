@@ -1,6 +1,6 @@
 // 소켓 없이 한 판을 빠르게 돌리는 시뮬레이션 (봇 시나리오 테스트용).
 // 실제 방과 같은 흐름: 스냅샷 틱(20Hz)마다 받는 사람별 스냅샷을 만들고, 봇은 매 틱(30Hz) 마지막 스냅샷을 보고 입력한다.
-import type { Balance, MatchInfo, Role, Snapshot } from '@decoy/shared';
+import type { Balance, MatchInfo, Role, Snapshot } from '../index';
 import type { BotBrain } from './botBrains';
 import { Game, type GamePlayerSetup } from './game';
 import { AliasBook, buildSnapshot, computeVisibility } from './interest';

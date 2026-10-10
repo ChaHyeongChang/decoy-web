@@ -1,7 +1,7 @@
 // 단위 · 봇 테스트 공용: balance 로드와 기본 판 구성
 import { readFileSync } from 'node:fs';
 import { validateBalance, type Balance, type InputFrame, type Role } from '@decoy/shared';
-import { Game, type GamePlayerSetup } from '../../server/src/game';
+import { Game, type GamePlayerSetup } from '@decoy/shared/sim';
 
 export function loadTestBalance(): Balance {
   return validateBalance(JSON.parse(readFileSync('config/balance.json', 'utf8')));
