@@ -7,6 +7,10 @@ import { validateBalance, type Balance } from '@decoy/shared';
 export const HEALTH_PATH = '/healthz';
 /** 이 서버가 보낸 응답이라는 표시. 깨우기 화면(sw.js)이 호스팅 서비스의 로딩 페이지와 구별하는 데 쓴다 */
 export const SERVER_MARK_HEADER = 'x-decoy-server';
+/** 서버(와 함께 빌드한 화면)의 빌드 ID (M13d). 서비스 워커가 앱 셸 사전 캐시를 이 값으로 확인한다 */
+export const BUILD_HEADER = 'x-decoy-build';
+/** 빌드 ID 파일 (Vite 플러그인이 client/dist에 쓴다, client/vite.config.ts) */
+export const BUILD_ID_FILE = 'build-id.json';
 /** 테스트 훅 /test/stall이 붙잡을 수 있는 최대 시간 (ms) */
 export const MAX_STALL_MS = 60_000;
 /**
@@ -67,4 +71,15 @@ export function parseOptions(argv: string[], env: NodeJS.ProcessEnv): ServerOpti
 export function loadBalance(path: string): Balance {
   const text = readFileSync(path, 'utf8');
   return validateBalance(JSON.parse(text));
+}
+
+/** 정적 파일 폴더의 빌드 ID (`{"id": "..."}`). 파일이 없거나 깨졌으면 null — 그러면 빌드 비교를 하지 않는다 */
+export function readBuildId(staticDir: string): string | null {
+  try {
+    const raw: unknown = JSON.parse(readFileSync(resolve(staticDir, BUILD_ID_FILE), 'utf8'));
+    const id = raw !== null && typeof raw === 'object' ? (raw as { id?: unknown }).id : null;
+    return typeof id === 'string' && /^[0-9a-z]{6,40}$/.test(id) ? id : null;
+  } catch {
+    return null;
+  }
 }

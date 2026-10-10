@@ -169,6 +169,9 @@ export const UI_TEXT = {
   quickCancel: '취소',
   quickDropped: '대기열에서 빠졌어요',
   quickRetry: '다시 찾기',
+  // ── 새 버전 (M13d) ──
+  updateAvailable: '새 버전이 있어요',
+  updateReload: '새로고침',
 } as const;
 
 /** 조작 안내 (첫 판 오버레이 · Tab 화면) */

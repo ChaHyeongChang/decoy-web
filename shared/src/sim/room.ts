@@ -80,6 +80,8 @@ export interface RoomConfig {
   testHooks: boolean;
   /** 기기 안 연습 서버 (M13b, client/src/localServer.ts): 새 방은 모두 연습 방(빈자리 = 실전 봇, `P-` 코드) */
   practice?: boolean;
+  /** 서버 빌드 ID (M13d): welcome · pong에 실어 화면 빌드와 비교하게 한다. 없으면 null */
+  buildId?: string | null;
 }
 
 const ALL_ROLES: readonly Role[] = ['monster', ...ROLE_IDS];
@@ -203,6 +205,7 @@ export class Room {
       room: this.code,
       balance: this.config.balance,
       balanceHash: this.balanceHash,
+      build: this.config.buildId ?? null,
     });
     this.sendLobby();
     if (this.phase === 'playing' && this.game) seat.conn?.send({ t: 'match', info: this.matchInfo(seat) });
@@ -368,7 +371,7 @@ export class Room {
         }
         return;
       case 'ping':
-        seat.conn?.send({ t: 'pong', c: msg.c, s: nowMs });
+        seat.conn?.send({ t: 'pong', c: msg.c, s: nowMs, build: this.config.buildId ?? null });
         return;
       case 'rematch':
         // 빠른 매칭은 판 뒤 방을 해산한다: 다시 하기는 누른 사람만 대기열로 (ServerCore가 옮긴다)

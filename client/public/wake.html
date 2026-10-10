@@ -2,8 +2,10 @@
 <!--
   서버 깨우기 화면. 서비스 워커(sw.js)가 미리 받아 두었다가, 잠든 서버가 깨어나는 동안 페이지 대신 보여 준다.
   서버가 깨어나면(healthz가 이 서버의 표시와 함께 답하면) 스스로 새로고침해 원래 주소(방 코드 포함)로 돌아간다.
-  서버는 깨어 있는데 표시가 없으면(표시를 모르는 예전 버전으로 되돌린 경우 등) 서비스 워커를 지우고 다시 연다.
-  '다시 시도' 버튼도 서비스 워커를 지운다. 이 화면에 갇히는 일이 없게 하는 탈출구다
+  서버는 깨어 있는데 표시가 없으면(표시를 모르는 예전 버전으로 되돌린 경우 등) 서비스 워커를 지우고 다시 연다 — 이 화면에
+  갇히는 일이 없게 하는 탈출구는 이것뿐이다. '다시 시도'는 새로고침만 한다(M13d).
+  앱 셸이 캐시돼 있으면 "기다리는 동안 봇과 연습"으로 기기 안 연습을 바로 연다(`?practice=1`은 서비스 워커가 캐시에서 준다).
+  90초가 지나면 "서버에 연결할 수 없어요" 안내
   게임 코드 없이 혼자 도는 페이지라 문구 · 색을 여기 직접 적는다 (문구 원본: docs/STORY_TEXT.md, 색: VISUAL_SPEC)
 -->
 <html lang="ko">
@@ -164,6 +166,15 @@
       .warn {
         color: var(--warn);
       }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 10px;
+      }
+      #retry {
+        background: #132433;
+      }
       button {
         --cut: 8px;
         margin-top: 4px;
@@ -214,10 +225,13 @@
             인터넷 연결이 끊겨 있어요. 와이파이나 데이터를 확인해 주세요.
           </p>
           <p class="warn" id="slow" hidden>
-            생각보다 오래 걸리고 있어요. 아래 버튼으로 다시 시도하거나, 계속 안 되면 개발자에게 알려 주세요.
+            서버에 연결할 수 없어요. 기다리는 동안 봇과 연습을 하거나, 아래 버튼으로 다시 시도해 주세요.
           </p>
         </div>
-        <button type="button" id="retry" hidden>다시 시도</button>
+        <div class="actions">
+          <button type="button" id="practice" data-testid="wake-practice" hidden>기다리는 동안 봇과 연습</button>
+          <button type="button" id="retry" hidden>다시 시도</button>
+        </div>
       </div>
     </main>
     <script>
@@ -236,6 +250,7 @@
         const offline = document.getElementById('offline');
         const slow = document.getElementById('slow');
         const retry = document.getElementById('retry');
+        const practice = document.getElementById('practice');
         let done = false;
 
         function recentReloads() {
@@ -321,7 +336,27 @@
           setTimeout(poll, POLL_MS);
         }
 
-        retry.addEventListener('click', () => bypassWorker());
+        // 다시 시도: 새로고침만 (서비스 워커 해제는 표시 없는 서버를 만났을 때만)
+        retry.addEventListener('click', () => {
+          done = true;
+          location.reload();
+        });
+        // 봇과 연습: 앱 셸이 캐시돼 있을 때만 (서비스 워커가 ?practice=1을 캐시에서 준다)
+        // 원래 주소의 설정(그래픽 품질 · 터치 · 디버그 등)은 남기고 방 코드만 뺀다
+        practice.addEventListener('click', () => {
+          done = true;
+          const target = new URL('./', location.href);
+          for (const [k, v] of new URL(location.href).searchParams) if (k !== 'room') target.searchParams.set(k, v);
+          target.searchParams.set('practice', '1');
+          location.href = target.href;
+        });
+        if (typeof caches !== 'undefined')
+          caches
+            .keys()
+            .then((keys) => {
+              practice.hidden = !keys.some((k) => k.startsWith('decoy-shell-'));
+            })
+            .catch(() => {});
         tick();
         setInterval(tick, 500);
         poll();

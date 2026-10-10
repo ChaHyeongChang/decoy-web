@@ -16,6 +16,7 @@ import {
   type SurvivorView,
 } from '@decoy/shared';
 import { sfx } from './audio';
+import { buildMismatch } from './buildInfo';
 import { UI_TEXT } from './data/storyText';
 import { device } from './device';
 import type { QualityTier } from './gfx/presets';
@@ -343,6 +344,11 @@ export class App {
     this.wakeUi.render(this.local || this.lobbyUi.atHome ? { ...panel, visible: false } : panel);
   }
 
+  /** 서버 빌드가 이 화면과 다르다 (M13d) */
+  private showUpdate(): void {
+    showUpdateBanner();
+  }
+
   /** 지금 주고받는 전송: 연습 중이면 기기 안 서버, 아니면 서버 WebSocket */
   get link(): Transport {
     return this.local ?? this.net;
@@ -661,7 +667,12 @@ export class App {
 
   private onMessage(msg: ServerMessage): void {
     switch (msg.t) {
+      case 'pong':
+        // 서버가 새 빌드면 (앱 셸 캐시가 옛 화면을 줬다) "새 버전이 있어요" (M13d, 연습 중에는 오지 않는다)
+        if (buildMismatch(msg.build)) this.showUpdate();
+        return;
       case 'welcome': {
+        if (buildMismatch(msg.build)) this.showUpdate();
         this.balance = validateBalance(msg.balance);
         this.balanceHash = msg.balanceHash;
         this.you = msg.you;
@@ -772,6 +783,26 @@ export class App {
         return;
     }
   }
+}
+
+/** "새 버전이 있어요" + 새로고침 (M13d). 한 번만 만들고 판 화면을 가리지 않게 위 가운데 작은 띠 */
+let updateShown = false;
+function showUpdateBanner(): void {
+  if (updateShown) return;
+  updateShown = true;
+  const node = document.createElement('div');
+  node.className = 'update-banner';
+  node.setAttribute('role', 'status');
+  node.setAttribute('data-testid', 'update-available');
+  const text = document.createElement('span');
+  text.textContent = UI_TEXT.updateAvailable;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn';
+  btn.textContent = UI_TEXT.updateReload;
+  btn.addEventListener('click', () => window.location.reload());
+  node.append(text, btn);
+  document.body.appendChild(node);
 }
 
 export function showToast(text: string, ms = 2500): void {
