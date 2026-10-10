@@ -1,8 +1,8 @@
 // 앱 생명주기 (MOBILE_PLAN M12 8 · 9번): 재연결 정책(1 → 2 → 4 → 5초, 숨김 · 오프라인이면 0회, 보임 · online이면 즉시),
 // 수신 감시(4초 무응답이면 끊고 바로 다시, 60초 숨김 뒤 1초 안에 pong이 오면 재연결 0회), 마지막 방 30초 · in-progress 2초 재시도,
-// 화면 꺼짐 방지, 뒤로 가기 항목. 시계 · 타이머는 가짜(FakeClock)로 주입한다
+// 화면 꺼짐 방지, 뒤로 가기 항목, 새 소켓의 시계 다시 맞추기(net.ts). 시계 · 타이머는 가짜(FakeClock)로 주입한다
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   BackGuard,
   LAST_ROOM_MS,
@@ -17,9 +17,11 @@ import {
   isActivationEvent,
   reconnectDelay,
   rejoinRetryDelay,
+  returnTarget,
   type Clock,
   type WakeLockLike,
 } from '../../client/src/lifecycle';
+import { NetClient } from '../../client/src/net';
 
 /** 가짜 시계: advance(ms) 동안 때가 된 타이머를 순서대로 부른다. freeze(ms)는 타이머 없이 시간만 흐른다(정지한 페이지) */
 class FakeClock implements Clock {
@@ -315,6 +317,16 @@ describe('마지막 방 (터치 · 설치 앱)', () => {
     expect(rejoinRetryDelay(last, 28_000)).toBe(2000);
     expect(rejoinRetryDelay(last, 28_001)).toBeNull();
   });
+
+  it('주소에 방이 없거나 같은 방 주소로 다시 열면 복귀(거절되면 다시 시도), 다른 방 주소면 아님', () => {
+    const last = { room: 'ABCD', at: 0 };
+    expect(returnTarget(null, last)).toBe(last);
+    // 같은 방 초대 링크 · 기록으로 다시 엶 (welcome마다 주소에 ?room=이 붙는다)
+    expect(returnTarget('ABCD', last)).toBe(last);
+    expect(returnTarget('WXYZ', last)).toBeNull();
+    expect(returnTarget(null, null)).toBeNull();
+    expect(returnTarget('ABCD', null)).toBeNull();
+  });
 });
 
 describe('화면 꺼짐 방지', () => {
@@ -441,6 +453,42 @@ describe('뒤로 가기 (터치 · 설치 앱)', () => {
     expect(g.popped()).toBe(false);
   });
 
+  it('판 중 새로고침 · 탭 폐기 뒤 복원: 지금 항목이 이미 내 항목이면 하나 더 넣지 않고, 판이 끝나면 그것을 걷어 낸다', () => {
+    const calls: string[] = [];
+    let backs = 0;
+    const make = (state: unknown): BackGuard =>
+      new BackGuard(
+        { pushState: () => calls.push('push'), back: () => calls.push('back') },
+        () => (backs += 1),
+        state,
+      );
+    const g = make({ decoyGuard: 1 });
+    expect(g.guarding).toBe(true);
+    g.arm();
+    g.gesture();
+    expect(calls).toEqual([]);
+    // 뒤로 가기 → 확인 창, "계속"에서 다시 넣는다
+    expect(g.popped()).toBe(true);
+    expect(backs).toBe(1);
+    g.gesture();
+    expect(calls).toEqual(['push']);
+    // 판에 다시 들어가지 못했어도(arm 없이) 결과 · 첫 화면에서 옛 항목을 걷어 낸다
+    calls.length = 0;
+    const h = make({ decoyGuard: 1 });
+    h.disarm();
+    expect(calls).toEqual(['back']);
+    expect(h.popped()).toBe(true);
+    expect(backs).toBe(1);
+    // 다른 기록 상태는 내 항목이 아니다
+    for (const other of [null, undefined, 'x', 1, {}, { decoyGuard: 2 }]) {
+      calls.length = 0;
+      const o = make(other);
+      expect(o.guarding).toBe(false);
+      o.disarm();
+      expect(calls).toEqual([]);
+    }
+  });
+
   it('PC(넣지 않음)는 뒤로 가기를 건드리지 않는다', () => {
     const { g, calls } = guard();
     expect(g.popped()).toBe(false);
@@ -455,5 +503,96 @@ describe('뒤로 가기 (터치 · 설치 앱)', () => {
     expect(isActivationEvent('pointerdown', 'touch')).toBe(false);
     expect(isActivationEvent('click', undefined)).toBe(true);
     expect(isActivationEvent('keydown', undefined)).toBe(true);
+  });
+});
+
+// ───────────── 새 소켓의 시계 다시 맞추기 (net.ts, 진동이 풀리는 조건) ─────────────
+
+/** WebSocket 흉내: 시험이 open · message · close를 낸다 */
+class FakeWs {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static all: FakeWs[] = [];
+  readyState = FakeWs.CONNECTING;
+  readonly sent: string[] = [];
+  private readonly handlers = new Map<string, ((ev: { data?: string }) => void)[]>();
+
+  constructor(readonly url: string) {
+    FakeWs.all.push(this);
+  }
+
+  addEventListener(type: string, fn: (ev: { data?: string }) => void): void {
+    this.handlers.set(type, [...(this.handlers.get(type) ?? []), fn]);
+  }
+
+  send(text: string): void {
+    this.sent.push(text);
+  }
+
+  close(): void {
+    this.readyState = 3;
+  }
+
+  fire(type: 'open' | 'message' | 'close', data?: string): void {
+    if (type === 'open') this.readyState = FakeWs.OPEN;
+    for (const fn of this.handlers.get(type) ?? []) fn({ data });
+  }
+
+  /** 이 소켓으로 보낸 마지막 ping의 c */
+  lastPing(): number {
+    const pings = this.sent
+      .map((t) => JSON.parse(t) as { t: string; c: number })
+      .filter((m) => m.t === 'ping');
+    const c = pings.at(-1)?.c;
+    if (c === undefined) throw new Error('ping 없음');
+    return c;
+  }
+}
+
+describe('새 소켓의 시계 다시 맞추기 (net.ts)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    FakeWs.all = [];
+  });
+
+  const pong = (c: number): string => JSON.stringify({ t: 'pong', c, s: c + 5000 });
+  /** 첫 ping은 setTimeout(0) 뒤에 나간다 */
+  const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 5));
+
+  it('새 소켓이 열리면 첫 pong에서 onResynced: 다시 맞추는 중 끊겨(감시 · 숨김 중 OS) 새로 연결해도 진동 시계가 풀린다', async () => {
+    vi.stubGlobal('WebSocket', FakeWs);
+    vi.stubGlobal('window', {
+      setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
+      clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
+    });
+    const net = new NetClient('ws://test/ws', { lag: 0, jitterMs: 0 });
+    let resynced = 0;
+    net.onResynced = () => (resynced += 1);
+    net.connect();
+    const ws1 = FakeWs.all[0]!;
+    ws1.fire('open');
+    expect(net.clockFresh).toBe(false);
+    await flush();
+    ws1.fire('message', pong(ws1.lastPing()));
+    expect(resynced).toBe(1);
+    expect(net.clockFresh).toBe(true);
+    // 보임 → 다시 맞추기 시작 → 응답 없이 끊김 (반쯤 열린 소켓을 감시가 버림 · 숨김 중 OS가 닫음)
+    net.resync();
+    expect(net.clockFresh).toBe(false);
+    const oldPing = ws1.lastPing();
+    net.drop();
+    net.connect();
+    const ws2 = FakeWs.all[1]!;
+    ws2.fire('open');
+    expect(net.clockFresh).toBe(false);
+    // 지연 큐에 남아 새 소켓으로 나간 옛 ping의 pong은 표본이 아니다
+    ws2.fire('message', pong(oldPing));
+    expect(resynced).toBe(1);
+    expect(net.clockFresh).toBe(false);
+    await flush();
+    ws2.fire('message', pong(ws2.lastPing()));
+    expect(resynced).toBe(2);
+    expect(net.clockFresh).toBe(true);
+    net.drop();
   });
 });

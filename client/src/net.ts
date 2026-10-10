@@ -29,7 +29,7 @@ export class NetClient {
   private samples: ClockSample[] = [];
   private pingTimer: number | null = null;
   private pingCount = 0;
-  /** 이 시각(performance.now) 전에 보낸 ping의 pong은 시계 표본으로 쓰지 않는다 (숨김에서 돌아와 다시 맞추는 중) */
+  /** 이 시각(performance.now) 전에 보낸 ping의 pong은 시계 표본으로 쓰지 않는다 (숨김에서 돌아와 다시 맞추는 중 · 새 소켓) */
   private sampleSince = -Infinity;
   /** 시계를 다시 맞추는 중이다: 새 표본이 오면 옛 표본을 버린다 */
   private resyncing = false;
@@ -41,7 +41,7 @@ export class NetClient {
   onClose: (() => void) | null = null;
   /** 서버 메시지가 소켓에 도착했다 (지연 큐 전, 수신 감시) */
   onHeard: (() => void) | null = null;
-  /** 다시 맞추기 뒤 첫 시계 표본을 받았다 */
+  /** 다시 맞추기(resync) · 새 소켓 연결 뒤 첫 시계 표본을 받았다 */
   onResynced: (() => void) | null = null;
 
   constructor(
@@ -68,8 +68,10 @@ export class NetClient {
       this.clearConnectTimer();
       this.connected = true;
       this.samples = [];
-      this.resyncing = false;
-      this.sampleSince = -Infinity;
+      // 새 소켓도 다시 맞추기다: 첫 pong에서 onResynced (숨김 중 끊김 · 감시로 버린 뒤 다시 연결해도 진동이 풀린다).
+      // 지연 큐에 남은 옛 ping의 pong은 표본으로 쓰지 않는다
+      this.resyncing = true;
+      this.sampleSince = performance.now();
       this.startPings();
       this.onOpen?.();
     });

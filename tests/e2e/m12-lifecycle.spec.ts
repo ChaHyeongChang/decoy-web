@@ -1,5 +1,6 @@
 // M12 앱 생명주기 (MOBILE_PLAN M12 자동 검증 'E2E m12-lifecycle'): 숨김 · 소켓 끊김 · 반쯤 열린 소켓 · 오프라인 · 마지막 방 복귀 ·
-// 뒤로 가기 확인 · 화면 꺼짐 방지 · 진동 · 판 직전 터치 안내 · 다른 탭 안내. 성능 항목은 갈래 C, 판 중 10초 위치 표시는 갈래 A.
+// 뒤로 가기 확인 · 화면 꺼짐 방지 · 진동 · 판 직전 터치 안내와 판 중 10초 위치 표시(입력을 막지 않음) · 다른 탭 안내.
+// 성능 항목은 m12-perf.
 // 헤드리스 크롬에서 실제로 되는 방법(실험으로 확인, Chromium 141):
 //  - 숨김: 탭 전환 · 창 최소화 · CDP 어느 것도 document.visibilityState를 바꾸지 않는다 → 시작 스크립트가 visibilityState ·
 //    hidden을 덮어쓰고 visibilitychange를 낸다. 실제 멈춤은 CDP Page.setWebLifecycleState(frozen)로 함께 흉내 낸다
@@ -8,7 +9,6 @@
 //    아무것도 오가지 않는다(반쯤 열린 소켓과 같다). 그 사이 새 WebSocket을 만들면 콘솔 에러(ERR_INTERNET_DISCONNECTED)가 난다
 //  - page.evaluate · locator 기다리기는 사용자 활성화를 준다 → '활성화 전' 진동은 시작 스크립트에서(어떤 evaluate보다 먼저) 본다
 // 느린 CI 대비: 간격 폴링(100~200ms), 시간 창은 넉넉히(3초 · 2초 기준은 그 시각을 페이지 안에서 잰다)
-import { readFileSync } from 'node:fs';
 import {
   expect,
   test,
@@ -24,6 +24,7 @@ import {
   PHONE_LANDSCAPE,
   createRoom,
   dpr1,
+  inputLog,
   myId,
   newPlayerPage,
   pickRoleAndReady,
@@ -148,6 +149,8 @@ interface RelayPair {
   server: WebSocketRoute;
   /** 서버 → 페이지 중계를 멈춘다 (반쯤 열린 소켓) */
   hold: boolean;
+  /** 끊었다: 어느 쪽으로도 더 보내지 않는다 (닫히는 중인 소켓에 보내면 페이지 콘솔 에러) */
+  cut: boolean;
 }
 
 interface Relay {
@@ -163,14 +166,14 @@ async function relayWs(page: Page): Promise<Relay> {
   const r: Relay = { pairs: [], joins: 0, keepServer: false };
   await page.routeWebSocket(/\/ws$/, (ws) => {
     const server = ws.connectToServer();
-    const pair: RelayPair = { page: ws, server, hold: false };
+    const pair: RelayPair = { page: ws, server, hold: false, cut: false };
     r.pairs.push(pair);
     ws.onMessage((m) => {
       if (typeof m === 'string' && m.includes('"t":"join"')) r.joins += 1;
-      server.send(m);
+      if (!pair.cut) server.send(m);
     });
     server.onMessage((m) => {
-      if (!pair.hold) ws.send(m);
+      if (!pair.hold && !pair.cut) ws.send(m);
     });
     ws.onClose(() => {
       if (!r.keepServer) void server.close();
@@ -184,6 +187,7 @@ async function relayWs(page: Page): Promise<Relay> {
 async function cutSocket(r: Relay): Promise<void> {
   const p = r.pairs.at(-1);
   if (!p) throw new Error('중계 중인 소켓 없음');
+  p.cut = true;
   await p.server.close();
   await p.page.close();
 }
@@ -229,24 +233,86 @@ async function soloMatch(
 }
 
 const snapCount = (page: Page): Promise<number> => page.evaluate(() => window.__DECOY__?.snapCount ?? 0);
+const lastTick = (page: Page): Promise<number> =>
+  page.evaluate(() => window.__DECOY__?.getLastSnapshot()?.tick ?? -1);
+
+/**
+ * 다시 연결해 같은 자리로 스냅샷이 다시 온다: 서버 틱 tick0 뒤의 스냅샷 3개 (판은 이어지므로 틱은 계속 는다).
+ * 다시 들어가면 서버가 match를 또 보내 snapCount가 0부터 센다 — 숨기기 전까지 쌓인 수와 견주지 않는다
+ */
+async function waitForResumed(page: Page, tick0: number, id: string): Promise<void> {
+  await page.waitForFunction(
+    ([t, me]) => {
+      const d = window.__DECOY__;
+      return !!d && d.snapCount >= 3 && (d.getLastSnapshot()?.tick ?? -1) > (t as number) && d.you === me;
+    },
+    [tick0, id] as const,
+    { polling: 100, timeout: 20_000 },
+  );
+}
+
+/** 다른 플레이어(봇)를 세운다: 괴물 봇의 공격 진동이 세는 값에 섞이지 않게 */
+async function freezeOthers(s: Solo): Promise<void> {
+  const tr = await truth(s.page, s.code);
+  for (const p of tr.players)
+    if (p.id !== s.id) await sendTest(s.page, { kind: 'freeze', target: p.id, frozen: true });
+}
+
+/** 가짜 진동이 받은 피격 패턴(한 번 울림) 수 */
+const hitVibes = (page: Page): Promise<number> =>
+  page.evaluate(
+    () => (window as unknown as E2EWindow).__e2eVib?.filter((v) => v.pattern.length === 1).length ?? 0,
+  );
+
+/**
+ * 숨김에서 돌아와 다시 연결한 뒤 시계를 맞추면 진동이 다시 울린다: 숨김이 진동을 막고(holdClock), 새 소켓의 첫 pong이
+ * 푼다(clockSynced). 풀리지 않으면 그 뒤 판 내내 피격 · 발각 진동이 0번이다
+ */
+async function expectHapticsBack(page: Page): Promise<void> {
+  await expect.poll(() => life(page, (h) => h.clockFresh), POLL).toBe(true);
+  const n = await hitVibes(page);
+  await life(page, (h) => h.hapticHit(0));
+  expect(await hitVibes(page), '다시 연결한 뒤 피격 진동').toBe(n + 1);
+}
+
+/** 마지막 입력 프레임의 이동 · 입력 방식 */
+async function lastMove(page: Page): Promise<{ mx: number; my: number; mode: string } | null> {
+  const e = (await inputLog(page)).at(-1);
+  return e ? { mx: e.mx, my: e.my, mode: e.mode } : null;
+}
 
 // ───────────── 숨김 · 끊김 · 재연결 ─────────────
 
-test('숨김 → 이 탭의 소켓만 끊김 → 다시 보임: 숨긴 동안 재연결 0회, 보이면 3초 안에 같은 자리 · 스냅샷 재개, 터치 상태 초기화', async ({
+test('숨김 → 이 탭의 소켓만 끊김 → 다시 보임: 숨김에서 손가락을 모두 놓고, 숨긴 동안 재연결 0회, 보이면 3초 안에 같은 자리 · 스냅샷 재개, 다시 연결한 뒤 진동이 울린다', async ({
   browser,
 }) => {
-  test.setTimeout(120_000);
-  const s = await soloMatch(browser, PHONE, 'runner', { relay: true });
+  test.setTimeout(150_000);
+  const s = await soloMatch(browser, PHONE, 'runner', { relay: true, inits: [fakeVibrate] });
   const { page } = s;
   const relay = s.relay!;
+  await freezeOthers(s);
   // 이동 스틱을 잡은 채 숨긴다 (손가락은 CDP로 계속 눌려 있다)
   const zone = centerOf(await waitForTouchTarget(page, 'move-zone'));
   const t = await MultiTouch.attach(page);
   await t.down(1, zone.x, zone.y);
   await t.move(1, zone.x + 50, zone.y - 10, { steps: 4, stepMs: 34 });
+  await expect.poll(async () => Math.abs((await lastMove(page))?.mx ?? 0), POLL).toBeGreaterThan(0.5);
+  // ① 소켓은 그대로 숨김 → 보임 (판 장면도 그대로): 숨김에서 터치 화면이 손가락을 모두 놓았다. 손가락 1을 누른 채로
+  // 새 손가락 2가 이동 스틱을 잡는다 — 놓지 않았다면 남은 손가락 1 기록이 손가락 2를 거부한다(입력 0만 봐서는 못 잡는다)
+  // (숨겨진 동안은 입력 프레임을 만들지 않는다 — 보인 뒤 첫 프레임부터 본다)
+  await setVisible(page, false);
+  await setVisible(page, true);
+  await expect.poll(() => lastMove(page), POLL).toMatchObject({ mx: 0, my: 0 });
+  await t.down(2, zone.x, zone.y);
+  await t.move(2, zone.x, zone.y - 90, { steps: 6, stepMs: 20 });
   await expect
-    .poll(() => page.evaluate(() => Math.abs(window.__DECOY__?.getLastInput()?.mx ?? 0)), POLL)
-    .toBeGreaterThan(0.5);
+    .poll(async () => {
+      const m = await lastMove(page);
+      return m !== null && m.mode === 'touch' && m.my < -0.9 && Math.abs(m.mx) < 0.1;
+    }, POLL)
+    .toBe(true);
+  await t.up(2);
+  // ② 손가락 1은 누른 채 숨기고 이 탭의 소켓만 끊는다 (OS가 끊은 것처럼)
   const connects0 = await life(page, (h) => h.connects);
   await setVisible(page, false);
   await cutSocket(relay);
@@ -255,57 +321,54 @@ test('숨김 → 이 탭의 소켓만 끊김 → 다시 보임: 숨긴 동안 �
   await page.waitForTimeout(3500);
   expect(await life(page, (h) => h.connects)).toBe(connects0);
   expect(relay.pairs).toHaveLength(1);
-  const before = await snapCount(page);
+  const tick0 = await lastTick(page);
   const t0 = await page.evaluate(() => {
     (window as unknown as E2EWindow).__e2eSetVisible?.(true);
     return performance.now();
   });
-  // 보이면 바로 연결 → 같은 자리 · 판 장면 다시 · 스냅샷
-  await page.waitForFunction(
-    ([n, id]) => (window.__DECOY__?.snapCount ?? 0) > (n as number) + 2 && window.__DECOY__?.you === id,
-    [before, s.id] as const,
-    { polling: 100, timeout: 20_000 },
-  );
+  // 보이면 바로 연결 → 같은 자리 · 판 장면 다시 · 스냅샷 (재연결 + 스냅샷 3개 받는 시간만 잰다)
+  await waitForResumed(page, tick0, s.id);
   const took = await page.evaluate((a) => performance.now() - a, t0);
   console.log(`[m12-lifecycle] 숨김 복귀 → 스냅샷 재개 ${Math.round(took)}ms`);
   expect(took).toBeLessThan(3000);
   expect(relay.pairs).toHaveLength(2);
   expect(await page.evaluate(() => window.__DECOY__?.role)).toBe('runner');
-  // 서버도 같은 자리를 접속 중으로 본다
+  // 서버의 같은 자리 (30초 유예 동안 자리를 지킨다 — 접속 중인지는 위의 스냅샷 재개 · you가 보장한다)
   const me = (await truth(page, s.code)).players.find((p) => p.id === s.id);
-  expect(me).toBeDefined();
-  // 터치 상태 초기화: 손가락이 아직 눌려 있어도 이동 입력은 0 (숨김에서 모든 손가락을 놓았다)
-  await expect
-    .poll(() => page.evaluate(() => window.__DECOY__?.getLastInput() ?? null), POLL)
-    .toMatchObject({ mx: 0, my: 0 });
+  expect(me?.role).toBe('runner');
+  // 다시 만든 판 장면도 눌린 채 남은 손가락 1을 이동으로 보지 않는다
+  await expect.poll(() => lastMove(page), POLL).toMatchObject({ mx: 0, my: 0 });
+  // 진동: 숨김이 막은 진동이 새 소켓에서 시계를 맞춘 뒤 다시 울린다
+  await expectHapticsBack(page);
   await t.detach();
   expect(s.problems).toEqual([]);
   await s.context.close();
 });
 
-test('반쯤 열린 소켓(서버 → 페이지 중계만 멈춤): 수신 감시가 4초 뒤 끊고 바로 다시 연결해 같은 자리로', async ({
+test('반쯤 열린 소켓(숨김에서 돌아왔는데 서버 → 페이지 중계만 멈춤): 수신 감시가 4초 뒤 끊고 바로 다시 연결해 같은 자리로, 진동도 다시 울린다', async ({
   browser,
 }) => {
   test.setTimeout(120_000);
-  const s = await soloMatch(browser, PHONE, 'scout', { relay: true });
+  const s = await soloMatch(browser, PHONE, 'scout', { relay: true, inits: [fakeVibrate] });
   const { page } = s;
   const relay = s.relay!;
+  await freezeOthers(s);
   const first = relay.pairs[0]!;
-  const t0 = Date.now();
+  // 숨긴 사이 소켓이 반쯤 열린 채가 된다 → 돌아오면 시계 다시 맞추기 ping에 답이 없다
+  await setVisible(page, false);
   first.hold = true;
+  const t0 = Date.now();
+  await setVisible(page, true);
   await expect.poll(() => life(page, (h) => h.watchdogDrops), { ...POLL, timeout: 15_000 }).toBe(1);
   const tookDrop = Date.now() - t0;
   console.log(`[m12-lifecycle] 반쯤 열린 소켓 → 감시가 끊음 ${tookDrop}ms`);
   // 4초 무응답 + 확인 간격 0.5초 (테스트 쪽 왕복 여유)
   expect(tookDrop).toBeGreaterThanOrEqual(3500);
   expect(tookDrop).toBeLessThan(8000);
-  const before = await snapCount(page);
-  await page.waitForFunction(
-    ([n, id]) => (window.__DECOY__?.snapCount ?? 0) > (n as number) + 2 && window.__DECOY__?.you === id,
-    [before, s.id] as const,
-    { polling: 100, timeout: 15_000 },
-  );
+  // 끊긴 소켓으로는 더 오지 않는다: 이 틱 뒤의 스냅샷은 새 소켓으로 온 것이다
+  await waitForResumed(page, await lastTick(page), s.id);
   expect(relay.pairs.length).toBe(2);
+  await expectHapticsBack(page);
   expect(s.problems).toEqual([]);
   await s.context.close();
 });
@@ -381,32 +444,36 @@ test('휴대폰: ?room= 없이 다시 열어도 30초 안이면 같은 자리 (�
   await pc.context.close();
 });
 
-test('휴대폰: 옛 소켓이 반쯤 열린 채 남아도(in-progress) 2초마다 다시 시도해 같은 자리로', async ({
+test('휴대폰: 옛 소켓이 반쯤 열린 채 남아도(in-progress) 2초마다 다시 시도해 같은 자리로 — ?room= 없이 다시 열어도, 같은 방 주소(초대 링크 · 기록)로 다시 열어도', async ({
   browser,
 }) => {
-  test.setTimeout(150_000);
-  // 옛 앱: 숨겨진 뒤 멈췄다(프로세스가 죽은 것처럼). 서버는 그 소켓이 아직 살아 있다고 본다(하트비트로 잡히기 전)
+  test.setTimeout(180_000);
   const s = await soloMatch(browser, PHONE, 'runner', { relay: true });
-  const old = s.relay!;
-  await setVisible(s.page, false);
-  const cdp = await s.context.newCDPSession(s.page);
-  await cdp.send('Page.setWebLifecycleState', { state: 'frozen' });
-  // 앱을 다시 연다: 주소에 ?room= 없이
-  const page = await s.context.newPage();
+  let old = { page: s.page, relay: s.relay! };
   const problems: string[] = [];
-  watchConsole(page, problems);
-  const relay = await relayWs(page);
-  await page.goto(`/?${BASE_QUERY.slice(1)}`);
-  // 거절(in-progress) → 2초마다 다시 (그동안 '다시 연결하는 중' 안내, 첫 화면으로 가지 않는다)
-  await expect.poll(() => relay.joins, POLL).toBeGreaterThanOrEqual(3);
-  await expect(page.getByTestId('server-waking')).toContainText('다시 연결하는 중');
-  await expect(page.getByTestId('create-room')).toHaveCount(0);
-  // 서버가 옛 소켓을 끊었다 (하트비트) → 다음 시도에서 같은 자리
-  await old.pairs[0]!.server.close();
-  await waitForSnapshots(page, 3);
-  expect(await myId(page)).toBe(s.id);
-  await expect(page.getByTestId('server-waking')).toBeHidden();
-  console.log(`[m12-lifecycle] 옛 소켓이 남은 동안 입장 시도 ${relay.joins}번`);
+  // welcome마다 주소에 ?room=이 붙으므로 기록 · 같은 방 링크로 다시 열면 주소에 방 코드가 있다
+  for (const url of [`/?${BASE_QUERY.slice(1)}`, `/?room=${s.code}${BASE_QUERY}`]) {
+    // 옛 앱: 숨겨진 뒤 멈췄다(프로세스가 죽은 것처럼). 서버는 그 소켓이 아직 살아 있다고 본다(하트비트로 잡히기 전)
+    await setVisible(old.page, false);
+    const cdp = await s.context.newCDPSession(old.page);
+    await cdp.send('Page.setWebLifecycleState', { state: 'frozen' });
+    // 앱을 다시 연다 (새 탭: 이 탭의 자리 토큰이 없다)
+    const page = await s.context.newPage();
+    watchConsole(page, problems);
+    const relay = await relayWs(page);
+    await page.goto(url);
+    // 거절(in-progress) → 2초마다 다시 (그동안 '다시 연결하는 중' 안내, 첫 화면으로 가지 않는다)
+    await expect.poll(() => relay.joins, POLL).toBeGreaterThanOrEqual(3);
+    await expect(page.getByTestId('server-waking')).toContainText('다시 연결하는 중');
+    await expect(page.getByTestId('create-room')).toHaveCount(0);
+    // 서버가 옛 소켓을 끊었다 (하트비트) → 다음 시도에서 같은 자리
+    await old.relay.pairs.at(-1)!.server.close();
+    await waitForSnapshots(page, 3);
+    expect(await myId(page), url).toBe(s.id);
+    await expect(page.getByTestId('server-waking')).toBeHidden();
+    console.log(`[m12-lifecycle] 옛 소켓이 남은 동안 입장 시도 ${relay.joins}번 (${url.split('&')[0]})`);
+    old = { page, relay };
+  }
   expect([...s.problems, ...problems]).toEqual([]);
   await s.context.close();
 });
@@ -467,6 +534,126 @@ test('휴대폰 판 중 뒤로 가기 → 확인 창: "계속"이면 판 유지,
   await s.context.close();
 });
 
+test('휴대폰 판 중 새로고침(탭 폐기 뒤 복원과 같다): 남은 뒤로 가기 항목을 그대로 써 하나 더 넣지 않고, 결과에서 걷어 낸다', async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const s = await soloMatch(browser, PHONE, 'runner');
+  const { page } = s;
+  const pushes = (): Promise<number> =>
+    page.evaluate(() => (window as unknown as E2EWindow).__e2ePush?.length ?? 0);
+  const state = (): Promise<string> => page.evaluate(() => JSON.stringify(history.state));
+  let t = await MultiTouch.attach(page);
+  const zone = centerOf(await waitForTouchTarget(page, 'move-zone'));
+  await t.tap(1, zone.x, zone.y);
+  await expect.poll(() => life(page, (h) => h.guarding), POLL).toBe(true);
+  expect(await state()).toBe('{"decoyGuard":1}');
+  const entries = await page.evaluate(() => history.length);
+  await t.detach();
+  // 판 중 다시 읽힌다 (이 탭의 자리 토큰으로 같은 자리) — 지금 기록 항목이 이미 내 항목이다
+  await page.reload();
+  await waitForSnapshots(page, 3);
+  expect(await myId(page)).toBe(s.id);
+  expect(await life(page, (h) => h.guarding)).toBe(true);
+  t = await MultiTouch.attach(page);
+  const zone2 = centerOf(await waitForTouchTarget(page, 'move-zone'));
+  await t.tap(1, zone2.x, zone2.y);
+  await page.waitForTimeout(300);
+  expect(await pushes()).toBe(0);
+  expect(await page.evaluate(() => history.length)).toBe(entries);
+  // 뒤로 가기 → 확인 창 (새로고침 뒤에도 그 아래 항목과 같은 문서다), "계속"이면 다시 넣는다
+  await page.goBack({ waitUntil: 'commit' });
+  const dialog = page.getByTestId('leave-dialog');
+  await expect(dialog).toBeVisible();
+  await press(page.getByTestId('leave-stay'));
+  await expect(dialog).toBeHidden();
+  expect(await pushes()).toBe(1);
+  expect(await page.evaluate(() => window.__DECOY__?.phase)).toBe('playing');
+  // 판을 끝낸다 (시간 초과) → 결과: 넣어 둔 항목을 걷어 내 판 전 항목으로 돌아온다
+  await sendTest(page, { kind: 'setTime', timeLeft: 0.5 });
+  await expect(page.getByTestId('result')).toBeVisible();
+  await expect.poll(() => life(page, (h) => h.guarding), POLL).toBe(false);
+  await expect.poll(state, POLL).toBe('null');
+  await t.detach();
+  expect(s.problems).toEqual([]);
+  await s.context.close();
+});
+
+test('휴대폰: 끊겨 다시 연결을 기다리는 중에 "나가기" → 첫 화면, 다시 연결한 뒤 진짜 끊김에는 알림이 뜬다', async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const s = await soloMatch(browser, PHONE, 'runner', { relay: true });
+  const { page, context } = s;
+  const relay = s.relay!;
+  const zone = centerOf(await waitForTouchTarget(page, 'move-zone'));
+  const t = await MultiTouch.attach(page);
+  await t.tap(1, zone.x, zone.y);
+  await expect.poll(() => life(page, (h) => h.guarding), POLL).toBe(true);
+  const toast = page.locator('.toast', { hasText: '연결이 끊겼습니다' });
+  // 망이 끊겼다: 오프라인이라 다시 시도하지 않고 기다린다 (끊김 알림은 이때 한 번)
+  await context.setOffline(true);
+  await cutSocket(relay);
+  await expect(toast).toBeVisible();
+  await expect.poll(() => life(page, (h) => h.link), POLL).toBe('waiting');
+  // 이 알림이 사라진 뒤에 본다 (마지막 단언이 이 알림으로 맞지 않게)
+  await expect(toast).toHaveCount(0);
+  // 기다리는 중에 뒤로 가기 → 나가기: 버릴 소켓이 없어 닫힘 이벤트가 나지 않는다
+  await page.goBack({ waitUntil: 'commit' });
+  await expect(page.getByTestId('leave-dialog')).toBeVisible();
+  await press(page.getByTestId('leave-go'));
+  await expect(page.getByTestId('create-room')).toBeVisible();
+  expect(await life(page, (h) => h.link)).toBe('waiting');
+  await context.setOffline(false);
+  await expect.poll(() => life(page, (h) => h.link), POLL).toBe('open');
+  expect(relay.pairs).toHaveLength(2);
+  // 첫 화면에서 쓰던 연결이 진짜로 끊긴다 → 알림
+  await cutSocket(relay);
+  await expect(toast).toBeVisible();
+  await t.detach();
+  expect(s.problems).toEqual([]);
+  await context.close();
+});
+
+test('휴대폰 판 중 다시 연결했는데 자리가 없다(in-progress): 첫 화면 · 화면 꺼짐 방지 해제 · 뒤로 가기 항목 걷음 · 판 장면 멈춤', async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const s = await soloMatch(browser, PHONE, 'runner', { relay: true, inits: [fakeWakeLock] });
+  const { page } = s;
+  const wakeLog = (): Promise<{ op: string; id: number; vis: string }[]> =>
+    page.evaluate(() => (window as unknown as E2EWindow).__e2eWake?.slice() ?? []);
+  await expect.poll(wakeLog, POLL).toEqual([{ op: 'request', id: 1, vis: 'visible' }]);
+  const zone = centerOf(await waitForTouchTarget(page, 'move-zone'));
+  const t = await MultiTouch.attach(page);
+  await t.tap(1, zone.x, zone.y);
+  await expect.poll(() => life(page, (h) => h.guarding), POLL).toBe(true);
+  // 이 기기의 자리 토큰을 잃었다(저장소가 지워짐): 다시 연결하면 진행 중인 방에 들어갈 자리가 없다.
+  // 서버가 잠들었다 깨거나 다시 시작해 방이 사라진 경우(room-not-found)도 같은 길로 첫 화면에 간다
+  await page.evaluate((c) => {
+    sessionStorage.removeItem(`decoy:seat:${c}`);
+    localStorage.removeItem('decoy:seats');
+  }, s.code);
+  await cutSocket(s.relay!);
+  await expect(page.getByTestId('create-room')).toBeVisible();
+  await expect(page.getByTestId('lobby-error')).toContainText('이미 진행 중인 방입니다');
+  await expect.poll(() => life(page, (h) => h.guarding), POLL).toBe(false);
+  await expect.poll(() => page.evaluate(() => JSON.stringify(history.state)), POLL).toBe('null');
+  await expect.poll(wakeLog, POLL).toEqual([
+    { op: 'request', id: 1, vis: 'visible' },
+    { op: 'release', id: 1, vis: 'visible' },
+  ]);
+  await expect.poll(() => page.evaluate(() => window.__DECOY__?.getHudLayout() ?? null), POLL).toBeNull();
+  // 다시 보여도 화면 꺼짐 방지를 다시 요청하지 않는다
+  await setVisible(page, false);
+  await setVisible(page, true);
+  await page.waitForTimeout(300);
+  expect((await wakeLog()).filter((e) => e.op === 'request')).toHaveLength(1);
+  await t.detach();
+  expect(s.problems).toEqual([]);
+  await s.context.close();
+});
+
 test('PC 뒤로 가기는 지금 동작 그대로 (기록 항목을 넣지 않고 확인 창도 없다)', async ({ browser }) => {
   test.setTimeout(120_000);
   const s = await soloMatch(browser, undefined, 'monster');
@@ -480,6 +667,46 @@ test('PC 뒤로 가기는 지금 동작 그대로 (기록 항목을 넣지 않�
   await page.goBack();
   expect(page.url()).toBe('about:blank');
   await s.context.close();
+});
+
+/** 시작 스크립트: matchMedia('(display-mode: <mode>)')가 맞다고 답한다 (PC 브라우저 F11 · 키오스크 = fullscreen, 설치한 PWA = standalone) */
+function fakeDisplayMode(mode: string): void {
+  const real = window.matchMedia.bind(window);
+  window.matchMedia = (q: string): MediaQueryList =>
+    q === `(display-mode: ${mode})`
+      ? ({
+          matches: true,
+          media: q,
+          onchange: null,
+          addEventListener: () => undefined,
+          removeEventListener: () => undefined,
+          addListener: () => undefined,
+          removeListener: () => undefined,
+          dispatchEvent: () => false,
+        } as MediaQueryList)
+      : real(q);
+}
+
+test('PC 브라우저 전체 화면(F11 · 키오스크 = display-mode fullscreen)은 설치 앱이 아니다: 마지막 방 · 뒤로 가기 확인 없음. 설치한 PWA(standalone)는 설치 앱', async ({
+  browser,
+}) => {
+  test.setTimeout(90_000);
+  for (const [mode, installed] of [
+    ['fullscreen', false],
+    ['standalone', true],
+  ] as const) {
+    const pc = await newPlayerPage(browser);
+    await pc.context.addInitScript(fakeDisplayMode, mode);
+    const code = await createRoom(pc.page);
+    expect(await pc.page.evaluate((m) => matchMedia(`(display-mode: ${m})`).matches, mode)).toBe(true);
+    expect(await life(pc.page, (h) => h.lifeApp), mode).toBe(installed);
+    const last = await pc.page.evaluate(() => localStorage.getItem('decoy:lastRoom'));
+    expect(last === null ? null : (JSON.parse(last) as { room: string }).room, mode).toBe(
+      installed ? code : null,
+    );
+    expect(pc.problems).toEqual([]);
+    await pc.context.close();
+  }
 });
 
 test('Wake Lock: 판 시작 때 요청 · 숨겨져 풀린 뒤 다시 보이면 재요청 · 결과에서 해제 (로비에서는 요청 없음)', async ({
@@ -574,12 +801,8 @@ test('진동: 활성화 전 0번, 피격 1번 · 오래된 피격 0번, 발각 �
   await context.close();
 });
 
-test('진동 (판 이벤트, 판 장면이 haptics를 부르면 엄격히): 내 피격 1번 · 발각 전환 1번, 멈췄다 돌아온 뒤 지난 일 0번', async ({
-  browser,
-}) => {
+test('진동 (판 이벤트): 내 피격 1번 · 발각 전환 1번, 멈췄다 돌아온 뒤 지난 일 0번', async ({ browser }) => {
   test.setTimeout(180_000);
-  // GameScene → haptics 한 줄은 갈래 A가 넣는다. 들어오기 전에는 진동 0번이 맞다(이 시험이 통합 뒤 의미를 갖는다)
-  const wired = /\bhaptics\.(hit|spotted)\(/.test(readFileSync('client/src/scenes/GameScene.ts', 'utf8'));
   const mon = await newPlayerPage(browser);
   const code = await createRoom(mon.page, '&bots=1');
   const phone = await newPlayerPage(browser, PHONE);
@@ -621,11 +844,9 @@ test('진동 (판 이벤트, 판 장면이 haptics를 부르면 엄격히): 내 
   await phone.page.waitForTimeout(500);
   const hits1 = await hitCount();
   const spots1 = await spotCount();
-  console.log(
-    `[m12-lifecycle] 판 이벤트 진동 (판 장면 연결 ${wired ? '됨' : '전'}): 피격 ${hits1} · 발각 ${spots1}`,
-  );
-  expect(hits1).toBe(wired ? 1 : 0);
-  expect(spots1).toBe(wired ? 1 : 0);
+  console.log(`[m12-lifecycle] 판 이벤트 진동: 피격 ${hits1} · 발각 ${spots1}`);
+  expect(hits1).toBe(1);
+  expect(spots1).toBe(1);
   // 멈췄다 돌아온다: 숨김 + 페이지 정지 동안 두 번째 피격(수감) → 돌아오면 밀린 스냅샷의 지난 일
   const cdp = await phone.context.newCDPSession(phone.page);
   await setVisible(phone.page, false);
@@ -652,7 +873,7 @@ test('진동 (판 이벤트, 판 장면이 haptics를 부르면 엄격히): 내 
 
 // ───────────── 판 직전 터치 안내 · 설정 · 다른 탭 ─────────────
 
-test('판 직전 터치 안내: 새 휴대폰에서 준비 뒤 카드, 닫으면 다시 안 뜸, 다시 보기 뒤 다시 뜸, 떠 있는 채 판이 시작하면 본 것. 능력 줄은 키캡 없이. PC는 그대로', async ({
+test('판 직전 터치 안내: 새 휴대폰에서 준비 뒤 카드, 닫으면 다시 안 뜸, 다시 보기 뒤 다시 뜸, 떠 있는 채 판이 시작하면 본 것, 그 판 처음 10초 위치 표시는 입력을 막지 않고 사라짐. 능력 줄은 키캡 없이. PC는 그대로', async ({
   browser,
 }) => {
   test.setTimeout(150_000);
@@ -705,6 +926,38 @@ test('판 직전 터치 안내: 새 휴대폰에서 준비 뒤 카드, 닫으면
   await waitForSnapshots(page, 3);
   expect(await page.evaluate(() => localStorage.getItem('decoy:touchTutorial'))).toBe('1');
   await expect(card).toBeHidden();
+  // 판 중 처음 10초 위치 표시: 떠 있는 동안 입력을 막지 않는다 (덮개 아래 대상이 실제 히트 테스트에 잡히고, 이동 스틱이 입력을 만든다)
+  const hints = page.locator('.tc-hints');
+  await expect(hints).toBeVisible();
+  await expect(hints.locator('.tc-hint-zone')).toContainText('여기를 누르고 끌어 이동');
+  for (const id of ['move-zone', 'ability', 'rescue']) {
+    const c = centerOf(await waitForTouchTarget(page, id));
+    const hit = await page.evaluate(
+      ([x, y]) =>
+        document
+          .elementFromPoint(x!, y!)
+          ?.closest('[data-touch-target]')
+          ?.getAttribute('data-touch-target') ?? null,
+      [c.x, c.y],
+    );
+    expect(hit, id).toBe(id);
+  }
+  const zone = centerOf(await waitForTouchTarget(page, 'move-zone'));
+  const t = await MultiTouch.attach(page);
+  await t.down(1, zone.x, zone.y);
+  await t.move(1, zone.x + 90, zone.y, { steps: 6, stepMs: 20 });
+  await expect
+    .poll(async () => {
+      const m = await lastMove(page);
+      return m !== null && m.mode === 'touch' && m.mx > 0.9 && Math.abs(m.my) < 0.1;
+    }, POLL)
+    .toBe(true);
+  // 그 입력은 위치 표시가 떠 있는 동안 만든 것이다
+  expect(await hints.evaluate((el) => el.classList.contains('gone'))).toBe(false);
+  await t.up(1);
+  await t.detach();
+  // 10초 뒤 사라진다
+  await expect(hints).toBeHidden({ timeout: 20_000 });
   expect(problems).toEqual([]);
   await context.close();
 
@@ -719,6 +972,7 @@ test('판 직전 터치 안내: 새 휴대폰에서 준비 뒤 카드, 닫으면
   await press(pc.page.getByTestId('start-button'));
   await waitForSnapshots(pc.page, 3);
   await expect.poll(() => pc.page.evaluate(() => window.__DECOY__?.getHud().help), POLL).toBe(true);
+  await expect(pc.page.locator('.tc-hints')).toHaveCount(0);
   expect(pc.problems).toEqual([]);
   await pc.context.close();
 });
