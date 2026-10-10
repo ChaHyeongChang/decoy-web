@@ -11,8 +11,8 @@ export const SERVER_MARK_HEADER = 'x-decoy-server';
 export const MAX_STALL_MS = 60_000;
 /**
  * 동시에 봇을 채워 판을 할 수 있는 빠른 매칭 방 수 (M13c). 실전 봇 방 하나의 비용을 재서 "모든 봇 방 비용 ≤ Render 무료
- * CPU(0.1개)의 50%"로 정했다(측정 · 계산은 DECISIONS M13c). 넘으면 그 방은 "사람만 기다리는 중". --max-bot-rooms ·
- * DECOY_MAX_BOT_ROOMS로 바꾼다(유료 플랜)
+ * CPU(0.1개)의 50%"로 정했다: 방 하나가 판 1초에 CPU 약 2.5ms(scripts/measure-bot-rooms.ts), 코어 속도 2배 여유
+ * (측정 · 계산은 DECISIONS M13c). 넘으면 그 방은 "사람만 기다리는 중". --max-bot-rooms · DECOY_MAX_BOT_ROOMS로 바꾼다(유료 플랜)
  */
 export const DEFAULT_MAX_BOT_ROOMS = 6;
 
