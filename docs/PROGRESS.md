@@ -20,6 +20,7 @@
 | M13a 시뮬레이션 공유화 · 길찾기 | #11 | 2026-10-10 12:40 |
 | M13b 실전 봇 · 봇과 연습 · 로비 홈 | #12 | 2026-10-10 13:38 |
 | M13c 빠른 매칭 | #13 | 2026-10-10 14:07 |
+| M13d 앱 셸 캐시 · 오프라인 진입 | #14 | 2026-10-10 14:42 |
 
 main에 병합하면 Render에 자동 배포된다(`render.yaml`, `plan: free` — **유료 전환은 사용자가 직접 한다. 파일의 플랜은 바꾸지 않는다**).
 
@@ -117,7 +118,9 @@ MOBILE_PLAN과 달라진 점
 
 | M13c (PR #13) | 약 50분 (2회: PR 빠른 검사 1회 3분 · 수동 전체 검사 1회 47분) | 약 3분 (1회) | 약 53분 | 전체 검사 한 번에 통과(4샤드 11 · 9 · 11 · 9분). 로컬 전체 E2E에서 실패한 연습 정보 차단 시험(괴물 조준이 마우스를 따름)을 고친 뒤 걸었다 |
 
-2026년 10월 누적: 약 1,095분 (2026-10-10 14:10 UTC M13c main 검사까지). 이 세션은 1,800분을 넘을 것 같으면 멈추고 알린다
+| M13d (PR #14) | 약 55분 (2회: PR 빠른 검사 1회 3분 · 수동 전체 검사 1회 52분) | 약 3분 (1회) | 약 58분 | 전체 검사 한 번에 통과(4샤드 12 · 12 · 9 · 12분). 로컬 전체 E2E에서 앱 셸 캐시와 맞지 않던 기존 시험 둘을 고친 뒤 걸었다 |
+
+2026년 10월 누적: 약 1,153분 (2026-10-10 14:45 UTC M13d main 검사까지). 이 세션은 1,800분을 넘을 것 같으면 멈추고 알린다
 
 ## M0 — 뼈대와 도구 (완료)
 - npm 워크스페이스(shared · server · client · tests), TypeScript strict(`noUncheckedIndexedAccess` 포함), ESLint(any 금지, shared/server에서 Phaser import 금지), Prettier
@@ -304,7 +307,7 @@ MOBILE_PLAN과 달라진 점
 - M13b에서 넘어온 연습 정보 차단 E2E가 전체 실행에서 다시 실패해 원인을 찾았다: PC 괴물의 조준은 마우스를 따르는데 마우스가 역할 버튼 자리에 남아 괴물이 왼쪽 아래(2.85rad)를 봤다 → 생존자가 시야에 거의 안 들어옴(표본 2개). 내 화면이 새 자리로 옮긴 뒤 마우스를 북쪽 생존자 위로 옮기고 조준이 북쪽인지 확인한 뒤 모으게 고쳤다(마우스를 안 옮기면 단독 실행에서도 실패, 고친 뒤 세 번 연속 통과)
 - 검증: `npm run check` 통과, 단위 857개(+15, 1 건너뜀), 골든 해시 · 정보 차단 시험 그대로, 로컬 전체 E2E 140개 중 139개 통과(26.8분, 콘솔 에러 · 경고 0) + 실패한 하나는 위처럼 고쳐 따로 통과. JS gzip 304,975B(M13b 병합 + 1.7KiB, 예산 4KiB)
 
-## M13d — 앱 셸 캐시 · 오프라인 진입 (완료)
+## M13d — 앱 셸 캐시 · 오프라인 진입 (완료, PR #14 · 2026-10-10 14:42 UTC 병합)
 계획: `docs/MOBILE_PLAN.md` M13d
 - 서버(`server/src/static.ts` · `config.ts`): 확장자가 있는 경로의 파일이 없으면 404(게임 HTML을 JS · 그림 자리에 주지 않는다), 약한 ETag + `If-None-Match` 304, `.woff2 → font/woff2` · `.txt` MIME. 빌드 ID: 모든 응답 헤더 `x-decoy-build`, welcome · pong에 `build`
 - 빌드: Vite 플러그인(`client/vite.config.ts` · `client/shellBuild.ts`)이 빌드마다 ID를 정해 화면 코드 · `dist/build-id.json` · `dist/sw.js`(ID + 앱 셸 파일 목록)에 넣는다
@@ -314,6 +317,16 @@ MOBILE_PLAN과 달라진 점
 - 시험: 단위 `sw-shell` 14개(서비스 워커를 vm에서 돌려 사전 캐시 검사 · 이동 세 갈래 · 옛 셸 지우기), `static-gzip`(없는 자산 404 · ETag 304 · MIME), E2E `m13-offline` 5개(네트워크를 끊고 서버도 끈 채 새로고침 → 앱 셸 → 탭 두 번에 봇과 연습 끝까지 — 휴대폰 · PC, 서버만 꺼짐, Render 정지 흉내 → 깨우기 화면의 봇과 연습, 빌드 ID만 다른 두 빌드 → 새 워커 · 옛 셸 지움 · "새 버전이 있어요")
 - 전체 실행에서 기존 시험 두 개가 실패해 고쳤다: ① 판 중 새로고침의 늦은 폰트 시험 — 이제 앱 셸 캐시가 폰트를 바로 내주고 `page.route`는 워커가 받은 요청을 가로채지 못한다 → 이 시험은 워커를 막은 기기(첫 방문)를 흉내 낸다(Playwright가 남기는 차단 경고만 거름) ② 세로로 든 채 다시 연결하는 시험 — 끊기 전에 잰 틱으로 '다시 이어짐'을 기다려, 끊기 직전에 온 스냅샷이 늦게 처리되면 새 소켓 없이 통과 조건이 맞았다 → 끊은 뒤 마지막 틱보다 새 스냅샷을 기다린다(고친 뒤 세 번 연속 통과)
 - 검증: `npm run check` 통과, 단위 874개(+17, 1 건너뜀), 골든 해시 · 정보 차단 시험 그대로, 로컬 전체 E2E 145개 중 143개 통과(27.5분, 콘솔 에러 · 경고 0) + 실패한 둘은 위처럼 고쳐 따로 통과. JS gzip 305,194B(M13c 병합 + 0.2KiB, 예산 2KiB)
+
+## M14 — PWA · TWA 준비 (완료)
+계획: `docs/MOBILE_PLAN.md` M14. **서명 키는 만들지도 커밋하지도 않았다** — 패키지 · 키 · 지문은 사람이 `docs/PLAY_STORE_GUIDE.md` 2부로
+- `client/public/manifest.webmanifest`: id `/`, 시작 주소 `/?source=pwa`, 범위 `/`, **전체 화면 · 가로**, 바탕 · 테마 `#0B1622`, 분류 games, 아이콘 any 192 · 512 + maskable 192 · 512. `client/index.html`이 manifest · theme-color를 건다
+- 아이콘: `npm run icons`(`scripts/make-icons.mjs`) — 로고 SVG를 VISUAL_SPEC 바탕 위에 Playwright Chromium canvas로 그린다(새 의존성 없음). maskable은 로고 원판이 가운데 80% 안전 원 안. 스토어 아이콘 `artifacts/store/app-icon-512.png`(완전 불투명)
+- `/.well-known/assetlinks.json`(`server/src/wellKnown.ts`): 환경 변수 `TWA_PACKAGE_NAME` · `TWA_SHA256_FINGERPRINTS`(쉼표로 여러 개 — 업로드 키 + Play 앱 서명 키)로 만들고, 없거나 형식이 틀리면 404(틀리면 시작 로그에 이유). `render.yaml`에는 키 자리만(`sync: false`, 플랜 free 그대로)
+- 서명 키 가드: `.gitignore`에 `*.jks` · `*.keystore` · `*.aab` · `*.apk` · `signing-key-info.txt`, 단위 시험이 추적 파일에 키 · 패키지 파일 · JKS 매직 · 개인 키 문자열 0개를 확인
+- `npm run verify:deploy`: manifest · 아이콘 200(맞는 MIME), 가짜 지문 두 개로 assetlinks 200 · 리다이렉트 없음
+- 시험: 단위 `pwa-twa` 15개(manifest 필드 · 아이콘 실제 PNG 크기 · 불투명 · maskable 안전 영역, `buildAssetLinks` · 지문 형식 · 환경 변수, 실제 서버 프로세스로 assetlinks 200 · 404, render.yaml 키 자리 · free, 서명 키 가드), PNG 읽기 도우미(`tests/helpers/png.ts`, M15 그림 검사에도 씀), E2E `m14-pwa`(브라우저가 manifest를 오류 없이 읽음 — CDP `Page.getAppManifest`, 아이콘 · manifest 200 · MIME, 시작 주소로 열기)
+- 검증: `npm run check` 통과, 단위 889개(+15, 1 건너뜀), 골든 해시 · 정보 차단 시험 그대로, 로컬 전체 E2E 146개 통과(27.3분, 콘솔 에러 · 경고 0), `verify:deploy --no-docker` 통과(CI는 Docker). JS gzip 305,194B(M13d 병합과 같음 — 화면 코드 변화 없음)
 
 ## M15 — 스토어 등록 자료 · 최종 보고 (완료)
 계획: `docs/MOBILE_PLAN.md` M15. **계정 · 결제 · 서명 키가 필요한 일은 하지 않고 `docs/PLAY_STORE_GUIDE.md` 2부로 넘겼다**
