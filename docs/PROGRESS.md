@@ -346,3 +346,7 @@ MOBILE_PLAN과 달라진 점
 - `docs/PLAY_STORE_GUIDE.md` 2부(4~13단계): 패키지 이름 · 도메인, PWABuilder 값, 서명 키 두 곳 보관, 스토어 등록정보, 첫 업로드 · 지문 두 개를 Render 환경 변수로 · 주소창 확인, 비공개 테스트 12명 × 14일, Render 유료 전환(`render.yaml`은 그대로), 정식 출시, 해마다 target API, 운영 종료 순서. 시험이 단계 제목과 환경 변수 이름 · 경로를 서버 코드와 대조
 - 스토어 그림(`artifacts/store/`, `npm run shots:store`): 휴대폰 스크린샷 5장(1920×1080, 640×360 터치 배율 3 · WebGL · 품질 높음 — 로비 · 괴물 · 생존자 발각 · 구조 · 결과), 그래픽 이미지 1024×500, 앱 아이콘 512. 규격 시험(크기 · 비율 · 알파 없음 · 용량 · 장면 차이 · 터치 UI · git 추적)
 - `npm run verify:deploy`에 처리방침 두 경로 · 문의처 환경 변수 확인. README 모바일 절 · PLAYTEST_GUIDE 휴대폰 절 · DEPLOY 환경 변수 표
+- 최종 스크린샷 `artifacts/final/` 7장을 지금 그래픽(WebGL · 품질 높음, 1920×1080)으로 다시 찍었다(`scripts/remaster-shots.mjs`, 콘솔 문제 0)
+- 스토어 그림을 찍으며 정한 것: 시험 전용 `setTime`에 `elapsed`(결과의 판 길이), 터치 괴물의 조준은 이동 스틱을 짧게 끌어 정함, 16:9 휴대폰은 엄지 버튼이 맵 오른쪽 아래를 덮어 장면을 왼쪽 · 가운데에 둠, 발각 장면은 배너가 보이는 순간 바로 찍음(DECISIONS)
+- 시험: 단위 `privacy` 17개(ClientMessage 필드 ↔ 대응표 · 처리방침 · STORE_LISTING, 저장 키 · 캐시 이름, 문서 형식, 문의처 바꿔 넣기, 서버 응답, 외부 주소 정적 검사, 채팅 · 광고 · 결제 의존성 없음), `store-listing` 10개(글자 수 · 과장 표현 · 규칙 숫자 · 안내서 단계 제목 · 환경 변수 이름 · manifest 값 · render.yaml), `store-images` 6개(규격 · 불투명 · 장면 차이 · 터치 UI · git 추적), `storage-keys`의 처리방침 대조가 건너뜀에서 실행으로, `bot-driver`에 `elapsed` 1개. E2E `m15-privacy` 3개(로비 링크 → 처리방침 · 360px · 돌아가기, 오프라인 처리방침, 혼합 판 + 봇과 연습 동안 외부 요청 0)
+- 검증: `npm run check` 통과, 단위 924개(+35, 건너뜀 0 — 처리방침 대조가 이제 돈다), 골든 해시 · 정보 차단 시험 그대로, 로컬 전체 E2E 149개 통과(27.2분, 콘솔 에러 · 경고 0), `verify:deploy --no-docker` 통과. JS gzip 305,284B(M14 병합 + 0.1KiB, 처리방침 링크)
