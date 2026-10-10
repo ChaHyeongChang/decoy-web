@@ -2,6 +2,97 @@
 
 `docs/BUILD_PLAN.md` 마일스톤별 결과. 막힌 항목은 `> 보류:`로 표시한다.
 
+## 다음 세션 인수인계 (2026-10-10, M12 병합 직후)
+
+이 절은 M13부터 이어 갈 새 세션을 위한 요약이다. 자세한 내용은 아래 마일스톤 기록 · `docs/DECISIONS.md` · `docs/MOBILE_PLAN.md`에 있다. 다음 세션은 이 절을 고쳐 쓰며 이어 간다.
+
+### 1. 끝난 마일스톤과 병합된 PR
+| 마일스톤 | PR | main 병합 (UTC) |
+|---|---|---|
+| M0~M9 (v2 본편) | #1 | — |
+| CI 도입 · 문서 · Render 무료 배포 준비 | #2 · #3 · #4 | — |
+| M10a 선명도 · 품질 단계 · 안개 방식 | #5 | 2026-10-08 15:45 |
+| M10b 월드 그래픽 | #6 | 2026-10-09 09:11 |
+| M10c UI · 폰트 · 문서 · 전후 비교 | #7 | 2026-10-09 13:46 |
+| M11 터치 조작 | #8 | 2026-10-09 19:53 |
+| M12 모바일 화면 · 성능 · 앱 생명주기 | #9 | 2026-10-10 10:29 |
+
+main에 병합하면 Render에 자동 배포된다(`render.yaml`, `plan: free` — **유료 전환은 사용자가 직접 한다. 파일의 플랜은 바꾸지 않는다**).
+
+### 2. 남은 작업과 순서 (M13~M15)
+순서: **M13a → M13b → M13c → M13d → M14 → M15**. 마일스톤(PR)마다 `origin/main`에서 새 브랜치 → PR → 병합 직전 전체 검사 통과 → 병합. 계획 원문은 `docs/MOBILE_PLAN.md`의 해당 절이고, 6절 진행 체크를 병합 때마다 [x]로 바꾼다.
+- **M13a 시뮬레이션 공유화 · 길찾기(동작 불변)**: `server`의 시뮬레이션을 `shared/src/sim/`으로, 연결 처리 · 틱 스케줄러를 `ServerCore`로. `node:crypto` → `globalThis.crypto`, eslint로 `shared/**`의 `node:*` · `ws` · `fs` import 금지, exports `"./sim"`. **길찾기 수정은 같은 PR의 별도 커밋**(봇 판 기대값이 바뀌면 그 커밋에서 이유와 함께). 파일 이동이 넓어 갈래를 나누지 않는다. 새로 생긴 `shared/src/notes.ts`(isKeptNote)와 `server/src/sendPolicy.ts`(createSender)도 이동 대상인지 볼 것(송신은 서버에 남는다)
+- **M13b 실전 봇 · 봇과 연습 · 로비 홈**: 계약 커밋(`quick` · `leave` 메시지, 방 종류, `RoomHooks.beforeStep`, `Transport`) → 봇 두뇌(자기 스냅샷만) · `LocalTransport`(기기 안 Room 30Hz) · 연결과 상관없이 그리는 홈 + 상태 줄. `kind: local`이면 `?room=` · 자리 토큰 · `lastRoom`을 저장하지 않고 M12 생명주기(수신 감시 · 재연결 · 다른 탭 · 뒤로 가기 확인)를 끈다. M12의 판 직전 터치 안내 카드(`TouchTutorialCard`)는 연습 · 빠른 매칭에도 붙여 쓸 수 있게 클래스로 만들어 두었다
+- **M13c 빠른 매칭**: 서버 대기열 · 자동 시작(`balance.json` `matchmaking.quickMatchWait`, 스키마 · GAME_DESIGN 변경 이력 같은 커밋) · 판 뒤 해산 · 다른 사람 이름 "플레이어 n" · 서버 로그 닉네임 제거 · 동시 봇 방 상한
+- **M13d 앱 셸 캐시 · 오프라인 진입**: 확장자 경로 404, `x-decoy-build` 빌드 ID, 서비스 워커 앱 셸(지금 `client/public/sw.js`는 깨우기 전용, 캐시 이름 `decoy-wake-v2`), 페이지 이동 세 갈래, wake.html "봇과 연습"
+- **M14 PWA · TWA 준비**: manifest · 아이콘(로고 SVG에서 스크립트로), `/.well-known/assetlinks.json`은 환경변수 **`TWA_PACKAGE_NAME`** · **`TWA_SHA256_FINGERPRINTS`**(쉼표로 여러 개)로 만들고 값이 없으면 404, `render.yaml`에는 키 자리만(`sync: false`). **서명 키는 만들지도 커밋하지도 않는다**(`.gitignore` 가드 + 테스트)
+- **M15 스토어 자료 · 최종 보고**: `/privacy`(한국어, `storageKeys.ts` 목록과 대조 — `tests/unit/storage-keys.test.ts`가 `docs/PRIVACY.md`가 없으면 지금은 건너뛴다, M15에서 처리방침 파일 기준으로 바꾼다), `docs/STORE_LISTING.md`, 스토어 이미지(`artifacts/store/`), `docs/PLAY_STORE_GUIDE.md` 2부. **계정 · 결제 · 서명 키가 필요한 일은 하지 않고 PLAY_STORE_GUIDE.md에 넘긴다.** 끝나면 최종 보고(MOBILE_PLAN 5절)
+
+MOBILE_PLAN과 달라진 점
+- 정적 파일 gzip은 M13d가 아니라 **M12에서 이미 했다**(`server/src/static.ts`, DECISIONS 'M12: 정적 파일 gzip'). M13d 서버 갈래에는 다음이 남는다: 약한 ETag(크기-수정 시각) + `If-None-Match` 304, MIME에 `.woff2 → font/woff2` · `.txt` · (M14) `.webmanifest`. M12 성능 검토에서 나온 제안이고 패치는 저장소에 없다(다시 만든다)
+- 판 시작 배치: 세로 안내가 덮는 동안은 최대 300ms 대기를 적용하지 않고 가로가 된 때부터 다시 센다(MOBILE_PLAN M12 1번에 각주)
+- 서버 송신 정책(256KB부터 스냅샷 건너뛰기 · 8MB에서 끊기, 거점 메모 스냅샷은 보냄)과 입력 타이머(1/30초 경계) — 계획에 없던 것을 M12에서 더했다
+- FPS 게이트 하한: 코어 2개 이하 50, 그 밖 55(M11)
+
+### 3. 진행 중에 정한 결정과 주의할 점
+**CI 방식** (`.github/workflows/ci.yml`)
+- push · PR · main 병합마다 빠른 검사 작업 하나(check · 단위 · `@core` E2E, 2~3분)
+- **PR마다 병합 직전에** 수동 실행(`workflow_dispatch`, ref = PR 브랜치)으로 전체 검사: 빠른 검사 + 전체 E2E 4샤드 + 지연 봇 + 배포 검증 + 결과 작업 "전체 검사 결과". 결과 작업이 success일 때만 병합한다. 한 번에 약 45~55분(청구 분, 작업마다 분 단위로 올림)
+- 샤드는 `scripts/e2e-shard.mjs`가 `tests/e2e/durations.json`(러너 실측 초) 무게로 나눈다. **새 spec 파일을 만들면 durations.json에 줄을 더한다**(없으면 120초로 친다). 오래 걸리게 바꾸면 값도 고친다
+- 병합은 GitHub MCP `merge_pull_request`(merge 방식, `expectedHeadSha` = 검사한 head). 병합 커밋 제목 · 커밋 메시지는 한국어 한 줄
+- CI 결과는 알림에만 기대지 말고 직접 확인하거나 확인 예약(send_later)을 건다. 취소 · 시간 초과도 결과로 보고 바로 대응한다
+- 마일스톤마다 Actions 사용 분을 이 문서 맨 위 표에 적는다. private 저장소 무료 한도는 월 2,000분이고 10월에 약 862분을 썼다. 전체 검사 실패 한 번이 약 45분이라 로컬에서 전체 E2E를 먼저 통과시키고 건다
+
+**느린 러너 대응** (private 저장소 러너는 2코어, 로컬 컨테이너보다 1.5~2.4배 느리다)
+- 고정 대기 뒤 한 번 읽기 금지. 서버 정답 기록(`tests/e2e/.results/truth.jsonl`, `helpers.ts`의 `truthLogSize()` · `truthSince(offset, room)`)으로 틱 단위 확인
+- 봇 순간이동 · 멈춤은 `/test/state`에서 정확한 자리에 멈췄는지 확인하고 아니면 다시 놓는다(`m10-map.shared.ts`)
+- 재연결이 끼는 시험은 `page.on('websocket')`으로 세고 명시한다
+- FPS 게이트는 `availableParallelism() <= 2 ? 50 : 55`
+- 시간 창(대기 · 디바운스) 회귀는 E2E가 아니라 순수 모듈 + 가짜 시계 단위 테스트로 잡는다(`render/settle.ts`, `lifecycle.ts`)
+- 실패를 "흔들림"으로 넘기지 않는다. M10b · M11 실패는 모두 실제 타이밍 문제였고 하나는 제품 버그였다
+
+**번들 예산** (`tests/e2e/bundle-size.spec.ts`)
+- 마일스톤마다 `MILESTONE.base`를 직전 병합 값으로 옮기고 예산을 정한다. M12는 M11 병합 265,960B + 16KiB, 끝 값은 281,088B. **M13a 시작 때 base를 M12 병합 값(281,088B)으로 바꾼다.** M10 전 346,679B를 넘지 않는 상한은 그대로
+- JS gzip은 bundle-size 출력으로 잰다. CSS는 예산 밖
+
+**테스트 요령**
+- 로컬: `npm run check` · `npx vitest run` · `npm run build` 뒤 `npx playwright test --config tests/e2e/playwright.config.ts`(전체 134개, 이 컨테이너 1 worker 약 25분). 여러 작업이 동시에 E2E를 돌리면 `DECOY_E2E_PORT`를 서로 다르게
+- Playwright는 설치된 Chromium(`/opt/pw-browsers`)을 쓴다. `playwright install` 하지 않는다
+- 새 시험은 옛 코드에서 실패하는지 확인하고 커밋한다(검토에서 늘 참인 단언 · 빈 통과를 여러 번 잡았다)
+- 디버그 훅: `window.__DECOY__`(`?debug`) · 생명주기 `window.__DECOY_LIFE__`(?debug · 개발 서버만). 터치는 `?touch=1`, 품질은 `?quality=`
+- 저장소 접근은 `client/src/storageKeys.ts` 목록 · 함수로만(검사 테스트가 있다). 문구는 `docs/STORY_TEXT.md`와 `client/src/data/storyText.ts`를 함께(동기화 테스트)
+
+**작업 방식**
+- 큰 마일스톤은 계약 커밋 → 파일 소유가 겹치지 않는 갈래(worktree)로 나눠 만들고 → 합친 뒤 여러 관점 검토 → 반박 검증 → 확인된 지적을 다시 갈래로 고쳐 → 고친 결과를 다시 반박 검증하는 순서로 했다
+- 병합 갈래 durations.json 충돌은 모든 줄을 합쳐 푼다
+- `git push --force` 금지, 로컬 `main`은 쓰지 않는다(`origin/main`에서 브랜치)
+
+### 4. 알려진 문제와 보류 항목
+- `> 보류:` 표시 항목은 없다
+- 실기기 확인 전: 중급 휴대폰 중간 50fps · 저사양 낮음 30fps, 진동 · Wake Lock · 탭 폐기 복원 · 180° 뒤집기 · 안전 영역 등 — `docs/HUMAN_CHECKS.md` M11 · M12 절
+- M11 전체 검사의 해상도 테스트 재연결 원인은 확인하지 못했다(2코어 러너에서 SwiftShader 4K가 CPU를 다 써 하트비트 응답이 늦은 것으로 본다. 시험이 재연결을 감지해 적는다)
+- 아주 낮은 창(658×320에서 높이 290 이하 등)에서 판 중 창이 줄면 오른쪽 칸 거점 게이지가 엄지 버튼에 덮일 수 있다(미니맵은 숨기지만 게이지는 숨길 수 없는 정보). 근본 해결은 판 중 HUD 재배치(명세 '판 중 배치 고정'을 바꿔야 함)
+- 송신 건너뛰기 문턱 256KB는 실제 스냅샷 기준 약 8~11초 분량이다. 낮출지(예: 64KB)는 실기기 느린 망 확인 뒤 판단(HUMAN_CHECKS)
+- 판 중 재연결이 room-not-found · in-progress로 거절돼 첫 화면에 가도 주소 `?room=`과 `decoy:lastRoom`이 남아, 30초 안에 다시 열면 그 방 복귀를 시도한다(M12 전부터 있던 동작)
+- 판 내내 세로로 들고 있으면 판 장면을 만들지 않는다(의도). 세로 상태에서 재접속으로 `match`가 다시 오면 이전 판 장면이 가로가 될 때까지 남는다
+- 폰트(.woff2)를 `application/octet-stream`으로 보낸다(브라우저는 받아들인다, M13d에서 MIME 추가)
+- 끊긴 소켓(반쯤 열린 연결 · 8MB 끊김 · 닫히는 중)으로 이미 나간 거점 메모는 다시 연결해도 다시 오지 않는다(M12 전부터). 고치려면 판 중 attach 때 끝난 점령 수만큼 메모를 outbox에 다시 넣는다(클라이언트는 이제 'match' 뒤 메모를 새 장면이 다시 보이므로 그것과 짝)
+- 시험이 비어 있는 곳: 숨긴 미니맵에서 GPU 안개 합성을 막는 `GameScene`의 `minimap.shown` 가드(합성 횟수 디버그 값이 없음), 터치 로비 미리 굽기 E2E는 HUD 아틀라스 · 정적 맵만 비교(캐릭터 아틀라스는 안 봄), `render/settle.ts` 밖의 '터치가 아니면 바로 끝남' 분기
+- GPU 안개의 `fogCommitMs`(m12-perf 기록 줄)는 이제 미니맵 합성을 빼고 잰다(합성이 미니맵을 읽을 때로 옮겨 감)
+- 판 직전 안내 카드의 괴물 그림 2번 배지(18px)가 가장 작은 그림(112px)에서 조준 스틱 원의 약 절반을 가린다(HUMAN_CHECKS)
+- `touchControls.ts`의 `hintsShown` getter는 쓰는 곳이 없다
+
+### 5. 다음 세션이 처음 읽을 파일
+1. `CLAUDE.md` — 작업 규칙(한국어, 서버만 판정, 수치는 balance.json, 그래픽은 코드로, Git 규칙)
+2. `docs/PROGRESS.md` — 이 절과 맨 위 Actions 분 표, M10a~M12 기록
+3. `docs/MOBILE_PLAN.md` — 머리의 '바꾸지 않는 것', 3절 진행 방식, **M13~M15 절**, 4~6절
+4. `docs/DECISIONS.md` — 4절 M10~M12 행(특히 CI 나누기 · FPS 게이트 · M12 배치 · 생명주기 · 송신)
+5. `docs/TECH_SPEC.md` — 구조 · 네트워크 · 정보 차단 · 테스트
+6. `docs/HUMAN_CHECKS.md` — 사람이 확인할 것(M11 · M12)
+7. `.github/workflows/ci.yml` · `scripts/e2e-shard.mjs` · `tests/e2e/durations.json` — CI 구조
+8. `tests/e2e/helpers.ts` · `tests/e2e/bundle-size.spec.ts` — 시험 도우미와 번들 예산
+9. `docs/PLAY_STORE_GUIDE.md` — 사용자에게 넘길 일(1부, M15에서 2부)
+
 ## GitHub Actions 사용 분 (마일스톤별, 대략)
 작업마다 시작 ~ 끝을 분 단위로 올려 더한 값(Linux 러너, 큐 대기 제외). private 저장소 무료 한도는 월 2,000분. M10b부터 push · PR마다 빠른 검사, 병합 직전 전체 검사(MOBILE_PLAN 3절)
 
@@ -12,8 +103,9 @@
 | M10b (PR #6) | 378분 (17회: 2026-10-09 07:20 UTC까지 7회 162분 + 그 뒤 PR 빠른 검사 5회 13분 · 수동 전체 검사 5회 203분) | 3분 (1회) | 약 381분 | 전체 E2E 한 작업이 30분 제한에 걸려 취소 · 재실행이 겹쳤다(E2E 133분). 그 뒤 CI를 나눴다. 전체 검사는 다섯 번 걸어 마지막에 통과(실패 3번 135분 · 옛 head라 취소 1번 23분). 실패는 모두 느린 러너에서만 드러난 타이밍 문제였고 그중 하나는 제품 버그(느린 기기에서 오래된 이벤트 거르기). 전체 검사 한 번은 약 45분(빠른 검사 3~5 + E2E 4샤드 33~37 + 지연 2 + 배포 1 + 결과 1) |
 | M10c (PR #7) | 51분 (3회: PR 빠른 검사 2회 6분 · 수동 전체 검사 1회 45분) | 4분 (1회) | 약 55분 | 전체 검사 한 번에 통과 |
 | M11 (PR #8) | 약 238분 (12회: PR 빠른 검사 7회 21분 · 수동 전체 검사 4회 + 2번 샤드 재실행 1회 약 217분) | 3분 (1회) | 약 241분 | 전체 검사 네 번째에 통과. 실패 셋은 모두 2코어 러너에서만 드러난 기존 테스트의 타이밍 · 기준값 문제였다(FPS 게이트 하한, 시야 모드 전환 한 번 읽기, 봇 순간이동과 멈춤 사이 틱) — 고친 뒤 통과. M11 코드의 회귀는 없었다(main 대 M11 CPU 감속 비교) |
+| M12 (PR #9) | 약 69분 (6회: PR 빠른 검사 5회 14분 · 수동 전체 검사 1회 55분) | 확인 중 | 확인 중 | 전체 검사 한 번에 통과. 통합 head에서 로컬 전체 E2E(133개)를 먼저 통과시킨 뒤 걸었다 |
 
-2026년 10월 합계: 약 790분 (2026-10-09 19:53 UTC 병합까지)
+2026년 10월 합계: 확인 중 (2026-10-10 10:29 UTC M12 병합까지)
 
 ## M0 — 뼈대와 도구 (완료)
 - npm 워크스페이스(shared · server · client · tests), TypeScript strict(`noUncheckedIndexedAccess` 포함), ESLint(any 금지, shared/server에서 Phaser import 금지), Prettier
@@ -154,7 +246,9 @@
 - 번들 예산을 마일스톤마다 직전 병합 값 기준으로 옮겼다(M11 = M10c 병합 + 12KiB, M10 전보다 작아야 한다는 상한은 그대로)
 - 검증: `npm run check` 통과, 단위 601개, E2E 103개 전부 통과(21.5분, head e0fd312, 콘솔 에러 · 경고 0). `server/` · `config/balance.json` 변경 0(`shared/`는 디버그 타입만), 골든 해시 · 정보 차단 E2E 그대로. JS gzip 265,960B(M10c 병합 +5.8KiB / 예산 +12KiB, M10 전보다 −78.8KiB). 터치 대상은 휴대폰 4종(높이 293~412) · 태블릿 가로에서 48px 이상 · 8px 간격 · 가장자리 띠 밖
 
-## M12 — 모바일 화면 · 성능 · 앱 생명주기 (PR #9)
+## M12 — 모바일 화면 · 성능 · 앱 생명주기 (완료, PR #9 · 2026-10-10 10:29 UTC 병합)
+- 병합 직전 GitHub 전체 검사는 한 번에(run 38044188729, head 3337372) success: 빠른 검사 2.8분, 전체 E2E 4샤드 8.3 · 12.3 · 12.6 · 12.2분, 지연 봇 1.6분, 배포 검증 0.7분
+- 병합 뒤 main 빠른 검사(run 38045061621) 확인 중 — Render 자동 배포 대상
 계획: `docs/MOBILE_PLAN.md` M12. 계약 커밋(판 배치 API · HUD 배치 디버그 훅 · 저장 키 목록 · 입력 방식별 문구 · 첫 실행 터치 안내 · 진동 자리) 위에서 세 갈래(A 터치 판 화면 / B 앱 생명주기 / C 성능)를 나눠 만들고 합쳤다. 통합 검토 23건을 다시 네 갈래(생명주기 · 서버 송신 · 판 시작 렌더 · 터치 판 HUD)로 고쳤다
 - 터치 판 화면(갈래 A, `client/src/ui/layout.ts` · HUD 부품 · `touchControls.ts`): `configureLayout(폭, 높이, 터치)`가 판 시작 직전에 배치를 정한다(touchWide · touchNarrow · band, 맵 배율은 PC 그대로이고 논리 크기 · zoom으로 맞춤). 터치 HUD 1단위 = 0.68 CSS px, 글자 12/14/16 CSS px. 링 게이지 · 압축 팀 카드, 자리가 없으면 미니맵 숨김, 안내 줄은 맨 아래 가장자리 띠, 이동 영역은 HUD 아래. 안전 영역(`#game-root` · 로비 · 결과 · wake.html). 입력 방식별 HUD 문구 · 첫 판 10초 위치 표시
 - 앱 생명주기(갈래 B, `client/src/lifecycle.ts` · `net.ts` · `app.ts`): 재연결 1 → 2 → 4초(최대 5초, 숨김 · 오프라인이면 0회), 보이는 동안 4초 무응답이면 끊고 다시 연결, 숨김 복귀 때 시계 다시 맞추기, 마지막 방 30초 복귀(터치 · 설치 앱), 다른 탭 안내 + 여기서 계속하기, 뒤로 가기 확인, Wake Lock, 진동(피격 70ms · 발각 35-80-35ms, 설정), 판 직전 터치 안내 카드, 기기 저장 키 목록(`storageKeys.ts`) 검사, 문구 동기화 검사
