@@ -16,6 +16,8 @@
 | M10c UI · 폰트 · 문서 · 전후 비교 | #7 | 2026-10-09 13:46 |
 | M11 터치 조작 | #8 | 2026-10-09 19:53 |
 | M12 모바일 화면 · 성능 · 앱 생명주기 | #9 | 2026-10-10 10:29 |
+| 다음 세션 인수인계 | #10 | 2026-10-10 10:54 |
+| M13a 시뮬레이션 공유화 · 길찾기 | #11 | 2026-10-10 12:40 |
 
 main에 병합하면 Render에 자동 배포된다(`render.yaml`, `plan: free` — **유료 전환은 사용자가 직접 한다. 파일의 플랜은 바꾸지 않는다**).
 
@@ -107,7 +109,9 @@ MOBILE_PLAN과 달라진 점
 
 | 다음 세션 인수인계 (PR #10) | 55분 (2회: PR 빠른 검사 1회 3분 · 수동 전체 검사 1회 52분) | 2분 (1회) | 약 57분 | 문서만. 전체 검사 한 번에 통과(4샤드 11 · 12 · 13 · 9분) |
 
-2026년 10월 누적: 약 919분 (2026-10-10 10:56 UTC 인수인계 병합까지). 이 세션은 1,800분을 넘을 것 같으면 멈추고 알린다
+| M13a (PR #11) | 약 62분 (2회: PR 빠른 검사 1회 3분 · 수동 전체 검사 1회 59분) | 3분 (1회) | 약 65분 | 전체 검사 한 번에 통과. 로컬 전체 E2E(134개)를 먼저 통과시킨 뒤 걸었다 |
+
+2026년 10월 누적: 약 984분 (2026-10-10 12:43 UTC M13a main 검사까지). 이 세션은 1,800분을 넘을 것 같으면 멈추고 알린다
 
 ## M0 — 뼈대와 도구 (완료)
 - npm 워크스페이스(shared · server · client · tests), TypeScript strict(`noUncheckedIndexedAccess` 포함), ESLint(any 금지, shared/server에서 Phaser import 금지), Prettier
@@ -266,7 +270,9 @@ MOBILE_PLAN과 달라진 점
 - 검증: `npm run check` 통과, 단위 799개(+1 건너뜀: PRIVACY 문서가 생기면 켜지는 대조), 통합 head 2a3b521 전체 E2E 133개 통과(25.1분, 콘솔 에러 · 경고 0), 그 뒤 M12 E2E 31개 다시 통과, 최종 head 3337372 전체 E2E 134개 통과(24.5분). 골든 해시 · 정보 차단 E2E(`m3-info`) 그대로. JS gzip 281,131B(M11 병합 +14.8KiB / 예산 +16KiB, M10 전보다 −64.0KiB). `config/balance.json` 변경 0. 서버는 송신 정책(`sendPolicy.ts`) · 정적 파일 gzip만
 - 알려진 문제 · 사람 확인: 실기기 FPS(중급 50 · 저사양 30) 미측정, 아주 낮은 창(658×320에서 290 이하)에서 오른쪽 칸 거점 게이지가 엄지 버튼에 덮일 수 있음, 송신 건너뛰기 문턱 256KB(약 8~11초 분량)를 낮출지, 판 중 재연결이 거절돼 첫 화면에 가도 주소 `?room=` · lastRoom이 남아 30초 안에 다시 열면 복귀를 시도함(기존 동작) — `docs/HUMAN_CHECKS.md` M12
 
-## M13a — 시뮬레이션 공유화 · 길찾기 (진행 중)
+## M13a — 시뮬레이션 공유화 · 길찾기 (완료, PR #11 · 2026-10-10 12:40 UTC 병합)
+- 병합 직전 GitHub 전체 검사는 한 번에(run 38051879031, head d07db5a) success: 빠른 검사 2.8분, 전체 E2E 4샤드 13.4 · 10.5 · 11.0 · 11.6분, 지연 봇 1.6분, 배포 검증 0.6분
+- 병합 뒤 main 빠른 검사(run 38052808156) success, 2.6분 — Render 자동 배포 대상
 계획: `docs/MOBILE_PLAN.md` M13a. 파일 이동이 넓어 갈래를 나누지 않고 혼자 했다. 커밋 둘: 이동(동작 불변) → 길찾기 수정
 - 이동: `server/src`의 판정 · 방 · 정보 차단 · 봇 두뇌 · 길찾기 · 정답 상태를 `shared/src/sim/`(`@decoy/shared/sim`)으로 옮겼다. 서버에는 HTTP · ws 소켓 · `setInterval` · 송신 정책 · 정답 파일 기록 · WebSocket 봇만 남는다. 연결 처리(join 묶기 · ping · 바뀐 연결 무시 · 닫힌 뒤 버림 · detach)와 명목 시각 틱 스케줄러를 `ServerCore`로 뺐다(기기 안 연습 M13b가 같이 쓴다)
 - `node:crypto` → Web Crypto(`globalThis.crypto.getRandomValues`) + 직접 쓴 base64url · hex 인코더(Node `Buffer`와 같은 결과를 시험). eslint로 shared의 `node:*` · `ws` · `fs` import 금지(eslint API 시험), esbuild `platform: 'browser'`로 sim을 묶으면 오류 · 경고 0
