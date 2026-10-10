@@ -81,6 +81,7 @@ import { DashTrail, STUN_VEIL, WorldPostFx } from './effects';
 import { ALPHA, FOG } from './colors';
 import { createFogLayer, type FogLayer } from './baseLayer';
 import {
+  PolyCache,
   ambientRgb,
   compositeScaleFor,
   fogPathFor,
@@ -177,6 +178,13 @@ interface GfxCount {
   fills: number;
 }
 
+/** 정보 항목 중 한 종류의 수 */
+function countKind(items: readonly InfoItem[], kind: InfoItem['kind']): number {
+  let n = 0;
+  for (const i of items) if (i.kind === kind) n += 1;
+  return n;
+}
+
 export class WorldRenderer {
   readonly container: Phaser.GameObjects.Container;
   /** 안개 레이어(구조 · 발광)를 담는 컨테이너. 캐릭터 컨테이너보다 먼저 만들어 항상 아래에 그린다. 후처리는 여기에만 */
@@ -189,6 +197,14 @@ export class WorldRenderer {
   private readonly post: WorldPostFx;
   /** 괴물 화면: 자기 시야(부채꼴 ∪ 근접 원) 테두리 선분 (안개와 같은 주기로 계산) */
   private outline: [Vec2, Vec2][] = [];
+  /** outline을 만든 다각형 (부채꼴 · 근접 원). 같은 참조면 다시 계산하지 않는다 */
+  private outlineOf: [readonly Vec2[] | null, readonly Vec2[] | null] = [null, null];
+  /** 시야 다각형 캐시: 같은 눈이 같은 자리 · 같은 모양이면 같은 다각형 (가만히 선 동안 가시 다각형 계산을 건너뛴다) */
+  private readonly polys = new PolyCache();
+  /** 이번 프레임에 화면에 있는 효과 출처 (프레임마다 비워 다시 쓴다) */
+  private readonly present = new Set<string>();
+  /** 림을 그린 눈들 (다각형 참조 · 역할) */
+  private rimsOf: { poly: readonly Vec2[]; role: RoleId | null }[] = [];
   private readonly rims: Phaser.GameObjects.Graphics;
   /** 빛 속 먼지 (그림 묶음 'mote' 이미지 풀) */
   private readonly dust: Phaser.GameObjects.Container;
@@ -570,24 +586,31 @@ export class WorldRenderer {
     const mR = balance.monster.radius;
 
     // 1~6. 바닥 · 거점 · 탈출구 영역 · 시야 채움 · 안개 — 갱신 주기마다 합성
+    // (그림이 지난 주기와 같으면 안개 레이어가 합성 · 업로드를 건너뛰고, 미니맵도 다시 그리지 않는다)
     const fogDue = v.nowMs - this.lastFogAt >= (isMonster ? MONSTER_FOG_MS : SURVIVOR_FOG_MS);
-    this.baseRefreshed = fogDue;
+    this.baseRefreshed = false;
     if (fogDue) {
       this.lastFogAt = v.nowMs;
       const b = this.fog;
       b.begin();
       b.drawPoints(snap.world.points, balance);
       b.drawExits(snap.world.exits, balance);
-      this.outline = [];
       this.eyes = [];
       if (isMonster && v.me) {
-        const near = monsterNearPolygon(balance, v.me);
-        const cone = monsterConePolygon(balance, v.me, v.me.face, v.myBlend);
+        const me = v.me;
+        const near = this.polys.get('near', me.x, me.y, 0, 0, () => monsterNearPolygon(balance, me));
+        const cone = this.polys.get('cone', me.x, me.y, me.face, v.myBlend, () =>
+          monsterConePolygon(balance, me, me.face, v.myBlend),
+        );
         b.fillPoly(near, DANGER, CONE_LOOK.nearFill);
         b.fillPoly(cone, CONE.idle, CONE_LOOK.selfFill);
         b.addHardLight(near);
         b.addHardLight(cone);
-        if (this.useFog) this.outline = unionOutline([cone, near]);
+        // 테두리는 두 다각형이 그대로면 지난 값 (다각형 캐시가 같은 참조를 돌려준다)
+        if (!this.useFog) this.setOutline([], null, null);
+        else if (this.outlineOf[0] !== cone || this.outlineOf[1] !== near) {
+          this.setOutline(unionOutline([cone, near]), cone, near);
+        }
         const shape = monsterConeShape(balance, v.myBlend);
         this.eyes.push({ poly: cone, center: v.me, radius: shape.range, role: null, r: shape.range });
         this.eyes.push({
@@ -598,9 +621,11 @@ export class WorldRenderer {
           r: balance.monster.nearVisionRadius,
         });
       } else {
+        this.setOutline([], null, null);
         for (const e of this.survivorEyes(v)) {
           const r = survivorVisionRadius(balance, e.role);
-          const poly = survivorVisionPolygon(e.pos, r);
+          const pos = e.pos;
+          const poly = this.polys.get(e.role, pos.x, pos.y, r, 0, () => survivorVisionPolygon(pos, r));
           b.fillPoly(poly, CONE_LOOK.visionTint, CONE_LOOK.visionTintAlpha);
           b.addSoftLight({ poly, center: e.pos, radius: r, soft: balance.survivor.visionSoftEdge });
           this.eyes.push({
@@ -613,6 +638,7 @@ export class WorldRenderer {
         }
       }
       b.commit();
+      this.baseRefreshed = b.changed;
       this.drawRims();
     }
 
@@ -679,7 +705,8 @@ export class WorldRenderer {
 
     // 상대 쪽 잔여 효과 규칙: 생존자 화면에서 괴물이 나오는 효과는 이번 스냅샷에 괴물이 있을 때만
     const oppVisible = isMonster || opponentFxAllowed(snap.monster !== null);
-    const present = new Set<string>();
+    const present = this.present;
+    present.clear();
     if (isMonster) for (const s of snap.survivors) present.add(s.id);
     else if (snap.monster) present.add('monster');
     this.fxs.pruneSources(present);
@@ -789,7 +816,8 @@ export class WorldRenderer {
     }
     const surv = snap.you.surv;
     if (!isMonster && surv?.status === 'free') {
-      const anyPrisoner = [...v.survivors.values()].some((s) => s.status === 'imprisoned');
+      let anyPrisoner = false;
+      for (const s of v.survivors.values()) if (s.status === 'imprisoned') anyPrisoner = true;
       if (anyPrisoner) {
         const item: InfoItem = {
           kind: 'range',
@@ -979,12 +1007,25 @@ export class WorldRenderer {
       coneRed: this.coneRed,
       particles: this.fxs.count,
       dust: motes.length,
-      reveal: info.filter((i) => i.kind === 'reveal').length,
+      reveal: countKind(info, 'reveal'),
     };
+  }
+
+  private setOutline(seg: [Vec2, Vec2][], cone: readonly Vec2[] | null, near: readonly Vec2[] | null): void {
+    this.outline = seg;
+    this.outlineOf = [cone, near];
   }
 
   /** 생존자 시야 경계 림 (그 사람의 역할색, 원호 부분만 — 벽 그림자 선은 긋지 않는다) */
   private drawRims(): void {
+    // 눈들의 다각형 · 역할이 지난 주기와 같으면(다각형 캐시의 같은 참조) 이미 그린 선 그대로
+    const sig = this.rimsOf;
+    if (
+      sig.length === this.eyes.length &&
+      this.eyes.every((e, i) => sig[i]?.poly === e.poly && sig[i]?.role === e.role)
+    )
+      return;
+    this.rimsOf = this.eyes.map((e) => ({ poly: e.poly, role: e.role }));
     const g = this.rims;
     g.clear();
     for (const e of this.eyes) {

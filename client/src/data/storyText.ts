@@ -41,34 +41,43 @@ export interface RoleCard {
   name: string;
   /** 로비 카드 한 줄 소개 */
   intro: string;
-  /** 능력 한 줄 설명 */
+  /** 능력 한 줄 설명 (키보드 · 마우스: "키 이름 · 키 이름 — 설명") */
   ability: string;
+  /** 능력 한 줄 설명 (터치, M12: 키 없이 "이름 · 이름 — 설명". 버튼 이름은 터치 화면과 같다) */
+  abilityTouch: string;
   color: string;
 }
+
+/** 입력 방식 (M12 문구 고르기). 터치 모드(device.touch)면 'touch' */
+export type InputMode = 'keyboard' | 'touch';
 
 export const ROLE_CARDS: Record<Role, RoleCard> = {
   monster: {
     name: '괴물',
     intro: '수용소의 사냥꾼. 도망친 자들을 다시 가둔다.',
     ability: '좌클릭 공격 · 우클릭 시야 전환 · Shift 돌진 · Q 포효',
+    abilityTouch: '공격 · 시야 전환 · 돌진 · 포효',
     color: '#EF4444',
   },
   runner: {
     name: '러너',
     intro: '배달 일을 하던 사람. 누구보다 빨리 달린다. 미끼가 되는 건 언제나 이 사람이다.',
     ability: 'Space 질주 — 3초간 빠르게 달린다',
+    abilityTouch: '질주 — 3초간 빠르게 달린다',
     color: '#3B82F6',
   },
   guard: {
     name: '가드',
     intro: '건물 경비원. 겁이 없다. 괴물 앞을 막아서는 유일한 사람.',
     ability: 'Space 밀치기 — 가까운 괴물을 잠깐 기절시킨다',
+    abilityTouch: '밀치기 — 가까운 괴물을 잠깐 기절시킨다',
     color: '#A855F7',
   },
   scout: {
     name: '스카우트',
     intro: '사진가. 남들이 못 보는 것을 먼저 본다. 괴물이 어디 있는지 가장 먼저 안다.',
     ability: 'Space 탐지 — 4초간 괴물 위치를 팀 전원에게 보여 준다',
+    abilityTouch: '탐지 — 4초간 괴물 위치를 팀 전원에게 보여 준다',
     color: '#22C55E',
   },
 };
@@ -125,6 +134,8 @@ export const UI_TEXT = {
   wakingBody:
     '무료 서버는 15분 동안 아무도 접속하지 않으면 잠들어요. 깨어나는 데 1분쯤 걸릴 수 있어요. 이 화면을 그대로 두면 자동으로 연결돼요.',
   wakingElapsed: '{n}초째 기다리는 중',
+  /** 오프라인일 때 연결 안내 본문 (M12, wake.html과 같은 문구) */
+  offline: '인터넷 연결이 끊겨 있어요. 와이파이나 데이터를 확인해 주세요.',
   roomGoneHint:
     '서버가 잠들었다 깨어나거나 다시 시작하면 방이 사라져요. 새 방을 만들어 링크를 다시 보내 주세요.',
   campWarn: '감옥 근처에 너무 오래 있다 — 곧 느려진다',
@@ -158,12 +169,42 @@ export const CONTROLS: Record<'monster' | 'survivor', string[]> = {
   ],
 };
 
+/** 조작 안내 (터치, M12): 첫 판 오버레이 대신 쓰지 않고 점수판 화면 · 판 직전 안내와 같은 내용. 형식은 CONTROLS와 같다 */
+export const CONTROLS_TOUCH: Record<'monster' | 'survivor', string[]> = {
+  survivor: [
+    '왼쪽 스틱  이동 (바라보는 방향 = 이동 방향)',
+    '능력 버튼  고유 능력',
+    '구조 버튼 (누르고 있기)  감옥 문 앞에서 구조',
+    '점수판 버튼  점수판 · 상태',
+    '거점 A · B를 점령하고, 두 사람이 함께 탈출구에 3초 서 있으면 문이 열린다',
+  ],
+  monster: [
+    '왼쪽 스틱  이동 · 오른쪽 스틱  조준',
+    '오른쪽 스틱을 놓으면  공격 (가운데로 되돌리면 취소)',
+    '돌진 버튼 (끌어서 방향)  돌진 · 포효 · 시야 버튼',
+    '점수판 버튼  점수판 · 상태',
+    '생존자를 두 번 때리면 감옥으로. 두 명을 죽이거나 셋 모두 가두면 승리',
+  ],
+};
+
+/** 입력 방식에 맞는 역할 능력 줄 (로비 역할 카드) */
+export function roleAbility(role: Role, mode: InputMode): string {
+  return mode === 'touch' ? ROLE_CARDS[role].abilityTouch : ROLE_CARDS[role].ability;
+}
+
+/** 입력 방식에 맞는 조작 안내 */
+export function controlsText(team: 'monster' | 'survivor', mode: InputMode): string[] {
+  return mode === 'touch' ? CONTROLS_TOUCH[team] : CONTROLS[team];
+}
+
 export const HUD_TEXT = {
   status: { normal: '정상', injured: '부상', imprisoned: '수감', dead: '사망', escaped: '탈출' },
   offline: '연결 끊김',
   ready: '준비됨',
   rescuing: '구조 중',
   imprisonedHint: '수감 중 — 동료가 감옥 문 앞에서 E로 구조하면 풀려난다',
+  /** 터치 (M12) */
+  imprisonedHintTouch: '수감 중 — 동료가 감옥 문 앞에서 구조 버튼을 누르고 있으면 풀려난다',
   spectating: '관전 중',
   last30: '최후',
   attack: '공격',
@@ -173,6 +214,8 @@ export const HUD_TEXT = {
   monsterWaking: '괴물이 깨어나는 중',
   scoreboard: '점수판',
   closeHint: '아무 키나 누르면 닫힘 · Tab으로 다시 보기',
+  /** 터치 (M12) */
+  closeHintTouch: '화면을 누르면 닫힘 · 점수판 버튼으로 다시 보기',
   /** 내 카드 태그 · 미니맵 제목 (M10c) */
   me: '나',
   minimap: '지도',
@@ -189,4 +232,36 @@ export const TOUCH_TEXT = {
   fullscreen: '전체 화면',
   rotateTitle: '가로로 돌려 주세요',
   rotateBody: 'DECOY는 가로 화면에서 합니다. 세로로 두는 동안에는 조작할 수 없고, 판은 계속 흘러가요.',
+  // ── 첫 실행 터치 안내 (M12): 판 직전 본문 · 판 중 처음 10초 위치 표시 ──
+  tutorialTitle: '터치 조작',
+  tutorialSurvivor: [
+    '왼쪽 아래를 누르고 끌면 이동 — 누른 자리가 스틱 가운데',
+    '오른쪽 아래 능력 버튼 · 감옥 문 앞에서는 구조 버튼을 누르고 있기',
+    '오른쪽 위 점수판 버튼으로 팀 상태 보기',
+  ],
+  tutorialMonster: [
+    '왼쪽 아래를 누르고 끌면 이동 — 누른 자리가 스틱 가운데',
+    '오른쪽 조준 스틱을 끌어 조준하고, 놓으면 공격 · 가운데로 되돌리면 취소',
+    '돌진 버튼은 끌어서 방향을 정하고, 짧게 탭하면 지금 방향으로',
+    '포효 · 시야 버튼은 탭 · 오른쪽 위 점수판 버튼',
+  ],
+  tutorialOk: '알겠어요',
+  /** 판 중 위치 표시의 이동 영역 이름 */
+  hintMove: '여기를 누르고 끌어 이동',
+} as const;
+
+/** 앱 생명주기 · 설정 문구 (M12): 로비 설정 · 다른 탭 안내 · 뒤로 가기 확인 */
+export const APP_TEXT = {
+  settings: '설정',
+  haptics: '진동',
+  hapticsOn: '켜기',
+  hapticsOff: '끄기',
+  tutorialReplay: '터치 조작 안내 다시 보기',
+  tutorialReplayDone: '다음 판 전에 다시 보여 드려요',
+  continueHere: '여기서 계속하기',
+  leaveTitle: '판에서 나가시겠어요?',
+  leaveBody:
+    '30초 안에 돌아오면 같은 자리에서 이어서 할 수 있어요. 그 뒤에는 생존자는 사망 처리되고, 괴물이면 판이 무효가 돼요.',
+  leaveStay: '계속',
+  leaveGo: '나가기',
 } as const;

@@ -15,8 +15,13 @@ export interface RenderSizeInput {
   /** 논리 해상도 (게임 좌표) */
   logicalW: number;
   logicalH: number;
-  /** 품질 단계의 해상도 상한 */
-  preset: { readonly dprCap: number; readonly maxPixels: number };
+  /** 품질 단계의 해상도 상한 (높이 하한은 터치 낮음만, 없으면 0) */
+  preset: {
+    readonly dprCap: number;
+    readonly maxPixels: number;
+    readonly minBackingH?: number;
+    readonly floorDprCap?: number;
+  };
   /** ?scale로 준 배율 (없으면 null) */
   scaleOverride: number | null;
   /** 부모 요소의 화면 위치 (CSS px). 캔버스의 화면 절대 위치를 기기 픽셀에 맞출 때 쓴다 */
@@ -79,9 +84,21 @@ export function snapToDevice(v: number, dpr: number): number {
 }
 
 /**
+ * 품질 배율 상한 (scaleOverride 전). 기본은 dprCap이고, 높이 하한(minBackingH)이 있으면
+ * 표시 높이 × 배율이 하한 이상이 되도록 floorDprCap까지 올린다: max(dprCap, min(minBackingH / 표시 높이, floorDprCap))
+ */
+export function presetScaleCap(preset: RenderSizeInput['preset'], dispH: number): number {
+  const cap = positive(preset.dprCap, 1);
+  const minH = preset.minBackingH ?? 0;
+  if (!(minH > 0) || !(dispH > 0)) return cap;
+  const floorCap = positive(preset.floorDprCap ?? cap, cap);
+  return Math.max(cap, Math.min(minH / dispH, floorCap));
+}
+
+/**
  * 렌더 해상도를 정한다.
  *  fit = min(cssW / logicalW, cssH / logicalH)
- *  k = min(dpr, dprCap, √(maxPixels / (logicalW·fit × logicalH·fit))) × (scaleOverride ?? 1)
+ *  k = min(dpr, 배율 상한(presetScaleCap: dprCap, 높이 하한), √(maxPixels / (logicalW·fit × logicalH·fit))) × (scaleOverride ?? 1)
  *  백버퍼 = round(논리 × fit × k), zoom = 백버퍼 폭 / 논리 폭, 표시 크기 = 백버퍼 / k
  *  위치는 가운데에 두고 기기 픽셀 격자에 맞춘다 (반 픽셀 어긋나면 합성기가 화면 전체를 다시 샘플한다)
  */
@@ -95,7 +112,7 @@ export function computeRenderSize(i: RenderSizeInput): RenderSize {
   const fitPixels = logicalW * fit * (logicalH * fit);
   const pixelCap = Math.sqrt(positive(i.preset.maxPixels, fitPixels) / fitPixels);
   const scale = i.scaleOverride === null ? 1 : positive(i.scaleOverride, 1);
-  const k = Math.min(dpr, positive(i.preset.dprCap, 1), pixelCap) * scale;
+  const k = Math.min(dpr, presetScaleCap(i.preset, logicalH * fit), pixelCap) * scale;
   const backingW = Math.max(1, Math.round(logicalW * fit * k));
   const backingH = Math.max(1, Math.round(logicalH * fit * k));
   const dispW = toLayoutUnit(backingW / k);

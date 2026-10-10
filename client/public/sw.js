@@ -6,7 +6,7 @@
 // wake.html은 서버가 깨어나면(healthz) 스스로 새로고침해서 원래 주소로 돌아간다.
 // 페이지 이동만 다룬다. 스크립트 · 이미지 · WebSocket은 건드리지 않는다 (게임 코드는 캐시하지 않는다)
 
-const CACHE = 'decoy-wake-v1';
+const CACHE = 'decoy-wake-v2';
 const WAKE_URL = new URL('wake.html', self.location.href).href;
 const NETWORK_WAIT_MS = 5000;
 const MARK_HEADER = 'x-decoy-server';

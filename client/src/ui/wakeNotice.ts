@@ -9,6 +9,7 @@ export class WakeNoticeUI {
   private readonly root: HTMLDivElement;
   private readonly logo: HTMLImageElement;
   private readonly title: HTMLDivElement;
+  private readonly body: HTMLDivElement;
   private readonly elapsed: HTMLDivElement;
   private lastKey = '';
 
@@ -30,6 +31,7 @@ export class WakeNoticeUI {
     const body = document.createElement('div');
     body.className = 'wake-body';
     body.textContent = UI_TEXT.wakingBody;
+    this.body = body;
     const bar = document.createElement('div');
     bar.className = 'wake-bar';
     bar.setAttribute('aria-hidden', 'true');
@@ -42,7 +44,7 @@ export class WakeNoticeUI {
   }
 
   render(view: WakeView): void {
-    const key = view.visible ? `${view.variant}:${view.seconds}` : 'hidden';
+    const key = view.visible ? `${view.variant}:${view.seconds}:${view.offline}` : 'hidden';
     if (key === this.lastKey) return;
     this.lastKey = key;
     if (!view.visible) {
@@ -51,6 +53,8 @@ export class WakeNoticeUI {
     }
     this.logo.style.display = view.variant === 'waking' ? '' : 'none';
     this.title.textContent = view.variant === 'waking' ? UI_TEXT.wakingTitle : UI_TEXT.reconnectingTitle;
+    // 오프라인이면 서버가 잠든 것이 아니라 기기 연결 문제다 (wake.html과 같은 문구)
+    this.body.textContent = view.offline ? UI_TEXT.offline : UI_TEXT.wakingBody;
     this.elapsed.textContent = UI_TEXT.wakingElapsed.replace('{n}', String(view.seconds));
     this.root.style.display = '';
   }

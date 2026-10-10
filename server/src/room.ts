@@ -6,6 +6,7 @@ import {
   ROOM_CODE_LENGTH,
   Rng,
   balanceHash,
+  isKeptNote,
   teamOf,
   type Balance,
   type ClientMessage,
@@ -138,7 +139,7 @@ export class Room {
       p.connected = true;
       p.droppedFor = null;
       // 끊긴 동안 쌓인 일회성 알림은 버린다 (돌아온 첫 스냅샷에 지난 소리 · 배너가 몰려 오지 않게). 거점 메모(비밀번호)만 남긴다
-      p.outbox = p.outbox.filter((e) => e.k === 'text' && (e.id === 'NOTE_FIRST' || e.id === 'NOTE_SECOND'));
+      p.outbox = p.outbox.filter(isKeptNote);
     }
   }
 

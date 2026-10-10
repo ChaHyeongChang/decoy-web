@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { ICONS } from '../../client/src/art/icons';
 import { TOUCH_TEXT } from '../../client/src/data/storyText';
-import { PORTRAIT_QUERY, detectInBrowser, detectTouchMode } from '../../client/src/device';
+import { PORTRAIT_QUERY, detectInBrowser, detectInstalled, detectTouchMode } from '../../client/src/device';
 
 const html = readFileSync('client/index.html', 'utf8');
 const css = readFileSync('client/src/style.css', 'utf8');
@@ -38,6 +38,20 @@ describe('브라우저 안인가 detectInBrowser ("전체 화면" 버튼)', () =
     expect(detectInBrowser({ standalone: true, fullscreen: false, iosStandalone: false })).toBe(false);
     expect(detectInBrowser({ standalone: false, fullscreen: true, iosStandalone: false })).toBe(false);
     expect(detectInBrowser({ standalone: false, fullscreen: false, iosStandalone: true })).toBe(false);
+  });
+});
+
+describe('설치 앱인가 detectInstalled (앱 생명주기: 마지막 방 · 뒤로 가기 확인)', () => {
+  it('standalone · iOS 홈 화면 앱만 설치 앱이다', () => {
+    expect(detectInstalled({ standalone: false, iosStandalone: false })).toBe(false);
+    expect(detectInstalled({ standalone: true, iosStandalone: false })).toBe(true);
+    expect(detectInstalled({ standalone: false, iosStandalone: true })).toBe(true);
+  });
+
+  it('PC 브라우저 F11 · 키오스크 전체 화면(display-mode fullscreen만)은 "전체 화면" 버튼만 숨기고 설치 앱이 아니다', () => {
+    const f11 = { standalone: false, fullscreen: true, iosStandalone: false };
+    expect(detectInBrowser(f11)).toBe(false);
+    expect(detectInstalled(f11)).toBe(false);
   });
 });
 

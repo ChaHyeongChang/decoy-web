@@ -29,6 +29,7 @@ import { FOG_EDGE_FRAG, snapToDevice } from './fogMath';
 import {
   CanvasPen,
   LightMap,
+  LightRecord,
   PenRecord,
   addRimLift,
   countGraphicsCmds,
@@ -271,6 +272,16 @@ export class GpuFog implements FogLayer {
   private tintN = 0;
   private readonly lpt: number;
   private readonly light: LightMap | null;
+  /** 이번 주기의 빛 명령 (지난번과 같으면 빛 지도를 다시 칠하지도 올리지도 않는다) */
+  private readonly lightRec = new LightRecord();
+  /** 이번 주기의 미니맵 합성 명령 (시야 채움 · 조각, 그린 순서대로) */
+  private miniRec = new PenRecord();
+  /** 마지막으로 바뀐 주기의 미니맵 명령 (null = 아직 없음 — 첫 주기는 늘 바뀐 것으로 본다). miniSource가 이것으로 합성한다 */
+  private miniLast: PenRecord | null = null;
+  /** 미니맵 캔버스가 마지막 commit보다 낡았는가 (합성은 miniSource를 읽을 때) */
+  private miniDirty = true;
+  /** 마지막 commit에서 화면 · 미니맵 그림이 바뀌었는가 (안 바뀌었으면 미니맵도 다시 그릴 필요가 없다) */
+  changed = true;
   private readonly lightKey: string | null = null;
   private readonly lightTexture: Phaser.Textures.Texture | null = null;
   private readonly lightImage: Phaser.GameObjects.Image | null = null;
@@ -278,11 +289,9 @@ export class GpuFog implements FogLayer {
   private readonly liftKey: string;
   private readonly liftBox: Phaser.GameObjects.Container;
   private readonly miniLift: Path2D;
-  /** 미니맵용 작은 합성 (빛 지도와 같은 해상도) */
-  private readonly mini: HTMLCanvasElement;
-  private readonly miniCtx: CanvasRenderingContext2D;
+  /** 미니맵용 작은 합성 (빛 지도와 같은 해상도). 처음 읽을 때 만든다 (미니맵이 없는 터치 배치는 만들지 않는다) */
+  private mini: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; pen: CanvasPen } | null = null;
   private readonly miniStatic: HTMLCanvasElement;
-  private readonly miniPen: CanvasPen;
   private readonly s: number;
   private readonly ox: number;
   private readonly oy: number;
@@ -374,24 +383,45 @@ export class GpuFog implements FogLayer {
       sprite,
     );
     this.miniLift = rimLiftPath(lpt);
-    const mini = makeCanvas(this.miniStatic.width, this.miniStatic.height);
-    this.mini = mini.canvas;
-    this.miniCtx = mini.ctx;
-    this.miniPen = new CanvasPen(this.miniCtx, lpt, lpt / (TILE_PX * MAP_SCALE));
     this.begin();
     this.commit();
   }
 
+  /**
+   * 미니맵 합성: 정적 맵 → 채움 · 조각 → 빛 곱하기 → 테두리 리프트. 마지막 commit 뒤 처음 읽을 때만 합성한다
+   * (미니맵을 숨긴 터치 배치는 읽지 않으므로 안개 주기마다 하던 합성이 없다). 빛 지도는 commit에서만 바뀌어 결과는 같다
+   */
   get miniSource(): HTMLCanvasElement {
-    return this.mini;
+    if (!this.mini) {
+      const m = makeCanvas(this.miniStatic.width, this.miniStatic.height);
+      this.mini = { ...m, pen: new CanvasPen(m.ctx, this.lpt, this.lpt / (TILE_PX * MAP_SCALE)) };
+    }
+    const { canvas, ctx: c, pen } = this.mini;
+    if (this.miniDirty) {
+      this.miniDirty = false;
+      c.globalCompositeOperation = 'source-over';
+      c.drawImage(this.miniStatic, 0, 0);
+      this.miniLast?.replay(pen);
+      if (this.light) {
+        c.save();
+        c.globalCompositeOperation = 'multiply';
+        c.drawImage(this.light.canvas, 0, 0, canvas.width, canvas.height);
+        c.restore();
+      }
+      addRimLift(c, this.miniLift);
+    }
+    return canvas;
   }
 
+  /**
+   * 안개 주기 시작. 빛 · 미니맵은 바로 칠하지 않고 기록만 한다: commit에서 지난번과 견줘 바뀐 것만 다시 칠하고 올린다
+   * (미니맵은 읽을 때 합성. M12 휴대폰 성능: 다 같이 서 있는 동안 빛 지도 업로드 · 미니맵 합성이 없다). 그림 결과는 바로 칠하던 때와 같다
+   */
   begin(): void {
     this.t0 = performance.now();
     this.tintN = 0;
-    this.light?.clear();
-    this.miniCtx.globalCompositeOperation = 'source-over';
-    this.miniCtx.drawImage(this.miniStatic, 0, 0);
+    this.lightRec.reset();
+    this.miniRec.reset();
   }
 
   fillPoly(poly: readonly Vec2[], color: number, alpha: number): void {
@@ -405,10 +435,10 @@ export class GpuFog implements FogLayer {
     t.rec.fillPoly(poly, color, alpha);
     this.tintBounds[this.tintN] = polyBounds(poly);
     this.tintN += 1;
-    this.miniPen.fillPoly(poly, color, alpha);
+    this.miniRec.fillPoly(poly, color, alpha);
   }
 
-  /** 조각 하나를 기록 → (바뀌었으면) 조각 캔버스에 다시 그리고, 미니맵에는 늘 그린다 */
+  /** 조각 하나를 기록 → (바뀌었으면) 조각 캔버스에 다시 그리고, 미니맵 기록에는 늘 넣는다 */
   private paintPatch(key: string, bounds: TileRect, paint: (pen: PenRecord) => void): void {
     this.rec.reset();
     paint(this.rec);
@@ -422,7 +452,7 @@ export class GpuFog implements FogLayer {
       this.patches.set(key, patch);
     }
     patch.update(this.rec);
-    this.rec.replay(this.miniPen);
+    this.rec.replay(this.miniRec);
   }
 
   drawPoints(points: readonly PointView[], balance: Balance): void {
@@ -445,11 +475,11 @@ export class GpuFog implements FogLayer {
   }
 
   addSoftLight(light: SoftLight): void {
-    this.light?.addSoft(light);
+    if (this.light) this.lightRec.addSoft(light);
   }
 
   addHardLight(poly: readonly Vec2[]): void {
-    this.light?.addHard(poly);
+    if (this.light) this.lightRec.addHard(poly);
   }
 
   commit(): void {
@@ -458,15 +488,19 @@ export class GpuFog implements FogLayer {
       if (i < this.tintN && b) t.update(b);
       else t.hide();
     });
-    if (this.light) {
-      if (this.lightTexture) uploadCanvasTexture(this.lightTexture);
-      const c = this.miniCtx;
-      c.save();
-      c.globalCompositeOperation = 'multiply';
-      c.drawImage(this.light.canvas, 0, 0, this.mini.width, this.mini.height);
-      c.restore();
+    const lightChanged = this.light !== null && this.lightRec.paint(this.light);
+    if (lightChanged && this.lightTexture) uploadCanvasTexture(this.lightTexture);
+    // 미니맵: 빛과 명령이 지난번과 같으면 그대로 둔다. 바뀌었으면 이번 기록을 남기고(맞바꿔 다음 주기에 다시 쓴다) 읽을 때 합성
+    const last = this.miniLast;
+    const miniChanged = lightChanged || last === null || !this.miniRec.sameAs(last.ops);
+    if (miniChanged) {
+      this.miniLast = this.miniRec;
+      this.miniRec = last ?? new PenRecord();
+      this.miniDirty = true;
     }
-    addRimLift(this.miniCtx, this.miniLift);
+    // 화면 쪽 시야 채움 · 조각 · 빛은 모두 미니맵 기록에도 들어가므로, 미니맵이 그대로면 화면도 그대로다
+    this.changed = miniChanged;
+    gfxState.features.fogSkips = Number(gfxState.features.fogSkips ?? 0) + (miniChanged ? 0 : 1);
     const n = countGraphicsCmds(this.root.list);
     gfxState.features.mapGfxCmds = n.cmds;
     gfxState.features.mapLayerObjects = n.objects;

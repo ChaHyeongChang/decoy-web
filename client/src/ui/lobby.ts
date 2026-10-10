@@ -3,8 +3,10 @@
 // 남이 고른 카드 = 사선 해치 + 주인 이름 — 색만으로 구분하지 않는다
 import type { LobbyPlayer, LobbyState, Role } from '@decoy/shared';
 import type { IconId } from '../art/icons';
-import { HUD_TEXT, ROLE_CARDS, TOUCH_TEXT, UI_TEXT } from '../data/storyText';
-import { canOfferFullscreen, enterFullscreen } from '../device';
+import { HUD_TEXT, ROLE_CARDS, TOUCH_TEXT, UI_TEXT, roleAbility, type InputMode } from '../data/storyText';
+import { canOfferFullscreen, device, enterFullscreen } from '../device';
+import { haptics } from '../haptics';
+import { markTouchTutorialShown, resetTouchTutorial, touchTutorialNeeded } from '../touchTutorial';
 import {
   loadSavedQuality,
   parseQualityChoice,
@@ -12,6 +14,7 @@ import {
   saveQualityChoice,
   type QualityChoice,
 } from '../gfx/quality';
+import { SettingsMenu, TouchTutorialCard } from './lifecycleUi';
 import { blueprintSvg, glyphSvg, h, icon, keycap, logoImg, roleFigureSvg, roleVars, svgSpan } from './uiArt';
 
 export interface LobbyActions {
@@ -25,7 +28,7 @@ export interface LobbyActions {
 
 const ROLE_ORDER: Role[] = ['monster', 'runner', 'guard', 'scout'];
 
-/** 능력 줄(ROLE_CARDS.ability)의 항목마다 붙는 아이콘 — 문구의 순서와 같다 */
+/** 능력 줄(ROLE_CARDS.ability · abilityTouch)의 항목마다 붙는 아이콘 — 문구의 순서와 같다 */
 const ABILITY_ICONS: Record<Role, IconId[]> = {
   monster: ['attack', 'visionSearch', 'dash', 'roar'],
   runner: ['sprint'],
@@ -41,20 +44,23 @@ const QUALITY_OPTIONS: readonly { value: QualityChoice; label: string }[] = [
   { value: 'low', label: UI_TEXT.qualityLow },
 ];
 
-/** "Space 질주 — 3초간 …" · "좌클릭 공격 · 우클릭 시야 전환 · …" → 키캡 · 이름 · 설명 */
-function abilityList(role: Role): HTMLElement {
-  const [head = '', desc] = ROLE_CARDS[role].ability.split(' — ');
+/**
+ * 능력 줄 (M12 입력 방식별): 키보드 "Space 질주 — 3초간 …" · "좌클릭 공격 · 우클릭 시야 전환 · …" → 아이콘 · 키캡 · 이름 · 설명,
+ * 터치 "질주 — 3초간 …" · "공격 · 시야 전환 · …" → 아이콘 · 이름 · 설명 (키캡 없음, 이름은 터치 버튼과 같다)
+ */
+function abilityList(role: Role, mode: InputMode): HTMLElement {
+  const [head = '', desc] = roleAbility(role, mode).split(' — ');
   const items = head.split(' · ');
   const list = h('span', { class: 'role-ability' });
   items.forEach((item, i) => {
-    const at = item.indexOf(' ');
     const id = ABILITY_ICONS[role][i];
+    const at = mode === 'touch' ? -1 : item.indexOf(' ');
     list.append(
       h(
         'span',
         {},
         ...(id ? [icon(id, 18)] : []),
-        keycap(item.slice(0, at)),
+        ...(at > 0 ? [keycap(item.slice(0, at))] : []),
         h('span', {}, item.slice(at + 1)),
       ),
     );
@@ -85,6 +91,14 @@ export class LobbyUI {
   private qualityChoice: QualityChoice | null = null;
   /** "전체 화면" (휴대폰 브라우저에서만): 첫 화면은 로고 아래, 방 화면은 오른쪽 위 구석 */
   private readonly fsButton: HTMLButtonElement | null = null;
+  /** 설정 (M12, 터치 모드에서만: 진동 · 터치 안내 다시 보기). 첫 화면은 그래픽 줄 옆, 방 화면은 명령 줄 왼쪽 */
+  private readonly settings: SettingsMenu | null = null;
+  /** 판 직전 터치 안내 (M12, 터치 모드 · 이 기기에서 처음): 준비 뒤 방장 시작을 기다리는 동안 명령 줄 위 */
+  private readonly tutorial = new TouchTutorialCard(() => this.tutorialSeen());
+  /** 마지막으로 그린 방 상태 (설정에서 안내 다시 보기를 누르면 그 자리에서 다시 그린다) */
+  private lastLobby: LobbyState | null = null;
+  /** 역할 카드 능력 줄의 입력 방식 */
+  private readonly mode: InputMode = device.touch ? 'touch' : 'keyboard';
 
   constructor(
     host: HTMLElement,
@@ -112,7 +126,44 @@ export class LobbyUI {
       this.fsButton.addEventListener('click', enterFullscreen);
       this.root.classList.add('has-fs');
     }
+    if (device.touch) {
+      const menu = new SettingsMenu(this.root, {
+        haptics: haptics.supported,
+        tutorial: true,
+        hapticsOn: () => haptics.enabled,
+        setHaptics: (on) => haptics.setEnabled(on),
+        replayTutorial: () => {
+          resetTouchTutorial();
+          // 방에서 준비한 채 기다리는 중이면 바로 다시 보인다
+          if (this.lastLobby && this.atRoom) this.renderRoom(this.lastLobby);
+        },
+      });
+      if (menu.useful) this.settings = menu;
+    }
     host.appendChild(this.root);
+  }
+
+  /** 첫 화면이 보이는 중인가 */
+  get atHome(): boolean {
+    return this.root.style.display !== 'none' && this.content.classList.contains('lobby-home');
+  }
+
+  private get atRoom(): boolean {
+    return this.root.style.display !== 'none' && this.content.classList.contains('lobby-room');
+  }
+
+  /**
+   * 판이 시작한다 (서버 match): 판 직전 안내가 떠 있었으면 본 것으로 친다 — 그 판의 처음 10초 위치 표시는
+   * 판 장면이 takeTouchHints()로 가져간다. 설정 판도 닫는다
+   */
+  matchStarting(): void {
+    if (this.tutorial.visible) this.tutorialSeen();
+    this.settings?.close();
+  }
+
+  private tutorialSeen(): void {
+    markTouchTutorialShown();
+    this.tutorial.hide();
   }
 
   setYou(id: string): void {
@@ -125,6 +176,7 @@ export class LobbyUI {
 
   hide(): void {
     this.root.style.display = 'none';
+    this.settings?.close();
   }
 
   /** 오류 문구 (빈 문자열이면 숨김) */
@@ -141,6 +193,9 @@ export class LobbyUI {
 
   /** 첫 화면: 방 만들기 / 코드로 입장 */
   renderHome(prefillCode = ''): void {
+    this.lastLobby = null;
+    this.tutorial.hide();
+    this.settings?.close();
     const name = h('input', {
       'data-testid': 'name-input',
       placeholder: UI_TEXT.namePlaceholder,
@@ -227,13 +282,18 @@ export class LobbyUI {
       h('span', { class: 'field-label' }, UI_TEXT.graphics),
       select,
     );
+    // 터치 모드: 그래픽 줄 오른쪽에 설정 단추 (진동 · 터치 안내 다시 보기)
+    if (this.settings) return [h('div', { class: 'row' }, row, this.settings.button()), note];
     return [row, note];
   }
 
   /** 방 로비 */
   renderRoom(lobby: LobbyState): void {
     if (this.lastRoom !== lobby.room) this.showError('');
+    // 첫 화면에서 넘어왔으면 열려 있던 설정 판을 닫는다 (같은 방 화면을 다시 그릴 때는 그대로)
+    if (!this.atRoom) this.settings?.close();
     this.lastRoom = lobby.room;
+    this.lastLobby = lobby;
     const me = lobby.players.find((p) => p.id === this.you);
     const isHost = me?.host ?? false;
 
@@ -302,7 +362,12 @@ export class LobbyUI {
       if (!me?.ready) enterFullscreen();
       this.actions.setReady(!(me?.ready ?? false));
     });
-    const buttons = h('div', { class: 'action-row' }, ready);
+    const buttons = h(
+      'div',
+      { class: 'action-row' },
+      ...(this.settings ? [this.settings.button()] : []),
+      ready,
+    );
     if (isHost) {
       const start = h(
         'button',
@@ -319,11 +384,15 @@ export class LobbyUI {
     // 준비 · 시작: 가운데 명령 줄 (안내 · 오류는 그 아래)
     const actions = h(
       'div',
-      { class: 'lobby-actions' },
+      { class: device.touch ? 'lobby-actions life-anchor' : 'lobby-actions' },
       buttons,
       h('div', { class: 'lobby-hint', 'data-testid': 'lobby-hint' }, hintText),
       this.errorBox,
     );
+    // 판 직전 터치 안내: 터치 모드에서 역할을 고르고 준비한 뒤 (이 기기에서 처음이거나 다시 보기를 눌렀을 때)
+    if (device.touch && me?.role && me.ready && lobby.phase === 'lobby' && touchTutorialNeeded())
+      this.tutorial.show(actions, me.role);
+    else this.tutorial.hide();
 
     // 로비 상태가 올 때마다 방 화면을 새로 만든다. 키보드 포커스가 body로 날아가지 않게 같은 요소(data-testid)로 돌려준다
     const active = document.activeElement;
@@ -373,7 +442,7 @@ export class LobbyUI {
         h('span', { class: 'role-name' }, info.name),
       ),
       h('span', { class: 'role-intro' }, info.intro),
-      abilityList(role),
+      abilityList(role, this.mode),
       ownerRow,
     );
     const card = h(

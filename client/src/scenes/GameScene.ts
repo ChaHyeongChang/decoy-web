@@ -5,11 +5,13 @@ import {
   type DrawnEntity,
   type FxTarget,
   type GameEvent,
+  type HudLayoutItem,
   type InfoItem,
   type InputFrame,
   type InputLogEntry,
   type Role,
   type Snapshot,
+  isKeptNote,
 } from '@decoy/shared';
 import type { App } from '../app';
 import { sfx } from '../audio';
@@ -17,21 +19,23 @@ import { STORY_TEXT, UI_TEXT, formatText } from '../data/storyText';
 import { device } from '../device';
 import { qualityHooks, sessionAutoDowngrade } from '../gfx/quality';
 import { getFpsOverride, gfxNow, gfxState, probeSlot } from '../gfx/state';
+import { haptics } from '../haptics';
 import { InputLog, InputSampler } from '../input';
 import { applyDashStart, applyWindupLock, predictMonsterPress, type LocalWindup } from '../localActions';
 import { COLOR } from '../render/colors';
 import { ScreenEffects, collectFxTargets } from '../render/effects';
 import { WorldRenderer } from '../render/worldRenderer';
 import { TouchInput, type TouchFrameCtx } from '../touchInput';
+import { TOUCH_HINT_MS, takeTouchHints } from '../touchTutorial';
 import type { IconId } from '../art/icons';
 import { Banners, type BannerLine } from '../ui/banners';
 import { Hud } from '../ui/hud';
 import type { Tone } from '../ui/hudArt';
 import { HudKit, type Slice } from '../ui/hudKit';
-import { VIEW_H, VIEW_W, fitCamera, screenToTile } from '../ui/layout';
+import { HUD, VIEW_H, VIEW_W, fitCamera, screenToTile } from '../ui/layout';
 import { Minimap } from '../ui/minimap';
 import { Scoreboard, TutorialOverlay } from '../ui/overlays';
-import { drawProbeText } from '../ui/text';
+import { PROBE_DEPTH, drawProbeText } from '../ui/text';
 import { TouchControls } from '../ui/touchControls';
 import { staleEventLimitMs, trackFrameMs } from './staleEvents';
 
@@ -99,6 +103,8 @@ export class GameScene extends Phaser.Scene {
   private localWindup: LocalWindup | null = null;
   /** 판 중 FPS 감시를 하는가 (세션 상태는 sessionAutoDowngrade: 느리면 한 단계 내리고 효과를 확인한다) */
   private watchingFps = false;
+  /** 지금 처리하는 스냅샷이 서버에서 만들어진 뒤 지난 시간 (ms, 진동: 오래된 일은 울리지 않는다) */
+  private eventAgeMs = 0;
 
   constructor() {
     super('game');
@@ -168,6 +174,42 @@ export class GameScene extends Phaser.Scene {
     };
   }
 
+  /**
+   * 디버그 · 테스트: 보이는 HUD 글자 · 그림 (M12 getHudLayout, 논리 px). 깊이 39 이상(미니맵 · HUD · 배너 · 안내 · 점수판)에서
+   * 화면 효과 · 발각 테두리 · 선명도 탐침을 뺀다. 글자 크기 = 글꼴 px × 세로 배율. 표시 목록에서 직접 잰다(자기 신고 아님)
+   */
+  get hudItems(): HudLayoutItem[] {
+    const items: HudLayoutItem[] = [];
+    if (!this.hud) return items;
+    const r1 = (v: number): number => Math.round(v * 10) / 10;
+    let n = 0;
+    for (const o of this.children.list) {
+      const text = o instanceof Phaser.GameObjects.Text;
+      if (!(text || o instanceof Phaser.GameObjects.Image)) continue;
+      if (!o.visible || o.alpha === 0 || o.depth < 39 || o.depth >= PROBE_DEPTH) continue;
+      if (this.screenFx.owns(o) || this.spottedEdge.owns(o)) continue;
+      // 빈 글자는 아무것도 그리지 않는다
+      if (text && o.text === '') continue;
+      const b = o.getBounds();
+      if (b.width <= 0 || b.height <= 0) continue;
+      n += 1;
+      const item: HudLayoutItem = {
+        id: o.name || `${text ? 'text' : 'image'}${n}`,
+        kind: text ? 'text' : 'image',
+        x: r1(b.x),
+        y: r1(b.y),
+        w: r1(b.width),
+        h: r1(b.height),
+      };
+      if (text) {
+        item.fontPx = r1(parseFloat(String(o.style.fontSize)) * Math.abs(o.scaleY));
+        item.text = o.text;
+      }
+      items.push(item);
+    }
+    return items;
+  }
+
   /** 디버그 · 테스트: 최근 입력 프레임 120개, 오래된 것부터 (pressed는 한 프레임만 살아 lastFrame으로는 놓친다) */
   get inputLog(): InputLogEntry[] {
     return this.inputHistory.entries();
@@ -195,11 +237,11 @@ export class GameScene extends Phaser.Scene {
     this.myBlend = 0;
     this.kit = new HudKit(this);
     this.hud = new Hud(this.kit, info, balance, device.touch);
-    this.minimap = new Minimap(this, this.kit);
+    this.minimap = new Minimap(this, this.kit, info.role === 'monster');
     this.banners = new Banners(this.kit);
-    // 첫 판 조작 안내는 키보드 · 마우스용이라 터치 모드에서는 만들지 않는다 (터치 안내는 M12, 버튼마다 이름표가 있다)
+    // 첫 판 조작 안내는 키보드 · 마우스용이라 터치 모드에서는 만들지 않는다 (터치는 판 직전 안내 + 판 중 위치 표시, M12)
     this.tutorial = info.firstMatch && !device.touch ? new TutorialOverlay(this.kit, info) : null;
-    this.scoreboard = new Scoreboard(this.kit, info, balance);
+    this.scoreboard = new Scoreboard(this.kit, info, balance, device.touch);
     this.screenFx = new ScreenEffects(this, this.world.stunVeil);
     this.localWindup = null;
     this.spottedEdge = this.kit.slice(38);
@@ -224,29 +266,53 @@ export class GameScene extends Phaser.Scene {
     this.sampler.attach(host, { touch: this.touch, touchAim: info.role === 'monster' });
     if (this.touch) {
       const uiRoot = document.getElementById('ui-root') ?? document.body;
-      this.touchControls = new TouchControls(uiRoot, { role: info.role, feed: this.touch });
+      // 판 HUD 자리 (논리 px): 터치 화면이 이동 영역을 그 아래에서 시작한다. 캔버스 자리는 창 크기가 바뀔 때마다 다시 잰다.
+      // 판 중 창이 낮아져 엄지 버튼이 미니맵을 덮으면 미니맵을 숨기고, 크기가 돌아오면 다시 보인다 (M12 검토)
+      const plan = HUD.touch ? (info.role === 'monster' ? HUD.touch.monster : HUD.touch.survivor) : null;
+      const canvas = this.game.canvas;
+      this.touchControls = new TouchControls(uiRoot, {
+        role: info.role,
+        feed: this.touch,
+        hud: {
+          rects: plan?.rects ?? [],
+          canvas: () => {
+            const r = canvas.getBoundingClientRect();
+            return r.height > 0 ? { left: r.left, top: r.top, k: r.height / VIEW_H } : null;
+          },
+          onCovered: (ids) => this.minimap.setHidden(ids.has('minimap')),
+        },
+      });
+      // 판 직전 터치 안내를 본 판이면 처음 10초 동안 스틱 · 버튼 자리를 보인다 (입력을 막지 않는다)
+      if (takeTouchHints()) this.touchControls.showHints(TOUCH_HINT_MS);
     }
     this.roarPings = [];
+    // 'match' 뒤 이 장면이 생기기 전(판 시작 대기 · 세로 안내 · 다시 들어온 판의 장면 재시작)에 온 거점 메모를 다시 보인다.
+    // 장면이 생긴 뒤의 메모는 아래 구독이 받는다 (M12 검토: 재접속 때 서버가 남겨 보낸 메모가 터치에서 사라지던 것)
+    for (const ev of app.matchNotes) this.onEvent(ev);
     this.unsubscribe = app.subscribe((e) => {
       if (e.kind !== 'snapshot') return;
       if (this.seq < e.snap.ack) this.seq = e.snap.ack;
       // 오래된 스냅샷의 일회성 연출(소리 · 플래시 · 알림 배너 · 핑)은 건너뛴다(staleEvents.ts). 거점 메모(비밀번호)는 오래돼도 보여 준다
-      const stale = app.net.synced && app.net.serverNow() - e.snap.st > staleEventLimitMs(this.frameMs);
+      const age = app.net.synced ? Math.max(0, app.net.serverNow() - e.snap.st) : 0;
+      const stale = app.net.synced && age > staleEventLimitMs(this.frameMs);
+      this.eventAgeMs = age;
+      // 진동 (터치 기기): 발각 꺼짐 → 켜짐 전환만 울린다(판단은 haptics, 지난 일은 그 시간으로 거른다)
+      if (device.touch) haptics.spotted(e.snap.you.surv?.spotted === true, age);
       for (const ev of e.snap.events) {
-        const note = ev.k === 'text' && (ev.id === 'NOTE_FIRST' || ev.id === 'NOTE_SECOND');
-        if (!stale || note) this.onEvent(ev);
+        if (!stale || isKeptNote(ev)) this.onEvent(ev);
       }
       const now = performance.now();
       this.roarPings = this.roarPings.filter((p) => p.until > now);
     });
-    // 입력 샘플링은 렌더 프레임과 따로 타이머로 돈다 (그리기가 느려도 조작 주기는 1/30초 유지)
+    // 입력 샘플링은 렌더 프레임과 따로 타이머로 돈다 (그리기가 느려도 조작 주기는 1/30초 유지).
+    // 다음 1/30초 경계에 맞춰 깨어난다(M12: 4ms 간격 반복은 초당 250번 깨어나 휴대폰 메인 스레드의 약 14%를 썼다)
     this.lastInputAt = performance.now();
-    this.inputTimer = window.setInterval(() => this.inputTick(), 4);
+    this.scheduleInput();
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       probeSlot.draw = prevProbe;
       this.watchingFps = false;
       sessionAutoDowngrade.endMatch();
-      if (this.inputTimer !== null) window.clearInterval(this.inputTimer);
+      if (this.inputTimer !== null) window.clearTimeout(this.inputTimer);
       this.inputTimer = null;
       this.sampler.detach();
       this.touchControls?.destroy();
@@ -277,6 +343,7 @@ export class GameScene extends Phaser.Scene {
         if (ev.you) {
           this.screenFx.hit(now);
           sfx.play('hit', 1);
+          if (device.touch) haptics.hit(this.eventAgeMs);
         } else {
           sfx.play('hit', 0.4);
         }
@@ -416,6 +483,17 @@ export class GameScene extends Phaser.Scene {
     if (res.dash) app.predictor.predictAction(frame.seq, applyDashStart(balance));
   }
 
+  /** 다음 입력 틱(쌓인 시간이 1/30초가 되는 때)에 깨어나도록 예약한다. 장면이 끝나면 SHUTDOWN에서 취소 */
+  private scheduleInput(): void {
+    const dtMs = this.app.dt * 1000;
+    const wait = Math.max(1, dtMs - this.acc - (performance.now() - this.lastInputAt));
+    this.inputTimer = window.setTimeout(() => {
+      this.inputTimer = null;
+      this.inputTick();
+      if (this.sys.isActive()) this.scheduleInput();
+    }, wait);
+  }
+
   private inputTick(): void {
     const now = performance.now();
     const delta = now - this.lastInputAt;
@@ -503,7 +581,9 @@ export class GameScene extends Phaser.Scene {
     this.drawn = this.world.drawn;
     this.screenFx.update(now, snap.you.role === 'monster' && (app.predictor?.state?.stun ?? 0) > 0);
     this.kit.sync();
-    if (this.world.baseRefreshed) this.minimap.refreshBase(this.world.baseCanvas);
+    // 미니맵이 없거나 숨었으면 축소 합성 원본(baseCanvas)을 읽지 않는다. 다시 보이면 그 프레임에 한 번 그린다
+    if (this.minimap.shown && (this.world.baseRefreshed || this.minimap.stale))
+      this.minimap.refreshBase(this.world.baseCanvas);
     const roster = app.match.roster;
     const roleOf = (id: string): Role | null => roster.find((r) => r.id === id)?.role ?? null;
     this.minimap.update(this.drawn, snap.you.role, roleOf);

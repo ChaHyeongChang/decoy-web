@@ -246,7 +246,7 @@ export class FxSystem {
 
   /** 수명이 끝난 효과와, 출처가 이번 스냅샷에서 사라진 상대 효과를 없앤다 */
   update(nowS: number, presentSources: ReadonlySet<string>): void {
-    this.list = this.list.filter(
+    this.keep(
       (f) =>
         nowS - f.born < f.life &&
         nowS >= f.born - 1 &&
@@ -256,7 +256,15 @@ export class FxSystem {
 
   /** 출처가 사라진 상대 효과를 바로 없앤다 (src = null인 이벤트 좌표 효과는 수명까지) */
   pruneSources(presentSources: ReadonlySet<string>): void {
-    this.list = this.list.filter((f) => !f.opp || f.src === null || presentSources.has(f.src));
+    this.keep((f) => !f.opp || f.src === null || presentSources.has(f.src));
+  }
+
+  /** 조건에 맞는 효과만 같은 순서로 남긴다 (프레임마다 새 배열을 만들지 않게 제자리에서) */
+  private keep(pred: (f: Fx) => boolean): void {
+    const list = this.list;
+    let n = 0;
+    for (const f of list) if (pred(f)) list[n++] = f;
+    list.length = n;
   }
 
   clear(): void {
@@ -390,13 +398,16 @@ function hash2(i: number, j: number, salt: number): number {
 
 /**
  * 빛 속 먼지 (장식): 월드 칸마다 하나씩 시드 고정 위치 · 주기로 떠다니며 숨쉬듯 나타났다 사라진다.
- * 시계(tS)만의 함수라 시계를 멈추면 멈춘다. 자기 팀 시야 다각형 안(완전히 밝은 반경 안)에 있는 것만 돌려준다
+ * 시계(tS)만의 함수라 시계를 멈추면 멈춘다. 자기 팀 시야 다각형 안(완전히 밝은 반경 안)에 있는 것만 돌려준다.
+ * 고르는 순서(우선값 pri)는 시계와 상관없는 칸의 값이라, 칸을 우선값 순서로 먼저 늘어놓고(같으면 나열 순서, 안정 정렬)
+ * 앞에서부터 자리 · 시야 안을 재다가 count개를 채우면 멈춘다: '시야 안 칸을 모두 재서 우선값 순으로 count개'와 결과가 같고,
+ * 다각형 검사는 칸 전부(시야 3개면 약 150번)가 아니라 count개 남짓만 한다 (M12 휴대폰 성능, 프레임마다 부른다)
  */
 export function dustMotes(tS: number, eyes: readonly DustEye[], count: number): DustMote[] {
   if (count <= 0 || eyes.length === 0) return [];
   const cell = DUST.cell;
   const seen = new Set<number>();
-  const cand: { pri: number; m: DustMote }[] = [];
+  const cells: { pri: number; i: number; j: number }[] = [];
   for (const e of eyes) {
     const i0 = Math.floor((e.center.x - e.radius) / cell);
     const i1 = Math.floor((e.center.x + e.radius) / cell);
@@ -407,31 +418,36 @@ export function dustMotes(tS: number, eyes: readonly DustEye[], count: number): 
         const key = j * 4096 + i;
         if (seen.has(key)) continue;
         seen.add(key);
-        const period = DUST.periodMinS + hash2(i, j, 3) * (DUST.periodMaxS - DUST.periodMinS);
-        const ph = (tS / period + hash2(i, j, 4)) % 1;
-        const wob = tS * 0.21 + hash2(i, j, 5) * 6.28;
-        const x = (i + 0.2 + 0.6 * hash2(i, j, 1)) * cell + Math.sin(wob) * DUST.drift;
-        const y = (j + 0.2 + 0.6 * hash2(i, j, 2)) * cell + Math.cos(wob * 0.8) * DUST.drift - ph * 0.3;
-        const p = { x, y };
-        let inside = false;
-        for (const q of eyes) {
-          if (Math.hypot(x - q.center.x, y - q.center.y) > q.radius) continue;
-          if (pointInPolygon(p, q.poly)) {
-            inside = true;
-            break;
-          }
-        }
-        if (!inside) continue;
-        const a = DUST.alpha * Math.sin(Math.PI * ph);
-        cand.push({
-          pri: hash2(i, j, 7),
-          m: { x, y, alpha: a, size: DUST.sizePx * (0.6 + 0.4 * hash2(i, j, 6)) },
-        });
+        cells.push({ pri: hash2(i, j, 7), i, j });
       }
     }
   }
-  cand.sort((a, b) => a.pri - b.pri);
-  return cand.slice(0, count).map((c) => c.m);
+  cells.sort((a, b) => a.pri - b.pri);
+  const out: DustMote[] = [];
+  for (const { i, j } of cells) {
+    if (out.length >= count) break;
+    const period = DUST.periodMinS + hash2(i, j, 3) * (DUST.periodMaxS - DUST.periodMinS);
+    const ph = (tS / period + hash2(i, j, 4)) % 1;
+    const wob = tS * 0.21 + hash2(i, j, 5) * 6.28;
+    const x = (i + 0.2 + 0.6 * hash2(i, j, 1)) * cell + Math.sin(wob) * DUST.drift;
+    const y = (j + 0.2 + 0.6 * hash2(i, j, 2)) * cell + Math.cos(wob * 0.8) * DUST.drift - ph * 0.3;
+    let inside = false;
+    for (const q of eyes) {
+      if (Math.hypot(x - q.center.x, y - q.center.y) > q.radius) continue;
+      if (pointInPolygon({ x, y }, q.poly)) {
+        inside = true;
+        break;
+      }
+    }
+    if (!inside) continue;
+    out.push({
+      x,
+      y,
+      alpha: DUST.alpha * Math.sin(Math.PI * ph),
+      size: DUST.sizePx * (0.6 + 0.4 * hash2(i, j, 6)),
+    });
+  }
+  return out;
 }
 
 // ───────────────────────── 후처리 수식 (effects.ts WorldPostFx · 셰이더 · 구운 오버레이가 같이 쓴다) ─────────────────────────

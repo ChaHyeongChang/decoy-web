@@ -108,6 +108,34 @@ describe('터치 화면 배치 touchLayout', () => {
   });
 });
 
+describe('가로 180° 뒤집기 (M12 검토): 안전 영역이 왼쪽 48 → 오른쪽 48로 바뀌면 배치도 좌우로 옮겨진다', () => {
+  for (const [name, w, h] of SCREENS)
+    for (const monster of [true, false])
+      it(`${name} ${monster ? '괴물' : '생존자'}`, () => {
+        const a = touchLayout(w, h, { l: 48, r: 0, t: 0, b: 0 }, monster, false);
+        const b = touchLayout(w, h, { l: 0, r: 48, t: 0, b: 0 }, monster, false);
+        // 안전 사각형은 좌우 대칭
+        expect(b.safe).toEqual({ ...a.safe, x: w - (a.safe.x + a.safe.w) });
+        // 오른쪽 엄지 무리 · 점수판은 48px 왼쪽으로 (크기 그대로)
+        const shifted = (r: Box): Box => ({ ...r, x: r.x - 48 });
+        if (monster) expect(b.aim).toEqual(shifted(a.aim!));
+        for (const [id, r] of Object.entries(a.buttons))
+          expect(b.buttons[id as keyof typeof a.buttons], id).toEqual(shifted(r));
+        // 이동 영역은 새 왼쪽 띠(32px)에서 시작하고 오른쪽 끝(화면 40%)은 그대로
+        expect([a.zone.x, b.zone.x]).toEqual([48 + EDGE_BAND.side, EDGE_BAND.side]);
+        expect(b.zone.x + b.zone.w).toBe(a.zone.x + a.zone.w);
+        expect(b.moveHome.x).toBe(a.moveHome.x - 48);
+        // 카메라 구멍 쪽 띠에서 시작한 터치는 무시하고, 반대쪽은 받는다
+        for (const [x, inA, inB] of [
+          [60, true, false],
+          [w - 60, false, true],
+        ] as const) {
+          expect(inEdgeBand(x, h / 2, a.safe), `${x}`).toBe(inA);
+          expect(inEdgeBand(x, h / 2, b.safe), `${x}`).toBe(inB);
+        }
+      });
+});
+
 describe('가장자리 띠에서 시작한 터치는 무시 inEdgeBand', () => {
   const L = touchLayout(863, 360, { l: 0, r: 0, t: 0, b: 0 }, true, false);
   it('왼쪽 · 오른쪽 32px, 아래 24px 띠 안이면 무시', () => {

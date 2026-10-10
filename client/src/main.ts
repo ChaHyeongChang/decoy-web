@@ -3,27 +3,44 @@ import Phaser from 'phaser';
 import { App, readParams } from './app';
 import { sfx } from './audio';
 import { installDebug } from './debug';
-import { canOfferFullscreen, enterFullscreen, initDevice } from './device';
+import { canOfferFullscreen, device, enterFullscreen, initDevice, onDeviceChange } from './device';
 import type { QualityPreset, QualityTier, RendererKind } from './gfx/presets';
 import {
+  autoQuality,
   detectQuality,
+  forgetPerfMemory,
+  fpsWatchFor,
   isSoftwareGl,
   isTouchDevice,
+  loadPerfMemory,
   loadSavedQuality,
+  perfToRemember,
   qualityHooks,
+  rememberPerf,
   savedForSession,
   sessionAutoDowngrade,
+  type PerfMode,
   type QualityChoice,
+  type QualityEnv,
   type QualitySource,
 } from './gfx/quality';
 import { currentPreset, gfxState, notifyGfxChange, onGfxChange, probeSlot } from './gfx/state';
 import { prebakeAtlas } from './art/atlas';
 import { prebakeFogArt } from './render/baseLayer';
 import { computeRenderSize, type RenderSize } from './render/resolution';
+import { settleSize } from './render/settle';
 import { GameScene } from './scenes/GameScene';
 import { fontState, loadUiFonts, onUiFontsLate, uiFontsReady } from './ui/fonts';
 import { prebakeHud } from './ui/hudKit';
-import { RENDER_SCALE, VIEW_H, VIEW_W, fitCamera, setRenderScale } from './ui/layout';
+import {
+  RENDER_SCALE,
+  VIEW_H,
+  VIEW_W,
+  configureLayout,
+  fitCamera,
+  layout,
+  setRenderScale,
+} from './ui/layout';
 import { drawProbeText, relayoutAll, retextAll } from './ui/text';
 
 /** 창 크기 · DPR이 바뀐 뒤 백버퍼를 다시 만들 때까지 기다리는 시간 (끌어서 바꾸는 동안 매번 만들지 않게) */
@@ -66,8 +83,15 @@ function rendererType(): number {
   return Phaser.AUTO;
 }
 
-function decideQuality(): { tier: QualityTier; source: QualitySource } {
-  return detectQuality({
+/**
+ * 판 중 측정을 기억 · 적용하는 모드. 지금은 온라인 판만 있다 (M13b 연습 판이 생기면 판 시작 전에 'practice'로 바꾸고
+ * 품질을 다시 정한 뒤 sessionAutoDowngrade.beginMatch에 같은 모드를 넘긴다)
+ */
+const perfMode: PerfMode = 'online';
+
+/** 품질을 정하는 환경. 판 중 측정 기억은 터치 기기에서만 쓴다 (PC는 M10 그대로 세션 단위) */
+function qualityEnv(): QualityEnv {
+  return {
     url: urlQuality,
     saved: savedForSession(sessionChoice, loadSavedQuality()),
     renderer: gfxState.renderer,
@@ -75,7 +99,16 @@ function decideQuality(): { tier: QualityTier; source: QualitySource } {
     touch,
     cores,
     memory,
-  });
+    perf: touch ? (loadPerfMemory()[perfMode] ?? null) : null,
+  };
+}
+
+function decideQuality(): { tier: QualityTier; source: QualitySource } {
+  const env = qualityEnv();
+  const q = detectQuality(env);
+  // 기억한 단계로 시작했는가 (디버그 · E2E: 'none'이면 기기 자동 그대로)
+  gfxState.features.perfTier = q.source === 'auto' && q.tier !== autoQuality(env) ? q.tier : 'none';
+  return q;
 }
 
 /** 품질 단계가 켜는 장식 기능 (디버그 훅 · E2E용. 실제로 켠 결과는 각 렌더 모듈이 덧쓴다) */
@@ -83,6 +116,8 @@ function presetFeatures(p: QualityPreset): Record<string, boolean | number | str
   return {
     dprCap: p.dprCap,
     maxPixels: p.maxPixels,
+    minBackingH: p.minBackingH,
+    floorDprCap: p.floorDprCap,
     compositeCap: p.compositeCap,
     lightPxPerTile: p.lightPxPerTile,
     fog: p.fog,
@@ -103,12 +138,15 @@ function setQuality(q: { tier: QualityTier; source: QualitySource }): void {
   syncAutoStatus();
 }
 
-/** 판 중 자동 하향 상태 (on · checking · off) 표시 */
+/** 판 중 자동 하향 상태 (on · checking · off)와 기준 FPS 표시 */
 function syncAutoStatus(): void {
   gfxState.features.autoDowngrade = sessionAutoDowngrade.status;
+  gfxState.features.autoMinFps = sessionAutoDowngrade.config.minFps;
 }
 
 gfxState.touch = touch;
+// 판 중 하향 기준: 터치 기기는 목표(중간 50fps)에 맞춘 값 (gfx/quality.ts TOUCH_FPS_WATCH)
+sessionAutoDowngrade.setWatchConfig(fpsWatchFor(touch));
 gfxState.scaleOverride = params.scaleOverride;
 // 렌더러는 Phaser가 정한다. 그 전에는 요청대로(AUTO면 WebGL로) 가정하고, 부팅 직후 실제 렌더러로 다시 정한다
 gfxState.renderer = params.renderer === 'canvas' ? 'canvas' : 'webgl';
@@ -312,6 +350,8 @@ function onBooted(): void {
   setQuality(decideQuality());
   applyResolution(true);
   window.addEventListener('resize', onViewportChange);
+  // 가로 180° 뒤집기: 창 크기는 그대로라 resize가 없고 안전 영역(#game-root 자리)만 바뀐다
+  screen.orientation?.addEventListener('change', onViewportChange);
   watchDpr();
 }
 // 문서가 이미 준비되어 있으면(모듈 스크립트는 늘 그렇다) Phaser는 생성자 안에서 바로 부팅한다.
@@ -324,8 +364,10 @@ else game.events.once(Phaser.Core.Events.READY, onBooted);
 qualityHooks.choose = (choice) => {
   sessionChoice = choice;
   urlQuality = null;
-  // 사용자가 정한 단계: 확인 중이던 자동 하향을 되돌릴 대상이 사라진다
+  // 사용자가 정한 단계: 확인 중이던 자동 하향을 되돌릴 대상이 사라지고, 판 중 측정 기억(온라인 · 연습)도 지운다
+  // ('자동'을 고르면 기기 자동 단계부터 다시 잰다)
   sessionAutoDowngrade.cancelPending();
+  forgetPerfMemory();
   setQuality(decideQuality());
   applyResolution(true);
 };
@@ -347,6 +389,9 @@ qualityHooks.auto = (a) => {
     setQuality({ tier: a.to, source: gfxState.qualitySource });
     applyResolution(true);
   }
+  // 터치 기기 · 자동: 효과를 확인한 하향은 다음 접속에도 그 단계로 시작한다 (같은 모드, 기기 자동 단계가 같을 때만)
+  const remember = perfToRemember(a, touch, gfxState.qualitySource, autoQuality(qualityEnv()));
+  if (remember && rememberPerf(remember.mode, remember.rec)) gfxState.features.perfSaved = remember.rec.tier;
   syncAutoStatus();
 };
 
@@ -384,6 +429,8 @@ function schedulePrebake(): void {
   const run = (): void => {
     prebakeTimer = null;
     if (!game.isBooted || game.scene.isActive('game')) return;
+    // 터치: 판 배치(논리 크기 → 배율 · HUD 서명)로 굽는다. 아니면 첫 판 시작 때 맵 · 캐릭터 · HUD를 모두 다시 굽는다
+    if (device.touch) applyMatchLayout();
     prebakeFogArt();
     const b = app.balance;
     if (b) prebakeAtlas(game.scene.getScene('idle'), b.survivor.radius, b.monster.radius);
@@ -408,6 +455,51 @@ void loadUiFonts().then((ok) => {
 // 시간 제한(3초)을 넘겨 늦게 받았으면 그때 다시 그린다 (그 사이 판이 대체 글꼴로 시작했을 수 있다)
 onUiFontsLate(relayoutScenes);
 
+/** 판 시작 전 크기 대기를 멈춘다 (로비 복귀 · 결과 · 새 판: 그 판 장면은 시작하지 않는다) */
+let stopSettle = (): void => undefined;
+
+/**
+ * 터치 모드에서 판을 시작하기 전에 화면 크기가 자리 잡기를 기다린다 (가로 고정 · 전체 화면 전환, 세로로 열었다 돌린 경우).
+ * 세로 안내가 덮고 있으면 가로가 될 때까지 기다린다 (render/settle.ts). PC는 기다리지 않는다
+ */
+function settleViewport(): Promise<void> {
+  stopSettle();
+  if (!device.touch) return Promise.resolve();
+  return new Promise((resolve) => {
+    stopSettle = settleSize(
+      {
+        size: () => gameRoot.getBoundingClientRect(),
+        portrait: () => device.portrait,
+        onTurn: onDeviceChange,
+        now: () => performance.now(),
+        later: (fn, ms) => {
+          const t = window.setTimeout(fn, ms);
+          return () => window.clearTimeout(t);
+        },
+      },
+      resolve,
+    );
+  });
+}
+
+/**
+ * 판 배치를 정하고(PC는 언제나 1920×1080) 논리 크기가 바뀌었으면 백버퍼 · 카메라를 다시 맞춘다.
+ * 판 장면을 만들기 직전과 터치 로비의 미리 굽기 앞에서만 부른다(판 중 크기 변화는 논리 크기를 두고 zoom만 다시 맞춘다)
+ */
+function applyMatchLayout(): void {
+  const r = gameRoot.getBoundingClientRect();
+  const before = layout();
+  const next = configureLayout(r.width, r.height, device.touch);
+  gfxState.layout = next.kind;
+  gfxState.viewW = next.viewW;
+  gfxState.viewH = next.viewH;
+  // 논리 크기가 그대로여도 지금 크기로 맞춘다: 디바운스를 기다리는 크기 변화(회전 · 전체 화면)가 있으면 판 장면이 낡은 배율로
+  // 굽고 곧바로 다시 굽는다. 바뀐 것이 없으면 캔버스 자리만 다시 놓는다
+  if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+  resizeTimer = null;
+  applyResolution(next.viewW !== before.viewW || next.viewH !== before.viewH);
+}
+
 /** 판 장면 시작 요청 번호 (폰트를 기다리는 동안 로비로 돌아가면 시작하지 않는다) */
 let sceneRequest = 0;
 /** 이번 판 전에 로비(대기)를 거쳤는가. 아니면 진행 중인 판에 다시 들어온 것이다 */
@@ -419,14 +511,17 @@ app.subscribe((e) => {
     // 진행 중인 판에 다시 들어왔으면 기다리지 않는다(판은 계속 흐른다). 늦게 받은 폰트는 onUiFontsLate가 다시 그린다
     const fonts = fromLobby ? loadUiFonts() : Promise.resolve(uiFontsReady());
     fromLobby = false;
-    void fonts.then((ok) => {
+    void Promise.all([fonts, settleViewport()]).then(([ok]) => {
       if (req !== sceneRequest) return;
       // 첫 받기가 시간 초과로 끝난 뒤 늦게 받았으면 loadUiFonts()는 계속 false다. 지금 준비됐는지로 기록한다
       fontState.atSceneStart = ok || uiFontsReady();
       game.scene.stop('game');
+      applyMatchLayout();
       game.scene.start('game', { app });
     });
-  } else if (e.kind === 'lobby' && e.lobby.phase === 'lobby') {
+  } else if (e.kind === 'result') stopSettle();
+  else if (e.kind === 'lobby' && e.lobby.phase === 'lobby') {
+    stopSettle();
     sceneRequest++;
     fromLobby = true;
     if (game.scene.isActive('game')) game.scene.stop('game');

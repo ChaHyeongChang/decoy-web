@@ -12,12 +12,15 @@ export interface WakeView {
   variant: WakeVariant;
   /** 기다린 시간 (초, 내림) */
   seconds: number;
+  /** 기기가 오프라인이다 (M12: 본문을 서버 잠듦 대신 인터넷 연결 안내로) */
+  offline: boolean;
 }
 
 export class WakeNoticeState {
   private everOpened = false;
   private waitingSince: number | null = null;
   private stopped = false;
+  private isOffline = false;
 
   /** 연결을 시도하기 시작했다 (이미 기다리는 중이면 처음 시각을 유지한다) */
   connecting(nowMs: number): void {
@@ -37,16 +40,36 @@ export class WakeNoticeState {
     this.waitingSince ??= nowMs;
   }
 
+  /**
+   * 연결은 됐지만 아직 자리로 돌아가지 못했다 (M12 마지막 방 복귀: 옛 연결이 남아 거절되어 2초마다 다시 시도하는 중).
+   * 끊겼을 때처럼 '다시 연결하는 중'으로 보이고, 자리로 돌아가면(opened) 사라진다
+   */
+  rejoining(nowMs: number): void {
+    if (this.stopped) return;
+    this.waitingSince ??= nowMs;
+  }
+
+  /** 기기 온라인 상태 (online · offline 이벤트, 처음에는 navigator.onLine) */
+  setOffline(offline: boolean): void {
+    this.isOffline = offline;
+  }
+
   /** 다시 연결하지 않는다 (다른 탭이 자리를 가져감) */
   stop(): void {
     this.stopped = true;
     this.waitingSince = null;
   }
 
+  /** stop 뒤 다시 연결한다 ("여기서 계속하기") */
+  resume(): void {
+    this.stopped = false;
+  }
+
   view(nowMs: number): WakeView {
     const variant: WakeVariant = this.everOpened ? 'reconnecting' : 'waking';
-    if (this.stopped || this.waitingSince === null) return { visible: false, variant, seconds: 0 };
+    const offline = this.isOffline;
+    if (this.stopped || this.waitingSince === null) return { visible: false, variant, seconds: 0, offline };
     const waited = Math.max(0, nowMs - this.waitingSince);
-    return { visible: waited >= WAKE_NOTICE_DELAY_MS, variant, seconds: Math.floor(waited / 1000) };
+    return { visible: waited >= WAKE_NOTICE_DELAY_MS, variant, seconds: Math.floor(waited / 1000), offline };
   }
 }
