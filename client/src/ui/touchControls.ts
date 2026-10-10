@@ -7,7 +7,10 @@
 // 색만으로 구분하지 않기: 준비 = 눈금 가득 + 강조색 아이콘, 쿨타임 = 눈금 일부 + 남은 초, 효과 중 = 채운 면, 못 씀 = 사선 해치
 // M12: 판 HUD(왼쪽 칸 위쪽 타이머 · 게이지 · 팀 카드)와 겹치지 않게 이동 영역을 그 아래에서 시작한다(HUD 자리는 논리 px라
 // 창 크기가 바뀌면 캔버스 위치로 다시 잰다). 첫 판(판 직전 터치 안내를 본 판)은 처음 10초 동안 이동 영역 · 스틱 · 버튼 자리를
-// 반투명 도형 + 이름표로 보인다(입력을 막지 않음). 점수판이 열려 있으면 화면 어디를 눌러도 닫히고 다른 버튼은 흐려진다
+// 반투명 도형 + 이름표로 보인다(입력을 막지 않음). 점수판이 열려 있으면 화면 어디를 눌러도 닫히고 다른 버튼은 흐려진다.
+// 판 배치(HUD 자리 · 글자 px)는 판 시작 크기로 정해지고 판 중에는 캔버스만 줄지만, 버튼은 지금 창 가장자리에 붙는다: 창이 낮아져
+// 버튼 · 조준 스틱이 HUD 부품을 덮으면 onCovered로 알린다(GameScene이 미니맵을 숨긴다 — 판 화면 전체가 늘 보여 같은 정보다).
+// 가로 180° 뒤집기는 창 크기가 그대로라 resize가 없고 안전 영역만 바뀐다: 방향 change에서도 다시 잰다
 import { BTN, type Role } from '@decoy/shared';
 import { iconSvg, type IconId } from '../art/icons';
 import { hexCss } from '../art/palette';
@@ -31,9 +34,13 @@ export interface TouchControlsOptions {
   feed: TouchFeed;
   /**
    * 늘 떠 있는 판 HUD 부품 (논리 px)과 지금 캔버스 자리(창 CSS px의 왼쪽 위 · 논리 1px의 CSS px). 이동 영역을 그 아래에서
-   * 시작한다 (M12). 없으면 M11 배치 그대로
+   * 시작한다 (M12). 없으면 M11 배치 그대로. onCovered = 다시 배치할 때마다 버튼 · 조준 스틱이 덮는 부품 id (hudCovered)
    */
-  hud?: { rects: readonly Box[]; canvas: () => { left: number; top: number; k: number } | null };
+  hud?: {
+    rects: readonly { id: string; rect: Box }[];
+    canvas: () => { left: number; top: number; k: number } | null;
+    onCovered?: (ids: ReadonlySet<string>) => void;
+  };
 }
 
 // ───────────────────────── 배치 (순수) ─────────────────────────
@@ -162,6 +169,19 @@ export function touchLayout(
     dashR: Math.round(btn * 0.9),
     buttons,
   };
+}
+
+/**
+ * 버튼 · 조준 스틱(점수판 · 전체 화면 포함)과 겹치는 판 HUD 부품의 id (창 CSS px, 닿기만 하면 아니다).
+ * 판 시작 크기에서는 HUD 배치가 엄지 자리를 비워 두어 비어 있다. 판 중 창이 낮아지면 생긴다 (M12 검토)
+ */
+export function hudCovered(L: TouchLayout, boxes: readonly { id: string; b: Box }[]): Set<string> {
+  const ts = [L.aim, ...Object.values(L.buttons)];
+  const out = new Set<string>();
+  for (const { id, b } of boxes)
+    if (ts.some((t) => t && t.x < b.x + b.w && b.x < t.x + t.w && t.y < b.y + b.h && b.y < t.y + t.h))
+      out.add(id);
+  return out;
 }
 
 /** 가장자리 띠에서 시작한 터치인가 (안전 영역 사각형 밖) */
@@ -319,10 +339,18 @@ export class TouchControls {
     on(document, 'visibilitychange', () => {
       if (document.hidden) this.cancelAll();
     });
-    on(window, 'resize', () => {
+    // 창 크기 변화 · 화면 방향 change(가로 180° 뒤집기는 resize 없이 안전 영역만 바뀐다). 안전 영역(env) 값은 방향 이벤트보다
+    // 늦게 올 수 있어 0.3초 뒤 한 번 더 잰다. 손가락 좌표 기준이 달라지므로 손가락은 버린다 (input.ts가 회전 때 TouchFeed도 비운다)
+    let again = 0;
+    const onTurn = (): void => {
       this.cancelAll();
       this.relayout();
-    });
+      window.clearTimeout(again);
+      again = window.setTimeout(() => this.relayout(), 300);
+    };
+    on(window, 'resize', onTurn);
+    on(screen.orientation ?? window, screen.orientation ? 'change' : 'orientationchange', onTurn);
+    this.cleanup.push(() => window.clearTimeout(again));
     this.cleanup.push(onDeviceChange(() => this.apply()));
     root.appendChild(this.layer);
     this.relayout();
@@ -476,15 +504,13 @@ export class TouchControls {
   }
 
   /** 판 HUD 부품 자리 (창 CSS px). 캔버스 자리를 모르면 빈 목록 */
-  private hudBoxes(): Box[] {
+  private hudBoxes(): { id: string; b: Box }[] {
     const hud = this.opts.hud;
     const c = hud?.canvas();
     if (!hud || !c) return [];
-    return hud.rects.map((r) => ({
-      x: c.left + r.x * c.k,
-      y: c.top + r.y * c.k,
-      w: r.w * c.k,
-      h: r.h * c.k,
+    return hud.rects.map(({ id, rect: r }) => ({
+      id,
+      b: { x: c.left + r.x * c.k, y: c.top + r.y * c.k, w: r.w * c.k, h: r.h * c.k },
     }));
   }
 
@@ -494,15 +520,17 @@ export class TouchControls {
     const hgt = window.innerHeight;
     const p = this.probe.getBoundingClientRect();
     const inset = { l: p.left, r: w - p.right, t: p.top, b: hgt - p.bottom };
+    const boxes = this.hudBoxes();
     const L = touchLayout(
       w,
       hgt,
       inset,
       this.opts.role === 'monster',
       this.parts.has('fullscreen'),
-      this.hudBoxes(),
+      boxes.map((x) => x.b),
     );
     this.layout = L;
+    this.opts.hud?.onCovered?.(hudCovered(L, boxes));
     const place = (el: HTMLElement | undefined, b: Box | null | undefined): void => {
       if (el && b)
         Object.assign(el.style, { left: `${b.x}px`, top: `${b.y}px`, width: `${b.w}px`, height: `${b.h}px` });

@@ -265,18 +265,20 @@ export class GameScene extends Phaser.Scene {
     this.sampler.attach(host, { touch: this.touch, touchAim: info.role === 'monster' });
     if (this.touch) {
       const uiRoot = document.getElementById('ui-root') ?? document.body;
-      // 판 HUD 자리 (논리 px): 터치 화면이 이동 영역을 그 아래에서 시작한다. 캔버스 자리는 창 크기가 바뀔 때마다 다시 잰다
+      // 판 HUD 자리 (논리 px): 터치 화면이 이동 영역을 그 아래에서 시작한다. 캔버스 자리는 창 크기가 바뀔 때마다 다시 잰다.
+      // 판 중 창이 낮아져 엄지 버튼이 미니맵을 덮으면 미니맵을 숨기고, 크기가 돌아오면 다시 보인다 (M12 검토)
       const plan = HUD.touch ? (info.role === 'monster' ? HUD.touch.monster : HUD.touch.survivor) : null;
       const canvas = this.game.canvas;
       this.touchControls = new TouchControls(uiRoot, {
         role: info.role,
         feed: this.touch,
         hud: {
-          rects: plan ? plan.rects.map((r) => r.rect) : [],
+          rects: plan?.rects ?? [],
           canvas: () => {
             const r = canvas.getBoundingClientRect();
             return r.height > 0 ? { left: r.left, top: r.top, k: r.height / VIEW_H } : null;
           },
+          onCovered: (ids) => this.minimap.setHidden(ids.has('minimap')),
         },
       });
       // 판 직전 터치 안내를 본 판이면 처음 10초 동안 스틱 · 버튼 자리를 보인다 (입력을 막지 않는다)
@@ -576,7 +578,9 @@ export class GameScene extends Phaser.Scene {
     this.drawn = this.world.drawn;
     this.screenFx.update(now, snap.you.role === 'monster' && (app.predictor?.state?.stun ?? 0) > 0);
     this.kit.sync();
-    if (this.world.baseRefreshed) this.minimap.refreshBase(this.world.baseCanvas);
+    // 미니맵이 없거나 숨었으면 축소 합성 원본(baseCanvas)을 읽지 않는다. 다시 보이면 그 프레임에 한 번 그린다
+    if (this.minimap.shown && (this.world.baseRefreshed || this.minimap.stale))
+      this.minimap.refreshBase(this.world.baseCanvas);
     const roster = app.match.roster;
     const roleOf = (id: string): Role | null => roster.find((r) => r.id === id)?.role ?? null;
     this.minimap.update(this.drawn, snap.you.role, roleOf);

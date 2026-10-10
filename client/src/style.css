@@ -2021,7 +2021,7 @@ select {
   --ring: #2c5a6e;
   align-content: center;
   gap: 2px;
-  padding-bottom: 14px;
+  padding-bottom: 16px;
   background-color: rgba(15, 27, 39, 0.8);
 }
 .tc-sys .tc-ico {
@@ -2029,13 +2029,14 @@ select {
 }
 .tc-sys > .tc-cap {
   top: auto;
-  bottom: 6px;
+  bottom: 5px;
   padding: 0;
   clip-path: none;
   background: none;
   color: var(--text);
-  font-size: 11px;
-  line-height: 13px;
+  /* 글자 하한 12px (MOBILE_PLAN M12 2번) */
+  font-size: 12px;
+  line-height: 14px;
 }
 .tc-sys[aria-pressed='true'] > .tc-face {
   --ring: var(--neon);
