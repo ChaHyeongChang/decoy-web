@@ -398,7 +398,16 @@ export class App {
     if (wasInRoom)
       this.emit({
         kind: 'lobby',
-        lobby: { room: code, phase: 'lobby', players: [], bots: false, canStart: false, waitingFor: null },
+        lobby: {
+          room: code,
+          kind: 'code',
+          phase: 'lobby',
+          players: [],
+          bots: false,
+          canStart: false,
+          waitingFor: null,
+          autoStartAt: null,
+        },
       });
   }
 

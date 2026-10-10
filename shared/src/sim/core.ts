@@ -63,7 +63,10 @@ export class ServerCore {
         conn.send({ t: 'pong', c: msg.c, s: now });
         return;
       }
-      if (bound && bound.seat.conn?.id === conn.id) bound.room.handle(bound.seat, msg, now);
+      if (!bound || bound.seat.conn?.id !== conn.id) return;
+      bound.room.handle(bound.seat, msg, now);
+      // 나가기: 자리와의 묶음을 푼다 (같은 연결로 다른 방에 들어갈 수 있다)
+      if (msg.t === 'leave') bound = null;
     };
 
     return {

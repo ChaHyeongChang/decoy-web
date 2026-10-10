@@ -1,6 +1,7 @@
 // 서버 연결: WebSocket, 인위적 지연(?lag), 시계 동기화(ping), 메시지 전달.
 // 언제 연결 · 재연결 · 감시로 끊을지는 lifecycle.ts LinkKeeper가 정한다(M12). 여기서는 소켓 하나를 열고 버린다
 import { LagQueue, type ClientMessage, type ServerMessage } from '@decoy/shared';
+import type { Transport } from './transport';
 
 export type NetListener = (msg: ServerMessage) => void;
 
@@ -20,7 +21,8 @@ interface ClockSample {
   offset: number;
 }
 
-export class NetClient {
+export class NetClient implements Transport {
+  readonly kind = 'net' as const;
   private ws: WebSocket | null = null;
   private connectTimer: number | null = null;
   private readonly listeners = new Set<NetListener>();
@@ -100,6 +102,14 @@ export class NetClient {
   on(listener: NetListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  subscribe(listener: NetListener): () => void {
+    return this.on(listener);
+  }
+
+  close(): void {
+    this.drop();
   }
 
   send(msg: ClientMessage): void {
