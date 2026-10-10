@@ -152,7 +152,7 @@ export class ReplacedNotice {
 
 // ───────────── 판 직전 터치 안내 ─────────────
 
-/** 손가락 자리 그림의 번호 표 (안내 줄 순서와 같다) */
+/** 손가락 자리 그림의 번호 표 (안내 줄 순서와 같다, 그림 단위. 18px 배지가 가장 작은 그림(112×56px) 안에 들게 x 9~91 · y 9~41.5) */
 interface Spot {
   n: number;
   x: number;
@@ -161,7 +161,8 @@ interface Spot {
 
 /**
  * 터치 화면 자리 그림 (가로 휴대폰, 100 × 50 단위): 왼쪽 아래 이동 영역 · 오른쪽 아래 엄지 버튼 · 오른쪽 위 점수판.
- * 실제 배치(touchControls.ts touchLayout)를 줄여 그린 것. 번호는 안내 줄과 같다
+ * 실제 배치(touchControls.ts touchLayout)를 줄여 그린 것. 번호는 안내 줄과 같다. 번호는 그림 위에 얹은 HTML 배지라 그림
+ * 배율(휴대폰 폭 112~132px)과 상관없이 CSS 12px 글자다 (SVG 글자로는 6~7px이었다, M12 검토)
  */
 function controlsDiagram(team: 'monster' | 'survivor'): string {
   const parts: string[] = [
@@ -185,10 +186,10 @@ function controlsDiagram(team: 'monster' | 'survivor'): string {
       '<circle class="tt-ctl" cx="78" cy="22.5" r="3.6"/>',
     );
     spots = [
-      { n: 1, x: 8, y: 22 },
-      { n: 2, x: 93, y: 46 },
-      { n: 3, x: 67, y: 33 },
-      { n: 4, x: 82.5, y: 15.5 },
+      { n: 1, x: 9, y: 21 },
+      { n: 2, x: 91, y: 41.5 },
+      { n: 3, x: 66, y: 32 },
+      { n: 4, x: 82.5, y: 14 },
     ];
   } else {
     parts.push(
@@ -196,16 +197,15 @@ function controlsDiagram(team: 'monster' | 'survivor'): string {
       '<circle class="tt-ctl" cx="75" cy="31" r="4.6"/>',
     );
     spots = [
-      { n: 1, x: 8, y: 22 },
-      { n: 2, x: 81, y: 22 },
-      { n: 3, x: 81, y: 9 },
+      { n: 1, x: 9, y: 21 },
+      { n: 2, x: 80, y: 21 },
+      { n: 3, x: 79, y: 9 },
     ];
   }
-  for (const s of spots)
-    parts.push(
-      `<g class="tt-num"><circle cx="${s.x}" cy="${s.y}" r="4.2"/><text x="${s.x}" y="${s.y + 1.75}">${s.n}</text></g>`,
-    );
-  return `<svg viewBox="0 0 100 50" width="100%" height="100%" aria-hidden="true">${parts.join('')}</svg>`;
+  const badges = spots.map(
+    (s) => `<span class="tt-badge" style="left:${s.x}%;top:${s.y * 2}%">${s.n}</span>`,
+  );
+  return `<svg viewBox="0 0 100 50" width="100%" height="100%" aria-hidden="true">${parts.join('')}</svg>${badges.join('')}`;
 }
 
 /**

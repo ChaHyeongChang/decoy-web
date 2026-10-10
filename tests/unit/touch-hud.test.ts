@@ -1,9 +1,11 @@
 // 터치 판 배치 (M12, MOBILE_PLAN M12 1 · 2번): layoutFor 터치 분기(화면비 규칙 · 세로 입력은 가로로 · 맵이 화면 안 · 띠 규칙),
 // 터치 글자 크기(CSS 12px 이상, 주요 14 이상 — 높이 293 · 320 · 360), 터치 HUD 부품이 맵 · 서로 · 엄지 영역(터치 화면 대상 ·
-// 이동 스틱 그림)과 겹치지 않음, 배너 자리 · 맨 아래 안내 줄이 터치 대상과 겹치지 않음. PC는 언제나 1920×1080 그대로
+// 이동 스틱 그림)과 겹치지 않음, 배너 자리 · 맨 아래 안내 줄이 터치 대상과 겹치지 않음. PC는 언제나 1920×1080 그대로.
+// 판 중 창이 낮아지면(M12 검토) 엄지 버튼이 덮는 HUD 부품을 찾는다(hudCovered → 미니맵을 숨긴다)
 import { afterEach, describe, expect, it } from 'vitest';
+import { computeRenderSize } from '../../client/src/render/resolution';
 import * as L from '../../client/src/ui/layout';
-import { touchLayout, type Box } from '../../client/src/ui/touchControls';
+import { hudCovered, touchLayout, type Box } from '../../client/src/ui/touchControls';
 
 afterEach(() => L.applyLayout(L.pcLayout()));
 
@@ -235,5 +237,66 @@ describe('터치 HUD 자리 touchHudPlan', () => {
     expect(a).toEqual(b);
     expect(a.zone.y).toBe(0);
     expect(a.zone.h).toBe(360 - 24);
+  });
+});
+
+describe('판 중 창이 낮아지면 엄지 버튼이 덮는 HUD 부품 hudCovered (M12 검토)', () => {
+  /**
+   * 판 시작 화면(w×h)으로 정한 HUD(논리 px)를 지금 창(w×nh)의 캔버스 자리로 옮겨(main.ts measure와 같은 computeRenderSize,
+   * 기기 배율 1 — 판 중에는 논리 크기를 두고 캔버스만 줄인다) 그 창의 터치 화면(전체 화면 버튼까지)과 대조한다
+   */
+  const covered = (w: number, h: number, nh: number, monster: boolean): string[] => {
+    const l = L.layoutFor(w, h, true);
+    L.applyLayout(l);
+    const plan = monster ? L.HUD.touch!.monster : L.HUD.touch!.survivor;
+    const r = computeRenderSize({
+      cssW: w,
+      cssH: nh,
+      dpr: 1,
+      logicalW: l.viewW,
+      logicalH: l.viewH,
+      preset: { dprCap: 1, maxPixels: 1e12 },
+      scaleOverride: null,
+    });
+    const k = r.dispH / l.viewH;
+    const boxes = plan.rects.map(({ id, rect }) => ({
+      id,
+      b: { x: r.left + rect.x * k, y: r.top + rect.y * k, w: rect.w * k, h: rect.h * k },
+    }));
+    const T = touchLayout(
+      w,
+      nh,
+      { l: 0, r: 0, t: 0, b: 0 },
+      monster,
+      true,
+      boxes.map((x) => x.b),
+    );
+    return [...hudCovered(T, boxes)].sort();
+  };
+
+  it('판 시작 크기 그대로면 아무것도 덮지 않는다 (모든 시험 화면 · 두 역할)', () => {
+    for (const [name, w, h] of SCREENS)
+      for (const monster of [true, false])
+        expect(covered(w, h, h, monster), `${name} ${monster}`).toEqual([]);
+  });
+
+  it('전체 화면이 꺼지거나 도구 막대가 나와 낮아지면 미니맵이 덮인다 (괴물 915×412 → 356 · 330, 863×360 → 304, 생존자 802×293 → 250)', () => {
+    expect(covered(915, 412, 356, true)).toEqual(['minimap']);
+    expect(covered(915, 412, 330, true)).toEqual(['minimap']);
+    expect(covered(863, 360, 304, true)).toEqual(['minimap']);
+    expect(covered(802, 293, 250, false)).toEqual(['minimap']);
+    // 조금 낮아진 정도면 그대로 (자리 여유 8px 안)
+    expect(covered(915, 412, 405, true)).toEqual([]);
+  });
+
+  it('닿기만 하면 덮은 것이 아니다', () => {
+    const T = touchLayout(863, 360, { l: 0, r: 0, t: 0, b: 0 }, true, false);
+    const sb = T.buttons.scoreboard!;
+    const touching = [
+      { id: 'left', b: { x: sb.x - 20, y: sb.y, w: 20, h: sb.h } },
+      { id: 'below', b: { x: sb.x, y: sb.y + sb.h, w: sb.w, h: 30 } },
+      { id: 'in', b: { x: sb.x - 20, y: sb.y, w: 20.5, h: sb.h } },
+    ];
+    expect([...hudCovered(T, touching)]).toEqual(['in']);
   });
 });

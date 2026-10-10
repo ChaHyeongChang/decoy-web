@@ -6,13 +6,17 @@
 // 배너는 아이콘 + 리본(양 끝 제비꼬리) + 톤 색: 발각 = 눈 + 빨강(#B91C1C), 경고 = 아이콘 + 주황(글자 #0B1622, 8.49:1),
 // 정보 = 아이콘 + 청록(#0E7490). 색만으로 구분하지 않는다. 그림은 HUD 아틀라스 9조각이라 글이 바뀌어도 다시 굽지 않는다.
 // M12 터치 배치: 그림 HUD.s배 · 글자 CSS 14px(넘치면 12px까지 줄인다), 맵 안 가로 범위(좌우 칸 HUD · 오른쪽 위 버튼을 비킨
-// HUD.touch.overlay)에 두고 보이는 것만 위에서부터 쌓는다(지속 → 알림 → 메모). 낮은 화면에서 감옥을 덜 가린다
+// HUD.touch.overlay)에 두고 보이는 것만 위에서부터 쌓는다(지속 → 알림 → 메모). 낮은 화면에서 감옥을 덜 가린다.
+// 쌓은 메모가 감옥(맵 14타일) 위 끝을 넘으면 알림이 빠질 때까지 메모를 미룬다(메모에는 만료가 없다, 알림은 1~2초). 알림 없이
+// 지속 배너만으로 넘으면 그대로 띄운다(지속 배너는 30초까지 이어져 미루면 비밀번호를 놓친다. 802×293도 지속 + 메모 아래 끝이 감옥
+// 위 23px 앞이라 시험 화면에서는 생기지 않는다, E2E m12-hud). PC는 고정 자리 그대로
+import { PRISON_RECT, TILE_PX } from '@decoy/shared';
 import type { IconId } from '../art/icons';
 import { NEON_DIM, UI } from '../art/palette';
 import { fontGeneration } from './fonts';
 import { FR, TONE, type Tone } from './hudArt';
 import { hexColor, setText, type HudKit, type Slice, type Spr } from './hudKit';
-import { HUD, VIEW_W } from './layout';
+import { HUD, MAP_SCALE, MAP_Y, VIEW_W } from './layout';
 import { UI_FONT, makeText, type CrispText } from './text';
 
 export interface BannerLine {
@@ -185,25 +189,46 @@ export class Banners {
       if (line) y += row.height + gap;
     });
     if (touch) this.noteY = y;
+    const cur = this.note.text;
     if (nowMs >= this.noteUntil) {
-      const n = this.notes.shift();
-      if (n) {
+      const n = this.notes[0];
+      if (n && !this.blocked(n.text)) {
+        this.notes.shift();
         this.showNote(n.text);
         this.noteUntil = nowMs + n.ms;
       } else {
         this.showNote('');
       }
+    } else if (cur.visible && this.blocked(cur.text)) {
+      // 떠 있던 메모가 새 알림에 밀려 감옥에 닿으면 숨기고 남은 시간을 큐 맨 앞에 되돌린다
+      this.notes.unshift({ text: cur.text, ms: this.noteUntil - nowMs });
+      this.noteUntil = nowMs;
+      this.showNote('');
     } else if (
-      this.note.text.visible &&
+      cur.visible &&
       (this.noteGen !== fontGeneration() || (touch !== null && this.noteAt !== this.noteY))
     ) {
-      this.showNote(this.note.text.text);
+      this.showNote(cur.text);
     }
     this.visible = [
       ...(persistent ? [persistent.text] : []),
       ...this.shown.map((b) => b.text),
       ...(this.note.text.visible ? [this.note.text.text] : []),
     ];
+  }
+
+  /** 터치: 알림이 떠 있고 이 글의 메모 상자가 감옥 위 끝을 넘는가 (넘으면 미룬다, 사이 간격은 더하지 않는다) */
+  private blocked(text: string): boolean {
+    return (
+      HUD.touch !== null &&
+      this.shown.length > 0 &&
+      this.noteY + this.noteH(text) > MAP_Y + PRISON_RECT.y0 * TILE_PX * MAP_SCALE
+    );
+  }
+
+  /** 메모 상자 높이 (논리 px): 글자를 넣어 잰다 (같은 글이면 다시 그리지 않는다) */
+  private noteH(text: string): number {
+    return Math.ceil(this.note.text.setText(text).height) + (HUD.touch ? 8 : 14) * HUD.s * 2;
   }
 
   /** 메모 상자: 가운데 위, 글자에 맞춘 판 + 왼쪽 연필 아이콘 (벽에 새긴 글) */
@@ -216,13 +241,13 @@ export class Banners {
       N.text.setVisible(false);
       return;
     }
-    N.text.setText(text).setVisible(true);
+    const h = this.noteH(text);
+    N.text.setVisible(true);
     const k = HUD.s;
     const padX = (HUD.touch ? 16 : 30) * k;
     const padY = (HUD.touch ? 8 : 14) * k;
     const icon = 26 * k;
     const w = Math.ceil(N.text.width) + padX * 2 + icon;
-    const h = Math.ceil(N.text.height) + padY * 2;
     const x0 = Math.round(span().cx - w / 2);
     const y = this.noteY;
     this.noteAt = y;
