@@ -1,0 +1,21 @@
+{
+  "id": "/",
+  "name": "DECOY",
+  "short_name": "DECOY",
+  "description": "생존자 3 vs 괴물 1 비대칭 탈출 게임. 빠른 매칭 · 친구와 방 코드 · 혼자 봇과 연습",
+  "lang": "ko",
+  "dir": "ltr",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "theme_color": "#0b1622",
+  "background_color": "#0B1622",
+  "categories": ["games"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

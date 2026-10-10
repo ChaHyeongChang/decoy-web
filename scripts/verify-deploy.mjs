@@ -10,6 +10,17 @@ import { join } from 'node:path';
 import WebSocket from 'ws';
 
 const PORT_IN_CONTAINER = 3000;
+/** assetlinks 확인용 가짜 값 (M14): 형식만 맞는 패키지 이름 · 지문 두 개 (실제 서명 키와 무관) */
+const FAKE_PACKAGE = 'com.example.decoyverify';
+const FAKE_FINGERPRINTS = [
+  Array.from({ length: 32 }, (_, i) => ((i * 7 + 3) & 255).toString(16).padStart(2, '0'))
+    .join(':')
+    .toUpperCase(),
+  Array.from({ length: 32 }, (_, i) => ((i * 13 + 1) & 255).toString(16).padStart(2, '0'))
+    .join(':')
+    .toUpperCase(),
+];
+const TWA_ENV = { TWA_PACKAGE_NAME: FAKE_PACKAGE, TWA_SHA256_FINGERPRINTS: FAKE_FINGERPRINTS.join(',') };
 const IMAGE = 'decoy-web:verify';
 const CONTAINER = 'decoy-web-verify';
 
@@ -95,6 +106,32 @@ async function check(base) {
   log(`HTTP 200 (첫 화면, ${asset})`);
   const room = await wsWelcome(`${base.replace('http', 'ws')}/ws`);
   log(`WebSocket 접속 · 방 만들기 성공 (방 ${room})`);
+  await checkPwa(base);
+}
+
+/** M14: manifest · 아이콘 · assetlinks.json (컨테이너에 가짜 TWA 환경 변수를 넣고 띄웠다) */
+async function checkPwa(base) {
+  const mr = await fetch(`${base}/manifest.webmanifest`);
+  if (mr.status !== 200 || mr.headers.get('content-type') !== 'application/manifest+json')
+    throw new Error(`manifest HTTP ${mr.status} ${mr.headers.get('content-type')}`);
+  const manifest = await mr.json();
+  for (const icon of manifest.icons ?? []) {
+    const r = await fetch(new URL(icon.src, `${base}/manifest.webmanifest`));
+    if (r.status !== 200 || r.headers.get('content-type') !== 'image/png')
+      throw new Error(`아이콘 ${icon.src} HTTP ${r.status} ${r.headers.get('content-type')}`);
+  }
+  log(`manifest · 아이콘 ${manifest.icons?.length ?? 0}개 200`);
+  const al = await fetch(`${base}/.well-known/assetlinks.json`, { redirect: 'manual' });
+  if (al.status !== 200 || al.headers.get('content-type') !== 'application/json')
+    throw new Error(`assetlinks HTTP ${al.status} ${al.headers.get('content-type')}`);
+  const links = await al.json();
+  const target = links?.[0]?.target;
+  if (
+    target?.package_name !== FAKE_PACKAGE ||
+    JSON.stringify(target?.sha256_cert_fingerprints) !== JSON.stringify(FAKE_FINGERPRINTS)
+  )
+    throw new Error(`assetlinks 본문이 다릅니다: ${JSON.stringify(links)}`);
+  log('assetlinks.json 200 (가짜 지문 두 개, 리다이렉트 없음)');
 }
 
 async function viaDocker() {
@@ -133,6 +170,7 @@ async function viaDocker() {
     CONTAINER,
     '-e',
     `PORT=${PORT_IN_CONTAINER}`,
+    ...Object.entries(TWA_ENV).flatMap(([k, v]) => ['-e', `${k}=${v}`]),
     '-p',
     `${hostPort}:${PORT_IN_CONTAINER}`,
     IMAGE,
@@ -158,7 +196,7 @@ async function viaNode() {
   execFileSync('npm', ['run', 'build'], { stdio: 'inherit' });
   const port = await freePort();
   const proc = spawn(process.execPath, ['server/dist/index.js'], {
-    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', NODE_ENV: 'production' },
+    env: { ...process.env, ...TWA_ENV, PORT: String(port), HOST: '127.0.0.1', NODE_ENV: 'production' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   proc.stdout.on('data', (d) => log(`서버: ${d.toString().trim()}`));

@@ -8,13 +8,20 @@ export interface RunningServer {
   stop(): Promise<void>;
 }
 
-/** port를 주면 그 포트로 띄운다 (같은 출처로 서버를 바꿔 띄우는 서비스 워커 시험, M13d). 없으면 빈 포트 */
-export async function startServer(args: string[] = [], opts: { port?: number } = {}): Promise<RunningServer> {
+/**
+ * port를 주면 그 포트로 띄운다 (같은 출처로 서버를 바꿔 띄우는 서비스 워커 시험, M13d). 없으면 빈 포트.
+ * env는 이 시험 프로세스의 환경 변수 위에 덧씌운다 (M14 assetlinks)
+ */
+export async function startServer(
+  args: string[] = [],
+  opts: { port?: number; env?: Record<string, string> } = {},
+): Promise<RunningServer> {
   const proc = spawn(
     process.execPath,
     ['--import', 'tsx', 'server/src/index.ts', `--port=${opts.port ?? 0}`, '--host=127.0.0.1', ...args],
     {
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, ...opts.env },
     },
   );
   const output: string[] = [];
