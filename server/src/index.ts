@@ -17,12 +17,16 @@ import {
 import { createSender } from './sendPolicy';
 import { serveStatic } from './static';
 import { TruthLog } from './truthLog';
+import { ASSETLINKS_PATH, assetLinksFromEnv } from './wellKnown';
 import { spawnLocalBot } from './bots';
 
 const options = parseOptions(process.argv.slice(2), process.env);
 const balance = loadBalance(options.balancePath);
 /** 함께 빌드한 화면의 빌드 ID (M13d). 없으면 null(비교 안 함) */
 const buildId = readBuildId(options.staticDir);
+/** 안드로이드 앱 도메인 연결 (M14): 환경 변수가 맞으면 본문, 아니면 null → 404 */
+const assetLinks = assetLinksFromEnv(process.env);
+if (assetLinks.problem) console.warn(assetLinks.problem);
 const truthLog = options.truthLogPath ? new TruthLog(options.truthLogPath) : null;
 const lagRng = new Rng(options.seed ^ 0x5bd1e995);
 
@@ -121,6 +125,18 @@ function handleHttp(req: IncomingMessage, res: ServerResponse): void {
     url = new URL(req.url ?? '/', 'http://localhost');
   } catch {
     res.writeHead(400).end();
+    return;
+  }
+  if (url.pathname === ASSETLINKS_PATH) {
+    // 리다이렉트 없이 200 JSON (구글 확인 도구 조건). 값이 없으면 404 — 게임 HTML을 주지 않는다
+    if (assetLinks.body)
+      res
+        .writeHead(200, { 'content-type': 'application/json', 'cache-control': 'public, max-age=300' })
+        .end(assetLinks.body);
+    else
+      res
+        .writeHead(404, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' })
+        .end('not found');
     return;
   }
   if (url.pathname === HEALTH_PATH) {

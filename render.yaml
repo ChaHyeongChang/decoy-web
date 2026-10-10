@@ -22,3 +22,9 @@ services:
         value: '10000'
       - key: NODE_ENV
         value: production
+      # 안드로이드 앱(TWA) 도메인 연결 /.well-known/assetlinks.json (M14). 값은 저장소에 두지 않는다 — 앱 패키지를 만든 뒤
+      # Render 대시보드에서 넣는다 (docs/PLAY_STORE_GUIDE.md 2부). 비어 있으면 그 경로는 404
+      - key: TWA_PACKAGE_NAME
+        sync: false
+      - key: TWA_SHA256_FINGERPRINTS
+        sync: false

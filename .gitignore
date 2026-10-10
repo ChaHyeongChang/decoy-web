@@ -5,6 +5,7 @@ dist/
 artifacts/*
 !artifacts/final/
 !artifacts/remaster/
+!artifacts/store/
 test-results/
 playwright-report/
 tests/e2e/.results/
@@ -20,3 +21,11 @@ id_ed25519*
 .npmrc
 .netrc
 .git-credentials
+# 안드로이드 앱 서명 키 · 패키지 (M14): PWABuilder 압축 파일에 서명 키와 비밀번호 파일이 들어 있다. 저장소에 넣지 않는다
+# (잃으면 업데이트 불가 — 두 곳 이상에 따로 보관, docs/PLAY_STORE_GUIDE.md)
+*.jks
+*.keystore
+*.aab
+*.apk
+signing-key-info.txt
+signing.keystore

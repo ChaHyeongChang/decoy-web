@@ -12,6 +12,10 @@ DECOY의 그래픽은 **코드로 그린다**. 저장소에 들어 있는 이미
 | `docs/images/logo_decoy.png` | 게임 로고 원본 (213 × 213, 원형, 배경 투명) | 사용자 제공 (프로젝트 로고) | 프로젝트 소유 | 예 (파비콘 · 작은 로고, 빌드 때 해시 이름으로 복사) |
 | `docs/images/logo_decoy.svg` | 로고 벡터판 (원본과 같은 디자인으로 다시 그림, 512 격자) | 이 프로젝트에서 원본 PNG를 보고 손으로 다시 그림 (M10a) | 프로젝트 소유 (원본 로고와 같음) | 아니오 (원본 보관용) |
 | `client/public/logo.svg` | `docs/images/logo_decoy.svg`와 같은 파일 (`tests/unit/logo-svg.test.ts`가 같은지 확인) | 위와 같음 | 프로젝트 소유 | 예 (로비 · 결과 큰 로고, 깨우기 안내 2x) |
+| `client/public/icons/icon-192.png` | 앱 아이콘 192 (purpose any, M14) — 로고 SVG를 바탕색 위에 | `scripts/make-icons.mjs`가 `client/public/logo.svg`로 그림 | 프로젝트 소유 (원본 로고와 같음) | 예 (manifest) |
+| `client/public/icons/icon-512.png` | 앱 아이콘 512 (purpose any, M14) | 위와 같음 | 프로젝트 소유 | 예 (manifest) |
+| `client/public/icons/maskable-192.png` | 앱 아이콘 192 (purpose maskable, 로고가 가운데 80% 안전 원 안, M14) | 위와 같음 | 프로젝트 소유 | 예 (manifest) |
+| `client/public/icons/maskable-512.png` | 앱 아이콘 512 (purpose maskable, M14) | 위와 같음 | 프로젝트 소유 | 예 (manifest) |
 | `docs/images/concept_01_survivor_fog.png` | 컨셉 이미지: 생존자 시야 · 안개 | 기획 단계에 생성형 AI로 만든 이미지 (사용자 제공) | 문서 참고용. 게임 · 스토어에 쓰지 않음 | 아니오 |
 | `docs/images/concept_02_map_reference.png` | 컨셉 이미지: 맵 참고 | 위와 같음 | 문서 참고용. 게임 · 스토어에 쓰지 않음 | 아니오 |
 | `docs/images/concept_04_decoy_play.png` | 컨셉 이미지: 플레이 장면 | 위와 같음 | 문서 참고용. 게임 · 스토어에 쓰지 않음 | 아니오 |
