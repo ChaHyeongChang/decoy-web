@@ -205,6 +205,20 @@ test('괴물로 연습할 때 받은 스냅샷에 시야 밖 생존자가 0명�
     },
     [mon.id, survivors.map((p) => p.id)] as const,
   );
+  // PC 괴물의 조준은 마우스를 따른다: 마우스가 역할 버튼 자리에 남아 있으면 엉뚱한 쪽을 봐서 '보인 생존자' 표본이
+  // 거의 안 생긴다. 내 화면이 새 자리로 옮겨 간 뒤 마우스를 북쪽 생존자 위로 옮기고, 조준이 북쪽이 될 때까지 기다린다
+  await page.waitForFunction(() => {
+    const r = window.__DECOY__?.getRenderPos();
+    return r !== null && r !== undefined && Math.hypot(r.x - 24, r.y - 23) < 0.05;
+  });
+  const north = await page.evaluate(() => window.__DECOY__?.tileToClient(24, 20.5) ?? null);
+  if (!north) throw new Error('tileToClient 없음');
+  await page.mouse.move(north.x, north.y);
+  await expect
+    .poll(async () => Math.abs(((await localTruth(page)).monster?.aim ?? 0) + Math.PI / 2), {
+      timeout: 10_000,
+    })
+    .toBeLessThan(0.1);
   // 같은 틱의 (스냅샷, 기기 안 정답) 쌍을 모은다: 기기 안 서버는 틱 사이에 메시지를 마이크로태스크로 넘기므로
   // 스냅샷을 받은 프레임의 정답 틱이 스냅샷 틱과 같으면 같은 순간이다
   const pairs = await page.evaluate(async () => {
