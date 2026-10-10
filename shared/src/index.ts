@@ -3,6 +3,7 @@ export * from './geometry';
 export * from './lag';
 export * from './map';
 export * from './movement';
+export * from './notes';
 export * from './rng';
 export * from './types';
 export * from './debugTypes';

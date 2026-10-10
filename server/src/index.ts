@@ -3,10 +3,10 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { Duplex } from 'node:stream';
 import { performance } from 'node:perf_hooks';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { LagQueue, Rng, type ClientMessage, type ServerMessage } from '@decoy/shared';
+import { LagQueue, Rng, type ClientMessage } from '@decoy/shared';
 import { HEALTH_PATH, MAX_STALL_MS, SERVER_MARK_HEADER, loadBalance, parseOptions } from './config';
 import { RoomManager, type Conn, type Room, type Seat } from './room';
-import { sendAction } from './sendPolicy';
+import { createSender } from './sendPolicy';
 import { serveStatic } from './static';
 import { TruthLog, truthOf } from './truth';
 import { spawnLocalBot } from './bots';
@@ -161,28 +161,8 @@ wss.on('connection', (socket: WebSocket) => {
   connCounter += 1;
   const half = options.lag / 2;
   const jitter = options.lag > 0 ? balance.network.lagJitterMs : 0;
-  // null = 닫기 표식. 앞서 보낸 메시지(예: 'replaced' 알림)를 모두 보낸 뒤 닫는다
-  const outbound = new LagQueue<{ text: string; snap: boolean } | null>(
-    half,
-    jitter,
-    (out) => {
-      if (socket.readyState !== socket.OPEN) return;
-      if (out === null) {
-        socket.close();
-        return;
-      }
-      // 받는 쪽이 못 따라오면 오래된 스냅샷은 건너뛰고, 그래도 크게 쌓이면 끊는다 (sendPolicy.ts)
-      const action = sendAction(socket.bufferedAmount, out.snap);
-      if (action === 'terminate') socket.terminate();
-      else if (action === 'send') socket.send(out.text);
-    },
-    () => lagRng.next(),
-  );
-  const conn: Conn = {
-    id: connCounter,
-    send: (msg: ServerMessage) => outbound.push({ text: JSON.stringify(msg), snap: msg.t === 'snap' }),
-    close: () => outbound.push(null),
-  };
+  // 송신: 받는 쪽이 못 따라오면 오래된 스냅샷은 건너뛰고(거점 메모가 든 것은 보냄), 그래도 크게 쌓이면 끊는다 (sendPolicy.ts)
+  const conn: Conn = { id: connCounter, ...createSender(socket, half, jitter, () => lagRng.next()) };
   alive.set(socket, true);
   socket.on('pong', () => alive.set(socket, true));
   let bound: { room: Room; seat: Seat } | null = null;
