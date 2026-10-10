@@ -623,6 +623,8 @@ export class Room {
       }
       case 'setTime':
         game.timeLeft = cmd.timeLeft;
+        if (typeof cmd.elapsed === 'number' && Number.isFinite(cmd.elapsed) && cmd.elapsed >= 0)
+          game.time = cmd.elapsed;
         return;
       case 'setSurvivor': {
         const s = game.survivorById(cmd.target);

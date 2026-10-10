@@ -28,3 +28,6 @@ services:
         sync: false
       - key: TWA_SHA256_FINGERPRINTS
         sync: false
+      # 개인정보 처리방침(/privacy, M15)의 문의처. 공개해도 되는 이메일을 대시보드에서 넣는다. 비어 있으면 "스토어의 개발자 연락처로 문의"
+      - key: PRIVACY_CONTACT
+        sync: false

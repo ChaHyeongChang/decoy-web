@@ -1,0 +1,83 @@
+{
+  "createdAt": "2026-10-10T15:10:47.893Z",
+  "shots": [
+    {
+      "file": "feature-graphic.png",
+      "scene": "feature",
+      "width": 1024,
+      "height": 500,
+      "bytes": 398941,
+      "touchTargets": [],
+      "renderer": "webgl",
+      "quality": "high"
+    },
+    {
+      "file": "phone-1-lobby.png",
+      "scene": "lobby",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 619080,
+      "touchTargets": [],
+      "renderer": "webgl",
+      "quality": "high"
+    },
+    {
+      "file": "phone-2-monster.png",
+      "scene": "monster",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 622944,
+      "touchTargets": [
+        "move-zone",
+        "aim-stick",
+        "dash",
+        "roar",
+        "mode",
+        "scoreboard"
+      ],
+      "renderer": "webgl",
+      "quality": "high"
+    },
+    {
+      "file": "phone-3-survivor.png",
+      "scene": "survivor",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 644579,
+      "touchTargets": [
+        "move-zone",
+        "ability",
+        "rescue",
+        "scoreboard"
+      ],
+      "renderer": "webgl",
+      "quality": "high"
+    },
+    {
+      "file": "phone-4-rescue.png",
+      "scene": "rescue",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 631531,
+      "touchTargets": [
+        "move-zone",
+        "ability",
+        "rescue",
+        "scoreboard"
+      ],
+      "renderer": "webgl",
+      "quality": "high"
+    },
+    {
+      "file": "phone-5-result.png",
+      "scene": "result",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 233222,
+      "touchTargets": [],
+      "renderer": "webgl",
+      "quality": "high"
+    }
+  ],
+  "problems": []
+}

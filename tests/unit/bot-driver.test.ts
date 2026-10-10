@@ -129,6 +129,19 @@ describe('기기 안 연습 방', () => {
     expect(second).toHaveLength(3);
     for (const b of second) expect(first).not.toContain(b);
   });
+
+  it('시험 명령 setTime의 elapsed는 결과의 판 길이를 바꾼다 (없으면 실제로 흐른 시간)', () => {
+    const { core, clock } = practiceCore();
+    const { link, conn } = startPractice(core, 'guard');
+    link.receive(raw({ t: 'test', cmd: { kind: 'setTime', timeLeft: 0.05, elapsed: 512.4 } }));
+    runTicks(core, clock, 5);
+    expect(conn.last('result')?.result.durationSec).toBe(512);
+    link.receive(raw({ t: 'rematch' }));
+    runTicks(core, clock, 30);
+    link.receive(raw({ t: 'test', cmd: { kind: 'setTime', timeLeft: 0.05 } }));
+    runTicks(core, clock, 5);
+    expect(conn.last('result')?.result.durationSec).toBe(1);
+  });
 });
 
 describe('나가기 (leave)', () => {

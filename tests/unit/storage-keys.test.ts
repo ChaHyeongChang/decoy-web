@@ -2,8 +2,8 @@
 //  - client/src의 다른 파일에서 쓰면(주석 제외) 실패한다 → 키는 STORAGE_KEYS에 설명 · 보관 기간과 함께 더하고 readKey · writeKey로
 //  - 게임 코드 밖에서 혼자 도는 client/public의 HTML · JS(깨우기 화면 등)는 직접 쓸 수밖에 없으므로, 쓰는 키가 목록에 있는지 대조한다
 //  - 쿠키 · IndexedDB는 쓰지 않는다 (개인정보 처리방침 "쿠키 없음")
-//  - 개인정보 처리방침(docs/PRIVACY.md, M15)이 생기면 모든 키 · 캐시 이름이 거기 나와야 한다. 지금은 문서가 없어 건너뛴다
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+//  - 개인정보 처리방침(client/public/privacy.html, M15)에 모든 키 · 캐시 이름이 나와야 한다 (표 내용 대조는 privacy.test.ts)
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
@@ -11,7 +11,7 @@ import { STORAGE_KEYS, type StorageArea } from '../../client/src/storageKeys';
 
 const SRC = 'client/src';
 const PUBLIC = 'client/public';
-const PRIVACY = 'docs/PRIVACY.md';
+const PRIVACY = 'client/public/privacy.html';
 /** 여기서만 저장소를 직접 만진다 */
 const ALLOWED = join(SRC, 'storageKeys.ts');
 
@@ -129,15 +129,18 @@ describe('기기 저장 키', () => {
     expect(bad).toEqual([]);
   });
 
-  it.skipIf(!existsSync(PRIVACY))(
-    '개인정보 처리방침(docs/PRIVACY.md, M15)에 모든 저장 키 · 캐시 이름이 나온다 — 문서가 없으면 건너뜀',
-    () => {
-      const doc = readFileSync(PRIVACY, 'utf8');
-      const sw = readFileSync(join(PUBLIC, 'sw.js'), 'utf8');
-      const caches = [...sw.matchAll(/\bconst\s+CACHE\w*\s*=\s*'([^']+)'/g)].map((m) => m[1]!);
-      const keys = Object.values(STORAGE_KEYS).map((k) => k.key);
-      const missing = [...keys, ...caches].filter((k) => !doc.includes(k));
-      expect(missing).toEqual([]);
-    },
-  );
+  it('개인정보 처리방침(client/public/privacy.html, M15)에 모든 저장 키 · 캐시 이름이 나온다', () => {
+    const doc = readFileSync(PRIVACY, 'utf8');
+    const sw = readFileSync(join(PUBLIC, 'sw.js'), 'utf8');
+    // 'decoy-wake-v2' · `decoy-shell-${BUILD}` → 'decoy-shell-'
+    const caches = [
+      ...sw.matchAll(
+        /\bconst\s+\w*CACHE\w*\s*=\s*(?:\w+\s*\?\s*)?['`](decoy-[a-z]+-)(?:\$\{|([^'`$]*)['`])/g,
+      ),
+    ].map((m) => m[1]! + (m[2] ?? ''));
+    expect(caches.length).toBeGreaterThanOrEqual(2);
+    const keys = Object.values(STORAGE_KEYS).map((k) => k.key);
+    const missing = [...keys, ...caches].filter((k) => !doc.includes(k));
+    expect(missing).toEqual([]);
+  });
 });

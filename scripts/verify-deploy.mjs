@@ -20,7 +20,13 @@ const FAKE_FINGERPRINTS = [
     .join(':')
     .toUpperCase(),
 ];
-const TWA_ENV = { TWA_PACKAGE_NAME: FAKE_PACKAGE, TWA_SHA256_FINGERPRINTS: FAKE_FINGERPRINTS.join(',') };
+/** 처리방침 문의처 (M15): 넣은 값이 /privacy에 그대로 나오는지 본다 */
+const FAKE_CONTACT = 'privacy-check@example.com';
+const TWA_ENV = {
+  TWA_PACKAGE_NAME: FAKE_PACKAGE,
+  TWA_SHA256_FINGERPRINTS: FAKE_FINGERPRINTS.join(','),
+  PRIVACY_CONTACT: FAKE_CONTACT,
+};
 const IMAGE = 'decoy-web:verify';
 const CONTAINER = 'decoy-web-verify';
 
@@ -132,6 +138,22 @@ async function checkPwa(base) {
   )
     throw new Error(`assetlinks 본문이 다릅니다: ${JSON.stringify(links)}`);
   log('assetlinks.json 200 (가짜 지문 두 개, 리다이렉트 없음)');
+  // 개인정보 처리방침 (M15): 200 · HTML · 한국어 · 게임 HTML이 아님 · 넣은 문의처
+  for (const path of ['/privacy', '/privacy.html']) {
+    const pr = await fetch(`${base}${path}`, { redirect: 'manual' });
+    const html = await pr.text();
+    if (pr.status !== 200 || pr.headers.get('content-type') !== 'text/html; charset=utf-8')
+      throw new Error(`${path} HTTP ${pr.status} ${pr.headers.get('content-type')}`);
+    if (
+      !html.includes('<html lang="ko">') ||
+      !html.includes('개인정보 처리방침') ||
+      html.includes('id="game-root"')
+    )
+      throw new Error(`${path} 본문이 처리방침이 아닙니다`);
+    if (!html.includes(`mailto:${FAKE_CONTACT}`))
+      throw new Error(`${path}에 문의처(PRIVACY_CONTACT)가 없습니다`);
+  }
+  log('처리방침 /privacy · /privacy.html 200 (문의처 환경 변수 반영)');
 }
 
 async function viaDocker() {

@@ -9,6 +9,7 @@ artifacts/*
 test-results/
 playwright-report/
 tests/e2e/.results/
+tests/store/.results/
 *.log
 .DS_Store
 # private 저장소지만 키 · 인증 파일이 실수로 들어가지 않게
