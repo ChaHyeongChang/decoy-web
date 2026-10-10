@@ -6,7 +6,13 @@ import type { IconId } from '../art/icons';
 import { HUD_TEXT, ROLE_CARDS, TOUCH_TEXT, UI_TEXT, roleAbility, type InputMode } from '../data/storyText';
 import { canOfferFullscreen, device, enterFullscreen } from '../device';
 import { haptics } from '../haptics';
-import { markTouchTutorialShown, resetTouchTutorial, touchTutorialNeeded } from '../touchTutorial';
+import {
+  markTouchTutorialShown,
+  requestTouchHints,
+  resetTouchTutorial,
+  touchTutorialNeeded,
+} from '../touchTutorial';
+import type { ServerStatusView } from '../serverStatus';
 import {
   loadSavedQuality,
   parseQualityChoice,
@@ -20,6 +26,8 @@ import { blueprintSvg, glyphSvg, h, icon, keycap, logoImg, roleFigureSvg, roleVa
 export interface LobbyActions {
   create(name: string): void;
   join(code: string, name: string): void;
+  /** 봇과 연습 (M13b): 고른 역할로 기기 안에서 바로 시작 */
+  practice(role: Role, name: string): void;
   pickRole(role: Role | null): void;
   setReady(ready: boolean): void;
   setName(name: string): void;
@@ -99,6 +107,12 @@ export class LobbyUI {
   private lastLobby: LobbyState | null = null;
   /** 역할 카드 능력 줄의 입력 방식 */
   private readonly mode: InputMode = device.touch ? 'touch' : 'keyboard';
+  /** 첫 화면 서버 상태 줄 (M13b): 연결과 상관없이 첫 화면을 그리고 이 줄로 알린다 */
+  private readonly statusLine: HTMLDivElement;
+  private readonly statusText: HTMLSpanElement;
+  private status: ServerStatusView = { status: 'waking', seconds: 0 };
+  /** 연결이 필요한 첫 화면 버튼 (연결 전에는 끈다) */
+  private netButtons: HTMLButtonElement[] = [];
 
   constructor(
     host: HTMLElement,
@@ -114,6 +128,13 @@ export class LobbyUI {
     this.errorText = h('span', { 'data-testid': 'lobby-error' });
     this.errorBox = h('div', { class: 'lobby-error', role: 'alert' }, icon('warn', 18), this.errorText);
     this.showError('');
+    this.statusText = h('span', { class: 'status-text' });
+    this.statusLine = h(
+      'div',
+      { class: 'server-status', 'data-testid': 'server-status', role: 'status', 'aria-live': 'polite' },
+      h('span', { class: 'status-dot', 'aria-hidden': 'true' }),
+      this.statusText,
+    );
     this.root.append(bg, this.content);
     // 휴대폰 브라우저: "전체 화면" (누르면 전체 화면 + 가로 고정, M11). 준비 · 코드 입장도 같은 요청을 한다
     if (canOfferFullscreen()) {
@@ -223,8 +244,20 @@ export class LobbyUI {
       code.value = code.value.toUpperCase();
     });
     const join = h('button', { class: 'btn', 'data-testid': 'join-room' }, UI_TEXT.joinRoom);
+    // 봇과 연습 (M13b): 서버 연결과 상관없이 된다 (기기 안에서 판정)
+    const practice = h(
+      'button',
+      { class: 'btn btn-wide btn-practice', 'data-testid': 'practice' },
+      icon('play', 20),
+      UI_TEXT.practice,
+    );
+    practice.addEventListener('click', () => {
+      this.showError('');
+      this.renderPracticePicker(name.value);
+    });
     const doJoin = (): void => {
-      if (code.value.trim().length === 0) return;
+      // 연결 전에는 입장 버튼이 꺼져 있다 (Enter도 같다)
+      if (code.value.trim().length === 0 || join.disabled) return;
       enterFullscreen();
       this.showError('');
       this.actions.join(code.value.trim(), name.value);
@@ -238,16 +271,92 @@ export class LobbyUI {
       { class: 'panel home-panel' },
       h('label', { class: 'field' }, name),
       create,
+      practice,
       h('div', { class: 'divider' }),
       h('div', { class: 'row' }, h('label', { class: 'field field-code' }, code), join),
       ...this.qualityRow(),
+      this.statusLine,
       this.errorBox,
     );
+    this.netButtons = [create, join];
+    this.applyStatus();
     this.content.className = 'lobby-content lobby-home';
     const brand = this.brand(true);
     if (this.fsButton) brand.querySelector('.brand-text')?.append(this.fsButton);
     this.content.replaceChildren(brand, panel);
     this.show();
+  }
+
+  /**
+   * 봇과 연습: 역할 고르기 (첫 화면 자리). 고르면 바로 시작한다 — 앱을 연 뒤 탭 2번(봇과 연습 → 역할) 안에 판.
+   * 터치 기기에서 아직 조작 안내를 보지 않았으면 안내 카드 대신 그 판의 처음 10초 위치 표시만 한다
+   */
+  renderPracticePicker(name: string): void {
+    this.lastLobby = null;
+    this.tutorial.hide();
+    this.settings?.close();
+    const grid = h('div', { class: 'practice-roles' });
+    for (const role of ROLE_ORDER) {
+      const info = ROLE_CARDS[role];
+      const b = h(
+        'button',
+        { class: 'practice-role cut', 'data-testid': `practice-role-${role}`, style: roleVars(role) },
+        svgSpan('pr-figure', roleFigureSvg(role)),
+        h(
+          'span',
+          { class: 'rc-head' },
+          svgSpan('glyph', glyphSvg(role)),
+          h('span', { class: 'role-name' }, info.name),
+        ),
+      );
+      b.addEventListener('click', () => {
+        // 휴대폰: 판 시작은 메시지라 그때는 전체 화면을 요청할 수 없다. 탭할 때 (M11과 같다)
+        enterFullscreen();
+        if (device.touch && touchTutorialNeeded()) requestTouchHints();
+        this.actions.practice(role, name);
+      });
+      grid.append(b);
+    }
+    const cancel = h('button', { class: 'btn', 'data-testid': 'practice-cancel' }, UI_TEXT.practiceCancel);
+    cancel.addEventListener('click', () => this.renderHome());
+    const panel = h(
+      'div',
+      { class: 'panel home-panel practice-panel', 'data-testid': 'practice-picker' },
+      h('div', { class: 'lobby-hint' }, UI_TEXT.practicePick),
+      grid,
+      h('div', { class: 'action-row' }, cancel),
+      this.statusLine,
+      this.errorBox,
+    );
+    this.netButtons = [];
+    this.applyStatus();
+    this.content.className = 'lobby-content lobby-home';
+    const brand = this.brand(true);
+    if (this.fsButton) brand.querySelector('.brand-text')?.append(this.fsButton);
+    this.content.replaceChildren(brand, panel);
+    this.show();
+  }
+
+  /** 첫 화면 서버 상태 줄 (App이 0.25초마다 부른다). 바뀐 게 없으면 DOM을 건드리지 않는다 */
+  setServerStatus(view: ServerStatusView): void {
+    if (view.status === this.status.status && view.seconds === this.status.seconds) return;
+    this.status = view;
+    this.applyStatus();
+  }
+
+  private applyStatus(): void {
+    const v = this.status;
+    this.statusLine.dataset.state = v.status;
+    this.statusText.textContent =
+      v.status === 'connected'
+        ? UI_TEXT.statusConnected
+        : v.status === 'offline'
+          ? UI_TEXT.statusOffline
+          : v.status === 'unreachable'
+            ? UI_TEXT.statusUnreachable
+            : UI_TEXT.statusWaking.replace('{n}', String(v.seconds));
+    // 연결이 필요한 버튼은 연결 전에 끈다 (봇과 연습은 늘 된다)
+    for (const b of this.netButtons) b.disabled = v.status !== 'connected';
   }
 
   /**

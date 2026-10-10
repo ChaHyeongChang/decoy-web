@@ -86,6 +86,8 @@ async function waitForScene(page: Page): Promise<void> {
 
 /** 세로 화면에서는 세로 안내가 로비를 덮어 탭이 닿지 않는다: 버튼을 프로그램으로 누른다 */
 async function clickJs(page: Page, testId: string): Promise<void> {
+  // 첫 화면은 연결 전에도 그려지고 방 만들기는 연결될 때까지 꺼져 있다 (M13b)
+  await expect(page.getByTestId(testId)).toBeEnabled();
   await page.getByTestId(testId).evaluate((el) => (el as HTMLElement).click());
 }
 

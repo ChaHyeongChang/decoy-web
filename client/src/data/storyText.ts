@@ -149,6 +149,15 @@ export const UI_TEXT = {
   winVoid: '무효',
   modeSearch: '탐색',
   modeHunt: '추적',
+  // ── 첫 화면 · 봇과 연습 (M13b) ──
+  practice: '봇과 연습',
+  practicePick: '연습할 역할을 고르세요 — 고르면 바로 시작하고, 빈자리는 봇이 채워요',
+  practiceCancel: '취소',
+  home: '홈으로',
+  statusConnected: '서버 연결됨',
+  statusWaking: '서버를 깨우는 중… {n}초 — 기다리는 동안 봇과 연습을 할 수 있어요',
+  statusUnreachable: '서버에 연결할 수 없어요 — 봇과 연습은 할 수 있어요',
+  statusOffline: '인터넷 연결이 없어요 — 봇과 연습만 할 수 있어요',
 } as const;
 
 /** 조작 안내 (첫 판 오버레이 · Tab 화면) */

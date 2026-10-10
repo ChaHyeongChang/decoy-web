@@ -23,6 +23,14 @@ export function markTouchTutorialShown(): void {
   writeKey('touchTutorial', '1');
 }
 
+/**
+ * 봇과 연습(M13b): 역할을 고르면 바로 시작하므로 판 직전 안내 카드는 띄우지 않고(탭 2번 안에 판 시작), 아직 안내를 보지
+ * 않은 기기면 그 판의 처음 10초 위치 표시만 한다. 본 기록은 남기지 않는다(방 · 빠른 매칭에서 안내 카드를 그대로 본다)
+ */
+export function requestTouchHints(): void {
+  hintsPending = true;
+}
+
 /** 판 장면이 시작할 때 한 번 부른다: 이번 판에 위치 표시를 할지 (읽으면 꺼진다) */
 export function takeTouchHints(): boolean {
   const v = hintsPending;

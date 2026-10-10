@@ -57,8 +57,19 @@ export interface LobbyPlayer {
   bot: boolean;
 }
 
+/**
+ * 방 종류 (M13b): code = 방 코드 · 링크로 모이는 친구 방, quick = 빠른 매칭(M13c, 자동 시작 · 판 뒤 해산),
+ * practice = 기기 안 봇과 연습(서버에 가지 않는다, 방 코드 `P-` 접두)
+ */
+export type RoomKind = 'code' | 'quick' | 'practice';
+
+/** 기기 안 연습 방 코드의 접두. 서버 방 코드(4글자, ROOM_CODE_ALPHABET)와 겹치지 않는다 */
+export const PRACTICE_ROOM_PREFIX = 'P-';
+
 export interface LobbyState {
   room: string;
+  /** 방 종류 (M13b) */
+  kind: RoomKind;
   phase: RoomPhase;
   players: LobbyPlayer[];
   /** 빈자리를 봇으로 채울 수 있는 방 (?bots=1) */
@@ -67,6 +78,8 @@ export interface LobbyState {
   canStart: boolean;
   /** 시작할 수 없는 이유 (화면 안내용) */
   waitingFor: string | null;
+  /** 빠른 매칭 자동 시작 서버 시각 (ms, 서버 시계 — pong · 스냅샷과 같은 시계). 없으면 null (M13c) */
+  autoStartAt: number | null;
 }
 
 // ───────────────────────── 판 진행 상태 ─────────────────────────
@@ -310,6 +323,13 @@ export type ClientMessage =
   | { t: 'input'; frames: InputFrame[] }
   | { t: 'ping'; c: number }
   | { t: 'rematch' }
+  /** 빠른 매칭 대기열에 들어간다 (M13c). 대기 중이거나 판이 없는 빠른 매칭 방에 넣거나 새로 만든다 */
+  | { t: 'quick'; name: string }
+  /**
+   * 방에서 나간다 (M13b): 결과 화면 "홈으로" · 대기 취소. 로비 · 결과 단계에서는 자리를 지우고, 판 중에는 끊김과 같다
+   * (M13c에서 판 중 나가기는 유예 없이 바로 판정). 연결은 방에서 풀려 다른 방에 들어갈 수 있다
+   */
+  | { t: 'leave' }
   | { t: 'test'; cmd: TestCommand };
 
 export type ErrorCode =

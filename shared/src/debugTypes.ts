@@ -1,5 +1,6 @@
 // 브라우저 디버그 훅(window.__DECOY__)의 타입. 클라이언트와 E2E 테스트가 같이 쓴다.
 import type { MoveState } from './movement';
+import type { TruthFrame } from './sim/truth';
 import type { InputFrame, MatchResult, Role, Snapshot, TestCommand } from './types';
 
 /** 이번 프레임에 실제로 그린 엔티티 */
@@ -228,7 +229,14 @@ export interface DecoyDebug {
   /** 판 화면 HUD 배치 (M12, 판 장면이 없으면 null) */
   getHudLayout(): HudLayout | null;
   serverNow(): number;
+  /** 테스트 명령: 지금 전송으로 보낸다 (연습 중이면 기기 안 서버, M13b) */
   sendTest(cmd: TestCommand): void;
+  /** 지금 전송 (M13b): net = 서버 WebSocket, local = 기기 안 봇과 연습 */
+  readonly transport: 'net' | 'local';
+  /** 연습 방 코드 (`P-` 접두, 연습 중이 아니면 null) */
+  readonly practiceRoom: string | null;
+  /** 기기 안 정답 상태 (연습 중에만, 아니면 null). 서버의 /test/state와 같은 모양 */
+  getTruth(): TruthFrame | null;
   /** 타일 좌표 → 브라우저 창 좌표 (E2E에서 마우스를 옮길 때) */
   tileToClient(x: number, y: number): { x: number; y: number } | null;
 }

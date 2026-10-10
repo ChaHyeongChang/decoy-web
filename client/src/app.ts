@@ -33,6 +33,7 @@ import {
   type LastRoom,
   type LifecycleDebug,
 } from './lifecycle';
+import { LocalTransport } from './localServer';
 import { NetClient, defaultWsUrl } from './net';
 import { parseScale } from './render/resolution';
 import {
@@ -45,7 +46,9 @@ import {
   saveName,
   saveSeatToken,
 } from './session';
+import { serverStatus } from './serverStatus';
 import { Interpolator, Predictor, SnapshotClock, lerpAngle, lerpNum } from './sync';
+import type { Transport } from './transport';
 import { LeaveDialog, ReplacedNotice } from './ui/lifecycleUi';
 import { LobbyUI } from './ui/lobby';
 import { ResultUI } from './ui/result';
@@ -68,6 +71,8 @@ export interface AppParams {
   /** ?quality=high|medium|low: 그래픽 품질 강제 (저장된 선택 · 자동보다 우선). 없으면 null */
   quality: QualityTier | null;
   name: string | null;
+  /** ?practice=1: 첫 화면에서 봇과 연습 역할 고르기를 바로 연다 (M13b, 깨우기 화면의 "봇과 연습") */
+  practice: boolean;
   /** ?touch=1|0: 터치 화면을 강제로 켜거나 끈다 (M11, device.ts detectTouchMode). 없으면 null(기기로 판단) */
   touch: string | null;
 }
@@ -86,6 +91,7 @@ export function readParams(search: string): AppParams {
     scaleOverride: parseScale(p.get('scale')),
     quality: parseQuality(p.get('quality')),
     name: p.get('name'),
+    practice: p.get('practice') === '1',
     touch: p.get('touch'),
   };
 }
@@ -169,6 +175,10 @@ export class App {
   private quietClose = false;
   /** 첫 화면 방 코드 칸에 미리 넣을 것 (판에서 나간 방: 30초 안에 입장을 누르면 같은 자리) */
   private homePrefill = '';
+  // ── 봇과 연습 (M13b) ──
+  /** 기기 안 연습 서버. 연습 중이면 판 화면 · 디버그 훅은 이것으로 주고받는다 (app.link) */
+  private local: LocalTransport | null = null;
+  private localUnsub: (() => void) | null = null;
 
   constructor(
     readonly params: AppParams,
@@ -208,6 +218,7 @@ export class App {
             bots: params.bots,
           });
         },
+        practice: (role, name) => this.startPractice(role, name),
         join: (code, name) => {
           saveName(name);
           this.roomCode = code.toUpperCase();
@@ -215,14 +226,18 @@ export class App {
           this.returning = null;
           this.sendJoin(name);
         },
-        pickRole: (role: Role | null) => this.net.send({ t: 'role', role }),
-        setReady: (ready) => this.net.send({ t: 'ready', ready }),
-        setName: (name) => this.net.send({ t: 'name', name }),
-        start: () => this.net.send({ t: 'start' }),
+        pickRole: (role: Role | null) => this.link.send({ t: 'role', role }),
+        setReady: (ready) => this.link.send({ t: 'ready', ready }),
+        setName: (name) => this.link.send({ t: 'name', name }),
+        start: () => this.link.send({ t: 'start' }),
       },
       params.name ?? getSavedName(),
     );
-    this.resultUi = new ResultUI(uiRoot, () => this.net.send({ t: 'rematch' }));
+    this.resultUi = new ResultUI(
+      uiRoot,
+      () => this.link.send({ t: 'rematch' }),
+      () => this.leaveToHome(),
+    );
     this.wakeUi = new WakeNoticeUI(uiRoot);
     this.leaveDialog = new LeaveDialog(uiRoot, {
       stay: () => {
@@ -236,7 +251,10 @@ export class App {
     this.backGuard = this.lifeApp
       ? new BackGuard(window.history, () => this.leaveDialog.open(), window.history.state)
       : null;
-    this.net.on((msg) => this.onMessage(msg));
+    // 연습 중에는 서버 메시지를 쓰지 않는다 (연결도 쉰다)
+    this.net.on((msg) => {
+      if (!this.local) this.onMessage(msg);
+    });
     this.net.onHeard = () => this.keeper.heard();
     // 숨겨진 채 받은 첫 표본으로는 풀지 않는다 (보이면 다시 맞추고 그때 푼다)
     this.net.onResynced = () => {
@@ -292,12 +310,110 @@ export class App {
     this.wake.setOffline(navigator.onLine === false);
     this.wake.connecting(performance.now());
     this.keeper.start();
+    // 첫 화면은 연결과 상관없이 바로 그린다 (M13b). 방 링크 · 마지막 방 복귀로 들어가는 중이면 지금처럼 깨우기 패널
+    if (!this.roomCode) {
+      if (this.params.practice) this.lobbyUi.renderPracticePicker(this.params.name ?? getSavedName());
+      else this.lobbyUi.renderHome(this.homePrefill);
+    }
     // 기다린 시간(초)을 세려고 주기적으로 다시 그린다. 바뀐 게 없으면 DOM을 건드리지 않는다
     this.wakeTimer ??= window.setInterval(() => this.renderWake(), 250);
   }
 
+  /** 연결 안내: 첫 화면은 상태 줄(M13b), 방 · 판 화면은 가운데 패널. 연습 중에는 둘 다 띄우지 않는다 */
   private renderWake(): void {
-    this.wakeUi.render(this.wake.view(performance.now()));
+    const now = performance.now();
+    this.lobbyUi.setServerStatus(
+      serverStatus({
+        connected: this.net.connected,
+        offline: this.wake.offline,
+        waitingSince: this.wake.waitingSince,
+        nowMs: now,
+      }),
+    );
+    const panel = this.wake.view(now);
+    this.wakeUi.render(this.local || this.lobbyUi.atHome ? { ...panel, visible: false } : panel);
+  }
+
+  /** 지금 주고받는 전송: 연습 중이면 기기 안 서버, 아니면 서버 WebSocket */
+  get link(): Transport {
+    return this.local ?? this.net;
+  }
+
+  /** 기기 안 연습 중 */
+  get practicing(): boolean {
+    return this.local !== null;
+  }
+
+  /** 연습 방 코드 (디버그 · 시험) */
+  get practiceRoom(): string | null {
+    return this.local?.room?.code ?? null;
+  }
+
+  /** 기기 안 정답 상태 (연습 중 · 디버그 훅 전용) */
+  localTruth(): ReturnType<LocalTransport['truth']> {
+    return this.local?.truth() ?? null;
+  }
+
+  /**
+   * 봇과 연습 (M13b): 기기 안 서버를 만들고 고른 역할로 바로 시작한다. 서버 연결은 쉰다 — 연습 중에는 새 연결을 시도하지
+   * 않는다(오프라인 · 서버 잠듦에서도 소켓 시도 0). 주소 ?room= · 자리 토큰 · 마지막 방은 저장하지 않고,
+   * 수신 감시 · 재연결 · 다른 탭 처리 · 뒤로 가기 확인도 쓰지 않는다(연습은 다른 사람과 무관하다)
+   */
+  private startPractice(role: Role, name: string): void {
+    if (this.local) return;
+    saveName(name);
+    this.quietClose = true;
+    this.keeper.stop();
+    this.wake.stop();
+    this.net.drop();
+    this.clearRejoin();
+    this.returning = null;
+    this.roomCode = null;
+    const local = new LocalTransport({ testHooks: this.params.debug !== 'off' || import.meta.env.DEV });
+    this.local = local;
+    this.localUnsub = local.subscribe((msg) => this.onMessage(msg));
+    this.renderWake();
+    local.send({ t: 'join', room: null, create: true, name, token: null, altTokens: [], bots: true });
+    local.send({ t: 'role', role });
+    local.send({ t: 'ready', ready: true });
+    local.send({ t: 'start' });
+  }
+
+  /** 연습을 끝내고 첫 화면으로: 기기 안 서버를 닫고 서버 연결을 다시 시작한다 */
+  private stopPractice(): void {
+    const local = this.local;
+    if (!local) return;
+    this.localUnsub?.();
+    this.localUnsub = null;
+    local.close();
+    this.local = null;
+    this.you = null;
+    this.toHome('');
+    this.wake.resume();
+    this.wake.connecting(performance.now());
+    this.keeper.resume();
+    this.renderWake();
+  }
+
+  /**
+   * 결과 화면 "홈으로" (M13b): 연습이면 연습을 닫고, 서버 방이면 'leave'로 자리를 비우고 첫 화면으로.
+   * 연결은 방에서 풀려 그대로 첫 화면에서 쓴다 (방 만들기 · 입장)
+   */
+  private leaveToHome(): void {
+    if (this.local) {
+      this.stopPractice();
+      return;
+    }
+    this.net.send({ t: 'leave' });
+    clearLastRoom();
+    this.clearRejoin();
+    this.returning = null;
+    this.you = null;
+    this.homePrefill = '';
+    this.toHome('');
+    const url = new URL(window.location.href);
+    url.searchParams.delete('room');
+    window.history.replaceState(window.history.state, '', url.toString());
   }
 
   subscribe(listener: (e: AppEvent) => void): () => void {
@@ -328,6 +444,13 @@ export class App {
   /** 화면이 숨겨짐 · 보임: 감시 멈춤 · 재개(즉시 ping + 시계 다시 맞추기), 화면 꺼짐 방지 다시 요청, 오디오 다시 켜기 */
   private onVisibility(visible: boolean): void {
     this.keeper.visibility(visible);
+    // 연습: 숨기면 기기 안 서버 루프만 멈추고(판이 그대로 멈춤), 보이면 시계를 지금으로 맞춰 이어 간다 (따라잡기 0)
+    if (this.local) {
+      if (visible) {
+        this.local.resume();
+        haptics.clockSynced();
+      } else this.local.pause();
+    }
     if (visible) {
       this.awake.shown();
       sfx.resume();
@@ -340,7 +463,9 @@ export class App {
   /** 판 중인가 (화면 꺼짐 방지 · 뒤로 가기 확인) */
   private setPlaying(on: boolean): void {
     this.awake.set(on);
-    if (on) this.backGuard?.arm();
+    // 뒤로 가기 확인은 다른 사람과 함께하는 판에서만 (연습은 나가도 남에게 영향이 없다)
+    if (on && !this.local) this.backGuard?.arm();
+    else if (on) this.backGuard?.disarm();
     else {
       this.leaveDialog.close();
       this.backGuard?.disarm();
@@ -398,7 +523,16 @@ export class App {
     if (wasInRoom)
       this.emit({
         kind: 'lobby',
-        lobby: { room: code, phase: 'lobby', players: [], bots: false, canStart: false, waitingFor: null },
+        lobby: {
+          room: code,
+          kind: 'code',
+          phase: 'lobby',
+          players: [],
+          bots: false,
+          canStart: false,
+          waitingFor: null,
+          autoStartAt: null,
+        },
       });
   }
 
@@ -503,6 +637,9 @@ export class App {
         this.balance = validateBalance(msg.balance);
         this.balanceHash = msg.balanceHash;
         this.you = msg.you;
+        this.lobbyUi.setYou(msg.you);
+        // 연습 방: 주소 · 자리 토큰 · 마지막 방을 저장하지 않는다 (연습 중 새로고침 → 첫 화면)
+        if (this.local) return;
         this.roomCode = msg.room;
         this.returning = null;
         this.homePrefill = '';
@@ -510,7 +647,6 @@ export class App {
         // 마지막 방 복귀로 기다리던 안내를 내린다
         this.wake.opened();
         this.renderWake();
-        this.lobbyUi.setYou(msg.you);
         saveSeatToken(msg.room, msg.token);
         if (this.lifeApp) saveLastRoom(msg.room);
         const url = new URL(window.location.href);
@@ -525,7 +661,8 @@ export class App {
           this.result = null;
           this.setPlaying(false);
           this.resultUi.hide();
-          this.lobbyUi.renderRoom(msg.lobby);
+          // 연습 방은 방 화면 없이 바로 판이 시작된다 (역할 고르기 화면 · 결과 화면에서)
+          if (msg.lobby.kind !== 'practice') this.lobbyUi.renderRoom(msg.lobby);
         }
         this.emit({ kind: 'lobby', lobby: msg.lobby });
         return;

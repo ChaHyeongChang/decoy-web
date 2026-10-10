@@ -18,3 +18,5 @@ export * from './systems/exit';
 export * from './systems/match';
 export * from './systems/monster';
 export * from './systems/prison';
+export * from './botDriver';
+export * from './practiceBrains';

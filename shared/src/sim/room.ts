@@ -1,6 +1,7 @@
 // 방, 로비, 역할 선택, 재접속, 판 진행 (실시간 틱 → Game.step → 플레이어별 스냅샷)
 import {
   MAX_NAME_LENGTH,
+  PRACTICE_ROOM_PREFIX,
   ROLE_IDS,
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH,
@@ -14,6 +15,7 @@ import {
   type LobbyState,
   type MatchInfo,
   type Role,
+  type RoomKind,
   type RoomPhase,
   type ServerMessage,
   type TestCommand,
@@ -46,8 +48,13 @@ export interface Seat {
 }
 
 export interface RoomHooks {
-  /** 빈자리를 채울 봇을 띄운다 (bots.ts) */
+  /**
+   * 빈자리를 채울 봇을 띄운다. 서버 ?bots=1은 WebSocket 봇(server/src/bots.ts), 기기 안 연습 · 빠른 매칭은
+   * 같은 프로세스 봇(botDriver.ts — 봇 자리에 가짜 연결을 붙인다). 판 시작 직전에 불린다('match' 전)
+   */
   spawnBot?: (room: Room, seat: Seat) => void;
+  /** 판 중 틱마다 game.step 직전 (botDriver.ts가 봇 자리마다 이번 틱 입력 하나를 넣는다. 스냅샷은 20Hz라 매 틱 필요) */
+  beforeStep?: (room: Room) => void;
   /** 틱마다 정답 상태 기록 (테스트 전용) */
   recordTruth?: (room: Room) => void;
   log?: (msg: string) => void;
@@ -57,6 +64,8 @@ export interface RoomConfig {
   balance: Balance;
   seed: number;
   testHooks: boolean;
+  /** 기기 안 연습 서버 (M13b, client/src/localServer.ts): 새 방은 모두 연습 방(빈자리 = 실전 봇, `P-` 코드) */
+  practice?: boolean;
 }
 
 const ALL_ROLES: readonly Role[] = ['monster', ...ROLE_IDS];
@@ -84,6 +93,8 @@ export class Room {
     readonly config: RoomConfig,
     readonly bots: boolean,
     private readonly hooks: RoomHooks,
+    /** 방 종류 (M13b): 친구 방 · 빠른 매칭(M13c) · 기기 안 연습 */
+    readonly kind: RoomKind = 'code',
   ) {
     this.rng = new Rng(config.seed ^ hashCode(code));
     this.balanceHash = balanceHash(config.balance);
@@ -171,10 +182,31 @@ export class Room {
     this.sendLobby();
   }
 
+  /**
+   * 방에서 나간다 (M13b, 'leave'): 로비 · 결과 단계면 자리를 지우고(방장은 다음 사람에게), 판 중이면 끊김과 같다
+   * (유예를 센다 — M13c에서 바로 판정으로 바꾼다). 연결과 자리의 묶음은 ServerCore가 푼다
+   */
+  leave(seat: Seat, nowMs: number): void {
+    if (this.phase === 'playing') {
+      this.detach(seat, nowMs);
+      return;
+    }
+    const i = this.seats.indexOf(seat);
+    if (i < 0) return;
+    this.seats.splice(i, 1);
+    seat.conn = null;
+    if (this.hostId === seat.id) {
+      const next = this.humanSeats.sort((a, b) => a.joinOrder - b.joinOrder)[0];
+      this.hostId = next ? next.id : null;
+    }
+    this.sendLobby();
+  }
+
   lobbyState(): LobbyState {
     const { ok, reason } = this.startCheck();
     return {
       room: this.code,
+      kind: this.kind,
       phase: this.phase,
       players: this.seats.map((s) => ({
         id: s.id,
@@ -188,6 +220,7 @@ export class Room {
       bots: this.bots,
       canStart: ok,
       waitingFor: reason,
+      autoStartAt: null,
     };
   }
 
@@ -274,7 +307,16 @@ export class Room {
         seat.conn?.send({ t: 'pong', c: msg.c, s: nowMs });
         return;
       case 'rematch':
-        if (this.phase === 'result') this.backToLobby();
+        if (this.phase !== 'result') return;
+        this.backToLobby();
+        // 봇과 연습: 같은 역할로 바로 다음 판 (준비 · 방장 시작 없음)
+        if (this.kind === 'practice' && seat.role !== null) {
+          seat.ready = true;
+          if (this.startCheck().ok) this.startMatch();
+        }
+        return;
+      case 'leave':
+        this.leave(seat, nowMs);
         return;
       case 'test':
         if (this.config.testHooks) this.applyTest(msg.cmd);
@@ -372,6 +414,7 @@ export class Room {
     const game = this.game;
     if (this.phase !== 'playing' || !game) return;
     this.updateDrops(game);
+    this.hooks.beforeStep?.(this);
     game.step();
     this.hooks.recordTruth?.(this);
     if (this.isSnapshotTick(game.tick) || game.end) {
@@ -488,17 +531,19 @@ export class RoomManager {
     this.rng = new Rng(config.seed);
   }
 
-  private newCode(): string {
+  private newCode(kind: RoomKind): string {
+    // 연습 방은 접두가 달라 서버 방 코드와 겹치지 않는다 (주소 · 저장에도 쓰지 않는다)
+    const prefix = kind === 'practice' ? PRACTICE_ROOM_PREFIX : '';
     for (let attempt = 0; attempt < 1000; attempt += 1) {
-      const code = this.rng.token(ROOM_CODE_LENGTH, ROOM_CODE_ALPHABET);
+      const code = prefix + this.rng.token(ROOM_CODE_LENGTH, ROOM_CODE_ALPHABET);
       if (!this.rooms.has(code)) return code;
     }
     throw new Error('방 코드를 만들 수 없습니다');
   }
 
-  createRoom(bots: boolean): Room {
-    const code = this.newCode();
-    const room = new Room(code, this.config, bots, this.hooks);
+  createRoom(bots: boolean, kind: RoomKind = this.config.practice ? 'practice' : 'code'): Room {
+    const code = this.newCode(kind);
+    const room = new Room(code, this.config, bots || kind === 'practice', this.hooks, kind);
     this.rooms.set(code, room);
     return room;
   }

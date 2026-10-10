@@ -63,7 +63,10 @@ export class ServerCore {
         conn.send({ t: 'pong', c: msg.c, s: now });
         return;
       }
-      if (bound && bound.seat.conn?.id === conn.id) bound.room.handle(bound.seat, msg, now);
+      if (!bound || bound.seat.conn?.id !== conn.id) return;
+      bound.room.handle(bound.seat, msg, now);
+      // 나가기: 자리와의 묶음을 푼다 (같은 연결로 다른 방에 들어갈 수 있다)
+      if (msg.t === 'leave') bound = null;
     };
 
     return {
@@ -96,6 +99,11 @@ export class ServerCore {
     }
     if (nowMs >= this.nextTickAt) this.nextTickAt = nowMs + this.tickMs;
     return n;
+  }
+
+  /** 다음 틱의 명목 시각 (ms). 기기 안 연습 루프가 이 시각에 맞춰 깨어난다 */
+  get nextTickDue(): number {
+    return this.nextTickAt;
   }
 
   /** 다음 틱을 지금부터 한 틱 뒤로 맞춘다 (멈췄다 돌아왔을 때 따라잡기 없이 이어 가기) */
