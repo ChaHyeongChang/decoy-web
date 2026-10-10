@@ -1,8 +1,10 @@
 // 클라이언트 상태와 흐름: 연결 → 로비 → 판 → 결과. 앱 생명주기(숨김 · 재접속 · 마지막 방 · 뒤로 가기 · 화면 꺼짐 방지)는 M12
 import type Phaser from 'phaser';
 import {
+  isKeptNote,
   validateBalance,
   type Balance,
+  type GameEvent,
   type LobbyState,
   type MatchInfo,
   type MatchResult,
@@ -127,6 +129,11 @@ export class App {
   result: MatchResult | null = null;
   lastSnap: Snapshot | null = null;
   snapCount = 0;
+  /**
+   * 이번 'match' 뒤에 받은 거점 메모(비밀번호). 판 장면은 'match' 뒤 판 시작 대기(터치: 크기 안정 · 세로 안내)가 끝나야
+   * 생기므로 그 전에 온 메모는 받을 장면이 없다. 새 판 장면이 처음에 이것을 다시 보인다 (M12 검토)
+   */
+  matchNotes: GameEvent[] = [];
   /** 마지막 스냅샷을 받은 시각 (performance.now) */
   lastSnapAt = 0;
   predictor: Predictor | null = null;
@@ -528,6 +535,7 @@ export class App {
         this.result = null;
         this.lastSnap = null;
         this.snapCount = 0;
+        this.matchNotes = [];
         this.predictor = new Predictor(this.balance, this.dt);
         this.survivorsInterp.clear();
         this.monsterInterp.clear();
@@ -544,6 +552,7 @@ export class App {
         this.lastSnap = snap;
         this.lastSnapAt = performance.now();
         this.snapCount += 1;
+        for (const ev of snap.events) if (isKeptNote(ev)) this.matchNotes.push(ev);
         this.snapClock.add(snap.st, performance.now());
         const env = this.moveEnv();
         if (this.predictor && env) this.predictor.reconcile(snap.you.move, snap.ack, env);

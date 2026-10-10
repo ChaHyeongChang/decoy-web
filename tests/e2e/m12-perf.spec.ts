@@ -127,6 +127,8 @@ test('터치 기기 자동 선택: Canvas → 낮음, 터치 낮음 해상도(1.
   const phone = await soloMatch(browser, PHONE_LANDSCAPE);
   const g = await gfx(phone.page);
   expect(g.touch).toBe(true);
+  // 판 배치를 적용한 뒤 값이다 (PC 배치에서 읽으면 아래 해상도 대조가 다른 크기로 맞을 수 있다)
+  expect(g.layout).toMatch(/^touch/);
   expect([g.renderer, g.quality, g.qualitySource]).toEqual(['canvas', 'low', 'auto']);
   expect(g.features.perfTier).toBe('none');
   expect(g.features.autoMinFps).toBe(TOUCH_FPS_WATCH.minFps);

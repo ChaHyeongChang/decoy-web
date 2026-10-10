@@ -388,6 +388,7 @@ test('세로로 연 뒤 가로로 돌려 판 시작 · 세로인 채 시작하�
   const { layout } = await checkScreen(c.page, '비대칭 세로 → 가로');
   expect(layout.layout).toBe('touchWide');
   const fonts = layout.items.filter((i) => i.kind === 'text').map((i) => i.fontPx ?? 0);
+  expect(fonts.length).toBeGreaterThan(0);
   expect(Math.min(...fonts)).toBeGreaterThanOrEqual(MIN_FONT - 0.05);
   console.log(`[m12-screen] 비대칭 412×787 → 867×332: 가장 작은 글자 ${Math.min(...fonts)}px`);
   for (const s of [a, b, c]) expect(s.problems).toEqual([]);
@@ -597,6 +598,7 @@ test('PC: 창 크기와 상관없이 1920×1080 배치 · gfx.layout pc · HUD �
   expect(await touchTargets(page)).toEqual([]);
   // PC 글자는 M10c 그대로 (최소 15 논리 px)
   const fonts = l.items.filter((i) => i.kind === 'text').map((i) => (i.fontPx ?? 0) / k);
+  expect(fonts.length).toBeGreaterThan(0);
   expect(Math.min(...fonts)).toBeGreaterThanOrEqual(14.9);
   expect(s.problems).toEqual([]);
   await s.context.close();

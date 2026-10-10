@@ -175,10 +175,15 @@ async function relayWs(page: Page): Promise<Relay> {
     server.onMessage((m) => {
       if (!pair.hold && !pair.cut) ws.send(m);
     });
+    // 어느 쪽이 먼저 닫히든 중계를 멈춘다 (닫힌 소켓에 보내면 콘솔 에러가 난다)
     ws.onClose(() => {
+      pair.cut = true;
       if (!r.keepServer) void server.close();
     });
-    server.onClose(() => void ws.close());
+    server.onClose(() => {
+      pair.cut = true;
+      void ws.close();
+    });
   });
   return r;
 }
@@ -369,6 +374,44 @@ test('반쯤 열린 소켓(숨김에서 돌아왔는데 서버 → 페이지 중
   await waitForResumed(page, await lastTick(page), s.id);
   expect(relay.pairs.length).toBe(2);
   await expectHapticsBack(page);
+  expect(s.problems).toEqual([]);
+  await s.context.close();
+});
+
+test('휴대폰: 다시 연결한 뒤 판 장면이 다시 생기기 전(세로로 든 동안)에 온 거점 메모는 가로로 돌려 새 장면이 생기면 다시 뜬다', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const s = await soloMatch(browser, PHONE, 'runner', { relay: true });
+  const { page } = s;
+  const relay = s.relay!;
+  await freezeOthers(s);
+  const banners = (): Promise<string[]> => page.evaluate(() => window.__DECOY__?.getBanners() ?? []);
+  await expect.poll(async () => (await banners()).length, POLL).toBe(0);
+  // 세로로 든다: 판 장면은 그대로 돌고(세로 안내), 다시 연결해 'match'가 와도 가로가 될 때까지 새 장면을 만들지 않는다
+  const land = { width: 915, height: 412 };
+  await page.setViewportSize({ width: land.height, height: land.width });
+  const tick0 = await lastTick(page);
+  await cutSocket(relay);
+  await waitForResumed(page, tick0, s.id);
+  expect(relay.pairs.length).toBe(2);
+  // 새 장면이 생기기 전에 거점 A 해독: 메모는 'match' 뒤에 오고, 지금은 곧 멈출 옛 장면만 받는다
+  await sendTest(page, { kind: 'setPoint', point: 'A', progress: 1 });
+  await sendTest(page, { kind: 'teleport', target: s.id, x: 8, y: 16 });
+  await expect.poll(async () => (await banners()).some((b) => b.includes('앞자리')), POLL).toBe(true);
+  // 옛 장면의 터치 화면에 표시를 해 두고 가로로 돌린다 → 새 장면(표시 없는 터치 화면)이 생긴 뒤에도 메모가 보인다
+  await page.evaluate(() => document.querySelector('.touch-layer')?.setAttribute('data-e2e-old', '1'));
+  await page.setViewportSize(land);
+  await page.waitForFunction(
+    () => document.querySelector('.touch-layer:not([data-e2e-old])') !== null,
+    null,
+    {
+      polling: 100,
+      timeout: 20_000,
+    },
+  );
+  expect(await page.evaluate(() => document.querySelectorAll('.touch-layer[data-e2e-old]').length)).toBe(0);
+  await expect.poll(async () => (await banners()).some((b) => b.includes('앞자리')), POLL).toBe(true);
   expect(s.problems).toEqual([]);
   await s.context.close();
 });
@@ -634,6 +677,8 @@ test('휴대폰 판 중 다시 연결했는데 자리가 없다(in-progress): �
     sessionStorage.removeItem(`decoy:seat:${c}`);
     localStorage.removeItem('decoy:seats');
   }, s.code);
+  // 끊기 전에는 판 장면이 있다 (아래 '판 장면 멈춤' 단언이 그냥 통과하지 않게)
+  expect(await page.evaluate(() => window.__DECOY__?.getHudLayout() ?? null)).not.toBeNull();
   await cutSocket(s.relay!);
   await expect(page.getByTestId('create-room')).toBeVisible();
   await expect(page.getByTestId('lobby-error')).toContainText('이미 진행 중인 방입니다');

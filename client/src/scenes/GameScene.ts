@@ -286,6 +286,9 @@ export class GameScene extends Phaser.Scene {
       if (takeTouchHints()) this.touchControls.showHints(TOUCH_HINT_MS);
     }
     this.roarPings = [];
+    // 'match' 뒤 이 장면이 생기기 전(판 시작 대기 · 세로 안내 · 다시 들어온 판의 장면 재시작)에 온 거점 메모를 다시 보인다.
+    // 장면이 생긴 뒤의 메모는 아래 구독이 받는다 (M12 검토: 재접속 때 서버가 남겨 보낸 메모가 터치에서 사라지던 것)
+    for (const ev of app.matchNotes) this.onEvent(ev);
     this.unsubscribe = app.subscribe((e) => {
       if (e.kind !== 'snapshot') return;
       if (this.seq < e.snap.ack) this.seq = e.snap.ack;
