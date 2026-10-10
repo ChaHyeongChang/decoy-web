@@ -2,9 +2,9 @@
 
 `docs/BUILD_PLAN.md` 마일스톤별 결과. 막힌 항목은 `> 보류:`로 표시한다.
 
-## 다음 세션 인수인계 (2026-10-10, M12 병합 직후)
+## 현재 상태와 인수인계 (2026-10-10, M15까지 끝)
 
-이 절은 M13부터 이어 갈 새 세션을 위한 요약이다. 자세한 내용은 아래 마일스톤 기록 · `docs/DECISIONS.md` · `docs/MOBILE_PLAN.md`에 있다. 다음 세션은 이 절을 고쳐 쓰며 이어 간다.
+**M10~M15 모든 마일스톤이 끝났다.** 개발로 남은 일은 없고, 남은 것은 사람이 할 일이다: 구글 플레이 등록(`docs/PLAY_STORE_GUIDE.md` 1부 · 2부, 계정 · 결제 · 서명 키), 실기기 확인(`docs/HUMAN_CHECKS.md`), Render 환경 변수 세 개와 유료 플랜 전환. 새 세션이 이어 간다면 이 절부터 읽는다. 자세한 내용은 아래 마일스톤 기록 · `docs/DECISIONS.md` · `docs/MOBILE_PLAN.md`에 있다.
 
 ### 1. 끝난 마일스톤과 병합된 PR
 | 마일스톤 | PR | main 병합 (UTC) |
@@ -21,23 +21,25 @@
 | M13b 실전 봇 · 봇과 연습 · 로비 홈 | #12 | 2026-10-10 13:38 |
 | M13c 빠른 매칭 | #13 | 2026-10-10 14:07 |
 | M13d 앱 셸 캐시 · 오프라인 진입 | #14 | 2026-10-10 14:42 |
+| M14 PWA · TWA 준비 | #15 | (M14_MERGED) |
+| M15 스토어 자료 · 최종 보고 | #16 | 이 PR |
 
 main에 병합하면 Render에 자동 배포된다(`render.yaml`, `plan: free` — **유료 전환은 사용자가 직접 한다. 파일의 플랜은 바꾸지 않는다**).
 
-### 2. 남은 작업과 순서 (M13~M15)
-순서: **M13a → M13b → M13c → M13d → M14 → M15**. 마일스톤(PR)마다 `origin/main`에서 새 브랜치 → PR → 병합 직전 전체 검사 통과 → 병합. 계획 원문은 `docs/MOBILE_PLAN.md`의 해당 절이고, 6절 진행 체크를 병합 때마다 [x]로 바꾼다.
-- **M13a 시뮬레이션 공유화 · 길찾기(동작 불변)**: `server`의 시뮬레이션을 `shared/src/sim/`으로, 연결 처리 · 틱 스케줄러를 `ServerCore`로. `node:crypto` → `globalThis.crypto`, eslint로 `shared/**`의 `node:*` · `ws` · `fs` import 금지, exports `"./sim"`. **길찾기 수정은 같은 PR의 별도 커밋**(봇 판 기대값이 바뀌면 그 커밋에서 이유와 함께). 파일 이동이 넓어 갈래를 나누지 않는다. 새로 생긴 `shared/src/notes.ts`(isKeptNote)와 `server/src/sendPolicy.ts`(createSender)도 이동 대상인지 볼 것(송신은 서버에 남는다)
-- **M13b 실전 봇 · 봇과 연습 · 로비 홈**: 계약 커밋(`quick` · `leave` 메시지, 방 종류, `RoomHooks.beforeStep`, `Transport`) → 봇 두뇌(자기 스냅샷만) · `LocalTransport`(기기 안 Room 30Hz) · 연결과 상관없이 그리는 홈 + 상태 줄. `kind: local`이면 `?room=` · 자리 토큰 · `lastRoom`을 저장하지 않고 M12 생명주기(수신 감시 · 재연결 · 다른 탭 · 뒤로 가기 확인)를 끈다. M12의 판 직전 터치 안내 카드(`TouchTutorialCard`)는 연습 · 빠른 매칭에도 붙여 쓸 수 있게 클래스로 만들어 두었다
-- **M13c 빠른 매칭**: 서버 대기열 · 자동 시작(`balance.json` `matchmaking.quickMatchWait`, 스키마 · GAME_DESIGN 변경 이력 같은 커밋) · 판 뒤 해산 · 다른 사람 이름 "플레이어 n" · 서버 로그 닉네임 제거 · 동시 봇 방 상한
-- **M13d 앱 셸 캐시 · 오프라인 진입**: 확장자 경로 404, `x-decoy-build` 빌드 ID, 서비스 워커 앱 셸(지금 `client/public/sw.js`는 깨우기 전용, 캐시 이름 `decoy-wake-v2`), 페이지 이동 세 갈래, wake.html "봇과 연습"
-- **M14 PWA · TWA 준비**: manifest · 아이콘(로고 SVG에서 스크립트로), `/.well-known/assetlinks.json`은 환경변수 **`TWA_PACKAGE_NAME`** · **`TWA_SHA256_FINGERPRINTS`**(쉼표로 여러 개)로 만들고 값이 없으면 404, `render.yaml`에는 키 자리만(`sync: false`). **서명 키는 만들지도 커밋하지도 않는다**(`.gitignore` 가드 + 테스트)
-- **M15 스토어 자료 · 최종 보고**: `/privacy`(한국어, `storageKeys.ts` 목록과 대조 — `tests/unit/storage-keys.test.ts`가 `docs/PRIVACY.md`가 없으면 지금은 건너뛴다, M15에서 처리방침 파일 기준으로 바꾼다), `docs/STORE_LISTING.md`, 스토어 이미지(`artifacts/store/`), `docs/PLAY_STORE_GUIDE.md` 2부. **계정 · 결제 · 서명 키가 필요한 일은 하지 않고 PLAY_STORE_GUIDE.md에 넘긴다.** 끝나면 최종 보고(MOBILE_PLAN 5절)
+### 2. 남은 일 (사람 · 계정 · 결제 · 서명 키 — Claude가 하지 않았다)
+1. `docs/PLAY_STORE_GUIDE.md` 1부(개발자 계정 US$25 · 신원 확인 · Android 실기기 인증 · 테스터 12명)와 2부(패키지 이름 · PWABuilder · 서명 키 두 곳 보관 · 스토어 등록정보 · 지문 · 비공개 테스트 14일 · Render 유료 플랜 · 정식 출시 · 해마다 target API · 운영 종료)
+2. Render 대시보드 환경 변수: `PRIVACY_CONTACT`(처리방침 문의처, 공개 이메일), 첫 업로드 뒤 `TWA_PACKAGE_NAME` · `TWA_SHA256_FINGERPRINTS`. 저장하면 재배포 = 열린 방이 사라진다
+3. 정식 출시 전 Render 유료 플랜(Starter) 전환 — 대시보드에서. **`render.yaml`의 `plan: free`는 그대로 둔다**
+4. `docs/STORE_LISTING.md`의 **⚠ 확인 필요** 답(데이터 보안 · 콘텐츠 등급 · 타깃 연령)과 `docs/HUMAN_CHECKS.md`의 실기기 · 손맛 항목
 
 MOBILE_PLAN과 달라진 점
 - 정적 파일 gzip은 M13d가 아니라 **M12에서 이미 했다**(`server/src/static.ts`, DECISIONS 'M12: 정적 파일 gzip'). M13d 서버 갈래에는 다음이 남는다: 약한 ETag(크기-수정 시각) + `If-None-Match` 304, MIME에 `.woff2 → font/woff2` · `.txt` · (M14) `.webmanifest`. M12 성능 검토에서 나온 제안이고 패치는 저장소에 없다(다시 만든다)
 - 판 시작 배치: 세로 안내가 덮는 동안은 최대 300ms 대기를 적용하지 않고 가로가 된 때부터 다시 센다(MOBILE_PLAN M12 1번에 각주)
 - 서버 송신 정책(256KB부터 스냅샷 건너뛰기 · 8MB에서 끊기, 거점 메모 스냅샷은 보냄)과 입력 타이머(1/30초 경계) — 계획에 없던 것을 M12에서 더했다
 - FPS 게이트 하한: 코어 2개 이하 50, 그 밖 55(M11)
+- 처리방침은 `docs/PRIVACY.md`가 아니라 `client/public/privacy.html` 하나(서버가 문의처를 환경 변수로 바꿔 넣는다, M15)
+- 동시 봇 방 상한 6은 이 컨테이너에서 잰 비용에 코어 속도 2배 여유를 둔 값이다(M13c). Render 실측은 사람 확인
+- 시험 전용 `setTime`에 `elapsed`(흐른 판 시간)를 더했다 — 스토어 결과 화면용(M15)
 
 ### 3. 진행 중에 정한 결정과 주의할 점
 **CI 방식** (`.github/workflows/ci.yml`)
@@ -57,11 +59,14 @@ MOBILE_PLAN과 달라진 점
 - 실패를 "흔들림"으로 넘기지 않는다. M10b · M11 실패는 모두 실제 타이밍 문제였고 하나는 제품 버그였다
 
 **번들 예산** (`tests/e2e/bundle-size.spec.ts`)
-- 마일스톤마다 `MILESTONE.base`를 직전 병합 값으로 옮기고 예산을 정한다. M12는 M11 병합 265,960B + 16KiB, 끝 값은 281,131B. **M13a 시작 때 base를 M12 병합 값(281,131B)으로 바꾼다.** M10 전 346,679B를 넘지 않는 상한은 그대로
+- 마일스톤마다 `MILESTONE.base`를 직전 병합 값으로 옮기고 예산을 정한다. M13a 281,131B → M13b 303,210B(+21.6KiB, 기기 안 연습 · 실전 봇) → M13c 304,975B → M13d 305,194B → M14 같음 → M15 끝 값은 M15 절. 다음 작업은 base를 M15 병합 값으로 바꾸고 시작한다. M10 전 346,679B를 넘지 않는 상한은 그대로
 - JS gzip은 bundle-size 출력으로 잰다. CSS는 예산 밖
 
 **테스트 요령**
-- 로컬: `npm run check` · `npx vitest run` · `npm run build` 뒤 `npx playwright test --config tests/e2e/playwright.config.ts`(전체 134개, 이 컨테이너 1 worker 약 25분). 여러 작업이 동시에 E2E를 돌리면 `DECOY_E2E_PORT`를 서로 다르게
+- 로컬: `npm run check` · `npx vitest run` · `npm run build` 뒤 `npx playwright test --config tests/e2e/playwright.config.ts`(전체 약 150개, 이 컨테이너 1 worker 약 28분). 여러 작업이 동시에 E2E를 돌리면 `DECOY_E2E_PORT`를 서로 다르게
+- 앱 셸 서비스 워커(M13d)가 있으면 새로고침 때 자산이 캐시에서 와 `page.route`가 가로채지 못한다. 느린 회선 · 자산 가로채기 시험은 `serviceWorkers: 'block'` 컨텍스트로(Playwright가 남기는 차단 경고는 거른다)
+- PC 괴물의 조준은 마우스를 따른다. 괴물 시야를 쓰는 시험은 마우스를 옮겨 조준을 정하고 서버 조준을 확인한 뒤 본다. 터치 괴물은 마지막 이동 스틱 방향을 조준한다(키보드 · 순간이동 방향이 아님)
+- 스토어 그림: `npm run shots:store`(`tests/store/`, 일반 E2E와 따로)
 - Playwright는 설치된 Chromium(`/opt/pw-browsers`)을 쓴다. `playwright install` 하지 않는다
 - 새 시험은 옛 코드에서 실패하는지 확인하고 커밋한다(검토에서 늘 참인 단언 · 빈 통과를 여러 번 잡았다)
 - 디버그 훅: `window.__DECOY__`(`?debug`) · 생명주기 `window.__DECOY_LIFE__`(?debug · 개발 서버만). 터치는 `?touch=1`, 품질은 `?quality=`
@@ -80,23 +85,26 @@ MOBILE_PLAN과 달라진 점
 - 송신 건너뛰기 문턱 256KB는 실제 스냅샷 기준 약 8~11초 분량이다. 낮출지(예: 64KB)는 실기기 느린 망 확인 뒤 판단(HUMAN_CHECKS)
 - 판 중 재연결이 room-not-found · in-progress로 거절돼 첫 화면에 가도 주소 `?room=`과 `decoy:lastRoom`이 남아, 30초 안에 다시 열면 그 방 복귀를 시도한다(M12 전부터 있던 동작)
 - 판 내내 세로로 들고 있으면 판 장면을 만들지 않는다(의도). 세로 상태에서 재접속으로 `match`가 다시 오면 이전 판 장면이 가로가 될 때까지 남는다
-- 폰트(.woff2)를 `application/octet-stream`으로 보낸다(브라우저는 받아들인다, M13d에서 MIME 추가)
 - 끊긴 소켓(반쯤 열린 연결 · 8MB 끊김 · 닫히는 중)으로 이미 나간 거점 메모는 다시 연결해도 다시 오지 않는다(M12 전부터). 고치려면 판 중 attach 때 끝난 점령 수만큼 메모를 outbox에 다시 넣는다(클라이언트는 이제 'match' 뒤 메모를 새 장면이 다시 보이므로 그것과 짝)
 - 시험이 비어 있는 곳: 숨긴 미니맵에서 GPU 안개 합성을 막는 `GameScene`의 `minimap.shown` 가드(합성 횟수 디버그 값이 없음), 터치 로비 미리 굽기 E2E는 HUD 아틀라스 · 정적 맵만 비교(캐릭터 아틀라스는 안 봄), `render/settle.ts` 밖의 '터치가 아니면 바로 끝남' 분기
 - GPU 안개의 `fogCommitMs`(m12-perf 기록 줄)는 이제 미니맵 합성을 빼고 잰다(합성이 미니맵을 읽을 때로 옮겨 감)
 - 판 직전 안내 카드의 괴물 그림 2번 배지(18px)가 가장 작은 그림(112px)에서 조준 스틱 원의 약 절반을 가린다(HUMAN_CHECKS)
 - `touchControls.ts`의 `hintsShown` getter는 쓰는 곳이 없다
+- 오프라인 진입은 한 번 온라인으로 연 기기에서만 된다(앱 셸을 받아야 한다, DECISIONS 'M13d: 첫 실행 한계')
+- 빠른 매칭 대기 20초 · 봇 방 상한 6 · 봇 난이도는 사람 판단 전이다(HUMAN_CHECKS M13)
+- 스토어 결과 스크린샷은 괴물 승리(시간 초과) 장면이다. 생존자 승리 장면이 낫다면 `tests/store/store-shots.spec.ts`에 탈출 장면을 더해 다시 찍는다
+- 처리방침의 법적 충분성(개인정보 보호법)과 Render 국외 이전 연락처 표현은 사람이 판단한다
 
 ### 5. 다음 세션이 처음 읽을 파일
 1. `CLAUDE.md` — 작업 규칙(한국어, 서버만 판정, 수치는 balance.json, 그래픽은 코드로, Git 규칙)
-2. `docs/PROGRESS.md` — 이 절과 맨 위 Actions 분 표, M10a~M12 기록
-3. `docs/MOBILE_PLAN.md` — 머리의 '바꾸지 않는 것', 3절 진행 방식, **M13~M15 절**, 4~6절
-4. `docs/DECISIONS.md` — 4절 M10~M12 행(특히 CI 나누기 · FPS 게이트 · M12 배치 · 생명주기 · 송신)
+2. `docs/PROGRESS.md` — 이 절과 아래 Actions 분 표, M10a~M15 기록
+3. `docs/MOBILE_PLAN.md` — 머리의 '바꾸지 않는 것', 3절 진행 방식, 4절 비용, 5절 최종 보고 형식, 6절 진행 체크
+4. `docs/DECISIONS.md` — 4절 M10~M15 행
 5. `docs/TECH_SPEC.md` — 구조 · 네트워크 · 정보 차단 · 테스트
-6. `docs/HUMAN_CHECKS.md` — 사람이 확인할 것(M11 · M12)
-7. `.github/workflows/ci.yml` · `scripts/e2e-shard.mjs` · `tests/e2e/durations.json` — CI 구조
-8. `tests/e2e/helpers.ts` · `tests/e2e/bundle-size.spec.ts` — 시험 도우미와 번들 예산
-9. `docs/PLAY_STORE_GUIDE.md` — 사용자에게 넘길 일(1부, M15에서 2부)
+6. `docs/HUMAN_CHECKS.md` — 사람이 확인할 것(M10~M15)
+7. `docs/PLAY_STORE_GUIDE.md` · `docs/STORE_LISTING.md` — 사람이 할 스토어 등록과 옮겨 적을 값
+8. `.github/workflows/ci.yml` · `scripts/e2e-shard.mjs` · `tests/e2e/durations.json` — CI 구조
+9. `tests/e2e/helpers.ts` · `tests/e2e/bundle-size.spec.ts` — 시험 도우미와 번들 예산
 
 ## GitHub Actions 사용 분 (마일스톤별, 대략)
 작업마다 시작 ~ 끝을 분 단위로 올려 더한 값(Linux 러너, 큐 대기 제외). private 저장소 무료 한도는 월 2,000분. M10b부터 push · PR마다 빠른 검사, 병합 직전 전체 검사(MOBILE_PLAN 3절)
