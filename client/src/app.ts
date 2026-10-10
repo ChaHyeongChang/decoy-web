@@ -27,6 +27,7 @@ import {
   browserWakeLock,
   listenLifecycle,
   rejoinRetryDelay,
+  returnTarget,
   type LastRoom,
   type LifecycleDebug,
 } from './lifecycle';
@@ -149,12 +150,12 @@ export class App {
   private readonly keeper: LinkKeeper;
   /** 판 중 화면 꺼짐 방지 */
   private readonly awake = new ScreenAwake(browserWakeLock, () => document.visibilityState === 'visible');
-  /** 터치 모드 또는 설치 앱: 마지막 방 복귀 · 뒤로 가기 확인을 쓴다 (PC 브라우저는 지금 동작 그대로) */
+  /** 터치 모드 또는 설치 앱(standalone): 마지막 방 복귀 · 뒤로 가기 확인을 쓴다 (PC 브라우저는 F11 전체 화면이어도 지금 동작 그대로) */
   readonly lifeApp: boolean;
   private readonly backGuard: BackGuard | null;
   private readonly leaveDialog: LeaveDialog;
   private readonly replacedNotice: ReplacedNotice;
-  /** 마지막 방으로 돌아가는 중 (주소에 ?room= 없이 30초 안에 다시 연 앱) */
+  /** 마지막 방으로 돌아가는 중 (?room= 없이, 또는 같은 방 주소로 30초 안에 다시 연 앱) */
   private returning: LastRoom | null = null;
   private rejoinTimer: number | null = null;
   /** 다음 끊김은 일부러 낸 것이다 (나가기): 끊김 알림을 띄우지 않는다 */
@@ -166,12 +167,9 @@ export class App {
     readonly params: AppParams,
     uiRoot: HTMLElement,
   ) {
-    this.lifeApp = device.touch || !device.inBrowser;
-    this.roomCode = params.room;
-    if (this.roomCode === null && this.lifeApp) {
-      this.returning = loadLastRoom();
-      this.roomCode = this.returning?.room ?? null;
-    }
+    this.lifeApp = device.touch || device.installed;
+    this.returning = this.lifeApp ? returnTarget(params.room, loadLastRoom()) : null;
+    this.roomCode = params.room ?? this.returning?.room ?? null;
     this.net = new NetClient(defaultWsUrl(), { lag: params.lag, jitterMs: 20 });
     this.keeper = new LinkKeeper(
       {
@@ -228,12 +226,19 @@ export class App {
       leave: () => this.leaveRoom(),
     });
     this.replacedNotice = new ReplacedNotice(uiRoot, () => this.continueHere());
-    this.backGuard = this.lifeApp ? new BackGuard(window.history, () => this.leaveDialog.open()) : null;
+    this.backGuard = this.lifeApp
+      ? new BackGuard(window.history, () => this.leaveDialog.open(), window.history.state)
+      : null;
     this.net.on((msg) => this.onMessage(msg));
     this.net.onHeard = () => this.keeper.heard();
-    this.net.onResynced = () => haptics.clockSynced();
+    // 숨겨진 채 받은 첫 표본으로는 풀지 않는다 (보이면 다시 맞추고 그때 푼다)
+    this.net.onResynced = () => {
+      if (document.visibilityState === 'visible') haptics.clockSynced();
+    };
     this.net.onOpen = () => {
       this.wasOpen = true;
+      // 나가기가 끊긴 채 기다리던 중이었으면(닫힘 이벤트 없이 바로 연결) 그 표시가 남아 다음 진짜 끊김 알림을 삼킨다
+      this.quietClose = false;
       this.keeper.opened();
       this.wake.opened();
       this.renderWake();
@@ -368,30 +373,40 @@ export class App {
     return true;
   }
 
-  /** 판 중 뒤로 가기 확인에서 "나가기": 방에서 나가 첫 화면으로 (서버는 끊김으로 보고 30초 유예를 센다) */
-  private leaveRoom(): void {
+  /**
+   * 방을 떠나 첫 화면으로 (나가기 · 다시 들어가지 못함): 화면 꺼짐 방지를 놓고 뒤로 가기 항목을 걷고 판 상태를 비운다.
+   * 방에 있었으면 판 장면을 멈추게 한다 (main.ts는 로비 단계 이벤트로 판 장면을 끝낸다)
+   */
+  private toHome(prefill: string): void {
     const code = this.roomCode ?? '';
+    const wasInRoom = this.lobby !== null || this.match !== null;
     this.setPlaying(false);
-    clearLastRoom();
-    this.clearRejoin();
     this.roomCode = null;
-    this.returning = null;
-    this.you = null;
     this.lobby = null;
     this.match = null;
     this.result = null;
     this.lastSnap = null;
+    this.resultUi.hide();
+    this.lobbyUi.renderHome(prefill);
+    if (wasInRoom)
+      this.emit({
+        kind: 'lobby',
+        lobby: { room: code, phase: 'lobby', players: [], bots: false, canStart: false, waitingFor: null },
+      });
+  }
+
+  /** 판 중 뒤로 가기 확인에서 "나가기": 방에서 나가 첫 화면으로 (서버는 끊김으로 보고 30초 유예를 센다) */
+  private leaveRoom(): void {
+    const code = this.roomCode ?? '';
+    clearLastRoom();
+    this.clearRejoin();
+    this.returning = null;
+    this.you = null;
     this.homePrefill = code;
+    this.toHome(code);
     const url = new URL(window.location.href);
     url.searchParams.delete('room');
     window.history.replaceState(window.history.state, '', url.toString());
-    this.resultUi.hide();
-    this.lobbyUi.renderHome(code);
-    // 판 장면을 멈추게 한다 (main.ts는 로비 단계 이벤트로 판 장면을 끝낸다)
-    this.emit({
-      kind: 'lobby',
-      lobby: { room: code, phase: 'lobby', players: [], bots: false, canStart: false, waitingFor: null },
-    });
     // 이 소켓은 그 자리에 묶여 있다: 버리고 새로 연결해 첫 화면에서 쓴다
     this.quietClose = true;
     this.keeper.restart();
@@ -561,11 +576,11 @@ export class App {
           this.returning = null;
           clearLastRoom();
         }
+        // 판 중 다시 연결했는데 방이 사라졌거나 자리가 없으면 나가기처럼 정리한다 (화면 꺼짐 방지 · 뒤로 가기 항목 · 판 장면)
         if (msg.code === 'room-not-found' || msg.code === 'in-progress' || msg.code === 'room-full') {
-          this.roomCode = null;
           this.wake.opened();
           this.renderWake();
-          this.lobbyUi.renderHome();
+          this.toHome('');
         }
         // 링크 · 재연결로 들어가려던 방이 없으면 대개 서버가 잠들었다 깨어났거나 다시 시작한 것이다 (방은 메모리에만 있다)
         if (msg.code === 'room-not-found' && this.joinFromLink) {

@@ -1,7 +1,7 @@
 // 기기 감지 (M11, MOBILE_PLAN M11 3 · 6번): 터치 모드 · 세로 화면 · 브라우저 안인지, 그리고 전체 화면 + 가로 고정.
 // 터치 모드 = ?touch=1|0이 있으면 그 값, 없으면 (pointer: coarse) 그리고 (hover: none).
 // 헤드리스 에뮬레이션은 navigator.maxTouchPoints가 1이라 그 값은 쓰지 않는다.
-// 판단은 순수 함수(detectTouchMode · detectInBrowser)이고, 창 · 문서는 initDevice와 enterFullscreen만 만진다.
+// 판단은 순수 함수(detectTouchMode · detectInBrowser · detectInstalled)이고, 창 · 문서는 initDevice와 enterFullscreen만 만진다.
 
 export interface DeviceEnv {
   /** ?touch 값 ('1' · '0', 없으면 null) */
@@ -32,6 +32,15 @@ export function detectInBrowser(m: {
 }
 
 /**
+ * 설치 앱인가 (홈 화면 앱 · TWA): display-mode standalone 또는 iOS 홈 화면 앱. 생명주기(마지막 방 · 뒤로 가기 확인)를 쓴다.
+ * display-mode fullscreen은 넣지 않는다 — PC 브라우저도 F11 · 키오스크 전체 화면이면 그렇게 알린다(PC는 지금 동작 그대로).
+ * 전체 화면 TWA는 터치 기기라 터치 모드로 잡힌다
+ */
+export function detectInstalled(m: { standalone: boolean; iosStandalone: boolean }): boolean {
+  return m.standalone || m.iosStandalone;
+}
+
+/**
  * 세로 안내를 띄우고 입력을 막는 조건. style.css의 세로 안내(.rotate-notice)와 같은 미디어 쿼리다
  * (터치 화면이면 태블릿도 포함, PC 좁은 창에서는 아님)
  */
@@ -45,6 +54,8 @@ export const device = {
   portrait: false,
   /** 브라우저 안 (설치 앱 · TWA가 아님): "전체 화면" 버튼을 보인다 */
   inBrowser: true,
+  /** 설치 앱 (standalone · iOS 홈 화면): 앱 생명주기를 쓴다 */
+  installed: false,
 };
 
 const listeners = new Set<() => void>();
@@ -74,11 +85,12 @@ export function initDevice(touchParam: string | null): void {
     coarse: on('(pointer: coarse)'),
     hoverNone: on('(hover: none)'),
   });
-  device.inBrowser = detectInBrowser({
+  const app = {
     standalone: on('(display-mode: standalone)'),
-    fullscreen: on('(display-mode: fullscreen)'),
     iosStandalone: (navigator as Navigator & { standalone?: boolean }).standalone === true,
-  });
+  };
+  device.inBrowser = detectInBrowser({ ...app, fullscreen: on('(display-mode: fullscreen)') });
+  device.installed = detectInstalled(app);
   const root = document.documentElement;
   root.classList.toggle('touch', device.touch);
   const portrait = media(PORTRAIT_QUERY);

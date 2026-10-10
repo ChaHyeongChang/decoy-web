@@ -254,6 +254,14 @@ export function freshLastRoom(raw: string | null, now: number): LastRoom | null 
 }
 
 /**
+ * 다시 연 앱이 돌아갈 마지막 방: 주소에 방 코드가 없거나, 주소의 방이 마지막 방과 같을 때(같은 방 링크 · 기록으로 다시 엶).
+ * 주소의 방이 다르면 null (처음 들어가는 방이라 거절돼도 다시 시도하지 않는다)
+ */
+export function returnTarget(urlRoom: string | null, last: LastRoom | null): LastRoom | null {
+  return last && (urlRoom === null || urlRoom === last.room) ? last : null;
+}
+
+/**
  * 마지막 방 복귀 중 거절(옛 소켓이 아직 붙어 있어 in-progress · room-full)을 받았다: 다시 시도할 때까지 ms,
  * 다음 시도가 저장 시각 + LAST_ROOM_MS를 넘으면 null(그만둔다)
  */
@@ -339,17 +347,22 @@ const GUARD_STATE = { decoyGuard: 1 } as const;
 /**
  * 판 중 뒤로 가기 확인 (MOBILE_PLAN M12 8번, 터치 · 설치 앱만). 크롬은 사용자 활성화 없이 넣은 기록 항목을 뒤로 가기에서
  * 건너뛰므로 판 안 첫 사용자 탭 핸들러(gesture)에서 넣는다. 뒤로 가기(popstate)로 그 항목이 빠지면 확인 창을 띄우고,
- * "계속"을 누를 때 그 핸들러에서 다시 넣는다. 판이 끝나면 남은 항목을 걷어 낸다(그 popstate는 무시)
+ * "계속"을 누를 때 그 핸들러에서 다시 넣는다. 판이 끝나면 남은 항목을 걷어 낸다(그 popstate는 무시).
+ * 판 중 새로고침 · 탭 폐기 뒤 복원으로 다시 읽히면 지금 기록 항목(initialState = history.state)이 이미 내 항목이다:
+ * 하나 더 넣지 않고 그것을 쓴다(판이 끝나면 걷어 낸다. 크롬은 새로고침 뒤에도 그 아래 항목과 같은 문서로 본다)
  */
 export class BackGuard {
   private armed = false;
-  private pushed = false;
+  private pushed: boolean;
   private ignorePops = 0;
 
   constructor(
     private readonly history: Pick<History, 'pushState' | 'back'>,
     private readonly onBack: () => void,
-  ) {}
+    initialState: unknown = null,
+  ) {
+    this.pushed = (initialState as { decoyGuard?: unknown } | null)?.decoyGuard === GUARD_STATE.decoyGuard;
+  }
 
   /** 기록 항목이 들어 있다 (시험 · 디버그) */
   get guarding(): boolean {
