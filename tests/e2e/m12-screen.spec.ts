@@ -1,8 +1,10 @@
 // M12 판 화면 배치 (MOBILE_PLAN M12 자동 검증 'E2E m12-screen'): 휴대폰 높이 293 · 320 · 360과 16:9 두 가지에서 HUD 글자
 // (디버그 훅 getHudLayout — 표시 목록에서 잰 CSS px)가 모두 12px 이상이고 HUD와 터치 컨트롤이 겹치지 않고 화면 안, 세로로 열었다
-// 돌려 시작해도 · 판 중 회전해도 가로 기준 논리 크기, 안전 영역(CDP setSafeAreaInsetsOverride) 안쪽, 로비 · 결과가 낮은 휴대폰에서
-// 화면 안(또는 스크롤로 닿음)이고 가로 스크롤 없음, PC는 1920×1080 배치 그대로.
-// 혼자 봇 방(?bots=1)에서 판을 시작한다. 기능 시험은 기기 배율 1. 느린 CI 대비: 간격 폴링(100~200ms)
+// 돌려 시작해도 · 세로인 채 시작하면 가로가 될 때까지 판 장면을 미뤄(세로 · 가로 크기가 비대칭이어도) · 판 중 회전해도 가로 기준
+// 논리 크기, 안전 영역(CDP setSafeAreaInsetsOverride) 안쪽, 로비 · 결과가 낮은 휴대폰에서 화면 안(또는 스크롤로 닿음)이고 가로
+// 스크롤 없음, 터치 로비가 판 배치로 미리 구움, PC는 1920×1080 배치 그대로.
+// 혼자 봇 방(?bots=1)에서 판을 시작한다. 판 배치 · 캔버스는 판 장면이 생긴 뒤(배치 적용 뒤)에 읽는다. 기능 시험은 기기 배율 1.
+// 느린 CI 대비: 간격 폴링(100~200ms)
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import type { HudLayout, HudLayoutItem, Role, TouchTarget } from '@decoy/shared';
 import {
@@ -74,6 +76,14 @@ interface Solo {
   id: string;
 }
 
+/** 판 장면이 떴다 = 판 배치(gfx.layout · 논리 크기)와 캔버스 크기가 정해졌다 (main.ts가 배치를 적용한 바로 뒤에 시작한다) */
+async function waitForScene(page: Page): Promise<void> {
+  await page.waitForFunction(() => (window.__DECOY__?.getHudLayout() ?? null) !== null, null, {
+    polling: 100,
+    timeout: 20_000,
+  });
+}
+
 /** 세로 화면에서는 세로 안내가 로비를 덮어 탭이 닿지 않는다: 버튼을 프로그램으로 누른다 */
 async function clickJs(page: Page, testId: string): Promise<void> {
   await page.getByTestId(testId).evaluate((el) => (el as HTMLElement).click());
@@ -81,7 +91,8 @@ async function clickJs(page: Page, testId: string): Promise<void> {
 
 /**
  * 봇 방을 만들어 역할을 고르고 혼자 시작한다 (터치 기기는 로비를 탭으로, portraitLobby면 프로그램 클릭).
- * beforeStart = 시작 직전 (방 화면, 시작 버튼은 거기서 누른다)
+ * beforeStart = 시작 직전 (방 화면, 시작 버튼은 거기서 누른다). 판 장면(판 배치 적용)까지 기다린다.
+ * 세로인 채 시작하면(sceneLater) 가로가 될 때까지 장면이 생기지 않으므로 스냅샷까지만 기다린다
  */
 async function soloMatch(
   browser: Browser,
@@ -91,6 +102,7 @@ async function soloMatch(
     safeArea?: { left?: number; right?: number; bottom?: number };
     beforeStart?: (p: Page) => Promise<void>;
     portraitLobby?: boolean;
+    sceneLater?: boolean;
   } = {},
 ): Promise<Solo> {
   const { context, page, problems } = await newPlayerPage(browser, device);
@@ -113,6 +125,7 @@ async function soloMatch(
   if (opts.beforeStart) await opts.beforeStart(page);
   else await press(page.getByTestId('start-button'));
   await waitForSnapshots(page, 3);
+  if (!opts.sceneLater) await waitForScene(page);
   return { context, page, problems, code, id: await myId(page) };
 }
 
@@ -249,21 +262,73 @@ test('글자 · 겹침: 휴대폰 높이 293 · 320 · 360 · 16:9 두 가지에
 
 // ───────────── 회전 ─────────────
 
-test('세로로 연 뒤 가로로 돌려 판 시작 · 세로인 채 시작해도 가로 기준 배치 · 판 중 회전(가로 → 세로 → 가로)에도 논리 크기 그대로', async ({
+/**
+ * 세로 안내가 덮는 동안은 판 장면을 만들지 않는다: 최대 대기(0.3초)를 넉넉히 넘긴 ms 동안 여러 번 봐도 장면이 없다.
+ * (세로 크기로 판 배치를 정하면 돌린 뒤 화면비가 달라 판 내내 작게 그려진다, 검토 #3)
+ */
+async function noSceneWhilePortrait(page: Page, label: string, ms = 1500): Promise<void> {
+  await expect(page.getByTestId('rotate-notice')).toBeVisible();
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    expect(await page.evaluate(() => window.__DECOY__?.getHudLayout() ?? null), label).toBeNull();
+    await page.waitForTimeout(150);
+  }
+}
+
+/**
+ * 판 장면이 처음 보인 순간의 배율(gfx.zoom)을 적어 둔다 (__firstZoom). 돌린 직후 시작한 판이 크기 변경 디바운스(150ms)를
+ * 기다리던 낡은 배율로 장면을 만들고 곧바로 다시 굽지 않는지 본다 (검토 #13). 타이머 틈마다 확인한다
+ */
+async function watchFirstZoom(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as Window & { __firstZoom?: number };
+    delete w.__firstZoom;
+    const look = (): void => {
+      const d = window.__DECOY__;
+      if (d?.getHudLayout()) w.__firstZoom = d.gfx.zoom;
+      else window.setTimeout(look, 0);
+    };
+    look();
+  });
+}
+
+async function firstZoom(page: Page): Promise<number> {
+  const h = await page.waitForFunction(
+    () => (window as Window & { __firstZoom?: number }).__firstZoom,
+    null,
+    {
+      polling: 100,
+      timeout: 20_000,
+    },
+  );
+  const v = (await h.jsonValue()) as number;
+  await h.dispose();
+  return v;
+}
+
+test('세로로 연 뒤 가로로 돌려 판 시작 · 세로인 채 시작하면 가로가 될 때까지 판 장면을 미뤄 가로 기준 배치(세로 · 가로 크기가 비대칭이어도) · 판 중 회전(가로 → 세로 → 가로)에도 논리 크기 그대로', async ({
   browser,
 }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(240_000);
   const phone = dpr1(PHONE_LANDSCAPE);
   const land = phone.viewport!;
-  const expectLandscape = async (page: Page, label: string): Promise<{ viewW: number; viewH: number }> => {
-    // 터치는 판 장면을 만들기 전에 화면 크기가 자리 잡기를 최대 0.3초 기다린다 (세로면 그만큼)
+  const expectLandscape = async (
+    page: Page,
+    label: string,
+    want: { width: number; height: number } = land,
+  ): Promise<{ viewW: number; viewH: number }> => {
     await hudLayout(page);
     const g = await gfx(page);
     expect(g.layout, label).toBe('touchWide');
     expect(g.viewW, label).toBeGreaterThan(g.viewH);
-    expect(g.viewW / g.viewH, label).toBeCloseTo(land.width / land.height, 1);
+    expect(g.viewW / g.viewH, label).toBeCloseTo(want.width / want.height, 1);
     return { viewW: g.viewW, viewH: g.viewH };
   };
+  const waitCssW = (page: Page, w: number) =>
+    page.waitForFunction((x) => Math.abs((window.__DECOY__?.gfx.cssW ?? 0) - x) < 2, w, {
+      polling: 150,
+      timeout: 10_000,
+    });
 
   // ① 세로로 열어 방을 만들고(세로 안내가 덮어 버튼은 프로그램 클릭) 가로로 돌린 뒤 시작
   const a = await soloMatch(browser, dpr1(portrait(PHONE_LANDSCAPE)), 'monster', {
@@ -277,18 +342,20 @@ test('세로로 연 뒤 가로로 돌려 판 시작 · 세로인 채 시작해�
   await checkScreen(a.page, '세로로 연 뒤 돌려 시작');
   await a.context.close();
 
-  // ② 세로인 채 시작(안내가 덮어 프로그램 클릭) → 긴 변을 폭으로. 돌리면 zoom만 다시 맞춘다
+  // ② 세로인 채 시작(안내가 덮어 프로그램 클릭): 가로가 될 때까지 판 장면을 만들지 않는다. 돌리면 그때 가로 크기로 배치하고,
+  // 장면은 처음부터 지금 배율로 만든다(디바운스를 기다리던 낡은 배율로 만들고 다시 굽지 않는다)
   const b = await soloMatch(browser, dpr1(portrait(PHONE_LANDSCAPE)), 'runner', {
     portraitLobby: true,
+    sceneLater: true,
     beforeStart: (page) => clickJs(page, 'start-button'),
   });
-  const sizeB = await expectLandscape(b.page, '세로인 채 시작');
-  expect(sizeB).toEqual(sizeA);
+  await noSceneWhilePortrait(b.page, '세로인 채 시작');
+  await watchFirstZoom(b.page);
   await b.page.setViewportSize(land);
-  await b.page.waitForFunction((w) => Math.abs((window.__DECOY__?.gfx.cssW ?? 0) - w) < 2, land.width, {
-    polling: 150,
-    timeout: 10_000,
-  });
+  const sizeB = await expectLandscape(b.page, '세로인 채 시작 → 가로');
+  expect(sizeB).toEqual(sizeA);
+  await waitCssW(b.page, land.width);
+  expect(await firstZoom(b.page), '판 장면을 만든 배율').toBe((await gfx(b.page)).zoom);
   await checkScreen(b.page, '세로인 채 시작 → 가로');
 
   // ③ 판 중 회전: 가로 → 세로(터치 화면 꺼짐) → 가로. 논리 크기 그대로, 터치 대상 다시 배치 · 겹침 없음
@@ -297,17 +364,34 @@ test('세로로 연 뒤 가로로 돌려 판 시작 · 세로인 채 시작해�
   await expect.poll(async () => (await touchTargets(b.page)).length, POLL).toBe(0);
   expect(await expectLandscape(b.page, '판 중 세로')).toEqual(sizeA);
   await b.page.setViewportSize(land);
-  await b.page.waitForFunction((w) => Math.abs((window.__DECOY__?.gfx.cssW ?? 0) - w) < 2, land.width, {
-    polling: 150,
-    timeout: 10_000,
-  });
+  await waitCssW(b.page, land.width);
   expect(await expectLandscape(b.page, '판 중 다시 가로')).toEqual(sizeA);
   const after = await checkScreen(b.page, '판 중 다시 가로');
   expect(after.targets.map((t) => [t.id, Math.round(t.x), Math.round(t.y)])).toEqual(
     before.map((t) => [t.id, Math.round(t.x), Math.round(t.y)]),
   );
-  for (const s of [a, b]) expect(s.problems).toEqual([]);
   await b.context.close();
+
+  // ④ 실제 휴대폰의 세로 크기는 가로를 뒤집은 값이 아니다(주소창 · 안전 영역이 다르게 빠진다): 세로 412×787로 시작 →
+  // 가로 867×332. 세로 크기로 정했다면 touchNarrow(화면비 787:412)로 굳어 돌린 뒤 HUD 글자가 12px 아래였다
+  const tall = { width: 412, height: 787 };
+  const wide = { width: 867, height: 332 };
+  const c = await soloMatch(browser, dpr1({ ...PHONE_LANDSCAPE, viewport: tall, screen: tall }), 'monster', {
+    portraitLobby: true,
+    sceneLater: true,
+    beforeStart: (page) => clickJs(page, 'start-button'),
+  });
+  await noSceneWhilePortrait(c.page, '비대칭 세로로 시작');
+  await c.page.setViewportSize(wide);
+  await expectLandscape(c.page, '비대칭 세로 → 가로', wide);
+  // 글자 12px 이상 · 겹침 없음 · 화면 안 (checkScreen의 hudProblems)
+  const { layout } = await checkScreen(c.page, '비대칭 세로 → 가로');
+  expect(layout.layout).toBe('touchWide');
+  const fonts = layout.items.filter((i) => i.kind === 'text').map((i) => i.fontPx ?? 0);
+  expect(Math.min(...fonts)).toBeGreaterThanOrEqual(MIN_FONT - 0.05);
+  console.log(`[m12-screen] 비대칭 412×787 → 867×332: 가장 작은 글자 ${Math.min(...fonts)}px`);
+  for (const s of [a, b, c]) expect(s.problems).toEqual([]);
+  await c.context.close();
 });
 
 // ───────────── 안전 영역 ─────────────
@@ -442,6 +526,52 @@ async function hScroll(page: Page, selector: string): Promise<boolean> {
     );
   }, selector);
 }
+
+// ───────────── 미리 굽기 ─────────────
+
+/**
+ * 그래픽 굽기 기록 (HUD 아틀라스 굽기 횟수 · 정적 맵 캐시 바이트 — 다른 배율로 구우면 바뀐다).
+ * 미리 굽기가 멈출 때까지(1.6초 그대로) 기다린 값
+ */
+async function quietBakes(page: Page): Promise<{ hud: number; map: number }> {
+  const read = async () => {
+    const f = (await gfx(page)).features;
+    return { hud: Number(f.hudBakes ?? 0), map: Number(f.mapCacheBytes ?? 0) };
+  };
+  let v = await read();
+  let since = Date.now();
+  const deadline = since + 20_000;
+  while (Date.now() - since < 1600) {
+    expect(Date.now(), '로비 미리 굽기가 멈추지 않는다').toBeLessThan(deadline);
+    await page.waitForTimeout(150);
+    const n = await read();
+    if (n.hud !== v.hud || n.map !== v.map) [v, since] = [n, Date.now()];
+  }
+  return v;
+}
+
+test('터치 로비는 판 배치로 미리 굽는다: 첫 판 시작 때 맵 · HUD 아틀라스를 다시 굽지 않는다', async ({
+  browser,
+}) => {
+  test.setTimeout(90_000);
+  let lobby = { hud: -1, map: -1 };
+  const s = await soloMatch(browser, dpr1(PHONE_LANDSCAPE), 'runner', {
+    beforeStart: async (page) => {
+      // 판 배치는 로비에서 이미 판과 같다 (PC 1920×1080 배율로 구워 두면 판 시작 때 모두 버리고 다시 굽는다, 검토 #11)
+      await expect.poll(async () => (await gfx(page)).layout, POLL).toBe('touchWide');
+      lobby = await quietBakes(page);
+      expect(lobby.hud).toBeGreaterThan(0);
+      expect(lobby.map).toBeGreaterThan(0);
+      await press(page.getByTestId('start-button'));
+    },
+  });
+  await hudLayout(s.page);
+  const g = await gfx(s.page);
+  expect(g.layout).toBe('touchWide');
+  expect({ hud: Number(g.features.hudBakes), map: Number(g.features.mapCacheBytes) }).toEqual(lobby);
+  expect(s.problems).toEqual([]);
+  await s.context.close();
+});
 
 // ───────────── PC ─────────────
 
