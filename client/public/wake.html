@@ -229,7 +229,9 @@
           </p>
         </div>
         <div class="actions">
-          <button type="button" id="practice" data-testid="wake-practice" hidden>기다리는 동안 봇과 연습</button>
+          <button type="button" id="practice" data-testid="wake-practice" hidden>
+            기다리는 동안 봇과 연습
+          </button>
           <button type="button" id="retry" hidden>다시 시도</button>
         </div>
       </div>
@@ -346,7 +348,8 @@
         practice.addEventListener('click', () => {
           done = true;
           const target = new URL('./', location.href);
-          for (const [k, v] of new URL(location.href).searchParams) if (k !== 'room') target.searchParams.set(k, v);
+          for (const [k, v] of new URL(location.href).searchParams)
+            if (k !== 'room') target.searchParams.set(k, v);
           target.searchParams.set('practice', '1');
           location.href = target.href;
         });
