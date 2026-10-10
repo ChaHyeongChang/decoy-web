@@ -241,7 +241,9 @@ test('폰트: 로비 화면에서 Noto Sans KR이 이미 준비되어 있고, �
 test('진행 중인 판에 새로고침으로 다시 들어오면 폰트를 기다리지 않고 판 화면을 띄우고, 늦게 온 폰트로 다시 그린다', async ({
   browser,
 }) => {
-  const { context, page, problems } = await newPlayerPage(browser);
+  // 서비스 워커(M13d 앱 셸)가 있으면 새로고침 때 폰트가 캐시에서 바로 와 '느린 회선'이 생기지 않는다(route도 워커가 받은
+  // 요청은 가로채지 못한다). 이 시험은 앱 셸이 아직 없는 기기 — 첫 방문 · 워커를 못 쓰는 브라우저 — 를 흉내 낸다
+  const { context, page, problems } = await newPlayerPage(browser, { serviceWorkers: 'block' });
   await page.goto(`/?bots=1${BASE_QUERY}`);
   await page.getByTestId('create-room').click();
   await expect(page.getByTestId('room-code')).toHaveText(/^[A-Z]{4}$/);
@@ -282,7 +284,10 @@ test('진행 중인 판에 새로고침으로 다시 들어오면 폰트를 기�
     .poll(() => page.evaluate(() => window.__DECOY__?.getHud().timerFontGen ?? -1), { intervals: [100] })
     .toBe(1);
   await waitForSnapshots(page, 5);
-  expect(problems).toEqual([]);
+  // 워커를 막으면 Playwright가 스스로 경고를 남긴다(앱 코드가 낸 것이 아니다)
+  expect(problems.filter((p) => !p.includes('Service Worker registration blocked by Playwright'))).toEqual(
+    [],
+  );
   await context.close();
 });
 

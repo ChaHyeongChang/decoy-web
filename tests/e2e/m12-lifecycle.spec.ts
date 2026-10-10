@@ -393,7 +393,9 @@ test('휴대폰: 다시 연결한 뒤 판 장면이 다시 생기기 전(세로�
   await page.setViewportSize({ width: land.height, height: land.width });
   const tick0 = await lastTick(page);
   await cutSocket(relay);
-  await waitForResumed(page, tick0, s.id);
+  // 끊기 직전에 서버가 보낸 스냅샷이 끊김보다 늦게 처리되면 tick0보다 큰 틱이 새 소켓 없이도 온다(부하가 걸린 전체 실행에서
+  // 봤다). 끊은 뒤 페이지가 마지막으로 받은 틱보다 새 스냅샷 = 새 소켓으로 온 스냅샷을 기다린다
+  await waitForResumed(page, Math.max(tick0, await lastTick(page)), s.id);
   expect(relay.pairs.length).toBe(2);
   // 새 장면이 생기기 전에 거점 A 해독: 메모는 'match' 뒤에 오고, 지금은 곧 멈출 옛 장면만 받는다
   await sendTest(page, { kind: 'setPoint', point: 'A', progress: 1 });
