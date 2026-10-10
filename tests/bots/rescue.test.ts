@@ -8,9 +8,9 @@ import {
   SPOTS,
   Walker,
   idleBrain,
+  SimMatch,
   type BotBrain,
-} from '../../server/src/botBrains';
-import { SimMatch } from '../../server/src/sim';
+} from '@decoy/shared/sim';
 import { BTN } from '@decoy/shared';
 import { loadTestBalance } from '../helpers/fixtures';
 

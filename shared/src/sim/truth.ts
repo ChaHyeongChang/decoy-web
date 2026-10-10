@@ -1,5 +1,5 @@
-// 테스트 전용 정답 상태 기록 (--test-hooks / --truth-log). 정보 차단 E2E가 이것과 대조한다.
-import { appendFileSync, writeFileSync } from 'node:fs';
+// 테스트 전용 정답 상태 (--test-hooks / --truth-log). 정보 차단 E2E가 이것과 대조한다.
+// 파일에 쓰는 기록기(TruthLog)는 서버에 남는다 (server/src/truthLog.ts)
 import type { Room } from './room';
 
 export interface TruthPlayer {
@@ -42,15 +42,4 @@ export function truthOf(room: Room): TruthFrame | null {
     tracked: m.trackedLeft,
     roarReveal: m.roarRevealLeft,
   };
-}
-
-export class TruthLog {
-  constructor(private readonly path: string) {
-    writeFileSync(path, '');
-  }
-
-  record(room: Room): void {
-    const frame = truthOf(room);
-    if (frame) appendFileSync(this.path, `${JSON.stringify(frame)}\n`);
-  }
 }

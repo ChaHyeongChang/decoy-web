@@ -3,7 +3,6 @@
 // 생존자에게: 팀원 전원(항상), 시야 합집합 안일 때만 괴물과 부채꼴, 탐지 · 포효 경고 중의 괴물 위치(마커)
 // 괴물에게:  자기 상태, 부채꼴 · 근접 원 안 생존자만 — 임시 ID, 역할 없이(능력 노출 1초만 예외),
 //            익명 상태 목록. 생존자 실제 ID · 역할 · 부상 여부 · 탈출구 개방 진행도는 보내지 않는다
-import { randomBytes } from 'node:crypto';
 import {
   exceeds,
   inCircleVision,
@@ -21,8 +20,9 @@ import {
   type SurvivorSelf,
   type SurvivorView,
   type WorldView,
-} from '@decoy/shared';
+} from '../index';
 import type { Game } from './game';
+import { newAliasId } from './random';
 import type { GamePlayer, MonsterState, SurvivorState } from './state';
 
 function round(v: number, digits = 3): number {
@@ -75,8 +75,7 @@ export class AliasBook {
 
   update(visible: Set<string>): void {
     for (const id of [...this.aliases.keys()]) if (!visible.has(id)) this.aliases.delete(id);
-    for (const id of visible)
-      if (!this.aliases.has(id)) this.aliases.set(id, `s${randomBytes(6).toString('hex')}`);
+    for (const id of visible) if (!this.aliases.has(id)) this.aliases.set(id, newAliasId());
   }
 
   get(id: string): string | undefined {

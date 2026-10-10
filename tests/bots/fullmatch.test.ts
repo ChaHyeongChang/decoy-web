@@ -7,10 +7,10 @@ import {
   PatrolMonsterBrain,
   PhasedBrain,
   SPOTS,
+  SimMatch,
+  buildResult,
   type BotBrain,
-} from '../../server/src/botBrains';
-import { SimMatch } from '../../server/src/sim';
-import { buildResult } from '../../server/src/systems/match';
+} from '@decoy/shared/sim';
 import { loadTestBalance } from '../helpers/fixtures';
 
 const balance = loadTestBalance();

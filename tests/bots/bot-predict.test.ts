@@ -1,7 +1,6 @@
 // 봇의 내 위치 예측 (지연 환경에서 목표를 지나쳐 흔들리지 않게): 사람 클라이언트 예측과 같은 이동 코드
 import { describe, expect, it } from 'vitest';
-import { predictSelf } from '../../server/src/bots';
-import { AliasBook, buildSnapshot, computeVisibility } from '../../server/src/interest';
+import { AliasBook, buildSnapshot, computeVisibility, predictSelf } from '@decoy/shared/sim';
 import { Driver, frame, loadTestBalance, place, readyGame } from '../helpers/fixtures';
 
 const balance = loadTestBalance();

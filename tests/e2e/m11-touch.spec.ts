@@ -83,7 +83,7 @@ async function canOfferFs(page: Page): Promise<boolean> {
 /** playwright.config.ts의 TRUTH_LOG (m3-info와 같은 경로, 저장소 루트 기준) */
 const TRUTH_LOG = 'tests/e2e/.results/truth.jsonl';
 
-/** 정답 기록 한 줄: helpers의 TruthFrame + 포효 노출 남은 시간 (server/src/truth.ts) */
+/** 정답 기록 한 줄: helpers의 TruthFrame + 포효 노출 남은 시간 (shared/src/sim/truth.ts) */
 type TruthTick = TruthFrame & { roarReveal: number };
 
 function truthLogSize(): number {

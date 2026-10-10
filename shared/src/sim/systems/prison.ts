@@ -1,5 +1,5 @@
 // 감옥 구조 (GAME_DESIGN 6.2): 문 앞에서 E를 3초 누르고 있으면 감옥 안 전원이 풀려나고 4초 보호
-import { BTN, RELEASE_SLOTS, RELEASE_SPARES, RESCUE_POINT, countdown, type Vec2 } from '@decoy/shared';
+import { BTN, RELEASE_SLOTS, RELEASE_SPARES, RESCUE_POINT, countdown, type Vec2 } from '../../index';
 import type { Game } from '../game';
 import type { SurvivorState } from '../state';
 

@@ -3,12 +3,12 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { Duplex } from 'node:stream';
 import { performance } from 'node:perf_hooks';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { LagQueue, Rng, type ClientMessage } from '@decoy/shared';
+import { LagQueue, Rng } from '@decoy/shared';
+import { ServerCore, truthOf, type Conn } from '@decoy/shared/sim';
 import { HEALTH_PATH, MAX_STALL_MS, SERVER_MARK_HEADER, loadBalance, parseOptions } from './config';
-import { RoomManager, type Conn, type Room, type Seat } from './room';
 import { createSender } from './sendPolicy';
 import { serveStatic } from './static';
-import { TruthLog, truthOf } from './truth';
+import { TruthLog } from './truthLog';
 import { spawnLocalBot } from './bots';
 
 const options = parseOptions(process.argv.slice(2), process.env);
@@ -16,14 +16,17 @@ const balance = loadBalance(options.balancePath);
 const truthLog = options.truthLogPath ? new TruthLog(options.truthLogPath) : null;
 const lagRng = new Rng(options.seed ^ 0x5bd1e995);
 
-const manager = new RoomManager(
+// 방 · 연결 처리 · 틱 스케줄러는 기기 안 연습과 같은 코드 (shared/src/sim/core.ts). 여기는 HTTP · ws 소켓 · setInterval만
+const core = new ServerCore(
   { balance, seed: options.seed, testHooks: options.testHooks },
   {
     log: (m) => console.log(m),
     recordTruth: truthLog ? (room) => truthLog.record(room) : undefined,
     spawnBot: (room, seat) => spawnLocalBot(`ws://127.0.0.1:${actualPort()}/ws`, room.code, seat.token),
   },
+  () => performance.now(),
 );
+const manager = core.manager;
 
 /**
  * 테스트 전용(--test-hooks): 이 시각(performance.now)까지 HTTP 요청과 새 WebSocket 연결을 붙잡아 둔다.
@@ -165,71 +168,25 @@ wss.on('connection', (socket: WebSocket) => {
   const conn: Conn = { id: connCounter, ...createSender(socket, half, jitter, () => lagRng.next()) };
   alive.set(socket, true);
   socket.on('pong', () => alive.set(socket, true));
-  let bound: { room: Room; seat: Seat } | null = null;
-  let closed = false;
-
-  const dispatch = (raw: string): void => {
-    // 지연 큐 때문에 소켓이 닫힌 뒤에 도착한 메시지는 버린다 (유령 자리 방지)
-    if (closed) return;
-    try {
-      handleMessage(raw);
-    } catch (err) {
-      // 메시지 하나의 오류가 서버 전체를 멈추지 않게: 그 연결만 닫는다
-      console.error('메시지 처리 오류', err);
-      socket.close();
-    }
-  };
-
-  const handleMessage = (raw: string): void => {
-    let msg: ClientMessage;
-    try {
-      msg = JSON.parse(raw) as ClientMessage;
-    } catch {
-      return;
-    }
-    if (typeof msg !== 'object' || msg === null || typeof msg.t !== 'string') return;
-    const now = performance.now();
-    if (msg.t === 'join') {
-      if (bound) return;
-      const r = manager.join(conn, msg);
-      if ('error' in r) {
-        conn.send(r.error);
-        return;
-      }
-      bound = r;
-      r.room.welcome(r.seat);
-      return;
-    }
-    if (msg.t === 'ping' && !bound) {
-      conn.send({ t: 'pong', c: msg.c, s: now });
-      return;
-    }
-    if (bound && bound.seat.conn?.id === conn.id) bound.room.handle(bound.seat, msg, now);
-  };
-  const inbound = new LagQueue<string>(half, jitter, dispatch, () => lagRng.next());
+  const link = core.connect(conn, (err) => {
+    // 메시지 하나의 오류가 서버 전체를 멈추지 않게: 그 연결만 닫는다
+    console.error('메시지 처리 오류', err);
+    socket.close();
+  });
+  const inbound = new LagQueue<string>(
+    half,
+    jitter,
+    (raw) => link.receive(raw),
+    () => lagRng.next(),
+  );
 
   socket.on('message', (data) => inbound.push(data.toString()));
-  socket.on('close', () => {
-    closed = true;
-    if (bound && bound.seat.conn?.id === conn.id) bound.room.detach(bound.seat, performance.now());
-  });
+  socket.on('close', () => link.close());
   socket.on('error', () => socket.close());
 });
 
-// 고정 틱 루프. 틱마다 명목 시각(시작 + n × 틱 길이)을 넘겨 스냅샷 시각 간격이 고르게 한다.
-// 한 번에 최대 5틱까지 따라잡고, 그보다 밀리면 시간을 버린다
-const tickMs = 1000 / balance.network.serverTickHz;
-let nextTickAt = performance.now() + tickMs;
-setInterval(() => {
-  const now = performance.now();
-  let n = 0;
-  while (now >= nextTickAt && n < 5) {
-    manager.tick(nextTickAt);
-    nextTickAt += tickMs;
-    n += 1;
-  }
-  if (now >= nextTickAt) nextTickAt = now + tickMs;
-}, tickMs / 4);
+// 고정 틱 루프: 틱 길이의 1/4마다 깨어 와야 했던 틱을 명목 시각으로 돌린다 (ServerCore.advance)
+setInterval(() => core.advance(performance.now()), core.tickMs / 4);
 
 httpServer.listen(options.port, options.host, () => {
   const lag = options.lag > 0 ? ` (지연 ${options.lag}ms)` : '';

@@ -2,7 +2,7 @@
 //   두 거점을 모두 점령하면 활성화. 자유 생존자 2명 이상이 같은 탈출구 반경 1.5 안에 함께 3초 → 그 문이 열린다
 //   인원이 모자라면 진행은 0으로. 괴물이 있어도 멈추지 않는다(exit.pausedWhenMonsterInside: false)
 //   한 번 열린 문은 끝까지 열려 있고, 열린 문 칸(외벽)으로 걸어 들어가면 탈출
-import { CAPTURE_POINTS, EXITS, inRect } from '@decoy/shared';
+import { CAPTURE_POINTS, EXITS, inRect } from '../../index';
 import type { Game } from '../game';
 import type { SurvivorState } from '../state';
 

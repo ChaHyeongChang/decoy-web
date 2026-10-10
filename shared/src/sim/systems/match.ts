@@ -5,7 +5,7 @@
 //   12분 경과 → 탈출 못 한 생존자 사망 처리 후 판정 (= 괴물 승리)
 //   괴물이 재접속 유예 안에 돌아오지 않음 → 무효
 // 판정 순서: 생존자 승리를 먼저, 그다음 괴물 승리
-import { countdown, type MatchResult, type PlayerRecord, type ResultGrade, type TextId } from '@decoy/shared';
+import { countdown, type MatchResult, type PlayerRecord, type ResultGrade, type TextId } from '../../index';
 import type { Game } from '../game';
 import type { MatchOutcomeReason } from '../state';
 

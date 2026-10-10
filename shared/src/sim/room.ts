@@ -17,10 +17,10 @@ import {
   type RoomPhase,
   type ServerMessage,
   type TestCommand,
-} from '@decoy/shared';
-import { randomBytes } from 'node:crypto';
+} from '../index';
 import { Game } from './game';
 import { AliasBook, buildSnapshot, computeVisibility } from './interest';
+import { newSeatToken } from './random';
 import { applyDropExpired, buildResult } from './systems/match';
 
 export interface Conn {
@@ -106,7 +106,7 @@ export class Room {
     const seat: Seat = {
       id: `p${this.joinCounter}`,
       // 자리 토큰은 예측할 수 없어야 한다 (시드 난수는 시뮬레이션 전용)
-      token: randomBytes(18).toString('base64url'),
+      token: newSeatToken(),
       name: cleanName(name) || `플레이어 ${this.joinCounter}`,
       role: null,
       ready: bot,

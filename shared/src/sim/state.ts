@@ -9,7 +9,7 @@ import type {
   RoleId,
   SurvivorStatus,
   VisionModeId,
-} from '@decoy/shared';
+} from '../index';
 
 export interface PlayerStats {
   hitsTaken: number;

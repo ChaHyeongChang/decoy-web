@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ClientMessage, Role } from '@decoy/shared';
-import { RoomManager, type Room, type Seat } from '../../server/src/room';
+import { RoomManager, type Room, type Seat } from '@decoy/shared/sim';
 import { FakeConn } from '../helpers/fakeConn';
 import { loadTestBalance } from '../helpers/fixtures';
 

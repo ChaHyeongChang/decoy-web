@@ -61,12 +61,36 @@ export default tseslint.config(
     languageOptions: { sourceType: 'script', globals: { ...globals.serviceworker } },
   },
   {
-    // shared · server에는 Phaser를 들이지 않는다 (시뮬레이션과 렌더링 분리)
-    files: ['shared/**/*.ts', 'server/**/*.ts'],
+    // server에는 Phaser를 들이지 않는다 (시뮬레이션과 렌더링 분리)
+    files: ['server/**/*.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
         { paths: [{ name: 'phaser', message: 'shared/server에서 Phaser 금지' }] },
+      ],
+    },
+  },
+  {
+    // shared는 서버와 브라우저(기기 안 연습)가 같이 돌린다 (M13a): Phaser도, Node 전용 모듈도 들이지 않는다.
+    // 소켓 · 파일 · 타이머 같은 바깥 일은 server/src가 맡는다
+    files: ['shared/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            { name: 'phaser', message: 'shared/server에서 Phaser 금지' },
+            { name: 'ws', message: 'shared에서 ws 금지 (소켓은 server/src)' },
+            { name: 'fs', message: 'shared에서 fs 금지 (파일은 server/src)' },
+          ],
+          patterns: [
+            {
+              group: ['node:*'],
+              message:
+                'shared에서 Node 전용 모듈 금지 (브라우저에서도 돈다, globalThis.crypto 등 공통 API만)',
+            },
+          ],
+        },
       ],
     },
   },

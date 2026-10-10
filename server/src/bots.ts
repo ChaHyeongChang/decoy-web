@@ -1,41 +1,18 @@
 // 개발 · 테스트용 봇. 실제 WebSocket 클라이언트로 접속해 자기에게 온 (걸러진) 스냅샷만 보고 움직인다.
 import WebSocket from 'ws';
 import {
-  cloneMoveState,
-  stepMovement,
   validateBalance,
   type Balance,
   type ClientMessage,
   type InputFrame,
   type MatchInfo,
-  type MoveEnv,
   type ServerMessage,
   type Snapshot,
 } from '@decoy/shared';
-import { devBotBrain, idleBrain, moverOf, type BotBrain } from './botBrains';
+import { devBotBrain, idleBrain, predictSelf, type BotBrain } from '@decoy/shared/sim';
 
 /** 서버가 아직 처리하지 않은 입력을 이만큼까지 기억한다 (예측용) */
 const MAX_PENDING = 60;
-
-/**
- * 봇의 내 위치 예측: 마지막 스냅샷(서버가 처리한 입력까지)에 아직 처리 안 된 입력을 같은 이동 코드로 다시 적용한다.
- * 사람 클라이언트의 예측과 같은 방식이라 지연(lag)이 있어도 목표를 지나쳐 흔들리지 않는다. 다른 몸은 무시한다
- */
-export function predictSelf(snap: Snapshot, pending: readonly InputFrame[], balance: Balance): Snapshot {
-  const later = pending.filter((f) => f.seq > snap.ack);
-  if (later.length === 0) return snap;
-  const move = cloneMoveState(snap.you.move);
-  const env: MoveEnv = {
-    kind: snap.you.role === 'monster' ? 'monster' : 'survivor',
-    role: snap.you.role === 'monster' ? null : snap.you.role,
-    mover: moverOf(snap),
-    campActive: snap.world.imprisoned > 0,
-    obstacles: [],
-  };
-  const dt = 1 / balance.network.serverTickHz;
-  for (const f of later) stepMovement(move, f, env, balance, dt);
-  return { ...snap, you: { ...snap.you, move } };
-}
 
 export interface BotClientOptions {
   url: string;

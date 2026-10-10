@@ -18,10 +18,13 @@ import {
   type InputFrame,
   type Vec2,
 } from '@decoy/shared';
-import type { Game } from '../../server/src/game';
-import { computeVisibility } from '../../server/src/interest';
-import type { MonsterState, SurvivorState } from '../../server/src/state';
-import { buildResult } from '../../server/src/systems/match';
+import {
+  buildResult,
+  computeVisibility,
+  type Game,
+  type MonsterState,
+  type SurvivorState,
+} from '@decoy/shared/sim';
 import { newGame } from '../helpers/fixtures';
 
 /** 기대 해시. 규칙 · 판정을 일부러 바꿨을 때만 GAME_DESIGN 변경 이력과 함께 갱신한다 */

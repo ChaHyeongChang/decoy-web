@@ -16,7 +16,7 @@ import {
   type MoveEnv,
   type Role,
   type RoleId,
-} from '@decoy/shared';
+} from '../index';
 import type {
   CapturePointState,
   ExitRuntime,
