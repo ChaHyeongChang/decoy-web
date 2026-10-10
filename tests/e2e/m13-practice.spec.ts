@@ -59,8 +59,8 @@ test('서버 연결이 막혀도 3초 안에 상태 줄 · 봇과 연습이 보�
   browser,
 }) => {
   const { context, page, problems } = await newPlayerPage(browser, dpr1(PHONE_LANDSCAPE));
+  // 막힌 시도는 route 처리기로 센다 (가로챈 WebSocket은 page 'websocket' 이벤트를 내지 않는다)
   const blocked = await blockServer(page);
-  const sockets = countSockets(page);
   const t0 = Date.now();
   await page.goto(QUERY);
   const status = page.getByTestId('server-status');
@@ -81,7 +81,7 @@ test('서버 연결이 막혀도 3초 안에 상태 줄 · 봇과 연습이 보�
   // 탭 두 번: 봇과 연습 → 역할
   await press(page.getByTestId('practice'));
   await press(page.getByTestId('practice-role-runner'));
-  const tapAt = sockets();
+  const tapAt = blocked.attempts();
   await expect.poll(async () => (await practiceState(page)).phase, { timeout: 10_000 }).toBe('playing');
   const st = await practiceState(page);
   expect(st.transport).toBe('local');
@@ -111,8 +111,8 @@ test('서버 연결이 막혀도 3초 안에 상태 줄 · 봇과 연습이 보�
   await expect(page.getByTestId('result')).toBeHidden();
   expect((await practiceState(page)).role).toBe('runner');
   await expect.poll(async () => (await practiceState(page)).snapCount ?? 0).toBeGreaterThan(10);
-  // 연습을 시작한 뒤로 새 WebSocket을 열지 않았다
-  expect(sockets()).toBe(tapAt);
+  // 연습을 시작한 뒤로 새 WebSocket을 열지 않았다 (막히기 전 재연결 간격 1 · 2 · 4초가 몇 번 지났는데도)
+  expect(blocked.attempts()).toBe(tapAt);
   expect(page.url()).not.toContain('room=');
 
   // 끝내고 홈으로: 첫 화면 · 상태 줄, 서버 연결을 다시 시도한다
@@ -122,7 +122,7 @@ test('서버 연결이 막혀도 3초 안에 상태 줄 · 봇과 연습이 보�
   await expect(page.getByTestId('practice')).toBeVisible();
   await expect(page.getByTestId('server-status')).toBeVisible();
   expect(await page.evaluate(() => window.__DECOY__?.transport)).toBe('net');
-  await expect.poll(() => sockets(), { timeout: 8000 }).toBeGreaterThan(tapAt);
+  await expect.poll(() => blocked.attempts(), { timeout: 8000 }).toBeGreaterThan(tapAt);
   expect(problems).toEqual([]);
   await context.close();
 });
@@ -168,7 +168,7 @@ test('연습 중 10초 숨겼다 돌아오면 같은 판이 그대로 이어지�
   expect(st.practiceRoom).toBe(room);
   const snap = (await page.evaluate(() => window.__DECOY__?.getLastSnapshot() ?? null)) as Snapshot | null;
   expect(snap?.world.paused).toBeNull();
-  await expect(page.getByTestId('replaced-notice')).toHaveCount(0);
+  await expect(page.getByTestId('replaced-notice')).toBeHidden();
   expect(page.url()).not.toContain('room=');
   // 새로고침하면 연습은 사라지고 첫 화면
   await page.reload();
@@ -269,6 +269,7 @@ test('서버 방 결과 화면의 "홈으로"는 자리를 비우고, 같은 연
   await page.evaluate(() => window.__DECOY__?.sendTest({ kind: 'setTime', timeLeft: 0.1 }));
   await expect(page.getByTestId('result')).toBeVisible({ timeout: 10_000 });
   const opened = sockets();
+  expect(opened).toBeGreaterThan(0);
   await page.getByTestId('result-home').click();
   await expect(page.getByTestId('create-room')).toBeEnabled();
   expect(page.url()).not.toContain('room=');
