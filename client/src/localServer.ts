@@ -41,11 +41,8 @@ export class LocalTransport implements Transport {
 
   constructor(options: LocalOptions) {
     const seed = options.seed ?? Math.floor(Math.random() * 2 ** 31);
-    // 봇마다 다른 시드 (같은 연습 시드면 같은 판단)
-    const driver = new BotDriver(
-      (info, seat) => practiceBrain(info.role, (seed + seat.joinOrder * 7919) | 0),
-      PRACTICE_BALANCE,
-    );
+    // 한 방의 봇은 같은 시드를 쓴다 (생존자 봇의 계획 — 어느 거점을 혼자 · 함께 — 이 시드에서 나와 서로 맞물린다)
+    const driver = new BotDriver((info) => practiceBrain(info.role, seed), PRACTICE_BALANCE);
     this.core = new ServerCore(
       { balance: PRACTICE_BALANCE, seed, testHooks: options.testHooks, practice: true },
       driver.hooks(),

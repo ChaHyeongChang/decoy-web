@@ -35,7 +35,11 @@ import { FakeConn } from '../helpers/fakeConn';
 import { loadTestBalance } from '../helpers/fixtures';
 
 const balance = loadTestBalance();
-const SEEDS = [1, 2, 3, 4, 5, 6];
+/**
+ * 시드 6개: 생존자 승리 셋(1 · 2 · 9)과 괴물 승리 셋(4 · 7 · 10). 1~60 조사에서 생존자 32 · 괴물 28 · 시간 초과 0이었다.
+ * 판은 혼돈스러워 규칙 · 길찾기 · 두뇌가 조금만 바뀌어도 시드별 결과가 뒤집힐 수 있어, 한쪽에 하나만 걸지 않게 셋씩 고른다
+ */
+const SEEDS = [1, 2, 4, 7, 9, 10];
 /** 평균 틱 비용 상한 (ms): 봇 4명 판 SimMatch.step(판 진행 + 스냅샷 + 두뇌) */
 const TICK_BUDGET_MS = 0.3;
 
