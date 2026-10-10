@@ -293,8 +293,12 @@ test('감옥 구조 장면 → 결과 화면', async ({ browser }) => {
   if (!runner || !scout) throw new Error('봇 생존자 없음');
   await send(page, { kind: 'setSurvivor', target: runner.id, status: 'imprisoned', hp: 2, imprisonCount: 1 });
   await send(page, { kind: 'setSurvivor', target: scout.id, status: 'imprisoned', hp: 2, imprisonCount: 1 });
-  await placeBots(page, code, [['monster', 29.5, 22.5, -2.6]]);
-  for (const p of [runner, scout]) await send(page, { kind: 'freeze', target: p.id, frozen: true });
+  // 갇힌 둘은 감옥 안 자리로 (setSurvivor는 상태만 바꾼다)
+  await placeBots(page, code, [
+    ['runner', 23.5, 15.5, 0.4],
+    ['scout', 24.5, 15.6, 2.6],
+    ['monster', 29.5, 22.5, -2.6],
+  ]);
   await placeSelf(page, code, you, RESCUE_POINT.x, RESCUE_POINT.y + 0.4, -Math.PI / 2);
   await page.waitForFunction(() => (window.__DECOY__?.getBanners() ?? []).length === 0, null, {
     timeout: 30_000,
