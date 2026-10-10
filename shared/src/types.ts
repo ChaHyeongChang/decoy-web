@@ -305,7 +305,8 @@ export type TestCommand =
   | { kind: 'teleport'; target: string; x: number; y: number; face?: number }
   | { kind: 'setSurvivor'; target: string; hp?: number; status?: SurvivorStatus; imprisonCount?: number }
   | { kind: 'setPoint'; point: PointId; progress: number }
-  | { kind: 'setTime'; timeLeft: number }
+  /** elapsed: 흐른 판 시간(초)도 바꾼다 — 결과의 판 길이 (M15 스토어 촬영). 시험 전용 */
+  | { kind: 'setTime'; timeLeft: number; elapsed?: number }
   | { kind: 'freeze'; target: string; frozen: boolean };
 
 export type ClientMessage =

@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { expect, test, type Browser, type BrowserContextOptions, type Page } from '@playwright/test';
 import { RESCUE_POINT, type Role, type TestCommand } from '@decoy/shared';
 import { watchConsole } from '../e2e/helpers';
+import { MultiTouch } from '../e2e/touch';
 
 const OUT = 'artifacts/store';
 /** 640×360 휴대폰 가로, 기기 배율 3 (16:9 → 1920×1080). 플레이 스크린샷은 긴 변 ≤ 짧은 변 × 2 */
@@ -231,31 +232,60 @@ test('괴물 화면: 추적 시야에 흰 생존자 둘, 포효 표시', async (
   const tab = await openTab(browser, PHONE, '괴물');
   const { page } = tab;
   const { code, you } = await soloMatch(page, 'monster');
-  // 괴물은 감옥 남쪽에서 북쪽(감옥 문)을 본다. 생존자는 감옥 앞 · 왼쪽 기둥 옆, 스카우트는 멀리
+  // 괴물은 거점 A 방 입구 동쪽에서 서쪽(방 안)을 추적 시야로 본다. 생존자 둘은 거점 A를 점령하는 중, 스카우트는 멀리.
+  // 16:9 휴대폰에서는 엄지 버튼이 맵 오른쪽 아래를 덮으므로 장면을 왼쪽 방에 둔다
   await placeBots(page, code, [
-    ['guard', 24.6, 20.2, 2.4],
-    ['runner', 21.2, 21.6, -2.2],
+    ['guard', 9.4, 16.3, 0.2],
+    ['runner', 8.1, 17.5, -0.4],
     ['scout', 40, 16, 0],
   ]);
+  await send(page, { kind: 'setPoint', point: 'A', progress: 0.35 });
   // 괴물 시작 지연(5초) 뒤에 움직일 수 있다
   await page.waitForFunction(() => (window.__DECOY__?.getLastSnapshot()?.you.move.frozen ?? 1) <= 0, null, {
     timeout: 20_000,
   });
-  await placeSelf(page, code, you, 25.2, 24.6, -1.75);
+  // 터치 화면은 조준 스틱을 놓고 있으면 마지막 이동 스틱 방향을 조준한다(키보드 이동은 반영하지 않는다):
+  // 이동 스틱을 서쪽으로 잠깐 끌어 조준을 서쪽으로 정하고 자리로 돌아온다
+  await placeSelf(page, code, you, 20, 16.9, Math.PI);
+  const zone = await page.evaluate(
+    () => window.__DECOY__?.getTouchTargets().find((t) => t.id === 'move-zone') ?? null,
+  );
+  if (!zone) throw new Error('이동 영역 없음');
+  const touch = await MultiTouch.attach(page);
+  const sx = zone.x + zone.w * 0.6;
+  const sy = zone.y + zone.h * 0.6;
+  await touch.down(1, sx, sy);
+  await touch.move(1, sx - 60, sy, { steps: 6 });
+  await page.waitForTimeout(600);
+  await touch.up(1);
+  await touch.detach();
+  await placeSelf(page, code, you, 14.6, 16.9, Math.PI);
+  await expect
+    .poll(async () => {
+      const r = await page.request.get(`/test/state?room=${code}`);
+      const t = (await r.json()) as { monster: { aim: number } | null };
+      return Math.abs(Math.abs(t.monster?.aim ?? 0) - Math.PI);
+    })
+    // 추적 시야 반각(25°) 안: 아래에서 생존자 둘이 실제로 보이는지 다시 확인한다
+    .toBeLessThan(0.2);
   await tapTarget(page, 'mode');
   await expect
-    .poll(() => page.evaluate(() => window.__DECOY__?.getLastSnapshot()?.monster?.mode))
+    .poll(() => page.evaluate(() => window.__DECOY__?.getLastSnapshot()?.you.mon?.mode))
     .toBe('hunt');
+  await page.waitForFunction(() => (window.__DECOY__?.getLastSnapshot()?.survivors.length ?? 0) >= 2, null, {
+    timeout: 20_000,
+  });
   // 처음 10초 위치 표시 · 시작 알림이 사라질 때까지
   await page.waitForFunction(() => (window.__DECOY__?.getBanners() ?? []).length === 0, null, {
     timeout: 30_000,
   });
+  // 판 중간처럼: 남은 시간 8:42
+  await send(page, { kind: 'setTime', timeLeft: 522.4 });
   await page.keyboard.down('KeyQ');
   await page.waitForTimeout(120);
   await page.keyboard.up('KeyQ');
   await steady(page);
   await save(page, 'phone-2-monster.png', 'monster');
-  // 그래픽 이미지 원본: 같은 장면을 PC 넓은 화면으로 (터치 UI 없이)
   await tab.close();
 });
 
@@ -263,22 +293,28 @@ test('생존자 화면: 거점 A 점령 중 괴물에게 발각', async ({ brows
   const tab = await openTab(browser, PHONE, '생존자');
   const { page } = tab;
   const { code, you } = await soloMatch(page, 'runner');
+  // 괴물은 처음엔 등을 돌리고 있다가(발각 없음), 판 시작 안내 메모가 걷힌 뒤 러너 쪽으로 돌아선다 → 발각 배너가 막 뜬 순간을 찍는다
   await placeBots(page, code, [
-    ['monster', 11.6, 17.2, Math.PI - 0.15],
+    ['monster', 11.6, 17.2, 0],
     ['guard', 9.2, 14.6, 0.6],
     ['scout', 40, 16, 0],
   ]);
   await placeSelf(page, code, you, 8, 16.4, 0);
   await send(page, { kind: 'setPoint', point: 'A', progress: 0.42 });
-  await page.waitForFunction(() => window.__DECOY__?.getLastSnapshot()?.you.surv?.spotted === true, null, {
-    timeout: 20_000,
+  await page.waitForFunction(() => (window.__DECOY__?.getBanners() ?? []).length === 0, null, {
+    timeout: 30_000,
   });
+  await send(page, { kind: 'setTime', timeLeft: 548.4 });
+  await page.evaluate((ms) => window.__DECOY__?.freezeClock(ms), CLOCK_MS);
+  // 개발용 괴물 봇은 멈춰도 제자리에서 조준을 돌린다: 발각과 배너가 함께 보이는 순간 바로 찍는다
+  await placeBots(page, code, [['monster', 11.6, 17.2, Math.PI - 0.15]]);
   await page.waitForFunction(
-    () => (window.__DECOY__?.getBanners() ?? []).some((t) => t.includes('발각')),
+    () =>
+      window.__DECOY__?.getLastSnapshot()?.you.surv?.spotted === true &&
+      (window.__DECOY__?.getBanners() ?? []).some((t) => t.includes('발각')),
     null,
-    { timeout: 20_000 },
+    { timeout: 20_000, polling: 'raf' },
   );
-  await steady(page);
   await save(page, 'phone-3-survivor.png', 'survivor');
   await tab.close();
 });
@@ -297,9 +333,11 @@ test('감옥 구조 장면 → 결과 화면', async ({ browser }) => {
   await placeBots(page, code, [
     ['runner', 23.5, 15.5, 0.4],
     ['scout', 24.5, 15.6, 2.6],
-    ['monster', 29.5, 22.5, -2.6],
+    // 괴물이 가드 시야 안에서 감옥 쪽으로 다가오는 중 (긴장감)
+    ['monster', 26.3, 21.4, -2.3],
   ]);
   await placeSelf(page, code, you, RESCUE_POINT.x, RESCUE_POINT.y + 0.4, -Math.PI / 2);
+  await send(page, { kind: 'setTime', timeLeft: 455.4 });
   await page.waitForFunction(() => (window.__DECOY__?.getBanners() ?? []).length === 0, null, {
     timeout: 30_000,
   });
@@ -316,8 +354,8 @@ test('감옥 구조 장면 → 결과 화면', async ({ browser }) => {
   await page.evaluate((ms) => window.__DECOY__?.freezeClock(ms), CLOCK_MS);
   await save(page, 'phone-4-rescue.png', 'rescue');
   await page.keyboard.up('KeyE');
-  // 결과: 시간 초과로 끝낸다 (탈출 0명 → 괴물 승리)
-  await send(page, { kind: 'setTime', timeLeft: 0.1 });
+  // 결과: 시간 초과로 끝낸다 (탈출 0명 → 괴물 승리). 판 길이는 실제 판처럼 (시험 전용 elapsed)
+  await send(page, { kind: 'setTime', timeLeft: 0.1, elapsed: 534 });
   await expect(page.getByTestId('result')).toBeVisible({ timeout: 15_000 });
   await page.waitForTimeout(800);
   await save(page, 'phone-5-result.png', 'result');
@@ -328,24 +366,41 @@ test('그래픽 이미지 1024×500: 괴물 화면 가운데 + 로고 + DECOY', 
   const tab = await openTab(browser, WIDE, '그래픽');
   const { page } = tab;
   const { code, you } = await soloMatch(page, 'monster');
+  // 거점 B 방 입구(맵 가운데 높이 — 카메라가 위아래로 막히지 않아 HUD가 잘라 낸 그림에 들어오지 않는다)에서
+  // 괴물이 동쪽 방 안의 생존자 둘을 본다. 스카우트는 멀리
   await placeBots(page, code, [
-    ['guard', 27.6, 21.4, 2.6],
-    ['runner', 30.4, 23.6, 2.9],
-    ['scout', 40, 16, 0],
+    ['guard', 38.7, 15.4, 2.8],
+    ['runner', 39.5, 17.1, -2.9],
+    ['scout', 8, 16, 0],
   ]);
   await page.waitForFunction(() => (window.__DECOY__?.getLastSnapshot()?.you.move.frozen ?? 1) <= 0, null, {
     timeout: 20_000,
   });
-  await placeSelf(page, code, you, 24.6, 23.2, 0.1);
-  const aim = await page.evaluate(() => window.__DECOY__?.tileToClient(29, 22.8) ?? null);
+  const ME = { x: 35, y: 16.2 };
+  await placeSelf(page, code, you, ME.x, ME.y, 0);
+  // 카메라가 새 자리로 따라온 뒤 마우스로 동쪽을 조준하고, 서버 조준이 동쪽이 될 때까지
+  await page.waitForTimeout(1000);
+  const aim = await page.evaluate(() => window.__DECOY__?.tileToClient(41, 16.2) ?? null);
   if (!aim) throw new Error('tileToClient 없음');
   await page.mouse.move(aim.x, aim.y);
+  await expect
+    .poll(async () => {
+      const r = await page.request.get(`/test/state?room=${code}`);
+      const t = (await r.json()) as { monster: { aim: number } | null };
+      return Math.abs(t.monster?.aim ?? 9);
+    })
+    .toBeLessThan(0.08);
+  // 생존자 둘이 시야에 들어와 부채꼴이 빨개진다
+  await page.waitForFunction(() => (window.__DECOY__?.getLastSnapshot()?.survivors.length ?? 0) >= 2, null, {
+    timeout: 20_000,
+  });
   await page.waitForFunction(() => (window.__DECOY__?.getBanners() ?? []).length === 0, null, {
     timeout: 30_000,
   });
+  await send(page, { kind: 'setTime', timeLeft: 431.4 });
   await steady(page);
   // 내 캐릭터(화면 가운데)를 왼쪽 40%쯤에 두고 오른쪽으로 부채꼴이 뻗게 자른다
-  const me = await page.evaluate(() => window.__DECOY__?.tileToClient(24.6, 23.2) ?? null);
+  const me = await page.evaluate(([x, y]) => window.__DECOY__?.tileToClient(x!, y!) ?? null, [ME.x, ME.y]);
   if (!me) throw new Error('tileToClient 없음');
   const crop = { w: 1024, h: 500 };
   const cx = Math.max(0, Math.min(WIDE.viewport!.width - crop.w, Math.round(me.x - crop.w * 0.42)));
