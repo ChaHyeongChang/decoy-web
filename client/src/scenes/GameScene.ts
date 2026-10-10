@@ -11,6 +11,7 @@ import {
   type InputLogEntry,
   type Role,
   type Snapshot,
+  isKeptNote,
 } from '@decoy/shared';
 import type { App } from '../app';
 import { sfx } from '../audio';
@@ -295,8 +296,7 @@ export class GameScene extends Phaser.Scene {
       // 진동 (터치 기기): 발각 꺼짐 → 켜짐 전환만 울린다(판단은 haptics, 지난 일은 그 시간으로 거른다)
       if (device.touch) haptics.spotted(e.snap.you.surv?.spotted === true, age);
       for (const ev of e.snap.events) {
-        const note = ev.k === 'text' && (ev.id === 'NOTE_FIRST' || ev.id === 'NOTE_SECOND');
-        if (!stale || note) this.onEvent(ev);
+        if (!stale || isKeptNote(ev)) this.onEvent(ev);
       }
       const now = performance.now();
       this.roarPings = this.roarPings.filter((p) => p.until > now);

@@ -53,6 +53,11 @@ async function soloMatch(browser: Browser, device: DeviceOptions, query = '') {
   await pickRoleAndReady(p.page, 'runner');
   await press(p.page.getByTestId('start-button'));
   await waitForSnapshots(p.page, 3);
+  // 판 배치를 적용한 뒤에 읽는다 (판 장면이 HUD 배치를 만든 뒤)
+  await p.page.waitForFunction(() => (window.__DECOY__?.getHudLayout() ?? null) !== null, null, {
+    polling: 100,
+    timeout: 20_000,
+  });
   return { ...p, sockets: () => sockets };
 }
 
