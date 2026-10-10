@@ -1,7 +1,9 @@
 // 빌드된 클라이언트(client/dist)를 서빙한다.
 // M12: 받는 쪽이 gzip을 받으면(Accept-Encoding) 텍스트 자산을 압축해 보낸다. 파일마다 한 번만 압축해 메모리에 두고
 // (수정 시각 · 크기가 바뀌면 다시), 압축은 스레드 풀에서 해 판 틱 루프를 멈추지 않는다. 이미 압축된 형식(png · woff2 등)은 그대로.
-// 텍스트 자산 응답에는 압축 여부와 상관없이 `Vary: Accept-Encoding`을 붙여 중간 캐시가 압축본을 못 받는 쪽에 주지 않게 한다
+// 텍스트 자산 응답에는 압축 여부와 상관없이 `Vary: Accept-Encoding`을 붙여 중간 캐시가 압축본을 못 받는 쪽에 주지 않게 한다.
+// M13d: 확장자가 있는 경로의 파일이 없으면 404(예전에는 index.html 200 — 배포 전환 순간 HTML이 JS 자리에 캐시될 수 있었다),
+// 확장자가 없는 경로만 index.html. 약한 ETag(크기-수정 시각) + If-None-Match 304, 폰트 · 문서 · manifest MIME
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import type { ServerResponse } from 'node:http';
@@ -11,7 +13,7 @@ import { constants as zlibConstants, gzip } from 'node:zlib';
 
 const gzipAsync = promisify(gzip);
 
-const MIME: Record<string, string> = {
+export const MIME: Readonly<Record<string, string>> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -20,7 +22,23 @@ const MIME: Record<string, string> = {
   '.json': 'application/json; charset=utf-8',
   '.map': 'application/json; charset=utf-8',
   '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+  '.txt': 'text/plain; charset=utf-8',
+  '.webmanifest': 'application/manifest+json',
 };
+
+/** 약한 ETag: 크기-수정 시각 (내용 해시를 매번 읽지 않는다. gzip 여부와 상관없이 같은 표현으로 본다) */
+export function weakEtag(size: number, mtimeMs: number): string {
+  return `W/"${size.toString(16)}-${Math.floor(mtimeMs).toString(16)}"`;
+}
+
+/** If-None-Match가 이 ETag와 맞는가 (여러 값 · `*` · 약한 비교) */
+export function etagMatches(header: string | string[] | undefined, etag: string): boolean {
+  const raw = Array.isArray(header) ? header.join(',') : (header ?? '');
+  if (raw.trim() === '') return false;
+  const bare = (t: string): string => t.trim().replace(/^W\//, '');
+  return raw.split(',').some((t) => t.trim() === '*' || bare(t) === bare(etag));
+}
 
 /** 압축할 텍스트 자산 (확장자). png · woff2 · jpg · webp 같은 이미 압축된 형식은 넣지 않는다 */
 export const COMPRESSIBLE_EXT: ReadonlySet<string> = new Set([
@@ -132,13 +150,23 @@ export function serveStatic(
     res.writeHead(400).end();
     return;
   }
+  // 요청한 경로 자체의 확장자 ('/'는 없음 — index.html로 바꾸기 전에 본다)
+  const requestedExt = extname(pathname);
   if (pathname.endsWith('/')) pathname += 'index.html';
   const filePath = normalize(join(root, pathname));
   if (!filePath.startsWith(normalize(root + sep)) && filePath !== normalize(root)) {
     res.writeHead(403).end();
     return;
   }
-  const target = existsSync(filePath) && statSync(filePath).isFile() ? filePath : join(root, 'index.html');
+  const exists = existsSync(filePath) && statSync(filePath).isFile();
+  // 확장자가 있는 경로(자산)가 없으면 404: 게임 HTML을 JS · 이미지 자리에 주지 않는다 (서비스 워커 사전 캐시 검사와 짝)
+  if (!exists && requestedExt !== '') {
+    res
+      .writeHead(404, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' })
+      .end('not found');
+    return;
+  }
+  const target = exists ? filePath : join(root, 'index.html');
   if (!existsSync(target)) {
     res
       .writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
@@ -149,11 +177,16 @@ export function serveStatic(
   const cache = target.includes(`${sep}assets${sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache';
   const headers: Record<string, string> = { 'content-type': type, 'cache-control': cache };
   const st = statSync(target);
+  headers.etag = weakEtag(st.size, st.mtimeMs);
+  if (isCompressible(target, st.size)) headers.vary = 'Accept-Encoding';
+  if (etagMatches(res.req?.headers['if-none-match'], headers.etag)) {
+    res.writeHead(304, headers).end();
+    return;
+  }
   if (!isCompressible(target, st.size)) {
     streamRaw(target, res, headers);
     return;
   }
-  headers.vary = 'Accept-Encoding';
   if (!acceptsGzip(acceptEncoding)) {
     streamRaw(target, res, headers);
     return;

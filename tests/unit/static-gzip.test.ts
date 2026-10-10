@@ -15,6 +15,9 @@ import {
   gzipCacheSize,
   isCompressible,
   serveStatic,
+  MIME,
+  etagMatches,
+  weakEtag,
 } from '../../server/src/static';
 
 interface Res {
@@ -44,9 +47,14 @@ const PNG = Buffer.concat([
 const WOFF2 = Buffer.concat([Buffer.from('wOF2'), Buffer.alloc(4000, 7)]);
 const SMALL_JS = 'self.x=1;';
 
-function get(path: string, acceptEncoding?: string, srvPort = port): Promise<Res> {
+function get(
+  path: string,
+  acceptEncoding?: string,
+  srvPort = port,
+  extra: Record<string, string> = {},
+): Promise<Res> {
   return new Promise((resolve, reject) => {
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { ...extra };
     if (acceptEncoding !== undefined) headers['accept-encoding'] = acceptEncoding;
     const req = request({ host: '127.0.0.1', port: srvPort, path, headers }, (res) => {
       const chunks: Buffer[] = [];
@@ -191,8 +199,8 @@ describe('정적 파일 gzip', () => {
     expect(r.body.toString('utf8')).toBe(SMALL_JS);
   });
 
-  it('없는 경로 · 폴더는 지금처럼 index.html (no-cache), 압축 받으면 압축본', async () => {
-    for (const path of ['/', '/lobby/ABCD', '/nothing.js']) {
+  it('확장자 없는 경로 · 폴더는 지금처럼 index.html (no-cache), 압축 받으면 압축본', async () => {
+    for (const path of ['/', '/lobby/ABCD', '/privacy']) {
       const r = await get(path, 'gzip');
       expect(r.status, path).toBe(200);
       expect(r.headers['content-type']).toBe('text/html; charset=utf-8');
@@ -202,6 +210,56 @@ describe('정적 파일 gzip', () => {
     }
     const plain = await get('/lobby/ABCD');
     expect(plain.body.toString('utf8')).toBe(HTML);
+  });
+
+  it('확장자가 있는 경로의 파일이 없으면 404 (게임 HTML을 JS · 이미지 자리에 주지 않는다, M13d)', async () => {
+    for (const path of [
+      '/nothing.js',
+      '/assets/index-old999.js',
+      '/assets/gone.css',
+      '/fonts/x.woff2',
+      '/a/b.png',
+    ]) {
+      const r = await get(path, 'gzip');
+      expect(r.status, path).toBe(404);
+      expect(r.headers['content-type']).toBe('text/plain; charset=utf-8');
+      expect(r.headers['cache-control']).toBe('no-store');
+      expect(r.body.toString('utf8')).not.toContain('<html');
+      // 표시 헤더는 오류에도 붙는다 (index.ts가 먼저 붙임)
+      expect(r.headers['x-decoy-server']).toBe('1');
+    }
+  });
+
+  it('MIME: woff2 · txt · webmanifest (M13d)', async () => {
+    expect(MIME['.woff2']).toBe('font/woff2');
+    expect(MIME['.txt']).toBe('text/plain; charset=utf-8');
+    expect(MIME['.webmanifest']).toBe('application/manifest+json');
+    expect((await get('/fonts/ui.woff2')).headers['content-type']).toBe('font/woff2');
+    expect((await get('/manifest.webmanifest')).headers['content-type']).toBe('application/manifest+json');
+  });
+
+  it('약한 ETag(크기-수정 시각)를 붙이고 If-None-Match가 맞으면 304 (본문 없음), 다르면 200', async () => {
+    const first = await get('/assets/index-abc123.js', 'gzip');
+    const etag = String(first.headers.etag);
+    expect(etag).toMatch(/^W\/"[0-9a-f]+-[0-9a-f]+"$/);
+    // 압축 여부와 상관없이 같은 ETag (약한 비교)
+    expect((await get('/assets/index-abc123.js')).headers.etag).toBe(etag);
+    const again = await get('/assets/index-abc123.js', 'gzip', port, { 'if-none-match': etag });
+    expect(again.status).toBe(304);
+    expect(again.body.length).toBe(0);
+    expect(again.headers.etag).toBe(etag);
+    expect(again.headers['cache-control']).toBe('public, max-age=31536000, immutable');
+    expect(
+      (await get('/', undefined, port, { 'if-none-match': `"x", ${etag.replace('W/', '')}` })).status,
+    ).toBe(200);
+    const index = await get('/');
+    const idx304 = await get('/', undefined, port, { 'if-none-match': String(index.headers.etag) });
+    expect(idx304.status).toBe(304);
+    expect(idx304.headers['cache-control']).toBe('no-cache');
+    expect((await get('/', undefined, port, { 'if-none-match': 'W/"0-0"' })).status).toBe(200);
+    expect(etagMatches('*', 'W/"1-2"')).toBe(true);
+    expect(etagMatches(undefined, 'W/"1-2"')).toBe(false);
+    expect(weakEtag(255, 1000.7)).toBe('W/"ff-3e8"');
   });
 
   it('파일마다 한 번만 압축해 메모리에 두고, 파일이 바뀌면 다시 압축한다', async () => {

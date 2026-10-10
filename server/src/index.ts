@@ -5,7 +5,15 @@ import { performance } from 'node:perf_hooks';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { LagQueue, Rng } from '@decoy/shared';
 import { BotDriver, ServerCore, practiceBrain, truthOf, type Conn, type Room } from '@decoy/shared/sim';
-import { HEALTH_PATH, MAX_STALL_MS, SERVER_MARK_HEADER, loadBalance, parseOptions } from './config';
+import {
+  BUILD_HEADER,
+  HEALTH_PATH,
+  MAX_STALL_MS,
+  SERVER_MARK_HEADER,
+  loadBalance,
+  parseOptions,
+  readBuildId,
+} from './config';
 import { createSender } from './sendPolicy';
 import { serveStatic } from './static';
 import { TruthLog } from './truthLog';
@@ -13,6 +21,8 @@ import { spawnLocalBot } from './bots';
 
 const options = parseOptions(process.argv.slice(2), process.env);
 const balance = loadBalance(options.balancePath);
+/** 함께 빌드한 화면의 빌드 ID (M13d). 없으면 null(비교 안 함) */
+const buildId = readBuildId(options.staticDir);
 const truthLog = options.truthLogPath ? new TruthLog(options.truthLogPath) : null;
 const lagRng = new Rng(options.seed ^ 0x5bd1e995);
 
@@ -40,7 +50,7 @@ function botRoomsPlaying(except: Room): number {
 
 // 방 · 연결 처리 · 틱 스케줄러는 기기 안 연습과 같은 코드 (shared/src/sim/core.ts). 여기는 HTTP · ws 소켓 · setInterval만
 const core = new ServerCore(
-  { balance, seed: options.seed, testHooks: options.testHooks },
+  { balance, seed: options.seed, testHooks: options.testHooks, buildId },
   {
     log: (m) => console.log(m),
     recordTruth: truthLog ? (room) => truthLog.record(room) : undefined,
@@ -82,7 +92,10 @@ function safePathname(raw: string | undefined): string | null {
 
 const httpServer = createServer((req, res) => {
   // 모든 응답(오류 포함)에 표시를 붙인다. 표시가 없으면 호스팅 서비스(깨우는 중 화면 등)가 대신 답한 것
-  if (performance.now() >= unmarkUntil) res.setHeader(SERVER_MARK_HEADER, '1');
+  if (performance.now() >= unmarkUntil) {
+    res.setHeader(SERVER_MARK_HEADER, '1');
+    if (buildId) res.setHeader(BUILD_HEADER, buildId);
+  }
   const wait = stallLeft(safePathname(req.url) ?? '/', 'http');
   if (wait > 0) {
     setTimeout(() => safeHandleHttp(req, res), wait);

@@ -102,7 +102,7 @@ describe('ServerCore 연결 처리', () => {
     link.receive(raw({ t: 'ready', ready: true }));
     link.receive('{잘못된 JSON');
     link.receive('null');
-    expect(c.inbox).toEqual([{ t: 'pong', c: 5, s: 1234 }]);
+    expect(c.inbox).toEqual([{ t: 'pong', c: 5, s: 1234, build: null }]);
   });
 
   it('join하면 자리에 묶여 welcome · lobby를 받고, 두 번째 join은 무시', () => {

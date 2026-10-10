@@ -19,6 +19,8 @@ export class ServerCore {
   /** 틱 길이 (ms) */
   readonly tickMs: number;
   private nextTickAt: number;
+  /** 서버 빌드 ID (M13d, 없으면 null) */
+  private readonly buildId: string | null;
 
   constructor(
     config: RoomConfig,
@@ -27,6 +29,7 @@ export class ServerCore {
     private readonly now: () => number,
   ) {
     this.manager = new RoomManager(config, hooks);
+    this.buildId = config.buildId ?? null;
     this.tickMs = 1000 / config.balance.network.serverTickHz;
     this.nextTickAt = now() + this.tickMs;
   }
@@ -63,7 +66,7 @@ export class ServerCore {
         return;
       }
       if (msg.t === 'ping' && !live) {
-        conn.send({ t: 'pong', c: msg.c, s: now });
+        conn.send({ t: 'pong', c: msg.c, s: now, build: this.buildId });
         return;
       }
       if (!live) return;

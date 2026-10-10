@@ -345,10 +345,20 @@ export type ErrorCode =
   | 'queue-dropped';
 
 export type ServerMessage =
-  | { t: 'welcome'; you: string; token: string; room: string; balance: Balance; balanceHash: string }
+  | {
+      t: 'welcome';
+      you: string;
+      token: string;
+      room: string;
+      balance: Balance;
+      balanceHash: string;
+      /** 서버 빌드 ID (M13d, client/dist/build-id.json). 화면 빌드와 다르면 "새 버전이 있어요". 없으면 비교 안 함 */
+      build?: string | null;
+    }
   | { t: 'lobby'; lobby: LobbyState }
   | { t: 'match'; info: MatchInfo }
   | { t: 'snap'; s: Snapshot }
-  | { t: 'pong'; c: number; s: number }
+  /** build: 서버 빌드 ID (M13d, join 전에도 비교) */
+  | { t: 'pong'; c: number; s: number; build?: string | null }
   | { t: 'result'; result: MatchResult }
   | { t: 'error'; code: ErrorCode; message: string };

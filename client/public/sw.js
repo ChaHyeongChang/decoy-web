@@ -1,21 +1,78 @@
-// 서버 깨우기 화면용 서비스 워커.
-// Render 무료 플랜처럼 잠드는 서버는 깨어나는 동안(1분쯤) 첫 화면을 바로 주지 못하고, 호스팅 서비스의 영어 대기 화면이 뜬다.
-// 한 번이라도 접속한 기기에서는 이 워커가 페이지 이동을 가로채,
-//   - 서버가 5초 안에 답하고 그 응답이 이 서버의 것(x-decoy-server: 1)이면 그대로 보여 주고
-//   - 늦거나 실패하거나 다른 곳(호스팅 서비스)이 답했으면 미리 받아 둔 wake.html('서버를 깨우는 중…')을 보여 준다.
-// wake.html은 서버가 깨어나면(healthz) 스스로 새로고침해서 원래 주소로 돌아간다.
-// 페이지 이동만 다룬다. 스크립트 · 이미지 · WebSocket은 건드리지 않는다 (게임 코드는 캐시하지 않는다)
+// DECOY 서비스 워커: 앱 셸 캐시 (M13d) + 서버 깨우기 화면.
+//  - 앱 셸: 빌드 때 dist 전체 파일 목록(sw.js · wake.html · build-id.json 제외)과 빌드 ID가 아래 두 줄에 들어간다
+//    (client/vite.config.ts). 설치할 때 모두 받아 `decoy-shell-<빌드ID>`에 넣는다. 응답이 정상이고 content-type이 맞고
+//    `x-decoy-build`가 이 빌드와 같을 때만 넣고, 하나라도 어긋나면 설치를 실패시켜 다음에 다시 한다(옛 HTML이 JS 자리에 들어가지 않게)
+//  - 페이지 이동 세 갈래: 5초 안에 이 서버(x-decoy-server: 1)가 답하면 그대로 / 네트워크 자체가 실패(오프라인 · 서버 꺼짐)하면
+//    캐시한 앱 셸 → 첫 화면이 상태 줄 안내 + "봇과 연습" / 느리거나 표시 없는 응답(잠든 Render의 대기 화면)이면 wake.html.
+//    `?practice=1` 이동은 캐시 먼저(잠든 서버를 기다리지 않는다). 처리방침(M15 /privacy)도 캐시가 있으면 캐시
+//  - 자산(같은 출처 GET, 페이지 이동 아님)은 이 빌드 셸에 있으면 캐시, 없으면 네트워크
+//  - /ws · /healthz · /test/* · /.well-known/*는 가로채지 않는다
+//  - 옛 `decoy-shell-*`는 새 워커가 켜질 때 지운다(동적 import가 없어 열린 화면은 더 받을 자산이 없다)
+// 빌드하지 않은 원본(개발 · 시험)에서는 BUILD가 null이라 앱 셸 없이 깨우기 화면만 한다
 
-const CACHE = 'decoy-wake-v2';
-const WAKE_URL = new URL('wake.html', self.location.href).href;
+const BUILD = null; // 빌드 때 바뀐다 (vite.config.ts decoyBuild)
+const SHELL = []; // 빌드 때 바뀐다
+
+const WAKE_CACHE = 'decoy-wake-v2';
+const SHELL_CACHE = BUILD ? `decoy-shell-${BUILD}` : null;
+const SCOPE = new URL('./', self.location.href);
+const WAKE_URL = new URL('wake.html', SCOPE).href;
+const INDEX_URL = new URL('index.html', SCOPE).href;
+const PRIVACY_URL = new URL('privacy.html', SCOPE).href;
 const NETWORK_WAIT_MS = 5000;
 const MARK_HEADER = 'x-decoy-server';
+const BUILD_HEADER = 'x-decoy-build';
+/** 가로채지 않는 경로 (앞부분) */
+const PASS = ['/ws', '/healthz', '/test/', '/.well-known/'];
+
+/** 확장자별로 와야 하는 content-type 앞부분 (JS 자리에 HTML이 오면 설치 실패) */
+const TYPE_PREFIX = {
+  '.html': 'text/html',
+  '.js': 'text/javascript',
+  '.css': 'text/css',
+  '.json': 'application/json',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.woff2': 'font/woff2',
+  '.webmanifest': 'application/manifest+json',
+  '.txt': 'text/plain',
+};
+
+function extOf(path) {
+  const m = /\.[a-z0-9]+$/i.exec(path);
+  return m ? m[0].toLowerCase() : '';
+}
+
+/** 사전 캐시에 넣어도 되는 응답인가 */
+function goodShellResponse(path, res) {
+  if (!(res instanceof Response) || res.status !== 200) return false;
+  if (res.headers.get(BUILD_HEADER) !== BUILD) return false;
+  const want = TYPE_PREFIX[extOf(path)];
+  const type = res.headers.get('content-type') || '';
+  return want ? type.startsWith(want) : true;
+}
+
+async function precacheShell() {
+  if (!SHELL_CACHE) return;
+  const fetched = await Promise.all(
+    SHELL.map(async (path) => {
+      const url = new URL(path, SCOPE).href;
+      const res = await fetch(new Request(url, { cache: 'reload' }));
+      if (!goodShellResponse(path, res)) throw new Error(`앱 셸 사전 캐시 실패: ${path}`);
+      return [url, res];
+    }),
+  );
+  // 모두 맞을 때만 넣는다 (일부만 든 셸로 오프라인 화면이 깨지지 않게)
+  const cache = await caches.open(SHELL_CACHE);
+  await Promise.all(fetched.map(([url, res]) => cache.put(url, res)));
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches
-      .open(CACHE)
+      .open(WAKE_CACHE)
       .then((cache) => cache.add(new Request(WAKE_URL, { cache: 'reload' })))
+      .then(() => precacheShell())
       .then(() => self.skipWaiting()),
   );
 });
@@ -26,7 +83,13 @@ self.addEventListener('activate', (event) => {
       .keys()
       .then((keys) =>
         Promise.all(
-          keys.filter((k) => k.startsWith('decoy-wake-') && k !== CACHE).map((k) => caches.delete(k)),
+          keys
+            .filter(
+              (k) =>
+                (k.startsWith('decoy-wake-') && k !== WAKE_CACHE) ||
+                (k.startsWith('decoy-shell-') && k !== SHELL_CACHE),
+            )
+            .map((k) => caches.delete(k)),
         ),
       )
       .then(() => self.clients.claim()),
@@ -35,19 +98,44 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
-  if (req.mode !== 'navigate' || req.method !== 'GET') return;
+  if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
-  // 테스트 훅과 깨우기 화면 자체는 그대로 둔다
-  if (url.pathname.includes('/test/') || url.href === WAKE_URL) return;
-  event.respondWith(navigate(event));
+  if (PASS.some((p) => url.pathname === p || url.pathname.startsWith(p))) return;
+  if (url.href === WAKE_URL) return;
+  if (req.mode === 'navigate') {
+    event.respondWith(navigate(event, url));
+    return;
+  }
+  if (SHELL_CACHE) event.respondWith(asset(req));
 });
 
 function fromServer(res) {
   return res instanceof Response && res.headers.get(MARK_HEADER) === '1';
 }
 
-async function navigate(event) {
+async function shellMatch(url) {
+  if (!SHELL_CACHE) return undefined;
+  const cache = await caches.open(SHELL_CACHE);
+  return cache.match(url, { ignoreSearch: true });
+}
+
+/** 자산: 이 빌드 셸에 있으면 캐시, 없으면 네트워크 */
+async function asset(req) {
+  const cached = await shellMatch(req.url);
+  return cached || fetch(req);
+}
+
+async function navigate(event, url) {
+  // 봇과 연습 · 처리방침: 캐시 먼저 (잠든 서버를 기다리지 않는다)
+  if (url.searchParams.get('practice') === '1') {
+    const shell = await shellMatch(INDEX_URL);
+    if (shell) return shell;
+  }
+  if (url.pathname === '/privacy' || url.pathname === '/privacy.html') {
+    const page = await shellMatch(PRIVACY_URL);
+    if (page) return page;
+  }
   const network = fetch(event.request);
   // 늦게 온 응답도 끝까지 받는다 (이 요청이 잠든 서버를 깨운다)
   event.waitUntil(
@@ -57,12 +145,21 @@ async function navigate(event) {
     ),
   );
   const first = await Promise.race([
-    network.catch(() => null),
-    new Promise((resolve) => setTimeout(() => resolve(null), NETWORK_WAIT_MS)),
+    network.then(
+      (res) => ({ kind: 'response', res }),
+      () => ({ kind: 'failed' }),
+    ),
+    new Promise((resolve) => setTimeout(() => resolve({ kind: 'slow' }), NETWORK_WAIT_MS)),
   ]);
-  if (fromServer(first)) return first;
-  const cached = await caches.match(WAKE_URL);
-  if (cached) return cached;
+  if (first.kind === 'response' && fromServer(first.res)) return first.res;
+  // 네트워크 자체가 실패(오프라인 · 서버 꺼짐): 앱 셸 → 첫 화면이 상태 줄 안내 + 봇과 연습
+  if (first.kind === 'failed') {
+    const shell = await shellMatch(INDEX_URL);
+    if (shell) return shell;
+  }
+  // 느리거나 이 서버가 아닌 응답(잠든 서버의 대기 화면): 깨우기 화면
+  const wake = await caches.match(WAKE_URL);
+  if (wake) return wake;
   // 깨우기 화면이 아직 없으면(설치 직후 등) 원래대로 기다린다
   return network;
 }
@@ -70,7 +167,7 @@ async function navigate(event) {
 /** 서버가 깨어 있을 때 깨우기 화면을 새로 받아 둔다 (배포로 wake.html이 바뀌어도 따라가게) */
 async function refreshWakePage() {
   try {
-    const cache = await caches.open(CACHE);
+    const cache = await caches.open(WAKE_CACHE);
     await cache.add(new Request(WAKE_URL, { cache: 'no-cache' }));
   } catch {
     // 다음 기회에

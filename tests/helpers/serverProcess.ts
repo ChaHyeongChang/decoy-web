@@ -8,10 +8,11 @@ export interface RunningServer {
   stop(): Promise<void>;
 }
 
-export async function startServer(args: string[] = []): Promise<RunningServer> {
+/** port를 주면 그 포트로 띄운다 (같은 출처로 서버를 바꿔 띄우는 서비스 워커 시험, M13d). 없으면 빈 포트 */
+export async function startServer(args: string[] = [], opts: { port?: number } = {}): Promise<RunningServer> {
   const proc = spawn(
     process.execPath,
-    ['--import', 'tsx', 'server/src/index.ts', '--port=0', '--host=127.0.0.1', ...args],
+    ['--import', 'tsx', 'server/src/index.ts', `--port=${opts.port ?? 0}`, '--host=127.0.0.1', ...args],
     {
       stdio: ['ignore', 'pipe', 'pipe'],
     },
@@ -46,4 +47,18 @@ export async function startServer(args: string[] = []): Promise<RunningServer> {
         proc.kill('SIGTERM');
       }),
   };
+}
+
+/** 지금 비어 있는 TCP 포트 하나 (잠깐 열었다 닫는다) */
+export async function freePort(): Promise<number> {
+  const { createServer } = await import('node:net');
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.once('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const addr = srv.address();
+      const port = typeof addr === 'object' && addr ? addr.port : 0;
+      srv.close(() => resolve(port));
+    });
+  });
 }
