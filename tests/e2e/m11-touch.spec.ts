@@ -1334,7 +1334,8 @@ test('결과 화면: 터치 화면이 꺼지고 입력이 없으며, 버튼(왼�
   );
   expect(layer).toMatchObject({
     pts: [true, true, true],
-    buttons: ['rematch'],
+    // 홈으로(M13b) · 다시 하기 (DOM 순서)
+    buttons: ['result-home', 'rematch'],
     touchAction: 'pan-y',
     layerVisibility: 'hidden',
   });
