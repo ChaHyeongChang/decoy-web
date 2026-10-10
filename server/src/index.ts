@@ -4,7 +4,7 @@ import type { Duplex } from 'node:stream';
 import { performance } from 'node:perf_hooks';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { LagQueue, Rng } from '@decoy/shared';
-import { ServerCore, truthOf, type Conn } from '@decoy/shared/sim';
+import { BotDriver, ServerCore, practiceBrain, truthOf, type Conn, type Room } from '@decoy/shared/sim';
 import { HEALTH_PATH, MAX_STALL_MS, SERVER_MARK_HEADER, loadBalance, parseOptions } from './config';
 import { createSender } from './sendPolicy';
 import { serveStatic } from './static';
@@ -16,13 +16,33 @@ const balance = loadBalance(options.balancePath);
 const truthLog = options.truthLogPath ? new TruthLog(options.truthLogPath) : null;
 const lagRng = new Rng(options.seed ^ 0x5bd1e995);
 
+// 빠른 매칭 빈자리 봇 (M13c): 같은 프로세스 실전 봇 (기기 안 연습과 같은 두뇌 · 드라이버, 소켓 없음)
+const quickBots = new BotDriver(
+  (info, seat) => practiceBrain(info.role, (options.seed + seat.joinOrder * 7919) | 0),
+  balance,
+);
+
+/** 지금 봇을 채워 판을 하는 빠른 매칭 방 수 (동시 봇 방 상한, DECISIONS M13c) */
+function botRoomsPlaying(except: Room): number {
+  let n = 0;
+  for (const r of core.manager.rooms.values())
+    if (r !== except && r.kind === 'quick' && r.phase === 'playing' && r.seats.some((s) => s.bot)) n += 1;
+  return n;
+}
+
 // 방 · 연결 처리 · 틱 스케줄러는 기기 안 연습과 같은 코드 (shared/src/sim/core.ts). 여기는 HTTP · ws 소켓 · setInterval만
 const core = new ServerCore(
   { balance, seed: options.seed, testHooks: options.testHooks },
   {
     log: (m) => console.log(m),
     recordTruth: truthLog ? (room) => truthLog.record(room) : undefined,
-    spawnBot: (room, seat) => spawnLocalBot(`ws://127.0.0.1:${actualPort()}/ws`, room.code, seat.token),
+    // ?bots=1 개발용 방은 WebSocket 봇, 빠른 매칭은 같은 프로세스 실전 봇
+    spawnBot: (room, seat) => {
+      if (room.kind === 'quick') quickBots.attach(room, seat);
+      else spawnLocalBot(`ws://127.0.0.1:${actualPort()}/ws`, room.code, seat.token);
+    },
+    beforeStep: (room) => quickBots.beforeStep(room),
+    canFillBots: (room) => botRoomsPlaying(room) < options.maxBotRooms,
   },
   () => performance.now(),
 );

@@ -141,7 +141,13 @@ export class ResultUI {
         h(
           'span',
           { class: 'who-text' },
-          h('span', {}, p.name),
+          h(
+            'span',
+            {},
+            p.name,
+            // 봇 표시는 결과 화면에서만 (빠른 매칭은 대기 · 판 중 봇 여부를 알리지 않는다, M13c)
+            ...(p.bot ? [h('span', { class: 'tag tag-bot', 'data-testid': 'result-bot' }, UI_TEXT.bot)] : []),
+          ),
           h('span', { class: 'who-role' }, ROLE_CARDS[p.role].name),
         ),
       );

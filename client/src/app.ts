@@ -219,6 +219,13 @@ export class App {
           });
         },
         practice: (role, name) => this.startPractice(role, name),
+        quick: (name) => {
+          saveName(name);
+          this.joinFromLink = false;
+          this.returning = null;
+          this.net.send({ t: 'quick', name });
+        },
+        leaveQueue: () => this.leaveToHome(),
         join: (code, name) => {
           saveName(name);
           this.roomCode = code.toUpperCase();
@@ -330,6 +337,8 @@ export class App {
         nowMs: now,
       }),
     );
+    // 빠른 매칭 대기 남은 시간 (서버 시계)
+    if (this.net.synced) this.lobbyUi.tick(this.net.serverNow());
     const panel = this.wake.view(now);
     this.wakeUi.render(this.local || this.lobbyUi.atHome ? { ...panel, visible: false } : panel);
   }
@@ -399,18 +408,23 @@ export class App {
    * 결과 화면 "홈으로" (M13b): 연습이면 연습을 닫고, 서버 방이면 'leave'로 자리를 비우고 첫 화면으로.
    * 연결은 방에서 풀려 그대로 첫 화면에서 쓴다 (방 만들기 · 입장)
    */
-  private leaveToHome(): void {
+  private leaveToHome(queueDropped = false): void {
     if (this.local) {
       this.stopPractice();
       return;
     }
     this.net.send({ t: 'leave' });
+    this.forgetRoom(queueDropped);
+  }
+
+  /** 방을 잊고 첫 화면으로 (나가기 뒤 · 대기열에서 빠짐): 주소 room · 마지막 방을 지운다. 연결은 그대로 쓴다 */
+  private forgetRoom(queueDropped: boolean): void {
     clearLastRoom();
     this.clearRejoin();
     this.returning = null;
     this.you = null;
     this.homePrefill = '';
-    this.toHome('');
+    this.toHome('', queueDropped);
     const url = new URL(window.location.href);
     url.searchParams.delete('room');
     window.history.replaceState(window.history.state, '', url.toString());
@@ -451,6 +465,15 @@ export class App {
         haptics.clockSynced();
       } else this.local.pause();
     }
+    // 빠른 매칭 대기 중 화면이 숨겨지면 바로 대기열에서 빠진다 (돌아오면 "대기열에서 빠졌어요 — 다시 찾기", M13c)
+    if (
+      !visible &&
+      !this.local &&
+      this.lobby?.kind === 'quick' &&
+      this.lobby.phase === 'lobby' &&
+      this.match === null
+    )
+      this.leaveToHome(true);
     if (visible) {
       this.awake.shown();
       sfx.resume();
@@ -509,7 +532,7 @@ export class App {
    * 방을 떠나 첫 화면으로 (나가기 · 다시 들어가지 못함): 화면 꺼짐 방지를 놓고 뒤로 가기 항목을 걷고 판 상태를 비운다.
    * 방에 있었으면 판 장면을 멈추게 한다 (main.ts는 로비 단계 이벤트로 판 장면을 끝낸다)
    */
-  private toHome(prefill: string): void {
+  private toHome(prefill: string, queueDropped = false): void {
     const code = this.roomCode ?? '';
     const wasInRoom = this.lobby !== null || this.match !== null;
     this.setPlaying(false);
@@ -519,7 +542,7 @@ export class App {
     this.result = null;
     this.lastSnap = null;
     this.resultUi.hide();
-    this.lobbyUi.renderHome(prefill);
+    this.lobbyUi.renderHome(prefill, queueDropped);
     if (wasInRoom)
       this.emit({
         kind: 'lobby',
@@ -538,6 +561,11 @@ export class App {
 
   /** 판 중 뒤로 가기 확인에서 "나가기": 방에서 나가 첫 화면으로 (서버는 끊김으로 보고 30초 유예를 센다) */
   private leaveRoom(): void {
+    // 빠른 매칭 판: 나가기는 서버에 알려 그 자리를 바로 판정한다(유예 없음, M13c). 연결은 그대로 첫 화면에서 쓴다
+    if (this.lobby?.kind === 'quick') {
+      this.leaveToHome();
+      return;
+    }
     const code = this.roomCode ?? '';
     clearLastRoom();
     this.clearRejoin();
@@ -714,6 +742,11 @@ export class App {
           this.keeper.stop();
           this.setPlaying(false);
           this.replacedNotice.show(msg.message);
+          return;
+        }
+        // 빠른 매칭 자동 시작 순간 응답이 없어 대기열에서 빠졌다 (M13c)
+        if (msg.code === 'queue-dropped') {
+          this.forgetRoom(true);
           return;
         }
         // 마지막 방 복귀: 옛 소켓이 아직 그 자리에 붙어 있으면 30초 창 안에서 2초마다 다시

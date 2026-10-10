@@ -605,6 +605,56 @@ select {
     opacity: 0.35;
   }
 }
+/* 빠른 매칭 대기 (M13c): 위 띠의 초대 패널 자리에 제목 · 인원 · 남은 시간 */
+.quick-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 12px 18px;
+}
+.quick-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--neon-text);
+  font-size: 18px;
+  font-weight: 800;
+}
+.quick-head .quick-countdown {
+  flex-basis: 100%;
+  color: var(--text);
+  text-align: left;
+}
+.quick-people {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.quick-person {
+  gap: 6px;
+}
+.quick-person .avatar {
+  width: 22px;
+  height: 22px;
+}
+/* 첫 화면 "대기열에서 빠졌어요 — 다시 찾기" (경고 아이콘 + 글자, 색만으로 알리지 않는다) */
+.quick-dropped {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  color: #fcd34d;
+  font-size: 14px;
+}
+.quick-dropped .ico {
+  color: var(--warn);
+}
+.quick-dropped .btn {
+  margin-left: auto;
+  padding: 0 14px;
+}
 /* 봇과 연습: 역할 고르기 (첫 화면 자리, 고르면 바로 시작) */
 .practice-roles {
   display: grid;

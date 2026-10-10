@@ -28,6 +28,10 @@ export interface LobbyActions {
   join(code: string, name: string): void;
   /** 봇과 연습 (M13b): 고른 역할로 기기 안에서 바로 시작 */
   practice(role: Role, name: string): void;
+  /** 빠른 매칭 대기열에 들어간다 (M13c) */
+  quick(name: string): void;
+  /** 빠른 매칭 대기 취소 (M13c): 자리를 비우고 첫 화면으로 */
+  leaveQueue(): void;
   pickRole(role: Role | null): void;
   setReady(ready: boolean): void;
   setName(name: string): void;
@@ -113,6 +117,10 @@ export class LobbyUI {
   private status: ServerStatusView = { status: 'waking', seconds: 0 };
   /** 연결이 필요한 첫 화면 버튼 (연결 전에는 끈다) */
   private netButtons: HTMLButtonElement[] = [];
+  private netButtonsExtra: HTMLButtonElement | null = null;
+  /** 빠른 매칭 대기 화면의 남은 시간 글자와 자동 시작 시각(서버 시계, M13c) */
+  private quickCountdown: HTMLElement | null = null;
+  private quickStartAt: number | null = null;
 
   constructor(
     host: HTMLElement,
@@ -212,9 +220,11 @@ export class LobbyUI {
     return h('div', { class: hero ? 'brand brand-hero' : 'brand' }, logoImg('brand-logo'), text);
   }
 
-  /** 첫 화면: 방 만들기 / 코드로 입장 */
-  renderHome(prefillCode = ''): void {
+  /** 첫 화면: 빠른 매칭 · 봇과 연습 · 방 만들기 / 코드로 입장. queueDropped면 "대기열에서 빠졌어요 — 다시 찾기" (M13c) */
+  renderHome(prefillCode = '', queueDropped = false): void {
     this.lastLobby = null;
+    this.quickCountdown = null;
+    this.netButtonsExtra = null;
     this.tutorial.hide();
     this.settings?.close();
     const name = h('input', {
@@ -224,11 +234,20 @@ export class LobbyUI {
       'aria-label': UI_TEXT.namePlaceholder,
     });
     name.value = this.defaultName;
-    const create = h(
+    // 빠른 매칭 (M13c): 모르는 사람과 자동으로 (서버 연결이 필요)
+    const quickBtn = h(
       'button',
-      { class: 'btn btn-primary btn-wide', 'data-testid': 'create-room' },
-      UI_TEXT.createRoom,
+      { class: 'btn btn-primary btn-wide', 'data-testid': 'quick-match' },
+      icon('play', 20),
+      UI_TEXT.quickMatch,
     );
+    quickBtn.addEventListener('click', () => {
+      if (quickBtn.disabled) return;
+      enterFullscreen();
+      this.showError('');
+      this.actions.quick(name.value);
+    });
+    const create = h('button', { class: 'btn btn-wide', 'data-testid': 'create-room' }, UI_TEXT.createRoom);
     create.addEventListener('click', () => {
       this.showError('');
       this.actions.create(name.value);
@@ -248,7 +267,7 @@ export class LobbyUI {
     const practice = h(
       'button',
       { class: 'btn btn-wide btn-practice', 'data-testid': 'practice' },
-      icon('play', 20),
+      icon('replay', 20),
       UI_TEXT.practice,
     );
     practice.addEventListener('click', () => {
@@ -270,15 +289,17 @@ export class LobbyUI {
       'div',
       { class: 'panel home-panel' },
       h('label', { class: 'field' }, name),
-      create,
+      ...(queueDropped ? [this.droppedRow(() => this.actions.quick(name.value))] : []),
+      quickBtn,
       practice,
+      create,
       h('div', { class: 'divider' }),
       h('div', { class: 'row' }, h('label', { class: 'field field-code' }, code), join),
       ...this.qualityRow(),
       this.statusLine,
       this.errorBox,
     );
-    this.netButtons = [create, join];
+    this.netButtons = [quickBtn, create, join];
     this.applyStatus();
     this.content.className = 'lobby-content lobby-home';
     const brand = this.brand(true);
@@ -293,6 +314,8 @@ export class LobbyUI {
    */
   renderPracticePicker(name: string): void {
     this.lastLobby = null;
+    this.quickCountdown = null;
+    this.netButtonsExtra = null;
     this.tutorial.hide();
     this.settings?.close();
     const grid = h('div', { class: 'practice-roles' });
@@ -337,6 +360,100 @@ export class LobbyUI {
     this.show();
   }
 
+  /** "대기열에서 빠졌어요 — 다시 찾기" (대기 중 화면을 숨겼거나 응답이 없어 서버가 뺀 뒤) */
+  private droppedRow(retry: () => void): HTMLElement {
+    const again = h(
+      'button',
+      { class: 'btn', 'data-testid': 'quick-retry' },
+      icon('replay', 18),
+      UI_TEXT.quickRetry,
+    );
+    again.addEventListener('click', () => {
+      if (again.disabled) return;
+      retry();
+    });
+    this.netButtonsExtra = again;
+    return h(
+      'div',
+      { class: 'quick-dropped', role: 'status', 'data-testid': 'quick-dropped' },
+      icon('warn', 18),
+      h('span', {}, UI_TEXT.quickDropped),
+      again,
+    );
+  }
+
+  /**
+   * 빠른 매칭 대기 화면 (M13c): 인원 · 자동 시작까지 남은 시간 · 역할 카드(다른 사람은 "플레이어 n") · 취소.
+   * 준비 · 방장 시작은 없다. 남은 시간은 tick()이 서버 시계로 센다
+   */
+  private renderQuick(lobby: LobbyState): void {
+    const me = lobby.players.find((p) => p.id === this.you);
+    const cards = h('div', { class: 'role-cards' });
+    for (const role of ROLE_ORDER) cards.appendChild(this.roleCard(role, lobby));
+    const count = h(
+      'span',
+      { class: 'chip quick-count', 'data-testid': 'quick-count' },
+      icon('scoreboard', 18),
+      h('span', { class: 'num' }, UI_TEXT.quickCount.replace('{n}', String(lobby.players.length))),
+    );
+    this.quickStartAt = lobby.autoStartAt;
+    this.quickCountdown = h('div', { class: 'lobby-hint quick-countdown', 'data-testid': 'quick-countdown' });
+    if (lobby.autoStartAt === null) this.quickCountdown.textContent = UI_TEXT.quickHumansOnly;
+    const cancel = h(
+      'button',
+      { class: 'btn', 'data-testid': 'quick-cancel' },
+      icon('back', 18),
+      UI_TEXT.quickCancel,
+    );
+    cancel.addEventListener('click', () => this.actions.leaveQueue());
+    // 모인 사람 (다른 사람은 서버가 익명 "플레이어 n"으로 보낸다, 봇 여부는 결과 화면에서만)
+    const people = h('div', { class: 'quick-people', 'data-testid': 'quick-people' });
+    for (const p of lobby.players) {
+      const avatar = p.role ? svgSpan('avatar', glyphSvg(p.role)) : h('span', { class: 'avatar none' });
+      people.append(
+        h(
+          'span',
+          { class: 'chip quick-person', style: p.role ? roleVars(p.role) : undefined },
+          avatar,
+          h('span', { class: 'nm' }, p.name),
+          ...(p.id === this.you ? [h('span', { class: 'tag' }, UI_TEXT.me)] : []),
+        ),
+      );
+    }
+    const head = h(
+      'div',
+      { class: 'panel quick-head' },
+      h('div', { class: 'quick-title' }, icon('visionSearch', 20), h('span', {}, UI_TEXT.quickTitle)),
+      count,
+      this.quickCountdown,
+      people,
+    );
+    const actions = h(
+      'div',
+      { class: device.touch ? 'lobby-actions life-anchor' : 'lobby-actions' },
+      h('div', { class: 'action-row' }, ...(this.settings ? [this.settings.button()] : []), cancel),
+      h('div', { class: 'lobby-hint', 'data-testid': 'lobby-hint' }, me?.role ? '' : UI_TEXT.quickPickHint),
+      this.errorBox,
+    );
+    // 판 직전 터치 안내 (M12 카드): 역할을 고른 뒤 기다리는 동안
+    if (device.touch && me?.role && touchTutorialNeeded()) this.tutorial.show(actions, me.role);
+    else this.tutorial.hide();
+    this.content.className = 'lobby-content lobby-room lobby-quick';
+    if (this.fsButton) this.root.append(this.fsButton);
+    this.content.replaceChildren(h('div', { class: 'lobby-top' }, this.brand(false), head), cards, actions);
+    this.show();
+  }
+
+  /** 0.25초마다 (App): 빠른 매칭 대기 남은 시간을 서버 시계로 센다 */
+  tick(serverNow: number): void {
+    const el = this.quickCountdown;
+    const at = this.quickStartAt;
+    if (!el || at === null || !el.isConnected) return;
+    const left = Math.ceil((at - serverNow) / 1000);
+    const text = left > 0 ? UI_TEXT.quickAutoStart.replace('{n}', String(left)) : UI_TEXT.quickStarting;
+    if (el.textContent !== text) el.textContent = text;
+  }
+
   /** 첫 화면 서버 상태 줄 (App이 0.25초마다 부른다). 바뀐 게 없으면 DOM을 건드리지 않는다 */
   setServerStatus(view: ServerStatusView): void {
     if (view.status === this.status.status && view.seconds === this.status.seconds) return;
@@ -357,6 +474,7 @@ export class LobbyUI {
             : UI_TEXT.statusWaking.replace('{n}', String(v.seconds));
     // 연결이 필요한 버튼은 연결 전에 끈다 (봇과 연습은 늘 된다)
     for (const b of this.netButtons) b.disabled = v.status !== 'connected';
+    if (this.netButtonsExtra) this.netButtonsExtra.disabled = v.status !== 'connected';
   }
 
   /**
@@ -396,9 +514,17 @@ export class LobbyUI {
     return [row, note];
   }
 
-  /** 방 로비 */
+  /** 방 로비 (빠른 매칭 방이면 대기 화면) */
   renderRoom(lobby: LobbyState): void {
     if (this.lastRoom !== lobby.room) this.showError('');
+    if (lobby.kind === 'quick') {
+      if (!this.atRoom) this.settings?.close();
+      this.lastRoom = lobby.room;
+      this.lastLobby = lobby;
+      this.renderQuick(lobby);
+      return;
+    }
+    this.quickCountdown = null;
     // 첫 화면에서 넘어왔으면 열려 있던 설정 판을 닫는다 (같은 방 화면을 다시 그릴 때는 그대로)
     if (!this.atRoom) this.settings?.close();
     this.lastRoom = lobby.room;

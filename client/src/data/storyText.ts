@@ -158,6 +158,17 @@ export const UI_TEXT = {
   statusWaking: '서버를 깨우는 중… {n}초 — 기다리는 동안 봇과 연습을 할 수 있어요',
   statusUnreachable: '서버에 연결할 수 없어요 — 봇과 연습은 할 수 있어요',
   statusOffline: '인터넷 연결이 없어요 — 봇과 연습만 할 수 있어요',
+  // ── 빠른 매칭 (M13c) ──
+  quickMatch: '빠른 매칭',
+  quickTitle: '상대를 찾는 중',
+  quickCount: '{n}/4명',
+  quickAutoStart: '{n}초 뒤 빈자리를 봇으로 채워 시작해요 (4명이 모이면 바로)',
+  quickStarting: '곧 시작해요',
+  quickHumansOnly: '사람만 기다리는 중 — 4명이 모이면 시작해요',
+  quickPickHint: '역할을 고르지 않으면 남은 역할 중 하나로 시작해요',
+  quickCancel: '취소',
+  quickDropped: '대기열에서 빠졌어요',
+  quickRetry: '다시 찾기',
 } as const;
 
 /** 조작 안내 (첫 판 오버레이 · Tab 화면) */

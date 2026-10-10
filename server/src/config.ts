@@ -9,6 +9,12 @@ export const HEALTH_PATH = '/healthz';
 export const SERVER_MARK_HEADER = 'x-decoy-server';
 /** 테스트 훅 /test/stall이 붙잡을 수 있는 최대 시간 (ms) */
 export const MAX_STALL_MS = 60_000;
+/**
+ * 동시에 봇을 채워 판을 할 수 있는 빠른 매칭 방 수 (M13c). 실전 봇 방 하나의 비용을 재서 "모든 봇 방 비용 ≤ Render 무료
+ * CPU(0.1개)의 50%"로 정했다(측정 · 계산은 DECISIONS M13c). 넘으면 그 방은 "사람만 기다리는 중". --max-bot-rooms ·
+ * DECOY_MAX_BOT_ROOMS로 바꾼다(유료 플랜)
+ */
+export const DEFAULT_MAX_BOT_ROOMS = 6;
 
 export interface ServerOptions {
   port: number;
@@ -22,6 +28,8 @@ export interface ServerOptions {
   balancePath: string;
   staticDir: string;
   truthLogPath: string | null;
+  /** 동시 봇 방 상한 (빠른 매칭, M13c) */
+  maxBotRooms: number;
 }
 
 function argValue(argv: string[], name: string): string | undefined {
@@ -49,6 +57,10 @@ export function parseOptions(argv: string[], env: NodeJS.ProcessEnv): ServerOpti
     balancePath: resolve(argValue(argv, 'balance') ?? env.DECOY_BALANCE ?? 'config/balance.json'),
     staticDir: resolve(argValue(argv, 'static') ?? 'client/dist'),
     truthLogPath: argValue(argv, 'truth-log') ?? null,
+    maxBotRooms: Math.max(
+      0,
+      Math.floor(num(argValue(argv, 'max-bot-rooms') ?? env.DECOY_MAX_BOT_ROOMS, DEFAULT_MAX_BOT_ROOMS)),
+    ),
   };
 }
 
