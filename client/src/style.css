@@ -518,6 +518,19 @@ select {
 .brand-hero .brand-sub {
   font-size: 16px;
 }
+/* 처리방침 링크 (M15): 로고 아래 작은 글자. 터치로 누를 수 있게 위아래 여백으로 높이를 키운다 */
+.privacy-link {
+  padding: 6px 4px;
+  color: var(--text-faint);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.privacy-link:hover,
+.privacy-link:focus-visible {
+  color: var(--neon-text);
+}
 
 /* 첫 화면 */
 .home-panel {

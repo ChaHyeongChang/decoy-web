@@ -25,6 +25,8 @@
   "m13-offline.spec.ts": 90,
   "m13-practice.spec.ts": 150,
   "m13-quick.spec.ts": 60,
+  "m14-pwa.spec.ts": 5,
+  "m15-privacy.spec.ts": 45,
   "m2-controls.spec.ts": 11,
   "m3-info.spec.ts": 49,
   "m4-combat.spec.ts": 9,

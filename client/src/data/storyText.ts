@@ -172,6 +172,8 @@ export const UI_TEXT = {
   // ── 새 버전 (M13d) ──
   updateAvailable: '새 버전이 있어요',
   updateReload: '새로고침',
+  // ── 처리방침 (M15) ──
+  privacy: '개인정보 처리방침',
 } as const;
 
 /** 조작 안내 (첫 판 오버레이 · Tab 화면) */

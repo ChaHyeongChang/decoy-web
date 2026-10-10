@@ -304,6 +304,7 @@ export class LobbyUI {
     this.content.className = 'lobby-content lobby-home';
     const brand = this.brand(true);
     if (this.fsButton) brand.querySelector('.brand-text')?.append(this.fsButton);
+    brand.querySelector('.brand-text')?.append(privacyLink());
     this.content.replaceChildren(brand, panel);
     this.show();
   }
@@ -356,6 +357,7 @@ export class LobbyUI {
     this.content.className = 'lobby-content lobby-home';
     const brand = this.brand(true);
     if (this.fsButton) brand.querySelector('.brand-text')?.append(this.fsButton);
+    brand.querySelector('.brand-text')?.append(privacyLink());
     this.content.replaceChildren(brand, panel);
     this.show();
   }
@@ -728,4 +730,9 @@ async function copyText(text: string, input: HTMLInputElement, label: HTMLElemen
     // 아래 안내로
   }
   done(UI_TEXT.copyManual);
+}
+
+/** 처리방침 링크 (M15, 플레이 정책: 앱 안에서도 열 수 있어야 한다). 첫 화면 로고 아래. 같은 탭으로 열어 설치 앱 안에서 열린다 */
+function privacyLink(): HTMLAnchorElement {
+  return h('a', { class: 'privacy-link', href: '/privacy', 'data-testid': 'privacy-link' }, UI_TEXT.privacy);
 }

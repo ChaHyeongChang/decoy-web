@@ -2,13 +2,13 @@
 
 <img src="docs/images/logo_decoy.png" alt="DECOY 로고" width="120" align="right" />
 
-생존자 3명과 괴물 1명이 브라우저로 접속해 겨루는 온라인 비대칭 탈출 게임이다. 설치 없이 링크 하나로 4명이 들어온다.
+생존자 3명과 괴물 1명이 브라우저로 접속해 겨루는 온라인 비대칭 탈출 게임이다. 설치 없이 링크 하나로 4명이 들어온다. PC와 휴대폰(가로 화면, 터치)이 같은 방에서 함께 하고, 안드로이드 앱(PWA를 감싼 TWA)으로 구글 플레이에 올릴 준비가 되어 있다.
 
 - 생존자는 흩어져 거점 A · B를 점령하고, 두 명이 함께 탈출구를 열어 빠져나간다. 괴물에게는 모든 생존자가 **흰색**으로 보여서, 누가 누구인지 숨기며 미끼가 될 수 있다
 - 괴물은 마우스로 시야와 공격 방향을 조준해 생존자를 쫓는다. 두 번 맞은 생존자는 감옥으로 간다
 - 서버가 모든 판정을 하고, 플레이어마다 **볼 수 있는 것만** 보낸다(시야 밖 상대의 좌표는 아예 오지 않는다)
 
-TypeScript · Phaser 3 · Node `ws` 권한 서버. 그래픽은 코드로 그린 단색 도형이고, 효과음은 WebAudio로 합성한다.
+TypeScript · Phaser 3 · Node `ws` 권한 서버. 그래픽은 코드로 그리고(질감 · 빛 · 안개, 품질 높음 · 중간 · 낮음), 효과음은 WebAudio로 합성한다.
 
 ## 실행
 
@@ -25,12 +25,28 @@ npm start            # http://localhost:8080
 - **인터넷**: Render 무료 플랜(싱가포르, `render.yaml` — 태블릿 브라우저만으로 배포)을 쓰거나, Dockerfile로 한국 · 일본 리전 서비스에 배포한다 → [docs/DEPLOY.md](docs/DEPLOY.md). 무료 서버가 잠들어 있으면 깨어나는 동안 "서버를 깨우는 중…" 안내가 뜬다
 - **개발 모드**: `npm run dev` (서버 + Vite 핫 리로드, http://localhost:5173)
 
+### 첫 화면에서 시작하는 법
+
+| 버튼 | 뜻 |
+|---|---|
+| 빠른 매칭 | 모르는 사람과 자동으로. 20초 안에 4명이 모이지 않으면 빈자리를 봇으로 채워 시작한다(서버가 동시에 돌릴 수 있는 봇 방 수 안에서) |
+| 봇과 연습 | 역할을 고르면 바로 봇 셋과 한 판. 기기 안에서 판정해 서버가 필요 없다(오프라인 · 서버가 잠든 동안에도) |
+| 방 만들기 · 코드 입장 | 친구 방. 4글자 방 코드나 링크(`/?room=ABCD`)로 부른다 |
+
+### 휴대폰 · 안드로이드
+
+- **휴대폰 브라우저**: 같은 주소를 가로로 들고 연다. 왼쪽 엄지로 이동 스틱, 오른쪽 엄지로 버튼(괴물은 조준 스틱). 첫 판 전에 터치 조작 안내가 한 번 뜬다
+- **설치(PWA)**: 크롬 메뉴의 '홈 화면에 추가' 또는 '앱 설치' → 주소창 없이 가로 · 전체 화면으로 열린다. 한 번 온라인으로 연 뒤에는 오프라인에서도 앱이 열리고 봇과 연습을 할 수 있다
+- **구글 플레이 앱**: PWABuilder로 만든 TWA 패키지를 올린다. 계정 · 서명 키 · 결제가 필요한 일은 사람이 [docs/PLAY_STORE_GUIDE.md](docs/PLAY_STORE_GUIDE.md)를 따라 한다. 스토어에 옮겨 적을 글 · 답은 [docs/STORE_LISTING.md](docs/STORE_LISTING.md), 그림은 `artifacts/store/`
+- **개인정보 처리방침**: `/privacy` (첫 화면 아래 링크). 문의처는 배포 환경 변수 `PRIVACY_CONTACT`
+
 ### 주소 옵션
 
 | 옵션 | 뜻 |
 |---|---|
 | `?room=ABCD` | 그 방으로 바로 들어간다 (로비의 "링크 복사") |
 | `?bots=1` | 방을 만들 때 붙이면, 시작할 때 빈 역할을 순찰 봇이 채운다 (혼자 시험) |
+| `?practice=1` | 바로 봇과 연습 역할 고르기 (서버 없이, 앱 셸 캐시에서) |
 | `?quality=low` | 그래픽 품질 낮음 (로비의 '그래픽'에서도 고를 수 있다. high · medium · low, 기본은 자동) |
 | `?scale=0.5` | 렌더 해상도 배율 (0.25~1, 화면 크기 × 기기 픽셀 배율로 정한 해상도에 곱한다) |
 | `?debug=1` | FPS · 핑 · 서버 틱 · 예측 오차 오버레이 |
@@ -38,6 +54,8 @@ npm start            # http://localhost:8080
 | `?renderer=canvas` | Canvas 렌더러 강제 (기본은 WebGL) |
 
 ## 조작
+
+PC 키보드 · 마우스 기준이다. 휴대폰 터치 조작은 [docs/GAME_DESIGN.md](docs/GAME_DESIGN.md) 2장.
 
 | 입력 | 생존자 | 괴물 |
 |---|---|---|
@@ -71,7 +89,9 @@ npm test               # 단위 + 봇 시나리오 (규칙 · 정보 차단 · �
 npm run test:e2e       # 빌드 후 브라우저 4개 E2E 전체 (Playwright, 스크린샷은 artifacts/)
 npm run test:e2e:core  # 핵심 E2E만 (@core 태그, PR CI가 돌리는 것)
 npm run test:lag       # lag 100 · 200 실서버에 WebSocket 봇 4명으로 실시간 전체 판 (몇 분)
-npm run verify:deploy  # Docker 이미지(없으면 빌드 결과물)를 띄워 HTTP · WebSocket 접속 확인
+npm run verify:deploy  # Docker 이미지(없으면 빌드 결과물)를 띄워 HTTP · WebSocket · manifest · assetlinks · 처리방침 확인
+npm run icons          # 로고 SVG로 PWA 아이콘 · 스토어 아이콘 PNG 만들기
+npm run shots:store    # 빌드 후 실제 게임 화면으로 스토어 스크린샷 5장 · 그래픽 이미지 촬영 (artifacts/store/)
 ```
 
 push · PR마다(그리고 main에 들어갈 때) GitHub Actions(`.github/workflows/ci.yml`)가 빠른 검사(`check` · `test` · `test:e2e:core`, 3분 안팎)를 돌린다. PR을 병합하기 직전에는 같은 워크플로를 그 브랜치에서 수동 실행(Actions 탭 → CI → Run workflow)해 전체 E2E(파일별 러너 시간으로 고르게 나눈 4개 작업, `scripts/e2e-shard.mjs`) · 지연 봇 판 · 배포 검증까지 돌리고, `전체 검사 결과`가 success여야 병합한다.
@@ -86,12 +106,15 @@ push · PR마다(그리고 main에 들어갈 때) GitHub Actions(`.github/workfl
 | [docs/CREDITS.md](docs/CREDITS.md) | 외부 에셋(폰트 · 로고 · 이미지) 출처와 라이선스 |
 | [docs/STORY_TEXT.md](docs/STORY_TEXT.md) | 게임 내 문구 |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | 로컬 · 같은 와이파이 · 인터넷 배포 (Render 무료 플랜 단계별 절차 포함) |
+| [docs/MOBILE_PLAN.md](docs/MOBILE_PLAN.md) | M10~M15 계획: 비주얼 리마스터 · 터치 · 모바일 · 봇과 연습 · PWA/TWA · 스토어 |
+| [docs/PLAY_STORE_GUIDE.md](docs/PLAY_STORE_GUIDE.md) | 구글 플레이 등록: 계정 · 패키지 · 서명 키 · 비공개 테스트 · 출시 · 운영 종료 (사람이 할 일) |
+| [docs/STORE_LISTING.md](docs/STORE_LISTING.md) | 스토어 등록정보 · 콘텐츠 등급 · 데이터 보안 답변 초안 |
 | [docs/PLAYTEST_GUIDE.md](docs/PLAYTEST_GUIDE.md) | 테스터용 플레이테스트 방법 |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | 설계와 다르게 만든 것 · 문서에 없어 정한 것 |
 | [docs/HUMAN_CHECKS.md](docs/HUMAN_CHECKS.md) | 사람이 직접 확인할 것 |
 | [docs/PROGRESS.md](docs/PROGRESS.md) | 마일스톤별 진행 기록 |
 
-`docs/images/concept_*.png`는 생성형 AI로 만든 분위기 참고용 이미지로, 게임에서는 쓰지 않는다. 게임에 실리는 외부 파일은 로고(원본 `docs/images/logo_decoy.png`는 파비콘 · 작은 크기, 같은 디자인으로 다시 그린 SVG는 큰 화면)와 UI 폰트(Noto Sans KR 서브셋, SIL OFL 1.1)뿐이고, 출처 · 라이선스는 [docs/CREDITS.md](docs/CREDITS.md)에 적는다.
+`docs/images/concept_*.png`는 생성형 AI로 만든 분위기 참고용 이미지로, 게임과 스토어 그림에는 쓰지 않는다. 게임에 실리는 외부 파일은 로고(원본 `docs/images/logo_decoy.png`는 파비콘 · 작은 크기, 같은 디자인으로 다시 그린 SVG는 큰 화면)와 UI 폰트(Noto Sans KR 서브셋, SIL OFL 1.1)뿐이고, 출처 · 라이선스는 [docs/CREDITS.md](docs/CREDITS.md)에 적는다.
 
 ## 폴더
 
@@ -100,5 +123,5 @@ shared/   서버와 클라이언트가 같이 쓰는 코드 (이동 · 충돌 ·
 server/   권한 서버 (HTTP · WebSocket · 틱 타이머, 판정 코드는 shared/src/sim)
 client/   Phaser 클라이언트 (예측 · 보간 · 렌더링 · HUD · 효과음)
 config/   balance.json (수치의 원본)
-tests/    unit · bots · e2e · lag
+tests/    unit · bots · e2e · lag · store(스토어 그림 촬영)
 ```

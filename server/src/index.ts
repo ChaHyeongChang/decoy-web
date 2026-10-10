@@ -15,6 +15,7 @@ import {
   readBuildId,
 } from './config';
 import { createSender } from './sendPolicy';
+import { PRIVACY_PATHS, privacyHandler } from './privacy';
 import { serveStatic } from './static';
 import { TruthLog } from './truthLog';
 import { ASSETLINKS_PATH, assetLinksFromEnv } from './wellKnown';
@@ -27,6 +28,8 @@ const buildId = readBuildId(options.staticDir);
 /** 안드로이드 앱 도메인 연결 (M14): 환경 변수가 맞으면 본문, 아니면 null → 404 */
 const assetLinks = assetLinksFromEnv(process.env);
 if (assetLinks.problem) console.warn(assetLinks.problem);
+/** 개인정보 처리방침 (M15): 문의처는 환경 변수 PRIVACY_CONTACT */
+const servePrivacy = privacyHandler(options.staticDir, process.env);
 const truthLog = options.truthLogPath ? new TruthLog(options.truthLogPath) : null;
 const lagRng = new Rng(options.seed ^ 0x5bd1e995);
 
@@ -177,6 +180,11 @@ function handleHttp(req: IncomingMessage, res: ServerResponse): void {
     const room = manager.rooms.get((url.searchParams.get('room') ?? '').toUpperCase());
     res.writeHead(room ? 200 : 404, { 'content-type': 'application/json' });
     res.end(JSON.stringify(room ? truthOf(room) : null));
+    return;
+  }
+  if (PRIVACY_PATHS.includes(url.pathname)) {
+    // 개인정보 처리방침: 문의처를 환경 변수로 바꿔 넣는다. 파일이 없으면 404 (게임 HTML을 주지 않는다)
+    servePrivacy(res, req.headers['accept-encoding']);
     return;
   }
   serveStatic(options.staticDir, url, res);
