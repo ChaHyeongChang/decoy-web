@@ -85,7 +85,10 @@ describe('스토어 그림 (artifacts/store)', () => {
         let n = 0;
         for (let k = 0; k < a.length; k += 4 * 97) {
           n += 1;
-          if (Math.abs(a[k]! - b[k]!) + Math.abs(a[k + 1]! - b[k + 1]!) + Math.abs(a[k + 2]! - b[k + 2]!) > 24)
+          if (
+            Math.abs(a[k]! - b[k]!) + Math.abs(a[k + 1]! - b[k + 1]!) + Math.abs(a[k + 2]! - b[k + 2]!) >
+            24
+          )
             diff += 1;
         }
         expect(diff / n, `${phones[i]} ↔ ${phones[j]}`).toBeGreaterThan(0.1);
@@ -102,7 +105,9 @@ describe('스토어 그림 (artifacts/store)', () => {
       expect(s?.renderer, f).toBe('webgl');
       expect(s?.quality, f).toBe('high');
     }
-    expect(by.get('phone-2-monster.png')?.touchTargets).toEqual(expect.arrayContaining(['aim-stick', 'dash', 'roar']));
+    expect(by.get('phone-2-monster.png')?.touchTargets).toEqual(
+      expect.arrayContaining(['aim-stick', 'dash', 'roar']),
+    );
     expect(by.get('phone-4-rescue.png')?.touchTargets).toContain('rescue');
     // 기록과 파일이 맞다 (다시 찍고 기록만 옛것이 아니게)
     for (const s of manifest.shots) expect(files, s.file).toContain(s.file);

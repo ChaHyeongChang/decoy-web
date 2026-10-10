@@ -40,7 +40,10 @@ test('로비 링크를 탭하면 처리방침이 열리고(200 · HTML · 한국
   const link = page.getByTestId('privacy-link');
   await expect(link).toBeVisible();
   await expect(link).toHaveText('개인정보 처리방침');
-  const [res] = await Promise.all([page.waitForResponse((r) => new URL(r.url()).pathname === '/privacy'), press(link)]);
+  const [res] = await Promise.all([
+    page.waitForResponse((r) => new URL(r.url()).pathname === '/privacy'),
+    press(link),
+  ]);
   expect(res.status()).toBe(200);
   expect(res.headers()['content-type']).toBe('text/html; charset=utf-8');
   await expect(page).toHaveURL(/\/privacy$/);
@@ -86,14 +89,19 @@ test('앱 셸을 받은 뒤 네트워크를 끊고 서버도 끈 채 /privacy를
   watchConsole(page, problems);
   try {
     await page.goto(`${base}/?debug=hook&renderer=canvas`);
-    await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, { timeout: 20_000 });
+    await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {
+      timeout: 20_000,
+    });
     await expect
       .poll(
         () =>
           page.evaluate(async () => {
             const shell = (await caches.keys()).find((k) => k.startsWith('decoy-shell-'));
             if (!shell) return false;
-            return (await (await caches.open(shell)).match(new URL('privacy.html', location.href).href)) !== undefined;
+            return (
+              (await (await caches.open(shell)).match(new URL('privacy.html', location.href).href)) !==
+              undefined
+            );
           }),
         { timeout: 20_000 },
       )
@@ -111,7 +119,9 @@ test('앱 셸을 받은 뒤 네트워크를 끊고 서버도 끈 채 /privacy를
     await server.stop();
   }
   // 서버를 끈 시험이라 브라우저 자체 연결 실패 로그만 허용 (m13-offline과 같은 기준)
-  expect(problems.filter((p) => !/WebSocket connection to .* failed|Failed to load resource/.test(p))).toEqual([]);
+  expect(
+    problems.filter((p) => !/WebSocket connection to .* failed|Failed to load resource/.test(p)),
+  ).toEqual([]);
 });
 
 test('외부 전송 없음: 혼합 판(PC + 휴대폰 + 봇)과 봇과 연습 동안 모든 요청 · WebSocket이 같은 출처', async ({
@@ -154,9 +164,9 @@ test('외부 전송 없음: 혼합 판(PC + 휴대폰 + 봇)과 봇과 연습 �
   await solo.page.goto('/?debug=hook&renderer=canvas');
   await press(solo.page.getByTestId('practice'));
   await press(solo.page.getByTestId('practice-role-scout'));
-  await expect.poll(() => solo.page.evaluate(() => window.__DECOY__?.phase ?? null), { timeout: 15_000 }).toBe(
-    'playing',
-  );
+  await expect
+    .poll(() => solo.page.evaluate(() => window.__DECOY__?.phase ?? null), { timeout: 15_000 })
+    .toBe('playing');
   await solo.page.waitForTimeout(3000);
   await solo.page.evaluate(() => window.__DECOY__?.sendTest({ kind: 'setTime', timeLeft: 0.1 }));
   await expect(solo.page.getByTestId('result')).toBeVisible({ timeout: 15_000 });

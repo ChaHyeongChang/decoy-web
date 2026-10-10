@@ -144,9 +144,14 @@ async function checkPwa(base) {
     const html = await pr.text();
     if (pr.status !== 200 || pr.headers.get('content-type') !== 'text/html; charset=utf-8')
       throw new Error(`${path} HTTP ${pr.status} ${pr.headers.get('content-type')}`);
-    if (!html.includes('<html lang="ko">') || !html.includes('개인정보 처리방침') || html.includes('id="game-root"'))
+    if (
+      !html.includes('<html lang="ko">') ||
+      !html.includes('개인정보 처리방침') ||
+      html.includes('id="game-root"')
+    )
       throw new Error(`${path} 본문이 처리방침이 아닙니다`);
-    if (!html.includes(`mailto:${FAKE_CONTACT}`)) throw new Error(`${path}에 문의처(PRIVACY_CONTACT)가 없습니다`);
+    if (!html.includes(`mailto:${FAKE_CONTACT}`))
+      throw new Error(`${path}에 문의처(PRIVACY_CONTACT)가 없습니다`);
   }
   log('처리방침 /privacy · /privacy.html 200 (문의처 환경 변수 반영)');
 }
