@@ -30,7 +30,9 @@ export function applyDropExpired(game: Game, playerId: string): void {
   const p = game.players.get(playerId);
   if (!p) return;
   if (p.kind === 'monster') {
-    finish(game, 'void', 'monsterLeft');
+    // 최후의 30초 = 생존자 승리가 이미 확정된 뒤: 무효가 아니라 생존자 승리 (등급은 그때까지 탈출한 수)
+    if (game.grace !== null) finish(game, 'survivors', 'escaped');
+    else finish(game, 'void', 'monsterLeft');
     return;
   }
   if (p.status === 'free' || p.status === 'imprisoned') p.status = 'dead';

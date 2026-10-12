@@ -389,6 +389,43 @@ describe('빠른 매칭: 판 중 · 판 뒤', () => {
     },
   );
 
+  // 출시 전 검토: 생존자 승리가 확정된 '최후의 30초'에 괴물이 나가거나 끊겨도 무효가 아니라 생존자 승리 (9장)
+  function graceStarted(): ReturnType<typeof startedPair> {
+    const env = startedPair();
+    for (const s of env.room.seats.filter((q) => q.bot))
+      env.a.link.receive(raw({ t: 'test', cmd: { kind: 'setSurvivor', target: s.id, status: 'escaped' } }));
+    env.run(200, [env.a, env.b]);
+    expect(env.room.phase).toBe('playing');
+    expect(env.room.game?.grace).not.toBeNull();
+    return env;
+  }
+
+  it('최후의 30초 중 괴물이 나가면 무효가 아니라 생존자 승리 (탈출 2명 → 탈출 성공)', () => {
+    const { a, b, room, run } = graceStarted();
+    a.link.receive(raw({ t: 'leave' }));
+    run(100, [b]);
+    expect(room.phase).toBe('result');
+    expect(room.lastResult?.result.winner).toBe('survivors');
+    expect(b.conn.last('result')?.result).toMatchObject({
+      winner: 'survivors',
+      grade: 'success',
+      escaped: 2,
+    });
+  });
+
+  it('최후의 30초 중 괴물이 끊기면 판은 멈추고(유예 동안), 돌아오지 않으면 생존자 승리', () => {
+    const { a, b, room, run } = graceStarted();
+    const grace = room.game?.grace ?? 0;
+    a.link.close();
+    run(1000, [b]);
+    expect(room.phase).toBe('playing');
+    expect(room.game?.paused).not.toBeNull();
+    expect(room.game?.grace).toBeCloseTo(grace, 1);
+    run(GRACE_MS, [b]);
+    expect(room.phase).toBe('result');
+    expect(b.conn.last('result')?.result).toMatchObject({ winner: 'survivors', grade: 'success' });
+  });
+
   it('빠른 매칭 시작 직후 괴물이 받은 모든 메시지 원문에 다른 자리의 역할 문자열과 봇 여부가 없다', () => {
     const env = setup();
     const a = env.client('괴물');
