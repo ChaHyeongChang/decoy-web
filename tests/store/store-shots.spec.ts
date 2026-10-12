@@ -4,6 +4,7 @@
 //      phone-4-rescue (감옥 구조) · phone-5-result (결과)
 //  - 그래픽 이미지 feature-graphic.png 1024×500: 괴물 화면(PC, 배율 2)의 가운데를 잘라 왼쪽에 로고 + DECOY를 얹는다
 //  - artifacts/store/manifest.json: 장면 · 크기 · 찍는 순간의 터치 대상 · 그래픽 상태 · 콘솔 문제 (tests/unit/store-images.test.ts가 읽는다)
+//  - 모든 그림은 알파 없는 24비트 RGB PNG(색 형식 2)로 저장한다: 플레이 그래픽 이미지 · 스크린샷 조건 (canvas는 RGBA로 내보낸다)
 // 장면은 사람 탭 하나 + 서버 봇 셋(테스트 훅으로 자리 · 멈춤)으로 만든다. 판정은 서버가 하고, 화면은 실제 게임 그대로다
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -11,6 +12,7 @@ import { expect, test, type Browser, type BrowserContextOptions, type Page } fro
 import { RESCUE_POINT, type Role, type TestCommand } from '@decoy/shared';
 import { watchConsole } from '../e2e/helpers';
 import { MultiTouch } from '../e2e/touch';
+import { toRgbPng } from '../helpers/png';
 
 const OUT = 'artifacts/store';
 /** 640×360 휴대폰 가로, 기기 배율 3 (16:9 → 1920×1080). 플레이 스크린샷은 긴 변 ≤ 짧은 변 × 2 */
@@ -177,7 +179,8 @@ async function save(page: Page, file: string, scene: string, buf?: Buffer): Prom
       quality: d?.gfx.quality ?? null,
     };
   });
-  const png = buf ?? (await page.screenshot());
+  // 알파 없는 RGB로 (이미 RGB면 그대로, 투명한 화소가 있으면 멈춘다)
+  const png = toRgbPng(buf ?? (await page.screenshot()));
   writeFileSync(join(OUT, file), png);
   shots.push({
     file,
@@ -452,7 +455,7 @@ test('그래픽 이미지 1024×500: 괴물 화면 가운데 + 로고 + DECOY', 
       if ('letterSpacing' in g)
         (g as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = '2px';
       g.fillText('생존자 3 vs 괴물 1 · 비대칭 탈출', 58, 418);
-      // 알파 없는 PNG가 되게 (모든 화소 불투명)
+      // 모든 화소 불투명 (canvas는 RGBA PNG로 내보내므로 save가 알파를 버린 RGB로 다시 쓴다)
       const d = g.getImageData(0, 0, 1024, 500);
       for (let i = 3; i < d.data.length; i += 4) d.data[i] = 255;
       g.putImageData(d, 0, 0);
