@@ -1,6 +1,6 @@
 // M13a 시뮬레이션 공유화: shared/src/sim이 브라우저에서도 묶이고(Node 전용 API 없음), 서버와 기기 안 연습이
 // 같은 연결 처리 · 틱 스케줄러(ServerCore)를 쓴다
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { build } from 'esbuild';
 import { ESLint } from 'eslint';
 import type { ClientMessage, ServerMessage } from '@decoy/shared';
@@ -65,6 +65,32 @@ describe('Web Crypto 난수 문자열 (node:crypto 대체)', () => {
       expect(newAliasId()).toMatch(/^s[0-9a-f]{12}$/);
     }
     expect(tokens.size).toBe(200);
+  });
+
+  // 출시 전 검토: 토큰을 예측할 수 있으면 같은 방의 남의 자리를 넘겨받을 수 있다(괴물이 생존자 시야를 봄). Math.random ·
+  // 카운터 · 고정 시드로 바꿔도 모양 · 서로 다름 시험은 통과하므로, 난수원이 Web Crypto뿐인지 직접 본다
+  it('자리 토큰 · 임시 ID는 crypto.getRandomValues에서만 나온다 (0으로 고정하면 A×24 · s000000000000, 방의 자리 토큰도)', () => {
+    const spy = vi
+      .spyOn(globalThis.crypto, 'getRandomValues')
+      .mockImplementation(<T extends ArrayBufferView | null>(array: T): T => {
+        if (array) new Uint8Array(array.buffer, array.byteOffset, array.byteLength).fill(0);
+        return array;
+      });
+    try {
+      expect(newSeatToken()).toBe('A'.repeat(24));
+      expect(newAliasId()).toBe('s000000000000');
+      // 방이 만드는 자리 토큰도 같은 길이다 (Room.addSeat → newSeatToken)
+      const c = new ProbeConn();
+      newCore({ t: 0 })
+        .connect(c, () => {})
+        .receive(join(null));
+      const welcome = c.inbox.find((m) => m.t === 'welcome');
+      expect(welcome?.t === 'welcome' ? welcome.token : null).toBe('A'.repeat(24));
+      const bytes = spy.mock.calls.reduce((n, [a]) => n + (a?.byteLength ?? 0), 0);
+      expect(bytes).toBeGreaterThanOrEqual(18 + 6 + 18);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
