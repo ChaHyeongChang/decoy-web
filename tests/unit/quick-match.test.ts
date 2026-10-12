@@ -206,6 +206,87 @@ describe('빠른 매칭: 대기열 · 자동 시작', () => {
   });
 });
 
+// 출시 전 검토: 3초 안에 소식은 있었지만 자동 시작 직전에 소켓이 닫힌 자리는 판에 남되, 판에서도 '끊김'으로 시작한다
+// (9장 유예). 옛 코드는 '연결됨'으로 시작해 괴물이면 판이 멈추지도 무효가 되지도 않았다
+describe('빠른 매칭: 자동 시작 직전에 소켓이 닫힌 자리 (9장 유예)', () => {
+  function closedBeforeStart(closer: 'monster' | 'survivor'): ReturnType<typeof setup> & {
+    mon: Client;
+    sur: Client;
+    room: Room;
+  } {
+    const env = setup();
+    const mon = env.client('괴물');
+    const sur = env.client('생존');
+    quick(mon);
+    quick(sur);
+    mon.link.receive(raw({ t: 'role', role: 'monster' }));
+    sur.link.receive(raw({ t: 'role', role: 'runner' }));
+    const room = roomOf(env.core, mon);
+    env.run(WAIT_MS - 1500, [mon, sur]);
+    const gone = closer === 'monster' ? mon : sur;
+    const stays = closer === 'monster' ? sur : mon;
+    gone.link.close();
+    env.run(2000, [stays]);
+    expect(room.phase).toBe('playing');
+    // 빠지지 않고 판에 남았다 (봇으로 바뀌지 않음)
+    const seat = room.seats.find((s) => s.name === gone.name);
+    expect(seat?.bot).toBe(false);
+    expect(room.game?.players.get(seat?.id ?? '')?.connected).toBe(false);
+    return { ...env, mon, sur, room };
+  }
+
+  it('괴물 자리면 판이 멈추고, 유예(30초)가 지나도 돌아오지 않으면 무효', () => {
+    const { sur, room, run } = closedBeforeStart('monster');
+    expect(room.game?.paused).not.toBeNull();
+    run(GRACE_MS + 1000, [sur]);
+    expect(room.phase).toBe('result');
+    expect(sur.conn.last('result')?.result.winner).toBe('void');
+  });
+
+  it('생존자 자리면 판은 흐르고, 유예가 지나면 사망 처리', () => {
+    const { mon, room, run } = closedBeforeStart('survivor');
+    expect(room.game?.paused).toBeNull();
+    const id = room.seats.find((s) => s.name === '생존')?.id ?? '';
+    run(GRACE_MS + 1000, [mon]);
+    expect(room.game?.survivorById(id)?.status).toBe('dead');
+  });
+
+  it('유예 안에 같은 토큰으로 돌아오면 이어서 한다 (판 정지가 풀린다)', () => {
+    const env = closedBeforeStart('monster');
+    const { sur, room, run } = env;
+    run(5000, [sur]);
+    expect(room.game?.paused).not.toBeNull();
+    const back = rejoin(env, env.mon, room.code);
+    run(100, [back, sur]);
+    expect(room.phase).toBe('playing');
+    expect(room.game?.monster.connected).toBe(true);
+    expect(room.game?.paused).toBeNull();
+    expect(back.conn.last('match')?.info.role).toBe('monster');
+  });
+
+  it('4명이 차 바로 시작하는 경로에서도 직전에 닫힌 자리는 끊김으로 시작한다', () => {
+    const { core, client, run } = setup();
+    const cs = ['하나', '둘', '셋'].map((n) => client(n));
+    cs.forEach(quick);
+    cs[0]!.link.receive(raw({ t: 'role', role: 'monster' }));
+    const room = roomOf(core, cs[0]!);
+    run(1000, cs);
+    cs[1]!.link.close();
+    const fourth = client('넷');
+    quick(fourth);
+    expect(roomOf(core, fourth)).toBe(room);
+    run(100, [cs[0]!, cs[2]!, fourth]);
+    expect(room.phase).toBe('playing');
+    expect(room.seats.some((s) => s.bot)).toBe(false);
+    const seat = room.seats.find((s) => s.name === '둘');
+    expect(room.game?.players.get(seat?.id ?? '')?.connected).toBe(false);
+    for (const name of ['하나', '셋', '넷']) {
+      const s = room.seats.find((q) => q.name === name);
+      expect(room.game?.players.get(s?.id ?? '')?.connected).toBe(true);
+    }
+  });
+});
+
 describe('빠른 매칭: 판 중 · 판 뒤', () => {
   function startedPair(): ReturnType<typeof setup> & { a: Client; b: Client; room: Room } {
     const env = setup();

@@ -444,6 +444,15 @@ export class Room {
       .map((s) => ({ id: s.id, name: s.name, role: s.role, bot: s.bot }));
     this.matchCount += 1;
     this.game = new Game(setup, this.config.balance, { seed: this.rng.int(2 ** 31) });
+    // 시작 순간 연결이 없는 사람 자리(빠른 매칭: 최근 3초 안에 소식은 있었지만 그사이 소켓이 닫힘)는 판에서도
+    // 끊김으로 시작한다 — 9장 유예: 괴물이면 판 정지 뒤 무효, 생존자면 유예 뒤 사망, 돌아오면(attach) 이어서 (출시 전 검토)
+    for (const s of this.seats) {
+      if (s.bot || s.conn !== null) continue;
+      const p = this.game.players.get(s.id);
+      if (!p) continue;
+      p.connected = false;
+      p.droppedFor = 0;
+    }
     this.aliases = new AliasBook();
     this.monsterAway = 0;
     this.phase = 'playing';
