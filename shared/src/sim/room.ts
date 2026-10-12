@@ -25,7 +25,7 @@ import {
 import { Game } from './game';
 import { AliasBook, buildSnapshot, computeVisibility } from './interest';
 import { newSeatToken } from './random';
-import { applyDropExpired, buildResult } from './systems/match';
+import { applyDropExpired, buildResult, finish } from './systems/match';
 
 export interface Conn {
   readonly id: number;
@@ -519,6 +519,9 @@ export class Room {
     const game = this.game;
     if (this.phase !== 'playing' || !game) return;
     this.updateDrops(game);
+    // 빠른 매칭: 사람이 모두 나갔으면(연결된 사람도, 끊김 유예 중인 사람도 없음) 봇끼리 판을 계속하지 않고 무효로 끝낸다
+    // (봇 방 상한 한 칸을 60초 동안 차지하지 않게, 출시 전 검토). 끊김 유예 중인 사람이 있으면 그대로 기다린다
+    if (this.kind === 'quick' && !game.end && this.humansGone(game)) finish(game, 'void', 'humansLeft');
     this.hooks.beforeStep?.(this);
     game.step();
     this.hooks.recordTruth?.(this);
@@ -563,6 +566,13 @@ export class Room {
       else applyDropExpired(game, s.id);
     }
     game.paused = monsterAway && !game.end ? Math.max(0, grace - this.monsterAway) : null;
+  }
+
+  /** 판에 사람이 아무도 없다: 연결된 사람도, 끊김 유예를 세는 사람도 없다 (나가기 · 유예 만료 · 사망이나 탈출 뒤 끊김) */
+  private humansGone(game: Game): boolean {
+    return this.humanSeats.every(
+      (s) => s.conn === null && (game.players.get(s.id)?.droppedFor ?? null) === null,
+    );
   }
 
   /**
@@ -767,6 +777,18 @@ export class RoomManager {
     if (!msg.create) return { error: { t: 'error', code: 'bad-request', message: '방 코드가 필요합니다' } };
     const room = this.createRoom(Boolean(msg.bots));
     return { room, seat: room.addSeat(conn, msg.name, false, nowMs) };
+  }
+
+  /**
+   * 나가기로 사람 자리가 하나도 남지 않은 로비 · 결과 단계 방은 빈 방 시계(60초)를 기다리지 않고 바로 지운다
+   * (연결 하나로 방 만들기 · 나가기를 되풀이해 빈 방을 쌓지 못하게, 출시 전 검토). 남은 봇 연결(결과 단계)은 닫는다.
+   * 판 중인 방 · 끊겨 유예 중인 사람 자리가 남은 방은 그대로
+   */
+  dropIfAbandoned(room: Room): void {
+    if (room.phase === 'playing' || room.humanSeats.length > 0) return;
+    if (this.rooms.get(room.code) !== room) return;
+    this.rooms.delete(room.code);
+    for (const s of room.seats) s.conn?.close();
   }
 
   tick(nowMs: number): void {

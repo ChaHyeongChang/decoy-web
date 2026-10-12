@@ -74,14 +74,20 @@ export class ServerCore {
       if (msg.t === 'rematch' && live.room.kind === 'quick' && live.room.phase === 'result') {
         const name = live.seat.name;
         live.room.leave(live.seat, now);
+        // 마지막 사람이 떠난 결과 방은 바로 지운다 (남은 봇 연결도 닫는다)
+        this.manager.dropIfAbandoned(live.room);
         const r = this.manager.quick(conn, name, now);
         bound = r;
         r.room.welcome(r.seat);
         return;
       }
       live.room.handle(live.seat, msg, now);
-      // 나가기: 자리와의 묶음을 푼다 (같은 연결로 다른 방에 들어갈 수 있다)
-      if (msg.t === 'leave') bound = null;
+      // 나가기: 자리와의 묶음을 푼다 (같은 연결로 다른 방에 들어갈 수 있다). 사람이 남지 않은 로비 · 결과 방은 바로
+      // 지운다 — 안 그러면 연결 하나가 만들기 · 나가기를 되풀이해 빈 방을 60초씩 쌓는다 (출시 전 검토)
+      if (msg.t === 'leave') {
+        bound = null;
+        this.manager.dropIfAbandoned(live.room);
+      }
     };
 
     return {

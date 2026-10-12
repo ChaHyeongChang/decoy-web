@@ -105,8 +105,9 @@ export interface ExitRuntime {
   progress: number;
 }
 
+/** humansLeft: 빠른 매칭에서 사람이 모두 나가 봇만 남음 (무효, 출시 전 검토) */
 export type MatchOutcomeReason =
-  'escaped' | 'deaths' | 'allImprisoned' | 'noFreeSurvivors' | 'timeout' | 'monsterLeft';
+  'escaped' | 'deaths' | 'allImprisoned' | 'noFreeSurvivors' | 'timeout' | 'monsterLeft' | 'humansLeft';
 
 export interface MatchEnd {
   winner: 'survivors' | 'monster' | 'void';

@@ -3,7 +3,8 @@
 //   생존자 2명 이상 사망 → 괴물 승리
 //   3명 동시 수감, 또는 넓혀서 "탈출 2명 미만인데 자유 생존자 0명" → 괴물 승리
 //   12분 경과 → 탈출 못 한 생존자 사망 처리 후 판정 (= 괴물 승리)
-//   괴물이 재접속 유예 안에 돌아오지 않음 → 무효
+//   괴물이 재접속 유예 안에 돌아오지 않음 · 판 중 나가기 → 무효 (최후의 30초 중이면 생존자 승리, 출시 전 검토)
+//   빠른 매칭에서 사람이 모두 나감 → 무효 (room.ts)
 // 판정 순서: 생존자 승리를 먼저, 그다음 괴물 승리
 import { countdown, type MatchResult, type PlayerRecord, type ResultGrade, type TextId } from '../../index';
 import type { Game } from '../game';
