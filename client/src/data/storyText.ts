@@ -164,7 +164,7 @@ export const UI_TEXT = {
   quickCount: '{n}/4명',
   quickAutoStart: '{n}초 뒤 빈자리를 봇으로 채워 시작해요 (4명이 모이면 바로)',
   quickStarting: '곧 시작해요',
-  quickHumansOnly: '사람만 기다리는 중 — 4명이 모이면 시작해요',
+  quickHumansOnly: '서버가 붐벼 사람을 기다리는 중 — 다른 판이 끝나 봇 자리가 나거나 4명이 모이면 시작해요',
   quickPickHint: '역할을 고르지 않으면 남은 역할 중 하나로 시작해요',
   quickCancel: '취소',
   quickDropped: '대기열에서 빠졌어요',

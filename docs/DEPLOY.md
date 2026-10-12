@@ -120,7 +120,7 @@ docker run -d --name decoy --restart unless-stopped -p 80:8080 decoy-web
 | `PORT` | `10000` | 서버는 `PORT` 환경 변수로 뜬다. Render 웹 서비스 기본값을 적어 둔다 |
 | `TWA_PACKAGE_NAME` · `TWA_SHA256_FINGERPRINTS` | 값 없음 (`sync: false`, 대시보드에서 넣는다) | 안드로이드 앱이 주소창 없이 열리게 하는 `/.well-known/assetlinks.json`(M14). 비어 있으면 404. 넣는 때와 값은 `docs/PLAY_STORE_GUIDE.md` 8단계 |
 | `PRIVACY_CONTACT` | 값 없음 (`sync: false`, 대시보드에서 넣는다) | 개인정보 처리방침(`/privacy`, M15)의 문의처. 비어 있으면 "스토어의 개발자 연락처로 문의" |
-| `DECOY_MAX_BOT_ROOMS` | (넣지 않음 — 기본 6) | 빠른 매칭에서 동시에 봇을 채울 방 수(M13c). 유료 플랜이면 늘려도 된다 |
+| `DECOY_MAX_BOT_ROOMS` | 무료 플랜: 넣지 않음(기본 2) · **Starter로 바꾸면 `16`** | 빠른 매칭에서 동시에 봇을 채울 방 수(M13c, 출시 전 검토에서 6 → 2). CPU 할당량 흉내 실측(DECISIONS 5절)에서 무료(CPU 0.1개)는 봇 방 3개부터 끊겼고, Starter(CPU 0.5개)는 코어가 2배 느리다고 쳐도 16개까지 여유가 있었다. 넘은 방은 '사람만 기다리는 중'으로 다른 판이 끝나기를 기다린다 |
 | `DECOY_DEV_BOTS` | **넣지 않는다** | 개발용 봇 방(`?bots=1`)을 켠다. 이 방은 봇 방 상한 밖이라 배포 서버에서 켜면 연결 하나가 봇 판을 계속 만들 수 있다 |
 
 환경 변수는 Render 대시보드 → 서비스 → **Environment**에서 넣는다. **저장하면 서버가 다시 배포되어 열려 있던 방이 사라진다** — 아무도 없을 때 넣는다.

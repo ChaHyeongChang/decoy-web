@@ -6,6 +6,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
+import { MAX_BOT_ROOMS_ENV } from '../../server/src/config';
 import { PRIVACY_CONTACT_ENV, PRIVACY_PATHS } from '../../server/src/privacy';
 import { ASSETLINKS_PATH, TWA_FINGERPRINTS_ENV, TWA_PACKAGE_ENV } from '../../server/src/wellKnown';
 
@@ -94,13 +95,20 @@ describe('PLAY_STORE_GUIDE.md', () => {
   });
 
   it('적힌 환경 변수 이름 · 경로가 서버 코드와 같다', () => {
-    for (const name of [TWA_PACKAGE_ENV, TWA_FINGERPRINTS_ENV, PRIVACY_CONTACT_ENV])
+    for (const name of [TWA_PACKAGE_ENV, TWA_FINGERPRINTS_ENV, PRIVACY_CONTACT_ENV, MAX_BOT_ROOMS_ENV])
       expect(GUIDE, name).toContain(`\`${name}\``);
     expect(GUIDE).toContain(`\`${ASSETLINKS_PATH}\``);
     expect(GUIDE).toContain(`/privacy`);
     expect(PRIVACY_PATHS).toContain('/privacy');
     // 안내서에 적힌 대문자 환경 변수 이름은 모두 서버가 읽는 것이다 (오타 방지)
-    const known = new Set([TWA_PACKAGE_ENV, TWA_FINGERPRINTS_ENV, PRIVACY_CONTACT_ENV, 'PORT', 'NODE_ENV']);
+    const known = new Set([
+      TWA_PACKAGE_ENV,
+      TWA_FINGERPRINTS_ENV,
+      PRIVACY_CONTACT_ENV,
+      MAX_BOT_ROOMS_ENV,
+      'PORT',
+      'NODE_ENV',
+    ]);
     const mentioned = [...GUIDE.matchAll(/`([A-Z][A-Z0-9]*_[A-Z0-9_]+)`/g)].map((m) => m[1] ?? '');
     expect(mentioned.filter((n) => !known.has(n))).toEqual([]);
   });

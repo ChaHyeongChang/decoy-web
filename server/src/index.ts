@@ -250,7 +250,10 @@ setInterval(() => core.advance(performance.now()), core.tickMs / 4);
 httpServer.listen(options.port, options.host, () => {
   const lag = options.lag > 0 ? ` (지연 ${options.lag}ms)` : '';
   const hooks = (options.testHooks ? ' [테스트 훅]' : '') + (options.devBots ? ' [개발용 봇 방]' : '');
-  console.log(`DECOY 서버 시작: http://localhost:${actualPort()}${lag}${hooks}`);
+  // 봇 방 상한은 Render 로그에서 환경 변수(DECOY_MAX_BOT_ROOMS)가 들어갔는지 확인하라고 같이 찍는다
+  console.log(
+    `DECOY 서버 시작: http://localhost:${actualPort()}${lag}${hooks} (빠른 매칭 봇 방 상한 ${options.maxBotRooms})`,
+  );
 });
 
 // 종료 신호: 컨테이너에서 PID 1로 돌면 Node가 SIGTERM · SIGINT를 기본 처리하지 않으므로 직접 끝낸다

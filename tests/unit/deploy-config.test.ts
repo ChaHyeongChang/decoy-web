@@ -76,7 +76,10 @@ describe('서버 포트 · 주소 옵션', () => {
     expect(parseOptions([], { PORT: 'abc' }).port).toBe(8080);
   });
 
-  it('동시 봇 방 상한 (M13c): 기본값, DECOY_MAX_BOT_ROOMS · --max-bot-rooms로 바꾸고, 잘못된 값은 기본값 · 음수는 0', () => {
+  it('동시 봇 방 상한 (M13c, 출시 전 검토 2): 기본값, DECOY_MAX_BOT_ROOMS · --max-bot-rooms로 바꾸고, 잘못된 값은 기본값 · 음수는 0', () => {
+    // 무료 플랜(render.yaml plan: free) 기준값: CPU 0.1개 할당량 흉내 실측에서 봇 방 3개부터 끊겼다(출시 전 검토, DECISIONS 5절).
+    // Starter로 바꾸면 Render 환경 변수 DECOY_MAX_BOT_ROOMS로 올린다 — 기본값을 올리지 않는다
+    expect(DEFAULT_MAX_BOT_ROOMS).toBe(2);
     expect(parseOptions([], {}).maxBotRooms).toBe(DEFAULT_MAX_BOT_ROOMS);
     expect(parseOptions([], { DECOY_MAX_BOT_ROOMS: '12' }).maxBotRooms).toBe(12);
     expect(parseOptions(['--max-bot-rooms=3'], { DECOY_MAX_BOT_ROOMS: '12' }).maxBotRooms).toBe(3);

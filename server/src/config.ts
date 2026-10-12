@@ -14,12 +14,16 @@ export const BUILD_ID_FILE = 'build-id.json';
 /** 테스트 훅 /test/stall이 붙잡을 수 있는 최대 시간 (ms) */
 export const MAX_STALL_MS = 60_000;
 /**
- * 동시에 봇을 채워 판을 할 수 있는 빠른 매칭 방 수 (M13c). 실전 봇 방 하나의 비용을 재서 "빠른 매칭 봇 방 비용 ≤ Render
- * 무료 CPU(0.1개)의 50%"로 정했다: 방 하나가 판 1초에 CPU 약 2.5ms(scripts/measure-bot-rooms.ts), 코어 속도 2배 여유
- * (측정 · 계산은 DECISIONS M13c). 넘으면 그 방은 "사람만 기다리는 중". --max-bot-rooms · DECOY_MAX_BOT_ROOMS로 바꾼다(유료 플랜).
- * 세는 것은 빠른 매칭 봇 방뿐이다: 기기 안 연습은 서버를 쓰지 않고, 개발용 봇 방(?bots=1)은 배포 서버에서 꺼져 있다(devBots)
+ * 동시에 봇을 채워 판을 할 수 있는 빠른 매칭 방 수 (M13c → 출시 전 검토에서 6 → 2). Render 무료(CPU 0.1개)를 CFS 할당량
+ * (100ms 주기에 10ms)으로 흉내 내고 실제 서버에 사람 흉내 WebSocket 클라이언트를 붙여 잰 값이다: 봇 방 6개는 스냅샷 간격
+ * 최대 300~500ms · 판 시간 유실 분당 0.3~0.5초로 끊겼고, 봇 방만이면 2~3, 친구 방이 함께면 1~2가 경계였다(DECISIONS 5절).
+ * 넘으면 그 방은 "사람만 기다리는 중". Starter(CPU 0.5개)로 바꾸면 Render 환경 변수 DECOY_MAX_BOT_ROOMS=16(같은 측정에서
+ * 코어 2배 느림을 흉내 내도 통과). 세는 것은 빠른 매칭 봇 방뿐이다: 기기 안 연습은 서버를 쓰지 않고, 개발용 봇 방(?bots=1)은
+ * 배포 서버에서 꺼져 있다(devBots)
  */
-export const DEFAULT_MAX_BOT_ROOMS = 6;
+export const DEFAULT_MAX_BOT_ROOMS = 2;
+/** 동시 봇 방 상한을 바꾸는 환경 변수 (Render 대시보드, PLAY_STORE_GUIDE 10단계 · DEPLOY 환경 변수 표) */
+export const MAX_BOT_ROOMS_ENV = 'DECOY_MAX_BOT_ROOMS';
 
 export interface ServerOptions {
   port: number;
@@ -73,7 +77,7 @@ export function parseOptions(argv: string[], env: NodeJS.ProcessEnv): ServerOpti
     truthLogPath: argValue(argv, 'truth-log') ?? null,
     maxBotRooms: Math.max(
       0,
-      Math.floor(num(argValue(argv, 'max-bot-rooms') ?? env.DECOY_MAX_BOT_ROOMS, DEFAULT_MAX_BOT_ROOMS)),
+      Math.floor(num(argValue(argv, 'max-bot-rooms') ?? env[MAX_BOT_ROOMS_ENV], DEFAULT_MAX_BOT_ROOMS)),
     ),
   };
 }
