@@ -1,13 +1,14 @@
 // M13d 서비스 워커 결정표: client/public/sw.js를 node:vm에서 가짜 캐시 · fetch · 타이머로 돌린다
 //  서버 응답 / 오프라인 → 앱 셸 / 5초 초과 → wake.html / 표시 없는 응답 → wake.html / ?practice=1 캐시 먼저 /
-//  자산 캐시 우선 / 제외 경로 / JS 자리에 HTML이 오면 설치 실패 / 빌드 헤더가 다르면 설치 실패 /
-//  새 빌드면 옛 decoy-shell-*만 정리 / dist의 새 파일이 셸 목록에 자동 포함
+//  /privacy 네트워크 먼저 + 같은 빌드면 셸 사본 갱신, 실패 · 느림 · 표시 없음이면 셸 사본 /
+//  자산 캐시 우선 / 제외 경로 / JS 자리에 HTML이 오면 설치 실패 / 빌드 헤더가 다르면 설치 실패 / 사전 캐시는 'no-cache' 재검증 /
+//  새 빌드면 옛 decoy-shell-*만 정리 / dist의 새 파일이 셸 목록에 자동 포함(icons/ 제외)
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import vm from 'node:vm';
 import { describe, expect, it } from 'vitest';
-import { SHELL_EXCLUDE, listShellFiles, swWithBuild } from '../../client/shellBuild';
+import { SHELL_EXCLUDE, SHELL_EXCLUDE_PREFIX, listShellFiles, swWithBuild } from '../../client/shellBuild';
 
 const ORIGIN = 'https://decoy.test';
 const SW_SOURCE = readFileSync('client/public/sw.js', 'utf8');
@@ -85,11 +86,15 @@ function serverResponse(url: string, build: string, body = 'ok', type?: string):
 interface Worker {
   caches: FakeCaches;
   netCalls: string[];
+  /** 네트워크로 간 요청의 경로와 HTTP 캐시 방식 (Request.cache) */
+  netModes: { path: string; cache: RequestCache }[];
   setRoute(r: Route): void;
   install(): Promise<void>;
   activate(): Promise<void>;
   /** fetch 이벤트: 가로채면 응답, 아니면 null */
   fetch(url: string, mode?: 'navigate' | 'no-cors'): Promise<Response | null>;
+  /** fetch 이벤트들이 waitUntil로 맡긴 뒷일(늦은 응답 · 사본 갱신)이 모두 끝날 때까지 */
+  settle(): Promise<void>;
   /** 걸려 있는 setTimeout(5초 대기)을 모두 실행 */
   fireTimers(): void;
 }
@@ -97,9 +102,12 @@ interface Worker {
 function loadWorker(build: string | null, shell: readonly string[] = SHELL, shared?: FakeCaches): Worker {
   const handlers = new Map<string, Handler>();
   const netCalls: string[] = [];
+  const netModes: { path: string; cache: RequestCache }[] = [];
+  const pendingWork: Promise<unknown>[] = [];
   let route: Route = (req) => serverResponse(req.url, build ?? 'none');
   const fetcher = async (req: Request): Promise<Response> => {
     netCalls.push(new URL(req.url).pathname + new URL(req.url).search);
+    netModes.push({ path: new URL(req.url).pathname, cache: req.cache });
     return route(req);
   };
   const caches = shared ?? new FakeCaches(fetcher);
@@ -136,6 +144,7 @@ function loadWorker(build: string | null, shell: readonly string[] = SHELL, shar
   return {
     caches,
     netCalls,
+    netModes,
     setRoute: (r) => {
       route = r;
     },
@@ -153,9 +162,12 @@ function loadWorker(build: string | null, shell: readonly string[] = SHELL, shar
         respondWith: (p: Promise<Response>) => {
           responded = p;
         },
-        waitUntil: () => {},
+        waitUntil: (p: Promise<unknown>) => pendingWork.push(p),
       });
       return responded;
+    },
+    settle: async () => {
+      await Promise.all(pendingWork.splice(0));
     },
   };
 }
@@ -195,6 +207,15 @@ describe('앱 셸 사전 캐시 (설치)', () => {
     await expect(missing.install()).rejects.toThrow(/index-a1\.css/);
   });
 
+  it("사전 캐시는 'no-cache'(조건부 재검증)로 받는다 — 페이지가 방금 받은 파일을 'reload'로 다시 받지 않게", async () => {
+    const w = loadWorker('b1');
+    await w.install();
+    const shellPaths = new Set(SHELL.map((p) => `/${p}`));
+    const precache = w.netModes.filter((m) => shellPaths.has(m.path));
+    expect(precache.map((m) => m.path).sort()).toEqual([...shellPaths].sort());
+    for (const m of precache) expect(m.cache, m.path).toBe('no-cache');
+  });
+
   it('빌드하지 않은 원본(BUILD null)은 셸 없이 깨우기 화면만', async () => {
     const w = loadWorker(null);
     await w.install();
@@ -228,16 +249,15 @@ describe('페이지 이동 세 갈래', () => {
 
   it('5초 넘게 답이 없으면 깨우기 화면', async () => {
     const w = await installed();
+    // 앱 셸(index.html, 본문 'ok')과 구별되게 깨우기 화면 본문을 바꿔 둔다
+    await w.caches.caches
+      .get('decoy-wake-v2')
+      ?.put(`${ORIGIN}/wake.html`, new Response('WAKE', { headers: { 'content-type': 'text/html' } }));
     w.setRoute(() => new Promise<Response>(() => {}));
     const pending = w.fetch('/');
     await new Promise((r) => setTimeout(r, 5));
     w.fireTimers();
-    const res = await pending;
-    expect(res?.url === '' || res !== null).toBe(true);
-    expect(await text(res)).toBe('ok');
-    // 깨우기 캐시의 응답이다 (wake.html은 설치 때 받은 것)
-    const wake = await w.caches.caches.get('decoy-wake-v2')?.match(`${ORIGIN}/wake.html`);
-    expect(wake).toBeDefined();
+    expect(await text(await pending)).toBe('WAKE');
   });
 
   it('표시 없는 응답(잠든 Render의 503 대기 화면)이면 깨우기 화면, 앱 셸이 아니다', async () => {
@@ -267,6 +287,78 @@ describe('페이지 이동 세 갈래', () => {
     for (const p of ['/ws', '/healthz', '/test/state?room=AB', '/.well-known/assetlinks.json'])
       expect(await w.fetch(p, 'no-cors'), p).toBeNull();
     for (const p of ['/healthz', '/test/stall']) expect(await w.fetch(p), p).toBeNull();
+  });
+});
+
+describe('처리방침 /privacy (네트워크 먼저 + 셸 사본)', () => {
+  /** b1로 설치(처리방침 본문 CONTACT=default)한 워커 */
+  async function installedPrivacy(): Promise<Worker> {
+    const w = loadWorker('b1', [...SHELL, 'privacy.html']);
+    w.setRoute((req) =>
+      serverResponse(req.url, 'b1', req.url.endsWith('/privacy.html') ? 'CONTACT=default' : 'ok'),
+    );
+    await w.install();
+    return w;
+  }
+
+  /** 서버가 같은 빌드 b1에서 이 본문을 낸다 (/privacy · /privacy.html 모두) */
+  const privacyServer =
+    (body: string, build = 'b1'): Route =>
+    (req) =>
+      serverResponse(req.url, build, body, 'text/html; charset=utf-8');
+
+  async function shellCopy(w: Worker): Promise<string> {
+    return text((await w.caches.caches.get('decoy-shell-b1')?.match(`${ORIGIN}/privacy.html`)) ?? null);
+  }
+
+  it('같은 빌드에서 문의처만 바뀌면(환경 변수만 바꾼 재배포) 그 열람에 새 본문, 셸 사본도 새 본문 → 오프라인이면 갱신된 사본', async () => {
+    const w = await installedPrivacy();
+    expect(await shellCopy(w)).toBe('CONTACT=default');
+    w.setRoute(privacyServer('CONTACT=me@x.y'));
+    expect(await text(await w.fetch('/privacy'))).toBe('CONTACT=me@x.y');
+    await w.settle();
+    expect(await shellCopy(w)).toBe('CONTACT=me@x.y');
+    w.setRoute(() => Promise.reject(new TypeError('offline')));
+    expect(await text(await w.fetch('/privacy'))).toBe('CONTACT=me@x.y');
+    expect(await text(await w.fetch('/privacy.html'))).toBe('CONTACT=me@x.y');
+  });
+
+  it('다른 빌드 · 오류 응답은 그대로 보여 주되 셸 사본을 바꾸지 않는다', async () => {
+    const w = await installedPrivacy();
+    w.setRoute(privacyServer('CONTACT=new-build', 'b2'));
+    expect(await text(await w.fetch('/privacy'))).toBe('CONTACT=new-build');
+    // 이 서버 · 같은 빌드지만 오류 응답
+    w.setRoute(
+      () =>
+        new Response('oops', {
+          status: 500,
+          headers: { 'content-type': 'text/html', 'x-decoy-server': '1', 'x-decoy-build': 'b1' },
+        }),
+    );
+    expect(await text(await w.fetch('/privacy'))).toBe('oops');
+    await w.settle();
+    expect(await shellCopy(w)).toBe('CONTACT=default');
+  });
+
+  it('실패 · 5초 넘게 답 없음 · 표시 없는 응답이면 깨우기 화면이 아니라 셸 사본', async () => {
+    const w = await installedPrivacy();
+    await w.caches.caches
+      .get('decoy-wake-v2')
+      ?.put(`${ORIGIN}/wake.html`, new Response('WAKE', { headers: { 'content-type': 'text/html' } }));
+    // 표시 없는 응답 (잠든 Render의 대기 화면)
+    w.setRoute(() => new Response('Service waking up', { status: 503 }));
+    expect(await text(await w.fetch('/privacy'))).toBe('CONTACT=default');
+    // 네트워크 실패
+    w.setRoute(() => Promise.reject(new TypeError('offline')));
+    expect(await text(await w.fetch('/privacy'))).toBe('CONTACT=default');
+    await w.settle();
+    expect(await shellCopy(w)).toBe('CONTACT=default');
+    // 5초 넘게 답이 없다 (끝나지 않는 요청이라 뒷일은 기다리지 않는다)
+    w.setRoute(() => new Promise<Response>(() => {}));
+    const pending = w.fetch('/privacy');
+    await new Promise((r) => setTimeout(r, 5));
+    w.fireTimers();
+    expect(await text(await pending)).toBe('CONTACT=default');
   });
 });
 
@@ -302,7 +394,7 @@ describe('자산 · 업데이트', () => {
 });
 
 describe('셸 목록 만들기 (Vite 플러그인)', () => {
-  it('dist의 모든 파일(새 파일 포함)이 들어가고 sw.js · wake.html · build-id.json은 빠진다', () => {
+  it('dist의 모든 파일(새 파일 포함)이 들어가고 sw.js · wake.html · build-id.json · icons/는 빠진다', () => {
     const dir = mkdtempSync(join(tmpdir(), 'decoy-dist-'));
     try {
       for (const f of ['index.html', 'sw.js', 'wake.html', 'build-id.json', 'logo.svg'])
@@ -311,15 +403,19 @@ describe('셸 목록 만들기 (Vite 플러그인)', () => {
       mkdirSync(join(dir, 'icons'));
       writeFileSync(join(dir, 'assets', 'index-a.js'), 'x');
       writeFileSync(join(dir, 'icons', 'icon-192.png'), 'x');
+      writeFileSync(join(dir, 'icons', 'maskable-512.png'), 'x');
       writeFileSync(join(dir, 'privacy.html'), 'x');
+      writeFileSync(join(dir, 'manifest.webmanifest'), 'x');
       expect(listShellFiles(dir)).toEqual([
         'assets/index-a.js',
-        'icons/icon-192.png',
         'index.html',
         'logo.svg',
+        'manifest.webmanifest',
         'privacy.html',
       ]);
       expect(SHELL_EXCLUDE).toEqual(['sw.js', 'wake.html', 'build-id.json']);
+      // manifest 아이콘은 화면 · 오프라인 진입이 쓰지 않는다 (설치 때 브라우저 · OS가 받고, TWA는 APK 안의 것)
+      expect(SHELL_EXCLUDE_PREFIX).toEqual(['icons/']);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
