@@ -1,7 +1,7 @@
 // M11 터치 기능 시험 (MOBILE_PLAN M11 자동 검증 'E2E m11-touch'): 휴대폰 가로 에뮬레이션(기능 시험은 기기 배율 1)에서
 // 감지 · 멀티터치(왼쪽 이동 + 오른쪽 조준, 조준 스틱만 떼면 공격 1번) · 오입력 회귀 · 버튼 → 입력 비트(돌진 · 포효 ·
 // 시야 · 능력 · 구조) · 손가락이 사라질 때(pointercancel · blur) · 터치 대상 크기와 자리 ·
-// 브라우저 기본 동작 막기 · 세로 안내 · 전체 화면 호출 시점 · 결과 화면 레이어 · 오디오 열기.
+// 브라우저 기본 동작 막기 · 세로 안내 · 전체 화면 호출 시점 · 결과 화면 레이어(버튼 크기 · 간격) · 새 버전 띠 · 오디오 열기.
 // 혼자 봇 방(?bots=1)에서 판을 시작해 빠르게 돈다. 판정은 서버 정답(/test/state, 틱마다 쓰는 정답 기록 truth.jsonl)으로 본다.
 // 느린 CI 대비: 간격 폴링(100~200ms), 시간 창은 고정 sleep 대신 입력 프레임 수 · 서버 틱 수로 재고, 시간이 지나 바뀌는 판 상태
 // (괴물 위치 · 대기)는 시험 동작 직전에 시험 명령으로 다시 맞춘다
@@ -10,6 +10,7 @@ import { expect, test, type Browser, type BrowserContext, type Page } from '@pla
 import { BTN, RESCUE_POINT, angleDiff, type InputLogEntry, type Role } from '@decoy/shared';
 import { TOUCH } from '../../client/src/touchInput';
 import {
+  BASE_QUERY,
   LANDSCAPE_DEVICES,
   PC_NARROW,
   PHONE_LANDSCAPE,
@@ -1451,6 +1452,55 @@ test('결과 화면: 터치 화면이 꺼지고 입력이 없으며, 버튼은 4
   await t.detach();
   expect(s.problems).toEqual([]);
   await s.context.close();
+});
+
+// ───────────── 새 버전 띠 (M13d) ─────────────
+
+/** 서버가 보내는 빌드 ID(pong · welcome)만 바꿔 전한다 → 화면이 "새 버전이 있어요" 띠를 띄운다 (빌드를 둘 만들지 않고) */
+async function fakeNewServerBuild(page: Page): Promise<void> {
+  await page.routeWebSocket(/\/ws$/, (ws) => {
+    const server = ws.connectToServer();
+    // 어느 쪽이 먼저 닫히든 중계를 멈춘다 (닫힌 소켓에 보내면 페이지 콘솔 에러가 난다)
+    let open = true;
+    ws.onMessage((m) => {
+      if (open) server.send(m);
+    });
+    server.onMessage((m) => {
+      if (!open) return;
+      const relabel = typeof m === 'string' && /^\{"t":"(pong|welcome)"/.test(m);
+      ws.send(relabel ? m.replace(/"build":"[^"]*"/, '"build":"e2e-newer-build"') : m);
+    });
+    ws.onClose(() => {
+      open = false;
+      void server.close();
+    });
+    server.onClose(() => {
+      open = false;
+      void ws.close();
+    });
+  });
+}
+
+test('새 버전 띠: 손가락 화면에서 새로고침 버튼이 48px 이상이고, 판 중(body.in-match)에는 숨어 판 화면을 가리지 않는다', async ({
+  browser,
+}) => {
+  const { context, page, problems } = await newPlayerPage(browser, PHONE);
+  await fakeNewServerBuild(page);
+  await page.goto(`/?${BASE_QUERY.slice(1)}`);
+  const banner = page.getByTestId('update-available');
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText('새 버전이 있어요');
+  const btn = (await banner.getByRole('button').boundingBox())!;
+  expect(btn.height, '새로고침 버튼 높이').toBeGreaterThanOrEqual(48 - 0.05);
+  // 판 중에는 숨는다: 판이 시작되면 App.setPlaying이 body에 in-match를 단다(검토 반영 F08). 여기서는 그 표시에 대한
+  // CSS 약속만 본다 — 실제 판 흐름은 앱 쪽 시험이 본다
+  await page.evaluate(() => document.body.classList.add('in-match'));
+  await expect(banner).toBeHidden();
+  // 판이 끝나면(결과 · 첫 화면 · 방 화면) 다시 보인다 — 새로고침하기 좋은 때
+  await page.evaluate(() => document.body.classList.remove('in-match'));
+  await expect(banner).toBeVisible();
+  expect(problems).toEqual([]);
+  await context.close();
 });
 
 // ───────────── 오디오 ─────────────

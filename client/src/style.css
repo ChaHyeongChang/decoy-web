@@ -640,6 +640,11 @@ select {
   min-height: 40px;
   padding: 0 14px;
 }
+/* 판 중에는 숨긴다 (검토 반영 F08): 남은 시간 · 거점 게이지(PC)와 맵 위쪽 · 경고 줄(휴대폰)을 가리지 않게.
+   판이 시작되면 App.setPlaying이 body에 in-match를 달고, 결과 · 첫 화면 · 방 화면에서 다시 보인다 */
+.in-match .update-banner {
+  display: none;
+}
 /* 빠른 매칭 대기 (M13c): 위 띠의 초대 패널 자리에 제목 · 인원 · 남은 시간 */
 .quick-head {
   display: flex;
@@ -1611,7 +1616,8 @@ select {
   .invite-link .btn,
   .invite-link .field,
   .lobby-actions .btn,
-  .result-foot .btn {
+  .result-foot .btn,
+  .update-banner .btn {
     min-height: 48px;
   }
   .field input,
