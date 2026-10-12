@@ -94,6 +94,27 @@ describe('방과 로비', () => {
     expect(snap.you.id).toBe(seats[1]!.id);
   });
 
+  // 출시 전 검토: 내용 없는 메시지마다 모든 자리에 lobby를 다시 보내던 문제 (같은 내용 거르기를 판 중에만 했다)
+  it('로비에서 같은 이름 · 남이 가진 역할 · 시작 실패는 다른 사람에게 lobby를 다시 보내지 않고, 요청한 사람에게만 답한다', () => {
+    const { room, seats, conns } = setupRoom();
+    room.sendLobby();
+    room.handle(seats[1]!, { t: 'role', role: 'monster' }, 0);
+    const before = conns.map((c) => c.count('lobby'));
+    for (let i = 0; i < 50; i += 1) {
+      room.handle(seats[0]!, { t: 'name', name: seats[0]!.name }, 0);
+      room.handle(seats[0]!, { t: 'role', role: 'monster' }, 0);
+      // 방장이지만 아무도 준비하지 않아 시작은 거절된다
+      room.handle(seats[0]!, { t: 'start' }, 0);
+    }
+    expect(room.phase).toBe('lobby');
+    for (let i = 1; i < 4; i += 1) expect(conns[i]!.count('lobby')).toBe(before[i]);
+    expect(conns[0]!.count('lobby') - before[0]!).toBeGreaterThanOrEqual(100);
+    // 실제로 바뀌면 모두에게 간다
+    room.handle(seats[0]!, { t: 'name', name: '새 이름' }, 0);
+    for (let i = 1; i < 4; i += 1) expect(conns[i]!.count('lobby')).toBe(before[i]! + 1);
+    expect(conns[1]!.last('lobby')?.lobby.players[0]?.name).toBe('새 이름');
+  });
+
   it('방장이 나가고 유예가 지나면 다음 사람이 방장이 된다', () => {
     const { room, seats } = setupRoom();
     room.detach(seats[0]!, 0);

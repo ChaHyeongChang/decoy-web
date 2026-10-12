@@ -220,7 +220,7 @@ export class Room {
       balanceHash: this.balanceHash,
       build: this.config.buildId ?? null,
     });
-    this.sendLobby();
+    this.sendLobby(seat);
     if (this.phase === 'playing' && this.game) seat.conn?.send({ t: 'match', info: this.matchInfo(seat) });
     if (this.phase === 'result' && this.lastResult) seat.conn?.send(this.resultFor(seat, this.lastResult));
   }
@@ -279,14 +279,19 @@ export class Room {
     };
   }
 
-  sendLobby(): void {
+  /**
+   * 자리마다 로비를 보낸다. 받는 사람에게 갈 내용이 지난번과 같으면 어느 단계든 보내지 않는다:
+   *  - 판 중: 괴물에게 "생존자 누군가 끊김 · 재접속"이 메시지 도착 자체로 새지 않게
+   *  - 로비: 내용 없는 메시지(같은 이름 · 거절된 역할 · 빠른 매칭 start)를 되풀이해 남의 대기 화면을 흔들지 못하게 (출시 전 검토)
+   * force(요청한 사람)에게는 같아도 보낸다: 거절된 요청에 지금 상태로 답한다. 재접속은 attach가 lastLobby를 비운다
+   */
+  sendLobby(force?: Seat): void {
     const full = this.lobbyState();
     for (const s of this.seats) {
       if (!s.conn) continue;
       const lobby = this.lobbyFor(s, full);
       const json = JSON.stringify(lobby);
-      // 판 중에는 내용이 같으면 보내지 않는다: 괴물에게 "생존자 누군가 끊김 · 재접속"이 메시지 도착 자체로 새지 않게
-      if (this.phase === 'playing' && json === s.lastLobby) continue;
+      if (s !== force && json === s.lastLobby) continue;
       s.lastLobby = json;
       s.conn.send({ t: 'lobby', lobby });
     }
@@ -353,28 +358,29 @@ export class Room {
         const role = msg.role;
         if (role !== null && !ALL_ROLES.includes(role)) return;
         if (role !== null && this.seats.some((s) => s !== seat && s.role === role)) {
-          this.sendLobby();
+          // 거절: 요청한 사람에게만 지금 상태로 답한다 (다른 사람에게는 바뀐 것이 없다)
+          this.sendLobby(seat);
           return;
         }
         seat.role = role;
         seat.ready = false;
-        this.sendLobby();
+        this.sendLobby(seat);
         return;
       }
       case 'ready':
         // 빠른 매칭에는 준비가 없다
         if (this.phase !== 'lobby' || this.kind === 'quick') return;
         seat.ready = msg.ready && seat.role !== null;
-        this.sendLobby();
+        this.sendLobby(seat);
         return;
       case 'name':
         seat.name = cleanName(msg.name) || seat.name;
-        this.sendLobby();
+        this.sendLobby(seat);
         return;
       case 'start':
         if (seat.id !== this.hostId) return;
         if (!this.startCheck().ok) {
-          this.sendLobby();
+          this.sendLobby(seat);
           return;
         }
         this.startMatch();

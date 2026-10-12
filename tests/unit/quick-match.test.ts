@@ -201,6 +201,42 @@ describe('빠른 매칭: 대기열 · 자동 시작', () => {
     expect(quickRoom.seats).toHaveLength(1);
   });
 
+  // 출시 전 검토: 대기 방에 들어온 모르는 사람이 내용 없는 메시지를 되풀이해 다른 사람 대기 화면에 lobby를 쏟아붓던 문제
+  // (받을 때마다 화면을 다시 그려 역할 카드 · 취소를 누를 수 없었다). 같은 내용은 어느 단계든 다시 보내지 않는다
+  it('같은 이름 · 남이 가진 역할 · start를 100번씩 보내도 다른 사람에게 lobby가 다시 가지 않고, 실제로 바뀌면 간다', () => {
+    const { core, client } = setup();
+    // 흔드는 쪽이 먼저 들어와 방장이다 (빠른 매칭에는 방장 시작이 없어 start는 늘 거절된다)
+    const b = client('흔들기');
+    const a = client('기다림');
+    quick(b);
+    quick(a);
+    const room = roomOf(core, a);
+    expect(roomOf(core, b)).toBe(room);
+    expect(room.hostId).toBe(b.conn.last('welcome')?.you);
+    a.link.receive(raw({ t: 'role', role: 'monster' }));
+    const aBefore = a.conn.count('lobby');
+    const bBefore = b.conn.count('lobby');
+    for (let i = 0; i < 100; i += 1) {
+      b.link.receive(raw({ t: 'name', name: b.name }));
+      b.link.receive(raw({ t: 'role', role: 'monster' }));
+      b.link.receive(raw({ t: 'start' }));
+    }
+    // 빠른 매칭에서 남의 이름은 익명이라, b가 이름을 바꿔도 a가 받을 내용은 같다
+    b.link.receive(raw({ t: 'name', name: '새이름' }));
+    expect(a.conn.count('lobby')).toBe(aBefore);
+    expect(room.phase).toBe('lobby');
+    // 요청한 사람에게는 늘 답한다 (거절된 역할 · 시작 → 지금 상태로 화면을 되돌린다)
+    expect(b.conn.count('lobby') - bBefore).toBeGreaterThanOrEqual(200);
+    expect(room.seats.find((s) => s.name === '새이름')?.role).toBeNull();
+    // 실제로 바뀌면 간다
+    b.link.receive(raw({ t: 'role', role: 'guard' }));
+    expect(a.conn.count('lobby')).toBe(aBefore + 1);
+    const aId = a.conn.last('welcome')?.you;
+    const other = a.conn.last('lobby')?.lobby.players.find((p) => p.id !== aId);
+    expect(other?.role).toBe('guard');
+    expect(other?.name).toMatch(/^플레이어 [1-4]$/);
+  });
+
   it('대기 중 나가기(숨김 · 취소)는 자리를 지운다', () => {
     const { core, client } = setup();
     const a = client('가');
