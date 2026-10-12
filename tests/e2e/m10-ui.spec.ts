@@ -242,7 +242,9 @@ test('진행 중인 판에 새로고침으로 다시 들어오면 폰트를 기�
   browser,
 }) => {
   // 서비스 워커(M13d 앱 셸)가 있으면 새로고침 때 폰트가 캐시에서 바로 와 '느린 회선'이 생기지 않는다(route도 워커가 받은
-  // 요청은 가로채지 못한다). 이 시험은 앱 셸이 아직 없는 기기 — 첫 방문 · 워커를 못 쓰는 브라우저 — 를 흉내 낸다
+  // 요청은 가로채지 못한다). 이 시험은 서비스 워커가 없거나 아직 이 페이지를 맡지 않은 기기(워커를 못 쓰는 브라우저 등)를
+  // 흉내 낸다. 실제 첫 방문(워커 설치 중)은 이것과 다를 수 있다: 페이지의 폰트 요청이 워커 사전 캐시의 같은 주소 요청이
+  // 끝날 때까지 네트워크로 나가지 않는 것을 봤다(브라우저 HTTP 캐시가 같은 주소를 하나씩 처리하는 것으로 추정, 검토 q1a)
   const { context, page, problems } = await newPlayerPage(browser, { serviceWorkers: 'block' });
   await page.goto(`/?bots=1${BASE_QUERY}`);
   await page.getByTestId('create-room').click();
