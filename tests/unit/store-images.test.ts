@@ -2,7 +2,8 @@
 //  - 휴대전화 스크린샷 4장 이상 · 각 변 320~3840 · 긴 변 ≤ 짧은 변 × 2 · 알파 없음(24비트 RGB, 색 형식 2) · 8MB 이하
 //  - 그래픽 이미지 정확히 1024×500 · 알파 없음(24비트 RGB — 알파 채널이 있으면 화소가 모두 불투명이어도 거절될 수 있다) · 15MB 이하,
 //    앱 아이콘 512×512 · 1MB 이하 · 완전 불투명(32비트 PNG 허용)
-//  - 모두 git에 들어 있다(artifacts/store/는 .gitignore 예외), 장면이 서로 다르다(화소가 다름), 촬영 순간 터치 UI가 보였다(manifest.json)
+//  - 모두 git에 들어 있다(artifacts/store/는 .gitignore 예외), 장면이 서로 다르다(화소가 다름), 촬영 순간 터치 UI가 보였다(manifest.json),
+//    manifest.json의 크기 · 바이트가 지금 파일과 같다
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -18,6 +19,9 @@ const read = (f: string): Buffer => readFileSync(join(DIR, f));
 interface Shot {
   file: string;
   scene: string;
+  width: number;
+  height: number;
+  bytes: number;
   touchTargets: string[];
   renderer: string | null;
   quality: string | null;
@@ -114,6 +118,16 @@ describe('스토어 그림 (artifacts/store)', () => {
     expect(by.get('phone-4-rescue.png')?.touchTargets).toContain('rescue');
     // 기록과 파일이 맞다 (다시 찍고 기록만 옛것이 아니게)
     for (const s of manifest.shots) expect(files, s.file).toContain(s.file);
+    // 크기 · 바이트도 지금 파일과 같다 (파일만 다시 저장하고 기록은 옛 값으로 두지 않게, 검토 반영)
+    for (const s of manifest.shots) {
+      const buf = read(s.file);
+      const { width, height } = readPngInfo(buf);
+      expect({ width: s.width, height: s.height, bytes: s.bytes }, s.file).toEqual({
+        width,
+        height,
+        bytes: buf.length,
+      });
+    }
   });
 
   it('PNG 도우미(촬영 저장 경로): 불투명 RGBA를 알파 없는 RGB로 다시 쓰면 화소가 같고, 투명한 화소가 있으면 거절한다', () => {
