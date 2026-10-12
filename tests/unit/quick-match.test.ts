@@ -644,8 +644,7 @@ describe('빠른 매칭: 사람이 모두 나간 판 · 방', () => {
 
 describe('빠른 매칭: 동시 봇 방 상한', () => {
   it('상한이면 봇을 채우지 않고 "사람만 기다리는 중", 4명이 모이면 시작', () => {
-    let allow = false;
-    const { core, client, run } = setup({ canFillBots: () => allow });
+    const { core, client, run } = setup({ canFillBots: () => false });
     const a = client('가');
     quick(a);
     const room = roomOf(core, a);
@@ -659,8 +658,24 @@ describe('빠른 매칭: 동시 봇 방 상한', () => {
     run(100, [a, ...others]);
     expect(room.phase).toBe('playing');
     expect(room.seats.some((s) => s.bot)).toBe(false);
-    void allow;
+  });
+
+  it('상한이 풀리면 다음 틱에 빈자리를 봇으로 채워 시작한다 ("사람만 기다리는 중" → 봇과 판)', () => {
+    let allow = false;
+    const { core, client, run } = setup({ canFillBots: () => allow });
+    const a = client('가');
+    quick(a);
+    const room = roomOf(core, a);
+    run(WAIT_MS + 200, [a]);
+    expect(room.phase).toBe('lobby');
+    expect(a.conn.last('lobby')?.lobby).toMatchObject({ waitingFor: WAITING_HUMANS_ONLY, autoStartAt: null });
+    expect(a.conn.count('match')).toBe(0);
     allow = true;
+    run(100, [a]);
+    expect(room.phase).toBe('playing');
+    expect(room.seats.filter((s) => s.bot)).toHaveLength(3);
+    expect(a.conn.count('match')).toBe(1);
+    expect(a.conn.last('lobby')?.lobby.waitingFor).not.toBe(WAITING_HUMANS_ONLY);
   });
 });
 
