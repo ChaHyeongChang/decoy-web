@@ -4,7 +4,7 @@ import type { Duplex } from 'node:stream';
 import { performance } from 'node:perf_hooks';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { LagQueue, Rng } from '@decoy/shared';
-import { BotDriver, ServerCore, practiceBrain, truthOf, type Conn, type Room } from '@decoy/shared/sim';
+import { ServerCore, truthOf, type Conn, type Room } from '@decoy/shared/sim';
 import {
   BUILD_HEADER,
   HEALTH_PATH,
@@ -20,6 +20,7 @@ import { serveStatic } from './static';
 import { TruthLog } from './truthLog';
 import { ASSETLINKS_PATH, assetLinksFromEnv } from './wellKnown';
 import { spawnLocalBot } from './bots';
+import { createQuickBots } from './quickBots';
 
 const options = parseOptions(process.argv.slice(2), process.env);
 const balance = loadBalance(options.balancePath);
@@ -33,19 +34,9 @@ const servePrivacy = privacyHandler(options.staticDir, process.env);
 const truthLog = options.truthLogPath ? new TruthLog(options.truthLogPath) : null;
 const lagRng = new Rng(options.seed ^ 0x5bd1e995);
 
-/** 방 코드 → 정수 (한 방의 봇이 같은 시드를 쓰게) */
-function codeSeed(code: string): number {
-  let h = options.seed | 0;
-  for (let i = 0; i < code.length; i += 1) h = (Math.imul(h, 31) + code.charCodeAt(i)) | 0;
-  return h;
-}
-
-// 빠른 매칭 빈자리 봇 (M13c): 같은 프로세스 실전 봇 (기기 안 연습과 같은 두뇌 · 드라이버, 소켓 없음).
-// 한 방의 봇은 같은 시드 (생존자 봇의 점령 계획이 서로 맞물린다), 판마다 다르게 판 수를 섞는다
-const quickBots = new BotDriver(
-  (info, _seat, room) => practiceBrain(info.role, (codeSeed(room.code) + room.matchCount * 7919) | 0),
-  balance,
-);
+// 빠른 매칭 빈자리 봇 (M13c): 같은 프로세스 실전 봇 (quickBots.ts). 실전 봇 지도를 여기서(listen 전) 미리 계산한다 —
+// 서버 시작 뒤 첫 봇 판의 시작 틱 안에서 계산하지 않게 (출시 전 검토)
+const quickBots = createQuickBots(balance, options.seed);
 
 /**
  * 지금 봇을 채워 판을 하는 빠른 매칭 방 수 (동시 봇 방 상한, DECISIONS M13c). 개발용 봇 방(?bots=1)은 세지 않는다 —
