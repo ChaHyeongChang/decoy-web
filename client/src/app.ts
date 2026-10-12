@@ -528,9 +528,12 @@ export class App {
     }
   }
 
-  /** 판 중인가 (화면 꺼짐 방지 · 뒤로 가기 확인) */
+  /** 판 중인가 (화면 꺼짐 방지 · 뒤로 가기 확인 · 새 버전 띠 숨김) */
   private setPlaying(on: boolean): void {
     this.awake.set(on);
+    // 판 중에는 "새 버전이 있어요" 띠를 숨긴다(style.css .in-match): 남은 시간 · 거점 게이지 · 맵 위쪽을 가렸다.
+    // 결과 · 로비 · 첫 화면에서 다시 보인다 (검토 반영 F08)
+    document.body.classList.toggle('in-match', on);
     // 뒤로 가기 확인은 다른 사람과 함께하는 판에서만 (연습은 나가도 남에게 영향이 없다)
     if (on && !this.local) this.backGuard?.arm();
     else if (on) this.backGuard?.disarm();

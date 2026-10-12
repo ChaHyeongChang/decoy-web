@@ -51,6 +51,11 @@ async function practiceState(page: Page): Promise<{
   }));
 }
 
+/** 판 중 표시 (body.in-match: 새 버전 띠를 숨긴다) */
+async function inMatch(page: Page): Promise<boolean> {
+  return page.evaluate(() => document.body.classList.contains('in-match'));
+}
+
 async function localTruth(page: Page): Promise<TruthFrame> {
   const t = await page.evaluate(() => window.__DECOY__?.getTruth() ?? null);
   if (!t) throw new Error('기기 안 정답 없음');
@@ -85,6 +90,8 @@ test('서버 연결이 막혀도 3초 안에 상태 줄 · 봇과 연습이 보�
   await press(page.getByTestId('practice-role-runner'));
   const tapAt = blocked.attempts();
   await expect.poll(async () => (await practiceState(page)).phase, { timeout: 10_000 }).toBe('playing');
+  // 판 중에는 body에 in-match (새 버전 띠를 숨긴다, 검토 반영)
+  expect(await inMatch(page)).toBe(true);
   const st = await practiceState(page);
   expect(st.transport).toBe('local');
   expect(st.role).toBe('runner');
@@ -107,6 +114,7 @@ test('서버 연결이 막혀도 3초 안에 상태 줄 · 봇과 연습이 보�
   await page.evaluate(() => window.__DECOY__?.sendTest({ kind: 'setTime', timeLeft: 0.1 }));
   await expect(page.getByTestId('result')).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId('result-home')).toBeVisible();
+  expect(await inMatch(page)).toBe(false);
   // 다시 하기 → 같은 역할로 바로 두 번째 판
   await press(page.getByTestId('rematch'));
   await expect.poll(async () => (await practiceState(page)).phase, { timeout: 10_000 }).toBe('playing');
