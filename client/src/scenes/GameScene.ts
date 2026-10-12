@@ -250,7 +250,9 @@ export class GameScene extends Phaser.Scene {
     // 선명도 검사 글자는 판 동안 이 장면(HUD와 같은 곳)에 그린다. 장면이 끝나면 대기 장면 것으로 돌려놓는다
     const prevProbe = probeSlot.draw;
     probeSlot.draw = (text, x, y, px) => drawProbeText(this, text, x, y, px);
-    sessionAutoDowngrade.beginMatch(performance.now());
+    // 판 중 측정은 온라인 · 연습을 따로 재고 기억한다 (기기 안 시뮬레이션이 CPU를 더 쓴다, 검토 반영 F11).
+    // 시작 품질은 main.ts가 판 장면을 만들기 전에 같은 모드로 정했다(enterPerfMode)
+    sessionAutoDowngrade.beginMatch(performance.now(), app.practicing ? 'practice' : 'online');
     this.watchingFps = true;
 
     // 판 시작 문구 (괴물 대기 5초 동안)

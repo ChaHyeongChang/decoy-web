@@ -2,6 +2,7 @@
 //  - 터치 기기 자동 선택 = 중간, 판 중 하향 기준 50fps
 //  - 판 중 하향(중간 → 낮음)이 효과가 있으면(FPS가 오름) 'decoy:perf'에 온라인 기억으로 남고, 다시 열면 낮음으로 시작한다
 //  - 로비에서 품질을 직접 고르면(자동 포함) 기억을 지우고 기기 자동 단계로 돌아간다
+//  - (검토 반영) 봇과 연습 판의 하향은 '연습' 기억으로만 남는다: 온라인 판 시작 품질은 그대로, 다음 연습 판은 낮음으로
 // Canvas 휴대폰의 하향 · 입력 연속 · 터치 낮음 해상도 · CPU 4배 기록은 m12-perf.spec.ts
 import { expect, test, type Page } from '@playwright/test';
 import type { GfxDebugInfo } from '@decoy/shared';
@@ -115,6 +116,59 @@ test('휴대폰 자동 중간 → 판 중 하향이 효과가 있으면 기억�
   expect(await perfMemory(page)).toBeNull();
 
   await page.evaluate(() => window.__DECOY__?.injectFps(null));
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
+test('봇과 연습 판의 하향은 연습 기억으로만 남아 온라인 시작 품질은 그대로, 다음 연습 판은 낮음으로 시작한다', async ({
+  browser,
+}) => {
+  const { context, page, problems } = await newPlayerPage(browser, dpr1(PHONE_LANDSCAPE));
+  await context.addInitScript(fakeMidPhone);
+  const query = '/?debug=hook&renderer=webgl';
+  await page.goto(query);
+  let g = await gfx(page);
+  expect([g.renderer, g.quality, g.qualitySource, g.features.perfTier]).toEqual([
+    'webgl',
+    'medium',
+    'auto',
+    'none',
+  ]);
+  await press(page.getByTestId('practice'));
+  await press(page.getByTestId('practice-role-runner'));
+  await waitForSnapshots(page, 3);
+  expect(await page.evaluate(() => window.__DECOY__?.transport)).toBe('local');
+  // 중간에서 42fps → 낮음, 낮음에서 58fps → 유지(효과 있음)
+  await page.evaluate(() => window.__DECOY__?.injectFps(42));
+  await page.waitForFunction(() => (window.__DECOY__?.gfx.downgrades ?? 0) >= 1, null, {
+    ...POLL,
+    timeout: TOUCH_FPS_WATCH.warmupMs + TOUCH_FPS_WATCH.sustainMs + 20_000,
+  });
+  await page.evaluate(() => window.__DECOY__?.injectFps(58));
+  await page.waitForFunction(() => window.__DECOY__?.gfx.features.autoDowngrade === 'on', null, {
+    ...POLL,
+    timeout: DOWNGRADE_CHECK.settleMs + DOWNGRADE_CHECK.measureMs + 20_000,
+  });
+  g = await gfx(page);
+  expect([g.quality, g.features.perfSaved]).toEqual(['low', 'low']);
+  // 연습 기억만 (온라인 키 없음)
+  expect(await perfMemory(page)).toEqual({
+    v: PERF_MEMORY_VERSION,
+    practice: { tier: 'low', base: 'medium' },
+  });
+  await page.evaluate(() => window.__DECOY__?.injectFps(null));
+
+  // 다시 열기: 첫 화면 · 온라인 판의 시작 품질은 기기 자동(중간) 그대로
+  await page.goto(query);
+  g = await gfx(page);
+  expect([g.quality, g.qualitySource, g.features.perfTier]).toEqual(['medium', 'auto', 'none']);
+  // 다시 연습: 판 장면을 만들기 전에 연습 기억(낮음)으로 시작한다
+  await press(page.getByTestId('practice'));
+  await press(page.getByTestId('practice-role-runner'));
+  await waitForSnapshots(page, 3);
+  await expect.poll(async () => (await gfx(page)).quality, { intervals: [100, 200] }).toBe('low');
+  g = await gfx(page);
+  expect([g.quality, g.qualitySource, g.features.perfTier]).toEqual(['low', 'auto', 'low']);
   expect(problems).toEqual([]);
   await context.close();
 });

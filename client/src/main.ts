@@ -84,10 +84,10 @@ function rendererType(): number {
 }
 
 /**
- * 판 중 측정을 기억 · 적용하는 모드. 지금은 온라인 판만 있다 (M13b 연습 판이 생기면 판 시작 전에 'practice'로 바꾸고
- * 품질을 다시 정한 뒤 sessionAutoDowngrade.beginMatch에 같은 모드를 넘긴다)
+ * 판 중 측정을 기억 · 적용하는 모드: 온라인(서버 판) · 연습(기기 안 판). 판 장면을 만들기 직전에 이번 판의 모드로 바꾸고
+ * (enterPerfMode), 판 장면은 sessionAutoDowngrade.beginMatch에 같은 모드를 넘긴다 (검토 반영 F11)
  */
-const perfMode: PerfMode = 'online';
+let perfMode: PerfMode = 'online';
 
 /** 품질을 정하는 환경. 판 중 측정 기억은 터치 기기에서만 쓴다 (PC는 M10 그대로 세션 단위) */
 function qualityEnv(): QualityEnv {
@@ -101,6 +101,19 @@ function qualityEnv(): QualityEnv {
     memory,
     perf: touch ? (loadPerfMemory()[perfMode] ?? null) : null,
   };
+}
+
+/**
+ * 판 시작 직전: 이번 판의 측정 모드로 바꾼다. 터치 기기에서 모드가 바뀌면 그 모드의 기억으로 품질을 다시 정한다
+ * (PC는 기억을 쓰지 않으므로 다시 정하지 않는다 — 세션 하향이 풀리지 않게). 품질 단계가 바뀌었으면 true
+ */
+function enterPerfMode(mode: PerfMode): boolean {
+  if (mode === perfMode) return false;
+  perfMode = mode;
+  if (!touch) return false;
+  const before = gfxState.quality;
+  setQuality(decideQuality());
+  return gfxState.quality !== before;
 }
 
 function decideQuality(): { tier: QualityTier; source: QualitySource } {
@@ -486,7 +499,7 @@ function settleViewport(): Promise<void> {
  * 판 배치를 정하고(PC는 언제나 1920×1080) 논리 크기가 바뀌었으면 백버퍼 · 카메라를 다시 맞춘다.
  * 판 장면을 만들기 직전과 터치 로비의 미리 굽기 앞에서만 부른다(판 중 크기 변화는 논리 크기를 두고 zoom만 다시 맞춘다)
  */
-function applyMatchLayout(): void {
+function applyMatchLayout(force = false): void {
   const r = gameRoot.getBoundingClientRect();
   const before = layout();
   const next = configureLayout(r.width, r.height, device.touch);
@@ -497,7 +510,7 @@ function applyMatchLayout(): void {
   // 굽고 곧바로 다시 굽는다. 바뀐 것이 없으면 캔버스 자리만 다시 놓는다
   if (resizeTimer !== null) window.clearTimeout(resizeTimer);
   resizeTimer = null;
-  applyResolution(next.viewW !== before.viewW || next.viewH !== before.viewH);
+  applyResolution(force || next.viewW !== before.viewW || next.viewH !== before.viewH);
 }
 
 /** 판 장면 시작 요청 번호 (폰트를 기다리는 동안 로비로 돌아가면 시작하지 않는다) */
@@ -516,7 +529,8 @@ app.subscribe((e) => {
       // 첫 받기가 시간 초과로 끝난 뒤 늦게 받았으면 loadUiFonts()는 계속 false다. 지금 준비됐는지로 기록한다
       fontState.atSceneStart = ok || uiFontsReady();
       game.scene.stop('game');
-      applyMatchLayout();
+      // 연습 · 온라인 판 사이를 오가면 그 모드의 측정 기억으로 시작 품질을 다시 정한다 (바뀌면 백버퍼도 다시 맞춘다)
+      applyMatchLayout(enterPerfMode(app.practicing ? 'practice' : 'online'));
       game.scene.start('game', { app });
     });
   } else if (e.kind === 'result') stopSettle();
