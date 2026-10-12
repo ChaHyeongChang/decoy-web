@@ -5,16 +5,22 @@
 //  - 괴물로 연습할 때 받은 스냅샷을 독립 판정기와 기기 안 정답으로 대조: 시야 밖 생존자 0
 //  - 서버 방 결과 화면의 "홈으로"는 자리를 비우고 같은 연결로 첫 화면에서 다시 방을 만든다
 //  - (검토 반영) 첫 화면 상태 줄 · 오류 줄이 낮은 휴대폰 · PC 창에서 화면 안, 친구 방 로비 "나가기",
-//    ?practice=1은 마지막 방보다 우선하고 주소에서 지운다, 판 중 body.in-match(새 버전 띠 숨김)
+//    ?practice=1은 마지막 방보다 우선하고 주소에서 지운다, 판 중 body.in-match(새 버전 띠 숨김),
+//    터치 연습 판의 뒤로 가기 확인(연습 문구 → 첫 화면) · 새로고침 뒤 남은 항목 걷기(F16)
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { validateBalance, type Balance, type Snapshot } from '@decoy/shared';
 import type { TruthFrame } from '@decoy/shared/sim';
+import { APP_TEXT } from '../../client/src/data/storyText';
 import { monsterVerdict } from './infoCheck';
 import { PHONE_LANDSCAPE, dpr1, newPlayerPage, press, type DeviceOptions } from './helpers';
+import { MultiTouch, centerOf, waitForTouchTarget } from './touch';
 
 const balance: Balance = validateBalance(JSON.parse(readFileSync('config/balance.json', 'utf8')));
 const QUERY = '/?debug=hook&renderer=canvas';
+/** 설치 앱(TWA · 홈 화면 앱)의 시작 주소 (manifest start_url) + 시험 훅 */
+const APP_START = '/?source=pwa&debug=hook&renderer=canvas';
+const POLL = { intervals: [100, 150, 200], timeout: 20_000 };
 
 /** 서버 WebSocket을 모두 막는다 (연결 실패처럼 열리지 않고 닫힘). 막힌 시도 수를 센다 */
 async function blockServer(page: Page): Promise<{ attempts: () => number }> {
@@ -54,6 +60,28 @@ async function practiceState(page: Page): Promise<{
 /** 판 중 표시 (body.in-match: 새 버전 띠를 숨긴다) */
 async function inMatch(page: Page): Promise<boolean> {
   return page.evaluate(() => document.body.classList.contains('in-match'));
+}
+
+interface LifeState {
+  guarding: boolean;
+  link: string;
+  lifeApp: boolean;
+}
+
+/** 생명주기 시험 훅 (?debug): 뒤로 가기 항목이 들어 있는가 · 서버 연결 상태 · 터치/설치 앱인가 */
+async function lifeState(page: Page): Promise<LifeState | null> {
+  return page.evaluate(() => {
+    const h = (window as unknown as { __DECOY_LIFE__?: LifeState }).__DECOY_LIFE__;
+    return h ? { guarding: h.guarding, link: h.link, lifeApp: h.lifeApp } : null;
+  });
+}
+
+/** 판 안(이동 영역)을 손가락으로 한 번 탭한다 — 사용자 활성화 안에서 뒤로 가기 항목을 넣는 자리 */
+async function tapInMatch(page: Page): Promise<void> {
+  const t = await MultiTouch.attach(page);
+  const zone = centerOf(await waitForTouchTarget(page, 'move-zone'));
+  await t.tap(1, zone.x, zone.y);
+  await t.detach();
 }
 
 async function localTruth(page: Page): Promise<TruthFrame> {
@@ -443,5 +471,96 @@ test('?practice=1(방 링크 없이)은 30초 안 마지막 방 복귀보다 우
   await expect(page.getByTestId('create-room')).toBeVisible();
   await expect(page.getByTestId('practice-picker')).toHaveCount(0);
   expect(problems).toEqual([]);
+  await context.close();
+});
+
+// ───────────── 연습 판 뒤로 가기 (검토 반영 F16) ─────────────
+
+test('터치 연습 판 중 뒤로 가기 → 연습 문구 확인 창: "계속"이면 판 유지, "나가기"면 첫 화면 — 앞 문서가 없는 설치 앱에서도 문서를 떠나지 않는다 (검토 반영 F16)', async ({
+  browser,
+}) => {
+  const { context, page, problems } = await newPlayerPage(browser, dpr1(PHONE_LANDSCAPE));
+  // 설치 앱 시작 주소. 앞 기록은 Playwright의 about:blank뿐이다 — 실기기 TWA라면 이 자리의 뒤로 가기가 곧 앱 종료다
+  await page.goto(APP_START);
+  const appUrl = page.url();
+  await press(page.getByTestId('practice'));
+  await press(page.getByTestId('practice-role-runner'));
+  await expect.poll(async () => (await practiceState(page)).phase, { timeout: 10_000 }).toBe('playing');
+  expect((await practiceState(page)).transport).toBe('local');
+  expect((await lifeState(page))?.lifeApp).toBe(true);
+  // 판 안 탭(사용자 활성화)에서 뒤로 가기 항목을 넣는다. 옛 코드는 연습 판에서 넣지 않아(guarding false) 뒤로 가기가
+  // 확인 없이 about:blank(앱 종료)로 떠났다
+  await tapInMatch(page);
+  await expect.poll(async () => (await lifeState(page))?.guarding, POLL).toBe(true);
+
+  // 뒤로 가기 → 연습 문구 확인 창, 같은 문서에서 판이 계속 흐른다
+  await page.goBack({ waitUntil: 'commit' });
+  const dialog = page.getByTestId('leave-dialog');
+  await expect(dialog).toBeVisible();
+  expect(page.url()).toBe(appUrl);
+  await expect(dialog).toContainText(APP_TEXT.leaveTitlePractice);
+  await expect(dialog).toContainText(APP_TEXT.leaveBodyPractice);
+  // 친구 방(30초 유예) · 빠른 매칭(바로 판정) 문구가 섞이지 않는다
+  await expect(dialog).not.toContainText(APP_TEXT.leaveTitle);
+  await expect(dialog).not.toContainText('30초');
+  await expect(dialog).not.toContainText(APP_TEXT.leaveBodyQuick);
+  expect((await practiceState(page)).phase).toBe('playing');
+  // "계속" → 닫히고 그 탭에서 항목을 다시 넣는다
+  await press(page.getByTestId('leave-stay'));
+  await expect(dialog).toBeHidden();
+  await expect.poll(async () => (await lifeState(page))?.guarding, POLL).toBe(true);
+  expect((await practiceState(page)).phase).toBe('playing');
+
+  // 다시 뒤로 가기 → "나가기" → 첫 화면: 기기 안 판을 닫고 서버 연결을 다시 연다
+  await page.goBack({ waitUntil: 'commit' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText(APP_TEXT.leaveTitlePractice);
+  await press(page.getByTestId('leave-go'));
+  await expect(page.getByTestId('practice')).toBeVisible();
+  await expect(page.getByTestId('create-room')).toBeVisible();
+  await expect(dialog).toBeHidden();
+  const st = await practiceState(page);
+  expect(st.transport).toBe('net');
+  expect(st.practiceRoom ?? null).toBeNull();
+  expect(st.phase ?? null).toBeNull();
+  await expect.poll(() => page.evaluate(() => window.__DECOY__?.getHudLayout() ?? null), POLL).toBeNull();
+  expect(await inMatch(page)).toBe(false);
+  expect((await lifeState(page))?.guarding).toBe(false);
+  expect(page.url()).toBe(appUrl);
+  await expect.poll(async () => (await lifeState(page))?.link, POLL).toBe('open');
+  // 친구 방 나가기 경로(코드 칸 · 마지막 방)를 타지 않았다
+  await expect(page.getByTestId('room-code-input')).toHaveValue('');
+  expect(await page.evaluate(() => localStorage.getItem('decoy:lastRoom'))).toBeNull();
+  expect(problems).toEqual([]);
+  // 첫 화면의 뒤로 가기는 브라우저 동작 그대로 (남은 항목이 없어 한 번에 앞 문서로)
+  await page.goBack({ waitUntil: 'commit' });
+  expect(page.url()).toBe('about:blank');
+  await context.close();
+});
+
+test('터치 연습 판 중 새로고침(탭 폐기 뒤 복원과 같다)이면 남은 뒤로 가기 항목을 첫 화면을 그리기 전에 걷는다: 첫 화면의 첫 뒤로 가기가 먹히지 않는다 (검토 반영 F16)', async ({
+  browser,
+}) => {
+  const { context, page, problems } = await newPlayerPage(browser, dpr1(PHONE_LANDSCAPE));
+  await page.goto(APP_START);
+  const appUrl = page.url();
+  await press(page.getByTestId('practice'));
+  await press(page.getByTestId('practice-role-guard'));
+  await expect.poll(async () => (await practiceState(page)).phase, { timeout: 10_000 }).toBe('playing');
+  await tapInMatch(page);
+  await expect.poll(async () => (await lifeState(page))?.guarding, POLL).toBe(true);
+  expect(await page.evaluate(() => JSON.stringify(history.state))).toBe('{"decoyGuard":1}');
+  // 연습은 주소에 남지 않으므로 새로고침하면 첫 화면이다. 그 항목은 판 전 항목과 같은 문서라 걷어도 문서를 떠나지 않는다
+  await page.reload();
+  await expect(page.getByTestId('practice')).toBeVisible();
+  await expect(page.getByTestId('create-room')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => JSON.stringify(history.state)), POLL).toBe('null');
+  expect((await lifeState(page))?.guarding).toBe(false);
+  expect(page.url()).toBe(appUrl);
+  expect(await page.evaluate(() => window.__DECOY__?.transport)).toBe('net');
+  expect(problems).toEqual([]);
+  // 첫 화면에서 뒤로 가기 한 번이면 앞 문서로 (항목이 남아 있으면 같은 주소에 머문다)
+  await page.goBack({ waitUntil: 'commit' });
+  expect(page.url()).toBe('about:blank');
   await context.close();
 });

@@ -28,6 +28,7 @@ import {
   ScreenAwake,
   browserClock,
   browserWakeLock,
+  leaveKindFor,
   listenLifecycle,
   practiceEntry,
   rejoinRetryDelay,
@@ -267,11 +268,12 @@ export class App {
       leave: () => this.leaveRoom(),
     });
     this.replacedNotice = new ReplacedNotice(uiRoot, () => this.continueHere());
-    // 빠른 매칭 판은 나가기가 바로 판정되므로 확인 창 본문이 다르다 (leaveRoom의 분기와 같은 조건, 검토 반영 F10)
+    // 확인 창 문구는 판 종류마다 다르다 (leaveRoom의 분기와 같은 조건): 빠른 매칭 판은 나가기가 바로 판정되고(검토 반영 F10),
+    // 연습 판은 기기 안 판을 닫고 첫 화면으로 간다(검토 반영 F16)
     this.backGuard = this.lifeApp
       ? new BackGuard(
           window.history,
-          () => this.leaveDialog.open(this.lobby?.kind === 'quick'),
+          () => this.leaveDialog.open(leaveKindFor(this.local !== null, this.lobby?.kind ?? null)),
           window.history.state,
         )
       : null;
@@ -342,6 +344,9 @@ export class App {
     this.keeper.start();
     // 첫 화면은 연결과 상관없이 바로 그린다 (M13b). 방 링크 · 마지막 방 복귀로 들어가는 중이면 지금처럼 깨우기 패널
     if (!this.roomCode) {
+      // 연습 판 중 새로고침 · 탭 폐기 뒤 복원으로 왔으면 그 판의 뒤로 가기 항목({decoyGuard:1})이 남아 있다: 첫 화면을 그리기
+      // 전에 걷는다. 남기면 첫 화면에서 누른 첫 뒤로 가기가 아무 일 없이 먹힌다 (검토 반영 F16. 방 판은 다시 들어가 그 항목을 쓴다)
+      this.backGuard?.disarm();
       if (this.params.practice) this.lobbyUi.renderPracticePicker(this.params.name ?? getSavedName());
       else this.lobbyUi.renderHome(this.homePrefill);
     }
@@ -407,7 +412,8 @@ export class App {
   /**
    * 봇과 연습 (M13b): 기기 안 서버를 만들고 고른 역할로 바로 시작한다. 서버 연결은 쉰다 — 연습 중에는 새 연결을 시도하지
    * 않는다(오프라인 · 서버 잠듦에서도 소켓 시도 0). 주소 ?room= · 자리 토큰 · 마지막 방은 저장하지 않고,
-   * 수신 감시 · 재연결 · 다른 탭 처리 · 뒤로 가기 확인도 쓰지 않는다(연습은 다른 사람과 무관하다)
+   * 수신 감시 · 재연결 · 다른 탭 처리도 쓰지 않는다(연습은 다른 사람과 무관하다). 뒤로 가기 확인은 쓴다 — 설치 앱(TWA)에서는
+   * 뒤로 가기가 곧 앱 종료이고 판 중 첫 화면으로 갈 다른 길이 없다. 연습 문구로 묻고 '나가기'면 첫 화면 (검토 반영 F16)
    */
   private startPractice(role: Role, name: string): void {
     if (this.local) return;
@@ -534,9 +540,9 @@ export class App {
     // 판 중에는 "새 버전이 있어요" 띠를 숨긴다(style.css .in-match): 남은 시간 · 거점 게이지 · 맵 위쪽을 가렸다.
     // 결과 · 로비 · 첫 화면에서 다시 보인다 (검토 반영 F08)
     document.body.classList.toggle('in-match', on);
-    // 뒤로 가기 확인은 다른 사람과 함께하는 판에서만 (연습은 나가도 남에게 영향이 없다)
-    if (on && !this.local) this.backGuard?.arm();
-    else if (on) this.backGuard?.disarm();
+    // 뒤로 가기 확인은 연습 판도 쓴다 (검토 반영 F16): 설치 앱(TWA)에서는 뒤로 가기가 곧 앱 종료이고, 연습 판 중에는 첫 화면으로
+    // 갈 다른 길이 없다. 문구는 판 종류별(leaveKindFor), 연습의 '나가기'는 첫 화면(leaveRoom)
+    if (on) this.backGuard?.arm();
     else {
       this.leaveDialog.close();
       this.backGuard?.disarm();
@@ -609,9 +615,15 @@ export class App {
 
   /**
    * 판 중 뒤로 가기 확인에서 "나가기": 방에서 나가 첫 화면으로. 친구 방은 서버가 끊김으로 보고 30초 유예를 센다.
-   * 빠른 매칭 판은 유예 없이 바로 판정한다(확인 창 본문도 다르다, leaveBodyFor)
+   * 빠른 매칭 판은 유예 없이 바로 판정한다. 연습 판은 기기 안 판을 닫는다 (확인 창 문구도 다르다, leaveTextFor)
    */
   private leaveRoom(): void {
+    // 연습 판: 기기 안 서버를 닫고 첫 화면으로, 서버 연결은 다시 시작한다 (검토 반영 F16). 연습 방도 로비 상태를 가지므로
+    // 아래 친구 방 경로(마지막 방 지우기 · 새 소켓)를 타지 않게 먼저 거른다
+    if (this.local) {
+      this.stopPractice();
+      return;
+    }
     // 빠른 매칭 판: 나가기는 서버에 알려 그 자리를 바로 판정한다(유예 없음, M13c). 연결은 그대로 첫 화면에서 쓴다
     if (this.lobby?.kind === 'quick') {
       this.leaveToHome();

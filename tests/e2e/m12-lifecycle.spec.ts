@@ -552,8 +552,10 @@ test('휴대폰 판 중 뒤로 가기 → 확인 창: "계속"이면 판 유지,
   const dialog = page.getByTestId('leave-dialog');
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText('판에서 나가시겠어요?');
-  // 친구 방은 30초 유예 안내 (빠른 매칭 판은 '바로 판에서 빠져요' — m13-quick, 검토 반영)
+  // 친구 방은 30초 유예 안내 (빠른 매칭 판은 '바로 판에서 빠져요' — m13-quick, 연습 판은 연습 문구 — m13-practice, 검토 반영)
   await expect(dialog).toContainText('30초 안에 돌아오면');
+  await expect(dialog).not.toContainText('바로 판에서 빠져요');
+  await expect(dialog).not.toContainText('연습');
   const n = await snapCount(page);
   await expect.poll(() => snapCount(page), POLL).toBeGreaterThan(n + 5);
   await press(page.getByTestId('leave-stay'));

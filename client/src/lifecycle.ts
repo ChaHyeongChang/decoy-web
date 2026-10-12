@@ -2,6 +2,7 @@
 // 판단하는 부품은 시계 · 타이머 · 브라우저 API를 주입받아 단위 테스트로 확인한다(tests/unit/lifecycle.test.ts).
 // 브라우저 이벤트를 듣는 것은 listenLifecycle 하나이고, 무엇을 할지는 App(app.ts)이 정한다.
 // 숨겨진 동안 소켓을 일부러 끊지 않는다: OS가 끊으면 서버 하트비트로 잡히고 서버의 30초 유예가 적용된다(DECISIONS M12)
+import type { RoomKind } from '@decoy/shared';
 
 /** 수신 감시: 화면이 보이는 동안 이만큼 서버 메시지가 하나도 없으면 끊고 바로 다시 연결한다 (서버 pong은 1초마다) */
 export const RECV_TIMEOUT_MS = 4000;
@@ -427,6 +428,18 @@ export class BackGuard {
     if (this.armed) this.onBack();
     return true;
   }
+}
+
+/**
+ * 판 중 뒤로 가기 확인의 종류 (문구와 '나가기'가 다르다): 친구 방 판(30초 유예) · 빠른 매칭 판(유예 없이 바로 판정,
+ * 검토 반영 F10) · 연습 판(기기 안 판을 닫고 첫 화면으로, 검토 반영 F16)
+ */
+export type LeaveKind = 'match' | 'quick' | 'practice';
+
+/** 지금 판의 뒤로 가기 확인 종류. 연습(기기 안 서버)이 먼저다 — 연습 방도 로비 상태(kind 'practice')를 갖는다 */
+export function leaveKindFor(practicing: boolean, roomKind: RoomKind | null): LeaveKind {
+  if (practicing) return 'practice';
+  return roomKind === 'quick' ? 'quick' : 'match';
 }
 
 // ───────────── 시험 훅 ─────────────

@@ -295,6 +295,9 @@ export const APP_TEXT = {
   /** 빠른 매칭 판: 나가기는 유예 없이 바로 판정한다 (GAME_DESIGN 11.2, 검토 반영 F10) */
   leaveBodyQuick:
     '나가면 바로 판에서 빠져요. 생존자는 사망 처리되고, 괴물이면 판이 무효가 돼요. 이 판은 이어서 할 수 없어요.',
+  /** 봇과 연습 판: 나가기는 기기 안 판을 닫고 첫 화면으로 (다른 사람과 무관, 검토 반영 F16) */
+  leaveTitlePractice: '연습을 그만두고 첫 화면으로 갈까요?',
+  leaveBodyPractice: '이 연습 판은 여기서 끝나요. 봇과 연습은 첫 화면에서 언제든 다시 할 수 있어요.',
   leaveStay: '계속',
   leaveGo: '나가기',
 } as const;

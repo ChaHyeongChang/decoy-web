@@ -169,8 +169,10 @@ test('휴대폰 빠른 매칭 판의 뒤로 가기 확인은 "바로 판에서 �
   await page.goBack({ waitUntil: 'commit' });
   const dialog = page.getByTestId('leave-dialog');
   await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText(APP_TEXT.leaveTitle);
   await expect(dialog).toContainText(APP_TEXT.leaveBodyQuick);
   await expect(dialog).not.toContainText('30초');
+  await expect(dialog).not.toContainText(APP_TEXT.leaveTitlePractice);
   await press(page.getByTestId('leave-go'));
   await expect(page.getByTestId('quick-match')).toBeVisible();
   expect((await state(page)).phase).toBeNull();
