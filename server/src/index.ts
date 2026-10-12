@@ -47,7 +47,10 @@ const quickBots = new BotDriver(
   balance,
 );
 
-/** 지금 봇을 채워 판을 하는 빠른 매칭 방 수 (동시 봇 방 상한, DECISIONS M13c) */
+/**
+ * 지금 봇을 채워 판을 하는 빠른 매칭 방 수 (동시 봇 방 상한, DECISIONS M13c). 개발용 봇 방(?bots=1)은 세지 않는다 —
+ * 배포 서버에서는 꺼져 있다(options.devBots)
+ */
 function botRoomsPlaying(except: Room): number {
   let n = 0;
   for (const r of core.manager.rooms.values())
@@ -57,11 +60,11 @@ function botRoomsPlaying(except: Room): number {
 
 // 방 · 연결 처리 · 틱 스케줄러는 기기 안 연습과 같은 코드 (shared/src/sim/core.ts). 여기는 HTTP · ws 소켓 · setInterval만
 const core = new ServerCore(
-  { balance, seed: options.seed, testHooks: options.testHooks, buildId },
+  { balance, seed: options.seed, testHooks: options.testHooks, buildId, devBots: options.devBots },
   {
     log: (m) => console.log(m),
     recordTruth: truthLog ? (room) => truthLog.record(room) : undefined,
-    // ?bots=1 개발용 방은 WebSocket 봇, 빠른 매칭은 같은 프로세스 실전 봇
+    // ?bots=1 개발용 방(개발 서버에서만)은 WebSocket 봇, 빠른 매칭은 같은 프로세스 실전 봇
     spawnBot: (room, seat) => {
       if (room.kind === 'quick') quickBots.attach(room, seat);
       else spawnLocalBot(`ws://127.0.0.1:${actualPort()}/ws`, room.code, seat.token);
@@ -255,7 +258,7 @@ setInterval(() => core.advance(performance.now()), core.tickMs / 4);
 
 httpServer.listen(options.port, options.host, () => {
   const lag = options.lag > 0 ? ` (지연 ${options.lag}ms)` : '';
-  const hooks = options.testHooks ? ' [테스트 훅]' : '';
+  const hooks = (options.testHooks ? ' [테스트 훅]' : '') + (options.devBots ? ' [개발용 봇 방]' : '');
   console.log(`DECOY 서버 시작: http://localhost:${actualPort()}${lag}${hooks}`);
 });
 

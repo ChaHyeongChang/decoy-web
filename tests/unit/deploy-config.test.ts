@@ -86,6 +86,21 @@ describe('서버 포트 · 주소 옵션', () => {
     expect(parseOptions([], { DECOY_MAX_BOT_ROOMS: '2.7' }).maxBotRooms).toBe(2);
   });
 
+  it('개발용 봇 방(?bots=1)은 --dev · --test-hooks · DECOY_DEV_BOTS=1일 때만 받고, 배포 설정에서는 꺼져 있다', () => {
+    expect(parseOptions([], {}).devBots).toBe(false);
+    expect(parseOptions([], { NODE_ENV: 'production', PORT: '10000' }).devBots).toBe(false);
+    expect(parseOptions(['--dev'], {}).devBots).toBe(true);
+    expect(parseOptions(['--test-hooks'], {}).devBots).toBe(true);
+    expect(parseOptions([], { DECOY_DEV_BOTS: '1' }).devBots).toBe(true);
+    expect(parseOptions([], { DECOY_DEV_BOTS: '0' }).devBots).toBe(false);
+    expect(parseOptions([], { DECOY_DEV_BOTS: 'true' }).devBots).toBe(false);
+    // Render Blueprint · Dockerfile은 개발 플래그를 켜지 않는다
+    const keys = blueprint.services[0]!.envVars.map((v) => v.key);
+    expect(keys).not.toContain('DECOY_DEV_BOTS');
+    const dockerfile = readFileSync('Dockerfile', 'utf8');
+    expect(dockerfile).not.toMatch(/DECOY_DEV_BOTS|--dev\b|--test-hooks/);
+  });
+
   it('컨테이너 밖에서 접속할 수 있게 기본 주소는 0.0.0.0', () => {
     expect(parseOptions([], {}).host).toBe('0.0.0.0');
     expect(parseOptions([], { HOST: '127.0.0.1' }).host).toBe('127.0.0.1');

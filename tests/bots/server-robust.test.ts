@@ -79,3 +79,53 @@ describe('서버 견고성', () => {
     expect(await healthy()).toBe(true);
   });
 });
+
+/** 봇 방(join.bots)을 만들고 괴물로 준비 · 시작을 보낸 뒤 받은 메시지 */
+async function soloBotsRoom(port: number): Promise<ServerMessage[]> {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const inbox: ServerMessage[] = [];
+  ws.on('message', (d) => inbox.push(JSON.parse(d.toString()) as ServerMessage));
+  await new Promise((r) => ws.on('open', r));
+  ws.send(
+    JSON.stringify({
+      t: 'join',
+      room: null,
+      create: true,
+      name: 'x',
+      token: null,
+      altTokens: [],
+      bots: true,
+    }),
+  );
+  await new Promise((r) => setTimeout(r, 200));
+  ws.send(JSON.stringify({ t: 'role', role: 'monster' }));
+  ws.send(JSON.stringify({ t: 'ready', ready: true }));
+  ws.send(JSON.stringify({ t: 'start' }));
+  await new Promise((r) => setTimeout(r, 800));
+  ws.close();
+  return inbox;
+}
+
+function lastLobby(inbox: ServerMessage[]): Extract<ServerMessage, { t: 'lobby' }>['lobby'] | undefined {
+  return [...inbox].reverse().find((m): m is Extract<ServerMessage, { t: 'lobby' }> => m.t === 'lobby')
+    ?.lobby;
+}
+
+// 출시 전 검토: 배포 서버(플래그 없음)는 ?bots=1을 무시한다 — 연결 하나가 봇 방 상한 밖에서 봇 판을 계속 만들지 못하게
+describe('개발용 봇 방 (?bots=1)은 개발 서버에서만', () => {
+  it('플래그 없는 서버는 join.bots를 무시하고(일반 방), DECOY_DEV_BOTS=1이면 봇이 채운다', async () => {
+    const prod = await startServer();
+    const dev = await startServer([], { env: { DECOY_DEV_BOTS: '1' } });
+    try {
+      const [p, d] = await Promise.all([soloBotsRoom(prod.port), soloBotsRoom(dev.port)]);
+      expect(lastLobby(p)).toMatchObject({ bots: false, phase: 'lobby', canStart: false });
+      expect(p.some((m) => m.t === 'match')).toBe(false);
+      expect(prod.output.join('')).not.toMatch(/판 시작/);
+      expect(lastLobby(d)).toMatchObject({ bots: true, phase: 'playing' });
+      expect(d.some((m) => m.t === 'match')).toBe(true);
+      expect(dev.output.join('')).toMatch(/판 시작 \(code, 사람 1 · 봇 3\)/);
+    } finally {
+      await Promise.all([prod.stop(), dev.stop()]);
+    }
+  });
+});

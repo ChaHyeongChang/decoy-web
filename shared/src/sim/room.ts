@@ -82,6 +82,12 @@ export interface RoomConfig {
   practice?: boolean;
   /** 서버 빌드 ID (M13d): welcome · pong에 실어 화면 빌드와 비교하게 한다. 없으면 null */
   buildId?: string | null;
+  /**
+   * 개발용 봇 방(`?bots=1`, join.bots)을 받는가 (출시 전 검토). false면 join.bots를 무시하고 일반 방을 만든다 —
+   * 배포 서버는 끈다(server/src/config.ts: --dev · --test-hooks · DECOY_DEV_BOTS=1일 때만 켬). 없으면 받는다
+   * (단위 시험 · 측정 스크립트). 연습 · 빠른 매칭은 방 종류(kind)로 봇을 채우므로 이 값과 무관하다
+   */
+  devBots?: boolean;
 }
 
 const ALL_ROLES: readonly Role[] = ['monster', ...ROLE_IDS];
@@ -775,7 +781,8 @@ export class RoomManager {
         };
     }
     if (!msg.create) return { error: { t: 'error', code: 'bad-request', message: '방 코드가 필요합니다' } };
-    const room = this.createRoom(Boolean(msg.bots));
+    // 개발용 봇 방(?bots=1)은 개발 서버에서만 (배포 서버에서는 일반 방, 출시 전 검토)
+    const room = this.createRoom(Boolean(msg.bots) && this.config.devBots !== false);
     return { room, seat: room.addSeat(conn, msg.name, false, nowMs) };
   }
 
