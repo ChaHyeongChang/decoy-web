@@ -425,6 +425,24 @@ describe('빠른 매칭: 판 중 · 판 뒤', () => {
     }
   });
 
+  // 출시 전 검토: 봇 표시는 결과 화면에서만 (GAME_DESIGN 11장, DECISIONS M13c). 괴물 쪽만 보던 시험을 생존자 명단 · 로비까지
+  it('결과 전에는 생존자의 match 명단 · 로비 원문에 다른 자리의 봇 여부가 없다 (괴물 쪽도)', () => {
+    const { a, b, room } = startedPair();
+    const botIds = room.seats.filter((s) => s.bot).map((s) => s.id);
+    expect(botIds).toHaveLength(2);
+    // b = 생존자: 4자리 명단을 받지만 자기 말고는 모두 봇 아님으로 보인다 (봇 자리 둘이 명단에 있다)
+    const info = b.conn.last('match')?.info;
+    expect(info?.role).toBe('runner');
+    expect(info?.roster).toHaveLength(4);
+    expect(info?.roster.filter((r) => botIds.includes(r.id))).toHaveLength(2);
+    for (const r of info?.roster ?? []) if (r.id !== info?.you) expect(r.bot).toBe(false);
+    for (const me of [a, b]) {
+      const beforeResult = me.conn.inbox.filter((m) => m.t !== 'snap' && m.t !== 'result');
+      expect(beforeResult.filter((m) => m.t === 'lobby').length).toBeGreaterThan(0);
+      expect(JSON.stringify(beforeResult)).not.toContain('"bot":true');
+    }
+  });
+
   // 출시 전 검토: 결과 단계에서 자리가 지워진 뒤(다시 하기 · 나가기 · 유예 만료) 다시 보내는 결과에 그 사람 실제 닉네임이 갔다
   it.each(['none', 'rematch', 'leave', 'drop'] as const)(
     '결과 단계에서 다른 사람 자리가 지워져도(%s) 다시 접속해 받은 원문에 그 사람 닉네임이 없다',
