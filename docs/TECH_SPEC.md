@@ -39,6 +39,7 @@ decoy-web/
 ├─ server/src/                ← Node 전용 바깥 일만 (shared에는 `node:*` · `ws` · `fs` import 금지, eslint)
 │  ├─ index.ts                ← HTTP(정적 파일 · 테스트 훅) + ws 소켓 + setInterval → ServerCore
 │  ├─ config.ts · static.ts   ← 실행 옵션 · balance.json 읽기, 정적 파일(gzip)
+│  ├─ quickBots.ts            ← 빠른 매칭 같은 프로세스 실전 봇 드라이버(시작 때 실전 봇 지도 준비)
 │  ├─ sendPolicy.ts           ← 연결별 송신 큐 · 밀림 처리
 │  ├─ truthLog.ts             ← 정답 상태 파일 기록 (--truth-log)
 │  └─ bots.ts                 ← 개발 · 테스트용 WebSocket 봇
