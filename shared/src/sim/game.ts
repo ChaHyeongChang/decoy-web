@@ -289,7 +289,10 @@ export class Game {
     while (p.queue.length > 0 && processed < MAX_FRAMES_PER_TICK) {
       const input = p.queue[0];
       if (!input) break;
-      if (p.debt > 0) {
+      // 빚은 큐에 밀린 입력이 있을 때만 갚는다. 끊긴 뒤 틱마다 하나씩 오는 입력(따라잡기 묶음이 없거나 짧을 때)을
+      // 빚으로 먹으면 처리한 입력이 0이라 굶은 틱으로 다시 세어 빚이 도로 쌓이고, 끊긴 순간부터 약 1초 동안
+      // 이동 · 조준이 무시된다 (출시 전 검토)
+      if (p.debt > 0 && p.queue.length > 1) {
         // 서버가 이미 빈 입력으로 시간을 흘린 만큼, 늦게 도착한 입력은 이동 없이 처리한다
         // (안 그러면 입력이 영구히 몇 틱씩 밀린다). 버튼 눌림은 살린다
         p.queue.shift();
@@ -311,6 +314,8 @@ export class Game {
     }
     if (processed > 0) {
       p.starved = 0;
+      // 밀린 입력을 다 처리했으면 밀림이 없다: 남은 빚은 갚을 대상이 없으니 지운다
+      if (p.queue.length === 0) p.debt = 0;
       return;
     }
     p.starved += 1;
