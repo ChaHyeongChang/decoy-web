@@ -185,6 +185,7 @@ PWABuilder(마이크로소프트가 운영하는 무료 사이트)가 이 웹 �
    - 그림 파일은 저장소 GitHub 화면에서 파일을 열고 **Download raw file**로 태블릿에 받는다
 3. **스토어 설정**: 카테고리 · 태그 · 연락처(STORE_LISTING 1장 표). 이메일은 스토어에 공개된다
 4. **앱 콘텐츠**(정책 신고): STORE_LISTING 2장의 답을 차례로 넣는다 — 개인정보처리방침 URL(`<서비스 주소>/privacy`), 앱 액세스, 광고, 콘텐츠 등급 설문, 타깃 연령층, 데이터 보안, 그 밖의 신고. **⚠ 확인 필요** 표시는 직접 판단한다
+   - 데이터 유형 판단을 초안과 다르게 정하면 `client/src/privacyData.ts` · `client/public/privacy.html` · `docs/STORE_LISTING.md` 세 곳을 같은 값으로 고친다(단위 시험 `tests/unit/privacy.test.ts`가 셋을 대조한다. `main`에 병합하면 검사 통과 뒤 Render가 다시 배포해 공개 처리방침도 바뀐다)
 5. 처리방침 문의처를 넣는다: Render 대시보드 → 서비스 `decoy-web` → **Environment** → **Add Environment Variable** → 키 `PRIVACY_CONTACT`, 값은 공개해도 되는 이메일 → **Save Changes**. 저장하면 서버가 다시 배포된다(그 순간 열려 있던 방은 사라진다 — 아무도 없을 때). `<서비스 주소>/privacy`의 11번 문의처에 그 이메일이 보이면 된다
 
 ---

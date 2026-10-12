@@ -1,6 +1,7 @@
 // M15 개인정보 처리방침 · 외부 전송 (MOBILE_PLAN M15 자동 검증)
 //  - 로비 첫 화면의 링크를 탭하면 /privacy가 열린다: 200 · text/html · lang="ko" · 게임 HTML 아님, 돌아가기 링크로 첫 화면
 //  - 360px 폭(세로 휴대폰)과 가로 휴대폰에서 가로 스크롤이 없다
+//  - 첫 화면은 열기만 해도 ping만 보낸다(서버 상태 표시) — 처리방침 1번 '서버로 보내는 것' 문단이 그 사실을 적었다
 //  - 앱 셸을 받은 뒤 네트워크를 끊고 서버도 끈 채 /privacy를 열어도 뜬다 (서비스 워커 캐시)
 //  - 외부 전송 없음(실제 요청): 혼합 판(PC + 휴대폰 + 봇) 한 판과 봇과 연습 한 판 동안 모든 요청 · WebSocket 대상이 같은 출처
 import { expect, test, type Page } from '@playwright/test';
@@ -77,6 +78,37 @@ test('로비 링크를 탭하면 처리방침이 열리고(200 · HTML · 한국
   expect(wide, '화면 밖으로 나간 요소').toEqual([]);
   expect(narrow.problems).toEqual([]);
   await narrow.context.close();
+});
+
+test('첫 화면은 열기만 해도 서버 상태 표시를 위해 ping만 보내고, 처리방침 1번이 그 사실(지연 측정값 · IP 주소)을 적었다', async ({
+  browser,
+}) => {
+  const { context, page, problems } = await newPlayerPage(browser, dpr1(PHONE_LANDSCAPE));
+  const kinds: string[] = [];
+  page.on('websocket', (ws) => {
+    ws.on('framesent', (f) => {
+      const text = typeof f.payload === 'string' ? f.payload : f.payload.toString('utf8');
+      try {
+        kinds.push(String((JSON.parse(text) as { t?: unknown }).t));
+      } catch {
+        kinds.push(`(JSON 아님) ${text.slice(0, 20)}`);
+      }
+    });
+  });
+  await page.goto('/?debug=hook&renderer=canvas');
+  await expect(page.getByTestId('server-status')).toHaveAttribute('data-state', 'connected');
+  // 아무것도 누르지 않고 둔다
+  await page.waitForTimeout(3000);
+  expect(kinds.length, '첫 화면 연결').toBeGreaterThan(0);
+  expect([...new Set(kinds)], '첫 화면에서 보낸 메시지 종류').toEqual(['ping']);
+  // 처리방침이 이 동작을 적었다 (닉네임 등은 온라인 대전에서만)
+  await page.goto('/privacy');
+  const when = page.getByTestId('sent-when');
+  await expect(when).toContainText('앱을 인터넷에 연결된 상태로 열면');
+  await expect(when).toContainText('지연 측정값');
+  await expect(when).toContainText('IP 주소');
+  expect(problems).toEqual([]);
+  await context.close();
 });
 
 test('앱 셸을 받은 뒤 네트워크를 끊고 서버도 끈 채 /privacy를 열어도 뜬다', async ({ browser }) => {
