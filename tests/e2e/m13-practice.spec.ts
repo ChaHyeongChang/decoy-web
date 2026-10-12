@@ -282,18 +282,27 @@ test('서버 방 결과 화면의 "홈으로"는 자리를 비우고, 같은 연
   browser,
 }) => {
   const { context, page, problems } = await newPlayerPage(browser);
+  // 친구 한 명이 같은 방에 있다: 사람이 남은 방은 결과 단계에서도 남는다 (사람이 모두 나간 방은 바로 정리된다 — 검토 반영,
+  // RoomManager.dropIfAbandoned. 혼자 봇과 한 방이면 '홈으로' 순간 방이 사라져 아래 '진행 중' 거절을 볼 수 없다)
+  const friend = await newPlayerPage(browser);
   const sockets = countSockets(page);
   await page.goto(`${QUERY}&bots=1`);
   await page.getByTestId('create-room').click();
   await expect(page.getByTestId('room-code')).toHaveText(/^[A-Z]{4}$/);
   const code = (await page.getByTestId('room-code').textContent()) ?? '';
+  await friend.page.goto(`${QUERY}&room=${code}`);
+  await expect(friend.page.getByTestId('room-code')).toHaveText(code);
   await page.getByTestId('role-runner').click();
   await page.getByTestId('ready-button').click();
+  await friend.page.getByTestId('role-guard').click();
+  await friend.page.getByTestId('ready-button').click();
+  await expect(page.getByTestId('start-button')).toBeEnabled();
   await page.getByTestId('start-button').click();
   await expect.poll(async () => (await practiceState(page)).phase, { timeout: 10_000 }).toBe('playing');
   expect((await practiceState(page)).transport).toBe('net');
   await page.evaluate(() => window.__DECOY__?.sendTest({ kind: 'setTime', timeLeft: 0.1 }));
   await expect(page.getByTestId('result')).toBeVisible({ timeout: 10_000 });
+  await expect(friend.page.getByTestId('result')).toBeVisible({ timeout: 10_000 });
   const opened = sockets();
   expect(opened).toBeGreaterThan(0);
   await page.getByTestId('result-home').click();
@@ -304,12 +313,26 @@ test('서버 방 결과 화면의 "홈으로"는 자리를 비우고, 같은 연
   await page.getByTestId('join-room').click();
   await expect(page.getByTestId('lobby-error')).toContainText('이미 진행 중인 방입니다');
   await expect(page.getByTestId('room-code-input')).toHaveValue(code);
+  // 친구도 나가면 사람이 남지 않은 방은 바로 정리된다: 같은 코드로는 '찾을 수 없음'
+  await friend.page.getByTestId('result-home').click();
+  await expect(friend.page.getByTestId('create-room')).toBeEnabled();
+  await expect
+    .poll(
+      async () => {
+        await page.getByTestId('join-room').click();
+        return (await page.getByTestId('lobby-error').textContent()) ?? '';
+      },
+      { intervals: [200, 300, 500], timeout: 10_000 },
+    )
+    .toContain('찾을 수 없습니다');
   await page.getByTestId('create-room').click();
   await expect(page.getByTestId('room-code')).not.toHaveText(code);
   await expect(page.getByTestId('room-code')).toHaveText(/^[A-Z]{4}$/);
   // 같은 연결로 (새 WebSocket 없이)
   expect(sockets()).toBe(opened);
   expect(problems).toEqual([]);
+  expect(friend.problems).toEqual([]);
+  await friend.context.close();
   await context.close();
 });
 
