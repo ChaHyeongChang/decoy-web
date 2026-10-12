@@ -255,10 +255,36 @@ export function freshLastRoom(raw: string | null, now: number): LastRoom | null 
 
 /**
  * 다시 연 앱이 돌아갈 마지막 방: 주소에 방 코드가 없거나, 주소의 방이 마지막 방과 같을 때(같은 방 링크 · 기록으로 다시 엶).
- * 주소의 방이 다르면 null (처음 들어가는 방이라 거절돼도 다시 시도하지 않는다)
+ * 주소의 방이 다르면 null (처음 들어가는 방이라 거절돼도 다시 시도하지 않는다).
+ * practice = 주소에 ?practice=1(깨우기 화면의 "봇과 연습"): 방 링크 없이 연습을 고른 것이므로 마지막 방보다 우선한다 (검토 반영 F12).
+ * 방 링크와 함께 오면 지금처럼 방 링크가 이긴다
  */
-export function returnTarget(urlRoom: string | null, last: LastRoom | null): LastRoom | null {
+export function returnTarget(
+  urlRoom: string | null,
+  last: LastRoom | null,
+  practice = false,
+): LastRoom | null {
+  if (practiceEntry(practice, urlRoom)) return null;
   return last && (urlRoom === null || urlRoom === last.room) ? last : null;
+}
+
+/** ?practice=1이 방 링크 없이 왔다: 마지막 방 복귀를 건너뛰고(기억도 지운다) 연습 역할 고르기를 연다 (검토 반영 F12) */
+export function practiceEntry(practice: boolean, urlRoom: string | null): boolean {
+  return practice && urlRoom === null;
+}
+
+// ───────────── 방을 나온 뒤 늦게 온 메시지 (검토 반영 F07) ─────────────
+
+/** 떠난 방에서 늦게 올 수 있는 메시지: 다음 welcome(새 방) 전에 오면 버린다 */
+const ROOM_MESSAGES: ReadonlySet<string> = new Set(['lobby', 'match', 'snap', 'result']);
+
+/**
+ * 같은 소켓으로 'leave'를 보낸 뒤(빠른 매칭 취소 · 숨김, 결과 · 방 화면 "홈으로") 다음 welcome까지 받은 방 메시지는 떠난 방
+ * 것이다: 서버가 leave를 처리하기 전에 이미 보낸 lobby · match · snap · result. 한 소켓 안의 순서는 지켜지므로 welcome 뒤의
+ * 메시지는 새 방 것이다. pong · error · welcome은 늘 통과한다. 연습(기기 안 서버)은 이 거르기를 거치지 않는다
+ */
+export function staleAfterLeave(awaitingWelcome: boolean, type: string): boolean {
+  return awaitingWelcome && ROOM_MESSAGES.has(type);
 }
 
 /**

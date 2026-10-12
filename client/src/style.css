@@ -2326,3 +2326,14 @@ select {
   pointer-events: none;
   z-index: 50;
 }
+
+/* 검토 반영 (C) */
+/* 친구 방 로비 "나가기": 명령 줄 큰 버튼의 최소 폭(170 ~ 190px)을 쓰지 않는다 — 설정 · 준비 · 시작과 한 줄에 들어가게(658px 휴대폰) */
+.lobby-actions .btn.room-leave {
+  min-width: 0;
+  padding: 0 16px;
+}
+/* 깨우기 패널의 '첫 화면으로' (방 링크 · 마지막 방 복귀로 기다리는 중에만) */
+.wake-home {
+  margin-top: 14px;
+}

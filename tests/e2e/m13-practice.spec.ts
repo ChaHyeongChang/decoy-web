@@ -4,12 +4,14 @@
 //  - 연습 중 숨김 → 복귀하면 같은 판(정지 · 다른 탭 안내 없음), 주소에 room이 없고 새로고침하면 첫 화면
 //  - 괴물로 연습할 때 받은 스냅샷을 독립 판정기와 기기 안 정답으로 대조: 시야 밖 생존자 0
 //  - 서버 방 결과 화면의 "홈으로"는 자리를 비우고 같은 연결로 첫 화면에서 다시 방을 만든다
+//  - (검토 반영) 첫 화면 상태 줄 · 오류 줄이 낮은 휴대폰 · PC 창에서 화면 안, 친구 방 로비 "나가기",
+//    ?practice=1은 마지막 방보다 우선하고 주소에서 지운다, 판 중 body.in-match(새 버전 띠 숨김)
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { validateBalance, type Balance, type Snapshot } from '@decoy/shared';
 import type { TruthFrame } from '@decoy/shared/sim';
 import { monsterVerdict } from './infoCheck';
-import { PHONE_LANDSCAPE, dpr1, newPlayerPage, press } from './helpers';
+import { PHONE_LANDSCAPE, dpr1, newPlayerPage, press, type DeviceOptions } from './helpers';
 
 const balance: Balance = validateBalance(JSON.parse(readFileSync('config/balance.json', 'utf8')));
 const QUERY = '/?debug=hook&renderer=canvas';
@@ -289,11 +291,126 @@ test('서버 방 결과 화면의 "홈으로"는 자리를 비우고, 같은 연
   await page.getByTestId('result-home').click();
   await expect(page.getByTestId('create-room')).toBeEnabled();
   expect(page.url()).not.toContain('room=');
+  // 친구 방이면 코드 칸에 방 코드를 남긴다(검토 반영). 결과 단계 방에 다시 들어가려다 거절돼도 친 코드는 남는다
+  await expect(page.getByTestId('room-code-input')).toHaveValue(code);
+  await page.getByTestId('join-room').click();
+  await expect(page.getByTestId('lobby-error')).toContainText('이미 진행 중인 방입니다');
+  await expect(page.getByTestId('room-code-input')).toHaveValue(code);
   await page.getByTestId('create-room').click();
   await expect(page.getByTestId('room-code')).not.toHaveText(code);
   await expect(page.getByTestId('room-code')).toHaveText(/^[A-Z]{4}$/);
   // 같은 연결로 (새 WebSocket 없이)
   expect(sockets()).toBe(opened);
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
+/** 갤럭시 S 계열 가로(높이 360) · 낮은 PC 창 (검토 반영: 상태 줄 · 오류 줄이 첫 화면 밖이던 크기) */
+const LOW_SCREENS: { name: string; device: DeviceOptions }[] = [
+  {
+    name: '휴대폰 740×360',
+    device: dpr1({
+      ...PHONE_LANDSCAPE,
+      viewport: { width: 740, height: 360 },
+      screen: { width: 740, height: 360 },
+    }),
+  },
+  { name: 'PC 1366×657', device: { viewport: { width: 1366, height: 657 } } },
+];
+
+for (const d of LOW_SCREENS) {
+  test(`첫 화면 · 연습 고르기의 서버 상태 줄과 입장 실패 오류 줄이 스크롤 없이 화면 안에 있다 (${d.name})`, async ({
+    browser,
+  }) => {
+    // 연결이 막힘: 꺼진 버튼의 이유(상태 줄)가 첫 화면 안
+    const blocked = await newPlayerPage(browser, d.device);
+    await blockServer(blocked.page);
+    await blocked.page.goto(QUERY);
+    const status = blocked.page.getByTestId('server-status');
+    await expect(status).toHaveAttribute('data-state', 'waking');
+    await expect(blocked.page.getByTestId('quick-match')).toBeDisabled();
+    await expect(status).toBeInViewport({ ratio: 1 });
+    await press(blocked.page.getByTestId('practice'));
+    await expect(blocked.page.getByTestId('practice-picker')).toBeVisible();
+    await expect(status).toBeInViewport({ ratio: 1 });
+    expect(blocked.problems).toEqual([]);
+    await blocked.context.close();
+    // 서버 연결: 없는 방 코드로 입장 → 오류 줄이 첫 화면 안
+    const { context, page, problems } = await newPlayerPage(browser, d.device);
+    await page.goto(QUERY);
+    await expect(page.getByTestId('server-status')).toHaveAttribute('data-state', 'connected');
+    await expect(page.getByTestId('server-status')).toBeInViewport({ ratio: 1 });
+    await page.getByTestId('room-code-input').fill('ZZZZ');
+    await press(page.getByTestId('join-room'));
+    await expect(page.getByTestId('lobby-error')).toContainText('찾을 수 없습니다');
+    await expect(page.getByTestId('lobby-error')).toBeInViewport({ ratio: 1 });
+    expect(problems).toEqual([]);
+    await context.close();
+  });
+}
+
+test('친구 방 로비의 "나가기": 자리를 비우고(방장 넘김) 첫 화면, 코드 칸에 방 코드 · 주소와 마지막 방은 지워 다시 열어도 첫 화면', async ({
+  browser,
+}) => {
+  const phone = await newPlayerPage(browser, dpr1(PHONE_LANDSCAPE));
+  const pc = await newPlayerPage(browser);
+  await phone.page.goto(QUERY);
+  await press(phone.page.getByTestId('create-room'));
+  await expect(phone.page.getByTestId('room-code')).toHaveText(/^[A-Z]{4}$/);
+  const code = (await phone.page.getByTestId('room-code').textContent()) ?? '';
+  await pc.page.goto(`${QUERY}&room=${code}`);
+  const pcPlayers = pc.page.getByTestId('player-list').locator('.player');
+  await expect(pcPlayers).toHaveCount(2);
+  await expect(phone.page.getByTestId('player-list').locator('.player')).toHaveCount(2);
+  // 터치 기기: 방에 들어가면 마지막 방(30초 복귀)을 적는다
+  expect(await phone.page.evaluate(() => localStorage.getItem('decoy:lastRoom'))).not.toBeNull();
+  const leave = phone.page.getByTestId('room-leave');
+  await expect(leave).toBeVisible();
+  expect((await leave.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(48);
+  await press(leave);
+  await expect(phone.page.getByTestId('create-room')).toBeVisible();
+  await expect(phone.page.getByTestId('room-code')).toHaveCount(0);
+  await expect(phone.page.getByTestId('room-code-input')).toHaveValue(code);
+  expect(phone.page.url()).not.toContain('room=');
+  expect(await phone.page.evaluate(() => localStorage.getItem('decoy:lastRoom'))).toBeNull();
+  // 서버: 자리를 지우고 방장을 남은 사람에게
+  await expect(pcPlayers).toHaveCount(1);
+  await expect(pc.page.getByTestId('start-button')).toBeVisible();
+  // 곧바로 다시 열어도(설치 앱 시작 주소) 같은 방으로 돌아가지 않는다
+  await phone.page.goto(`/?source=pwa&debug=hook&renderer=canvas`);
+  await expect(phone.page.getByTestId('create-room')).toBeVisible();
+  await phone.page.waitForTimeout(1500);
+  await expect(phone.page.getByTestId('room-code')).toHaveCount(0);
+  await expect(pcPlayers).toHaveCount(1);
+  expect(phone.problems).toEqual([]);
+  expect(pc.problems).toEqual([]);
+  await phone.context.close();
+  await pc.context.close();
+});
+
+test('?practice=1(방 링크 없이)은 30초 안 마지막 방 복귀보다 우선하고, 읽은 뒤 주소에서 지운다 — 연습 중 새로고침은 첫 화면', async ({
+  browser,
+}) => {
+  const { context, page, problems } = await newPlayerPage(browser, dpr1(PHONE_LANDSCAPE));
+  await page.goto(QUERY);
+  await press(page.getByTestId('create-room'));
+  await expect(page.getByTestId('room-code')).toHaveText(/^[A-Z]{4}$/);
+  expect(await page.evaluate(() => localStorage.getItem('decoy:lastRoom'))).not.toBeNull();
+  // 깨우기 화면의 "기다리는 동안 봇과 연습"과 같은 주소 (방 코드 없이 practice=1)
+  await page.goto(`${QUERY}&practice=1`);
+  await expect(page.getByTestId('practice-picker')).toBeVisible();
+  await expect(page.getByTestId('room-code')).toHaveCount(0);
+  await expect(page.getByTestId('server-waking')).toBeHidden();
+  expect(page.url()).not.toContain('practice=');
+  expect(page.url()).not.toContain('room=');
+  expect(page.url()).toContain('debug=hook');
+  expect(await page.evaluate(() => localStorage.getItem('decoy:lastRoom'))).toBeNull();
+  await press(page.getByTestId('practice-role-runner'));
+  await expect.poll(async () => (await practiceState(page)).phase, { timeout: 10_000 }).toBe('playing');
+  // 새로고침 → 첫 화면 (역할 고르기가 다시 열리지 않는다)
+  await page.reload();
+  await expect(page.getByTestId('create-room')).toBeVisible();
+  await expect(page.getByTestId('practice-picker')).toHaveCount(0);
   expect(problems).toEqual([]);
   await context.close();
 });

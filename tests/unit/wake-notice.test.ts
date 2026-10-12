@@ -1,6 +1,6 @@
 // '서버 깨우는 중' 안내: 언제 보이고 언제 사라지는가
 import { describe, expect, it } from 'vitest';
-import { WAKE_NOTICE_DELAY_MS, WakeNoticeState } from '../../client/src/wakeNotice';
+import { WAKE_NOTICE_DELAY_MS, WakeNoticeState, wakeOffersHome } from '../../client/src/wakeNotice';
 
 describe('서버 깨우기 안내', () => {
   it('처음 연결을 기다린 지 잠깐(WAKE_NOTICE_DELAY_MS)이 지나야 보인다', () => {
@@ -62,5 +62,17 @@ describe('서버 깨우기 안내', () => {
     expect(v.offline).toBe(true);
     s.setOffline(false);
     expect(s.view(WAKE_NOTICE_DELAY_MS + 2000).offline).toBe(false);
+  });
+});
+
+describe("깨우기 패널의 '첫 화면으로' (검토 반영 F23)", () => {
+  it('방 경로로 부팅해 아직 방에 들어가지 못한 채 기다리면 보인다 (방 링크 · 마지막 방 복귀 · 옛 연결 재시도)', () => {
+    expect(wakeOffersHome({ roomCode: 'ABCD', inRoom: false, practicing: false })).toBe(true);
+  });
+
+  it('판 중 재연결(방 · 판 안) · 연습 중 · 방 코드 없음(첫 화면)이면 보이지 않는다', () => {
+    expect(wakeOffersHome({ roomCode: 'ABCD', inRoom: true, practicing: false })).toBe(false);
+    expect(wakeOffersHome({ roomCode: 'ABCD', inRoom: false, practicing: true })).toBe(false);
+    expect(wakeOffersHome({ roomCode: null, inRoom: false, practicing: false })).toBe(false);
   });
 });

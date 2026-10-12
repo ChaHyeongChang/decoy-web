@@ -393,8 +393,9 @@ test('휴대폰: 다시 연결한 뒤 판 장면이 다시 생기기 전(세로�
   await page.setViewportSize({ width: land.height, height: land.width });
   const tick0 = await lastTick(page);
   await cutSocket(relay);
-  // 끊기 직전에 서버가 보낸 스냅샷이 끊김보다 늦게 처리되면 tick0보다 큰 틱이 새 소켓 없이도 온다(부하가 걸린 전체 실행에서
-  // 봤다). 끊은 뒤 페이지가 마지막으로 받은 틱보다 새 스냅샷 = 새 소켓으로 온 스냅샷을 기다린다
+  // 틱을 읽을 때 중계(페이지 → 시험 → 페이지) 안에 있던 옛 소켓 스냅샷은 tick0 뒤 · 그 소켓의 close 전에 처리된다(부하가 걸린
+  // 전체 실행에서 봤다) → tick0보다 큰 틱이 새 소켓 없이도 온다. cutSocket이 끝나면 페이지가 close를 처리했으므로(닫힌 소켓의
+  // 늦은 메시지는 net.ts 가드가 버린다) 그 뒤 읽은 틱보다 새 스냅샷만 새 소켓에서 온다 — 그것을 기다린다
   await waitForResumed(page, Math.max(tick0, await lastTick(page)), s.id);
   expect(relay.pairs.length).toBe(2);
   // 새 장면이 생기기 전에 거점 A 해독: 메모는 'match' 뒤에 오고, 지금은 곧 멈출 옛 장면만 받는다
@@ -551,6 +552,8 @@ test('휴대폰 판 중 뒤로 가기 → 확인 창: "계속"이면 판 유지,
   const dialog = page.getByTestId('leave-dialog');
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText('판에서 나가시겠어요?');
+  // 친구 방은 30초 유예 안내 (빠른 매칭 판은 '바로 판에서 빠져요' — m13-quick, 검토 반영)
+  await expect(dialog).toContainText('30초 안에 돌아오면');
   const n = await snapCount(page);
   await expect.poll(() => snapCount(page), POLL).toBeGreaterThan(n + 5);
   await press(page.getByTestId('leave-stay'));

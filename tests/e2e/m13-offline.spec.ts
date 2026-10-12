@@ -3,6 +3,7 @@
 //    (휴대폰 · PC 각각). `setOffline`만으로는 서비스 워커 요청이 살아 있는 서버에 닿아 가짜로 통과하므로 서버를 끈다
 //  - 서버만 꺼짐(온라인): 새로 열기 → 상태 줄 안내 + 봇과 연습
 //  - Render 정지 흉내: 표시 헤더 없이 503을 주는 가짜 서버 → 깨우기 화면의 "기다리는 동안 봇과 연습"으로 판 시작
+//  - (검토 반영) 오프라인 + 서버 꺼짐에서 방 주소(?room=)로 열면 깨우기 패널의 "첫 화면으로" → 봇과 연습
 //  - 서비스 워커 업데이트: 빌드 ID만 다른 두 빌드를 차례로 서빙하면 새 워커로 바뀌고 옛 셸 캐시가 지워지고,
 //    화면은 "새 버전이 있어요"를 띄운다
 // 서버를 일부러 끄는 시험이라 브라우저가 스스로 찍는 연결 실패 로그만 허용한다(MOBILE_PLAN 3절 콘솔 규칙의 예외)
@@ -169,8 +170,8 @@ test('Render 정지 흉내(표시 없이 503): 깨우기 화면의 "기다리는
     await practice.click();
     // ?practice=1은 서비스 워커가 캐시에서 준다 → 역할 고르기가 바로 열린다
     await expect(page.getByTestId('practice-picker')).toBeVisible({ timeout: 5000 });
-    // 원래 주소의 설정은 남고 방 코드는 빠진다
-    expect(page.url()).toContain('practice=1');
+    // 원래 주소의 설정은 남고 방 코드는 빠진다. practice는 읽은 뒤 앱이 주소에서 지운다(새로고침 · '홈으로' 뒤 다시 열리지 않게)
+    expect(page.url()).not.toContain('practice=');
     expect(page.url()).toContain('debug=hook');
     expect(page.url()).not.toContain('room=');
     await page.getByTestId('practice-role-runner').click();
@@ -179,6 +180,49 @@ test('Render 정지 흉내(표시 없이 503): 깨우기 화면의 "기다리는
   } finally {
     await context.close();
     await new Promise<void>((r) => (fake ? fake.close(() => r()) : r()));
+    await server.stop();
+  }
+});
+
+test('오프라인 + 서버 꺼짐에서 방 주소(?room=)로 열면 깨우기 패널의 "첫 화면으로"로 코드를 남긴 채 첫 화면 → 봇과 연습 (휴대폰)', async ({
+  browser,
+}) => {
+  const port = await freePort();
+  const server = await startServer(['--test-hooks'], { port });
+  const base = `http://127.0.0.1:${port}`;
+  const { context, page, problems } = await newPlayerPage(browser, dpr1(PHONE_LANDSCAPE));
+  try {
+    await page.goto(`${base}/?debug=hook&renderer=canvas`);
+    await shellReady(page);
+    await context.setOffline(true);
+    await server.stop();
+    let sockets = 0;
+    page.on('websocket', () => {
+      sockets += 1;
+    });
+    // 방 초대 링크 · welcome이 넣은 주소로 다시 엶 (캐시한 앱 셸)
+    await page.goto(`${base}/?debug=hook&renderer=canvas&room=ABCD`);
+    const wake = page.getByTestId('server-waking');
+    await expect(wake).toBeVisible({ timeout: 10_000 });
+    await expect(wake).toContainText('인터넷 연결이 끊겨 있어요');
+    const home = page.getByTestId('wake-home');
+    await expect(home).toBeVisible();
+    expect((await home.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(48);
+    await press(home);
+    await expect(wake).toBeHidden();
+    const status = page.getByTestId('server-status');
+    await expect(status).toHaveAttribute('data-state', 'offline');
+    await expect(page.getByTestId('room-code-input')).toHaveValue('ABCD');
+    expect(page.url()).not.toContain('room=');
+    expect(await page.evaluate(() => localStorage.getItem('decoy:lastRoom'))).toBeNull();
+    await press(page.getByTestId('practice'));
+    await press(page.getByTestId('practice-role-scout'));
+    await expect.poll(() => phase(page), { timeout: 15_000 }).toBe('playing');
+    expect(await page.evaluate(() => window.__DECOY__?.transport)).toBe('local');
+    expect(sockets).toBe(0);
+    expect(unexpected(problems)).toEqual([]);
+  } finally {
+    await context.close();
     await server.stop();
   }
 });

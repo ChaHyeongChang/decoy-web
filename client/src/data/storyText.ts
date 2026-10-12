@@ -169,6 +169,11 @@ export const UI_TEXT = {
   quickCancel: '취소',
   quickDropped: '대기열에서 빠졌어요',
   quickRetry: '다시 찾기',
+  // ── 검토 반영 (출시 전) ──
+  /** 친구 방 로비 명령 줄: 방에서 나가 첫 화면으로 (F09) */
+  roomLeave: '나가기',
+  /** 방 링크 · 마지막 방 복귀로 기다리는 깨우기 패널: 첫 화면(봇과 연습)으로 (F23) */
+  wakeHome: '첫 화면으로',
   // ── 새 버전 (M13d) ──
   updateAvailable: '새 버전이 있어요',
   updateReload: '새로고침',
@@ -287,6 +292,9 @@ export const APP_TEXT = {
   leaveTitle: '판에서 나가시겠어요?',
   leaveBody:
     '30초 안에 돌아오면 같은 자리에서 이어서 할 수 있어요. 그 뒤에는 생존자는 사망 처리되고, 괴물이면 판이 무효가 돼요.',
+  /** 빠른 매칭 판: 나가기는 유예 없이 바로 판정한다 (GAME_DESIGN 11.2, 검토 반영 F10) */
+  leaveBodyQuick:
+    '나가면 바로 판에서 빠져요. 생존자는 사망 처리되고, 괴물이면 판이 무효가 돼요. 이 판은 이어서 할 수 없어요.',
   leaveStay: '계속',
   leaveGo: '나가기',
 } as const;

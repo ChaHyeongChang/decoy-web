@@ -58,10 +58,19 @@ class CenterCard {
 let ids = 0;
 const nextId = (p: string): string => `${p}-${++ids}`;
 
+/**
+ * 뒤로 가기 확인 본문: 친구 방은 30초 유예 안내, 빠른 매칭 판은 나가기가 바로 판정된다는 안내
+ * (GAME_DESIGN 11.2 — 유예 없음 · 이어서 할 수 없음, 검토 반영 F10)
+ */
+export function leaveBodyFor(quick: boolean): string {
+  return quick ? APP_TEXT.leaveBodyQuick : APP_TEXT.leaveBody;
+}
+
 /** 판 중 뒤로 가기 확인 (터치 · 설치 앱): "판에서 나가시겠어요?" + 계속 / 나가기 */
 export class LeaveDialog {
   private readonly box: CenterCard;
   private readonly stayBtn: HTMLButtonElement;
+  private readonly bodyText: HTMLParagraphElement;
 
   constructor(host: HTMLElement, actions: { stay: () => void; leave: () => void }) {
     const title = nextId('leave-title');
@@ -81,6 +90,7 @@ export class LeaveDialog {
     );
     this.stayBtn.addEventListener('click', () => actions.stay());
     go.addEventListener('click', () => actions.leave());
+    this.bodyText = h('p', { id: body, class: 'life-body' }, APP_TEXT.leaveBody);
     this.box.card.classList.add('life-leave');
     this.box.card.append(
       h(
@@ -89,7 +99,7 @@ export class LeaveDialog {
         icon('exit', 24, 'life-head-ico'),
         h('h2', { id: title }, APP_TEXT.leaveTitle),
       ),
-      h('p', { id: body, class: 'life-body' }, APP_TEXT.leaveBody),
+      this.bodyText,
       h('div', { class: 'life-buttons' }, go, this.stayBtn),
     );
     // Esc(키보드 · 일부 기기의 뒤로 가기 키) = 계속
@@ -102,7 +112,9 @@ export class LeaveDialog {
     return this.box.isOpen;
   }
 
-  open(): void {
+  /** quick = 빠른 매칭 판 (본문이 다르다, leaveBodyFor) */
+  open(quick = false): void {
+    this.bodyText.textContent = leaveBodyFor(quick);
     this.box.show(this.stayBtn);
   }
 

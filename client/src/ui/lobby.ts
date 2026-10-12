@@ -32,6 +32,8 @@ export interface LobbyActions {
   quick(name: string): void;
   /** 빠른 매칭 대기 취소 (M13c): 자리를 비우고 첫 화면으로 */
   leaveQueue(): void;
+  /** 친구 방 로비에서 나가기 (검토 반영 F09): 자리를 비우고 첫 화면으로 */
+  leaveRoom(): void;
   pickRole(role: Role | null): void;
   setReady(ready: boolean): void;
   setName(name: string): void;
@@ -285,10 +287,14 @@ export class LobbyUI {
     code.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') doJoin();
     });
+    // 상태 줄 · 오류 줄은 이름 칸 바로 아래 (검토 반영 F14): 패널 맨 아래면 높이 360 이하 휴대폰 가로 · 태블릿에서 화면 밖이라
+    // 꺼진 빠른 매칭 · 방 만들기 · 입장의 이유와 입장 실패 오류가 보이지 않았다
     const panel = h(
       'div',
       { class: 'panel home-panel' },
       h('label', { class: 'field' }, name),
+      this.statusLine,
+      this.errorBox,
       ...(queueDropped ? [this.droppedRow(() => this.actions.quick(name.value))] : []),
       quickBtn,
       practice,
@@ -296,8 +302,6 @@ export class LobbyUI {
       h('div', { class: 'divider' }),
       h('div', { class: 'row' }, h('label', { class: 'field field-code' }, code), join),
       ...this.qualityRow(),
-      this.statusLine,
-      this.errorBox,
     );
     this.netButtons = [quickBtn, create, join];
     this.applyStatus();
@@ -343,14 +347,15 @@ export class LobbyUI {
     }
     const cancel = h('button', { class: 'btn', 'data-testid': 'practice-cancel' }, UI_TEXT.practiceCancel);
     cancel.addEventListener('click', () => this.renderHome());
+    // 상태 줄 · 오류 줄은 안내 바로 아래 (첫 화면과 같은 자리, 검토 반영 F14)
     const panel = h(
       'div',
       { class: 'panel home-panel practice-panel', 'data-testid': 'practice-picker' },
       h('div', { class: 'lobby-hint' }, UI_TEXT.practicePick),
-      grid,
-      h('div', { class: 'action-row' }, cancel),
       this.statusLine,
       this.errorBox,
+      grid,
+      h('div', { class: 'action-row' }, cancel),
     );
     this.netButtons = [];
     this.applyStatus();
@@ -599,9 +604,19 @@ export class LobbyUI {
       if (!me?.ready) enterFullscreen();
       this.actions.setReady(!(me?.ready ?? false));
     });
+    // 나가기 (검토 반영 F09): 방에서 나가 첫 화면으로. 없으면 설치 앱 · 휴대폰에서 방 로비가 막다른 길이었다
+    // (뒤로 가기는 앱을 닫고, 30초 안에 다시 열면 같은 방으로 돌아온다)
+    const leave = h(
+      'button',
+      { class: 'btn room-leave', 'data-testid': 'room-leave' },
+      icon('back', 18),
+      UI_TEXT.roomLeave,
+    );
+    leave.addEventListener('click', () => this.actions.leaveRoom());
     const buttons = h(
       'div',
       { class: 'action-row' },
+      leave,
       ...(this.settings ? [this.settings.button()] : []),
       ready,
     );
