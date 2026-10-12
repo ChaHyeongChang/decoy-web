@@ -76,6 +76,19 @@ function roomOf(core: ServerCore, c: Client): Room {
   return room;
 }
 
+/** 소켓을 닫고 새 연결로 같은 자리 토큰을 들고 돌아온다 (새로고침 · 재연결) */
+function rejoin(env: ReturnType<typeof setup>, c: Client, code: string): Client {
+  const token = c.conn.last('welcome')?.token ?? null;
+  c.link.close();
+  const fresh = env.client(c.name);
+  fresh.link.receive(
+    raw({ t: 'join', room: code, create: false, name: c.name, token, altTokens: [], bots: false }),
+  );
+  return fresh;
+}
+
+const GRACE_MS = balance.match.reconnectGrace * 1000;
+
 describe('빠른 매칭: 대기열 · 자동 시작', () => {
   it('둘이 들어오면 같은 방, 대기 시간이 지나면 봇 2명과 시작 (역할을 안 고른 사람은 남은 역할 중 하나)', () => {
     const { core, client, run } = setup();
@@ -261,6 +274,39 @@ describe('빠른 매칭: 판 중 · 판 뒤', () => {
         if (p.name !== me.name) expect(p.name).toMatch(/^플레이어 [1-4]$/);
     }
   });
+
+  // 출시 전 검토: 결과 단계에서 자리가 지워진 뒤(다시 하기 · 나가기 · 유예 만료) 다시 보내는 결과에 그 사람 실제 닉네임이 갔다
+  it.each(['none', 'rematch', 'leave', 'drop'] as const)(
+    '결과 단계에서 다른 사람 자리가 지워져도(%s) 다시 접속해 받은 원문에 그 사람 닉네임이 없다',
+    (how) => {
+      const env = startedPair();
+      const { a, b, room, run } = env;
+      a.link.receive(raw({ t: 'test', cmd: { kind: 'setTime', timeLeft: 0.05 } }));
+      run(200, [a, b]);
+      expect(room.phase).toBe('result');
+      const aId = room.seats.find((s) => s.name === a.name)?.id ?? '';
+      const bId = room.seats.find((s) => s.name === b.name)?.id ?? '';
+      const seenAlias = b.conn.last('result')?.result.players.find((p) => p.id === aId)?.name;
+      expect(seenAlias).toMatch(/^플레이어 [1-4]$/);
+      if (how === 'rematch') a.link.receive(raw({ t: 'rematch' }));
+      else if (how === 'leave') a.link.receive(raw({ t: 'leave' }));
+      else if (how === 'drop') {
+        a.link.close();
+        run(GRACE_MS + 1000, [b]);
+      }
+      expect(room.seats.some((s) => s.id === aId)).toBe(how === 'none');
+      const fresh = rejoin(env, b, room.code);
+      const text = JSON.stringify(fresh.conn.inbox);
+      expect(text).not.toContain(a.name);
+      const result = fresh.conn.last('result')?.result;
+      expect(result?.players).toHaveLength(4);
+      for (const p of result?.players ?? []) if (p.id !== bId) expect(p.name).toMatch(/^플레이어 [1-4]$/);
+      // 처음 받은 결과와 같은 익명 이름, 봇 표시도 그대로
+      expect(result?.players.find((p) => p.id === aId)).toMatchObject({ name: seenAlias, bot: false });
+      expect(result?.players.filter((p) => p.bot)).toHaveLength(2);
+      expect(result?.players.find((p) => p.id === bId)?.name).toBe(b.name);
+    },
+  );
 
   it('빠른 매칭 시작 직후 괴물이 받은 모든 메시지 원문에 다른 자리의 역할 문자열과 봇 여부가 없다', () => {
     const env = setup();

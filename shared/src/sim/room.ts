@@ -91,6 +91,8 @@ export const ROOM_IDLE_TIMEOUT_MS = 60_000;
 export const QUICK_STALE_MS = 3000;
 /** 빠른 매칭: 봇을 채우지 못해 사람만 기다리는 중 (로비 안내) */
 export const WAITING_HUMANS_ONLY = '사람만 기다리는 중';
+/** 빠른 매칭에서 다른 사람의 익명 이름을 찾지 못했을 때 (실제 닉네임으로 돌아가지 않게) */
+export const ANON_NAME_FALLBACK = '플레이어';
 
 export class Room {
   phase: RoomPhase = 'lobby';
@@ -103,6 +105,11 @@ export class Room {
   private monsterAway = 0;
   matchCount = 0;
   lastResult: Extract<ServerMessage, { t: 'result' }> | null = null;
+  /**
+   * 판이 끝난 순간의 자리별 익명 이름 · 봇 여부 (결과를 다시 보낼 때). 결과 단계에서 다시 하기 · 나가기 · 유예 만료로
+   * 자리가 지워져도 결과 줄의 이름을 익명으로 보내기 위해 (빠른 매칭, 출시 전 검토)
+   */
+  private resultSeats = new Map<string, { alias: string; bot: boolean }>();
   emptySince: number | null = null;
   private joinCounter = 0;
   private readonly rng: Rng;
@@ -292,19 +299,23 @@ export class Room {
       players: full.players.map((p): LobbyPlayer => {
         if (p.id === seat.id) return p;
         const other = this.seatById(p.id);
-        const masked = { ...p, name: other?.alias ?? p.name, bot: false };
+        const masked = { ...p, name: other?.alias ?? ANON_NAME_FALLBACK, bot: false };
         return monsterInMatch ? { ...masked, role: null, connected: true, ready: true } : masked;
       }),
     };
   }
 
-  /** 받는 사람별 결과: 봇 표시를 넣고, 빠른 매칭이면 다른 사람 이름을 익명으로 (M13c) */
+  /**
+   * 받는 사람별 결과: 봇 표시를 넣고, 빠른 매칭이면 다른 사람 이름을 익명으로 (M13c). 결과 단계에서 지워진 자리는
+   * 판이 끝난 순간의 기록(resultSeats)으로 찾고, 그래도 없으면 실제 닉네임 대신 "플레이어"
+   */
   resultFor(seat: Seat, msg: Extract<ServerMessage, { t: 'result' }>): ServerMessage {
     const result: MatchResult = {
       ...msg.result,
       players: msg.result.players.map((p) => {
-        const other = this.seatById(p.id);
-        const name = this.kind === 'quick' && p.id !== seat.id ? (other?.alias ?? p.name) : p.name;
+        const other = this.seatById(p.id) ?? this.resultSeats.get(p.id);
+        const name =
+          this.kind === 'quick' && p.id !== seat.id ? (other?.alias ?? ANON_NAME_FALLBACK) : p.name;
         return { ...p, name, bot: other?.bot ?? false };
       }),
     };
@@ -437,6 +448,7 @@ export class Room {
     this.monsterAway = 0;
     this.phase = 'playing';
     this.lastResult = null;
+    this.resultSeats.clear();
     for (const s of this.seats) s.conn?.send({ t: 'match', info: this.matchInfo(s) });
     for (const s of this.seats) s.matchesPlayed += 1;
     this.sendLobby();
@@ -451,6 +463,8 @@ export class Room {
     const result = buildResult(game);
     this.phase = 'result';
     this.lastResult = { t: 'result', result };
+    // 판 중에는 자리가 지워지지 않으므로 여기에 이번 판 자리가 모두 있다
+    this.resultSeats = new Map(this.seats.map((s) => [s.id, { alias: s.alias, bot: s.bot }]));
     for (const s of this.seats) {
       const last = this.lastResult;
       s.conn?.send(this.resultFor(s, last));
@@ -465,6 +479,7 @@ export class Room {
     this.phase = 'lobby';
     this.game = null;
     this.lastResult = null;
+    this.resultSeats.clear();
     // 봇 자리는 비우고, 사람은 역할을 유지한 채 준비만 푼다
     for (let i = this.seats.length - 1; i >= 0; i -= 1) {
       const s = this.seats[i];
