@@ -2,8 +2,18 @@
 //  - 첫 화면: 연결을 기다리면 상태 줄 '서버를 깨우는 중… n초' + 봇과 연습 (M13b, 가운데 패널 대신)
 //  - 방 안에서: 끊긴 뒤면 가운데 패널 '서버에 다시 연결하는 중' 안내
 //  - 페이지를 새로 열 때: 서비스 워커가 미리 받아 둔 깨우기 화면(wake.html)을 보여 주고, 깨어나면 원래 주소로 돌아간다
+//  - 낮은 휴대폰 가로에서 깨우기 화면의 "봇과 연습" · 90초 뒤 "다시 시도"가 스크롤 없이 첫 화면 안 (검토 반영 F15)
 import { expect, test, type Page } from '@playwright/test';
-import { BASE_QUERY, createRoom, newPlayerPage } from './helpers';
+import {
+  BASE_QUERY,
+  PHONE_BROWSER,
+  PHONE_NARROW,
+  PHONE_SMALL,
+  createRoom,
+  dpr1,
+  newPlayerPage,
+  type DeviceOptions,
+} from './helpers';
 
 async function stall(page: Page, query: string): Promise<void> {
   const res = await page.request.get(`/test/stall?${query}`);
@@ -78,6 +88,53 @@ test('서버가 잠든 동안 페이지를 다시 열면 깨우기 화면이 뜨
   expect(problems).toEqual([]);
   await context.close();
 });
+
+// 휴대폰 가로(TWA는 가로 고정)의 낮은 화면: 브라우저 막대가 있는 Pixel 7 · 좁은 S9+ · 가장 낮은 Pixel 5
+const LOW_PHONES: { name: string; device: DeviceOptions }[] = [
+  { name: 'Pixel 7 863×360', device: dpr1(PHONE_BROWSER) },
+  { name: 'S9+ 658×320', device: dpr1(PHONE_NARROW) },
+  { name: 'Pixel 5 802×293', device: dpr1(PHONE_SMALL) },
+];
+
+for (const d of LOW_PHONES) {
+  test(`낮은 휴대폰 가로(${d.name})에서도 깨우기 화면의 "봇과 연습"이 스크롤 없이 첫 화면 안에 있고, 90초 뒤 "다시 시도"까지 함께 보인다`, async ({
+    browser,
+  }) => {
+    const { context, page, problems } = await newPlayerPage(browser, d.device);
+    await page.goto(`/?${BASE_QUERY.slice(1)}`);
+    await expect(page.getByTestId('create-room')).toBeVisible();
+    // 서비스 워커가 이 페이지를 맡으면 설치(앱 셸 사전 캐시)가 끝난 것 → 깨우기 화면에 "봇과 연습"이 뜬다
+    await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
+    // 90초 경고는 가짜 시계로 당긴다 (깨우기 화면이 시계를 쓰기 전에 건다)
+    await page.clock.install();
+    await stall(page, 'ms=30000&drop=1');
+    await page.reload();
+    const wake = page.getByTestId('wake-page');
+    await expect(wake).toBeVisible({ timeout: 15_000 });
+    const practice = page.getByTestId('wake-practice');
+    await expect(practice).toBeVisible();
+    // toBeVisible · click은 화면 밖(스크롤해야 닿는 곳)도 통과시키므로, 스크롤하지 않은 첫 화면에 다 들어오는지 본다
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await expect(practice, `${d.name}: 봇과 연습`).toBeInViewport({ ratio: 1 });
+    // 90초가 지나면 '서버에 연결할 수 없어요' + 다시 시도
+    await page.clock.fastForward(91_000);
+    const retry = page.locator('#retry');
+    await expect(page.locator('#slow')).toBeVisible();
+    await expect(retry).toBeVisible();
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await expect(practice, `${d.name}: 90초 뒤 봇과 연습`).toBeInViewport({ ratio: 1 });
+    await expect(retry, `${d.name}: 90초 뒤 다시 시도`).toBeInViewport({ ratio: 1 });
+    const box = async (sel: string) => (await page.locator(sel).boundingBox())!;
+    const [p, r] = [await box('[data-testid="wake-practice"]'), await box('#retry')];
+    console.log(
+      `[깨우기 화면] ${d.name}: 봇과 연습 y ${p.y.toFixed(0)}~${(p.y + p.height).toFixed(0)}, ` +
+        `다시 시도 y ${r.y.toFixed(0)}~${(r.y + r.height).toFixed(0)}`,
+    );
+    await page.screenshot({ path: `artifacts/screens/wake-page-${d.device.viewport?.height ?? 0}.png` });
+    expect(problems).toEqual([]);
+    await context.close();
+  });
+}
 
 test('서버가 깨어 있으면 서비스 워커가 있어도 첫 화면은 서버가 그대로 준다', async ({ browser }) => {
   const { context, page, problems } = await newPlayerPage(browser);

@@ -6,6 +6,7 @@
   갇히는 일이 없게 하는 탈출구는 이것뿐이다. '다시 시도'는 새로고침만 한다(M13d).
   앱 셸이 캐시돼 있으면 "기다리는 동안 봇과 연습"으로 기기 안 연습을 바로 연다(`?practice=1`은 서비스 워커가 캐시에서 준다).
   90초가 지나면 "서버에 연결할 수 없어요" 안내
+  낮은 휴대폰 가로(높이 480 이하)에서는 여백 · 글자 · 펄스를 줄여 두 버튼이 스크롤 없이 첫 화면에 든다
   게임 코드 없이 혼자 도는 페이지라 문구 · 색을 여기 직접 적는다 (문구 원본: docs/STORY_TEXT.md, 색: VISUAL_SPEC)
 -->
 <html lang="ko">
@@ -205,6 +206,41 @@
       }
       [hidden] {
         display: none;
+      }
+      /* 낮은 가로 화면(휴대폰 가로 높이 293~412, TWA는 가로 고정): 여백 · 글자 · 펄스를 줄여 "기다리는 동안 봇과 연습"과
+         90초 뒤 "다시 시도"까지 스크롤 없이 첫 화면에 든다 (검토 반영 F15) */
+      @media (max-height: 480px) {
+        main {
+          padding-top: max(8px, env(safe-area-inset-top, 0px));
+          padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
+        }
+        .card {
+          gap: 6px;
+          padding: 12px 20px 14px;
+        }
+        .pulse {
+          width: 36px;
+          height: 36px;
+        }
+        .brand {
+          font-size: 22px;
+        }
+        h1 {
+          font-size: 18px;
+        }
+        p {
+          font-size: 14px;
+          line-height: 1.45;
+        }
+        .muted {
+          font-size: 13px;
+        }
+      }
+      /* 가장 낮은 화면(293 등)은 장식 펄스(aria-hidden)를 숨긴다 — 90초 경고까지 들어갈 자리 */
+      @media (max-height: 340px) {
+        .pulse {
+          display: none;
+        }
       }
     </style>
   </head>
