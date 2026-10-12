@@ -10,7 +10,6 @@ import { expect, test, type Browser, type BrowserContext, type Page } from '@pla
 import { BTN, RESCUE_POINT, angleDiff, type InputLogEntry, type Role } from '@decoy/shared';
 import { TOUCH } from '../../client/src/touchInput';
 import {
-  BASE_QUERY,
   LANDSCAPE_DEVICES,
   PC_NARROW,
   PHONE_LANDSCAPE,
@@ -1481,23 +1480,33 @@ async function fakeNewServerBuild(page: Page): Promise<void> {
   });
 }
 
-test('새 버전 띠: 손가락 화면에서 새로고침 버튼이 48px 이상이고, 판 중(body.in-match)에는 숨어 판 화면을 가리지 않는다', async ({
+test('새 버전 띠: 손가락 화면에서 새로고침 버튼이 48px 이상이고, 실제 판이 시작되면(body.in-match) 숨어 판 화면을 가리지 않다가 결과에서 다시 보인다', async ({
   browser,
 }) => {
   const { context, page, problems } = await newPlayerPage(browser, PHONE);
+  await context.addInitScript(stubFullscreen);
   await fakeNewServerBuild(page);
-  await page.goto(`/?${BASE_QUERY.slice(1)}`);
+  const inMatch = (): Promise<boolean> => page.evaluate(() => document.body.classList.contains('in-match'));
+  // 첫 화면 → 봇 방 (welcome · pong의 빌드가 달라 띠가 뜬다)
+  await createRoom(page, '&bots=1');
   const banner = page.getByTestId('update-available');
   await expect(banner).toBeVisible();
   await expect(banner).toContainText('새 버전이 있어요');
   const btn = (await banner.getByRole('button').boundingBox())!;
   expect(btn.height, '새로고침 버튼 높이').toBeGreaterThanOrEqual(48 - 0.05);
-  // 판 중에는 숨는다: 판이 시작되면 App.setPlaying이 body에 in-match를 단다(검토 반영 F08). 여기서는 그 표시에 대한
-  // CSS 약속만 본다 — 실제 판 흐름은 앱 쪽 시험이 본다
-  await page.evaluate(() => document.body.classList.add('in-match'));
+  expect(await inMatch()).toBe(false);
+  // 실제 판 시작: App.setPlaying이 body에 in-match를 달아 띠를 숨긴다(검토 반영 F08). 손으로 클래스를 달지 않는다 —
+  // 옛 app.ts(in-match를 달지 않음)에서는 판 중에도 띠가 남은 시간 · 맵 위쪽을 가려 여기서 실패한다
+  await pickRoleAndReady(page, 'runner');
+  await press(page.getByTestId('start-button'));
+  await waitForSnapshots(page, 3);
+  expect(await inMatch()).toBe(true);
   await expect(banner).toBeHidden();
+  await expect.poll(() => page.evaluate(() => window.__DECOY__?.phase), POLL).toBe('playing');
   // 판이 끝나면(결과 · 첫 화면 · 방 화면) 다시 보인다 — 새로고침하기 좋은 때
-  await page.evaluate(() => document.body.classList.remove('in-match'));
+  await sendTest(page, { kind: 'setTime', timeLeft: 0.1 });
+  await expect(page.getByTestId('result')).toBeVisible({ timeout: 15_000 });
+  expect(await inMatch()).toBe(false);
   await expect(banner).toBeVisible();
   expect(problems).toEqual([]);
   await context.close();
