@@ -146,6 +146,30 @@ describe('ServerCore 연결 처리', () => {
     expect(seat?.name).toBe('새탭');
   });
 
+  // 출시 전 검토: 풀린 묶음(넘겨받힘 · 대기열에서 빠짐)이 방 객체를 연결이 닫힐 때까지 붙잡던 문제
+  it('넘겨받힌 옛 연결은 다음 메시지에서 방을 놓고, 닫힌 연결은 바로 놓는다 (자리는 끊김으로 남음)', () => {
+    const core = newCore({ t: 0 });
+    const a = new ProbeConn();
+    const la = core.connect(a, () => {});
+    expect(la.boundRoom).toBeNull();
+    la.receive(join(null));
+    const welcome = a.inbox.find((m) => m.t === 'welcome');
+    if (welcome?.t !== 'welcome') throw new Error('welcome 없음');
+    expect(la.boundRoom).toBe(welcome.room);
+    const b = new ProbeConn();
+    const lb = core.connect(b, () => {});
+    lb.receive(join(welcome.room, welcome.token));
+    la.receive(raw({ t: 'ping', c: 1 }));
+    expect(a.inbox.at(-1)?.t).toBe('pong');
+    expect(la.boundRoom).toBeNull();
+    expect(lb.boundRoom).toBe(welcome.room);
+    lb.close();
+    expect(lb.boundRoom).toBeNull();
+    const seat = core.manager.rooms.get(welcome.room)?.seats[0];
+    expect(seat?.conn).toBeNull();
+    expect(seat?.droppedAt).toBe(0);
+  });
+
   it('닫힌 뒤 도착한 메시지는 버리고, 닫히면 자리를 끊긴 상태로 (그때 시각)', () => {
     const clock = { t: 0 };
     const core = newCore(clock);

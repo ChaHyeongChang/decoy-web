@@ -12,6 +12,11 @@ export interface CoreLink {
   receive(raw: string): void;
   /** 연결이 닫혔다: 붙어 있던 자리를 끊긴 상태로 */
   close(): void;
+  /**
+   * 이 연결이 지금 붙잡고 있는 방의 코드 (시험 · 진단용 읽기 전용, 없으면 null). 대기열에서 빠졌거나 다른 연결이 자리를
+   * 넘겨받아 풀린 묶음은 다음 메시지에서 놓고, 닫히면 바로 놓는다 — 지운 방(다른 사람 닉네임 포함)을 붙잡지 않게
+   */
+  readonly boundRoom: string | null;
 }
 
 export class ServerCore {
@@ -53,6 +58,9 @@ export class ServerCore {
       const now = this.now();
       // 지금도 이 연결이 그 자리에 붙어 있는가 (다른 연결이 넘겨받았거나 대기열에서 빠졌으면 풀린 것으로 본다)
       const live = bound && bound.seat.conn?.id === conn.id ? bound : null;
+      // 풀린 묶음은 놓는다: 방이 지워진 뒤에도 이 연결이 방 객체(다른 사람 닉네임 포함)를 붙잡지 않게 (출시 전 검토).
+      // 다시 묶이는 길은 join · quick뿐이고 그때 새로 넣는다
+      if (!live) bound = null;
       if (msg.t === 'join' || msg.t === 'quick') {
         if (live) return;
         const r =
@@ -103,6 +111,10 @@ export class ServerCore {
       close: () => {
         closed = true;
         if (bound && bound.seat.conn?.id === conn.id) bound.room.detach(bound.seat, this.now());
+        bound = null;
+      },
+      get boundRoom(): string | null {
+        return bound?.room.code ?? null;
       },
     };
   }

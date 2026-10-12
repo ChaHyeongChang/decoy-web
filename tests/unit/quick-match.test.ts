@@ -5,6 +5,7 @@ import type { ClientMessage, Role, ServerMessage } from '@decoy/shared';
 import {
   BotDriver,
   QUICK_STALE_MS,
+  ROOM_IDLE_TIMEOUT_MS,
   ServerCore,
   WAITING_HUMANS_ONLY,
   devBotBrain,
@@ -172,6 +173,30 @@ describe('빠른 매칭: 대기열 · 자동 시작', () => {
     quick(b);
     expect(roomOf(core, b)).not.toBe(room);
     expect(QUICK_STALE_MS).toBe(3000);
+  });
+
+  // 출시 전 검토: 대기열에서 빠진 연결이 지운 방 객체(다른 사람 닉네임 포함)를 연결이 닫힐 때까지 붙잡던 문제
+  it('대기열에서 빠진 연결은 다음 메시지(첫 화면 ping)에서 그 방을 놓고, 방이 지워진 뒤에도 붙잡지 않는다', () => {
+    const { core, client, run } = setup();
+    const a = client('살아');
+    const b = client('멈춤');
+    quick(a);
+    quick(b);
+    const room = roomOf(core, a);
+    run(2000, [a, b]);
+    run(WAIT_MS, [a]);
+    expect(b.conn.last('error')?.code).toBe('queue-dropped');
+    expect(room.phase).toBe('playing');
+    expect(a.link.boundRoom).toBe(room.code);
+    b.link.receive(raw({ t: 'ping', c: 1 }));
+    expect(b.conn.last('pong')).toBeDefined();
+    expect(b.link.boundRoom).toBeNull();
+    // 남은 사람도 나가 방이 지워진 뒤: 어느 연결도 그 방을 가리키지 않는다
+    a.link.receive(raw({ t: 'leave' }));
+    run(ROOM_IDLE_TIMEOUT_MS + 1000, [b]);
+    expect(core.manager.rooms.has(room.code)).toBe(false);
+    expect(a.link.boundRoom).toBeNull();
+    expect(b.link.boundRoom).toBeNull();
   });
 
   it('방 코드 방은 매칭에 섞이지 않고, 빠른 매칭 방에는 코드로 새로 들어갈 수 없다', () => {
