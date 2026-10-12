@@ -67,6 +67,8 @@ export class InputSampler {
   private touchAim = false;
   /** 터치 모드에서 실제 마우스를 쓴 적이 있다 (그때만 마우스 커서로 조준한다) */
   private mouseSeen = false;
+  /** PC 모드: 이 판(attach 뒤)에서 캔버스 위 마우스 · 펜 포인터가 움직이거나 누른 적이 있다 (그 전 포인터 자리는 로비의 것) */
+  private canvasPointerSeen = false;
   /** Tab 누르고 있기 (점수판) */
   tabHeld = false;
   /** 아무 키나 눌림 (안내 오버레이 닫기용) */
@@ -83,11 +85,20 @@ export class InputSampler {
     return !this.touch || this.mouseSeen;
   }
 
+  /**
+   * 마우스 커서 조준을 지금 쓸 수 있는가: 터치 모드는 실제 마우스를 쓴 뒤(mouseAimUsable), PC 모드는 이 판에서 캔버스 위
+   * 마우스 · 펜이 움직이거나 누른 뒤. 그 전에는 포인터 자리가 로비에서 누른 버튼 자리라 판 시작 조준이 엉뚱한 곳을 향했다 (검토 반영)
+   */
+  get aimPointerReady(): boolean {
+    return this.touch ? this.mouseSeen : this.canvasPointerSeen;
+  }
+
   attach(canvasHost: EventTarget, opts: AttachOptions = {}): void {
     const env = opts.env ?? browserEnv();
     this.touch = opts.touch ?? null;
     this.touchAim = opts.touchAim ?? false;
     this.mouseSeen = false;
+    this.canvasPointerSeen = false;
     const touchMode = this.touch !== null;
     /**
      * 캔버스 클릭을 공격 · 시야 전환으로 쓰는 포인터: 터치 모드는 마우스만(손가락은 터치 화면이 받는다),
@@ -123,6 +134,7 @@ export class InputSampler {
       this.recomputeHeld();
     };
     const onPointerDown = (e: PointerEvent): void => {
+      if (e.pointerType !== 'touch') this.canvasPointerSeen = true;
       if (clicks(e)) {
         if (e.button === 0) {
           this.pressed |= BTN.ATTACK;
@@ -141,6 +153,10 @@ export class InputSampler {
       else if (e.button === 2) this.mouse &= ~BTN.MODE;
       this.recomputeHeld();
     };
+    /** 캔버스 위 마우스 · 펜 움직임 (PC 조준을 쓸 수 있게 됨). 손가락은 조준을 바꾸지 않는다 */
+    const onCanvasMove = (e: PointerEvent): void => {
+      if (e.pointerType !== 'touch') this.canvasPointerSeen = true;
+    };
     const onContext = (e: Event): void => e.preventDefault();
     const onBlur = (): void => this.reset();
     const onVisibility = (): void => {
@@ -150,6 +166,7 @@ export class InputSampler {
       listen(env.win, 'keydown', onKeyDown),
       listen(env.win, 'keyup', onKeyUp),
       listen(canvasHost, 'pointerdown', onPointerDown),
+      listen(canvasHost, 'pointermove', onCanvasMove),
       listen(env.win, 'pointerup', onPointerUp),
       listen(canvasHost, 'contextmenu', onContext),
       listen(env.win, 'blur', onBlur),
