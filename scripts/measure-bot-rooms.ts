@@ -15,8 +15,9 @@ const driver = new BotDriver(
   (info, _seat, room) => practiceBrain(info.role, room.code.length * 7 + room.matchCount),
   balance,
 );
+// devBots: 아래에서 봇 채우기 방(join.bots)으로 방을 만든다 — 배포 서버는 이것을 꺼 두므로 측정에서는 분명히 켠다
 const core = new ServerCore(
-  { balance, seed: 7, testHooks: false },
+  { balance, seed: 7, testHooks: false, devBots: true },
   { spawnBot: (room, seat) => driver.attach(room, seat), beforeStep: (room) => driver.beforeStep(room) },
   () => clock.t,
 );

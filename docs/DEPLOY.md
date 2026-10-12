@@ -153,6 +153,7 @@ docker run -d --name decoy --restart unless-stopped -p 80:8080 decoy-web
 - 바로 다시 띄우고 싶으면 서비스 화면 **Manual Deploy** → **Deploy latest commit**
 - 문서만 고친 커밋도 `main`에 들어가면 다시 배포된다(방이 사라진다). 플레이테스트가 없는 시간에 병합한다
 - 설정을 바꾸려면 `render.yaml`을 고쳐 `main`에 병합한다. Render가 Blueprint 변경을 읽어 적용한다 (리전은 바꿀 수 없다 — 새 서비스를 만든다)
+- 맵 · 이동 · 스냅샷 · 메시지 형식을 바꾸거나 `config/balance.json` 키를 지우는 · 이름을 바꾸는 배포는 **7장**을 먼저 본다 (옛 화면을 걸러야 한다)
 
 #### 무료 플랜에서 알아 둘 것
 
@@ -201,3 +202,25 @@ Railway 같은 서비스도 Dockerfile로 배포된다. 다만 아시아 리전�
 | 깨우기 기능을 아예 빼고 싶다 | `client/public/sw.js`를 지우기만 하면 이미 설치된 기기에 남는다. 대신 내용을 `self.addEventListener('install', () => self.skipWaiting()); self.addEventListener('activate', () => self.registration.unregister());`로 바꿔 배포하고, `client/src/main.ts`의 등록 코드를 뺀다 |
 | Render 배포가 "Waiting for checks"에서 멈춰 있다 | `main`의 GitHub Actions 검사가 실패했거나 아직 도는 중이다 (`autoDeployTrigger: checksPass`). 검사를 고치거나 **Manual Deploy** |
 | 화면이 끊긴다 | 로비의 그래픽 품질을 낮음으로(또는 주소에 `&quality=low`), 다른 탭 · 프로그램 닫기, `&debug=1`로 FPS 확인 |
+
+## 7. 옛 화면과 맞지 않는 배포 (프로토콜 버전)
+
+지금은 서버와 화면의 빌드가 달라도(배포 전에 열어 둔 탭, 설치한 앱의 앱 셸 캐시) 방 만들기 · 입장 · 빠른 매칭이 그대로 된다. 화면 위에 **"새 버전이 있어요"** 띠만 뜬다(M13d, welcome · pong의 빌드 ID 비교). 바뀐 내용이 옛 화면과 맞으면 이것으로 충분하다.
+
+다음 가운데 하나라도 바꾸는 배포는 옛 화면과 맞지 않는다. 옛 화면이 그대로 들어오면 그 판이 깨진다 (예측이 서버 판정과 어긋나 캐릭터가 끌려감, 모르는 필드 · 메시지로 화면 오류, 없는 balance 키로 화면이 멈춤).
+
+- 맵: 벽 · 거점 · 탈출구 · 감옥 위치 (화면의 예측 · 그리기가 같은 맵 코드를 쓴다)
+- 이동: `shared/movement.ts` (내 캐릭터 예측과 서버 판정이 같은 코드여야 한다)
+- 스냅샷 · 메시지 형식: `shared/src/types.ts`의 필드를 지우거나 이름 · 뜻을 바꿈 (필드 추가만은 대개 맞는다)
+- `config/balance.json` 키 삭제 · 개명 (화면은 welcome으로 받은 balance를 `validateBalance`로 읽는다)
+
+그런 배포에는 **같은 배포 안에** 다음을 넣는다. 지금 코드에는 없다 — 첫 비호환 배포 때 넣으면 된다(아래 4 때문에 소급해서 된다).
+
+1. `shared/src/types.ts`에 `export const PROTOCOL_VERSION = 1`을 두고, 그 뒤 비호환 배포마다 1씩 올린다
+2. 클라이언트가 보내는 `join` · `quick`에 `proto: PROTOCOL_VERSION`을 싣는다 (`ClientMessage` 타입에 필드를 더한다)
+3. 서버 `ServerCore.connect()`(`shared/src/sim/core.ts`)의 join · quick 분기 맨 앞에서 `proto`가 없거나 다르면 자리에 묶지 않고 오류로 거절한다. 문구는 새로고침 안내(예: "새 버전이 나왔어요. 새로고침해 주세요")이고 `docs/STORY_TEXT.md` · `client/src/data/storyText.ts`에 함께 적는다. 새 오류 코드(예: `update-required`)를 `ErrorCode`에 더하면 새 화면은 그 코드에서 "새 버전이 있어요" 띠를 띄울 수 있다
+4. **지금 화면은 `proto`를 보내지 않는다.** 그래서 그 배포가 나가면 지금 화면(과 그 전 화면)은 모두 "없음 = 옛 화면"으로 걸러진다. 옛 화면은 모르는 오류 코드도 받은 문구를 오류 줄에 띄우므로(`client/src/app.ts` error 처리의 마지막 줄) 새로고침 안내가 그대로 보인다
+5. 기기 안 연습(봇과 연습, `RoomConfig.practice` 서버)은 화면과 같은 빌드에 들어 있어 어긋날 수 없으므로 검사하지 않고 통과시킨다 — 오프라인 연습이 막히지 않게
+6. 첫 화면 자동 새로고침은 넣지 않는다: 앱 셸 캐시(`?practice=1` 캐시 먼저) · 깨우기 화면(`wake.html`)과 엮이면 새로고침이 되풀이될 수 있다
+
+배포 뒤 확인: 배포 전 빌드로 열어 둔 탭에서 빠른 매칭 · 방 만들기를 눌러 새로고침 안내가 뜨는지, 새로고침한 탭은 그대로 들어가는지, 비행기 모드에서 봇과 연습이 되는지 본다.
