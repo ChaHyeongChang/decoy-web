@@ -701,6 +701,11 @@ select {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
+/* 막 그린 역할 격자는 잠깐 탭을 받지 않는다 (검토 반영 F17): '봇과 연습'을 빠르게 두 번 탭하면 두 번째 탭이 그 자리에
+   새로 그려진 역할 버튼에 떨어져 고르지 않은 역할로 판이 시작됐다. lobby.ts가 그린 뒤 400ms 동안 arming을 단다 */
+.practice-roles.arming {
+  pointer-events: none;
+}
 .practice-role {
   --cut: 10px;
   --ring: var(--edge-2);
@@ -1551,7 +1556,9 @@ select {
   min-width: 200px;
   min-height: 48px;
 }
-@media (max-height: 620px) {
+/* 낮은 창은 촘촘하게. 손가락 화면은 높이 680까지: 1024×640 태블릿에서 넓은 배치의 버튼 아래끝(약 616.2)이 아래 24px 띠
+   (안드로이드 홈 제스처)에 걸렸다 (검토 반영, F18 후속) */
+@media (max-height: 620px), (pointer: coarse) and (max-height: 680px) {
   .result {
     padding: 8px 16px;
   }
@@ -1624,6 +1631,13 @@ select {
   .field select,
   .invite-link input {
     height: 46px;
+  }
+  /* 처리방침 링크도 손가락 대상 48px (검토 반영 F20). 글자는 작게 두고 높이 · 좌우 여백만 키운다 */
+  .privacy-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 48px;
+    padding: 0 8px;
   }
 }
 /* 전체 화면 (휴대폰 브라우저에서만 만든다, 전체 화면 중에는 숨김) */
@@ -1826,6 +1840,40 @@ select {
 @media (max-height: 500px) and (max-width: 640px) {
   .lobby-room .invite-code .label {
     display: none;
+  }
+}
+/* 낮은 태블릿 · 노트북 가로 (높이 501 ~ 860, 폭 760 이상 — 1024×640 · 1138×712 · 1280×720 · 1366×768 · 960×540): 첫 화면 ·
+   연습 고르기도 로고를 패널 옆에 (검토 반영 F19). 세로로 쌓으면 큰 로고(약 340 ~ 400px)가 패널을 밀어 연습 역할 아랫줄 · 취소 ·
+   코드 입장 · 그래픽 줄이 첫 화면 밖이었다. 빠른 매칭 대기 화면은 제목 띠를 로고 옆 한 줄에 두고 남은 시간을 제목 줄에
+   (960×540 PC에서 취소 · 안내가 밖이었다). 높이 500 이하 휴대폰 배치(위)와 겹치지 않는다 */
+@media (orientation: landscape) and (min-width: 760px) and (min-height: 501px) and (max-height: 860px) {
+  .lobby-home {
+    flex-direction: row;
+    gap: clamp(24px, 5vw, 64px);
+  }
+  .lobby-home .brand-hero {
+    flex: 0 1 300px;
+    min-width: 0;
+    margin: 0;
+  }
+  .lobby-home .brand-hero .brand-logo {
+    width: clamp(96px, 24vh, 160px);
+    height: clamp(96px, 24vh, 160px);
+  }
+  .lobby-home .brand-hero .wordmark {
+    font-size: clamp(36px, 8vh, 56px);
+  }
+  .home-panel {
+    flex: 0 1 400px;
+    min-width: 0;
+  }
+  .lobby-quick .quick-head {
+    flex: 1 1 360px;
+    min-width: 0;
+  }
+  /* 남은 시간: 제목 · 인원 옆에 들어가면 그 줄에, 안 들어가면 (지금처럼) 다음 줄로 */
+  .lobby-quick .quick-head .quick-countdown {
+    flex-basis: auto;
   }
 }
 .invite-code .label {

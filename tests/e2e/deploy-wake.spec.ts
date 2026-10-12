@@ -3,12 +3,14 @@
 //  - 방 안에서: 끊긴 뒤면 가운데 패널 '서버에 다시 연결하는 중' 안내
 //  - 페이지를 새로 열 때: 서비스 워커가 미리 받아 둔 깨우기 화면(wake.html)을 보여 주고, 깨어나면 원래 주소로 돌아간다
 //  - 낮은 휴대폰 가로에서 깨우기 화면의 "봇과 연습" · 90초 뒤 "다시 시도"가 스크롤 없이 첫 화면 안 (검토 반영 F15)
+//  - 태블릿 가로 · 낮은 노트북 창에서 깨우는 중 상태 줄(두 줄)과 첫 화면 버튼이 스크롤 없이 첫 화면 안 (검토 반영 F19)
 import { expect, test, type Page } from '@playwright/test';
 import {
   BASE_QUERY,
   PHONE_BROWSER,
   PHONE_NARROW,
   PHONE_SMALL,
+  TABLET_LANDSCAPE,
   createRoom,
   dpr1,
   newPlayerPage,
@@ -131,6 +133,43 @@ for (const d of LOW_PHONES) {
         `다시 시도 y ${r.y.toFixed(0)}~${(r.y + r.height).toFixed(0)}`,
     );
     await page.screenshot({ path: `artifacts/screens/wake-page-${d.device.viewport?.height ?? 0}.png` });
+    expect(problems).toEqual([]);
+    await context.close();
+  });
+}
+
+// 태블릿 가로(브라우저, 전체 화면 버튼 있음) · 낮은 노트북 창: 깨우는 중 상태 줄은 두 줄로 길어진다. 그래도 상태 줄과 그 줄이
+// 권하는 "봇과 연습", 연결되면 켜질 버튼들이 스크롤 없이 첫 화면 안 (검토 반영 F19 — 큰 로고가 위에 쌓여 밖이었다)
+const LOW_WIDE: { name: string; device: DeviceOptions }[] = [
+  { name: '태블릿 1024×640', device: dpr1(TABLET_LANDSCAPE) },
+  { name: 'PC 1280×720', device: { viewport: { width: 1280, height: 720 } } },
+];
+
+for (const d of LOW_WIDE) {
+  test(`태블릿 · 낮은 노트북 가로(${d.name})에서 깨우는 중 상태 줄과 봇과 연습 · 방 만들기 · 코드 입장이 스크롤 없이 첫 화면 안`, async ({
+    browser,
+  }) => {
+    const { context, page, problems } = await newPlayerPage(browser, d.device);
+    await stall(page, 'ms=9000&http=0');
+    await page.goto(`/?${BASE_QUERY.slice(1)}`);
+    const status = page.getByTestId('server-status');
+    await expect(status).toHaveAttribute('data-state', 'waking', { timeout: 3000 });
+    await expect(status).toContainText('봇과 연습');
+    // 안내 문구가 두 줄로 늘어난 상태에서 잰다 (한 줄이면 이 시험이 가장 긴 패널을 보지 않는다)
+    const lineHeight = await status.evaluate((el) => Number.parseFloat(getComputedStyle(el).lineHeight));
+    expect((await status.boundingBox())!.height, `${d.name}: 상태 줄 두 줄`).toBeGreaterThan(
+      lineHeight * 1.5,
+    );
+    expect(await page.getByTestId('lobby').evaluate((el) => el.scrollTop)).toBe(0);
+    for (const id of [
+      'server-status',
+      'quick-match',
+      'practice',
+      'create-room',
+      'room-code-input',
+      'join-room',
+    ])
+      await expect.soft(page.getByTestId(id), `${d.name}: ${id}`).toBeInViewport({ ratio: 1, timeout: 3000 });
     expect(problems).toEqual([]);
     await context.close();
   });
