@@ -3,9 +3,11 @@
 //  - 360px 폭(세로 휴대폰)과 가로 휴대폰에서 가로 스크롤이 없다. 돌아가기 링크(위 · 아래)는 터치 대상 48px 이상(검토 반영)
 //  - 첫 화면은 열기만 해도 ping만 보낸다(서버 상태 표시) — 처리방침 1번 '서버로 보내는 것' 문단이 그 사실을 적었다
 //  - 앱 셸을 받은 뒤 네트워크를 끊고 서버도 끈 채 /privacy를 열어도 뜬다 (서비스 워커 캐시)
+//  - (검토 반영) 같은 빌드로 문의처(PRIVACY_CONTACT)만 바꿔 서버를 다시 띄우면, 이미 셸을 받은 화면의 /privacy에 새 문의처가 뜨고
+//    이어서 오프라인이면 갱신된 사본이 뜬다 (서비스 워커의 처리방침 네트워크 먼저 · 같은 빌드 사본 갱신)
 //  - 외부 전송 없음(실제 요청): 혼합 판(PC + 휴대폰 + 봇) 한 판과 봇과 연습 한 판 동안 모든 요청 · WebSocket 대상이 같은 출처
-import { expect, test, type Page } from '@playwright/test';
-import { freePort, startServer } from '../helpers/serverProcess';
+import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { freePort, startServer, type RunningServer } from '../helpers/serverProcess';
 import {
   PHONE_LANDSCAPE,
   createRoom,
@@ -31,6 +33,22 @@ const PHONE_PORTRAIT = {
 
 async function horizontalOverflow(page: Page): Promise<number> {
   return page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+}
+
+/** 서버를 끈 시험에서만 허용하는 브라우저 자체 로그 (m13-offline과 같은 기준) */
+function unexpected(problems: string[]): string[] {
+  return problems.filter((p) => !/WebSocket connection to .* failed|Failed to load resource/.test(p));
+}
+
+/** 이 화면의 앱 셸 캐시에 든 처리방침 사본의 문의처 자리(<!--contact--> 사이). 셸 캐시 · 사본 · 자리가 없으면 null */
+async function shellPrivacyContact(page: Page): Promise<string | null> {
+  return page.evaluate(async () => {
+    const shell = (await caches.keys()).find((k) => k.startsWith('decoy-shell-'));
+    if (!shell) return null;
+    const res = await (await caches.open(shell)).match(new URL('/privacy.html', location.href).href);
+    if (!res) return null;
+    return /<!--contact-->([\s\S]*?)<!--\/contact-->/.exec(await res.text())?.[1] ?? null;
+  });
 }
 
 test('로비 링크를 탭하면 처리방침이 열리고(200 · HTML · 한국어), 돌아가기로 첫 화면 · 360px 폭과 가로 휴대폰에서 가로 스크롤 없음', async ({
@@ -163,9 +181,51 @@ test('앱 셸을 받은 뒤 네트워크를 끊고 서버도 끈 채 /privacy를
     await server.stop();
   }
   // 서버를 끈 시험이라 브라우저 자체 연결 실패 로그만 허용 (m13-offline과 같은 기준)
-  expect(
-    problems.filter((p) => !/WebSocket connection to .* failed|Failed to load resource/.test(p)),
-  ).toEqual([]);
+  expect(unexpected(problems)).toEqual([]);
+});
+
+test('같은 빌드로 문의처만 바꿔 서버를 다시 띄우면 셸을 받은 화면의 /privacy에 새 문의처, 이어서 오프라인이면 갱신된 사본', async ({
+  browser,
+}) => {
+  const port = await freePort();
+  const base = `http://127.0.0.1:${port}`;
+  const NEW_CONTACT = 'privacy-new@decoy.test';
+  // 첫 배포: 문의처 환경 변수 없음 → 문서의 기본 문구
+  let server: RunningServer = await startServer([], { port, env: { PRIVACY_CONTACT: '' } });
+  let context: BrowserContext | null = null;
+  const problems: string[] = [];
+  try {
+    context = await browser.newContext({ viewport: { width: 960, height: 540 } });
+    const page = await context.newPage();
+    watchConsole(page, problems);
+    await page.goto(`${base}/?debug=hook&renderer=canvas`);
+    await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {
+      timeout: 20_000,
+    });
+    await expect.poll(() => shellPrivacyContact(page), { timeout: 20_000 }).toContain('개발자 연락처');
+    // 같은 dist(같은 빌드 ID · 같은 sw.js)로 문의처만 바꿔 다시 띄운다 → 서비스 워커는 업데이트되지 않는다
+    await server.stop();
+    server = await startServer([], { port, env: { PRIVACY_CONTACT: NEW_CONTACT } });
+    await page.goto(`${base}/privacy`);
+    await expect(page.getByTestId('privacy-contact')).toContainText(NEW_CONTACT);
+    await expect(page.getByTestId('privacy-contact').locator('a')).toHaveAttribute(
+      'href',
+      `mailto:${NEW_CONTACT}`,
+    );
+    // 셸 사본도 새 문의처로 (서비스 워커가 응답을 화면에 넘기며 뒤에서 바꾼다)
+    await expect.poll(() => shellPrivacyContact(page), { timeout: 10_000 }).toContain(NEW_CONTACT);
+    // 이어서 오프라인 + 서버 꺼짐: 갱신된 사본
+    await server.stop();
+    await context.setOffline(true);
+    await page.goto(`${base}/privacy`);
+    await expect(page.locator('h1')).toHaveText('DECOY 개인정보 처리방침');
+    await expect(page.getByTestId('privacy-contact')).toContainText(NEW_CONTACT);
+    await expect(page.getByTestId('privacy-contact')).not.toContainText('개발자 연락처');
+  } finally {
+    await context?.close();
+    await server.stop();
+  }
+  expect(unexpected(problems)).toEqual([]);
 });
 
 test('외부 전송 없음: 혼합 판(PC + 휴대폰 + 봇)과 봇과 연습 동안 모든 요청 · WebSocket이 같은 출처', async ({
