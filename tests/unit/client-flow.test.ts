@@ -1,11 +1,13 @@
 // 출시 전 검토 반영 (클라이언트 흐름): PC 괴물 조준이 판 장면에서 캔버스 포인터를 받은 뒤에만 커서를 따르는지,
-// 판 중 뒤로 가기 확인 문구가 판 종류(친구 방 · 빠른 매칭 · 연습)에 맞는지. DOM 없이(jsdom 없음) 최소한의 EventTarget으로 본다
-import { describe, expect, it } from 'vitest';
+// 판 중 뒤로 가기 확인 문구가 판 종류(친구 방 · 빠른 매칭 · 연습)에 맞는지, '봇과 연습' 역할 격자의 연타 가드.
+// DOM 없이(jsdom 없음) 최소한의 EventTarget · 가짜 classList로 본다
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { InputSampler, type InputEnv } from '../../client/src/input';
 import { TouchInput } from '../../client/src/touchInput';
 import { APP_TEXT } from '../../client/src/data/storyText';
 import { leaveKindFor } from '../../client/src/lifecycle';
 import { leaveTextFor } from '../../client/src/ui/lifecycleUi';
+import { ARMING_CLASS, PRACTICE_ARM_MS, armAgainstDoubleTap } from '../../client/src/ui/lobby';
 
 class FakeDoc extends EventTarget {
   visibilityState: DocumentVisibilityState = 'visible';
@@ -95,5 +97,42 @@ describe('판 중 뒤로 가기 확인 문구 (검토 반영 F10 · F16)', () =>
     expect(leaveKindFor(false, 'quick')).toBe('quick');
     expect(leaveKindFor(false, 'code')).toBe('match');
     expect(leaveKindFor(false, null)).toBe('match');
+  });
+});
+
+describe("'봇과 연습' 연타 가드 (검토 반영 F17)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** classList만 있는 가짜 요소 */
+  const fakeEl = (): {
+    classList: { add(t: string): void; remove(t: string): void };
+    has(t: string): boolean;
+  } => {
+    const set = new Set<string>(['practice-roles']);
+    return {
+      classList: { add: (t) => set.add(t), remove: (t) => set.delete(t) },
+      has: (t) => set.has(t),
+    };
+  };
+
+  it('가드 시간은 안드로이드 더블 탭 판정(300ms)보다 길고, 역할 고르기를 굼뜨게 하지 않을 만큼 짧다', () => {
+    expect(PRACTICE_ARM_MS).toBeGreaterThan(300);
+    expect(PRACTICE_ARM_MS).toBeLessThanOrEqual(500);
+    expect(ARMING_CLASS).toBe('arming');
+  });
+
+  it(`그린 순간 'arming'이 붙고 PRACTICE_ARM_MS 동안 남았다가 그 뒤 떨어진다`, () => {
+    vi.useFakeTimers();
+    const el = fakeEl();
+    armAgainstDoubleTap(el);
+    expect(el.has('arming')).toBe(true);
+    vi.advanceTimersByTime(PRACTICE_ARM_MS - 1);
+    expect(el.has('arming')).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(el.has('arming')).toBe(false);
+    // 원래 클래스는 그대로
+    expect(el.has('practice-roles')).toBe(true);
   });
 });

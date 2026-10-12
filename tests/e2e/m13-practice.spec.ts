@@ -6,7 +6,7 @@
 //  - 서버 방 결과 화면의 "홈으로"는 자리를 비우고 같은 연결로 첫 화면에서 다시 방을 만든다
 //  - (검토 반영) 첫 화면 상태 줄 · 오류 줄이 낮은 휴대폰 · PC 창에서 화면 안, 친구 방 로비 "나가기",
 //    ?practice=1은 마지막 방보다 우선하고 주소에서 지운다, 판 중 body.in-match(새 버전 띠 숨김),
-//    터치 연습 판의 뒤로 가기 확인(연습 문구 → 첫 화면) · 새로고침 뒤 남은 항목 걷기(F16)
+//    터치 연습 판의 뒤로 가기 확인(연습 문구 → 첫 화면) · 새로고침 뒤 남은 항목 걷기(F16), '봇과 연습' 연타 가드(F17)
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { validateBalance, type Balance, type Snapshot } from '@decoy/shared';
@@ -21,6 +21,11 @@ const QUERY = '/?debug=hook&renderer=canvas';
 /** 설치 앱(TWA · 홈 화면 앱)의 시작 주소 (manifest start_url) + 시험 훅 */
 const APP_START = '/?source=pwa&debug=hook&renderer=canvas';
 const POLL = { intervals: [100, 150, 200], timeout: 20_000 };
+/**
+ * 연습 역할 격자의 연타 가드 시간. client/src/ui/lobby.ts PRACTICE_ARM_MS와 같다 (단위 시험 client-flow가 그 값을 본다).
+ * lobby.ts는 CSS를 불러 Playwright 쪽에서 import할 수 없다
+ */
+const PRACTICE_ARM_MS = 400;
 
 /** 서버 WebSocket을 모두 막는다 (연결 실패처럼 열리지 않고 닫힘). 막힌 시도 수를 센다 */
 async function blockServer(page: Page): Promise<{ attempts: () => number }> {
@@ -564,3 +569,127 @@ test('터치 연습 판 중 새로고침(탭 폐기 뒤 복원과 같다)이면 
   expect(page.url()).toBe('about:blank');
   await context.close();
 });
+
+// ───────────── '봇과 연습' 연타 가드 (검토 반영 F17) ─────────────
+
+test("'봇과 연습'을 누르면 역할 격자가 PRACTICE_ARM_MS 동안 arming(포인터 막음)이었다가 풀린다 — 키보드로는 가드 중에도 고른다 (검토 반영 F17)", async ({
+  browser,
+}) => {
+  const { context, page, problems } = await newPlayerPage(browser, dpr1(PHONE_LANDSCAPE));
+  await page.goto(QUERY);
+  await expect(page.getByTestId('practice')).toBeVisible();
+  // 누른 순간부터 클래스가 떨어질 때까지를 페이지 안에서 잰다 (Playwright 왕복 지연 없이)
+  const r = await page.evaluate(async () => {
+    document.querySelector<HTMLButtonElement>('[data-testid="practice"]')?.click();
+    const grid = document.querySelector('[data-testid="practice-picker"] .practice-roles');
+    const armed = grid?.classList.contains('arming') ?? false;
+    const t0 = performance.now();
+    while (grid?.classList.contains('arming') && performance.now() - t0 < 3000)
+      await new Promise((res) => setTimeout(res, 5));
+    return { found: grid !== null, armed, ms: performance.now() - t0, after: grid?.className ?? '' };
+  });
+  expect(r.found).toBe(true);
+  expect(r.armed, '그린 순간 역할 격자에 arming').toBe(true);
+  expect(r.ms).toBeGreaterThanOrEqual(PRACTICE_ARM_MS - 20);
+  expect(r.ms).toBeLessThan(PRACTICE_ARM_MS + 600);
+  expect(r.after).not.toContain('arming');
+  expect(r.after).toContain('practice-roles');
+  // 키보드는 막지 않는다: 다시 그린 고르기 화면에서 가드 중에도 Enter로 고른다 (Enter를 누른 순간 가드 중이었는지 기록)
+  await press(page.getByTestId('practice-cancel'));
+  await expect(page.getByTestId('practice')).toBeVisible();
+  await page.getByTestId('practice').focus();
+  await page.keyboard.press('Enter');
+  await page.evaluate(() => {
+    const w = window as unknown as { __e2eArmedAtKey?: boolean };
+    const b = document.querySelector<HTMLButtonElement>('[data-testid="practice-role-scout"]');
+    b?.addEventListener(
+      'keydown',
+      () => {
+        w.__e2eArmedAtKey = document.querySelector('.practice-roles')?.classList.contains('arming') ?? false;
+      },
+      { once: true },
+    );
+    b?.focus();
+  });
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await practiceState(page)).phase, { timeout: 10_000 }).toBe('playing');
+  expect((await practiceState(page)).role).toBe('scout');
+  expect(
+    await page.evaluate(() => (window as unknown as { __e2eArmedAtKey?: boolean }).__e2eArmedAtKey),
+    'Enter를 누를 때 가드 중이었다',
+  ).toBe(true);
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
+/**
+ * 손가락으로 '봇과 연습'을 빠르게 두 번 탭한다 (같은 자리, 100ms 간격). 두 번째 탭 자리가 역할 버튼 위인지는 시험 안에서
+ * 확인한다(빈 통과 방지). 막는 것은 style.css '.practice-roles.arming { pointer-events: none }'이다
+ */
+const DOUBLE_TAP_SCREENS: { name: string; device: DeviceOptions }[] = [
+  { name: '휴대폰 915×412', device: dpr1(PHONE_LANDSCAPE) },
+  { name: '휴대폰 740×360', device: LOW_SCREENS[0]!.device },
+];
+
+for (const d of DOUBLE_TAP_SCREENS) {
+  test(`터치: '봇과 연습'을 빠르게 두 번 탭해도 판이 시작되지 않고 역할 고르기가 남는다 (${d.name}, 검토 반영 F17)`, async ({
+    browser,
+  }) => {
+    const { context, page, problems } = await newPlayerPage(browser, d.device);
+    await page.goto(QUERY);
+    const btn = page.getByTestId('practice');
+    await expect(btn).toBeVisible();
+    // 고르기 화면을 한 번 그려 역할 버튼 자리를 재고 돌아온다: '봇과 연습' 버튼과 역할 버튼이 겹치는 자리를 탭한다
+    // (버튼 가운데는 역할 버튼 사이 틈일 수 있다 — 크롬의 터치 보정이 옆 버튼으로 붙여 옛 코드에서는 그래도 판이 시작됐다)
+    await press(btn);
+    const roles = await page.locator('[data-testid^="practice-role-"]').evaluateAll((els) =>
+      els.map((e) => {
+        const r = e.getBoundingClientRect();
+        return { id: e.getAttribute('data-testid') ?? '', x: r.x, y: r.y, w: r.width, h: r.height };
+      }),
+    );
+    await press(page.getByTestId('practice-cancel'));
+    await expect(btn).toBeVisible();
+    const box = await btn.boundingBox();
+    if (!box) throw new Error('봇과 연습 버튼 자리 없음');
+    let target: { id: string; x: number; y: number; area: number } | null = null;
+    for (const r of roles) {
+      const x0 = Math.max(box.x, r.x);
+      const x1 = Math.min(box.x + box.width, r.x + r.w);
+      const y0 = Math.max(box.y, r.y);
+      const y1 = Math.min(box.y + box.height, r.y + r.h);
+      const area = (x1 - x0) * (y1 - y0);
+      if (x1 - x0 > 8 && y1 - y0 > 8 && area > (target?.area ?? 0))
+        target = { id: r.id, x: (x0 + x1) / 2, y: (y0 + y1) / 2, area };
+    }
+    if (!target)
+      throw new Error(`봇과 연습 버튼과 겹치는 역할 버튼이 없다: ${JSON.stringify({ box, roles })}`);
+    await page.touchscreen.tap(target.x, target.y);
+    await page.waitForTimeout(100);
+    await page.touchscreen.tap(target.x, target.y);
+    await page.waitForTimeout(1000);
+    const st = await practiceState(page);
+    expect(
+      st.phase ?? null,
+      `두 번째 탭이 ${target.id}에 떨어져 판이 시작됐다 (style.css .practice-roles.arming이 포인터를 막는가)`,
+    ).toBeNull();
+    expect(st.transport).toBe('net');
+    await expect(page.getByTestId('practice-picker')).toBeVisible();
+    // 빈 통과 방지: 탭한 자리는 가드가 풀린 지금 그 역할 버튼 위다 (가드가 없으면 두 번째 탭이 이 버튼을 눌렀다)
+    const under = await page.evaluate(
+      ([px, py]) =>
+        document
+          .elementFromPoint(px, py)
+          ?.closest('[data-testid^="practice-role-"]')
+          ?.getAttribute('data-testid') ?? null,
+      [target.x, target.y] as const,
+    );
+    expect(under).toBe(target.id);
+    // 가드가 풀리면 탭 한 번으로 고른다
+    await press(page.getByTestId('practice-role-runner'));
+    await expect.poll(async () => (await practiceState(page)).phase, { timeout: 10_000 }).toBe('playing');
+    expect((await practiceState(page)).role).toBe('runner');
+    expect(problems).toEqual([]);
+    await context.close();
+  });
+}

@@ -42,6 +42,24 @@ export interface LobbyActions {
 
 const ROLE_ORDER: Role[] = ['monster', 'runner', 'guard', 'scout'];
 
+/**
+ * 연습 역할 고르기의 연타 가드 시간 (검토 반영 F17): '봇과 연습'을 빠르게 두 번 탭하면 두 번째 탭이 같은 자리에 막 그려진
+ * 역할 버튼에 떨어져, 고르지 않은 역할로 판이 바로 시작됐다. 그린 뒤 이만큼 역할 격자가 포인터를 받지 않는다
+ * (style.css '.practice-roles.arming'). 안드로이드 더블 탭 판정 시간(300ms)보다 길게. 키보드(Enter · Space)는 막지 않는다
+ */
+export const PRACTICE_ARM_MS = 400;
+/** 연타 가드 중인 역할 격자에 붙는 클래스 */
+export const ARMING_CLASS = 'arming';
+
+/** 막 그린 요소에 연타 가드를 붙였다가 ms 뒤 뗀다 (클래스만 바꾼다 — 포인터를 막는 것은 CSS) */
+export function armAgainstDoubleTap(
+  el: { classList: { add(token: string): void; remove(token: string): void } },
+  ms = PRACTICE_ARM_MS,
+): void {
+  el.classList.add(ARMING_CLASS);
+  globalThis.setTimeout(() => el.classList.remove(ARMING_CLASS), ms);
+}
+
 /** 능력 줄(ROLE_CARDS.ability · abilityTouch)의 항목마다 붙는 아이콘 — 문구의 순서와 같다 */
 const ABILITY_ICONS: Record<Role, IconId[]> = {
   monster: ['attack', 'visionSearch', 'dash', 'roar'],
@@ -324,6 +342,8 @@ export class LobbyUI {
     this.tutorial.hide();
     this.settings?.close();
     const grid = h('div', { class: 'practice-roles' });
+    // '봇과 연습'을 두 번 탭한 두 번째 탭이 막 그린 역할 버튼에 떨어지지 않게 잠깐 포인터를 막는다 (검토 반영 F17)
+    armAgainstDoubleTap(grid);
     for (const role of ROLE_ORDER) {
       const info = ROLE_CARDS[role];
       const b = h(
