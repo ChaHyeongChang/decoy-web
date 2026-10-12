@@ -589,6 +589,24 @@ describe('빠른 매칭: 사람이 모두 나간 판 · 방', () => {
     expect(room.lastResult?.result.winner).toBe('void');
   });
 
+  it('최후의 30초(생존자 승리 확정) 중에 사람이 모두 나가면 무효가 아니라 생존자 승리', () => {
+    const { a, room, run } = soloPlaying();
+    // 사람(러너)과 봇 생존자 하나가 탈출 → 최후의 30초
+    const me = room.seats.find((s) => !s.bot);
+    const botSurvivor = room.seats.find((s) => s.bot && s.role !== 'monster');
+    for (const s of [me, botSurvivor])
+      a.link.receive(
+        raw({ t: 'test', cmd: { kind: 'setSurvivor', target: s?.id ?? '', status: 'escaped' } }),
+      );
+    run(200, [a]);
+    expect(room.phase).toBe('playing');
+    expect(room.game?.grace).not.toBeNull();
+    a.link.receive(raw({ t: 'leave' }));
+    run(100);
+    expect(room.phase).toBe('result');
+    expect(room.lastResult?.result).toMatchObject({ winner: 'survivors', escaped: 2 });
+  });
+
   it('끊김 유예 중인 사람이 남아 있으면 다른 사람이 나가도 판은 계속되고, 그 사람은 돌아올 수 있다', () => {
     const env = setup();
     const a = env.client('나감');

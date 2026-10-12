@@ -532,8 +532,12 @@ export class Room {
     if (this.phase !== 'playing' || !game) return;
     this.updateDrops(game);
     // 빠른 매칭: 사람이 모두 나갔으면(연결된 사람도, 끊김 유예 중인 사람도 없음) 봇끼리 판을 계속하지 않고 무효로 끝낸다
-    // (봇 방 상한 한 칸을 60초 동안 차지하지 않게, 출시 전 검토). 끊김 유예 중인 사람이 있으면 그대로 기다린다
-    if (this.kind === 'quick' && !game.end && this.humansGone(game)) finish(game, 'void', 'humansLeft');
+    // (봇 방 상한 한 칸을 60초 동안 차지하지 않게, 출시 전 검토). 끊김 유예 중인 사람이 있으면 그대로 기다린다.
+    // 최후의 30초(생존자 승리 확정) 중이면 무효가 아니라 생존자 승리 — 괴물 나가기와 같은 규칙(9장)
+    if (this.kind === 'quick' && !game.end && this.humansGone(game)) {
+      if (game.grace !== null) finish(game, 'survivors', 'escaped');
+      else finish(game, 'void', 'humansLeft');
+    }
     this.hooks.beforeStep?.(this);
     game.step();
     this.hooks.recordTruth?.(this);
