@@ -1,6 +1,6 @@
 // M15 개인정보 처리방침 · 외부 전송 (MOBILE_PLAN M15 자동 검증)
 //  - 로비 첫 화면의 링크를 탭하면 /privacy가 열린다: 200 · text/html · lang="ko" · 게임 HTML 아님, 돌아가기 링크로 첫 화면
-//  - 360px 폭(세로 휴대폰)과 가로 휴대폰에서 가로 스크롤이 없다
+//  - 360px 폭(세로 휴대폰)과 가로 휴대폰에서 가로 스크롤이 없다. 돌아가기 링크(위 · 아래)는 터치 대상 48px 이상(검토 반영)
 //  - 첫 화면은 열기만 해도 ping만 보낸다(서버 상태 표시) — 처리방침 1번 '서버로 보내는 것' 문단이 그 사실을 적었다
 //  - 앱 셸을 받은 뒤 네트워크를 끊고 서버도 끈 채 /privacy를 열어도 뜬다 (서비스 워커 캐시)
 //  - 외부 전송 없음(실제 요청): 혼합 판(PC + 휴대폰 + 봇) 한 판과 봇과 연습 한 판 동안 모든 요청 · WebSocket 대상이 같은 출처
@@ -76,6 +76,18 @@ test('로비 링크를 탭하면 처리방침이 열리고(200 · HTML · 한국
       .map((el) => `${el.tagName} ${(el.textContent ?? '').slice(0, 20)}`),
   );
   expect(wide, '화면 밖으로 나간 요소').toEqual([]);
+  // 돌아가기 링크(위 · 아래)는 터치 대상 48px 이상 (VISUAL_SPEC 터치 대상 최소, 검토 반영)
+  const backs = await narrow.page.locator('a[href="/"]').evaluateAll((els) =>
+    els.map((el) => {
+      const r = el.getBoundingClientRect();
+      return { w: r.width, h: r.height };
+    }),
+  );
+  expect(backs, '돌아가기 링크 위 · 아래').toHaveLength(2);
+  for (const [i, b] of backs.entries()) {
+    expect(b.h, `돌아가기 링크 ${i + 1} 높이`).toBeGreaterThanOrEqual(48);
+    expect(b.w, `돌아가기 링크 ${i + 1} 폭`).toBeGreaterThanOrEqual(48);
+  }
   expect(narrow.problems).toEqual([]);
   await narrow.context.close();
 });
