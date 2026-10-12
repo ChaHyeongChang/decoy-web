@@ -1533,10 +1533,14 @@ select {
 .nil {
   color: var(--text-dim);
 }
+/* 홈으로 · 다시 하기는 반대로 동작하므로 붙이지 않는다 (터치 대상 8px 이상 간격, 검토 반영 F18).
+   한 줄에 안 들어가는 좁은 창(PC 420 폭 등)에서는 두 줄로 내려간다 */
 .result-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
+  gap: 12px;
 }
 .result-foot .btn {
   min-width: 200px;
@@ -1796,13 +1800,13 @@ select {
   .result-ending {
     font-size: 15px;
   }
-  /* "다시 하기"는 스크롤해도 아래에 남는다 */
+  /* "다시 하기"는 스크롤해도 아래에 남는다. 버튼 아래끝은 화면 아래 24px 띠(안드로이드 홈 제스처) 밖 (검토 반영 F18) */
   .result-foot {
     position: sticky;
     bottom: -8px;
     z-index: 1;
     margin: 0 -16px -12px;
-    padding: 8px 16px 12px;
+    padding: 8px 16px 24px;
     background: linear-gradient(180deg, rgba(15, 27, 39, 0), rgba(15, 27, 39, 0.97) 28%);
   }
 }

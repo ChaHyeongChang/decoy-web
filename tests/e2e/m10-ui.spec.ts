@@ -435,6 +435,34 @@ test('결과 화면: 글자 대비, 960×540 · 1366×768 · 더 낮은 창에�
       await expect(page.getByTestId('rematch')).toBeInViewport();
     }
   }
+  // 좁은 PC 창(420 · 520 폭): 결과 버튼 줄(홈으로 · 다시 하기)이 상자 밖으로 넘치지 않고(넘친 부분은 상자의 깎은 모서리에
+  // 잘린다) 가로 스크롤도 없으며, 두 버튼 사이가 8px 이상 — 간격 때문에 한 줄에 안 들어가면 두 줄로 내려간다
+  for (const w of [420, 520] as const) {
+    await page.setViewportSize({ width: w, height: 820 });
+    const m = await page.evaluate(() => {
+      const root = document.querySelector('[data-testid="result"]')!;
+      const box = root.querySelector('.result-box')!.getBoundingClientRect();
+      const [a, b] = [...root.querySelectorAll('.result-foot button')].map((el) =>
+        el.getBoundingClientRect(),
+      );
+      const gapX = Math.max(b!.left - a!.right, a!.left - b!.right);
+      const gapY = Math.max(b!.top - a!.bottom, a!.top - b!.bottom);
+      return {
+        hScroll: root.scrollWidth - root.clientWidth,
+        box: [box.left, box.right],
+        buttons: [a!, b!].map((r) => [r.left, r.right]),
+        // 가로 · 세로 중 떨어진 쪽의 간격 (겹치면 둘 다 음수라 음수)
+        gap: Math.max(gapX, gapY),
+      };
+    });
+    console.log(`[결과] ${w}×820 버튼 줄: ${JSON.stringify(m)}`);
+    expect(m.hScroll, `${w} 폭 가로 스크롤`).toBeLessThanOrEqual(0);
+    for (const [left, right] of m.buttons) {
+      expect(left, `${w} 폭 버튼 왼쪽 끝`).toBeGreaterThanOrEqual(m.box[0]! - 0.5);
+      expect(right, `${w} 폭 버튼 오른쪽 끝`).toBeLessThanOrEqual(m.box[1]! + 0.5);
+    }
+    expect(m.gap, `${w} 폭 버튼 사이`).toBeGreaterThanOrEqual(8);
+  }
   await page.setViewportSize({ width: 960, height: 540 });
 
   // 다시 하기 → 둘이 탈출 · 하나 사망 → 생존자 승리 (탈출 성공 = 문 2개)

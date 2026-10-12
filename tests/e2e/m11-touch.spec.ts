@@ -44,6 +44,7 @@ import {
   touchTargets,
   viewportScale,
   waitForTouchTarget,
+  type MeasuredTarget,
   type TouchLayout,
 } from './touch';
 
@@ -1294,7 +1295,44 @@ test('전체 화면 + 가로 고정: 서버 match를 받을 때는 부르지 않
 
 // ───────────── 결과 화면 레이어 ─────────────
 
-test('결과 화면: 터치 화면이 꺼지고 입력이 없으며, 버튼(왼쪽 40% 안 포함)을 탭하면 동작하고 왼쪽 영역에서 스크롤된다', async ({
+/** 결과 화면 버튼을 탭하면 나타나는 것 (홈으로 → 첫 화면, 다시 하기 → 방 화면) */
+const RESULT_TAP_LEADS_TO: Record<string, string> = { 'result-home': 'create-room', rematch: 'ready-button' };
+
+/** 결과 화면의 보이는 버튼을 터치 대상처럼 잰다 (touchLayoutProblems에 넘긴다. 창 · 안전 영역은 measureTouchLayout과 같이) */
+async function measureResultButtons(page: Page): Promise<TouchLayout> {
+  return page.evaluate(() => {
+    const px = (v: string) => Number.parseFloat(v) || 0;
+    const probe = document.createElement('div');
+    probe.style.cssText =
+      'position:fixed;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)';
+    document.body.appendChild(probe);
+    const ps = getComputedStyle(probe);
+    const insets = {
+      top: px(ps.paddingTop),
+      right: px(ps.paddingRight),
+      bottom: px(ps.paddingBottom),
+      left: px(ps.paddingLeft),
+    };
+    probe.remove();
+    const targets = [...document.querySelectorAll<HTMLElement>('[data-testid="result"] button')]
+      .filter((b) => b.checkVisibility({ checkVisibilityCSS: true }))
+      .map((b) => {
+        const r = b.getBoundingClientRect();
+        return {
+          id: b.dataset.testid ?? b.textContent ?? '',
+          kind: 'button' as const,
+          x: r.left,
+          y: r.top,
+          w: r.width,
+          h: r.height,
+          round: false,
+        };
+      });
+    return { viewport: { w: window.innerWidth, h: window.innerHeight }, insets, targets };
+  });
+}
+
+test('결과 화면: 터치 화면이 꺼지고 입력이 없으며, 버튼은 48px · 8px 간격 · 띠 밖이고 왼쪽 40% 안을 탭해도 동작하며, 왼쪽 영역에서 스크롤된다', async ({
   browser,
 }) => {
   test.setTimeout(120_000);
@@ -1340,6 +1378,11 @@ test('결과 화면: 터치 화면이 꺼지고 입력이 없으며, 버튼(왼�
     layerVisibility: 'hidden',
   });
   expect(layer.scrollable, '결과 화면이 휴대폰 높이보다 길다(스크롤 시험이 의미 있음)').toBeGreaterThan(20);
+  // 보이는 결과 버튼마다 48px 이상 · 서로 8px 이상(겹침 없음) · 화면 안 · 가장자리 띠 밖 — 판 터치 대상과 같은 규칙.
+  // 두 버튼은 반대로 동작한다(홈으로 = 자리를 비움, 다시 하기 = 다음 판)
+  const shown = await measureResultButtons(page);
+  expect(shown.targets.map((t) => t.id)).toEqual(['result-home', 'rematch']);
+  expect(touchLayoutProblems(shown), '결과 버튼 (처음 뜬 화면)').toEqual([]);
 
   // 글자 선택: 결과 글(결말 메모)을 끌어도 선택되지 않는다 (헤드리스는 길게 누르기로 선택을 만들지 못해 마우스 끌기로 본다).
   // 대조: 같은 자리에서 막기(user-select: none)를 잠시 풀면 선택된다
@@ -1374,24 +1417,36 @@ test('결과 화면: 터치 화면이 꺼지고 입력이 없으며, 버튼(왼�
   const during = (await inputLog(page)).filter((e) => e.t > shownAt);
   expect(during.filter((e) => e.mx !== 0 || e.my !== 0 || e.pressed !== 0 || e.held !== 0)).toEqual([]);
 
-  // 다시 하기: 왼쪽 40% 안에 걸친 부분을 탭한다 (안 걸치면 가운데)
-  const box = (await page.getByTestId('rematch').boundingBox())!;
-  const x = box.x < leftW ? (box.x + Math.min(box.x + box.width, leftW)) / 2 : box.x + box.width / 2;
-  const y = box.y + box.height / 2;
+  // 스크롤한 뒤에도 결과 버튼은 터치 대상 규칙 안 (아래 줄은 스크롤해도 남는다)
+  const scrolled = await measureResultButtons(page);
+  expect(touchLayoutProblems(scrolled), '결과 버튼 (스크롤 뒤)').toEqual([]);
+
+  // 왼쪽 40%(이동 스틱 영역 자리)에 걸친 결과 버튼을 그 안쪽 부분에서 탭한다. 걸친 버튼이 없으면 이 검사가 빈 갈래가
+  // 되므로 실패로 본다 (M13b가 '홈으로'를 더하며 '다시 하기'가 40% 밖으로 밀려 빈 갈래였던 것을 고침)
+  const inLeft = scrolled.targets.find((b) => b.x < leftW);
+  if (!inLeft)
+    throw new Error(`왼쪽 40%(${leftW.toFixed(1)}px)에 걸친 결과 버튼이 없다: ${JSON.stringify(scrolled)}`);
+  const after = RESULT_TAP_LEADS_TO[inLeft.id];
+  expect(after, `탭한 뒤 기대 화면을 아는 버튼 (${inLeft.id})`).toBeDefined();
+  const x = (inLeft.x + Math.min(inLeft.x + inLeft.w, leftW)) / 2;
+  const y = inLeft.y + inLeft.h / 2;
+  expect(x).toBeLessThan(leftW);
   expect(
     await page.evaluate(
       ([px, py]) =>
         document.elementFromPoint(px!, py!)?.closest('[data-testid]')?.getAttribute('data-testid'),
       [x, y],
     ),
-  ).toBe('rematch');
+  ).toBe(inLeft.id);
   const ups = (await pointerCounts(page))['pointerup:touch'] ?? 0;
   await page.touchscreen.tap(x, y);
-  await expect(page.getByTestId('ready-button')).toBeVisible();
+  await expect(page.getByTestId(after!)).toBeVisible();
+  await expect(result).toBeHidden();
   expect((await pointerCounts(page))['pointerup:touch'] ?? 0).toBeGreaterThan(ups);
+  const rect = (t: MeasuredTarget) => `${t.id} [${[t.x, t.y, t.w, t.h].map((v) => v.toFixed(1)).join(', ')}]`;
   console.log(
-    `[m11-touch] 결과 화면: 다시 하기 [${[box.x, box.y, box.width, box.height].map((v) => v.toFixed(1)).join(', ')}], ` +
-      `탭 (${x.toFixed(1)}, ${y.toFixed(1)}), 왼쪽 40% = ${leftW.toFixed(1)}px, 스크롤 가능 ${layer.scrollable}px`,
+    `[m11-touch] 결과 화면: ${shown.targets.map(rect).join(' · ')} (스크롤 뒤 ${scrolled.targets.map(rect).join(' · ')}), ` +
+      `탭 ${inLeft.id} (${x.toFixed(1)}, ${y.toFixed(1)}), 왼쪽 40% = ${leftW.toFixed(1)}px, 스크롤 가능 ${layer.scrollable}px`,
   );
   await t.detach();
   expect(s.problems).toEqual([]);
