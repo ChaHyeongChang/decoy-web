@@ -18,7 +18,8 @@ import type { App } from '../app';
 import { sfx } from '../audio';
 import { STORY_TEXT, UI_TEXT, formatText } from '../data/storyText';
 import { device } from '../device';
-import { qualityHooks, sessionAutoDowngrade } from '../gfx/quality';
+import { FPS_WINDOW_MS, sessionFrameStats, type FrameWindow } from '../gfx/frameStats';
+import { qualityHooks, sessionAutoDowngrade, type AdaptContext, type FrameSample } from '../gfx/quality';
 import { getFpsOverride, gfxNow, gfxState, probeSlot } from '../gfx/state';
 import { haptics } from '../haptics';
 import { InputLog, InputSampler } from '../input';
@@ -58,6 +59,9 @@ const ALERT_LOOK: Partial<Record<string, { tone: Tone; icon: IconId }>> = {
 };
 /** 발각 테두리 맥동 (Hz) */
 const SPOTTED_PULSE_HZ = 1.2;
+
+/** 적응형 품질이 최근 1초 측정을 다시 내는 간격 (ms). 매 프레임 백분위를 내지 않는다 */
+const ADAPT_WINDOW_EVERY_MS = 250;
 
 export class GameScene extends Phaser.Scene {
   private app!: App;
@@ -104,6 +108,11 @@ export class GameScene extends Phaser.Scene {
   private localWindup: LocalWindup | null = null;
   /** 판 중 FPS 감시를 하는가 (세션 상태는 sessionAutoDowngrade: 느리면 한 단계 내리고 효과를 확인한다) */
   private watchingFps = false;
+  /** 적응형 품질 입력 (프레임마다 새로 만들지 않는다). 최근 1초 측정은 ADAPT_WINDOW_EVERY_MS마다 다시 낸다 */
+  private readonly adaptSample: FrameSample = { fps: 0, workP95: 0 };
+  private readonly adaptCtx: AdaptContext = { targetHz: 60, displayHz: 60, canRateFallback: false };
+  private readonly adaptWindow: FrameWindow = { fps: 0, intervalAvg: 0, workP95: 0, frames: 0 };
+  private nextAdaptWindowAt = 0;
   /** 지금 처리하는 스냅샷이 서버에서 만들어진 뒤 지난 시간 (ms, 진동: 오래된 일은 울리지 않는다) */
   private eventAgeMs = 0;
 
@@ -545,18 +554,25 @@ export class GameScene extends Phaser.Scene {
   private watchFps(): void {
     if (!this.watchingFps || document.hidden) return;
     if (!this.app.lastSnap || this.app.result) return;
-    const fps = getFpsOverride() ?? this.game.loop.actualFps;
-    // 통합 전 임시: 작업 시간은 프레임 간격(1000 / fps)으로, 목표는 60Hz 고정으로 본다 (예전 동작 그대로)
-    const action = sessionAutoDowngrade.sample(
-      performance.now(),
-      { fps, workP95: 1000 / fps },
-      gfxState.quality,
-      {
-        targetHz: 60,
-        displayHz: 60,
-        canRateFallback: false,
-      },
-    );
+    const now = performance.now();
+    const sample = this.adaptSample;
+    // 측정: 그린 프레임의 최근 1초 FPS · 작업 시간 p95 (gfx/frameStats.ts). injectFps는 간격 = 작업 = 1000/fps로 본다
+    const forced = getFpsOverride();
+    if (forced !== null) {
+      sample.fps = forced;
+      sample.workP95 = 1000 / forced;
+    } else if (now >= this.nextAdaptWindowAt) {
+      this.nextAdaptWindowAt = now + ADAPT_WINDOW_EVERY_MS;
+      sessionFrameStats.window(FPS_WINDOW_MS, this.adaptWindow);
+      sample.fps = this.adaptWindow.fps;
+      sample.workP95 = this.adaptWindow.workP95;
+    }
+    // 목표: 프레임 제한 · 잰 화면 주사율 (main.ts가 페이싱 상태를 gfxState에 옮겨 적는다)
+    const ctx = this.adaptCtx;
+    ctx.targetHz = gfxState.targetHz;
+    ctx.displayHz = gfxState.displayHz;
+    ctx.canRateFallback = gfxState.frameLimit === 'auto' && gfxState.displayHz > 60;
+    const action = sessionAutoDowngrade.sample(now, sample, gfxState.quality, ctx);
     gfxState.measuredFps = sessionAutoDowngrade.average;
     if (action) qualityHooks.auto?.(action);
   }
