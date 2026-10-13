@@ -49,6 +49,32 @@ describe('PC 괴물 조준: 판 장면에서 캔버스 포인터를 받기 전�
     expect(clicked.sampler.aimPointerReady).toBe(true);
   });
 
+  // 수정 검토: Phaser는 마우스 움직임을 캔버스에서만 받는다. 캔버스 둘레 레터박스 · 필러박스(16:9가 아닌 창) 위 움직임을 세면
+  // 포인터가 로비에서 누른 자리에 남은 채 커서 조준을 써서, 막으려던 '로비 클릭 자리를 향한 판 시작 조준'이 다시 나왔다
+  it('PC: 캔버스 둘레(레터박스) 위 움직임은 세지 않고, 캔버스 위 움직임 · 어디서든 누르기는 센다', () => {
+    const env: InputEnv = { win: new EventTarget(), doc: new FakeDoc(), orientation: null };
+    const host = new EventTarget();
+    const canvas = new EventTarget();
+    /** host가 받은 이벤트의 target (실제 DOM에서는 캔버스의 이벤트가 host로 올라온다) */
+    const on = (type: string, target: EventTarget, pointerType = 'mouse'): Event =>
+      Object.defineProperty(ptrEv(type, pointerType), 'target', { value: target });
+    const moved = new InputSampler();
+    moved.attach(host, { touch: null, aimSurface: canvas, env });
+    host.dispatchEvent(on('pointermove', host));
+    host.dispatchEvent(on('pointermove', host, 'pen'));
+    expect(moved.aimPointerReady).toBe(false);
+    host.dispatchEvent(on('pointermove', canvas, 'touch'));
+    expect(moved.aimPointerReady).toBe(false);
+    host.dispatchEvent(on('pointermove', canvas));
+    expect(moved.aimPointerReady).toBe(true);
+    moved.detach();
+    const clicked = new InputSampler();
+    clicked.attach(host, { touch: null, aimSurface: canvas, env });
+    host.dispatchEvent(on('pointerdown', host));
+    expect(clicked.aimPointerReady).toBe(true);
+    clicked.detach();
+  });
+
   it('새 판(다시 붙임)마다 처음부터', () => {
     const r = rig(null);
     r.host.dispatchEvent(ptrEv('pointermove', 'mouse'));

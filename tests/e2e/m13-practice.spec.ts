@@ -7,13 +7,14 @@
 //  - (검토 반영) 첫 화면 상태 줄 · 오류 줄이 낮은 휴대폰 · PC 창에서 화면 안, 친구 방 로비 "나가기",
 //    ?practice=1은 마지막 방보다 우선하고 주소에서 지운다, 판 중 body.in-match(새 버전 띠 숨김),
 //    터치 연습 판의 뒤로 가기 확인(연습 문구 → 첫 화면) · 새로고침 뒤 남은 항목 걷기(F16), '봇과 연습' 연타 가드(F17)
+//  - (수정 검토) PC 괴물의 판 시작 조준: 지금 방향 → 레터박스 위 움직임은 세지 않음 → 캔버스 위로 오면 커서
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { validateBalance, type Balance, type Snapshot } from '@decoy/shared';
 import type { TruthFrame } from '@decoy/shared/sim';
 import { APP_TEXT } from '../../client/src/data/storyText';
 import { monsterVerdict } from './infoCheck';
-import { PHONE_LANDSCAPE, dpr1, newPlayerPage, press, type DeviceOptions } from './helpers';
+import { PHONE_LANDSCAPE, dpr1, inputLog, newPlayerPage, press, type DeviceOptions } from './helpers';
 import { MultiTouch, centerOf, waitForTouchTarget } from './touch';
 
 const balance: Balance = validateBalance(JSON.parse(readFileSync('config/balance.json', 'utf8')));
@@ -218,6 +219,74 @@ test('연습 중 10초 숨겼다 돌아오면 같은 판이 그대로 이어지�
   await expect(page.getByTestId('practice')).toBeVisible();
   await expect(page.getByTestId('create-room')).toBeVisible();
   expect(await page.evaluate(() => window.__DECOY__?.transport)).toBe('net');
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
+// 수정 검토: PC 괴물의 판 시작 조준. Phaser 포인터는 로비에서 누른 역할 카드 자리에 남아 있다. 판 장면이 그 자리를 따라 돌지
+// 않고(aimPointerReady), 캔버스 둘레 레터박스 위 움직임도 세지 않으며(aimSurface), 캔버스 위로 오면 커서를 따르는지
+// (mousePointer) 본다 — 단위 시험은 판 장면 연결을 보지 못한다
+test('PC 괴물: 판 시작 조준은 지금 방향, 레터박스 위 움직임은 그대로, 캔버스 위로 오면 커서를 따른다 (1280×900 창)', async ({
+  browser,
+}) => {
+  const { context, page, problems } = await newPlayerPage(browser, { viewport: { width: 1280, height: 900 } });
+  await page.goto(QUERY);
+  await page.getByTestId('practice').click();
+  const card = page.getByTestId('practice-role-monster');
+  await expect(card).toBeVisible();
+  const cardBox = await card.boundingBox();
+  // 누른 자리(역할 카드 가운데)에 Phaser 포인터가 남는다
+  await card.click();
+  await expect.poll(async () => (await practiceState(page)).phase, POLL).toBe('playing');
+  await expect.poll(async () => (await inputLog(page)).length, POLL).toBeGreaterThan(20);
+  const canvas = await page.evaluate(() => {
+    const r = document.querySelector('#game-root canvas')?.getBoundingClientRect();
+    return r ? { x: r.x, y: r.y, w: r.width, h: r.height } : null;
+  });
+  if (!canvas) throw new Error('캔버스 없음');
+  expect(canvas.y, '위아래 레터박스가 있는 창').toBeGreaterThan(40);
+  const angDiff = (a: number, b: number): number => {
+    const d = Math.abs(a - b) % (2 * Math.PI);
+    return Math.min(d, 2 * Math.PI - d);
+  };
+  /** 최근 ms 동안 보낸 입력의 조준 */
+  const recentAims = async (ms = 200): Promise<number[]> => {
+    const now = await page.evaluate(() => performance.now());
+    return (await inputLog(page)).filter((e) => e.t > now - ms).map((e) => e.aim);
+  };
+  const me = await page.evaluate(() => window.__DECOY__?.getRenderPos() ?? null);
+  if (!me) throw new Error('내 위치 없음');
+  const meClient = await page.evaluate(
+    ([x, y]) => window.__DECOY__?.tileToClient(x, y) ?? null,
+    [me.x, me.y] as const,
+  );
+  if (!meClient || !cardBox) throw new Error('좌표 없음');
+  const towardCard = Math.atan2(
+    cardBox.y + cardBox.height / 2 - meClient.y,
+    cardBox.x + cardBox.width / 2 - meClient.x,
+  );
+  expect(angDiff(towardCard, me.face), '역할 카드 쪽이 지금 방향과 달라야 이 시험이 가린다').toBeGreaterThan(0.3);
+  // 1) 마우스를 움직이지 않음: 지금 방향
+  const still = await recentAims(1000);
+  expect(still.length).toBeGreaterThan(10);
+  for (const a of still) expect(angDiff(a, me.face)).toBeLessThan(0.02);
+  // 2) 레터박스 위에서만 움직임: Phaser 포인터는 그대로라 여전히 지금 방향 (역할 카드 쪽을 향하지 않는다)
+  // (캔버스를 가로지르지 않게 한 번에 띠로 옮긴 뒤, 띠 안에서만 움직인다)
+  await page.mouse.move(canvas.x + canvas.w * 0.2, canvas.y / 2);
+  await page.mouse.move(canvas.x + canvas.w * 0.8, canvas.y / 2, { steps: 4 });
+  await page.waitForTimeout(300);
+  for (const a of await recentAims()) expect(angDiff(a, me.face)).toBeLessThan(0.02);
+  // 3) 캔버스 위 동쪽 4타일: 커서를 따른다
+  const east = await page.evaluate(
+    ([x, y]) => window.__DECOY__?.tileToClient(x + 4, y) ?? null,
+    [me.x, me.y] as const,
+  );
+  if (!east) throw new Error('좌표 없음');
+  await page.mouse.move(east.x, east.y, { steps: 4 });
+  await page.waitForTimeout(300);
+  const aimed = await recentAims();
+  expect(aimed.length).toBeGreaterThan(3);
+  for (const a of aimed) expect(angDiff(a, 0)).toBeLessThan((2 * Math.PI) / 180);
   expect(problems).toEqual([]);
   await context.close();
 });

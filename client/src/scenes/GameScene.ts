@@ -265,7 +265,11 @@ export class GameScene extends Phaser.Scene {
     this.inputHistory.clear();
     this.touch = device.touch ? new TouchInput() : null;
     this.touchActive = null;
-    this.sampler.attach(host, { touch: this.touch, touchAim: info.role === 'monster' });
+    this.sampler.attach(host, {
+      touch: this.touch,
+      touchAim: info.role === 'monster',
+      aimSurface: this.game.canvas,
+    });
     if (this.touch) {
       const uiRoot = document.getElementById('ui-root') ?? document.body;
       // 판 HUD 자리 (논리 px): 터치 화면이 이동 영역을 그 아래에서 시작한다. 캔버스 자리는 창 크기가 바뀔 때마다 다시 잰다.
@@ -391,7 +395,7 @@ export class GameScene extends Phaser.Scene {
     if (this.app.match?.role !== 'monster') return Number.NaN;
     const me = this.app.predictor?.state;
     if (!me) return Number.NaN;
-    // 이 판에서 마우스가 캔버스 위에서 움직이거나 누른 적이 없으면 포인터 자리(로비에서 누른 버튼 자리 · 0,0 · 마지막 터치 자리)를
+    // 이 판에서 마우스가 캔버스 위에서 움직이거나 판 화면을 누른 적이 없으면 포인터 자리(로비에서 누른 버튼 자리 · 0,0 · 마지막 터치 자리)를
     // 따라 돌지 않는다: 지금 방향 유지 (검토 반영 — 판 시작 조준이 로비 클릭 자리를 향하던 것)
     if (!this.sampler.aimPointerReady) return me.face;
     // 손가락 포인터는 조준을 바꾸지 않는다(터치스크린 노트북의 손가락 · 손바닥): 마우스 포인터만
