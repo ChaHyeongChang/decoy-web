@@ -2,14 +2,14 @@
 //  - 가상 시계(tests/helpers/virtualClock.ts)로 같은 시드의 '봇과 연습'을 60Hz · 120Hz 두 번 돌린다 (Canvas 렌더러, 품질 높음).
 //    시간 · 난수 · 타이머가 모두 가상이라 기기 안 판(시뮬레이션)은 두 번이 비트까지 같다 — 이것을 먼저 확인한다(getTruth)
 //  - 50ms(60Hz 3프레임 = 120Hz 6프레임)마다 같은 가상 시각에서 그림 상태를 모아 비교한다: 그린 엔티티 · 정보 레이어 · 연출 ·
-//    내 그린 자리 · 연출 상태(getAnimState: 시야 모드 보간 · 걷기 위상 · 자세 섞기 · 안개 갱신 시각 · 부채꼴 색 · 잔상 · 입자) · 배너 글.
-//    허용 오차는 위치 · 알파 · 보간 값 1e-3(r3 반올림 한 칸), 글 · 수 · 그림 이름은 정확히 같아야 한다
-//  - 판 장면을 만드는 프레임이 두 번 모두 같도록 역할을 60Hz 한 프레임 안 10ms 자리에서 누른다 (장면을 만드는 프레임이 다르면
-//    입력 틱 위상이 달라져 판 자체가 달라진다). 그러면 서버 틱 · 스냅샷 · 보간 경계도 그 10ms 자리라 120Hz도 같은 프레임에 보지만
-//    '바뀐 프레임 전체를 쌓는' 종류의 차이(부채꼴 색 · 시야 모드 보간 · 걷기)가 드러난다. 두 번째 위상은 첫 칸에 화면을 숨겼다 보여
-//    기기 안 서버를 4ms 자리로 다시 맞춘다(LocalTransport.resume): 120Hz가 한 프레임 먼저 보므로 '처음 본 프레임 시각을 잡는'
-//    종류의 차이(공격 준비 채움 · 페이드 · 입자 태어난 시각)가 드러난다
-//  - 괴물(생존자 화면) · 생존자(괴물 화면) 두 경우 × 두 위상. 콘솔 에러 · 경고 0
+//    내 그린 자리 · 연출 상태(getAnimState: 시야 모드 보간 · 걷기 위상 · 자세 섞기 · 안개 갱신 시각 · 부채꼴 색 · 잔상 격자 시각과
+//    알파 · 입자) · 배너 글. 허용 오차는 위치 · 알파 · 보간 값 1e-3(r3 반올림 한 칸), 글 · 수 · 그림 이름은 정확히 같아야 한다.
+//    두 번이 각자 hz대로 그렸는지(그린 프레임 수 = hz × 시간, 120Hz = 60Hz × 2)도 본다
+//  - 판 시작(역할을 누른 순간 = 판 장면을 만든 순간)의 60Hz 프레임 안 위치를 두 가지로 한다. 기기 안 서버 틱 · 스냅샷 · 보간 경계 ·
+//    입력 틱이 모두 그 위치에 온다. 10ms 자리면 120Hz도 같은 프레임에 보지만 '바뀐 프레임 전체를 쌓는' 종류의 차이(부채꼴 색 ·
+//    시야 모드 보간 · 걷기)가, 4ms 자리면 120Hz가 한 프레임(8.33ms) 먼저 보므로 '처음 본 프레임 시각을 잡는' 종류의 차이(공격 준비
+//    채움 · 돌진 잔상 시작 · 페이드 · 입자 태어난 시각 · 첫 프레임에 정하던 안개 격자)가 드러난다
+//  - 괴물(생존자 화면) · 생존자(괴물 화면) 두 경우 × 두 위치. 콘솔 에러 · 경고 0
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import type { AnimDebug, DrawnEntity, InfoItem } from '@decoy/shared';
 import type { TruthFrame } from '@decoy/shared/sim';
@@ -42,21 +42,9 @@ interface Run {
   problems: string[];
 }
 
-/** 화면 숨김 흉내 (document.visibilityState를 바꾸고 visibilitychange를 낸다) */
-function visibilityControl(): void {
-  let vis: DocumentVisibilityState = 'visible';
-  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => vis });
-  Object.defineProperty(document, 'hidden', { configurable: true, get: () => vis === 'hidden' });
-  (window as unknown as { __e2eSetVisible: (on: boolean) => void }).__e2eSetVisible = (on) => {
-    vis = on ? 'visible' : 'hidden';
-    document.dispatchEvent(new Event('visibilitychange'));
-  };
-}
-
 async function openRun(browser: Browser, hz: number): Promise<Run> {
   const { context, page, problems } = await newPlayerPage(browser);
   await context.addInitScript(installVirtualClock, { seed: SEED, hz });
-  await context.addInitScript(visibilityControl);
   // 서버 소켓은 막는다 (진짜 입출력이 가상 시각 어디에 끼는지 두 번이 달라지지 않게, 연습은 서버를 쓰지 않는다)
   await page.routeWebSocket(/\/ws$/, (ws) => ws.close({ code: 1011, reason: 'blocked' }));
   await page.goto(QUERY);
@@ -109,29 +97,18 @@ async function sample(page: Page): Promise<Sample> {
   });
 }
 
-/** 조작 중 상태 (누르고 있는 키: 화면을 숨기면 입력이 비워져 다시 누른다) */
-interface Ctx {
-  held: Set<string>;
-}
-
-/** 50ms 경계에서 하는 조작 (두 번 똑같이). 돌려준 ms만큼 이 칸 안에서 이미 흘렸다 */
-type Action = (page: Page, truth: TruthFrame | null, ctx: Ctx) => Promise<number | void>;
+/** 50ms 경계에서 하는 조작 (두 번 똑같이) */
+type Action = (page: Page, truth: TruthFrame | null) => Promise<void>;
 
 const keyDown =
   (...keys: string[]): Action =>
-  async (page, _truth, ctx) => {
-    for (const k of keys) {
-      await page.keyboard.down(k);
-      ctx.held.add(k);
-    }
+  async (page) => {
+    for (const k of keys) await page.keyboard.down(k);
   };
 const keyUp =
   (...keys: string[]): Action =>
-  async (page, _truth, ctx) => {
-    for (const k of keys) {
-      await page.keyboard.up(k);
-      ctx.held.delete(k);
-    }
+  async (page) => {
+    for (const k of keys) await page.keyboard.up(k);
   };
 const keyPress =
   (key: string): Action =>
@@ -146,38 +123,14 @@ const click =
   };
 const all =
   (...list: Action[]): Action =>
-  async (page, truth, ctx) => {
-    let used = 0;
-    for (const a of list) used += (await a(page, truth, ctx)) ?? 0;
-    return used;
+  async (page, truth) => {
+    for (const a of list) await a(page, truth);
   };
 
-/**
- * 화면을 숨겼다 바로 보인다: 기기 안 서버 틱 · 스냅샷 · 보간 경계가 이 순간(이 칸 + offsetMs = 60Hz 프레임 안 offsetMs 자리)으로
- * 다시 맞춰진다(LocalTransport.resume). 4ms면 120Hz는 그 60Hz 프레임의 앞 절반이라 바뀐 것을 한 프레임(8.33ms) 먼저 본다
- * ('처음 본 프레임 시각을 잡는' 차이가 드러난다), 10ms면 같은 프레임에 보지만 그 프레임 전체를 쌓는 차이가 드러난다.
- * 화면을 숨기면 입력이 비워지므로 누르던 키는 다시 누른다
- */
-function phaseShift(offsetMs: number): Action {
-  return async (page, _truth, ctx) => {
-    await advance(page, offsetMs);
-    await page.evaluate(() => {
-      const set = (window as unknown as { __e2eSetVisible: (on: boolean) => void }).__e2eSetVisible;
-      set(false);
-      set(true);
-    });
-    for (const k of ctx.held) await page.keyboard.down(k);
-    return offsetMs;
-  };
-}
-
-/**
- * 서버 틱 위상: 판 시작 그대로(60Hz 프레임 안 10ms 자리) · 첫 칸에 4ms 자리로 다시 맞춤. 연출마다 두 위상 모두에서 비교한다
- * (번갈아 바꾸면 한 번 돌리기로 끝나지만 어떤 연출이 어느 위상에서 일어날지 정할 수 없다)
- */
+/** 판 시작(역할을 누르는 순간)의 60Hz 프레임 안 위치. 연출마다 두 위치 모두에서 비교한다 */
 const PHASES = [
-  { name: '서버 틱이 60Hz 프레임 안 10ms 자리', offset: null },
-  { name: '서버 틱이 60Hz 프레임 안 4ms 자리', offset: 4 },
+  { name: '판 시작이 60Hz 프레임 안 10ms 자리', offset: 10 },
+  { name: '판 시작이 60Hz 프레임 안 4ms 자리', offset: 4 },
 ] as const;
 
 async function teleport(page: Page, target: string, x: number, y: number, face: number): Promise<void> {
@@ -210,16 +163,16 @@ async function runScenario(
   role: 'runner' | 'monster',
   chunks: number,
   makeActions: () => ReadonlyMap<number, Action>,
-  phaseOffset: number | null,
+  phaseOffset: number,
 ): Promise<Sample[]> {
   const actions = makeActions();
   const run = await openRun(browser, hz);
   const { page } = run;
   await domClick(page, 'practice');
   await advance(page, 500);
-  // 60Hz 한 프레임 안 10ms 자리에서 누른다: 판 장면은 두 번 모두 다음 공통 프레임에 생긴다.
+  // 60Hz 한 프레임 안 phaseOffset ms 자리에서 누른다 (판 장면은 판 시작 메시지를 받은 그 순간에 생긴다).
   // 누르기 바로 전에 난수를 다시 시작한다 (연습 판 시드 = Math.random)
-  await advance(page, 10);
+  await advance(page, phaseOffset);
   await page.evaluate(
     ([seed, id]) => {
       window.__VCLOCK__?.reseed(seed);
@@ -227,20 +180,27 @@ async function runScenario(
     },
     [SEED, `practice-role-${role}`] as const,
   );
-  await advance(page, 40);
+  await advance(page, CHUNK - phaseOffset);
   expect(await page.evaluate(() => window.__DECOY__?.transport)).toBe('local');
   const out: Sample[] = [];
-  const ctx: Ctx = { held: new Set() };
   for (let i = 0; i < chunks; i += 1) {
     const s = await sample(page);
     out.push(s);
-    let used = 0;
-    if (i === 1 && phaseOffset !== null) used += (await phaseShift(phaseOffset)(page, s.truth, ctx)) ?? 0;
     const act = actions.get(i);
-    if (act) used += (await act(page, s.truth, ctx)) ?? 0;
-    await advance(page, CHUNK - used);
+    if (act) await act(page, s.truth);
+    await advance(page, CHUNK);
   }
   expect(run.problems, `${hz}Hz 콘솔 에러 · 경고`).toEqual([]);
+  // 이 빠르기로 정말 그렸다: 판 중 그린 프레임 수 = hz × 지난 가상 시간 (제한기 · 판 밖 30fps가 120Hz를 60 · 30으로 묶으면
+  // 같은 시각 비교는 그대로 통과하므로 따로 본다. injectFps는 측정 fps를 덮어써 getFrameStats로는 알 수 없다)
+  const first = out[0];
+  const last = out[out.length - 1];
+  if (!first?.anim || !last?.anim) throw new Error('연출 상태 없음');
+  const expected = (hz * (last.t - first.t)) / 1000;
+  expect(
+    Math.abs(last.anim.frames - first.anim.frames - expected),
+    `${hz}Hz 그린 프레임 수`,
+  ).toBeLessThanOrEqual(1);
   await run.context.close();
   return out;
 }
@@ -315,7 +275,8 @@ function compareRender(a: Sample[], b: Sample[]): string[] {
     diff(`${at} info`, s.info, o.info, problems, tol);
     diff(`${at} fx`, s.fx, o.fx, problems, tol);
     diff(`${at} me`, s.me, o.me, problems, tol);
-    diff(`${at} anim`, s.anim, o.anim, problems, tol);
+    // 그린 프레임 수는 빠르기마다 다르다 (runScenario가 hz에 맞는지 따로 본다)
+    diff(`${at} anim`, s.anim && { ...s.anim, frames: 0 }, o.anim && { ...o.anim, frames: 0 }, problems, tol);
     diff(`${at} banners`, s.banners, o.banners, problems, tol);
   });
   return problems;
@@ -327,11 +288,14 @@ async function bothRates(
   role: 'runner' | 'monster',
   chunks: number,
   makeActions: () => ReadonlyMap<number, Action>,
-  phaseOffset: number | null,
+  phaseOffset: number,
 ): Promise<Sample[]> {
   const at60 = await runScenario(browser, 60, role, chunks, makeActions, phaseOffset);
   const at120 = await runScenario(browser, 120, role, chunks, makeActions, phaseOffset);
   expect(at120.length).toBe(at60.length);
+  // 120Hz는 같은 시간에 60Hz의 두 배를 그렸다
+  const drawn = (r: Sample[]): number => (r[r.length - 1]?.anim?.frames ?? 0) - (r[0]?.anim?.frames ?? 0);
+  expect(drawn(at120)).toBe(drawn(at60) * 2);
   compareTruth(at60, at120);
   expect(compareRender(at60, at120), '60Hz · 120Hz 같은 시각의 그림 상태').toEqual([]);
   return at60;
@@ -340,32 +304,52 @@ async function bothRates(
 const count = (samples: Sample[], pred: (s: Sample) => boolean): number => samples.filter(pred).length;
 const num = (v: number | boolean | undefined): number => (typeof v === 'number' ? v : 0);
 
-/** 생존자(질주자): 걷기 · 팀원 보간 · 질주, 괴물 대기(5초)가 끝나면 괴물 봇을 내 옆(지나온 자리)으로 옮겨 부채꼴 · 공격 · 피격 */
+/** 넓게 트인 곳 (오른쪽 방, 타일 좌표): 질주자를 여기 두고 괴물을 남쪽에 놓는다 (돌진 길이 벽에 막히지 않게) */
+const OPEN_SPOT = { x: 40.5, y: 12.5 };
+
+/**
+ * 생존자(질주자): 걷기 · 팀원 보간 · 질주. 괴물 대기(5초)가 끝나면 나를 트인 곳으로 옮기고 괴물 봇을 3타일 남쪽에 묶어 두고
+ * 나를 보게 · 등지게 번갈아 돌려 부채꼴 색이 노랑 ↔ 빨강으로 몇 번 바뀌게 한 뒤, 4.3타일 남쪽에 풀어 놓는다
+ * (돌진 거리 안: 봇이 돌진 · 공격 → 피격 · 수감)
+ */
 function runnerScript(): () => ReadonlyMap<number, Action> {
   return () => {
-    const trail: { x: number; y: number }[] = [];
-    const remember: Action = async (_page, truth) => {
-      const me = playerOf(truth, (p) => p.role === 'runner');
-      trail.push({ x: me.x, y: me.y });
-    };
+    const place =
+      (dist: number, facing: 'me' | 'away', frozen: boolean): Action =>
+      async (page, truth) => {
+        const mon = playerOf(truth, (p) => p.role === 'monster');
+        await teleport(
+          page,
+          mon.id,
+          OPEN_SPOT.x,
+          OPEN_SPOT.y + dist,
+          facing === 'me' ? -Math.PI / 2 : Math.PI / 2,
+        );
+        if (frozen)
+          await page.evaluate(
+            (id) => window.__DECOY__?.sendTest({ kind: 'freeze', target: id, frozen: true }),
+            mon.id,
+          );
+      };
     const a = new Map<number, Action>();
     a.set(0, keyDown('KeyD'));
     a.set(12, keyDown('KeyS'));
     a.set(26, keyUp('KeyD'));
     a.set(40, all(keyUp('KeyS'), keyDown('KeyA')));
-    for (let i = 60; i < 104; i += 2) a.set(i, remember);
-    a.set(62, all(remember, keyUp('KeyA'), keyDown('KeyW')));
-    a.set(84, all(remember, keyPress('Space')));
-    a.set(104, async (page, truth, ctx) => {
-      // 괴물을 지나온 자리(약 2타일 뒤)에 나를 보게 놓고 멈춘다
-      const me = playerOf(truth, (p) => p.role === 'runner');
-      const mon = playerOf(truth, (p) => p.role === 'monster');
-      const spot = trail[trail.length - 4] ?? trail[0] ?? me;
-      await teleport(page, mon.id, spot.x, spot.y, Math.atan2(me.y - spot.y, me.x - spot.x));
-      await keyUp('KeyW')(page, truth, ctx);
-    });
-    a.set(150, keyDown('KeyD'));
-    a.set(166, keyUp('KeyD'));
+    a.set(62, all(keyUp('KeyA'), keyDown('KeyW')));
+    a.set(84, keyPress('Space'));
+    a.set(
+      104,
+      all(keyUp('KeyW'), async (page, truth) => {
+        const me = playerOf(truth, (p) => p.role === 'runner');
+        await teleport(page, me.id, OPEN_SPOT.x, OPEN_SPOT.y, -Math.PI / 2);
+      }),
+    );
+    a.set(108, place(3, 'me', true));
+    a.set(114, place(3, 'away', true));
+    a.set(124, place(3, 'me', true));
+    a.set(128, place(3, 'away', true));
+    a.set(136, place(4.3, 'me', false));
     return a;
   };
 }
@@ -395,17 +379,25 @@ function monsterScript(): () => ReadonlyMap<number, Action> {
   };
 }
 
+/** 서로 다른 안개 · 시야 갱신 시각 수 (갱신 시계가 실제로 돌았다) */
+const fogTimes = (samples: Sample[]): number => new Set(samples.map((x) => x.anim?.fogAt ?? null)).size;
+
 for (const phase of PHASES) {
   test(`생존자(질주자) · ${phase.name}: 60Hz · 120Hz 같은 시각의 보간 · 걷기 · 안개 갱신 · 부채꼴 색 · 공격 준비 · 피격 · 수감 연출이 같다`, async ({
     browser,
   }) => {
     test.setTimeout(240_000);
-    const s = await bothRates(browser, 'runner', 190, runnerScript(), phase.offset);
-    // 비교한 연출이 실제로 일어났다 (아무 일 없는 화면을 비교하지 않게)
+    const s = await bothRates(browser, 'runner', 220, runnerScript(), phase.offset);
+    // 비교한 연출이 실제로 일어났다 (아무 일 없는 화면을 비교하지 않게): 걷기 · 안개 갱신 · 부채꼴 색 바뀜 · 공격 준비 · 피격 · 수감
     expect(count(s, (x) => x.anim !== null && Object.keys(x.anim.gait).length >= 3)).toBeGreaterThan(150);
+    expect(fogTimes(s)).toBeGreaterThan(200);
     expect(count(s, (x) => x.fx.cone === true)).toBeGreaterThan(5);
+    expect(count(s, (x) => num(x.fx.coneRed) > 0 && num(x.fx.coneRed) < 1)).toBeGreaterThanOrEqual(8);
     expect(count(s, (x) => x.fx.attackRange === true && num(x.fx.attackFill) < 1)).toBeGreaterThan(2);
     expect(count(s, (x) => num(x.fx.hitFlash) > 0)).toBeGreaterThan(0);
+    const imprisoned = (x: Sample): boolean =>
+      x.truth?.players.some((p) => p.role === 'runner' && p.status === 'imprisoned') === true;
+    expect(count(s, (x) => imprisoned(x) && num(x.fx.fade) > 0 && num(x.fx.fade) < 1)).toBeGreaterThan(3);
     expect(count(s, (x) => num(x.fx.particles) > 0)).toBeGreaterThan(20);
     expect(count(s, (x) => num(x.fx.dust) > 0)).toBeGreaterThan(100);
   });
@@ -415,9 +407,10 @@ for (const phase of PHASES) {
   }) => {
     test.setTimeout(240_000);
     const s = await bothRates(browser, 'monster', 190, monsterScript(), phase.offset);
+    expect(fogTimes(s)).toBeGreaterThan(170);
     expect(count(s, (x) => x.fx.attackRange === true && num(x.fx.attackFill) < 1)).toBeGreaterThan(2);
     expect(count(s, (x) => (x.anim?.myBlend ?? 0) > 0 && (x.anim?.myBlend ?? 1) < 1)).toBeGreaterThan(2);
-    expect(count(s, (x) => (x.anim?.dashGhosts ?? 0) > 0)).toBeGreaterThan(1);
+    expect(count(s, (x) => (x.anim?.ghosts.length ?? 0) > 0)).toBeGreaterThan(1);
     expect(count(s, (x) => x.info.some((i) => i.tag === 'roar'))).toBeGreaterThan(2);
   });
 }

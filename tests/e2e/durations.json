@@ -4,7 +4,7 @@
   "debug-overlay.spec.ts": 55,
   "deploy-wake.spec.ts": 75,
   "frame-limit.spec.ts": 45,
-  "frame-independence.spec.ts": 120,
+  "frame-independence.spec.ts": 65,
   "m1-sync.spec.ts": 15,
   "m10-fog.spec.ts": 18,
   "m10-fog.webgl.spec.ts": 607,
