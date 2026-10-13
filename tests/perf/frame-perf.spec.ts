@@ -1,6 +1,7 @@
 // 프레임 성능 측정 장면 (playwright.config.ts 머리 주석). 장면마다 새 브라우저 컨텍스트에서 봇과 연습 판을 시작하고,
 // 예열 뒤 CPU를 N배 느리게(CDP Emulation.setCPUThrottlingRate) 해 일정 시간 동안 프레임마다 잰다.
-// 품질은 주소의 ?quality로 고정하고 판 중 자동 조정은 injectFps(60)으로 막는다(두 빌드 모두 있는 디버그 훅)
+// 품질은 주소의 ?quality로 고정하고 판 중 자동 조정은 injectFps(화면 주사율)로 막는다(두 빌드 모두 있는 디버그 훅).
+// 후 빌드는 하향 기준이 목표 FPS에 비례하므로(120Hz면 PC 80) 60을 넣으면 120Hz 장면에서 목표를 60으로 낮춘다 — 장면의 주사율을 넣는다
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { test, type Browser, type CDPSession } from '@playwright/test';
@@ -76,7 +77,6 @@ export const SCENARIOS: Scenario[] = [
     quality: 'high',
     role: 'runner',
     cpu: 1,
-    hz: 120,
     scale: 0.25,
   }),
   pc({
@@ -85,7 +85,6 @@ export const SCENARIOS: Scenario[] = [
     quality: 'high',
     role: 'monster',
     cpu: 1,
-    hz: 120,
     scale: 0.25,
   }),
   pc({
@@ -163,8 +162,10 @@ async function measure(browser: Browser, sc: Scenario): Promise<PerfResult> {
     null,
     { timeout: 60_000, polling: 250 },
   );
-  await page.evaluate(() =>
-    (window as unknown as { __DECOY__?: { injectFps(f: number | null): void } }).__DECOY__?.injectFps(60),
+  await page.evaluate(
+    (fps) =>
+      (window as unknown as { __DECOY__?: { injectFps(f: number | null): void } }).__DECOY__?.injectFps(fps),
+    sc.hz ?? 60,
   );
   const cdp = await context.newCDPSession(page);
   await cdp.send('Emulation.setCPUThrottlingRate', { rate: sc.cpu });

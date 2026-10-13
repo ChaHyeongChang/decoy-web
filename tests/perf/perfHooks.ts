@@ -72,8 +72,10 @@ export function installPerfHooks(cfg: { seed: number; hz: number | null }): void
     const fire = (): void => {
       scheduled = false;
       const t = performance.now();
-      // 늦어진 프레임은 따라잡지 않는다 (실제 화면처럼 다음 주기로)
-      next = Math.max(next + period, t + 1);
+      // 늦어진 프레임은 따라잡지 않는다: 실제 화면처럼 vsync 격자 위의 다음 칸으로 (늦은 만큼 밀지 않는다 —
+      // 그래야 간격이 주기의 배수가 되어 후 빌드의 화면 주사율 재기가 실제 기기와 같게 본다)
+      next += period;
+      while (next <= t) next += period;
       const cbs = queue.splice(0);
       for (const cb of cbs) cb(t);
     };
