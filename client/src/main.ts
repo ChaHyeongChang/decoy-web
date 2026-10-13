@@ -5,6 +5,7 @@ import { sfx } from './audio';
 import { installDebug } from './debug';
 import { canOfferFullscreen, device, enterFullscreen, initDevice, onDeviceChange } from './device';
 import { Pacer, loadFrameLimit, pacingHooks, patchTimeStep } from './gfx/framePacing';
+import { sessionFrameStats } from './gfx/frameStats';
 import type { QualityPreset, QualityTier, RendererKind } from './gfx/presets';
 import {
   autoQuality,
@@ -189,10 +190,21 @@ setRenderScale(initial.zoom);
 // ───────────── 프레임 페이싱 (렌더링 최적화) ─────────────
 // 화면 주사율을 따라 그린다(자동). 60 · 120 제한은 Phaser의 fps.limit 대신 우리 제한기로: Phaser 것은 생성 때 고정이고
 // 오차 허용이 없어 120Hz 흔들림에서 40fps로 떨어진다. TimeStep.start가 this.step을 rAF에 묶기 전에 끼워야 한다
-const pacer = new Pacer(loadFrameLimit() ?? 'auto');
+// ?fpsLimit(시험용)는 이번 접속에만, 아니면 로비에서 고른 저장값
+const pacer = new Pacer(params.fpsLimit ?? loadFrameLimit() ?? 'auto');
 // 판이 없을 때(로비 · 결과)는 30fps로 묶는다 (빈 캔버스를 120Hz로 그리지 않게, 배터리)
 pacer.setIdle(true);
-patchTimeStep(Phaser.Core.TimeStep.prototype, pacer);
+// 프레임 측정(gfx/frameStats.ts): 그리는 걸음만 잰다 — 측정을 안쪽에, 제한기를 바깥에 끼워 건너뛴 rAF는 세기만 한다.
+// 작업 시간 = Phaser 한 걸음(장면 갱신 + 그리기 명령)의 메인 스레드 시간, 간격 = 그린 프레임 사이 rAF 시각 차이
+const timeStep = Phaser.Core.TimeStep.prototype;
+const rawStep = timeStep.step;
+timeStep.step = function measuredStep(this: Phaser.Core.TimeStep, time: number): void {
+  sessionFrameStats.begin(time, performance.now());
+  rawStep.call(this, time);
+  sessionFrameStats.end(performance.now());
+};
+patchTimeStep(timeStep, pacer);
+pacer.onSkip = () => sessionFrameStats.noteSkipped();
 
 /** 디버그 훅 · 오버레이 · 적응형 품질이 읽는 페이싱 상태 */
 function syncPacing(): void {
