@@ -106,6 +106,14 @@ describe('판 중 뒤로 가기 확인 문구 (검토 반영 F10 · F16)', () =>
     expect(leaveTextFor('quick').title).toBe(APP_TEXT.leaveTitle);
   });
 
+  it('괴물이 나가면 무효라는 안내에 최후의 30초 예외(생존자 승리)가 같이 있다 (수정 검토, GAME_DESIGN 9장)', () => {
+    for (const kind of ['match', 'quick'] as const) {
+      const body = leaveTextFor(kind).body;
+      expect(body).toContain('괴물이면 판이 무효');
+      expect(body).toContain('이미 탈출했다면 생존자 승리');
+    }
+  });
+
   it('연습 판은 연습 문구(첫 화면으로) — 온라인 판의 유예 · 판정 안내가 섞이지 않는다', () => {
     const t = leaveTextFor('practice');
     expect(t).toEqual({ title: APP_TEXT.leaveTitlePractice, body: APP_TEXT.leaveBodyPractice });
