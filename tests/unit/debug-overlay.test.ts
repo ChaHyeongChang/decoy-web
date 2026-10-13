@@ -1,13 +1,15 @@
 // ?debug=1 오버레이 (렌더링 최적화): 펼친 표 글자(모든 항목 · WebGL/Canvas 그리기 이름) · 접은 칩 한 줄 ·
-// 상자(칩만 입력을 받고 판 입력으로 보내지 않음 · 접기/펼치기 · 자리 · 4Hz · 바뀐 것만 씀)
+// 상자(칩만 입력을 받고 판 입력 · 문서 캡처 리스너로 보내지 않음 — 창 캡처 문지기 · 접기/펼치기 · 자리 · 4Hz · 바뀐 것만 씀)
 import { describe, expect, it } from 'vitest';
 import type { FrameStatsInfo } from '@decoy/shared';
 import {
   DEBUG_OVERLAY_UPDATE_MS,
+  GUARDED_EVENTS,
   formatDebugChip,
   formatDebugPanel,
   installDebugOverlay,
   type DebugOverlayData,
+  type GuardTarget,
   type OverlayAnchor,
   type OverlayHost,
 } from '../../client/src/ui/debugOverlay';
@@ -149,39 +151,74 @@ describe('formatDebugChip (접은 칩)', () => {
 
 interface FakeEvent {
   type: string;
+  target: unknown;
   button: number;
   cancelable: boolean;
   prevented: boolean;
+  /** stopPropagation 또는 stopImmediatePropagation (다음 노드로 가지 않는다) */
   stopped: boolean;
+  /** stopImmediatePropagation (같은 노드의 나중 리스너도 받지 않는다) */
+  immediate: boolean;
   preventDefault(): void;
   stopPropagation(): void;
+  stopImmediatePropagation(): void;
 }
 
-function event(type: string, button = 0, cancelable = true): FakeEvent {
+function event(type: string, target: unknown, button = 0, cancelable = true): FakeEvent {
   return {
     type,
+    target,
     button,
     cancelable,
     prevented: false,
     stopped: false,
+    immediate: false,
     preventDefault() {
       this.prevented = true;
     },
     stopPropagation() {
       this.stopped = true;
     },
+    stopImmediatePropagation() {
+      this.stopped = true;
+      this.immediate = true;
+    },
   };
 }
 
-/** 가짜 DOM 요소: textContent 쓰기 횟수 · 리스너 · 자식 */
-class FakeEl {
+type Listener = { fn: (e: FakeEvent) => void; opts: unknown };
+
+/** 리스너 목록 (같은 노드: stopImmediatePropagation이면 나머지를 건너뛴다) */
+class FakeNode {
+  readonly nodeType: number = 1;
+  listeners = new Map<string, Listener[]>();
+  addEventListener(type: string, fn: (e: FakeEvent) => void, opts?: unknown): void {
+    const l = this.listeners.get(type) ?? [];
+    l.push({ fn, opts });
+    this.listeners.set(type, l);
+  }
+  removeEventListener(type: string, fn: (e: FakeEvent) => void): void {
+    this.listeners.set(
+      type,
+      (this.listeners.get(type) ?? []).filter((l) => l.fn !== fn),
+    );
+  }
+  fire(e: FakeEvent): void {
+    for (const l of [...(this.listeners.get(e.type) ?? [])]) {
+      l.fn(e);
+      if (e.immediate) return;
+    }
+  }
+}
+
+/** 가짜 DOM 요소: textContent 쓰기 횟수 · 자식 · contains */
+class FakeEl extends FakeNode {
   id = '';
   className = '';
   hidden = false;
   style: Record<string, string> = {};
   attrs = new Map<string, string>();
   children: FakeEl[] = [];
-  listeners = new Map<string, { fn: (e: FakeEvent) => void; opts: unknown }[]>();
   writes = 0;
   removed = false;
   private text = '';
@@ -191,14 +228,8 @@ class FakeEl {
   appendChild(c: FakeEl): void {
     this.children.push(c);
   }
-  addEventListener(type: string, fn: (e: FakeEvent) => void, opts?: unknown): void {
-    const l = this.listeners.get(type) ?? [];
-    l.push({ fn, opts });
-    this.listeners.set(type, l);
-  }
-  dispatch(e: FakeEvent): FakeEvent {
-    for (const l of this.listeners.get(e.type) ?? []) l.fn(e);
-    return e;
+  contains(n: unknown): boolean {
+    return n === this || this.children.some((c) => c.contains(n));
   }
   get textContent(): string {
     return this.text;
@@ -212,6 +243,39 @@ class FakeEl {
   }
 }
 
+/**
+ * 가짜 창 · 문서: 창 캡처 → 문서 캡처 → 대상 순으로 보낸다(전파를 멈추면 다음 노드로 가지 않는다).
+ * 실제 앱처럼 문지기(설치 때) 뒤에 창 캡처 리스너(input.ts)와 문서 캡처 리스너(점수판 · 설정 메뉴 닫기)를 단다
+ */
+class FakeWorld {
+  readonly win = new FakeNode();
+  readonly doc = new FakeNode();
+  /** 칩 뒤에 단 리스너가 받은 이벤트 */
+  laterWin: string[] = [];
+  docCapture: string[] = [];
+  addAppListeners(): void {
+    for (const type of [
+      'pointerdown',
+      'touchstart',
+      'mousedown',
+      'click',
+      'contextmenu',
+      'pointerup',
+      'touchend',
+    ]) {
+      this.win.addEventListener(type, (e) => this.laterWin.push(e.type), { capture: true });
+      this.doc.addEventListener(type, (e) => this.docCapture.push(e.type), { capture: true });
+    }
+  }
+  dispatch(e: FakeEvent): FakeEvent {
+    this.win.fire(e);
+    if (!e.stopped) this.doc.fire(e);
+    // 대상 단계 (창 · 문서 자신이 대상이면 위에서 이미 받았다)
+    if (!e.stopped && e.target instanceof FakeEl) e.target.fire(e);
+    return e;
+  }
+}
+
 function setup(
   expanded: boolean,
   anchor: () => OverlayAnchor | null = () => null,
@@ -220,6 +284,7 @@ function setup(
   toggle: FakeEl;
   chip: FakeEl;
   panel: FakeEl;
+  world: FakeWorld;
   appended: unknown[];
   data: DebugOverlayData;
   tick: () => void;
@@ -238,6 +303,7 @@ function setup(
     body: { appendChild: (x) => appended.push(x) },
   };
   const data: DebugOverlayData = { ...DATA };
+  const world = new FakeWorld();
   let fn: (() => void) | null = null;
   let ms = 0;
   let stopped = false;
@@ -246,6 +312,7 @@ function setup(
     expanded,
     anchor,
     host,
+    win: world.win as unknown as GuardTarget,
     every: (f, period) => {
       fn = f;
       ms = period;
@@ -254,12 +321,14 @@ function setup(
       };
     },
   });
+  world.addAppListeners();
   const [root, toggle, chip, panel] = made as [FakeEl, FakeEl, FakeEl, FakeEl];
   return {
     root,
     toggle,
     chip,
     panel,
+    world,
     appended,
     data,
     tick: () => fn?.(),
@@ -305,45 +374,78 @@ describe('installDebugOverlay', () => {
     expect(toggle.attrs.get('aria-expanded')).toBe('false');
   });
 
-  it('누르면(주 버튼) 펼치고 다시 누르면 접는다. 다른 버튼은 무시. 누르기는 기본 동작 · 전파를 막는다', () => {
-    const { toggle, panel, overlay, chip } = setup(false);
-    const down = toggle.dispatch(event('pointerdown'));
-    expect(down.prevented && down.stopped).toBe(true);
+  it('창 캡처 단계 문지기: 시작 이벤트 6종을 캡처로 단다(touchstart만 passive — 창 전체 터치 스크롤을 막지 않게), 끝 이벤트는 달지 않는다', () => {
+    const { world } = setup(false);
+    expect(GUARDED_EVENTS.map((g) => g.type)).toEqual([
+      'pointerdown',
+      'touchstart',
+      'mousedown',
+      'click',
+      'dblclick',
+      'contextmenu',
+    ]);
+    for (const g of GUARDED_EVENTS) {
+      // 설치 때 단 문지기가 그 종류의 첫 창 리스너다 (나중에 붙는 input.ts 창 캡처보다 먼저)
+      const first = world.win.listeners.get(g.type)?.[0];
+      expect(first?.opts, g.type).toEqual({ capture: true, passive: g.type === 'touchstart' });
+    }
+    // 캔버스에서 시작한 끌기가 칩 위에서 끝나도 판 · Phaser가 뗌을 받도록 끝 이벤트는 그대로 둔다
+    for (const type of ['pointerup', 'touchend', 'touchcancel', 'mouseup', 'pointermove'])
+      expect(
+        GUARDED_EVENTS.some((g) => g.type === type),
+        type,
+      ).toBe(false);
+  });
+
+  it('칩(보이는 칩 · 누르는 자리)을 누르면: 펼치고 접는다, 기본 동작을 막고, 나중 창 캡처 · 문서 캡처(점수판 닫기) · 칩 자신까지 아무도 받지 않는다', () => {
+    const { toggle, chip, panel, overlay, world } = setup(false);
+    const down = world.dispatch(event('pointerdown', chip));
+    expect([down.prevented, down.immediate]).toEqual([true, true]);
     expect(overlay.expanded).toBe(true);
     expect(panel.hidden).toBe(false);
     expect(panel.textContent).toContain('서버 틱');
     expect(chip.textContent.startsWith('▾')).toBe(true);
-    toggle.dispatch(event('pointerdown', 2));
-    expect(overlay.expanded).toBe(true);
-    toggle.dispatch(event('pointerdown'));
+    world.dispatch(event('pointerdown', toggle));
     expect(overlay.expanded).toBe(false);
     expect(panel.hidden).toBe(true);
     expect(chip.textContent.startsWith('▸')).toBe(true);
+    for (const type of ['mousedown', 'click', 'contextmenu']) {
+      const e = world.dispatch(event(type, chip));
+      expect([e.prevented, e.immediate], type).toEqual([true, true]);
+    }
+    // touchstart: passive라 막지 않고 전파만 멈춘다 (스크롤 · 확대는 칩의 touch-action: none이 막는다)
+    const ts = world.dispatch(event('touchstart', chip));
+    expect([ts.prevented, ts.immediate]).toEqual([false, true]);
+    expect(world.laterWin).toEqual([]);
+    expect(world.docCapture).toEqual([]);
+    // 클릭 · 메뉴로는 접기/펼치기가 바뀌지 않는다 (pointerdown에서 한 번만)
+    expect(overlay.expanded).toBe(false);
   });
 
-  it('칩의 터치 · 마우스 · 클릭 · 메뉴 이벤트는 판 입력(Phaser 창 리스너는 defaultPrevented를 본다)으로 가지 않는다', () => {
-    const { toggle, overlay } = setup(false);
-    for (const type of [
-      'touchstart',
-      'touchend',
-      'touchcancel',
-      'mousedown',
-      'mouseup',
-      'click',
-      'contextmenu',
-    ]) {
-      const l = toggle.listeners.get(type);
-      expect(l?.length, type).toBe(1);
-      // 터치 시작을 막으려면 passive가 아니어야 한다
-      expect(l?.[0]?.opts, type).toEqual({ passive: false });
-      const e = toggle.dispatch(event(type));
-      expect([e.prevented, e.stopped], type).toEqual([true, true]);
-    }
-    // 취소할 수 없는 이벤트(스크롤 중)는 preventDefault를 부르지 않는다 (콘솔 경고가 나지 않게)
-    const late = toggle.dispatch(event('touchstart', 0, false));
-    expect([late.prevented, late.stopped]).toEqual([false, true]);
-    // 클릭으로는 접기/펼치기가 바뀌지 않는다 (pointerdown에서 한 번만)
+  it('다른 버튼(오른쪽 클릭)은 접기/펼치기 없이 막기만, 취소할 수 없는 이벤트는 preventDefault를 부르지 않는다', () => {
+    const { chip, overlay, world } = setup(false);
+    const right = world.dispatch(event('pointerdown', chip, 2));
+    expect([right.prevented, right.immediate]).toEqual([true, true]);
     expect(overlay.expanded).toBe(false);
+    const late = world.dispatch(event('pointerdown', chip, 0, false));
+    expect([late.prevented, late.immediate]).toEqual([false, true]);
+    expect(overlay.expanded).toBe(true);
+  });
+
+  it('칩 밖(펼친 표 · 다른 요소 · 창 자신)의 이벤트는 건드리지 않는다: 점수판 · 설정 메뉴는 예전처럼 닫힌다', () => {
+    const { panel, overlay, world } = setup(true);
+    const other = new FakeEl();
+    for (const target of [panel, other, world.win, null]) {
+      const e = world.dispatch(event('pointerdown', target));
+      expect([e.prevented, e.stopped]).toEqual([false, false]);
+    }
+    expect(world.laterWin).toEqual(['pointerdown', 'pointerdown', 'pointerdown', 'pointerdown']);
+    expect(world.docCapture).toEqual(['pointerdown', 'pointerdown', 'pointerdown', 'pointerdown']);
+    expect(overlay.expanded).toBe(true);
+    // 끝 이벤트는 칩 위에서 나도 그대로 퍼진다
+    const up = world.dispatch(event('pointerup', overlay.chipEl));
+    expect([up.prevented, up.stopped]).toEqual([false, false]);
+    expect(world.docCapture.at(-1)).toBe('pointerup');
   });
 
   it('자리: anchor가 있으면 그 px(반올림)에서 아래로 펼침(.dbg-top), 없으면 CSS 기본(왼쪽 아래, 인라인 자리 없음)', () => {
@@ -379,10 +481,13 @@ describe('installDebugOverlay', () => {
     expect(chip.textContent).toBe('▾ 60fps 16.7ms');
   });
 
-  it('dispose: 주기를 멈추고 상자를 뗀다', () => {
-    const { root, overlay, stopped } = setup(true);
+  it('dispose: 주기를 멈추고 문지기를 떼고 상자를 뗀다', () => {
+    const { root, chip, overlay, stopped, world } = setup(true);
     overlay.dispose();
     expect(stopped()).toBe(true);
     expect(root.removed).toBe(true);
+    const e = world.dispatch(event('pointerdown', chip));
+    expect([e.prevented, e.stopped]).toEqual([false, false]);
+    expect(overlay.expanded).toBe(true);
   });
 });

@@ -114,7 +114,7 @@ export interface GfxDebugInfo {
   upgrades: number;
 }
 
-/** 프레임 측정 (렌더링 최적화, ?fps=1 표시 · E2E). 최근 렌더 프레임들의 요약 */
+/** 프레임 측정 (렌더링 최적화, ?debug=1 오버레이 · 적응형 품질 · E2E). 최근 렌더 프레임들의 요약 */
 export interface FrameStatsInfo {
   /** 요약에 쓴 프레임 수 */
   frames: number;

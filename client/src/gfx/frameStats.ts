@@ -1,5 +1,5 @@
 // 프레임 측정 (렌더링 최적화): 렌더한 프레임의 간격 · 작업 시간 · 그리기 호출을 고정 크기 고리 버퍼에 모은다.
-// ?fps=1 표시 · 적응형 품질 · 디버그 훅이 읽는다. Phaser를 import하지 않는다(main.ts가 Phaser 루프에 끼운다).
+// ?debug=1 오버레이 · 적응형 품질 · 디버그 훅이 읽는다. Phaser를 import하지 않는다(main.ts가 Phaser 루프에 끼운다).
 //  - 프레임마다 부르는 begin · end · noteSkipped는 할당하지 않는다(타입 배열 고리에 쓰기만 한다)
 //  - 요약(summary · window)은 부를 때 계산한다: 표시는 4Hz, 적응형 품질은 판단할 때. 백분위는 미리 만든 작업용 배열에
 //    복사해 그 안에서 고른다(새 배열을 만들지 않는다)
@@ -312,9 +312,9 @@ export interface DrawCounter {
 type DrawFn = (a?: unknown, b?: unknown, c?: unknown, d?: unknown, e?: unknown, f?: unknown) => unknown;
 
 /**
- * WebGL 그리기 호출을 센다 (?fps=1일 때만 main.ts가 건다). 컨텍스트 *인스턴스*의 메서드를 감싸므로 다른 컨텍스트
- * (안개 GPU 시험 등)와 프로토타입은 건드리지 않는다. 감싼 함수는 고정 인자로 넘겨 호출마다 배열을 만들지 않는다
- * (WebIDL은 남는 인자를 버린다)
+ * WebGL 그리기 호출을 센다 (?debug=1 오버레이를 켰을 때만 debug.ts watchDrawCalls가 건다). 컨텍스트 *인스턴스*의
+ * 메서드를 감싸므로 다른 컨텍스트(안개 GPU 시험 등)와 프로토타입은 건드리지 않는다. 감싼 함수는 고정 인자로 넘겨 호출마다
+ * 배열을 만들지 않는다 (WebIDL은 남는 인자를 버린다)
  */
 export function installDrawCounter(
   gl: WebGLRenderingContext | WebGL2RenderingContext,

@@ -3,7 +3,8 @@
 // 배포 빌드에서도 ?debug=1만으로 뜬다(실제 휴대폰에서 잰다). 개발자용이라 한국어 이름표를 여기에 바로 쓴다.
 //  - 접기 · 펼치기: 칩(▸ 119fps 8.3ms)을 누르면 표가 열리고 닫힌다. 터치 기기는 접은 채, PC는 펼친 채 시작. 저장하지 않는다
 //  - 칩(누르는 자리 44px 높이)만 입력을 받고 표는 손가락 · 마우스가 통과한다(pointer-events: none). 칩을 누른 것은
-//    판 입력(터치 화면 · Phaser 창 리스너 · 점수판 닫기)으로 가지 않는다
+//    판 입력(터치 화면 · Phaser 창 리스너 · input.ts 창 캡처)과 바깥 누르기로 닫히는 것(점수판 · 설정 메뉴 — 문서 캡처
+//    리스너)으로 가지 않는다: 창 캡처 단계의 문지기(guard)가 가장 먼저 받아 멈춘다(installDebug는 app.start 전에 불린다)
 //  - 자리: PC는 왼쪽 아래(CSS), 터치는 anchor()가 주는 자리(debug.ts: 맵 왼쪽 위 — HUD 기둥 · 엄지 버튼과 겹치지 않는다)
 //  - 4Hz로 고친다. 바뀐 글자만 textContent 한 번씩 쓴다. 접혀 있으면 표 글자는 만들지 않는다
 // 이 파일은 Phaser · App을 import하지 않는다(단위 시험). 값은 debug.ts가 data()로 모아 준다
@@ -116,6 +117,14 @@ export interface DebugOverlayOptions {
   host?: OverlayHost;
   /** 주기 실행 (기본 window.setInterval). 멈추는 함수를 돌려준다 */
   every?: (fn: () => void, ms: number) => () => void;
+  /** 칩 누르기를 가장 먼저 받는 곳 (기본 window, 캡처 단계) */
+  win?: GuardTarget;
+}
+
+/** 문지기 리스너를 다는 곳 (window. 단위 시험은 가짜를 넘긴다) */
+export interface GuardTarget {
+  addEventListener(type: string, fn: (e: Event) => void, opts: AddEventListenerOptions): void;
+  removeEventListener(type: string, fn: (e: Event) => void, opts: AddEventListenerOptions): void;
 }
 
 export interface DebugOverlay {
@@ -139,16 +148,19 @@ function browserEvery(fn: () => void, msInterval: number): () => void {
   return () => window.clearInterval(id);
 }
 
-/** 칩에서 시작한 누르기는 판 입력 · 문서 리스너로 보내지 않는다: 기본 동작(포커스 · 호환 마우스 · 클릭 · 메뉴)도 막는다 */
-const SWALLOW = [
-  'touchstart',
-  'touchend',
-  'touchcancel',
-  'mousedown',
-  'mouseup',
-  'click',
-  'dblclick',
-  'contextmenu',
+/**
+ * 칩에서 시작하는 누르기의 이벤트: 창 캡처 단계에서 멈춰 다른 리스너가 받지 않게 하고, 기본 동작(포커스 · 호환 마우스 ·
+ * 클릭 · 메뉴)을 막는다. touchstart는 passive로 단다(창 전체의 터치 스크롤을 막는 리스너가 되지 않게) — 전파만 멈추고,
+ * 스크롤 · 확대는 칩의 touch-action: none이, 호환 마우스 · 클릭은 pointerdown의 preventDefault · click 문지기가 막는다.
+ * 끝 이벤트(pointerup · touchend · mouseup)는 건드리지 않는다: 캔버스에서 시작한 끌기가 칩 위에서 끝나도 판 · Phaser가 뗌을 받는다
+ */
+export const GUARDED_EVENTS: readonly { type: string; passive: boolean }[] = [
+  { type: 'pointerdown', passive: false },
+  { type: 'touchstart', passive: true },
+  { type: 'mousedown', passive: false },
+  { type: 'click', passive: false },
+  { type: 'dblclick', passive: false },
+  { type: 'contextmenu', passive: false },
 ];
 
 /** ?debug=1 오버레이를 붙인다 (debug.ts). 한 번만 부른다 */
@@ -204,22 +216,23 @@ export function installDebugOverlay(opts: DebugOverlayOptions): DebugOverlay {
     update();
   };
 
-  toggleEl.addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
+  /** 칩(누르는 자리) 안에서 난 이벤트인가 */
+  const inToggle = (t: EventTarget | null): boolean =>
+    t !== null && typeof (t as Node).nodeType === 'number' && toggleEl.contains(t as Node);
+  /**
+   * 문지기 (창 캡처 단계, 가장 먼저 붙는다): 칩 안의 누르기면 기본 동작을 막고 전파를 여기서 멈춘다. 그러면 문서 캡처
+   * 리스너(점수판 · 설정 메뉴 닫기, 소리 열기)부터 칩 자신 · Phaser 창 리스너까지 아무도 받지 않는다. 같은 창 캡처에 나중에
+   * 붙은 리스너(input.ts의 조작 안내 닫기 · 마우스 감지)도 stopImmediatePropagation으로 막는다. 접기 · 펼치기도 여기서 한다
+   */
+  const guard = (e: Event): void => {
+    if (!inToggle(e.target)) return;
+    if (e.cancelable && e.type !== 'touchstart') e.preventDefault();
+    e.stopImmediatePropagation();
     // 주 버튼(손가락 · 왼쪽 클릭)만
-    if (e.button !== 0) return;
-    setExpanded(!expanded);
-  });
-  for (const type of SWALLOW)
-    toggleEl.addEventListener(
-      type,
-      (e) => {
-        if (e.cancelable) e.preventDefault();
-        e.stopPropagation();
-      },
-      { passive: false },
-    );
+    if (e.type === 'pointerdown' && (e as PointerEvent).button === 0) setExpanded(!expanded);
+  };
+  const win: GuardTarget = opts.win ?? window;
+  for (const g of GUARDED_EVENTS) win.addEventListener(g.type, guard, { capture: true, passive: g.passive });
 
   host.body.appendChild(el);
   setExpanded(expanded);
@@ -236,6 +249,8 @@ export function installDebugOverlay(opts: DebugOverlayOptions): DebugOverlay {
     update,
     dispose() {
       stop();
+      for (const g of GUARDED_EVENTS)
+        win.removeEventListener(g.type, guard, { capture: true, passive: g.passive });
       el.remove();
     },
   };

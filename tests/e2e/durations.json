@@ -1,7 +1,7 @@
 {
   "adaptive-rate.spec.ts": 110,
   "bundle-size.spec.ts": 1,
-  "debug-overlay.spec.ts": 45,
+  "debug-overlay.spec.ts": 55,
   "deploy-wake.spec.ts": 75,
   "frame-limit.spec.ts": 45,
   "frame-independence.spec.ts": 120,

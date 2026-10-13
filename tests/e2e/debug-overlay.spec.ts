@@ -4,7 +4,8 @@
 //    펼친 표는 마우스가 통과한다
 //  - 휴대폰 가로 · 태블릿(helpers LANDSCAPE_DEVICES, 기기 배율 1): 접은 칩으로 시작, 칩(보이는 한 줄)은 판 HUD 부품 ·
 //    터치 대상과 겹치지 않고, 누르는 자리(44px 높이)는 터치 대상 · 늘 떠 있는 HUD와 겹치지 않는다. 탭으로 펼치고 접으며
-//    그동안 판 입력 기록(getInputLog)에 이동 · 버튼 · 조준이 생기지 않는다
+//    그동안 판 입력 기록(getInputLog)에 이동 · 버튼 · 조준이 생기지 않는다. 바깥을 누르면 닫히는 것(로비 설정 메뉴 · 판 점수판,
+//    문서 캡처 단계 리스너)은 칩을 눌러도 닫히지 않고, 칩 밖을 누르면 그대로 닫힌다
 //  - ?debug=hook(시험 훅만) · 아무것도 없으면 오버레이가 없다
 // 프레임 측정 값(FPS · 프레임 · 작업)은 main.ts가 Phaser 한 걸음마다 sessionFrameStats.begin/end를 부를 때 채워진다
 import { expect, test, type Page } from '@playwright/test';
@@ -94,6 +95,29 @@ async function startPractice(page: Page, role: 'runner' | 'monster'): Promise<vo
       timeout: 30_000,
     },
   );
+}
+
+/** 칩을 눌러 펼치거나(true) 접고(false) 그렇게 됐는지 본다 */
+async function tapChip(page: Page, expand: boolean): Promise<void> {
+  await press(page.getByTestId('debug-overlay-toggle'));
+  if (expand) await expect(page.getByTestId('debug-overlay-panel')).toBeVisible();
+  else await expect(page.getByTestId('debug-overlay-panel')).toBeHidden();
+}
+
+/** 누를 것이 없는 로비 빈 곳 (단추 · 입력칸 · 링크 · 설정 메뉴 · 디버그 오버레이 밖). 격자로 찾는다 */
+async function blankPoint(page: Page): Promise<{ x: number; y: number } | null> {
+  return page.evaluate(() => {
+    const busy =
+      'button, input, select, textarea, a, label, [role="button"], [role="dialog"], #debug-overlay';
+    for (let fy = 0.15; fy < 0.95; fy += 0.1)
+      for (let fx = 0.05; fx < 0.95; fx += 0.1) {
+        const x = Math.round(innerWidth * fx);
+        const y = Math.round(innerHeight * fy);
+        const el = document.elementFromPoint(x, y);
+        if (el && el.closest('.lobby') && !el.closest(busy)) return { x, y };
+      }
+    return null;
+  });
 }
 
 /** 펼친 표의 숫자 하나 */
@@ -227,6 +251,20 @@ for (const c of TOUCH_CASES) {
     const lobby = (await overlayState(page))!;
     expect(lobby.expanded).toBe('false');
     expect(lobby.panelHidden).toBe(true);
+    // 로비 설정 메뉴는 바깥을 누르면 닫힌다(문서 캡처 리스너): 칩을 눌러 펼치고 접어도 열린 채
+    const settings = page.getByTestId('settings-panel');
+    await press(page.getByTestId('settings-button'));
+    await expect(settings).toBeVisible();
+    await tapChip(page, true);
+    await expect(settings).toBeVisible();
+    await tapChip(page, false);
+    await expect(settings).toBeVisible();
+    // 칩 밖(아무 단추도 없는 로비 빈 곳)을 누르면 예전처럼 닫힌다. 설정 단추를 다시 누르지 않는다: 낮은 화면에서는
+    // Playwright가 단추를 화면 안으로 스크롤하고, 메뉴는 스크롤에 닫혔다가 그 탭에 다시 열린다
+    const blank = await blankPoint(page);
+    expect(blank, '로비 빈 곳').not.toBeNull();
+    await page.touchscreen.tap(blank!.x, blank!.y);
+    await expect(settings).toBeHidden();
     await startPractice(page, c.role);
     await waitForTouchTarget(page, 'move-zone');
     const vp = page.viewportSize()!;
@@ -287,6 +325,22 @@ for (const c of TOUCH_CASES) {
     expect(frames.length).toBeGreaterThan(5);
     expect(frames.every((f) => f.mode === 'touch')).toBe(true);
     expect(idle(frames)).toEqual([]);
+
+    // 점수판은 화면 어디를 눌러도 닫힌다(문서 캡처 리스너) — 칩은 예외: 펼치고 접어도 열린 채
+    const board = page.locator('[data-touch-target="scoreboard"]');
+    await press(board);
+    await expect(board).toHaveAttribute('aria-pressed', 'true');
+    await tapChip(page, true);
+    await page.waitForTimeout(200);
+    await expect(board).toHaveAttribute('aria-pressed', 'true');
+    await tapChip(page, false);
+    await page.waitForTimeout(200);
+    await expect(board).toHaveAttribute('aria-pressed', 'true');
+    // 칩 밖(맵 가운데)을 누르면 예전처럼 닫힌다 (칩만 예외다)
+    const map = await page.evaluate(() => window.__DECOY__?.getHudLayout()?.map ?? null);
+    expect(map).not.toBeNull();
+    await page.touchscreen.tap(map!.x + map!.w / 2, map!.y + map!.h / 2);
+    await expect(board).toHaveAttribute('aria-pressed', 'false');
     expect(problems).toEqual([]);
     await context.close();
   });
