@@ -1,27 +1,27 @@
 {
   "margin": 1.05,
-  "measuredAt": "임시",
+  "measuredAt": "PR #20 통합",
   "scenes": {
     "canvas-high-runner": {
       "pathMainPerFrame": 569.78,
       "paintMainPerFrame": 249.66,
       "stateMainPerFrame": 730.58,
-      "drawImagePerFrame": 236.08,
+      "drawImagePerFrame": 236.09,
       "pathOffPerFrame": 365.45,
-      "paintOffPerFrame": 14.84,
+      "paintOffPerFrame": 14.85,
       "textPerSec": 3.4,
-      "resizePerSec": 11.6,
+      "resizePerSec": 12.8,
       "readbackPerSec": 0.8
     },
     "canvas-high-monster": {
       "pathMainPerFrame": 257.35,
       "paintMainPerFrame": 165.91,
       "stateMainPerFrame": 506.41,
-      "drawImagePerFrame": 163.44,
+      "drawImagePerFrame": 163.46,
       "pathOffPerFrame": 141.86,
-      "paintOffPerFrame": 19.44,
+      "paintOffPerFrame": 19.46,
       "textPerSec": 4,
-      "resizePerSec": 12.8,
+      "resizePerSec": 16.6,
       "readbackPerSec": 0.8
     },
     "webgl-high-runner": {
@@ -32,9 +32,9 @@
       "programsPerFrame": 6,
       "framebuffersPerFrame": 3,
       "pathOffPerFrame": 447.01,
-      "paintOffPerFrame": 21.47,
+      "paintOffPerFrame": 21.48,
       "textPerSec": 3.4,
-      "resizePerSec": 11.6,
+      "resizePerSec": 12.8,
       "readbackPerSec": 0.8
     }
   }

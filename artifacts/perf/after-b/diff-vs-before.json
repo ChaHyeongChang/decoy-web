@@ -1,0 +1,166 @@
+{
+  "beforeDir": "artifacts/perf/before/high",
+  "afterDir": "artifacts/perf/after-b/high",
+  "results": [
+    {
+      "file": "lobby.png",
+      "width": 1920,
+      "height": 1080,
+      "maxChannelDiff": 144,
+      "meanChannelDiff": 0.5147672325102881,
+      "over2": 0.06629099151234567,
+      "over8": 0.028853684413580247,
+      "over32": 0.00002170138888888889
+    },
+    {
+      "file": "result.png",
+      "width": 1920,
+      "height": 1080,
+      "maxChannelDiff": 211,
+      "meanChannelDiff": 0.017741769547325103,
+      "over2": 0.001427469135802469,
+      "over8": 0.0006100501543209876,
+      "over32": 0.00008246527777777778
+    },
+    {
+      "file": "role-guard@1x.png",
+      "width": 1920,
+      "height": 1080,
+      "maxChannelDiff": 228,
+      "meanChannelDiff": 0.5544565007716049,
+      "over2": 0.021086516203703703,
+      "over8": 0.019420814043209878,
+      "over32": 0.004091435185185185
+    },
+    {
+      "file": "role-guard@2x.png",
+      "width": 2880,
+      "height": 1800,
+      "maxChannelDiff": 230,
+      "meanChannelDiff": 2.402284079218107,
+      "over2": 0.10372010030864197,
+      "over8": 0.09294521604938272,
+      "over32": 0.017926311728395063
+    },
+    {
+      "file": "role-monster@1x.png",
+      "width": 1920,
+      "height": 1080,
+      "maxChannelDiff": 1,
+      "meanChannelDiff": 0.000019450874485596707,
+      "over2": 0,
+      "over8": 0,
+      "over32": 0
+    },
+    {
+      "file": "role-monster@2x.png",
+      "width": 2880,
+      "height": 1800,
+      "maxChannelDiff": 213,
+      "meanChannelDiff": 0.011230195473251029,
+      "over2": 0.00013040123456790122,
+      "over8": 0.00012307098765432098,
+      "over32": 0.00007581018518518519
+    },
+    {
+      "file": "role-runner@1x.png",
+      "width": 1920,
+      "height": 1080,
+      "maxChannelDiff": 213,
+      "meanChannelDiff": 0.16819685570987655,
+      "over2": 0.010307195216049383,
+      "over8": 0.009971064814814815,
+      "over32": 0.0009080825617283951
+    },
+    {
+      "file": "role-runner@2x.png",
+      "width": 2880,
+      "height": 1800,
+      "maxChannelDiff": 205,
+      "meanChannelDiff": 0.0073092206790123454,
+      "over2": 0.00011168981481481482,
+      "over8": 0.00007484567901234568,
+      "over32": 0.00007253086419753086
+    },
+    {
+      "file": "role-scout@1x.png",
+      "width": 1920,
+      "height": 1080,
+      "maxChannelDiff": 63,
+      "meanChannelDiff": 0.07716483410493827,
+      "over2": 0.00978587962962963,
+      "over8": 0.006698013117283951,
+      "over32": 0.00010127314814814815
+    },
+    {
+      "file": "role-scout@2x.png",
+      "width": 2880,
+      "height": 1800,
+      "maxChannelDiff": 230,
+      "meanChannelDiff": 0.5150212191358025,
+      "over2": 0.01910493827160494,
+      "over8": 0.01740162037037037,
+      "over32": 0.0037544367283950616
+    },
+    {
+      "file": "runner-1366x768.png",
+      "width": 1366,
+      "height": 768,
+      "maxChannelDiff": 214,
+      "meanChannelDiff": 0.05364468948267447,
+      "over2": 0.0005309373474865788,
+      "over8": 0.0005109199609565642,
+      "over32": 0.0004422889214250854
+    },
+    {
+      "file": "tab-runner.png",
+      "width": 1920,
+      "height": 1080,
+      "maxChannelDiff": 202,
+      "meanChannelDiff": 0.0017878729423868314,
+      "over2": 0.00005738811728395062,
+      "over8": 0.00004967206790123457,
+      "over32": 0.00000771604938271605
+    },
+    {
+      "file": "zoom-pointA-monster.png",
+      "width": 1440,
+      "height": 810,
+      "maxChannelDiff": 29,
+      "meanChannelDiff": 0.02665895061728395,
+      "over2": 0.0016126543209876542,
+      "over8": 0.0014969135802469136,
+      "over32": 0
+    },
+    {
+      "file": "zoom-pointA-runner.png",
+      "width": 1440,
+      "height": 810,
+      "maxChannelDiff": 81,
+      "meanChannelDiff": 0.08140946502057614,
+      "over2": 0.003070987654320988,
+      "over8": 0.0016358024691358025,
+      "over32": 0.001558641975308642
+    },
+    {
+      "file": "zoom-prison-monster.png",
+      "width": 1440,
+      "height": 810,
+      "maxChannelDiff": 0,
+      "meanChannelDiff": 0,
+      "over2": 0,
+      "over8": 0,
+      "over32": 0
+    },
+    {
+      "file": "zoom-prison-runner.png",
+      "width": 1440,
+      "height": 810,
+      "maxChannelDiff": 1,
+      "meanChannelDiff": 0.007528292181069959,
+      "over2": 0,
+      "over8": 0,
+      "over32": 0
+    }
+  ]
+}
