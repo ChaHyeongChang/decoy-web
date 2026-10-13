@@ -32,6 +32,7 @@
     "shots:diff": "node scripts/perf-shots-diff.mjs",
     "shots:store": "npm run build && playwright test --config tests/store/playwright.config.ts",
     "perf:frame": "npm run build && playwright test --config tests/perf/playwright.config.ts",
+    "perf:table": "node scripts/perf-table.mjs",
     "typecheck": "tsc -p shared && tsc -p server && tsc -p client && tsc -p tests",
     "lint": "eslint .",
     "format": "prettier --write .",
