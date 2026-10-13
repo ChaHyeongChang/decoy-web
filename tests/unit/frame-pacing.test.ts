@@ -242,46 +242,56 @@ describe('화면 주사율 재기 (RefreshEstimator)', () => {
     const a = ticks(120, 2000, { t0: 0, jitter: 0.3 });
     for (const t of a) e.tick(t);
     expect(e.hz).toBe(120);
-    // 60Hz로 바뀐다: 고리(120개)의 절반이 넘게 바뀌어야(약 1초) 중앙값이 움직이고, 그 뒤 한 번 더 같아야 바꾼다
+    // 60Hz로 바뀐다: 짧은 쪽 20% 백분위라 고리(120개)의 80%(96개, 약 1.6초)가 바뀌어야 움직이고, 그 뒤 한 번 더 같아야 바꾼다
     const start = a[a.length - 1]! + 1000 / 60;
+    const fill = (Math.ceil(REFRESH.samples * (1 - REFRESH.percentile)) * 1000) / 60;
     let switchedAt: number | null = null;
     for (const t of ticks(60, 4000, { t0: start, jitter: 0.3 })) {
       e.tick(t);
       if (switchedAt === null && e.hz === 60) switchedAt = t - start;
     }
     expect(switchedAt).not.toBeNull();
-    expect(switchedAt!).toBeGreaterThanOrEqual(1000 + REFRESH.recomputeMs - 20);
-    expect(switchedAt!).toBeLessThanOrEqual(1000 + 2 * REFRESH.recomputeMs + 20);
+    expect(switchedAt!).toBeGreaterThanOrEqual(fill - 20);
+    expect(switchedAt!).toBeLessThanOrEqual(fill + 2 * REFRESH.recomputeMs + 20);
     expect(e.hz).toBe(60);
   });
 
-  it('흔들림 막기: 한 번만 다르게 나온 값으로는 바꾸지 않는다 (240Hz 화면에 잠깐 144Hz 간격)', () => {
-    // 240Hz면 0.5초(120 간격)에 고리 전체가 바뀌어, 다시 낼 때마다 그 0.5초만 본다
+  it('흔들림 막기: 한 번만 다르게 나온 값으로는 바꾸지 않는다 (120Hz 화면에 60 간격이 한 번 잴 만큼만)', () => {
     const e = new RefreshEstimator();
+    const pendingOf = (): number | null => (e as unknown as { pending: number | null }).pending;
     let t = 0;
     const seen = new Set<number>();
-    /** 다시 낸 값 중 아직 쓰지 않은 것 (흔들림 막기가 실제로 막았는지) */
-    const pending = new Set<number | null>();
-    const run = (hz: number, ms: number): void => {
-      const end = t + ms;
-      while (t < end) {
-        t += 1000 / hz;
-        e.tick(t);
-        seen.add(e.hz);
-        pending.add((e as unknown as { pending: number | null }).pending);
-      }
+    const step = (hz: number): void => {
+      t += 1000 / hz;
+      e.tick(t);
+      seen.add(e.hz);
     };
-    run(240, 2000);
-    expect(e.hz).toBe(240);
+    while (t < 2000) step(120);
+    expect(e.hz).toBe(120);
     seen.clear();
-    // 다시 내는 한 번 사이(0.5초)만 144Hz → 그다음은 240Hz
-    run(144, REFRESH.recomputeMs);
-    run(240, 2000);
-    expect([...seen]).toEqual([240]);
-    expect(pending.has(144), '144를 한 번 쟀지만 쓰지 않았다').toBe(true);
-    // 144Hz가 이어지면 바뀐다
-    run(144, 2000);
-    expect(e.hz).toBe(144);
+    // 60 간격을 처음으로 60이라고 잴(아직 쓰지 않음) 때까지만 — 고리의 80%가 바뀌어야 하므로 약 1.6초 뒤
+    let guard = 0;
+    while (pendingOf() !== 60 && guard++ < 1000) step(60);
+    expect(pendingOf(), '60을 한 번 쟀지만 쓰지 않았다').toBe(60);
+    // 다시 120: 다음에 다시 낼 때 120이라 60으로 바꾸지 않는다
+    const back = t + 2000;
+    while (t < back) step(120);
+    expect([...seen]).toEqual([120]);
+    expect(pendingOf()).toBeNull();
+    // 60이 이어지면 바뀐다
+    const more = t + 3000;
+    while (t < more) step(60);
+    expect(e.hz).toBe(60);
+  });
+
+  it('바쁜 기기: 120Hz 화면에서 프레임 70%가 vsync를 놓쳐(16.7ms) 간격이 늘어도 120Hz로 잰다 (중앙값이면 60)', () => {
+    const e = new RefreshEstimator();
+    let t = 0;
+    for (let i = 0; i < 600; i++) {
+      t += i % 10 < 7 ? 1000 / 60 : 1000 / 120;
+      e.tick(t);
+    }
+    expect(e.hz).toBe(120);
   });
 
   it('메모리: 간격 고리는 고정 크기 Float64Array 하나를 계속 쓴다 (tick마다 새로 잡지 않는다)', () => {
@@ -473,6 +483,28 @@ describe('목표 FPS (targetHzFor) · 제한기 제한 (capHzFor)', () => {
 describe('Pacer (주사율 재기 + 제한기 + 판 없음 30fps)', () => {
   /** pacer에 rAF 시각들을 넣고 그린 수 */
   const feed = (p: Pacer, ts: readonly number[]): number => ts.filter((t) => p.onTick(t)).length;
+
+  it('판 중에는 화면 주사율을 낮추지 않는다: 판 시작 때 120이면 rAF가 60 간격으로 밀려도 120 · 60 제한은 그대로, 판 밖에서 다시 잰다', () => {
+    const p = new Pacer('60');
+    feed(p, ticks(120, 1500, { t0: 0, jitter: 0.3 }));
+    p.setIdle(false);
+    expect([p.displayHz, p.capHz]).toEqual([120, 60]);
+    // 판 중: 모든 rAF가 16.7ms 간격(게임이 바빠 vsync를 놓침) — 재는 값은 60으로 내려가도 붙잡은 120을 쓴다
+    feed(p, ticks(60, 4000, { t0: 1500, jitter: 0.3 }));
+    expect(p.estimator.hz).toBe(60);
+    expect([p.displayHz, p.targetHz, p.capHz]).toEqual([120, 60, 60]);
+    // 판 밖으로 나가면 잰 값을 그대로 쓴다
+    p.setIdle(true);
+    expect(p.displayHz).toBe(60);
+  });
+
+  it('판 중에도 더 높게 재면 올린다 (부팅 직후 60으로 시작한 판에서 120Hz를 재면 120)', () => {
+    const p = new Pacer();
+    p.setIdle(false);
+    expect(p.displayHz).toBe(60);
+    feed(p, ticks(120, 1500, { t0: 0, jitter: 0.3 }));
+    expect([p.displayHz, p.targetHz]).toEqual([120, 120]);
+  });
 
   it('자동: 120Hz 화면을 재면 목표 120 · 제한 없음 · 모든 rAF', () => {
     const p = new Pacer();

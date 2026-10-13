@@ -57,8 +57,13 @@ export const REFRESH = {
   samples: 120,
   /** 이만큼 모이기 전에는 floorHz로 본다 */
   minSamples: 30,
-  /** 중앙값을 다시 내는 최소 간격 (ms) */
+  /** 다시 내는 최소 간격 (ms) */
   recomputeMs: 500,
+  /**
+   * 간격의 이 백분위로 잰다 (0.2 = 짧은 쪽 20%). 놓친 vsync는 간격을 늘리기만 하므로(바쁜 프레임은 다음 vsync로 밀린다)
+   * 중앙값이면 120을 못 버티는 기기에서 화면을 60Hz로 잘못 잰다 — 짧은 쪽은 가벼운 프레임 · 건너뛴 rAF의 실제 화면 주기다
+   */
+  percentile: 0.2,
   /** 이보다 긴 간격(숨김 · 멈춤 · 긴 작업)은 세지 않는다 (ms) */
   maxIntervalMs: 100,
   /** 흔한 주사율에 맞추는 허용 비율 (±7%) */
@@ -89,9 +94,9 @@ export function snapRefreshHz(rawHz: number): number {
 }
 
 /**
- * 화면 주사율 재기: rAF마다(그렸든 건너뛰었든) tick(t). 최근 120개 간격(0 이하 · 100ms 초과는 버림)의 중앙값으로
+ * 화면 주사율 재기: rAF마다(그렸든 건너뛰었든) tick(t). 최근 120개 간격(0 이하 · 100ms 초과는 버림)의 짧은 쪽 20% 백분위로
  * 0.5초에 한 번까지만 다시 낸다. 30개가 모이기 전에는 60. 처음 잰 값은 바로 쓰고, 그 뒤 바뀐 값은 두 번 잇달아 같게
- * 나와야 바꾼다(흔들림 막기). 중앙값이라 가끔 놓친 프레임 · 긴 프레임에 끌려가지 않는다
+ * 나와야 바꾼다(흔들림 막기). 짧은 쪽 백분위라 놓친 vsync · 긴 프레임(간격을 늘리기만 한다)에 끌려가지 않는다
  */
 export class RefreshEstimator {
   private readonly ring = new Float64Array(REFRESH.samples);
@@ -144,9 +149,8 @@ export class RefreshEstimator {
     // 빈 칸은 맨 뒤로 가게 (정렬 뒤 [0, n)만 본다) — subarray를 만들지 않으려고
     if (n < REFRESH.samples) s.fill(Infinity, n);
     s.sort();
-    const mid = n >> 1;
-    const median = n % 2 === 1 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2;
-    this.raw = 1000 / median;
+    const low = s[Math.min(n - 1, Math.floor(n * REFRESH.percentile))]!;
+    this.raw = 1000 / low;
     const next = snapRefreshHz(this.raw);
     if (!this.measured) {
       this.measured = true;
@@ -265,6 +269,8 @@ export class Pacer {
   private current: FrameLimit;
   private fallback: number | null = null;
   private idleOn = false;
+  /** 판 중 붙잡은 화면 주사율 (판 중에는 낮아지지 않는다, 판 밖이면 null) */
+  private heldHz: number | null = null;
 
   constructor(limit: FrameLimit = 'auto') {
     this.current = limit;
@@ -296,10 +302,16 @@ export class Pacer {
   /** 판이 없으면 true: 그리기를 IDLE_CAP_HZ로 묶는다(제한 설정과 상관없이). false면 제한 설정대로 */
   setIdle(idle: boolean): void {
     this.idleOn = idle;
+    this.heldHz = idle ? null : this.estimator.hz;
   }
 
+  /**
+   * 화면 주사율. 판 중에는 판 시작(또는 그 뒤 더 높게 잰) 값을 붙잡고 낮추지 않는다: 판 중 rAF는 게임 작업에 밀려 간격이 늘 수 있고
+   * (120을 못 버티는 기기), 그것을 화면이 느려진 것으로 보면 자동 제한의 목표 낮추기 · 60 제한이 꺼진다. 화면이 정말 느려졌으면
+   * (절전) 목표를 못 버텨 적응형 품질이 목표를 낮춘다. 판 밖(가벼운 30fps)에서는 잰 값을 그대로 쓴다
+   */
   get displayHz(): number {
-    return this.estimator.hz;
+    return this.heldHz ?? this.estimator.hz;
   }
 
   /**
@@ -307,12 +319,12 @@ export class Pacer {
    * 돌지 않고, 판이 시작하면 바로 이 값으로 그린다
    */
   get targetHz(): number {
-    return targetHzFor(this.current, this.estimator.hz, this.fallback);
+    return targetHzFor(this.current, this.displayHz, this.fallback);
   }
 
   /** 지금 제한기 제한 (Hz, 없으면 null). 판이 없으면 IDLE_CAP_HZ */
   get capHz(): number | null {
-    return this.idleOn ? IDLE_CAP_HZ : capHzFor(this.current, this.estimator.hz, this.fallback);
+    return this.idleOn ? IDLE_CAP_HZ : capHzFor(this.current, this.displayHz, this.fallback);
   }
 
   /** 제한 때문에 건너뛴 rAF 수 (누계) */
@@ -324,8 +336,9 @@ export class Pacer {
   onTick(t: number): boolean {
     // 주사율 재기는 건너뛸 tick도 본다 (제한 · 판 없음과 상관없이 실제 화면 주사율)
     this.estimator.tick(t);
+    if (this.heldHz !== null && this.estimator.hz > this.heldHz) this.heldHz = this.estimator.hz;
     this.limiter.setCap(this.capHz);
-    const run = this.limiter.shouldRun(t, this.estimator.hz);
+    const run = this.limiter.shouldRun(t, this.displayHz);
     if (!run) this.onSkip?.(t);
     return run;
   }

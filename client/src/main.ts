@@ -121,6 +121,8 @@ function startTargetHz(): number {
 }
 /** 마지막으로 품질을 정할 때의 시작 목표 FPS (터치 기기 측정 기억을 맞춰 볼 기준) */
 let decidedAtHz = 60;
+/** 이번 판의 시작 목표 FPS (판 장면을 만들 때 잡는다). 측정 기억은 이 값으로 남긴다 — 판 중 잰 값이 아니라 */
+let matchStartHz = 60;
 
 /**
  * 판 시작 직전: 이번 판의 측정 모드로 바꾼다. 터치 기기에서 모드가 바뀌면 그 모드의 기억으로 품질을 다시 정한다
@@ -483,6 +485,7 @@ qualityHooks.auto = (a) => {
       }
       break;
     case 'upRevert':
+      gfxState.downgrades += 1;
       if (a.step === 'rate') pacer.setFallback(a.to);
       else if (gfxState.quality === a.from) {
         setQuality({ tier: a.to, source: gfxState.qualitySource });
@@ -496,13 +499,7 @@ qualityHooks.auto = (a) => {
   syncPacing();
   // 터치 기기 · 자동: 효과를 확인한 하향(과 확인을 통과한 올림)은 다음 접속에도 그 단계로 시작한다 (같은 모드 · 같은 기기 자동 단계 ·
   // 같은 시작 목표 FPS일 때만)
-  const remember = perfToRemember(
-    a,
-    touch,
-    gfxState.qualitySource,
-    autoQuality(qualityEnv()),
-    startTargetHz(),
-  );
+  const remember = perfToRemember(a, touch, gfxState.qualitySource, autoQuality(qualityEnv()), matchStartHz);
   if (remember && rememberPerf(remember.mode, remember.rec)) gfxState.features.perfSaved = remember.rec.tier;
   syncAutoStatus();
 };
@@ -635,6 +632,7 @@ app.subscribe((e) => {
       // 지난 판에서 여유를 확인한 품질 올리기는 여기서(판 장면을 만들기 전) 한다
       const mode: PerfMode = app.practicing ? 'practice' : 'online';
       let changed = enterPerfMode(mode);
+      matchStartHz = startTargetHz();
       const up = sessionAutoDowngrade.takePendingUpgrade(mode, gfxState.quality);
       if (up) {
         qualityHooks.auto?.(up);
