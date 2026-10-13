@@ -260,6 +260,50 @@ describe('처리방침 문서', () => {
     }
   });
 
+  // 수정 검토: 대기 · 결과 화면의 나가기는 그 자리를 바로 지우고, 사람이 남지 않은 방은 방째 바로 지운다(RoomManager.dropIfAbandoned).
+  // 문서가 '모두 나가면 60초가 지난 뒤'만 적어 가장 흔한 경로와 달랐다. 코드와 문서 한쪽만 바뀌어도 실패한다
+  it('서버 보관 사실이 코드와 같다: 대기 · 결과 화면에서 나가면 그 자리 · 빈 방을 바로 지운다', async () => {
+    const { ServerCore } = await import('@decoy/shared/sim');
+    const { FakeConn } = await import('../helpers/fakeConn');
+    const { loadTestBalance } = await import('../helpers/fixtures');
+    const core = new ServerCore({ balance: loadTestBalance(), seed: 3, testHooks: false }, {}, () => 1000);
+    const join = (name: string, room: string | null) =>
+      JSON.stringify({
+        t: 'join',
+        room,
+        create: room === null,
+        name,
+        token: null,
+        altTokens: [],
+        bots: false,
+      });
+    const a = new FakeConn();
+    const b = new FakeConn();
+    const la = core.connect(a, (err) => {
+      throw err;
+    });
+    const lb = core.connect(b, (err) => {
+      throw err;
+    });
+    la.receive(join('가', null));
+    const code = a.last('welcome')?.room ?? '';
+    lb.receive(join('나', code));
+    const room = core.manager.rooms.get(code);
+    expect(room?.seats.map((x) => x.name)).toEqual(['가', '나']);
+    // 시계를 움직이지 않는다: 60초를 기다리지 않고 바로
+    lb.receive(JSON.stringify({ t: 'leave' }));
+    expect(room?.seats.map((x) => x.name)).toEqual(['가']);
+    la.receive(JSON.stringify({ t: 'leave' }));
+    expect(core.manager.rooms.size).toBe(0);
+    for (const [name, doc] of [
+      ['처리방침', plain(PRIVACY)],
+      ['STORE_LISTING', LISTING],
+    ] as const) {
+      expect(doc, name).toMatch(/결과 화면에서 나가면[^.|]*닉네임은 바로 지우고/);
+      expect(doc, name).toContain('방째');
+    }
+  });
+
   it('보내는 시점이 사실과 같다: 앱을 인터넷에 연결된 상태로 열면 첫 화면 연결(지연 측정값 · IP 주소), 나머지는 온라인 대전에서만', () => {
     expect(PRIVACY).not.toMatch(/온라인 대전을 할 때만/);
     expect(PRIVACY).not.toMatch(/온라인 대전을 하지 않으면 이전되지 않습니다/);
