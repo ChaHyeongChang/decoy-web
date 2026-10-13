@@ -493,6 +493,12 @@ class LogPen implements FogPen {
   fillPoly(poly: readonly Vec2[], color: number, alpha: number): void {
     this.calls.push(['fillPoly', poly.map((p) => [p.x, p.y]), color, alpha]);
   }
+  // 평평한 꼭짓점도 fillPoly와 같은 기록 (같은 그림이어야 한다)
+  fillPolyFlat(xy: readonly number[], start: number, n: number, color: number, alpha: number): void {
+    const pts: number[][] = [];
+    for (let i = 0; i < n; i += 1) pts.push([xy[start + i * 2] ?? NaN, xy[start + i * 2 + 1] ?? NaN]);
+    this.calls.push(['fillPoly', pts, color, alpha]);
+  }
   line(...a: number[]): void {
     this.calls.push(['line', ...a]);
   }
@@ -519,6 +525,9 @@ class BoundsPen implements FogPen {
   }
   fillPoly(poly: readonly Vec2[]): void {
     for (const p of poly) this.grow(p.x, p.y, 0);
+  }
+  fillPolyFlat(xy: readonly number[], start: number, n: number): void {
+    for (let i = 0; i < n; i += 1) this.grow(xy[start + i * 2] ?? NaN, xy[start + i * 2 + 1] ?? NaN, 0);
   }
   line(x0: number, y0: number, x1: number, y1: number, w: number): void {
     this.grow(x0, y0, w / 2 / LOGICAL_K);

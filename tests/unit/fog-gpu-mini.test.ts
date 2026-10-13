@@ -4,6 +4,8 @@
 // 캔버스를 가짜로 바꿔, 캔버스마다 받은 그리기 호출(그때의 합성 방식 포함)을 기록해 본다.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TILE_PX, type Vec2 } from '@decoy/shared';
+import { gfxState } from '../../client/src/gfx/state';
+import { loadTestBalance } from '../helpers/fixtures';
 
 interface Call {
   fn: string;
@@ -219,5 +221,105 @@ describe('GPU 안개 미니맵 합성 (읽을 때만)', () => {
     cycle(tri(40, 20), false);
     expect(fog.miniSource).toBeDefined();
     expect(firstMove(lastComposite())).toEqual([10 * LPT, 10 * LPT]);
+  });
+});
+
+describe('GPU 안개 조각 · 시야 채움: 바뀔 때만 다시 그려 올린다 (렌더링 최적화 2: 복사 · 꼭짓점 재생 없이)', () => {
+  const uploads = (): number => Number(gfxState.features.fogDynUploads ?? 0);
+
+  it('시야 채움: 받은 다각형을 그대로 그리고, 같은 값이면(참조가 달라도) 다시 올리지 않는다. 넘긴 배열을 나중에 고쳐도 비교가 틀리지 않는다', async () => {
+    const { cycle } = await makeFog();
+    const tint = (): FakeCanvas | undefined =>
+      (h.canvases as FakeCanvas[]).find((c) => c.width === 64 && c.calls.some((k) => k.fn === 'moveTo'));
+    const first = tri(9, 10);
+    cycle(first);
+    const u0 = uploads();
+    const t = tint();
+    expect(t).toBeDefined();
+    // 그린 경로 = 다각형 × 타일당 px (외접 사각형 원점 −1px로 옮긴 변환 위)
+    const calls = t?.calls ?? [];
+    const moves = calls.filter((c) => c.fn === 'moveTo' || c.fn === 'lineTo').map((c) => c.args);
+    expect(moves).toEqual(first.map((p) => [p.x * LPT, p.y * LPT]));
+    expect(calls.filter((c) => c.fn === 'setTransform').at(-1)?.args).toEqual([
+      1,
+      0,
+      0,
+      1,
+      -(9 * LPT - 1),
+      -(10 * LPT - 1),
+    ]);
+    // 같은 값의 새 배열: 다시 그리지 않는다
+    cycle(tri(9, 10));
+    expect(uploads()).toBe(u0);
+    // 넘긴 배열을 commit 뒤에 고쳐도, 다음 주기의 같은 값은 같은 그림으로 본다
+    first[0] = { x: 30, y: 30 };
+    cycle(tri(9, 10));
+    expect(uploads()).toBe(u0);
+    // 꼭짓점이 바뀌면 다시 올린다
+    cycle(tri(9.5, 10));
+    expect(uploads()).toBe(u0 + 1);
+  });
+
+  it('조각: 같은 그림이면 올리지 않고, 바뀌면 올린다 (기록 두 장을 맞바꿔도 X → Y → Y → X → X 순서가 맞다)', async () => {
+    const { fog } = await makeFog();
+    const bal = loadTestBalance();
+    const step = (progress: number): void => {
+      fog.begin();
+      fog.drawPoints([{ id: 'A', state: 'idle', progress }], bal);
+      fog.drawExits([{ id: 'N', state: 'inactive', progress: null }], bal);
+      fog.commit();
+    };
+    step(0.2);
+    const u0 = uploads();
+    const seq: [number, number][] = [
+      [0.2, 0],
+      [0.5, 1],
+      [0.5, 0],
+      [0.2, 1],
+      [0.2, 0],
+      [0.2, 0],
+      [0.9, 1],
+      [0.2, 1],
+    ];
+    let want = u0;
+    for (const [p, d] of seq) {
+      step(p);
+      want += d;
+      expect(uploads()).toBe(want);
+    }
+    // 모두 같은 주기에는 화면 · 미니맵도 그대로
+    step(0.2);
+    expect(fog.changed).toBe(false);
+  });
+
+  it('Canvas 한 장 합성(CanvasFog)도 기록 두 장을 맞바꿔 견준다: 바뀐 주기에만 합성한다 (X → Y → Y → X → X)', async () => {
+    await makeFog();
+    const { CanvasFog } = await import('../../client/src/render/baseLayer');
+    const scene = chain({ make: chain(), textures: chain(), game: { renderer: {} } });
+    const fog = new CanvasFog(scene as never, chain({ list: [] }) as never, {
+      fog: true,
+      compositeScale: 1,
+      lightPxPerTile: LPT,
+      zoom: 1,
+      ambientCss: '#101010',
+      shader: false,
+    });
+    const bal = loadTestBalance();
+    const step = (progress: number, poly: Vec2[]): boolean => {
+      fog.begin();
+      fog.drawPoints([{ id: 'B', state: 'idle', progress }], bal);
+      fog.fillPoly(poly, 0x00ff00, 0.12);
+      fog.addHardLight(poly);
+      fog.commit();
+      return fog.changed;
+    };
+    expect(step(0.3, tri(5, 5))).toBe(true);
+    expect(step(0.3, tri(5, 5))).toBe(false);
+    expect(step(0.7, tri(5, 5))).toBe(true);
+    expect(step(0.7, tri(5, 5))).toBe(false);
+    expect(step(0.3, tri(5, 5))).toBe(true);
+    expect(step(0.3, tri(5, 5))).toBe(false);
+    expect(step(0.3, tri(6, 5))).toBe(true);
+    expect(step(0.3, tri(6, 5))).toBe(false);
   });
 });

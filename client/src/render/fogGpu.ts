@@ -18,7 +18,17 @@
 // → 빛 지도(MULTIPLY) → 테두리 리프트(ADD, 정적 아틀라스 + 블리터). 발광은 곱하기 앞이라 어둠 속 약 30%,
 // 테두리 리프트는 곱하기 뒤라 시야 밖에서도 구조가 보인다.
 import Phaser from 'phaser';
-import { MAP_H, MAP_W, TILE_PX, type Balance, type ExitView, type PointView, type Vec2 } from '@decoy/shared';
+import {
+  MAP_H,
+  MAP_W,
+  TILE_PX,
+  type Balance,
+  type ExitId,
+  type ExitView,
+  type PointId,
+  type PointView,
+  type Vec2,
+} from '@decoy/shared';
 import { getGlowMap, getStaticMap, GLOW_SCALE, keepStaticMaps } from '../art/mapArt';
 import type { TileRect } from '../art/mapArtGeom';
 import { currentPreset, gfxNow, gfxState } from '../gfx/state';
@@ -131,13 +141,19 @@ class CanvasLayer {
   }
 }
 
-/** 공개 동적 레이어 한 조각 (거점 · 탈출구 하나, 합성 배율 · 정적 맵 텍셀 경계). 그린 명령이 바뀔 때만 다시 그려 올린다 */
+/**
+ * 공개 동적 레이어 한 조각 (거점 · 탈출구 하나, 합성 배율 · 정적 맵 텍셀 경계). 그린 명령이 바뀔 때만 다시 그려 올린다.
+ * 기록은 두 장을 맞바꿔 쓴다(이번 주기 rec · 마지막으로 그린 last): 주기마다 기록을 복사하지 않는다 (렌더링 최적화 2)
+ */
 class DynPatch {
   private readonly layer: CanvasLayer;
   private readonly pen: CanvasPen;
   private readonly x0: number;
   private readonly y0: number;
-  private last: number[] = [];
+  /** 이번 주기에 기록할 곳 */
+  rec = new PenRecord();
+  /** 마지막으로 그린 기록 (null = 아직 그리지 않음) */
+  private last: PenRecord | null = null;
 
   constructor(
     scene: Phaser.Scene,
@@ -158,13 +174,17 @@ class DynPatch {
     this.pen = new CanvasPen(this.layer.ctx, k, s);
   }
 
-  update(rec: PenRecord): void {
-    if (rec.sameAs(this.last)) return;
+  /** 이번 기록이 마지막으로 그린 것과 다르면 다시 그려 올린다 (기록은 맞바꾼다: 다음 주기에 rec을 다시 비워 쓴다) */
+  update(): void {
+    const rec = this.rec;
+    const last = this.last;
+    if (last && rec.sameAs(last.ops)) return;
     this.layer.clear();
     this.layer.ctx.setTransform(1, 0, 0, 1, -this.x0, -this.y0);
     rec.replay(this.pen);
     this.layer.upload();
-    this.last = rec.ops.slice();
+    this.last = rec;
+    this.rec = last ?? new PenRecord();
   }
 
   destroy(): void {
@@ -172,16 +192,30 @@ class DynPatch {
   }
 }
 
+/** 시야 채움 다각형이 없을 때 */
+const NO_POLY: readonly Vec2[] = [];
+
 /**
  * 시야 채움 한 장 (fillPoly 하나: 생존자 시야 원 · 괴물 부채꼴 · 근접 원). 빛 지도와 같은 격자(타일당 lpt px)에 그 다각형의
  * 외접 사각형만큼만 그린다: 맵 전체 크기 투명 사각형을 매 프레임 섞으면 채우기 비용(소프트웨어 래스터 · 모바일 GPU)이 크다.
- * 캔버스는 커지기만 하고(다시 만들지 않게), 기록이 지난번과 다를 때만 다시 그려 올린다
+ * 캔버스는 커지기만 하고(다시 만들지 않게), 그릴 것이 지난번과 다를 때만 다시 그려 올린다.
+ * 다각형은 받은 것을 그대로 그린다(기록을 꼭짓점 객체로 되살리지 않는다). 지난번과 견주는 수(색 · 알파 · 꼭짓점)는
+ * 한 배열에 고쳐 써 둔다 — 다각형 참조를 붙잡지 않으므로 그 뒤에 다각형이 바뀌어도 비교가 틀리지 않는다 (렌더링 최적화 2)
  */
 class TintPatch {
-  readonly rec = new PenRecord();
   private readonly layer: CanvasLayer;
   private readonly pen: CanvasPen;
-  private last: number[] = [];
+  /** 이번 주기에 그릴 것 */
+  private poly: readonly Vec2[] = NO_POLY;
+  private color = 0;
+  private alpha = 0;
+  /** 이번 주기 다각형의 외접 사각형 (타일) */
+  private bx0 = 0;
+  private by0 = 0;
+  private bx1 = 0;
+  private by1 = 0;
+  /** 마지막으로 그린 것: [색, 알파, 꼭짓점 수, x0, y0, x1, y1, …] (비었으면 아직 없음) */
+  private readonly last: number[] = [];
 
   constructor(
     scene: Phaser.Scene,
@@ -194,40 +228,83 @@ class TintPatch {
     this.pen = new CanvasPen(this.layer.ctx, lpt, lpt / (TILE_PX * MAP_SCALE));
   }
 
-  /** 기록(다각형 하나)을 그 외접 사각형(빛 지도 격자, 테 1px)에 그린다 */
-  update(b: TileRect): void {
+  /** 이번 주기에 그릴 다각형 (꼭짓점 3개 이상) */
+  set(poly: readonly Vec2[], color: number, alpha: number): void {
+    this.poly = poly;
+    this.color = color;
+    this.alpha = alpha;
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
+    for (const p of poly) {
+      x0 = Math.min(x0, p.x);
+      y0 = Math.min(y0, p.y);
+      x1 = Math.max(x1, p.x);
+      y1 = Math.max(y1, p.y);
+    }
+    this.bx0 = x0;
+    this.by0 = y0;
+    this.bx1 = x1;
+    this.by1 = y1;
+  }
+
+  /** 마지막으로 그린 것과 같은 그림인가 */
+  private same(): boolean {
+    const l = this.last;
+    const poly = this.poly;
+    if (l.length !== 3 + poly.length * 2 || l[0] !== this.color || l[1] !== this.alpha) return false;
+    for (let i = 0; i < poly.length; i += 1) {
+      const p = poly[i];
+      if (!p || l[3 + i * 2] !== p.x || l[4 + i * 2] !== p.y) return false;
+    }
+    return true;
+  }
+
+  /** 다각형을 그 외접 사각형(빛 지도 격자, 테 1px)에 그린다 */
+  update(): void {
     const img = this.layer.image;
     img.setVisible(true);
-    if (this.rec.sameAs(this.last)) return;
+    if (this.same()) return;
     const k = this.lpt;
-    const x0 = Math.floor(b.x0 * k) - 1;
-    const y0 = Math.floor(b.y0 * k) - 1;
-    const w = Math.ceil(b.x1 * k) + 1 - x0;
-    const h = Math.ceil(b.y1 * k) + 1 - y0;
+    const x0 = Math.floor(this.bx0 * k) - 1;
+    const y0 = Math.floor(this.by0 * k) - 1;
+    const w = Math.ceil(this.bx1 * k) + 1 - x0;
+    const h = Math.ceil(this.by1 * k) + 1 - y0;
     const c = this.layer.canvas;
     if (w > c.width || h > c.height) {
-      const up = (v: number): number => Math.ceil(v / 64) * 64;
       resizeCanvasTexture(
         this.layer.key,
         this.layer.texture,
         c,
-        up(Math.max(w, c.width)),
-        up(Math.max(h, c.height)),
+        Math.ceil(Math.max(w, c.width) / 64) * 64,
+        Math.ceil(Math.max(h, c.height) / 64) * 64,
       );
       img.setSizeToFrame();
     }
     this.layer.clear();
     this.layer.ctx.setTransform(1, 0, 0, 1, -x0, -y0);
-    this.rec.replay(this.pen);
+    this.pen.fillPoly(this.poly, this.color, this.alpha);
     this.layer.upload();
     const s = (TILE_PX * MAP_SCALE) / k;
     img.setPosition(MAP_X + x0 * s, MAP_Y + y0 * s);
-    this.last = this.rec.ops.slice();
+    const l = this.last;
+    const poly = this.poly;
+    l.length = 3 + poly.length * 2;
+    l[0] = this.color;
+    l[1] = this.alpha;
+    l[2] = poly.length;
+    for (let i = 0; i < poly.length; i += 1) {
+      const p = poly[i];
+      l[3 + i * 2] = p ? p.x : NaN;
+      l[4 + i * 2] = p ? p.y : NaN;
+    }
   }
 
   hide(): void {
     this.layer.image.setVisible(false);
-    this.last = [];
+    this.last.length = 0;
+    this.poly = NO_POLY;
   }
 
   destroy(): void {
@@ -235,23 +312,17 @@ class TintPatch {
   }
 }
 
-function polyBounds(poly: readonly Vec2[]): TileRect {
-  let x0 = Infinity;
-  let y0 = Infinity;
-  let x1 = -Infinity;
-  let y1 = -Infinity;
-  for (const p of poly) {
-    x0 = Math.min(x0, p.x);
-    y0 = Math.min(y0, p.y);
-    x1 = Math.max(x1, p.x);
-    y1 = Math.max(y1, p.y);
-  }
-  return { x0, y0, x1, y1 };
+function sameRect(a: TileRect, b: TileRect): boolean {
+  return a === b || (a.x0 === b.x0 && a.y0 === b.y0 && a.x1 === b.x1 && a.y1 === b.y1);
 }
 
-function sameRect(a: TileRect, b: TileRect): boolean {
-  return a.x0 === b.x0 && a.y0 === b.y0 && a.x1 === b.x1 && a.y1 === b.y1;
-}
+/** 조각 열쇠 (안개 주기마다 문자열을 만들지 않게 미리) */
+const POINT_KEY: Readonly<Record<PointId, string>> = { A: 'point-A', B: 'point-B' };
+const EXIT_KEY: Readonly<Record<ExitId, string>> = { N: 'exit-N', S: 'exit-S' };
+
+/** 조각 그리기에 넘기는 한 개짜리 목록 (paintPoints · paintExits는 목록을 받는다. 붙잡지 않으므로 고쳐 쓴다) */
+const ONE_POINT: PointView[] = [];
+const ONE_EXIT: ExitView[] = [];
 
 export class GpuFog implements FogLayer {
   readonly mode = 'gpu' as const;
@@ -264,11 +335,9 @@ export class GpuFog implements FogLayer {
   /** 공개 동적 레이어: 거점 · 탈출구 조각 (빛 지도 · 시야 채움보다 아래) */
   private readonly dynBox: Phaser.GameObjects.Container;
   private readonly patches = new Map<string, DynPatch>();
-  private readonly rec = new PenRecord();
-  /** 시야 채움 (빛 지도 격자, 다각형마다 한 장): 안개 주기마다 기록해 바뀐 장만 다시 그려 올린다 */
+  /** 시야 채움 (빛 지도 격자, 다각형마다 한 장): 안개 주기마다 견줘 바뀐 장만 다시 그려 올린다 */
   private readonly tintBox: Phaser.GameObjects.Container;
   private readonly tints: TintPatch[] = [];
-  private readonly tintBounds: TileRect[] = [];
   private tintN = 0;
   private readonly lpt: number;
   private readonly light: LightMap | null;
@@ -431,17 +500,13 @@ export class GpuFog implements FogLayer {
       t = new TintPatch(this.scene, this.tintBox, this.lpt);
       this.tints.push(t);
     }
-    t.rec.reset();
-    t.rec.fillPoly(poly, color, alpha);
-    this.tintBounds[this.tintN] = polyBounds(poly);
+    t.set(poly, color, alpha);
     this.tintN += 1;
     this.miniRec.fillPoly(poly, color, alpha);
   }
 
-  /** 조각 하나를 기록 → (바뀌었으면) 조각 캔버스에 다시 그리고, 미니맵 기록에는 늘 넣는다 */
-  private paintPatch(key: string, bounds: TileRect, paint: (pen: PenRecord) => void): void {
-    this.rec.reset();
-    paint(this.rec);
+  /** 조각 하나 (범위가 바뀌었으면 새로 만든다). 이번 주기 기록을 비워 돌려준다 */
+  private patchFor(key: string, bounds: TileRect): DynPatch {
     let patch = this.patches.get(key);
     if (patch && !sameRect(patch.bounds, bounds)) {
       patch.destroy();
@@ -451,27 +516,39 @@ export class GpuFog implements FogLayer {
       patch = new DynPatch(this.scene, this.dynBox, bounds, this.s, this.ox, this.oy);
       this.patches.set(key, patch);
     }
-    patch.update(this.rec);
-    this.rec.replay(this.miniRec);
+    patch.rec.reset();
+    return patch;
+  }
+
+  /** 조각 기록을 미니맵 기록에 늘 넣고, (바뀌었으면) 조각 캔버스에 다시 그려 올린다 */
+  private finishPatch(patch: DynPatch): void {
+    this.miniRec.append(patch.rec);
+    patch.update();
   }
 
   drawPoints(points: readonly PointView[], balance: Balance): void {
     const now = gfxNow();
     const r = balance.capturePoint.radius;
-    for (const p of points)
-      this.paintPatch(`point-${p.id}`, pointPaintBounds(p.id, r), (pen) =>
-        paintPoints(pen, [p], balance, now),
-      );
+    for (const p of points) {
+      const patch = this.patchFor(POINT_KEY[p.id], pointPaintBounds(p.id, r));
+      ONE_POINT[0] = p;
+      paintPoints(patch.rec, ONE_POINT, balance, now);
+      this.finishPatch(patch);
+    }
+    ONE_POINT.length = 0;
   }
 
   drawExits(exits: readonly ExitView[], balance: Balance): void {
     const now = gfxNow();
     const real = performance.now();
     const r = balance.exit.radius;
-    for (const e of exits)
-      this.paintPatch(`exit-${e.id}`, exitPaintBounds(e.id, r), (pen) =>
-        paintExits(pen, [e], balance, now, real),
-      );
+    for (const e of exits) {
+      const patch = this.patchFor(EXIT_KEY[e.id], exitPaintBounds(e.id, r));
+      ONE_EXIT[0] = e;
+      paintExits(patch.rec, ONE_EXIT, balance, now, real);
+      this.finishPatch(patch);
+    }
+    ONE_EXIT.length = 0;
   }
 
   addSoftLight(light: SoftLight): void {
@@ -483,11 +560,12 @@ export class GpuFog implements FogLayer {
   }
 
   commit(): void {
-    this.tints.forEach((t, i) => {
-      const b = this.tintBounds[i];
-      if (i < this.tintN && b) t.update(b);
+    for (let i = 0; i < this.tints.length; i += 1) {
+      const t = this.tints[i];
+      if (!t) continue;
+      if (i < this.tintN) t.update();
       else t.hide();
-    });
+    }
     const lightChanged = this.light !== null && this.lightRec.paint(this.light);
     if (lightChanged && this.lightTexture) uploadCanvasTexture(this.lightTexture);
     // 미니맵: 빛과 명령이 지난번과 같으면 그대로 둔다. 바뀌었으면 이번 기록을 남기고(맞바꿔 다음 주기에 다시 쓴다) 읽을 때 합성
