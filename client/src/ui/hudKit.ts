@@ -333,7 +333,12 @@ export class Spr implements Prim {
   crop(from: number, to: number, dx = 0): this {
     const c = this.cut;
     if (c && c.from === from && c.to === to && c.dx === dx) return this;
-    this.cut = { from, to, dx };
+    // 흐르는 사선은 프레임마다 dx만 바뀐다: 객체를 새로 만들지 않고 고쳐 쓴다
+    if (c) {
+      c.from = from;
+      c.to = to;
+      c.dx = dx;
+    } else this.cut = { from, to, dx };
     this.apply();
     return this;
   }
@@ -386,7 +391,7 @@ export class Spr implements Prim {
 export class Slice implements Prim {
   private readonly imgs: Phaser.GameObjects.Image[] = [];
   private name = '';
-  private rect = { x: 0, y: 0, w: 0, h: 0 };
+  private readonly rect = { x: 0, y: 0, w: 0, h: 0 };
   private on = false;
   private alpha = 1;
   /** 가운데 조각을 그리지 않는다 (발각 테두리처럼 가운데가 빈 것) */
@@ -405,7 +410,10 @@ export class Slice implements Prim {
     const r = this.rect;
     if (name === this.name && x === r.x && y === r.y && w === r.w && h === r.h && this.on) return this;
     this.name = name;
-    this.rect = { x, y, w, h };
+    r.x = x;
+    r.y = y;
+    r.w = w;
+    r.h = h;
     this.on = true;
     this.apply();
     return this;

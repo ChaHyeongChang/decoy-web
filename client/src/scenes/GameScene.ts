@@ -173,9 +173,11 @@ export class GameScene extends Phaser.Scene {
   private readonly touchView: TouchView = { slots: [] };
   /** 괴물 재접속 대기 줄 (남은 초가 바뀔 때만 새로) */
   private pausedMemo: { sec: number; line: BannerLine } | null = null;
-  /** 미니맵: 팀원 id → 역할 (이 판 명단, 프레임마다 닫힘 함수를 만들지 않는다) */
-  private readonly roleOf = (id: string): Role | null =>
-    this.app.match?.roster.find((r) => r.id === id)?.role ?? null;
+  /** 미니맵: 팀원 id → 역할 (이 판 명단. 프레임마다 · 엔티티마다 닫힘 함수를 만들지 않는다) */
+  private readonly roleOf = (id: string): Role | null => {
+    for (const r of this.app.match?.roster ?? []) if (r.id === id) return r.role;
+    return null;
+  };
 
   constructor() {
     super('game');
