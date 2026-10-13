@@ -327,7 +327,35 @@ interface FakeFrame {
 }
 
 /** Badges가 쓰는 장면 부분 (가짜): 상자 · 이미지 · 텍스처(프레임) · 캔버스 */
-function fakeScene(): {
+/** 가짜 WebGL 컨텍스트: 텍스처 일부 올리기에 쓰는 호출을 기록한다 (묶인 텍스처 상태 포함) */
+function fakeGl(): { gl: object; calls: unknown[][]; bound: () => unknown } {
+  const calls: unknown[][] = [];
+  let bound: unknown = 'phaser-bound';
+  const gl = {
+    TEXTURE0: 33984,
+    TEXTURE_2D: 3553,
+    TEXTURE_BINDING_2D: 32873,
+    UNPACK_PREMULTIPLY_ALPHA_WEBGL: 37441,
+    UNPACK_FLIP_Y_WEBGL: 37440,
+    RGBA: 6408,
+    UNSIGNED_BYTE: 5121,
+    isContextLost: () => false,
+    activeTexture: (u: number) => calls.push(['activeTexture', u]),
+    getParameter: (p: number) => {
+      calls.push(['getParameter', p]);
+      return bound;
+    },
+    bindTexture: (t: number, tex: unknown) => {
+      calls.push(['bindTexture', t, tex]);
+      bound = tex;
+    },
+    pixelStorei: (p: number, v: unknown) => calls.push(['pixelStorei', p, v]),
+    texSubImage2D: (...a: unknown[]) => calls.push(['texSubImage2D', ...a]),
+  };
+  return { gl, calls, bound: () => bound };
+}
+
+function fakeScene(webgl = true): {
   scene: object;
   box: { list: unknown[] };
   images: FakeImage[];
@@ -336,7 +364,9 @@ function fakeScene(): {
   frameSets: string[];
   uploads: () => number;
   moveBelow: ReturnType<typeof vi.fn>;
+  gl: ReturnType<typeof fakeGl>;
 } {
+  const gl = fakeGl();
   const images: FakeImage[] = [];
   const ctxs: RecCtx[] = [];
   const frames = new Map<string, FakeFrame>();
@@ -412,6 +442,7 @@ function fakeScene(): {
               width: src.width,
               height: src.height,
               isPowerOf2: false,
+              glTexture: { webGLTexture: `gl-${k}`, pma: true, flipY: false },
               update: () => {
                 uploads += 1;
               },
@@ -422,8 +453,10 @@ function fakeScene(): {
     },
     children: { moveBelow },
     events: { once: () => undefined },
+    // WebGL 렌더러면 gl이 있다 (Canvas 렌더러에는 없다)
+    game: { renderer: webgl ? { gl: gl.gl } : {} },
   };
-  return { scene, box, images, ctxs, frames, frameSets, uploads: () => uploads, moveBelow };
+  return { scene, box, images, ctxs, frames, frameSets, uploads: () => uploads, moveBelow, gl };
 }
 
 // ───────────── 오라클: 렌더링 최적화 2 전의 배지 굽기 (배지마다 캔버스 한 장) ─────────────
@@ -623,9 +656,11 @@ describe('Badges (캐릭터 아래 레이어, 바뀔 때만 구운 아틀라스 
     }
   });
 
-  it('상태 · 알파 · 배율이 바뀐 배지만 다시 굽고, 바뀐 프레임에만 한 번 올린다 (진행 값만 바뀌면 굽지도 올리지도 않는다)', async () => {
+  it('상태 · 알파 · 배율이 바뀐 배지만 다시 굽고 그 칸만 올린다 (진행 값만 바뀌면 굽지도 올리지도 않는다)', async () => {
     const { Badges } = await import('../../client/src/render/objects');
-    const { scene, ctxs, frameSets, uploads, images } = fakeScene();
+    const { scene, ctxs, frameSets, uploads, images, gl } = fakeScene();
+    /** 칸만 올린 횟수 (texSubImage2D) */
+    const subs = (): number => gl.calls.filter((c) => c[0] === 'texSubImage2D').length;
     const badges = new Badges(scene as never, { add: vi.fn() } as never);
     const exits: ExitView[] = [
       { id: 'N', state: 'inactive', progress: null },
@@ -644,12 +679,16 @@ describe('Badges (캐릭터 아래 레이어, 바뀔 때만 구운 아틀라스 
     badges.draw(pts(0.1, 'capturing'), exits, ALL_SEEN, NO_BLINK);
     expect(baked()).toEqual(['point-A', 'point-B', 'exit-N', 'exit-S', 'prison']);
     expect(uploads()).toBe(1);
+    expect(subs()).toBe(0);
     badges.draw(pts(0.6, 'capturing'), exits, ALL_SEEN, NO_BLINK);
     expect(baked()).toEqual([]);
     expect(uploads()).toBe(1);
+    expect(subs()).toBe(0);
     badges.draw(pts(0.6, 'blocked'), exits, ALL_SEEN, NO_BLINK);
     expect(baked()).toEqual(['point-A']);
-    expect(uploads()).toBe(2);
+    // 바뀐 칸만 올린다 (통째 올리기는 그대로)
+    expect(uploads()).toBe(1);
+    expect(subs()).toBe(1);
     // 알파만 바뀐 탈출구 · 감옥
     badges.draw(
       pts(0.6, 'blocked'),
@@ -658,7 +697,8 @@ describe('Badges (캐릭터 아래 레이어, 바뀔 때만 구운 아틀라스 
       NO_BLINK,
     );
     expect(baked()).toEqual(['exit-S', 'prison']);
-    expect(uploads()).toBe(3);
+    expect(uploads()).toBe(1);
+    expect(subs()).toBe(3);
     // 깜빡임 (괴물 화면 점령 중)
     badges.draw(
       pts(0.6, 'blocked'),
@@ -681,5 +721,60 @@ describe('Badges (캐릭터 아래 레이어, 바뀔 때만 구운 아틀라스 
     expect(PRISON_LOCK.y).toBeGreaterThan(PRISON_CENTER.y);
     expect(exitSignAt('N').y).toBeLessThan(1);
     expect(exitSignAt('S').y).toBeGreaterThan(31);
+  });
+
+  it('바뀐 배지는 GPU에 그 칸만 올린다 (texSubImage2D, Phaser 업로드와 같은 GL 상태 순서 · 묶음 되돌림), 칸을 다시 나누면 통째로', async () => {
+    const { Badges } = await import('../../client/src/render/objects');
+    const { scene, ctxs, frames, uploads, gl } = fakeScene();
+    const badges = new Badges(scene as never, { add: vi.fn() } as never);
+    const exits: ExitView[] = [
+      { id: 'N', state: 'inactive', progress: null },
+      { id: 'S', state: 'inactive', progress: null },
+    ];
+    const pts = (s: PointView['state']): PointView[] => [
+      { id: 'A', progress: 0, state: s },
+      { id: 'B', progress: 0, state: 'idle' },
+    ];
+    badges.draw(pts('idle'), exits, ALL_SEEN, NO_BLINK);
+    // 처음: 텍스처 크기가 정해지는 통째 올리기 한 번, 일부 올리기 없음
+    expect(uploads()).toBe(1);
+    expect(gl.calls).toEqual([]);
+    badges.draw(pts('capturing'), exits, ALL_SEEN, NO_BLINK);
+    expect(uploads()).toBe(1);
+    const f = frames.get('point-A')!;
+    const work = ctxs.at(-1)!;
+    expect(gl.calls).toEqual([
+      ['activeTexture', 33984],
+      ['getParameter', 32873],
+      ['bindTexture', 3553, expect.stringMatching(/^gl-badges-/)],
+      ['pixelStorei', 37441, true],
+      ['pixelStorei', 37440, false],
+      ['texSubImage2D', 3553, 0, f.x, f.y, 6408, 5121, work.canvas],
+      ['bindTexture', 3553, 'phaser-bound'],
+    ]);
+    // Phaser가 기억하는 묶음 그대로
+    expect(gl.bound()).toBe('phaser-bound');
+    // 진행 · 그대로인 배지: 아무것도 올리지 않는다
+    gl.calls.length = 0;
+    badges.draw(pts('capturing'), exits, ALL_SEEN, NO_BLINK);
+    expect(gl.calls).toEqual([]);
+    expect(uploads()).toBe(1);
+    // 배율이 바뀌면 칸을 다시 나누고 통째로 한 번 (그 draw에서는 일부 올리기 없음)
+    gfxState.zoom = 2;
+    badges.draw(pts('capturing'), exits, ALL_SEEN, NO_BLINK);
+    expect(uploads()).toBe(2);
+    expect(gl.calls).toEqual([]);
+  });
+
+  it('Canvas 렌더러(gl 없음): 바뀐 배지가 있으면 통째로 올리는 길로 (Canvas 렌더러는 캔버스를 바로 그린다)', async () => {
+    const { Badges } = await import('../../client/src/render/objects');
+    const { scene, uploads, gl } = fakeScene(false);
+    const badges = new Badges(scene as never, { add: vi.fn() } as never);
+    const exits: ExitView[] = [{ id: 'N', state: 'inactive', progress: null }];
+    badges.draw([{ id: 'A', progress: 0, state: 'idle' }], exits, ALL_SEEN, NO_BLINK);
+    expect(uploads()).toBe(1);
+    badges.draw([{ id: 'A', progress: 0, state: 'done' }], exits, ALL_SEEN, NO_BLINK);
+    expect(uploads()).toBe(2);
+    expect(gl.calls).toEqual([]);
   });
 });

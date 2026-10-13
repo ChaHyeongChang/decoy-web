@@ -45,6 +45,7 @@ import {
   removeCanvasTexture,
   resizeCanvasTexture,
   rgba,
+  uploadCanvasSubTexture,
   uploadCanvasTexture,
 } from './fogPaint';
 
@@ -381,6 +382,7 @@ class BadgeAtlas {
   private readonly texture: Phaser.Textures.Texture;
   private layout: BadgeAtlasLayout | null = null;
   private zoom = NaN;
+  /** 통째로 올려야 한다 (칸을 다시 나눠 텍스처 크기가 바뀌었거나, 일부 올리기를 못 했다) */
   private dirty = false;
 
   constructor(private readonly scene: Phaser.Scene) {
@@ -396,8 +398,9 @@ class BadgeAtlas {
     this.zoom = zoom;
     const l = layoutBadgeAtlas(zoom);
     this.layout = l;
-    // 빈 캔버스는 올리지 않는다: 칸을 다시 나누면 같은 draw에서 모두 다시 굽고 flush가 한 번 올린다
+    // 빈 캔버스는 올리지 않는다: 칸을 다시 나누면 같은 draw에서 모두 다시 굽고 flush가 한 번 통째로 올린다
     resizeCanvasTexture(this.key, this.texture, this.canvas, l.width, l.height, false);
+    this.dirty = true;
     return true;
   }
 
@@ -419,15 +422,25 @@ class BadgeAtlas {
     c.drawImage(wc, slot.x, slot.y);
     if (this.texture.has(id)) this.texture.get(id).setSize(r.w, r.h, slot.x, slot.y);
     else this.texture.add(id, 0, slot.x, slot.y, r.w, r.h);
-    this.dirty = true;
+    // 3) GPU에는 바뀐 칸만 올린다 (작업 캔버스 = 그 칸의 화소 그대로: 예전 배지 한 장을 올리던 것과 같은 양).
+    //    텍스처 크기가 바뀐 뒤(칸을 다시 나눔)이거나 WebGL이 아니면 flush가 통째로 올린다 (Canvas 렌더러는 캔버스를 바로 그린다)
+    if (
+      !this.dirty &&
+      !uploadCanvasSubTexture(this.scene.game.renderer, this.texture.source[0], wc, slot.x, slot.y)
+    )
+      this.dirty = true;
+    gfxState.features.badgeUploadPx =
+      Number(gfxState.features.badgeUploadPx ?? 0) + (this.dirty ? 0 : r.w * r.h);
     return r;
   }
 
-  /** 이번 프레임에 구운 것이 있으면 한 번 올린다 */
+  /** 통째로 올려야 하면(칸을 다시 나눔 · 일부 올리기를 못 함) 한 번 올린다 */
   flush(): void {
     if (!this.dirty) return;
     this.dirty = false;
     uploadCanvasTexture(this.texture);
+    gfxState.features.badgeUploadPx =
+      Number(gfxState.features.badgeUploadPx ?? 0) + this.canvas.width * this.canvas.height;
   }
 
   destroy(): void {

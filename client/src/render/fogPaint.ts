@@ -1281,6 +1281,65 @@ export function uploadCanvasTexture(tex: CanvasTextureLike): void {
   tex.source[0]?.update();
 }
 
+/** 텍스처 일부 올리기에 쓰는 WebGL 컨텍스트 부분 */
+export type SubUploadGl = Pick<
+  WebGLRenderingContext,
+  | 'TEXTURE0'
+  | 'TEXTURE_2D'
+  | 'TEXTURE_BINDING_2D'
+  | 'UNPACK_PREMULTIPLY_ALPHA_WEBGL'
+  | 'UNPACK_FLIP_Y_WEBGL'
+  | 'RGBA'
+  | 'UNSIGNED_BYTE'
+  | 'activeTexture'
+  | 'getParameter'
+  | 'bindTexture'
+  | 'pixelStorei'
+  | 'texSubImage2D'
+  | 'isContextLost'
+>;
+
+/** 렌더러 중 여기서 쓰는 부분 (Phaser WebGLRenderer.gl. Canvas 렌더러에는 없다) */
+export interface SubUploadHost {
+  readonly gl?: SubUploadGl;
+}
+
+/** 텍스처 source 중 여기서 쓰는 부분 (Phaser TextureSource.glTexture: WebGLTextureWrapper) */
+export interface SubUploadSource {
+  readonly glTexture?: {
+    readonly webGLTexture: WebGLTexture | null;
+    readonly pma: boolean;
+    readonly flipY: boolean;
+  } | null;
+}
+
+/**
+ * 캔버스 src를 WebGL 텍스처의 (x, y) 자리에 그 크기만큼만 올린다 (texSubImage2D). Phaser가 캔버스 텍스처를 올릴 때
+ * (WebGLTextureWrapper._processTexture)와 같은 순서로 GL 상태를 다룬다: 0번 단위에서 묶인 텍스처를 기억 → 이 텍스처를 묶고
+ * 프리멀티플라이 · 뒤집기를 텍스처 설정대로 → 올림 → 묶음 되돌림. 그래서 Phaser가 기억하는 묶음 상태가 그대로 맞다.
+ * WebGL이 아니거나(Canvas 렌더러는 캔버스를 바로 그린다) 컨텍스트를 잃었거나 GL 텍스처가 없으면 false (호출한 쪽이 통째로 올린다)
+ */
+export function uploadCanvasSubTexture(
+  host: object,
+  source: SubUploadSource | undefined,
+  src: TexImageSource,
+  x: number,
+  y: number,
+): boolean {
+  const gl = (host as SubUploadHost).gl;
+  const wrap = source?.glTexture;
+  const tex = wrap?.webGLTexture;
+  if (!gl || !wrap || !tex || gl.isContextLost()) return false;
+  gl.activeTexture(gl.TEXTURE0);
+  const current = gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null;
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, wrap.pma);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, wrap.flipY);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, gl.RGBA, gl.UNSIGNED_BYTE, src);
+  gl.bindTexture(gl.TEXTURE_2D, current);
+  return true;
+}
+
 /** 캔버스 크기를 바꾸고 텍스처 · 기본 프레임을 맞춘다 (CanvasTexture.setSize와 같은 순서. 캔버스 내용은 지워진다) */
 export function resizeCanvasTexture<C extends { width: number; height: number }>(
   key: string,

@@ -40,6 +40,7 @@ import {
   resetExitTracking,
   removeCanvasTexture,
   resizeCanvasTexture,
+  uploadCanvasSubTexture,
   uploadCanvasTexture,
   type CanvasTextureHost,
   type CanvasTextureLike,
@@ -406,6 +407,58 @@ class FakeHost implements CanvasTextureHost<FakeCanvas, FakeTexture> {
 }
 
 const bytes = (): number => Number(gfxState.features.textureBytes ?? 0);
+
+describe('텍스처 일부 올리기 (배지 아틀라스의 바뀐 칸)', () => {
+  const makeGl = (lost = false) => {
+    const calls: string[] = [];
+    const gl = {
+      TEXTURE0: 1,
+      TEXTURE_2D: 2,
+      TEXTURE_BINDING_2D: 3,
+      UNPACK_PREMULTIPLY_ALPHA_WEBGL: 4,
+      UNPACK_FLIP_Y_WEBGL: 5,
+      RGBA: 6,
+      UNSIGNED_BYTE: 7,
+      isContextLost: () => lost,
+      activeTexture: () => calls.push('activeTexture'),
+      getParameter: () => {
+        calls.push('getParameter');
+        return 'prev';
+      },
+      bindTexture: (_t: number, tex: unknown) => calls.push(`bind:${String(tex)}`),
+      pixelStorei: (p: number, v: boolean) => calls.push(`pixelStorei:${p}:${v}`),
+      texSubImage2D: (...a: unknown[]) => calls.push(`texSubImage2D:${a.slice(2, 4).join(',')}`),
+    };
+    return { gl, calls };
+  };
+  const src = {} as TexImageSource;
+  const wrap = { glTexture: { webGLTexture: 'tex' as unknown as WebGLTexture, pma: true, flipY: false } };
+
+  it('WebGL: Phaser 업로드와 같은 순서로 그 자리에만 올리고 묶음을 되돌린다', () => {
+    const { gl, calls } = makeGl();
+    expect(uploadCanvasSubTexture({ gl }, wrap, src, 12, 3)).toBe(true);
+    expect(calls).toEqual([
+      'activeTexture',
+      'getParameter',
+      'bind:tex',
+      'pixelStorei:4:true',
+      'pixelStorei:5:false',
+      'texSubImage2D:12,3',
+      'bind:prev',
+    ]);
+  });
+
+  it('Canvas 렌더러 · 컨텍스트를 잃음 · GL 텍스처 없음이면 아무것도 하지 않고 false (통째로 올리는 길로)', () => {
+    const lost = makeGl(true);
+    expect(uploadCanvasSubTexture({}, wrap, src, 0, 0)).toBe(false);
+    expect(uploadCanvasSubTexture({ gl: lost.gl }, wrap, src, 0, 0)).toBe(false);
+    expect(lost.calls).toEqual([]);
+    const { gl, calls } = makeGl();
+    expect(uploadCanvasSubTexture({ gl }, { glTexture: null }, src, 0, 0)).toBe(false);
+    expect(uploadCanvasSubTexture({ gl }, undefined, src, 0, 0)).toBe(false);
+    expect(calls).toEqual([]);
+  });
+});
 
 describe('캔버스 텍스처를 사본 없이 올린다', () => {
   it('일반 텍스처 + 기본 프레임(__BASE), 바이트 = 폭 × 높이 × 4를 기록하고 지우면 뺀다', () => {
