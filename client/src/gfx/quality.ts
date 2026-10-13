@@ -732,7 +732,8 @@ export type AutoDowngradeStatus = 'on' | 'checking' | 'probation' | 'off';
  *  - 올린 뒤 확인: 평균이 하향 기준 미만이면 다시 내리고(upRevert) 이번 세션에서는 더 올리지 않는다. 통과하면 upKeep
  * 확인이 끝나기 전에는 더 내리거나 올리지 않는다. 판마다 모드(온라인 · 연습)를 받아 결정에 실어 보내고, 다른 모드의 판으로
  * 넘어가면 확인 중이던 하향 · 되돌릴 품질 단계는 이어 가지 않는다(부하가 다른 판끼리 FPS를 견주지 않게).
- * 프레임 제한 · 화면 주사율이 바뀌어 목표가 달라지면(자기 결정이 아닌 변경) 확인 중이던 것을 판단 없이 끝내고 처음부터 잰다.
+ * 프레임 제한 · 화면 주사율(판 중에는 오르기만 한다)이 바뀌어 목표가 달라지면(자기 결정이 아닌 변경) 확인 중이던 것을
+ * 판단 없이 끝내고(이미 내린 품질은 되돌릴 단계로 쌓는다) 하향 감시를 예열부터 다시 켠다.
  * 샘플마다 할당하지 않는다(고리 버퍼 · 미리 만든 감시기. 결정을 낼 때만 객체를 만든다)
  */
 export class AutoDowngrade {
@@ -921,12 +922,18 @@ export class AutoDowngrade {
       if (ctx.targetHz === this.expectTargetHz) {
         this.expectTargetHz = null;
       } else {
-        // 다른 목표에서 잰 값끼리 견주지 않는다 (지금 품질 · 목표는 그대로 둔다)
+        // 다른 목표에서 잰 값끼리 견주지 않는다 (지금 품질 · 목표는 그대로 둔다). 판단 없이 끝낸 하향도 이미 내린
+        // 단계라 되돌릴 단계로 쌓는다: 버리면 자동으로 낮춘 단계가 천장이 된다. 올리기는 여유 · 올린 뒤 확인을 거치므로
+        // 효과가 없던 하향(30Hz로 묶인 화면)이어도 FPS가 목표에 닿지 않으면 올라가지 않는다
+        const p = this.pending;
+        if (p) this.stack.push({ kind: 'tier', from: p.from, to: p.to });
         this.pending = null;
         this.check = null;
         this.probing = null;
         this.probation = null;
-        if (this.watchOn) this.watch.restart(nowMs, this.watchCfg);
+        // 하향 감시는 새 목표에서 예열부터 다시 (이 판에서 이미 품질을 내렸거나 이어 온 확인으로 꺼져 있었어도)
+        this.watch.restart(nowMs, this.watchCfg);
+        this.watchOn = true;
       }
       this.changed(nowMs);
     }

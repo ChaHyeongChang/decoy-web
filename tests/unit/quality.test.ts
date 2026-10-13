@@ -801,10 +801,56 @@ describe('렌더링 최적화: 여유가 이어지면 자동으로 내린 단계
     const s = new AdaptiveSession('high', new AutoDowngrade(), '60', 120);
     expect(kinds(s.play(16_000, () => injected(30)))).toEqual(['downgrade']);
     expect(s.auto.status).toBe('checking');
-    // 다음 판 전에 사용자가 120으로: 60에서 잰 하향 전 평균과 견주지 않는다
+    // 다음 판 전에 사용자가 120으로: 60에서 잰 하향 전 평균과 견주지 않는다(되돌림 · 유지 없음).
+    // 이어 온 확인 때문에 꺼져 있던 하향 감시도 예열부터 다시 켠다: 120에서 70fps(기준 80 미만)면 한 단계 더
     s.limit = '120';
-    expect(s.play(60_000, () => injected(110))).toEqual([]);
-    expect([s.auto.status, s.tier, s.auto.steps.length]).toEqual(['on', 'medium', 0]);
+    const acts = s.play(20_000, () => injected(70));
+    expect(acts.map((l) => l.action)).toEqual([
+      { kind: 'downgrade', mode: 'online', from: 'medium', to: 'low', fpsBefore: 70 },
+    ]);
+    expect(acts[0]!.at).toBeGreaterThan(FPS_WATCH.warmupMs + FPS_WATCH.sustainMs);
+    expect(acts[0]!.at).toBeLessThan(FPS_WATCH.warmupMs + FPS_WATCH.sustainMs + 50);
+    // 판단 없이 끝낸 하향(높음 → 중간)도 되돌릴 단계로 남는다
+    expect(s.auto.steps).toEqual([{ kind: 'tier', from: 'high', to: 'medium' }]);
+    expect([s.auto.status, s.tier]).toEqual(['checking', 'low']);
+  });
+
+  it('판단 없이 끝낸 하향은 되돌릴 단계로 남아 여유가 이어지면 다시 올린다 (자동으로 낮춘 단계가 천장이 되지 않게)', () => {
+    const s = new AdaptiveSession('high', new AutoDowngrade(), '60', 120);
+    expect(kinds(s.play(16_000, () => injected(30)))).toEqual(['downgrade']);
+    s.limit = '120';
+    // 120에서 여유(120fps · 작업 3ms ≤ 4.17ms): 변경 20초 뒤부터 15초 넘게 → 다음 판 시작 전에 높음으로
+    expect(s.play(60_000, roomy())).toEqual([]);
+    expect(s.auto.queuedUpgrade).toEqual({ from: 'medium', to: 'high' });
+    expect(kinds(s.play(30_000, roomy()))).toEqual(['upgrade', 'upKeep']);
+    expect([s.tier, s.auto.steps.length]).toEqual(['high', 0]);
+  });
+
+  it('판 중에 화면 주사율이 올라 목표가 바뀌어도: 확인 중이던 하향은 되돌릴 단계로 남기고, 이 판에서 꺼졌던 하향 감시를 다시 켠다', () => {
+    const auto = new AutoDowngrade();
+    let tier: QualityTier = 'high';
+    const at60: AdaptContext = { targetHz: 60, displayHz: 60, canRateFallback: false };
+    const at120: AdaptContext = { targetHz: 120, displayHz: 120, canRateFallback: true };
+    const acts: { action: AutoQualityAction; t: number }[] = [];
+    let raisedAt = -1;
+    auto.beginMatch(0);
+    for (let t = 0; t < 60_000 && acts.length < 2; t += 1000 / 60) {
+      // 하향 직후(확인 중) 잰 주사율이 60 → 120으로 오른다 (자동 제한)
+      const ctx = acts.length > 0 && t > acts[0]!.t + 1000 ? at120 : at60;
+      if (ctx === at120 && raisedAt < 0) raisedAt = t;
+      const a = auto.sample(t, injected(ctx === at120 ? 70 : 30), tier, ctx);
+      if (!a) continue;
+      acts.push({ action: a, t });
+      if (a.kind === 'downgrade') tier = a.to;
+    }
+    expect(acts.map((a) => a.action.kind)).toEqual(['downgrade', 'rateDown']);
+    expect(acts[1]!.action).toMatchObject({ kind: 'rateDown', from: 120, to: 60 });
+    expect(acts[1]!.t - raisedAt).toBeGreaterThan(FPS_WATCH.warmupMs + FPS_WATCH.sustainMs);
+    expect(acts[1]!.t - raisedAt).toBeLessThan(FPS_WATCH.warmupMs + FPS_WATCH.sustainMs + 50);
+    expect(auto.steps).toEqual([
+      { kind: 'tier', from: 'high', to: 'medium' },
+      { kind: 'rate', from: 120, to: 60 },
+    ]);
   });
 });
 
