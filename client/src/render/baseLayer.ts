@@ -219,7 +219,7 @@ export class CanvasFog implements FogLayer {
   commit(): void {
     const lightChanged = this.light !== null && this.lightRec.paint(this.light);
     const last = this.last;
-    this.changed = lightChanged || last === null || !this.rec.sameAs(last.ops);
+    this.changed = lightChanged || last === null || !this.rec.same(last);
     if (this.changed) {
       const c = this.ctx;
       c.globalCompositeOperation = 'source-over';

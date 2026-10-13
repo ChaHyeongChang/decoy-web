@@ -704,6 +704,115 @@ describe('PenRecord.replay: 평평한 다각형 (꼭짓점 객체를 다시 만�
   });
 });
 
+describe('PenRecord 버퍼: 비울 때 버퍼를 놓지 않아도(길이 대신 개수) 예전 기록과 같은 수 · 같은 판단', () => {
+  /** 예전 PenRecord: push로 쌓고 비울 때 길이를 0으로 (V8이 버퍼를 놓는다) */
+  class OldPenRecord {
+    readonly ops: number[] = [];
+    reset(): void {
+      this.ops.length = 0;
+    }
+    fillCircle(x: number, y: number, r: number, color: number, alpha: number): void {
+      this.ops.push(0, x, y, r, color, alpha);
+    }
+    strokeCircle(x: number, y: number, r: number, width: number, color: number, alpha: number): void {
+      this.ops.push(1, x, y, r, width, color, alpha);
+    }
+    strokeArc(
+      x: number,
+      y: number,
+      r: number,
+      i: number,
+      f: number,
+      t: number,
+      w: number,
+      c: number,
+      a: number,
+    ): void {
+      this.ops.push(2, x, y, r, i, f, t, w, c, a);
+    }
+    fillPoly(poly: readonly Vec2[], color: number, alpha: number): void {
+      if (poly.length < 3) return;
+      this.ops.push(3, poly.length);
+      for (const p of poly) this.ops.push(p.x, p.y);
+      this.ops.push(color, alpha);
+    }
+    line(x0: number, y0: number, x1: number, y1: number, width: number, color: number, alpha: number): void {
+      this.ops.push(4, x0, y0, x1, y1, width, color, alpha);
+    }
+    sameAs(ops: readonly number[]): boolean {
+      const a = this.ops;
+      if (a.length !== ops.length) return false;
+      for (let i = 0; i < a.length; i += 1) if (a[i] !== ops[i]) return false;
+      return true;
+    }
+  }
+
+  it('주기마다 길이가 오르내리는 기록 (긴 기록 뒤 짧은 기록 · 빈 기록 · 같은 기록): 수 · sameAs · same · 덧붙이기가 예전과 같다', () => {
+    const rand = rng(77);
+    const nu = new PenRecord();
+    const old = new OldPenRecord();
+    const prevNu = new PenRecord();
+    let prevOld: number[] = [];
+    const mini = new PenRecord();
+    const miniOld: number[] = [];
+    for (let cycle = 0; cycle < 300; cycle += 1) {
+      nu.reset();
+      old.reset();
+      const same = cycle > 0 && rand() < 0.3;
+      const count = same ? -1 : Math.floor(rand() * 40);
+      if (same) {
+        // 지난 기록을 그대로 다시 (새 기록 = 재생, 예전 기록 = 같은 수를 다시 쌓기)
+        prevNu.replay(nu);
+        old.ops.push(...prevOld);
+      } else {
+        for (let k = 0; k < count; k += 1) {
+          const v = (): number => Math.round((rand() - 0.5) * 1000) / 10;
+          const op = Math.floor(rand() * 5);
+          if (op === 0) {
+            const a = [v(), v(), v(), 0xff, rand()] as const;
+            nu.fillCircle(...a);
+            old.fillCircle(...a);
+          } else if (op === 1) {
+            const a = [v(), v(), v(), 2, 0xff, rand()] as const;
+            nu.strokeCircle(...a);
+            old.strokeCircle(...a);
+          } else if (op === 2) {
+            const a = [v(), v(), v(), 1, v(), v(), 3, 0xff, rand()] as const;
+            nu.strokeArc(...a);
+            old.strokeArc(...a);
+          } else if (op === 3) {
+            const poly: Vec2[] = [];
+            const m = Math.floor(rand() * 30);
+            for (let i = 0; i < m; i += 1) poly.push({ x: v(), y: v() });
+            const alpha = rand();
+            nu.fillPoly(poly, 0xaa, alpha);
+            old.fillPoly(poly, 0xaa, alpha);
+          } else {
+            const a = [v(), v(), v(), v(), 2, 0xff, rand()] as const;
+            nu.line(...a);
+            old.line(...a);
+          }
+        }
+      }
+      expect(nu.ops).toEqual(old.ops);
+      expect(nu.size).toBe(old.ops.length);
+      expect(nu.sameAs(prevOld)).toBe(old.sameAs(prevOld));
+      expect(nu.same(prevNu)).toBe(old.sameAs(prevOld));
+      // 미니맵 기록처럼 여러 기록을 이어 붙인다 (가끔 비운다)
+      if (cycle % 5 === 0) {
+        mini.reset();
+        miniOld.length = 0;
+      }
+      mini.append(nu);
+      miniOld.push(...old.ops);
+      expect(mini.ops).toEqual(miniOld);
+      prevNu.reset();
+      prevNu.append(nu);
+      prevOld = old.ops.slice();
+    }
+  });
+});
+
 describe('LightRecord: 명령 객체를 고쳐 쓰는 기록이 예전과 같은 판단 · 같은 칠하기', () => {
   it('무작위 주기 (가만히 · 움직임 · 같은 값 다른 참조 · 개수 변화 · 부드러운/딱 잘린 시야): 바뀜 판단과 빛 지도 호출이 같다', () => {
     const rand = rng(2026);

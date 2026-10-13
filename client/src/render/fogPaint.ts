@@ -171,18 +171,50 @@ const OP_LINE = 4;
  * 다시 그리지도 올리지도 않고, 다르면 replay로 캔버스 펜(조각 · 미니맵)에 그대로 다시 그린다
  */
 export class PenRecord implements FogPen {
-  readonly ops: number[] = [];
+  /**
+   * 기록 버퍼 (앞의 n개가 이번 기록). 비울 때 길이를 0으로 줄이지 않는다: V8은 length = 0이면 버퍼를 놓아 주고 다음 주기에
+   * push로 다시 키우므로(늘릴 때마다 새 버퍼) 안개 주기마다 기록 크기의 몇 배를 새로 할당했다 (렌더링 최적화 2)
+   */
+  private readonly buf: number[] = [];
+  private n = 0;
+
+  /** 기록한 수의 사본 (시험 · 디버그용: 할당한다) */
+  get ops(): number[] {
+    return this.buf.slice(0, this.n);
+  }
+
+  /** 기록한 수의 개수 */
+  get size(): number {
+    return this.n;
+  }
 
   reset(): void {
-    this.ops.length = 0;
+    this.n = 0;
   }
 
   fillCircle(x: number, y: number, r: number, color: number, alpha: number): void {
-    this.ops.push(OP_FILL_CIRCLE, x, y, r, color, alpha);
+    const o = this.buf;
+    let n = this.n;
+    o[n++] = OP_FILL_CIRCLE;
+    o[n++] = x;
+    o[n++] = y;
+    o[n++] = r;
+    o[n++] = color;
+    o[n++] = alpha;
+    this.n = n;
   }
 
   strokeCircle(x: number, y: number, r: number, width: number, color: number, alpha: number): void {
-    this.ops.push(OP_STROKE_CIRCLE, x, y, r, width, color, alpha);
+    const o = this.buf;
+    let n = this.n;
+    o[n++] = OP_STROKE_CIRCLE;
+    o[n++] = x;
+    o[n++] = y;
+    o[n++] = r;
+    o[n++] = width;
+    o[n++] = color;
+    o[n++] = alpha;
+    this.n = n;
   }
 
   strokeArc(
@@ -196,43 +228,88 @@ export class PenRecord implements FogPen {
     color: number,
     alpha: number,
   ): void {
-    this.ops.push(OP_STROKE_ARC, x, y, r, inset, from, to, width, color, alpha);
+    const o = this.buf;
+    let n = this.n;
+    o[n++] = OP_STROKE_ARC;
+    o[n++] = x;
+    o[n++] = y;
+    o[n++] = r;
+    o[n++] = inset;
+    o[n++] = from;
+    o[n++] = to;
+    o[n++] = width;
+    o[n++] = color;
+    o[n++] = alpha;
+    this.n = n;
   }
 
   fillPoly(poly: readonly Vec2[], color: number, alpha: number): void {
     if (poly.length < 3) return;
-    const o = this.ops;
-    o.push(OP_FILL_POLY, poly.length);
-    for (const p of poly) o.push(p.x, p.y);
-    o.push(color, alpha);
+    const o = this.buf;
+    let n = this.n;
+    o[n++] = OP_FILL_POLY;
+    o[n++] = poly.length;
+    for (let i = 0; i < poly.length; i += 1) {
+      const p = poly[i];
+      o[n++] = p ? p.x : 0;
+      o[n++] = p ? p.y : 0;
+    }
+    o[n++] = color;
+    o[n++] = alpha;
+    this.n = n;
   }
 
-  fillPolyFlat(xy: readonly number[], start: number, n: number, color: number, alpha: number): void {
-    if (n < 3) return;
-    const o = this.ops;
-    o.push(OP_FILL_POLY, n);
-    for (let i = start; i < start + n * 2; i += 1) o.push(xy[i] ?? 0);
-    o.push(color, alpha);
+  fillPolyFlat(xy: readonly number[], start: number, count: number, color: number, alpha: number): void {
+    if (count < 3) return;
+    const o = this.buf;
+    let n = this.n;
+    o[n++] = OP_FILL_POLY;
+    o[n++] = count;
+    for (let i = start; i < start + count * 2; i += 1) o[n++] = xy[i] ?? 0;
+    o[n++] = color;
+    o[n++] = alpha;
+    this.n = n;
   }
 
   line(x0: number, y0: number, x1: number, y1: number, width: number, color: number, alpha: number): void {
-    this.ops.push(OP_LINE, x0, y0, x1, y1, width, color, alpha);
+    const o = this.buf;
+    let n = this.n;
+    o[n++] = OP_LINE;
+    o[n++] = x0;
+    o[n++] = y0;
+    o[n++] = x1;
+    o[n++] = y1;
+    o[n++] = width;
+    o[n++] = color;
+    o[n++] = alpha;
+    this.n = n;
   }
 
   /** 기록이 ops와 같은가 (같으면 다시 그릴 필요가 없다) */
   sameAs(ops: readonly number[]): boolean {
-    const a = this.ops;
-    if (a.length !== ops.length) return false;
-    for (let i = 0; i < a.length; i += 1) if (a[i] !== ops[i]) return false;
+    if (this.n !== ops.length) return false;
+    const a = this.buf;
+    for (let i = 0; i < this.n; i += 1) if (a[i] !== ops[i]) return false;
+    return true;
+  }
+
+  /** 다른 기록과 같은 수인가 (sameAs와 같은 판단, 사본을 만들지 않는다) */
+  same(rec: PenRecord): boolean {
+    if (this.n !== rec.n) return false;
+    const a = this.buf;
+    const b = rec.buf;
+    for (let i = 0; i < this.n; i += 1) if (a[i] !== b[i]) return false;
     return true;
   }
 
   /** 기록 rec의 명령을 그대로 이 기록에 덧붙인다 (재생해 기록한 것과 같은 수) */
   append(rec: PenRecord): void {
-    const src = rec.ops;
-    const o = this.ops;
-    const len = src.length;
-    for (let i = 0; i < len; i += 1) o.push(src[i] ?? 0);
+    const src = rec.buf;
+    const len = rec.n;
+    const o = this.buf;
+    let n = this.n;
+    for (let i = 0; i < len; i += 1) o[n++] = src[i] ?? 0;
+    this.n = n;
   }
 
   /**
@@ -244,8 +321,8 @@ export class PenRecord implements FogPen {
       pen.append(this);
       return;
     }
-    const o = this.ops;
-    const len = o.length;
+    const o = this.buf;
+    const len = this.n;
     let i = 0;
     while (i < len) {
       const op = o[i] ?? 0;

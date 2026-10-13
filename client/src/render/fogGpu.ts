@@ -178,7 +178,7 @@ class DynPatch {
   update(): void {
     const rec = this.rec;
     const last = this.last;
-    if (last && rec.sameAs(last.ops)) return;
+    if (last && rec.same(last)) return;
     this.layer.clear();
     this.layer.ctx.setTransform(1, 0, 0, 1, -this.x0, -this.y0);
     rec.replay(this.pen);
@@ -214,8 +214,12 @@ class TintPatch {
   private by0 = 0;
   private bx1 = 0;
   private by1 = 0;
-  /** 마지막으로 그린 것: [색, 알파, 꼭짓점 수, x0, y0, x1, y1, …] (비었으면 아직 없음) */
+  /**
+   * 마지막으로 그린 것: 앞의 lastN개 = [색, 알파, 꼭짓점 수, x0, y0, x1, y1, …] (0이면 아직 없음). 배열 길이는 줄이지 않는다
+   * (길이를 줄이면 V8이 버퍼를 놓아 다음에 다시 할당한다)
+   */
   private readonly last: number[] = [];
+  private lastN = 0;
 
   constructor(
     scene: Phaser.Scene,
@@ -237,7 +241,9 @@ class TintPatch {
     let y0 = Infinity;
     let x1 = -Infinity;
     let y1 = -Infinity;
-    for (const p of poly) {
+    for (let i = 0; i < poly.length; i += 1) {
+      const p = poly[i];
+      if (!p) continue;
       x0 = Math.min(x0, p.x);
       y0 = Math.min(y0, p.y);
       x1 = Math.max(x1, p.x);
@@ -253,7 +259,7 @@ class TintPatch {
   private same(): boolean {
     const l = this.last;
     const poly = this.poly;
-    if (l.length !== 3 + poly.length * 2 || l[0] !== this.color || l[1] !== this.alpha) return false;
+    if (this.lastN !== 3 + poly.length * 2 || l[0] !== this.color || l[1] !== this.alpha) return false;
     for (let i = 0; i < poly.length; i += 1) {
       const p = poly[i];
       if (!p || l[3 + i * 2] !== p.x || l[4 + i * 2] !== p.y) return false;
@@ -290,7 +296,7 @@ class TintPatch {
     img.setPosition(MAP_X + x0 * s, MAP_Y + y0 * s);
     const l = this.last;
     const poly = this.poly;
-    l.length = 3 + poly.length * 2;
+    this.lastN = 3 + poly.length * 2;
     l[0] = this.color;
     l[1] = this.alpha;
     l[2] = poly.length;
@@ -303,7 +309,7 @@ class TintPatch {
 
   hide(): void {
     this.layer.image.setVisible(false);
-    this.last.length = 0;
+    this.lastN = 0;
     this.poly = NO_POLY;
   }
 
@@ -570,7 +576,7 @@ export class GpuFog implements FogLayer {
     if (lightChanged && this.lightTexture) uploadCanvasTexture(this.lightTexture);
     // 미니맵: 빛과 명령이 지난번과 같으면 그대로 둔다. 바뀌었으면 이번 기록을 남기고(맞바꿔 다음 주기에 다시 쓴다) 읽을 때 합성
     const last = this.miniLast;
-    const miniChanged = lightChanged || last === null || !this.miniRec.sameAs(last.ops);
+    const miniChanged = lightChanged || last === null || !this.miniRec.same(last);
     if (miniChanged) {
       this.miniLast = this.miniRec;
       this.miniRec = last ?? new PenRecord();
