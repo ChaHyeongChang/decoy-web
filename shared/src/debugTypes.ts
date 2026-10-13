@@ -136,8 +136,8 @@ export interface FrameStatsInfo {
 export interface AnimDebug {
   /** 내 괴물 시야 모드 보간 (0 탐색 ~ 1 추적, 괴물이 아니면 null) */
   myBlend: number | null;
-  /** 엔티티별 걷기 위상 · 걷는 중 (id → 값) */
-  gait: Record<string, { phase: number; stepping: boolean }>;
+  /** 엔티티별 걷기 위상(라디안) · 걷기 자세 섞기(0 멈춤 ~ 1 걷는 중) (id → 값, 이번 프레임에 그린 것만) */
+  gait: Record<string, { phase: number; stepping: number }>;
   /** 마지막 안개 · 시야 갱신 시각 (ms, performance.now 기준. 아직 없으면 null) */
   fogAt: number | null;
   /** 생존자 화면 괴물 부채꼴 빨강 정도 0~1 */

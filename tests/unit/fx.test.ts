@@ -5,8 +5,11 @@ import { validateBalance } from '../../shared/src/balance';
 import { survivorVisionPolygon } from '../../shared/src/visibility';
 import { circleIntersectsSector, pointInPolygon } from '../../shared/src/geometry';
 import {
+  DASH_GHOST_MS,
   DUST,
+  DashTrail,
   FX_LIMITS,
+  GHOST_EVERY_MS,
   FX_PRESETS,
   FxSystem,
   POST,
@@ -214,5 +217,87 @@ describe('후처리 수식', () => {
   it('색보정 그늘 기울기는 밝기(Rec.709 가중 합)를 바꾸지 않는다', () => {
     const [r, g, b] = POST.shadowTone;
     expect(Math.abs(0.2126 * r + 0.7152 * g + 0.0722 * b)).toBeLessThan(1e-4);
+  });
+});
+
+describe('돌진 잔상: 돌진 시작부터 1/30초 격자 (렌더링 최적화: 프레임 독립성)', () => {
+  /** 돌진 시작 start부터 dur 동안 x = (t − start) × 0.012 로 달리는 괴물을 hz로 그린다. 프레임 시각 → 잔상 (자리 · 알파) */
+  const run = (
+    hz: number,
+    start: number,
+    dur: number,
+    to: number,
+  ): Map<number, { x: number; a: number; at: number }[]> => {
+    const trail = new DashTrail();
+    trail.setLife(DASH_GHOST_MS);
+    const out = new Map<number, { x: number; a: number; at: number }[]>();
+    let dashing = false;
+    for (let k = 1; (k * 1000) / hz <= to; k += 1) {
+      const t = (k * 1000) / hz;
+      if (t >= start && t < start + dur) {
+        trail.sample((t - start) * 0.012, 0, 0, t, start);
+        dashing = true;
+      } else if (dashing) {
+        trail.end();
+        dashing = false;
+      }
+      out.set(
+        Math.round(t * 1000),
+        trail.live(t).map((g) => ({ x: g.g.x, a: g.alpha, at: g.g.at })),
+      );
+    }
+    return out;
+  };
+
+  it('60 · 120 · 144fps가 같은 시각에 같은 수 · 같은 알파 · 같은 자리 (시작이 프레임 사이여도)', () => {
+    // 첫 잔상(돌진 시작 격자)은 그 전 돌진 프레임이 없어 처음 본 프레임 자리에 남는다: 자리만 한 프레임 이동만큼 다를 수 있다
+    const a = run(60, 103, 250, 700);
+    for (const hz of [120, 144]) {
+      const b = run(hz, 103, 250, 700);
+      for (const [t, list] of a) {
+        const o = b.get(t);
+        if (!o) continue;
+        expect(o.length).toBe(list.length);
+        o.forEach((g, i) => {
+          expect(g.a).toBeCloseTo(list[i]?.a ?? Number.NaN, 9);
+          expect(g.at).toBeCloseTo(list[i]?.at ?? Number.NaN, 9);
+          // 자리는 지난 프레임과 이번 프레임 사이를 격자 시각으로 보간한다. 격자 시각보다 1ms 안 이른 프레임에 남긴 것은
+          // 그 프레임 자리(빠르기 × 1ms 안)
+          const tol = g.at > 103 ? 0.012 * 1 : (1000 / 60) * 0.012;
+          expect(Math.abs(g.x - (list[i]?.x ?? Number.NaN))).toBeLessThanOrEqual(tol + 1e-9);
+        });
+      }
+    }
+  });
+
+  it('60fps에서는 예전처럼 두 프레임마다 하나 (1/30초), 수명 dash.duration', () => {
+    expect(GHOST_EVERY_MS).toBeCloseTo(33.333, 3);
+    const a = run(60, 1000 / 60, 250, 600);
+    const at = (t: number): number => a.get(Math.round(t * 1000))?.length ?? -1;
+    // 돌진 시작 프레임에 하나, 그 뒤 두 프레임마다 하나
+    expect(at(1000 / 60)).toBe(1);
+    expect(at(2000 / 60)).toBe(1);
+    expect(at(3000 / 60)).toBe(2);
+    expect(at(250)).toBe(8);
+    // 돌진이 끝나면 수명(0.25초)까지 옅어진다
+    expect(at(32_000 / 60)).toBe(0);
+  });
+
+  it('돌진 도중 보이기 시작하면 지난 격자를 한 자리에 쌓지 않는다 · clear는 다음 돌진을 새 격자로', () => {
+    const trail = new DashTrail();
+    trail.setLife(250);
+    trail.sample(0, 0, 0, 1000, 0);
+    expect(trail.live(1000).map((g) => g.g.at)).toEqual([expect.closeTo(1000, 6)]);
+    trail.sample(0.4, 0, 0, 1040, 0);
+    expect(trail.live(1040).map((g) => g.g.at)).toEqual([
+      expect.closeTo(1000, 6),
+      expect.closeTo(1033.333, 3),
+    ]);
+    trail.clear();
+    expect(trail.live(1010)).toHaveLength(0);
+    trail.sample(1, 2, 0.5, 1020, 1020);
+    const g = trail.live(1020)[0];
+    expect(g?.g).toEqual({ x: 1, y: 2, aim: 0.5, at: 1020 });
+    expect(g?.alpha).toBe(1);
   });
 });

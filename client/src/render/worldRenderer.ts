@@ -42,20 +42,28 @@ import {
 } from '@decoy/shared';
 import {
   ANIM,
-  advanceWalk,
   cloakFrame,
   dashStretch,
   eyeBlink,
   fadeOut,
-  footfall,
   frameCount,
   quantizePhase,
   seedOf,
+  stepGait,
   windupFill,
+  type TravelPiece,
 } from '../art/anim';
 import { MOTE_R, cloakFrameName, ensureAtlas, type AtlasBuild } from '../art/atlas';
 import { starSlot } from '../art/shapes';
-import { FX_LIMITS, FxSystem, dustMotes, pickDissolveTarget, type DustEye, type StrikeHit } from '../art/fx';
+import {
+  DashTrail,
+  FX_LIMITS,
+  FxSystem,
+  dustMotes,
+  pickDissolveTarget,
+  type DustEye,
+  type StrikeHit,
+} from '../art/fx';
 import { CONE, DANGER, NEON, ROLE, WARN } from '../art/palette';
 import { effectivePreset, type QualityPreset, type RendererKind } from '../gfx/presets';
 import { gfxNow, gfxState, onGfxChange } from '../gfx/state';
@@ -77,15 +85,16 @@ import {
   type BodyDisk,
   type CharacterLayers,
 } from './characters';
-import { DashTrail, STUN_VEIL, WorldPostFx } from './effects';
+import { STUN_VEIL, WorldPostFx } from './effects';
 import { ALPHA, FOG } from './colors';
 import { createFogLayer, type FogLayer } from './baseLayer';
 import {
+  ConeRedTrack,
+  PhaseClock,
   PolyCache,
   ambientRgb,
   compositeScaleFor,
   fogPathFor,
-  nextConeRed,
   opponentFxAllowed,
   rgbCss,
   unionOutline,
@@ -131,11 +140,47 @@ export interface FrameView {
   /** 괴물 화면: 내가 기절 중 / 돌진 중 */
   myStunned: boolean;
   myDashing: boolean;
+  /** 마지막 스냅샷을 받은 시각 (performance.now): 스냅샷으로 바뀐 상태가 시작된 순간 */
+  snapAt: number;
+  /** 괴물 화면: 예측한 공격 준비 · 돌진을 누른 시각 (입력 틱, 없으면 null) */
+  localWindupAt: number | null;
+  localDashAt: number | null;
+  /** 보간 엔티티의 프레임 사이 경로 · 상태 경계 (없으면 프레임 사이 직선 · 프레임 시각을 쓴다) */
+  motion: MotionSource | null;
 }
 
-/** 시야 원 · 안개 갱신 주기 (ms). 생존자 시야는 0.1초 이하, 괴물 부채꼴은 판정과 맞게 자주 */
+/**
+ * 보간 엔티티(다른 생존자 · 생존자 화면의 괴물)의 지난 프레임 → 이번 프레임 사이 (렌더링 최적화: 프레임 독립성).
+ * 걷기는 보간 경로를 표본 시각에서 나눈 조각으로 재고, 상태(준비 · 돌진 · 수감 · 발각)가 바뀐 프레임은 바뀐 경계 시각부터 잰다
+ */
+export interface MotionSource {
+  /** 보간 경로 조각들 (시간 순서). 보간 엔티티가 아니면 false */
+  travel(kind: 'survivor' | 'monster', id: string, out: TravelPiece[]): boolean;
+  /** 이번 프레임 사이에 보간 상태가 바뀔 수 있었던 경계의 이 기기 시각 (ms, 없으면 null) */
+  edgeAt(kind: 'survivor' | 'monster', id: string): number | null;
+  /**
+   * 내 캐릭터의 조각들 (anim selfPieces): 걷는 중인지는 입력 틱마다 예측 상태가 움직였는가로, 거리는 예측 보간(직전 틱 상태 →
+   * 지금 틱 상태)의 빠르기로 잰다. 입력 틱 · 스냅샷 보정 · 보간이 다 간 순간에서 나눈다. 기록이 없으면 false
+   */
+  selfTravel(out: TravelPiece[]): boolean;
+}
+
+/** 프레임 독립성 시험용 월드 연출 상태 (AnimDebug의 월드 부분) */
+export interface WorldAnimDebug {
+  gait: Record<string, { phase: number; stepping: number }>;
+  fogAt: number | null;
+  coneRed: number;
+  dashGhosts: number;
+  particles: number;
+}
+
+/**
+ * 시야 원 · 안개 갱신 주기 (ms). 생존자 시야는 0.1초 이하, 괴물 부채꼴은 판정과 맞게 자주(1/30초).
+ * 정해진 시각에 위상을 고정해 갱신한다(fogMath PhaseClock): 60fps에서는 예전처럼 3 · 2프레임마다, 120fps는 6 · 4프레임마다.
+ * 괴물 주기는 예전 '33ms 넘게 지나면'이 60fps에서 실제로 두 프레임(33.3ms)마다였던 것을 그대로 1/30초로 적는다
+ */
 const SURVIVOR_FOG_MS = 50;
-const MONSTER_FOG_MS = 33;
+const MONSTER_FOG_MS = 1000 / 30;
 
 /** 포효 충격파 (괴물 화면, 범위 표시라 이벤트 효과 0.4초 한도 밖) */
 export const ROAR_WAVE_MS = 600;
@@ -162,6 +207,8 @@ interface Gait {
   y: number;
   stepping: number;
   footfall: boolean;
+  /** 이번 프레임에 발이 닿은 순간 (performance.now 기준 ms, 발먼지 입자의 태어난 시각) */
+  footAt: number;
 }
 
 interface Fade {
@@ -229,9 +276,18 @@ export class WorldRenderer {
   private readonly gfxCount: GfxCount = { arcs: 0, fills: 0 };
   /** 레이어 이름별 표시 객체 (후처리 검사 layerOf) */
   private readonly layerNames = new Map<Phaser.GameObjects.GameObject, LayerName>();
-  private lastFogAt = -1e9;
+  /** 안개 · 시야 갱신 시계 (정해진 시각에 위상 고정) */
+  private readonly fogClock = new PhaseClock();
   private coneRed = 0;
-  private coneShown = false;
+  private readonly coneTrack = new ConeRedTrack();
+  /** 지난 프레임 시각 (스냅샷 · 입력 틱으로 바뀐 상태가 이번 프레임 사이에 바뀌었는지 가린다) */
+  private lastDrawAt: number | null = null;
+  /** 걷기 조각 (프레임마다 다시 쓴다) */
+  private readonly pieces: TravelPiece[] = [];
+  /** 이번 프레임에 걷기를 진행한 엔티티 (디버그 animDebug) */
+  private readonly gaitDrawn = new Set<string>();
+  /** 이번 돌진이 시작된 순간 (돌진 잔상 격자, 돌진 중이 아니면 null) */
+  private dashSince: number | null = null;
   drawn: DrawnEntity[] = [];
   baseRefreshed = false;
   private readonly dashTrail = new DashTrail();
@@ -251,16 +307,20 @@ export class WorldRenderer {
   private hits: { x: number; y: number; you: boolean; t0: number }[] = [];
   /** 생존자 화면: 팀원 질주 끝 시각 (performance.now, 규칙 시간 sprintDuration) */
   private sprintUntil = 0;
-  /** 괴물 화면: 포효 충격파 시작(처음 그린 프레임에 정함, null = 아직 안 그림) · 자리 */
-  private roarWave: { t0: number | null; x: number; y: number } | null = null;
+  /**
+   * 괴물 화면: 포효 충격파 시작(포효 핑을 받은 시각) · 자리 · 한 번이라도 그렸는가. 처음 그리는 프레임이 이미 끝난 뒤면
+   * (프레임이 0.6초보다 느린 기기) 그 프레임부터 시작해 최소 한 번은 보인다
+   */
+  private roarWave: { t0: number; x: number; y: number; drawn: boolean } | null = null;
   /** 괴물 화면: 잡힘 알림 (보이던 자리에서 흩어짐) */
   private captureAt = -1e9;
   /** 기절 별 자리 (괴물 몸 중심에서 본 방향, 기절 중이 아니면 null) */
   private starDir: number | null = null;
   /** 괴물 화면: 마지막 타격 (attackHit 이벤트, 흩어짐 자리를 타격 부채꼴 안으로 좁힌다) */
   private lastStrike: (StrikeHit & { at: number }) | null = null;
-  /** 괴물 화면: 기절 알림 (가드가 안 보이면 괴물 몸 중심에서 방향 없이) */
+  /** 괴물 화면: 기절 알림 (가드가 안 보이면 괴물 몸 중심에서 방향 없이) · 받은 시각 */
   private stunnedPending = false;
+  private stunnedAt = 0;
   private shoveSeen = false;
   /** 공격 준비 채움 시작 (performance.now) */
   private windupStart: number | null = null;
@@ -436,13 +496,15 @@ export class WorldRenderer {
       }
       case 'stunned':
         this.stunnedPending = true;
+        this.stunnedAt = nowMs;
         return;
       case 'imprisoned':
         if (isMonster) this.captureAt = nowMs;
         return;
       case 'roarPings':
-        // 시작 시각은 처음 그리는 프레임에서 정한다: 프레임이 느린 기기에서도 충격파 · 범위가 최소 한 번은 보인다
-        if (isMonster && this.lastMe) this.roarWave = { t0: null, x: this.lastMe.x, y: this.lastMe.y };
+        // 시작은 받은 시각 (프레임 수와 무관). 프레임이 느린 기기에서도 충격파 · 범위가 최소 한 번은 보인다(draw)
+        if (isMonster && this.lastMe)
+          this.roarWave = { t0: nowMs, x: this.lastMe.x, y: this.lastMe.y, drawn: false };
         return;
       default:
         return;
@@ -481,7 +543,7 @@ export class WorldRenderer {
     this.fog = this.buildFog();
     this.post.apply(this.preset, this.fog.shader);
     this.post.raise();
-    this.lastFogAt = -1e9;
+    this.fogClock.reset();
   }
 
   /** 그림 텍스처 (zoom · 반지름이 바뀌면 다시 굽고 그림 묶음을 새로 만든다) */
@@ -533,22 +595,70 @@ export class WorldRenderer {
     return r;
   }
 
-  /** 이동 거리로 걷기 위상을 진행 (멈추면 그 자세로 정지). 순간이동(1타일 넘게)은 위상을 잇지 않는다 */
-  private gait(id: string, x: number, y: number, frameMs: number): Gait {
+  /**
+   * 이동 거리로 걷기 위상을 진행 (멈추면 그 자세로 정지). 순간이동(60fps 한 프레임에 1타일 넘는 빠르기)은 위상을 잇지 않는다.
+   * 보간 엔티티(kind)는 보간 경로를 표본 시각에서 나눈 조각으로 재고(모퉁이를 현으로 깎지 않게), 내 캐릭터(kind = null)는
+   * 입력 틱 · 보정 기록으로 잰다(selfTravel). 둘 다 없으면 프레임 사이 직선 하나.
+   * 걷기 판단 · 자세 섞기는 시간으로 잰다(anim stepGait): 60 · 120fps에서 같은 시각에 같은 위상 · 자세 (렌더링 최적화)
+   */
+  private gait(
+    v: FrameView,
+    id: string,
+    x: number,
+    y: number,
+    frameMs: number,
+    kind: 'survivor' | 'monster' | null,
+  ): Gait {
     let g = this.gaits.get(id);
     if (!g) {
-      g = { phase: 0, x, y, stepping: 0, footfall: false };
+      g = { phase: 0, x, y, stepping: 0, footfall: false, footAt: v.nowMs };
       this.gaits.set(id, g);
     }
-    const d = Math.hypot(x - g.x, y - g.y);
-    const prev = g.phase;
-    const moving = d > ANIM.walkEpsilon && d < 1;
-    if (moving) g.phase = advanceWalk(g.phase, d);
-    g.stepping = moving ? Math.min(1, g.stepping + frameMs / 120) : Math.max(0, g.stepping - frameMs / 160);
-    g.footfall = moving && footfall(prev, g.phase);
+    const pieces = this.pieces;
+    const chord = Math.hypot(x - g.x, y - g.y);
+    const known =
+      v.motion !== null && (kind === null ? v.motion.selfTravel(pieces) : v.motion.travel(kind, id, pieces));
+    if (!known) {
+      pieces.length = 0;
+      pieces.push({ ms: frameMs, dist: chord });
+    }
+    const fall = stepGait(g, pieces);
+    let total = 0;
+    for (const p of pieces) total += p.ms;
+    g.footfall = fall !== null;
+    g.footAt = fall === null ? v.nowMs : v.nowMs - (total - fall);
     g.x = x;
     g.y = y;
+    this.gaitDrawn.add(id);
     return g;
+  }
+
+  /** 스냅샷으로 바뀐 상태가 시작된 순간: 지난 프레임 뒤에 받은 스냅샷이면 받은 시각, 아니면 지금 */
+  private snapEdge(v: FrameView): number {
+    const prev = this.lastDrawAt;
+    return prev !== null && v.snapAt > prev && v.snapAt <= v.nowMs ? v.snapAt : v.nowMs;
+  }
+
+  /** 보간 엔티티의 상태가 이번 프레임에 바뀌었으면 그 순간 (표본 경계, 아니면 받은 스냅샷 · 지금) */
+  private flipAt(v: FrameView, kind: 'survivor' | 'monster', id: string): number {
+    const t = v.motion?.edgeAt(kind, id) ?? null;
+    return t !== null && t <= v.nowMs ? t : this.snapEdge(v);
+  }
+
+  /** 프레임 독립성 시험용: 이번 프레임의 걷기 · 안개 갱신 · 부채꼴 색 · 잔상 · 입자 */
+  animDebug(): WorldAnimDebug {
+    const gait: Record<string, { phase: number; stepping: number }> = {};
+    for (const id of this.gaitDrawn) {
+      const g = this.gaits.get(id);
+      if (g) gait[id] = { phase: g.phase, stepping: g.stepping };
+    }
+    return {
+      gait,
+      fogAt: this.fogClock.last,
+      coneRed: this.coneRed,
+      dashGhosts: this.fx.dashGhosts,
+      particles: this.fxs.count,
+    };
   }
 
   /** 생존자 팀 시야의 눈들 (자기 + 팀원, 사망 · 탈출 제외) */
@@ -587,10 +697,10 @@ export class WorldRenderer {
 
     // 1~6. 바닥 · 거점 · 탈출구 영역 · 시야 채움 · 안개 — 갱신 주기마다 합성
     // (그림이 지난 주기와 같으면 안개 레이어가 합성 · 업로드를 건너뛰고, 미니맵도 다시 그리지 않는다)
-    const fogDue = v.nowMs - this.lastFogAt >= (isMonster ? MONSTER_FOG_MS : SURVIVOR_FOG_MS);
+    const fogDue = this.fogClock.due(v.nowMs, isMonster ? MONSTER_FOG_MS : SURVIVOR_FOG_MS);
     this.baseRefreshed = false;
+    this.gaitDrawn.clear();
     if (fogDue) {
-      this.lastFogAt = v.nowMs;
       const b = this.fog;
       b.begin();
       b.drawPoints(snap.world.points, balance);
@@ -680,9 +790,15 @@ export class WorldRenderer {
       });
     }
     const coneShown = !isMonster && v.monster !== null;
+    // 부채꼴 색은 seesSomeone이 바뀐 순간(보간 표본 경계)부터 잰다 (프레임 수와 무관)
+    this.coneRed = this.coneTrack.update(
+      coneShown,
+      v.monster?.seesSomeone === true,
+      v.nowMs,
+      coneShown ? this.flipAt(v, 'monster', 'monster') : v.nowMs,
+    );
     if (!isMonster && v.monster) {
       const m = v.monster;
-      this.coneRed = nextConeRed(this.coneRed, this.coneShown, m.seesSomeone, frameMs);
       this.drawMonsterCone(balance, m, tS);
       const shape = monsterConeShape(balance, m.blend);
       const state = m.seesSomeone ? 'seen' : 'idle';
@@ -698,10 +814,7 @@ export class WorldRenderer {
         color: CONE[state],
         alpha: state === 'seen' ? CONE_LOOK.fillSeen : CONE_LOOK.fillIdle,
       });
-    } else {
-      this.coneRed = 0;
     }
-    this.coneShown = coneShown;
 
     // 상대 쪽 잔여 효과 규칙: 생존자 화면에서 괴물이 나오는 효과는 이번 스냅샷에 괴물이 있을 때만
     const oppVisible = isMonster || opponentFxAllowed(snap.monster !== null);
@@ -736,9 +849,12 @@ export class WorldRenderer {
       if (serverWindup || v.localWindupDir !== null) {
         windupDir = v.localWindupDir ?? v.me.face;
         windupAt = v.me;
-        // 예측한 준비는 누른 순간부터, 서버 값만 있으면 남은 시간에서
+        // 예측한 준비는 누른 순간(입력 틱)부터, 서버 값만 있으면 그 스냅샷을 받은 순간의 남은 시간에서
         if (this.windupStart === null)
-          this.windupStart = v.localWindupDir !== null ? v.nowMs : v.nowMs - (atk.windup - left) * 1000;
+          this.windupStart =
+            v.localWindupDir !== null
+              ? (v.localWindupAt ?? v.nowMs)
+              : Math.min(v.nowMs, v.snapAt) - (atk.windup - left) * 1000;
       }
     }
     // 생존자 화면: 준비 이벤트를 받았는데 보간된 준비(100ms 늦음)를 준비 시간 안에 한 번도 못 그렸으면 늦게라도 한 번
@@ -750,9 +866,12 @@ export class WorldRenderer {
     if (!isMonster && oppVisible && v.monster && (v.monster.windup > 0 || latched)) {
       windupDir = v.monster.windup > 0 ? v.monster.aim : (this.oppWindupPending?.dir ?? v.monster.aim);
       windupAt = v.monster;
-      // 늦게 한 번 그리는 준비는 다 찬 모습으로
+      // 보간된 준비는 보간 상태가 바뀐 순간(표본 경계)부터, 늦게 한 번 그리는 준비는 다 찬 모습으로
       if (this.windupStart === null)
-        this.windupStart = v.nowMs - (atk.windup - (v.monster.windup > 0 ? v.monster.windup : 0)) * 1000;
+        this.windupStart =
+          v.monster.windup > 0
+            ? this.flipAt(v, 'monster', 'monster') - (atk.windup - v.monster.windup) * 1000
+            : v.nowMs - atk.windup * 1000;
       this.oppWindupPending = null;
       oppFx += 1;
     }
@@ -794,8 +913,10 @@ export class WorldRenderer {
       drawCampZone(this.ranges, item, PRISON_RECT);
     }
     if (isMonster && this.roarWave) {
-      this.roarWave.t0 ??= v.nowMs;
-      const k = (v.nowMs - this.roarWave.t0) / ROAR_WAVE_MS;
+      const wave = this.roarWave;
+      if (!wave.drawn && v.nowMs - wave.t0 >= ROAR_WAVE_MS) wave.t0 = v.nowMs;
+      wave.drawn = true;
+      const k = (v.nowMs - wave.t0) / ROAR_WAVE_MS;
       if (k >= 1 || k < 0) this.roarWave = null;
       else {
         const item: InfoItem = {
@@ -863,7 +984,8 @@ export class WorldRenderer {
     this.starsG.clear();
     const footDust = FX_LIMITS.footDust[this.preset.tier];
 
-    // 돌진 잔상 (보이는 화면, dash.duration): 돌진 중 위치를 남기고 옅어진다 + 붉은 줄
+    // 돌진 잔상 (보이는 화면, dash.duration): 돌진 중 위치를 남기고 옅어진다 + 붉은 줄.
+    // 잔상은 돌진이 시작된 순간(내 돌진: 누른 입력 틱, 상대: 보간 표본 경계)부터 1/30초 격자 (프레임 수와 무관)
     this.dashTrail.setLife(balance.monster.dash.duration * 1000);
     const dashing = isMonster
       ? v.me && v.myDashing
@@ -874,7 +996,19 @@ export class WorldRenderer {
         : null;
     if (dashing) {
       const face = 'aim' in dashing ? dashing.aim : dashing.face;
-      this.dashTrail.sample(dashing.x, dashing.y, face, v.nowMs);
+      if (this.dashSince === null) {
+        const pressed = v.localDashAt;
+        const prev = this.lastDrawAt;
+        this.dashSince = isMonster
+          ? pressed !== null && prev !== null && pressed > prev && pressed <= v.nowMs
+            ? pressed
+            : this.snapEdge(v)
+          : this.flipAt(v, 'monster', 'monster');
+      }
+      this.dashTrail.sample(dashing.x, dashing.y, face, v.nowMs, this.dashSince);
+    } else if (this.dashSince !== null) {
+      this.dashSince = null;
+      this.dashTrail.end();
     }
     const ghosts = this.dashTrail.live(v.nowMs);
     this.drawGhosts(ghosts, mR);
@@ -917,6 +1051,9 @@ export class WorldRenderer {
       if (!r.used) {
         r.destroy();
         this.monsterRigs.delete(id);
+        // 걷기도 생존자처럼 지운다: 시야에서 사라진 프레임이 fps마다 다르면(120fps는 사라지기 직전 프레임을 하나 더 그린다)
+        // 남은 위상이 달라져 다시 나타난 뒤에도 이어졌다 (렌더링 최적화)
+        this.gaits.delete(id);
       }
 
     // 안개 위 마커: 탐지(초록 다이아, 실시간), 포효한 괴물 위치(주황), 포효 핑(흰 원 펄스)
@@ -997,6 +1134,7 @@ export class WorldRenderer {
     this.post.measure();
     gfxState.features.charGfxArcs = this.gfxCount.arcs;
     gfxState.features.charGfxFills = this.gfxCount.fills;
+    this.lastDrawAt = v.nowMs;
     this.fx = {
       stunStars: stunStars.any,
       dashGhosts: ghosts.length,
@@ -1117,7 +1255,10 @@ export class WorldRenderer {
     });
   }
 
-  /** 상태 변화 (수감 · 탈출 · 사망)를 보고 효과를 만든다. 반환: 지금 그릴 페이드 */
+  /**
+   * 상태 변화 (수감 · 탈출 · 사망)를 보고 효과를 만든다. 페이드 · 흩어짐은 상태가 바뀐 순간(flip: 보간 표본 경계 · 받은
+   * 스냅샷, 렌더링 최적화)부터 잰다 — 바뀐 것을 처음 본 프레임 시각은 fps마다 다르다
+   */
   private transition(
     id: string,
     status: SurvivorStatus,
@@ -1128,15 +1269,17 @@ export class WorldRenderer {
     realMs: number,
     isMonster: boolean,
     sR: number,
+    flip: () => number,
   ): void {
     const prev = this.lastStatus.get(id);
     if (prev && prev.status === 'free' && status === 'imprisoned') {
-      this.fxs.dissolve(prev.x, prev.y, sR, clockMs / 1000, null, isMonster);
-      this.fades.set(id, { kind: 'appear', t0: realMs, x, y, face });
+      const t0 = flip();
+      this.fxs.dissolve(prev.x, prev.y, sR, (clockMs - (realMs - t0)) / 1000, null, isMonster);
+      this.fades.set(id, { kind: 'appear', t0, x, y, face });
     } else if (prev && prev.status === 'free' && status === 'escaped' && !isMonster) {
-      this.fades.set(id, { kind: 'escape', t0: realMs, x: prev.x, y: prev.y, face: prev.face });
+      this.fades.set(id, { kind: 'escape', t0: flip(), x: prev.x, y: prev.y, face: prev.face });
     } else if (prev && prev.status !== 'dead' && status === 'dead' && !isMonster) {
-      this.fades.set(id, { kind: 'death', t0: realMs, x: prev.x, y: prev.y, face: prev.face });
+      this.fades.set(id, { kind: 'death', t0: flip(), x: prev.x, y: prev.y, face: prev.face });
     }
     if (status === 'free' || !prev) this.lastStatus.set(id, { status, x, y, face });
     else this.lastStatus.set(id, { ...prev, status });
@@ -1158,11 +1301,12 @@ export class WorldRenderer {
     const { snap, balance } = v;
     const isMonster = v.role === 'monster';
     const half = this.preset.halfFrameAnims;
-    const nowS = clockMs / 1000;
     const phaseOf = (g: Gait): number => (half ? quantizePhase(g.phase, 4) : g.phase);
     let stunAny = false;
     let stunOpp = false;
     const realMs = v.nowMs;
+    /** 이 기기 시각 t(ms)를 장식 시계(초)로: 입자의 태어난 시각을 바뀐 순간으로 둔다 */
+    const clockAt = (t: number): number => (clockMs - (realMs - t)) / 1000;
     this.hits = this.hits.filter((h) => realMs - h.t0 < 400);
 
     if (isMonster) {
@@ -1186,7 +1330,8 @@ export class WorldRenderer {
           sR,
         );
         if (best) {
-          this.fxs.dissolve(best.x, best.y, sR, nowS, null, true);
+          // 보이던 생존자가 사라진(수감된) 순간부터
+          this.fxs.dissolve(best.x, best.y, sR, clockAt(this.flipAt(v, 'survivor', best.id)), null, true);
           this.lastStatus.delete(best.id);
           this.captureAt = -1e9;
         }
@@ -1215,13 +1360,15 @@ export class WorldRenderer {
 
     // 다른 생존자
     for (const [id, s] of v.survivors) {
-      this.transition(id, s.status, s.x, s.y, s.face, clockMs, realMs, isMonster, sR);
+      this.transition(id, s.status, s.x, s.y, s.face, clockMs, realMs, isMonster, sR, () =>
+        this.flipAt(v, 'survivor', id),
+      );
       const fade = this.fades.get(id);
       if (s.status === 'dead' || s.status === 'escaped') {
         if (!isMonster && s.role && fade) this.drawFade(id, s.role, fade, realMs, sR);
         continue;
       }
-      const g = this.gait(id, s.x, s.y, frameMs);
+      const g = this.gait(v, id, s.x, s.y, frameMs, 'survivor');
       const rig = this.survivorRig(id);
       if (isMonster) {
         // 흰색 위장: 역할 · 체력 · 능력 인자 없이 (reveal은 서버가 노출 창에 보낸 역할뿐)
@@ -1253,7 +1400,7 @@ export class WorldRenderer {
             alpha: 1,
           });
         }
-        if (footDust && g.footfall) this.fxs.footDust(s.x, s.y, nowS, id, true);
+        if (footDust && g.footfall) this.fxs.footDust(s.x, s.y, clockAt(g.footAt), id, true);
       } else {
         const role = s.role ?? 'runner';
         const appear = fade?.kind === 'appear' ? 1 - fadeOut(realMs - fade.t0, ANIM.imprisonAppearMs) : 1;
@@ -1280,7 +1427,7 @@ export class WorldRenderer {
           drawInjury(this.attachG, s.x, s.y, s.face, sR);
         if (role === 'runner' && v.nowMs < this.sprintUntil && g.stepping > 0.3)
           drawSpeedLines(this.fxUnder, s.x, s.y, s.face, sR, tS);
-        if (footDust && g.footfall) this.fxs.footDust(s.x, s.y, nowS, null, false);
+        if (footDust && g.footfall) this.fxs.footDust(s.x, s.y, clockAt(g.footAt), null, false);
         if (s.rescue !== null && s.rescue > 0) {
           drawRescueRing(this.attachG, s.x, s.y, s.rescue);
           info.push({
@@ -1304,7 +1451,7 @@ export class WorldRenderer {
     if (!isMonster && v.monster) {
       const m = v.monster;
       const rig = this.monsterRig('monster');
-      const g = this.gait('monster', m.x, m.y, frameMs);
+      const g = this.gait(v, 'monster', m.x, m.y, frameMs, 'monster');
       const pose = this.monsterPose(m.x, m.y, m.aim, m.stunned, m.dashing, m.windup > 0 ? 1 : 0, g, tS, half);
       drawMonsterRig(rig, pose, mR);
       if (m.stunned && oppVisible) {
@@ -1314,8 +1461,9 @@ export class WorldRenderer {
         stunOpp = true;
       }
       if (this.stunnedPending && oppVisible)
-        this.fxs.ring('impact', m.x, m.y, mR * 2.4, nowS, 'monster', true);
-      if (footDust && g.footfall && oppVisible) this.fxs.footDust(m.x, m.y, nowS, 'monster', true);
+        this.fxs.ring('impact', m.x, m.y, mR * 2.4, clockAt(this.stunnedAt), 'monster', true);
+      if (footDust && g.footfall && oppVisible)
+        this.fxs.footDust(m.x, m.y, clockAt(g.footAt), 'monster', true);
       drawn.push({
         id: 'monster',
         kind: 'monster',
@@ -1333,7 +1481,7 @@ export class WorldRenderer {
       const st = snap.you.surv?.status;
       if (isMonster) {
         const rig = this.monsterRig(v.selfId);
-        const g = this.gait(v.selfId, v.me.x, v.me.y, frameMs);
+        const g = this.gait(v, v.selfId, v.me.x, v.me.y, frameMs, null);
         const raise = this.windupStart !== null ? 1 : 0;
         const pose = this.monsterPose(
           v.me.x,
@@ -1354,11 +1502,12 @@ export class WorldRenderer {
         }
         if (this.stunnedPending) {
           // 가드가 보였으면 그 자리에서 충격파가 이미 났다. 안 보였으면 몸 중심에서 방향 없이
-          if (!this.shoveSeen) this.fxs.ring('impact', v.me.x, v.me.y, mR * 2.4, nowS, null, false);
+          if (!this.shoveSeen)
+            this.fxs.ring('impact', v.me.x, v.me.y, mR * 2.4, clockAt(this.stunnedAt), null, false);
           this.stunnedPending = false;
           this.shoveSeen = false;
         }
-        if (footDust && g.footfall) this.fxs.footDust(v.me.x, v.me.y, nowS, null, false);
+        if (footDust && g.footfall) this.fxs.footDust(v.me.x, v.me.y, clockAt(g.footAt), null, false);
         drawn.push({
           id: v.selfId,
           kind: 'self',
@@ -1370,10 +1519,13 @@ export class WorldRenderer {
         });
       } else {
         const role = v.role as RoleId;
-        this.transition(v.selfId, st ?? 'free', v.me.x, v.me.y, v.me.face, clockMs, realMs, false, sR);
+        // 내 상태는 스냅샷으로 바뀐다: 그 스냅샷을 받은 순간부터
+        this.transition(v.selfId, st ?? 'free', v.me.x, v.me.y, v.me.face, clockMs, realMs, false, sR, () =>
+          this.snapEdge(v),
+        );
         const fade = this.fades.get(v.selfId);
         if (st !== 'dead' && st !== 'escaped') {
-          const g = this.gait(v.selfId, v.me.x, v.me.y, frameMs);
+          const g = this.gait(v, v.selfId, v.me.x, v.me.y, frameMs, null);
           const rig = this.survivorRig(v.selfId);
           const prot = (snap.you.surv?.protectLeft ?? 0) > 0;
           const appear = fade?.kind === 'appear' ? 1 - fadeOut(realMs - fade.t0, ANIM.imprisonAppearMs) : 1;
@@ -1401,7 +1553,7 @@ export class WorldRenderer {
             drawInjury(this.attachG, v.me.x, v.me.y, v.me.face, sR);
           if (role === 'runner' && s && s.abilityActive > 0 && g.stepping > 0.3)
             drawSpeedLines(this.fxUnder, v.me.x, v.me.y, v.me.face, sR, tS);
-          if (footDust && g.footfall) this.fxs.footDust(v.me.x, v.me.y, nowS, null, false);
+          if (footDust && g.footfall) this.fxs.footDust(v.me.x, v.me.y, clockAt(g.footAt), null, false);
           const rescue = s?.rescue ?? 0;
           if (rescue > 0) {
             drawRescueRing(this.attachG, v.me.x, v.me.y, rescue);

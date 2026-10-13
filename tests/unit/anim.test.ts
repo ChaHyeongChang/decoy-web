@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 import { validateBalance } from '../../shared/src/balance';
 import {
   ANIM,
+  LinearRamp,
+  WALK_REF_MS,
   advanceWalk,
   breathScale,
   cloakFrame,
@@ -14,12 +16,16 @@ import {
   frameCount,
   hiddenSurvivorPose,
   hitReact,
+  isWalking,
   protectBlink,
   quantizePhase,
+  selfPieces,
+  stepGait,
   walkPose,
   windupFill,
   windupFillFromRemaining,
 } from '../../client/src/art/anim';
+import type { GaitState, SelfStep, TravelPiece } from '../../client/src/art/anim';
 import type { drawHiddenSurvivor } from '../../client/src/render/characters';
 
 const balance = validateBalance(JSON.parse(readFileSync('config/balance.json', 'utf8')));
@@ -166,5 +172,198 @@ describe('괴물 화면 생존자 (흰색 위장)', () => {
     expect(typeof typeOnly).toBe('function');
     // 순수 함수도 역할 인자가 없다: 9개 (x, y, face, walkPhase, stepping, protected, reveal, clock, protectedAlpha)
     expect(hiddenSurvivorPose.length).toBe(9);
+  });
+});
+
+// ───────────── 렌더링 최적화: 프레임 독립성 (60 · 120fps에서 같은 시각에 같은 값) ─────────────
+
+/** hz로 from → to 사이 프레임 시각 (to 포함, 가상 시계처럼 k × 1000 / hz) */
+function frameTimes(hz: number, from: number, to: number): number[] {
+  const out: number[] = [];
+  for (let k = Math.floor((from * hz) / 1000) + 1; (k * 1000) / hz <= to + 1e-9; k += 1)
+    out.push((k * 1000) / hz);
+  return out;
+}
+
+/** 위상(라디안)이 2π로 감싼 것까지 같은가 */
+function samePhase(a: number | undefined, b: number): void {
+  const d = (((((a ?? Number.NaN) - b) % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+  expect(Math.abs(d)).toBeLessThan(1e-9);
+}
+
+/** 시각 → 위치(타일, 1차원)인 경로를 hz 프레임으로 잘라 조각들로 (프레임 사이 직선) */
+function chordPieces(path: (t: number) => number, times: readonly number[], from: number): TravelPiece[][] {
+  let prevT = from;
+  return times.map((t) => {
+    const piece = { ms: t - prevT, dist: Math.abs(path(t) - path(prevT)) };
+    prevT = t;
+    return [piece];
+  });
+}
+
+describe('걷기 판단 · 자세 섞기 (프레임 독립성)', () => {
+  it('걷기 판단은 시간당 빠르기: 60fps 한 프레임이면 예전 판단(거리 0.002 초과 · 1 미만)과 같다', () => {
+    expect(WALK_REF_MS).toBeCloseTo(16.667, 3);
+    expect(isWalking(0.0021, WALK_REF_MS)).toBe(true);
+    expect(isWalking(0.0019, WALK_REF_MS)).toBe(false);
+    expect(isWalking(0.99, WALK_REF_MS)).toBe(true);
+    expect(isWalking(1.01, WALK_REF_MS)).toBe(false);
+    // 120fps: 같은 빠르기면 거리 절반이어도 걷는 중 (예전 거리 판단은 0.0015에서 멈춤으로 봤다)
+    expect(isWalking(0.0015, WALK_REF_MS / 2)).toBe(true);
+    expect(isWalking(0.0009, WALK_REF_MS / 2)).toBe(false);
+    // 120fps 한 프레임에 0.6타일 = 60fps 한 프레임에 1.2타일 빠르기: 순간이동
+    expect(isWalking(0.6, WALK_REF_MS / 2)).toBe(false);
+    expect(isWalking(0, 10)).toBe(false);
+    expect(isWalking(0.1, 0)).toBe(false);
+  });
+
+  it('같은 경로를 60fps · 120fps 조각으로 걸으면 같은 시각에 위상 · 자세 섞기 · 발 닿는 순간이 같다', () => {
+    // 4타일/초로 걷다가 700ms에 멈추고 1000ms에 다시 걷는다 (멈춤 · 출발이 60Hz 프레임 사이에 있다)
+    const path = (t: number): number => (t < 700 ? t * 0.004 : t < 1000 ? 2.8 : 2.8 + (t - 1000) * 0.004);
+    const run = (hz: number): { t: number; phase: number; stepping: number; falls: number[] }[] => {
+      const g: GaitState = { phase: 0, stepping: 0 };
+      const times = frameTimes(hz, 0, 1500);
+      const pieces = chordPieces(path, times, 0);
+      const out: { t: number; phase: number; stepping: number; falls: number[] }[] = [];
+      const falls: number[] = [];
+      let prevT = 0;
+      times.forEach((t, i) => {
+        const fall = stepGait(g, pieces[i] ?? []);
+        if (fall !== null) falls.push(prevT + fall);
+        prevT = t;
+        out.push({ t, phase: g.phase, stepping: g.stepping, falls: falls.slice() });
+      });
+      return out;
+    };
+    const a = run(60);
+    const b = run(120);
+    for (const s of a) {
+      const o = b.find((x) => Math.abs(x.t - s.t) < 1e-6);
+      if (!o) throw new Error(`120fps에 ${s.t} 프레임이 없다`);
+      samePhase(o.phase, s.phase);
+      // 멈춤 · 출발 순간이 60Hz 프레임 사이면 그 프레임 하나는 판단이 다를 수 있다: 직선 경로를 프레임 조각 하나로 넘기면
+      // 시간 비율만큼만 걸은 것으로 보지 못한다. 월드 렌더러는 보간 경로를 표본 시각에서 나눈 조각을 넘겨 이 차이가 없다
+      expect(Math.abs(o.stepping - s.stepping)).toBeLessThanOrEqual(WALK_REF_MS / ANIM.stepOutMs + 1e-9);
+      expect(o.falls.length).toBe(s.falls.length);
+      o.falls.forEach((f, i) => expect(f).toBeCloseTo(s.falls[i] ?? Number.NaN, 6));
+    }
+  });
+
+  it('꺾인 점에서 나눈 조각을 넘기면 자세 섞기까지 정확히 같다 (보간 경로 조각)', () => {
+    // 멈춤 700ms · 출발 1000ms에서 나눈 조각: 60fps 프레임 (683.3, 700]은 그대로, (983.3, 1000]도 그대로라 경계가 프레임 안에 오게 690 · 990
+    const path = (t: number): number => (t < 690 ? t * 0.004 : t < 990 ? 2.76 : 2.76 + (t - 990) * 0.004);
+    const cuts = [690, 990];
+    const run = (hz: number): Map<number, GaitState> => {
+      const g: GaitState = { phase: 0, stepping: 0 };
+      const out = new Map<number, GaitState>();
+      let prevT = 0;
+      for (const t of frameTimes(hz, 0, 1500)) {
+        const pts = [prevT, ...cuts.filter((c) => c > prevT && c < t), t];
+        const pieces = pts.slice(1).map((p, i) => ({
+          ms: p - (pts[i] ?? p),
+          dist: Math.abs(path(p) - path(pts[i] ?? p)),
+        }));
+        stepGait(g, pieces);
+        out.set(Math.round(t * 1000), { ...g });
+        prevT = t;
+      }
+      return out;
+    };
+    const a = run(60);
+    const b = run(120);
+    for (const [t, s] of a) {
+      const o = b.get(t);
+      samePhase(o?.phase, s.phase);
+      expect(o?.stepping).toBeCloseTo(s.stepping, 9);
+    }
+  });
+
+  it('걷기 자세 섞기는 걷는 동안 stepInMs, 멈춘 동안 stepOutMs에 걸쳐 바뀐다', () => {
+    const g: GaitState = { phase: 0, stepping: 0 };
+    stepGait(g, [{ ms: ANIM.stepInMs / 2, dist: 0.2 }]);
+    expect(g.stepping).toBeCloseTo(0.5, 9);
+    stepGait(g, [{ ms: ANIM.stepInMs, dist: 0.4 }]);
+    expect(g.stepping).toBe(1);
+    stepGait(g, [{ ms: ANIM.stepOutMs / 4, dist: 0 }]);
+    expect(g.stepping).toBeCloseTo(0.75, 9);
+    // 입력 틱에서 정한 걷기(walk)는 그린 거리가 0이어도(보정 순간 멈춤) 걷는 중으로 둔다
+    stepGait(g, [{ ms: 30, dist: 0, walk: true }]);
+    expect(g.stepping).toBeCloseTo(1, 9);
+    // 순간이동 빠르기면 walk가 있어도 걷지 않는다
+    const before = g.phase;
+    stepGait(g, [{ ms: 8, dist: 3, walk: true }]);
+    expect(g.phase).toBe(before);
+  });
+
+  it('내 캐릭터 조각: 입력 틱 · 보정 · 보간이 다 간 순간에서 나누고, 거리는 예측 보간 빠르기로', () => {
+    const tick = 1000 / 30;
+    const steps: SelfStep[] = [
+      { t: 0, speed: 0.004, until: tick, walk: true },
+      // 보정: 보낸 입력을 서버가 모두 처리해 그린 자리가 다음 틱까지 멈춤 (빠르기 0, 걷기 판단은 틱 그대로)
+      { t: 20, speed: 0, until: tick, walk: true },
+      { t: tick, speed: 0.004, until: tick * 2, walk: false },
+    ];
+    const out: TravelPiece[] = [];
+    expect(selfPieces(steps, 10, 40, out)).toBe(true);
+    expect(out.map((p) => [p.ms, p.dist, p.walk])).toEqual(
+      [
+        [10, 0.04, true],
+        [tick - 20, 0, true],
+        [40 - tick, (40 - tick) * 0.004, false],
+      ].map(([ms, d, w]) => [expect.closeTo(ms as number, 9), expect.closeTo(d as number, 9), w]),
+    );
+    // 60fps · 120fps로 잘라도 같은 합
+    const total = (hz: number): { ms: number; dist: number; walkMs: number } => {
+      let ms = 0;
+      let dist = 0;
+      let walkMs = 0;
+      let prev = 0;
+      for (const t of frameTimes(hz, 0, 50)) {
+        selfPieces(steps, prev, t, out);
+        for (const p of out) {
+          ms += p.ms;
+          dist += p.dist;
+          if (p.walk) walkMs += p.ms;
+        }
+        prev = t;
+      }
+      return { ms, dist, walkMs };
+    };
+    const a = total(60);
+    const b = total(120);
+    expect(b.ms).toBeCloseTo(a.ms, 9);
+    expect(b.dist).toBeCloseTo(a.dist, 9);
+    expect(b.walkMs).toBeCloseTo(a.walkMs, 9);
+    // 시작 전 기록이 없으면 모른다 (프레임 사이 직선으로 대신)
+    expect(selfPieces(steps, -5, 3, out)).toBe(false);
+  });
+});
+
+describe('시간 곡선 (괴물 시야 모드 보간 등)', () => {
+  it('목표가 바뀐 순간부터 잰다: 60 · 120fps 어느 프레임에서 읽어도 같은 시각에 같은 값', () => {
+    const r = new LinearRamp(0, 400);
+    // 70ms에 받은 스냅샷이 목표를 1로 (60Hz 프레임 66.7 · 83.3 사이, 120Hz 프레임 66.7 · 75 사이)
+    r.setTarget(1, 70);
+    expect(r.valueAt(60)).toBe(0);
+    expect(r.valueAt(83.333)).toBeCloseTo(13.333 / 400, 6);
+    expect(r.valueAt(270)).toBeCloseTo(0.5, 9);
+    // 절반에서 다시 0으로: 그 순간 값에서 이어 간다
+    r.setTarget(0, 270);
+    expect(r.valueAt(370)).toBeCloseTo(0.25, 9);
+    expect(r.valueAt(1000)).toBe(0);
+    // 같은 목표는 다시 정하지 않는다 (시작 시각이 밀리지 않게)
+    r.setTarget(0, 500);
+    expect(r.valueAt(500)).toBe(0);
+    r.jump(0.8, 600);
+    expect(r.valueAt(650)).toBeCloseTo(0.675, 9);
+    expect(r.goal).toBe(0);
+  });
+
+  it('올라가기 · 내려가기 시간이 다를 수 있다 (부채꼴 빨강 0.1초 · 0.4초)', () => {
+    const r = new LinearRamp(0, 100, 400);
+    r.setTarget(1, 0);
+    expect(r.valueAt(50)).toBeCloseTo(0.5, 9);
+    r.setTarget(0, 100);
+    expect(r.valueAt(200)).toBeCloseTo(0.75, 9);
   });
 });

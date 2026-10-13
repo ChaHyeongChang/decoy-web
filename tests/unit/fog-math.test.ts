@@ -17,7 +17,10 @@ import {
 import { PRESETS, effectivePreset } from '../../client/src/gfx/presets';
 import { FOG } from '../../client/src/render/colors';
 import {
+  ConeRedTrack,
   FOG_EDGE_FRAG,
+  PHASE_TOLERANCE_MS,
+  PhaseClock,
   MAX_MINIMAP_SCALE,
   MIN_COMPOSITE_SCALE,
   ambientRgb,
@@ -356,5 +359,103 @@ describe('상대 쪽 잔여 효과 규칙', () => {
     let v = 1;
     for (let i = 0; i < 25; i += 1) v = nextConeRed(v, true, false, 16);
     expect(v).toBe(0);
+  });
+});
+
+// ───────────── 렌더링 최적화: 프레임 독립성 ─────────────
+
+/** hz 프레임 시각 (k × 1000 / hz, jitter ms만큼 흔들 수 있다) */
+function frameTimes(hz: number, to: number, jitter = 0): number[] {
+  const out: number[] = [];
+  for (let k = 1; (k * 1000) / hz <= to + 1e-9; k += 1)
+    out.push((k * 1000) / hz + (jitter ? Math.sin(k * 12.9898) * jitter : 0));
+  return out;
+}
+
+describe('안개 · 시야 갱신 시계 (정해진 시각에 위상 고정)', () => {
+  const refreshes = (times: readonly number[], period: number): { at: number; due: number }[] => {
+    const c = new PhaseClock();
+    const out: { at: number; due: number }[] = [];
+    for (const t of times) if (c.due(t, period)) out.push({ at: t, due: c.last ?? Number.NaN });
+    return out;
+  };
+
+  it('생존자 50ms · 괴물 1/30초: 60 · 120 · 144fps 모두 같은 정해진 시각에 갱신한다', () => {
+    for (const period of [50, 1000 / 30]) {
+      // 첫 갱신(판 장면 첫 프레임)은 같은 시각 0
+      const base = refreshes([0, ...frameTimes(60, 2000)], period).map((r) => r.due);
+      for (const hz of [120, 144]) {
+        const other = refreshes([0, ...frameTimes(hz, 2000)], period).map((r) => r.due);
+        // 144Hz는 프레임 하나 늦게(정해진 시각 + 6.9ms 안) 갱신할 수 있지만 정해진 시각(last)은 같다
+        expect(other.slice(0, base.length - 1)).toEqual(base.slice(0, base.length - 1));
+      }
+      // 60fps에서는 예전처럼 3 · 2프레임마다
+      const at = refreshes([0, ...frameTimes(60, 1000)], period).map((r) => r.at);
+      const gaps = at.slice(1).map((t, i) => t - (at[i] ?? t));
+      for (const g of gaps) expect(g).toBeCloseTo(period, 6);
+    }
+  });
+
+  it('120Hz 타임스탬프가 8.333ms씩(µs 시계)이어도 50ms마다 (예전 판단은 6 × 8.333 = 49.998ms라 7프레임 = 58ms마다였다)', () => {
+    const times = Array.from({ length: 360 }, (_, k) => (k + 1) * 8.333);
+    const r = refreshes(times, 50);
+    expect(r.length).toBeGreaterThanOrEqual(59);
+    // 예전: 지난 갱신(프레임 시각)부터 50ms 이상
+    let last = -1e9;
+    let old = 0;
+    for (const t of times)
+      if (t - last >= 50) {
+        last = t;
+        old += 1;
+      }
+    expect(old).toBeLessThanOrEqual(52);
+    // ±0.3ms로 흔들려도 평균 50ms
+    expect(refreshes(frameTimes(120, 3000, 0.3), 50).length).toBeGreaterThanOrEqual(59);
+    expect(PHASE_TOLERANCE_MS).toBe(1);
+  });
+
+  it('한 주기 넘게 밀리면(멈춤) 따라잡지 않고 지금으로 다시 맞춘다', () => {
+    const c = new PhaseClock();
+    expect(c.due(100, 50)).toBe(true);
+    expect(c.due(149.5, 50)).toBe(true);
+    expect(c.last).toBe(150);
+    expect(c.due(400, 50)).toBe(true);
+    expect(c.last).toBe(400);
+    expect(c.due(420, 50)).toBe(false);
+    c.reset();
+    expect(c.due(421, 50)).toBe(true);
+    expect(c.last).toBe(421);
+  });
+});
+
+describe('괴물 부채꼴 색: 바뀐 순간부터 (프레임 독립성)', () => {
+  it('seesSomeone이 60Hz 프레임 사이에 바뀌어도 60 · 120fps가 같은 시각에 같은 색', () => {
+    // 괴물이 보이는 채 70ms에 발각(빨강), 300ms에 해제 (바뀐 순간 = 보간 표본 경계)
+    const sees = (t: number): boolean => t >= 70 && t < 300;
+    const flips = [70, 300];
+    const run = (hz: number): Map<number, number> => {
+      const track = new ConeRedTrack();
+      const out = new Map<number, number>();
+      let prev = 0;
+      for (const t of frameTimes(hz, 800)) {
+        const flip = flips.find((f) => f > prev && f <= t) ?? t;
+        out.set(Math.round(t * 1000), track.update(true, sees(t), t, flip));
+        prev = t;
+      }
+      return out;
+    };
+    const a = run(60);
+    const b = run(120);
+    for (const [t, v] of a) expect(b.get(t)).toBeCloseTo(v, 9);
+    // 0.1초에 걸쳐 빨강, 0.4초에 걸쳐 노랑
+    expect(a.get(Math.round(((7 * 1000) / 60) * 1000))).toBeCloseTo((1000 * 7) / 60 / 100 - 0.7, 9);
+  });
+
+  it('다시 보인 첫 프레임은 지금 상태 그대로, 안 보이면 0', () => {
+    const track = new ConeRedTrack();
+    expect(track.update(true, true, 10, 10)).toBe(1);
+    expect(track.update(false, true, 20, 20)).toBe(0);
+    expect(track.update(true, false, 30, 30)).toBe(0);
+    expect(track.update(true, true, 80, 55)).toBeCloseTo(0.25, 9);
   });
 });
