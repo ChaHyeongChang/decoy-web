@@ -3,7 +3,7 @@
 //  - 프레임 제한 '자동' · 120Hz 화면에서 판 중 FPS가 PC 기준(목표 120의 2/3 = 80) 아래로 이어지면 품질은 그대로 두고 목표를 60으로
 //    낮춘다(rateDown, downgrades +1). 제한기가 실제로 그리는 프레임을 초당 약 60으로 줄이고 건너뛴 rAF를 센다
 //  - 여유(FPS ≥ 목표의 95% · 작업 p95 ≤ 120Hz 예산의 절반)가 이어지면 목표를 화면 주사율로 되돌린다(rateUp, upgrades +1).
-//    되돌린 뒤 확인(10초)을 통과하면 그대로, 그 사이 건너뛰는 rAF가 없다
+//    되돌린 뒤 확인(10초)을 통과하면 감시(on)로 돌아가고 목표는 그대로, 그 사이 건너뛰는 rAF가 없다
 //  - 고정 제한 120은 목표를 바꾸지 않는다(품질만 내린다 — 품질 낮음이라 더 내릴 단계가 없다)
 // 품질은 ?quality=low로 고정해(가장 낮은 단계) 품질 단계 변화 없이 목표 FPS만 본다
 import { expect, test, type Page } from '@playwright/test';
@@ -20,7 +20,9 @@ function pump120(): void {
   const fire = (): void => {
     scheduled = false;
     const t = performance.now();
-    next = Math.max(next + period, t + 1);
+    // 실제 화면처럼 vsync 격자에 맞춘다: 늦게 깨어나도 다음 마감은 격자 위의 다음 칸 (늦은 만큼 밀지 않는다)
+    next += period;
+    while (next <= t) next += period;
     for (const cb of queue.splice(0)) cb(t);
   };
   const spin = (): void => {
@@ -49,6 +51,7 @@ type Gfx = {
   upgrades: number;
   quality: string;
   frameLimit: string;
+  adapt: string;
 };
 
 async function gfx(page: Page): Promise<Gfx> {
@@ -62,6 +65,7 @@ async function gfx(page: Page): Promise<Gfx> {
       upgrades: g.upgrades,
       quality: g.quality,
       frameLimit: g.frameLimit,
+      adapt: String(g.features.autoDowngrade ?? '-'),
     };
   });
 }
@@ -117,10 +121,10 @@ test('자동 제한 · 120Hz 화면: 느리면 목표를 60으로(제한기가 �
   // 여유: 250fps · 작업 4ms(≤ 120Hz 예산 8.33ms의 절반)가 마지막 변경 20초 뒤부터 15초 넘게 → 목표를 되돌린다
   await page.evaluate(() => window.__DECOY__?.injectFps(250));
   await expect.poll(async () => (await gfx(page)).targetHz, { timeout: 60_000, intervals: [1000] }).toBe(120);
-  expect(await gfx(page)).toMatchObject({ quality: 'low', downgrades: 1, upgrades: 1 });
-  // 되돌린 뒤 확인(설정 3초 + 10초)을 통과해도 그대로
-  await page.waitForTimeout(14_000);
-  expect((await gfx(page)).targetHz).toBe(120);
+  expect(await gfx(page)).toMatchObject({ quality: 'low', downgrades: 1, upgrades: 1, adapt: 'probation' });
+  // 되돌린 뒤 확인(설정 3초 + 10초)을 통과하면(upKeep) 감시로 돌아가고 목표는 그대로
+  await expect.poll(async () => (await gfx(page)).adapt, { timeout: 20_000, intervals: [1000] }).toBe('on');
+  expect(await gfx(page)).toMatchObject({ targetHz: 120, downgrades: 1, upgrades: 1 });
   await page.evaluate(() => window.__DECOY__?.injectFps(null));
   await page.waitForTimeout(1200);
   const free = await oneSecond(page);
