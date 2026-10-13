@@ -11,6 +11,8 @@ const OUT = resolve(import.meta.dirname, `../../artifacts/perf/${LABEL}/frame-pe
 const WARMUP_MS = Number(process.env.DECOY_PERF_WARMUP_MS ?? 6000);
 const MEASURE_MS = Number(process.env.DECOY_PERF_MEASURE_MS ?? 12000);
 const SEED = 20261013;
+const ANDROID_UA =
+  'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36';
 
 interface Scenario {
   name: string;
@@ -136,6 +138,8 @@ async function measure(browser: Browser, sc: Scenario): Promise<PerfResult> {
     deviceScaleFactor: sc.dpr,
     isMobile: sc.phone,
     hasTouch: sc.phone,
+    // 휴대폰은 안드로이드 크롬으로 보이게: Phaser는 OS가 휴대폰일 때만 MobilePipeline(텍스처 하나에 그리기 한 번)을 쓴다
+    ...(sc.phone ? { userAgent: ANDROID_UA } : {}),
   });
   await context.addInitScript(installPerfHooks, { seed: SEED, hz: sc.hz ?? null });
   // 터치 기기에서 탭이 부르는 전체 화면을 흉내만 낸다 (헤드리스에서 창 크기가 바뀌지 않게)
