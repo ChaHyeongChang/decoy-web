@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { BTN, type MoveEnv } from '@decoy/shared';
 import { applyDashStart, applyWindupLock, predictMonsterPress } from '../../client/src/localActions';
-import { Interpolator, Predictor, lerpNum } from '../../client/src/sync';
+import type { TravelPiece } from '../../client/src/art/anim';
+import { Interpolator, Predictor, lerpNum, travelOf } from '../../client/src/sync';
 import { frame, loadTestBalance, newGame, readyGame } from '../helpers/fixtures';
 
 const balance = loadTestBalance();
@@ -194,5 +195,140 @@ describe('스냅샷 시계 (M1 검토 반영)', () => {
       if (renderTime >= arrivals[0]!.st && renderTime <= arrivals[lastIdx]!.st) inside += 1;
     }
     expect(inside / total).toBeGreaterThan(0.95);
+  });
+});
+
+// ───────────── 렌더링 최적화: 프레임 독립성 ─────────────
+
+/** hz 프레임 시각 (k × 1000 / hz) */
+const frameTimes = (hz: number, to: number): number[] =>
+  Array.from({ length: Math.floor((to * hz) / 1000) }, (_, k) => ((k + 1) * 1000) / hz);
+
+describe('보정 어긋남은 보정 순간부터 줄어든다 (프레임 독립성)', () => {
+  /** 78ms에 서버가 0.3타일 앞을, 195ms에 제자리를 알려 온다 (둘 다 120Hz 프레임이 60Hz보다 하나 더 지난 뒤). 프레임마다 그린 자리 */
+  const run = (hz: number, timed: boolean): Map<number, number> => {
+    const game = newGame();
+    const me = game.survivors[0]!;
+    let clock = 0;
+    const pred = new Predictor(balance, dt, () => clock);
+    pred.reconcile(me.move, 0, game.moveEnvFor(me));
+    const near = { ...me.move, x: me.move.x + 0.3 };
+    const events = [78, 195];
+    let prev = 0;
+    const out = new Map<number, number>();
+    pred.renderPos(0, 1, timed ? 0 : undefined);
+    for (const t of frameTimes(hz, 600)) {
+      for (const e of events)
+        if (e > prev && e <= t) {
+          clock = e;
+          pred.reconcile(e === 78 ? near : me.move, 0, game.moveEnvFor(me));
+        }
+      clock = t;
+      const p = pred.renderPos(t - prev, 1, timed ? t : undefined);
+      out.set(Math.round(t * 1000), p?.x ?? Number.NaN);
+      prev = t;
+    }
+    return out;
+  };
+
+  it('보정이 60Hz 프레임 사이에 와도 60 · 120fps가 같은 시각에 같은 자리를 그린다', () => {
+    const a = run(60, true);
+    const b = run(120, true);
+    for (const [t, x] of a) expect(b.get(t)).toBeCloseTo(x, 12);
+  });
+
+  it('예전처럼 프레임 간격으로 줄이면 보정 직후 자리가 fps마다 달랐다 (보정 전 시간까지 줄어듦)', () => {
+    const a = run(60, false);
+    const b = run(120, false);
+    let worst = 0;
+    for (const [t, x] of a) worst = Math.max(worst, Math.abs((b.get(t) ?? x) - x));
+    expect(worst).toBeGreaterThan(1e-3);
+  });
+
+  it('그리는 자리가 틱 사이 직선으로 가는 거리 (내 걷기 위상): 순간이동한 틱은 0', () => {
+    const game = newGame();
+    const me = game.survivors[0]!;
+    const pred = new Predictor(balance, dt);
+    expect(pred.stepDistance).toBe(0);
+    pred.reconcile(me.move, 0, game.moveEnvFor(me));
+    expect(pred.stepDistance).toBe(0);
+    pred.applyLocal(frame(1, 1, 0), game.moveEnvFor(me));
+    pred.applyLocal(frame(2, 1, 0), game.moveEnvFor(me));
+    expect(pred.stepDistance).toBeGreaterThan(0.05);
+    expect(pred.stepDistance).toBeLessThan(0.3);
+    pred.reconcile({ ...me.move, x: me.move.x + 6 }, 2, game.moveEnvFor(me));
+    expect(pred.stepDistance).toBe(0);
+  });
+});
+
+describe('보간 경로 조각 · 상태 경계 (프레임 독립성)', () => {
+  const samples = [
+    { t: 0, v: { x: 0, y: 0 } },
+    { t: 50, v: { x: 1, y: 0 } },
+    { t: 100, v: { x: 1, y: 1 } },
+  ];
+
+  it('표본 시각(꺾인 점)에서 나눈다: 모퉁이를 현으로 깎지 않는다', () => {
+    const out: TravelPiece[] = [];
+    expect(travelOf(samples, 40, 60, out)).toBe(2);
+    expect(out).toHaveLength(2);
+    expect(out[0]?.ms).toBeCloseTo(10, 9);
+    expect(out[0]?.dist).toBeCloseTo(0.2, 9);
+    expect(out[1]?.dist).toBeCloseTo(0.2, 9);
+    // 프레임 사이 직선이면 0.283
+    expect((out[0]?.dist ?? 0) + (out[1]?.dist ?? 0)).toBeGreaterThan(Math.hypot(0.2, 0.2) + 0.1);
+    // 첫 표본 전 · 마지막 표본 뒤는 그 자리에 서 있다
+    travelOf(samples, -30, 10, out);
+    expect(out.map((p) => p.dist)).toEqual([0, expect.closeTo(0.2, 9)]);
+    travelOf(samples, 90, 130, out);
+    expect(out.map((p) => p.dist)).toEqual([expect.closeTo(0.2, 9), 0]);
+    expect(travelOf([], 0, 10, out)).toBe(-1);
+    // 조각 객체는 다시 쓰고 쓴 수만 돌려준다 (프레임마다 새로 만들지 않는다)
+    const kept = out[0];
+    expect(travelOf(samples, 10, 20, out)).toBe(1);
+    expect(out[0]).toBe(kept);
+    expect(out[0]?.dist).toBeCloseTo(0.2, 9);
+  });
+
+  it('60 · 120fps로 나눠도 걸은 거리 · 시간의 합이 같다', () => {
+    const sum = (hz: number): { ms: number; dist: number } => {
+      const out: TravelPiece[] = [];
+      let ms = 0;
+      let dist = 0;
+      let prev = -20;
+      for (const t of frameTimes(hz, 150).map((x) => x - 20)) {
+        const n = travelOf(samples, prev, t, out);
+        for (const p of out.slice(0, n)) {
+          ms += p.ms;
+          dist += p.dist;
+        }
+        prev = t;
+      }
+      return { ms, dist };
+    };
+    const a = sum(60);
+    const b = sum(120);
+    expect(b.ms).toBeCloseTo(a.ms, 9);
+    expect(b.dist).toBeCloseTo(a.dist, 9);
+    expect(a.dist).toBeCloseTo(2, 9);
+  });
+
+  it('보간하지 않는 값(뒤 표본 값)이 바뀌는 경계: 지난 프레임 뒤 첫 경계 시각, 사라진 엔티티는 마지막 표본', () => {
+    const interp = new Interpolator<{ x: number; y: number }>((a, b, k) => ({
+      x: lerpNum(a.x, b.x, k),
+      y: lerpNum(a.y, b.y, k),
+    }));
+    for (const smp of samples) interp.push(smp.t, [{ id: 'a', v: smp.v }]);
+    expect(interp.edgeAt('a', 40, 60)).toBe(50);
+    expect(interp.edgeAt('a', 50, 60)).toBeNull();
+    expect(interp.edgeAt('a', -10, 5)).toBe(0);
+    expect(interp.edgeAt('a', 60, 200)).toBeNull();
+    expect(interp.edgeAt('b', 0, 100)).toBeNull();
+    const out: TravelPiece[] = [];
+    expect(interp.travel('a', 40, 60, out)).toBe(2);
+    expect(interp.travel('b', 40, 60, out)).toBe(-1);
+    // 다음 스냅샷에 없으면 사라진다: 마지막 표본 시각이 경계
+    interp.push(150, []);
+    expect(interp.edgeAt('a', 95, 105)).toBe(100);
   });
 });

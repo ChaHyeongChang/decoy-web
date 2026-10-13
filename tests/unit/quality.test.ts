@@ -1,27 +1,44 @@
-// 그래픽 품질 자동 선택 · 저장 · 판 중 FPS 감시 (M10a)
+// 그래픽 품질 자동 선택 · 저장 · 판 중 FPS 감시 (M10a) · 목표 FPS에 맞춘 적응형 품질 (렌더링 최적화)
 import { describe, expect, it } from 'vitest';
 import type { QualityTier } from '../../client/src/gfx/presets';
 import {
   AutoDowngrade,
+  BASE_TARGET_HZ,
   DOWNGRADE_CHECK,
   DowngradeCheck,
   FPS_WATCH,
   FpsWatch,
   QUALITY_STORAGE_KEY,
+  RATE_FALLBACK_HZ,
+  SAMPLE_RING_SIZE,
+  SlidingAverage,
+  THRESHOLD_CAP_HZ,
+  TOUCH_FPS_WATCH,
+  UP_PROBATION,
+  UP_WATCH,
+  UpProbation,
+  UpWatch,
   detectQuality,
   downgradeHelped,
   isSoftwareGl,
   isTouchDevice,
   loadSavedQuality,
+  minFpsFor,
   parseQuality,
   parseQualityChoice,
   saveQualityChoice,
   savedForSession,
+  type AdaptContext,
   type AutoQualityAction,
+  type FrameSample,
   type QualityChoice,
   type QualityEnv,
   type StorageLike,
 } from '../../client/src/gfx/quality';
+import { AdaptiveSession, injected, kinds, roomy, type FrameFn } from '../helpers/adaptiveSession';
+
+/** 60Hz 화면 · 목표 60 (렌더링 최적화 전과 같은 조건) */
+const AT_60: AdaptContext = { targetHz: 60, displayHz: 60, canRateFallback: false };
 
 const PC: QualityEnv = {
   url: null,
@@ -331,7 +348,7 @@ class Session {
     const kinds: AutoQualityAction['kind'][] = [];
     this.auto.beginMatch(start);
     for (; this.t < start + ms; this.t += 1000 / 60) {
-      const a = this.auto.sample(this.t, fps(this.t - start, this.tier), this.tier);
+      const a = this.auto.sample(this.t, injected(fps(this.t - start, this.tier)), this.tier, AT_60);
       if (!a) continue;
       kinds.push(a.kind);
       this.log.push(a.kind);
@@ -370,7 +387,7 @@ describe('판 중 자동 하향 · 효과 확인 · 되돌리기 (세션)', () =
     let downAt = -1;
     let revertAt = -1;
     for (let t = 0; t < 60_000; t += 1000 / 60) {
-      const a = auto.sample(t, 30, 'high');
+      const a = auto.sample(t, injected(30), 'high', AT_60);
       if (a?.kind === 'downgrade') downAt = t;
       if (a?.kind === 'revert') revertAt = t;
     }
@@ -432,5 +449,511 @@ describe('판 중 자동 하향 · 효과 확인 · 되돌리기 (세션)', () =
     // 5~10초 20, 10~15초 30
     expect(w.slowAverage).toBeGreaterThan(24);
     expect(w.slowAverage).toBeLessThan(26);
+  });
+});
+
+// ───────────── 렌더링 최적화: 목표 FPS에 맞춘 적응형 품질 ─────────────
+
+/** 60Hz PC: 처음 20초만 느려(잠깐 다른 부하) 높음 → 중간으로 내리고 유지한 뒤, 이어서 frame으로 70초 더 돈다 */
+function afterKeptDowngrade(frame: FrameSample): AutoDowngrade {
+  const auto = new AutoDowngrade();
+  let tier: QualityTier = 'high';
+  auto.beginMatch(0);
+  for (let t = 0; t < 100_000; t += 1000 / 60) {
+    const s = t < 20_000 ? injected(30) : t < 30_000 ? injected(60) : frame;
+    const a = auto.sample(t, s, tier, AT_60);
+    if (a?.kind === 'downgrade') tier = a.to;
+  }
+  return auto;
+}
+
+/** Array.prototype 메서드(늘리기 · 당기기 · 복사) 호출 수 (샘플마다 할당하지 않는지 보는 구조 검사) */
+function countArrayCalls(run: () => void): number {
+  const proto = Array.prototype as unknown as Record<string, (...args: unknown[]) => unknown>;
+  const names = ['push', 'pop', 'shift', 'unshift', 'splice', 'slice', 'concat', 'map', 'filter'];
+  const originals = names.map((n) => proto[n]);
+  let calls = 0;
+  names.forEach((n, i) => {
+    const f = originals[i]!;
+    proto[n] = function (this: unknown, ...args: unknown[]): unknown {
+      calls += 1;
+      return f.apply(this, args);
+    };
+  });
+  try {
+    run();
+  } finally {
+    names.forEach((n, i) => {
+      proto[n] = originals[i]!;
+    });
+  }
+  return calls;
+}
+
+describe('렌더링 최적화: 하향 기준은 목표 FPS에 비례한다', () => {
+  it('기준 = 60Hz 값 × min(목표, 120) / 60: PC 2/3 · 터치 5/6, 144 · 165Hz도 기준 목표 120', () => {
+    expect([BASE_TARGET_HZ, THRESHOLD_CAP_HZ, RATE_FALLBACK_HZ]).toEqual([60, 120, 60]);
+    expect([60, 90, 120, 144, 165, 240].map((hz) => minFpsFor(FPS_WATCH, hz))).toEqual([
+      40, 60, 80, 80, 80, 80,
+    ]);
+    expect([60, 90, 120, 144].map((hz) => minFpsFor(TOUCH_FPS_WATCH, hz))).toEqual([50, 75, 100, 100]);
+    // 이상한 목표는 60으로 본다
+    for (const hz of [Number.NaN, 0, -120, Number.POSITIVE_INFINITY])
+      expect(minFpsFor(FPS_WATCH, hz)).toBe(40);
+    expect(new AutoDowngrade().minFps).toBe(40);
+  });
+
+  it('고정 제한 120 · 120Hz 화면 PC: 평균 75fps면 품질을 한 단계(80 미만), 85fps면 그대로. 목표 FPS는 바꾸지 않는다', () => {
+    const slow = new AdaptiveSession('high', new AutoDowngrade(), '120', 120);
+    const down = slow.play(20_000, () => injected(75));
+    expect(kinds(down)).toEqual(['downgrade']);
+    expect(down[0]!.at).toBeGreaterThan(FPS_WATCH.warmupMs + FPS_WATCH.sustainMs);
+    expect(down[0]!.at).toBeLessThan(FPS_WATCH.warmupMs + FPS_WATCH.sustainMs + 50);
+    expect([slow.tier, slow.fallback, slow.targetHz]).toEqual(['medium', null, 120]);
+    expect(slow.auto.minFps).toBe(80);
+
+    const ok = new AdaptiveSession('high', new AutoDowngrade(), '120', 120);
+    expect(ok.play(60_000, () => injected(85))).toEqual([]);
+    expect(ok.tier).toBe('high');
+  });
+
+  it('144Hz 화면에서 90fps인 PC는 내려가지 않는다 (기준 80). 75fps면 먼저 목표 FPS를 60으로', () => {
+    const fast = new AdaptiveSession('high', new AutoDowngrade(), 'auto', 144);
+    expect(fast.play(60_000, () => injected(90))).toEqual([]);
+    expect([fast.tier, fast.targetHz]).toEqual(['high', 144]);
+
+    const slow = new AdaptiveSession('high', new AutoDowngrade(), 'auto', 144);
+    const acts = slow.play(20_000, () => injected(75));
+    expect(acts.map((l) => l.action)).toEqual([
+      { kind: 'rateDown', mode: 'online', from: 144, to: 60, fpsBefore: 75 },
+    ]);
+    expect([slow.tier, slow.targetHz]).toEqual(['high', 60]);
+  });
+
+  it('120 제한이어도 60Hz 화면이면 목표 60 · 기준 40 (M10 그대로)', () => {
+    const s = new AdaptiveSession('high', new AutoDowngrade(), '120', 60);
+    expect(s.targetHz).toBe(60);
+    expect(s.play(60_000, () => injected(45))).toEqual([]);
+    expect(kinds(s.play(20_000, () => injected(35)))).toEqual(['downgrade']);
+  });
+});
+
+describe('렌더링 최적화: 자동 프레임 제한은 목표 FPS를 먼저 낮춘다', () => {
+  it('자동 · 120Hz: 느리면 먼저 목표 60(품질 그대로, 확인 없음), 60에서도 느리면 같은 판에서 품질을 한 단계', () => {
+    const s = new AdaptiveSession('high', new AutoDowngrade(), 'auto', 120);
+    const frame: FrameFn = (tier, hz) => (hz > 60 ? injected(70) : injected(tier === 'high' ? 35 : 55));
+    const acts = s.play(60_000, frame);
+    expect(kinds(acts)).toEqual(['rateDown', 'downgrade', 'keep']);
+    const [rate, down, keep] = acts;
+    expect(rate!.action).toEqual({ kind: 'rateDown', mode: 'online', from: 120, to: 60, fpsBefore: 70 });
+    expect(rate!.at).toBeGreaterThan(FPS_WATCH.warmupMs + FPS_WATCH.sustainMs);
+    expect(rate!.at).toBeLessThan(FPS_WATCH.warmupMs + FPS_WATCH.sustainMs + 50);
+    // 목표 FPS 낮춤은 판당 품질 하향 한도에 세지 않는다: 새 목표에서 예열부터 다시 잰다
+    expect(down!.action).toMatchObject({ kind: 'downgrade', from: 'high', to: 'medium', fpsBefore: 35 });
+    expect(down!.at - rate!.at).toBeGreaterThan(FPS_WATCH.warmupMs + FPS_WATCH.sustainMs);
+    expect(down!.at - rate!.at).toBeLessThan(FPS_WATCH.warmupMs + FPS_WATCH.sustainMs + 50);
+    expect(keep!.at - down!.at).toBeGreaterThanOrEqual(DOWNGRADE_CHECK.settleMs + DOWNGRADE_CHECK.measureMs);
+    expect([s.tier, s.targetHz, s.auto.status]).toEqual(['medium', 60, 'on']);
+    expect(s.auto.steps).toEqual([
+      { kind: 'rate', from: 120, to: 60 },
+      { kind: 'tier', from: 'high', to: 'medium' },
+    ]);
+  });
+
+  it('목표 FPS 낮춤 뒤에는 확인이 없다 (상태 on, 다시 올리기 전까지 그대로)', () => {
+    const auto = new AutoDowngrade();
+    const ctx120: AdaptContext = { targetHz: 120, displayHz: 120, canRateFallback: true };
+    auto.beginMatch(0);
+    let at = -1;
+    for (let t = 0; t < 30_000 && at < 0; t += 1000 / 120) {
+      const a = auto.sample(t, injected(70), 'high', ctx120);
+      if (a) {
+        expect(a.kind).toBe('rateDown');
+        at = t;
+      }
+    }
+    expect(at).toBeGreaterThan(0);
+    expect(auto.status).toBe('on');
+  });
+
+  it('고정 제한(60 · 120)은 목표 FPS를 바꾸지 않는다: 바로 품질을 내리고, 효과가 없으면 되돌린다', () => {
+    const fixed60 = new AdaptiveSession('high', new AutoDowngrade(), '60', 120);
+    expect(kinds(fixed60.play(60_000, () => injected(30)))).toEqual(['downgrade', 'revert']);
+    expect([fixed60.fallback, fixed60.targetHz, fixed60.tier]).toEqual([null, 60, 'high']);
+
+    const fixed120 = new AdaptiveSession('high', new AutoDowngrade(), '120', 120);
+    expect(kinds(fixed120.play(60_000, () => injected(50)))).toEqual(['downgrade', 'revert']);
+    expect([fixed120.fallback, fixed120.targetHz, fixed120.tier]).toEqual([null, 120, 'high']);
+    expect(fixed120.auto.status).toBe('off');
+  });
+
+  it('60Hz 화면의 자동 제한은 목표를 바꿀 것이 없다 (M10 그대로 품질 하향)', () => {
+    const s = new AdaptiveSession('high', new AutoDowngrade(), 'auto', 60);
+    expect(s.ctx().canRateFallback).toBe(false);
+    expect(kinds(s.play(60_000, () => injected(30)))).toEqual(['downgrade', 'revert']);
+    expect(s.fallback).toBeNull();
+  });
+});
+
+describe('렌더링 최적화: 여유가 이어지면 자동으로 내린 단계를 되돌린다', () => {
+  it('품질: 마지막 변경 20초 뒤부터 여유가 15초 넘게 이어지면 다음 판 시작 전에 한 단계 (판 중에는 올리지 않는다)', () => {
+    const auto = new AutoDowngrade();
+    let tier: QualityTier = 'high';
+    const acts: { kind: AutoQualityAction['kind']; t: number }[] = [];
+    let queuedAt = -1;
+    auto.beginMatch(0);
+    for (let t = 0; t < 120_000; t += 1000 / 60) {
+      // 처음 20초만 느리다
+      const a = auto.sample(t, t < 20_000 ? injected(30) : { fps: 60, workP95: 4 }, tier, AT_60);
+      if (a) acts.push({ kind: a.kind, t });
+      if (a?.kind === 'downgrade') tier = a.to;
+      if (queuedAt < 0 && auto.queuedUpgrade) queuedAt = t;
+    }
+    auto.endMatch();
+    // 판 중에는 내림 · 유지뿐
+    expect(acts.map((a) => a.kind)).toEqual(['downgrade', 'keep']);
+    const downAt = acts[0]!.t;
+    expect(queuedAt - downAt).toBeGreaterThan(UP_WATCH.quietMs + UP_WATCH.sustainMs);
+    expect(queuedAt - downAt).toBeLessThan(UP_WATCH.quietMs + UP_WATCH.sustainMs + 100);
+    expect([tier, auto.status]).toEqual(['medium', 'on']);
+    expect(auto.queuedUpgrade).toEqual({ from: 'medium', to: 'high' });
+
+    // 다음 판 장면을 만들기 직전 (main.ts): 올리고, 그 판의 예열 뒤 확인한다
+    const up = auto.takePendingUpgrade('online', tier);
+    expect(up).toEqual({ kind: 'upgrade', mode: 'online', from: 'medium', to: 'high', fps: 60, workP95: 4 });
+    expect(auto.takePendingUpgrade('online', tier)).toBeNull();
+    tier = 'high';
+    expect(auto.status).toBe('probation');
+    const start = 200_000;
+    auto.beginMatch(start);
+    let keptAt = -1;
+    for (let t = start; t < start + 30_000 && keptAt < 0; t += 1000 / 60) {
+      const a = auto.sample(t, { fps: 60, workP95: 4 }, tier, AT_60);
+      if (a) {
+        expect(a).toEqual({ kind: 'upKeep', mode: 'online', step: 'tier', tier: 'high', fpsAfter: 60 });
+        keptAt = t - start;
+      }
+    }
+    expect(keptAt).toBeGreaterThanOrEqual(FPS_WATCH.warmupMs + UP_PROBATION.measureMs);
+    expect(keptAt).toBeLessThan(FPS_WATCH.warmupMs + UP_PROBATION.measureMs + 100);
+    expect([auto.status, auto.steps.length, auto.upgradesBlocked]).toEqual(['on', 0, false]);
+  });
+
+  it('여유 조건: FPS ≥ 목표 × 0.95 이고 작업 시간 p95 ≤ 예산(1000 / 목표)의 절반', () => {
+    expect(UP_WATCH).toEqual({ quietMs: 20000, sustainMs: 15000, minFpsRatio: 0.95, maxWorkRatio: 0.5 });
+    expect(UP_PROBATION).toEqual({ settleMs: 3000, measureMs: 10000 });
+    // 목표 60: 예산 16.7ms → 8.33ms까지
+    expect(afterKeptDowngrade({ fps: 60, workP95: 8.3 }).queuedUpgrade).toEqual({
+      from: 'medium',
+      to: 'high',
+    });
+    expect(afterKeptDowngrade({ fps: 60, workP95: 8.4 }).queuedUpgrade).toBeNull();
+    expect(afterKeptDowngrade({ fps: 58, workP95: 2 }).queuedUpgrade).not.toBeNull();
+    expect(afterKeptDowngrade({ fps: 56, workP95: 2 }).queuedUpgrade).toBeNull();
+    // 작업 시간을 모르면(측정 전) 올리지 않는다
+    expect(afterKeptDowngrade({ fps: 60, workP95: Number.NaN }).queuedUpgrade).toBeNull();
+  });
+
+  it('목표 FPS 올리기는 올린 뒤 목표의 예산으로 보고(120Hz: 4.17ms까지) 판 중에 바로 한다. 확인을 통과하면 유지', () => {
+    const run = (work: number): AdaptiveSession => {
+      const s = new AdaptiveSession('high', new AutoDowngrade(), 'auto', 120);
+      s.play(90_000, (_tier, hz, e) => (hz > 60 && e < 20_000 ? injected(70) : { fps: hz, workP95: work }));
+      return s;
+    };
+    const tight = run(5);
+    expect(kinds(tight.log)).toEqual(['rateDown']);
+    expect(tight.targetHz).toBe(60);
+
+    const s = run(4);
+    expect(kinds(s.log)).toEqual(['rateDown', 'rateUp', 'upKeep']);
+    const [down, up, kept] = s.log;
+    expect(up!.action).toEqual({ kind: 'rateUp', mode: 'online', from: 60, to: 120, fps: 60, workP95: 4 });
+    expect(up!.at - down!.at).toBeGreaterThan(UP_WATCH.quietMs + UP_WATCH.sustainMs);
+    expect(up!.at - down!.at).toBeLessThan(UP_WATCH.quietMs + UP_WATCH.sustainMs + 100);
+    expect(kept!.action).toEqual({ kind: 'upKeep', mode: 'online', step: 'rate', hz: 120, fpsAfter: 120 });
+    expect(kept!.at - up!.at).toBeGreaterThanOrEqual(UP_PROBATION.settleMs + UP_PROBATION.measureMs);
+    expect(kept!.at - up!.at).toBeLessThan(UP_PROBATION.settleMs + UP_PROBATION.measureMs + 50);
+    expect([s.targetHz, s.auto.steps.length]).toEqual([120, 0]);
+  });
+
+  it('가장 최근에 내린 것부터 되돌리고, 자동으로 내리기 전 상태(시작 단계 · 시작 목표)보다 올리지 않는다', () => {
+    const s = new AdaptiveSession('high', new AutoDowngrade(), 'auto', 120);
+    // 판 1: 45초까지 느리다(120에서 70, 60에서 높음 35 · 중간 55) → 목표 60 → 중간. 그 뒤 여유
+    const first: FrameFn = (tier, hz, e) =>
+      e < 45_000 ? (hz > 60 ? injected(70) : injected(tier === 'high' ? 35 : 55)) : roomy()(tier, hz, e);
+    expect(kinds(s.play(70_000, first))).toEqual(['rateDown', 'downgrade', 'keep']);
+    expect(s.auto.queuedUpgrade).toEqual({ from: 'medium', to: 'high' });
+    // 판 2: 시작 전 품질(가장 최근 단계) → 확인 통과 → 목표 FPS → 확인 통과
+    expect(kinds(s.play(60_000, roomy()))).toEqual(['upgrade', 'upKeep', 'rateUp', 'upKeep']);
+    expect([s.tier, s.targetHz, s.auto.steps.length]).toEqual(['high', 120, 0]);
+    // 판 3: 되돌릴 것이 없다
+    expect(s.play(120_000, roomy())).toEqual([]);
+    expect([s.tier, s.targetHz]).toEqual(['high', 120]);
+  });
+
+  it('?quality로 정한 단계도 천장: 내렸다 올려도 그 단계까지만', () => {
+    // ?quality=medium으로 시작한 PC
+    const s = new AdaptiveSession('medium', new AutoDowngrade(), 'auto', 60);
+    const first: FrameFn = (tier, hz, e) => (e < 20_000 ? injected(30) : roomy()(tier, hz, e));
+    expect(kinds(s.play(60_000, first))).toEqual(['downgrade', 'keep']);
+    expect(kinds(s.play(60_000, roomy()))).toEqual(['upgrade', 'upKeep']);
+    expect(s.tier).toBe('medium');
+    expect(s.play(120_000, roomy())).toEqual([]);
+    expect(s.tier).toBe('medium');
+  });
+
+  it('올린 뒤 확인에서 느리면 다시 내리고 이번 세션에서는 더 올리지 않는다 (내리기는 계속)', () => {
+    const s = new AdaptiveSession('high', new AutoDowngrade(), 'auto', 60);
+    expect(kinds(s.play(60_000, (t, hz, e) => (e < 20_000 ? injected(30) : roomy()(t, hz, e))))).toEqual([
+      'downgrade',
+      'keep',
+    ]);
+    // 높음은 실제로 느린 기기: 올린 판이 확인 전에 끝나면 다음 판 예열 뒤 이어서 확인한다
+    const highSlow: FrameFn = (tier, hz, e) => (tier === 'high' ? injected(35) : roomy()(tier, hz, e));
+    expect(kinds(s.play(10_000, highSlow))).toEqual(['upgrade']);
+    expect(s.auto.status).toBe('probation');
+    const back = s.play(30_000, highSlow);
+    expect(back.map((l) => l.action)).toEqual([
+      { kind: 'upRevert', mode: 'online', step: 'tier', from: 'high', to: 'medium', fpsAfter: 35 },
+    ]);
+    expect(back[0]!.at).toBeGreaterThanOrEqual(FPS_WATCH.warmupMs + UP_PROBATION.measureMs);
+    expect(back[0]!.at).toBeLessThan(FPS_WATCH.warmupMs + UP_PROBATION.measureMs + 100);
+    expect([s.tier, s.auto.status, s.auto.upgradesBlocked]).toEqual(['medium', 'on', true]);
+    expect(s.auto.steps).toEqual([{ kind: 'tier', from: 'high', to: 'medium' }]);
+    // 여유가 있어도 더 올리지 않는다
+    expect(s.play(120_000, roomy())).toEqual([]);
+    expect(s.auto.queuedUpgrade).toBeNull();
+    // 내리기는 그대로: 중간에서 느리면 낮음으로
+    expect(kinds(s.play(20_000, () => injected(30)))).toEqual(['downgrade']);
+  });
+
+  it('목표 FPS를 올린 뒤 느리면 다시 60으로 내리고 막는다', () => {
+    const s = new AdaptiveSession('high', new AutoDowngrade(), 'auto', 120);
+    // 120에서는 늘 70fps(기준 80 미만), 60에서는 여유
+    s.play(100_000, (_tier, hz) => (hz > 60 ? injected(70) : { fps: 60, workP95: 3 }));
+    expect(kinds(s.log)).toEqual(['rateDown', 'rateUp', 'upRevert']);
+    expect(s.log[2]!.action).toEqual({
+      kind: 'upRevert',
+      mode: 'online',
+      step: 'rate',
+      from: 120,
+      to: 60,
+      fpsAfter: 70,
+    });
+    expect([s.targetHz, s.auto.upgradesBlocked, s.tier]).toEqual([60, true, 'high']);
+  });
+
+  it('30Hz로 묶인 화면(재면 60Hz): 효과 없는 하향을 되돌리고 끈 뒤에는 여유가 있어도 올리지 않는다', () => {
+    const s = new AdaptiveSession('high', new AutoDowngrade(), 'auto', 60);
+    // 판 1: 잠깐 느려 높음 → 중간(유지). 판 2: 30Hz로 묶임(절전) → 중간 → 낮음 → 효과 없음 → 되돌리고 끔
+    expect(kinds(s.play(30_000, (t, hz, e) => (e < 20_000 ? injected(30) : roomy()(t, hz, e))))).toEqual([
+      'downgrade',
+      'keep',
+    ]);
+    expect(kinds(s.play(60_000, () => injected(30)))).toEqual(['downgrade', 'revert']);
+    expect([s.tier, s.auto.status]).toEqual(['medium', 'off']);
+    expect(s.play(120_000, roomy())).toEqual([]);
+    expect(s.auto.queuedUpgrade).toBeNull();
+    expect(s.tier).toBe('medium');
+  });
+
+  it('다른 모드의 판 · 다른 품질이면 미룬 품질 올리기를 하지 않는다 (목표 FPS 단계는 남는다)', () => {
+    const first: FrameFn = (tier, hz, e) =>
+      e < 45_000 ? (hz > 60 ? injected(70) : injected(tier === 'high' ? 35 : 55)) : roomy()(tier, hz, e);
+    const s = new AdaptiveSession('high', new AutoDowngrade(), 'auto', 120);
+    s.play(70_000, first);
+    expect(s.auto.queuedUpgrade).not.toBeNull();
+    // 연습 판: 부하가 다르다. 품질 단계는 잊고 목표 FPS 단계만 남는다
+    expect(s.auto.takePendingUpgrade('practice', s.tier)).toBeNull();
+    s.auto.beginMatch(s.t, 'practice');
+    expect(s.auto.steps).toEqual([{ kind: 'rate', from: 120, to: 60 }]);
+    s.auto.endMatch();
+
+    const other = new AdaptiveSession('high', new AutoDowngrade(), 'auto', 120);
+    other.play(70_000, first);
+    expect(other.auto.takePendingUpgrade('online', 'low')).toBeNull();
+  });
+
+  it('그사이 품질이 다른 이유로 바뀌면 그 단계는 되돌릴 대상이 아니다', () => {
+    const auto = afterKeptDowngrade({ fps: 60, workP95: 12 });
+    expect(auto.steps).toEqual([{ kind: 'tier', from: 'high', to: 'medium' }]);
+    auto.beginMatch(200_000);
+    // 예: 터치 기기가 모드 기억으로 품질을 다시 정했다
+    for (let t = 200_000; t < 300_000; t += 1000 / 60) auto.sample(t, { fps: 60, workP95: 2 }, 'low', AT_60);
+    expect(auto.steps).toEqual([]);
+    expect(auto.queuedUpgrade).toBeNull();
+  });
+
+  it('사용자가 품질을 고르면 되돌릴 품질 단계 · 미룬 올리기를 잊는다 (목표 FPS 단계는 둔다)', () => {
+    const first: FrameFn = (tier, hz, e) =>
+      e < 45_000 ? (hz > 60 ? injected(70) : injected(tier === 'high' ? 35 : 55)) : roomy()(tier, hz, e);
+    const s = new AdaptiveSession('high', new AutoDowngrade(), 'auto', 120);
+    s.play(70_000, first);
+    s.auto.cancelPending();
+    expect(s.auto.queuedUpgrade).toBeNull();
+    expect(s.auto.steps).toEqual([{ kind: 'rate', from: 120, to: 60 }]);
+    // 사용자가 프레임 제한을 바꾸면 목표 FPS 단계도 잊는다 (main.ts는 pacer.setFallback(null)도 한다)
+    s.auto.resetRate();
+    expect(s.auto.steps).toEqual([]);
+  });
+
+  it('프레임 제한을 바꿔 목표가 달라지면(자기 결정이 아님) 확인 중이던 하향을 판단 없이 끝내고 처음부터 잰다', () => {
+    const s = new AdaptiveSession('high', new AutoDowngrade(), '60', 120);
+    expect(kinds(s.play(16_000, () => injected(30)))).toEqual(['downgrade']);
+    expect(s.auto.status).toBe('checking');
+    // 다음 판 전에 사용자가 120으로: 60에서 잰 하향 전 평균과 견주지 않는다(되돌림 · 유지 없음).
+    // 이어 온 확인 때문에 꺼져 있던 하향 감시도 예열부터 다시 켠다: 120에서 70fps(기준 80 미만)면 한 단계 더
+    s.limit = '120';
+    const acts = s.play(20_000, () => injected(70));
+    expect(acts.map((l) => l.action)).toEqual([
+      { kind: 'downgrade', mode: 'online', from: 'medium', to: 'low', fpsBefore: 70 },
+    ]);
+    expect(acts[0]!.at).toBeGreaterThan(FPS_WATCH.warmupMs + FPS_WATCH.sustainMs);
+    expect(acts[0]!.at).toBeLessThan(FPS_WATCH.warmupMs + FPS_WATCH.sustainMs + 50);
+    // 판단 없이 끝낸 하향(높음 → 중간)도 되돌릴 단계로 남는다
+    expect(s.auto.steps).toEqual([{ kind: 'tier', from: 'high', to: 'medium' }]);
+    expect([s.auto.status, s.tier]).toEqual(['checking', 'low']);
+  });
+
+  it('판단 없이 끝낸 하향은 되돌릴 단계로 남아 여유가 이어지면 다시 올린다 (자동으로 낮춘 단계가 천장이 되지 않게)', () => {
+    const s = new AdaptiveSession('high', new AutoDowngrade(), '60', 120);
+    expect(kinds(s.play(16_000, () => injected(30)))).toEqual(['downgrade']);
+    s.limit = '120';
+    // 120에서 여유(120fps · 작업 3ms ≤ 4.17ms): 변경 20초 뒤부터 15초 넘게 → 다음 판 시작 전에 높음으로
+    expect(s.play(60_000, roomy())).toEqual([]);
+    expect(s.auto.queuedUpgrade).toEqual({ from: 'medium', to: 'high' });
+    expect(kinds(s.play(30_000, roomy()))).toEqual(['upgrade', 'upKeep']);
+    expect([s.tier, s.auto.steps.length]).toEqual(['high', 0]);
+  });
+
+  it('판 중에 화면 주사율이 올라 목표가 바뀌어도: 확인 중이던 하향은 되돌릴 단계로 남기고, 이 판에서 꺼졌던 하향 감시를 다시 켠다', () => {
+    const auto = new AutoDowngrade();
+    let tier: QualityTier = 'high';
+    const at60: AdaptContext = { targetHz: 60, displayHz: 60, canRateFallback: false };
+    const at120: AdaptContext = { targetHz: 120, displayHz: 120, canRateFallback: true };
+    const acts: { action: AutoQualityAction; t: number }[] = [];
+    let raisedAt = -1;
+    auto.beginMatch(0);
+    for (let t = 0; t < 60_000 && acts.length < 2; t += 1000 / 60) {
+      // 하향 직후(확인 중) 잰 주사율이 60 → 120으로 오른다 (자동 제한)
+      const ctx = acts.length > 0 && t > acts[0]!.t + 1000 ? at120 : at60;
+      if (ctx === at120 && raisedAt < 0) raisedAt = t;
+      const a = auto.sample(t, injected(ctx === at120 ? 70 : 30), tier, ctx);
+      if (!a) continue;
+      acts.push({ action: a, t });
+      if (a.kind === 'downgrade') tier = a.to;
+    }
+    expect(acts.map((a) => a.action.kind)).toEqual(['downgrade', 'rateDown']);
+    expect(acts[1]!.action).toMatchObject({ kind: 'rateDown', from: 120, to: 60 });
+    expect(acts[1]!.t - raisedAt).toBeGreaterThan(FPS_WATCH.warmupMs + FPS_WATCH.sustainMs);
+    expect(acts[1]!.t - raisedAt).toBeLessThan(FPS_WATCH.warmupMs + FPS_WATCH.sustainMs + 50);
+    expect(auto.steps).toEqual([
+      { kind: 'tier', from: 'high', to: 'medium' },
+      { kind: 'rate', from: 120, to: 60 },
+    ]);
+  });
+});
+
+describe('렌더링 최적화: injectFps(f) = FPS f · 작업 시간 1000/f', () => {
+  it('목표 60에서 injectFps(60)은 내리지도 올리지도 않는다 (되돌릴 단계가 있어도)', () => {
+    expect(afterKeptDowngrade(injected(60)).queuedUpgrade).toBeNull();
+    const s = new AdaptiveSession('high', new AutoDowngrade(), 'auto', 60);
+    expect(s.play(120_000, () => injected(60))).toEqual([]);
+  });
+
+  it('120Hz rAF에서 injectFps(120)은 아무것도 하지 않는다 (자동 · 고정 120)', () => {
+    for (const limit of ['auto', '120'] as const) {
+      const s = new AdaptiveSession('high', new AutoDowngrade(), limit, 120);
+      expect(s.play(120_000, () => injected(120))).toEqual([]);
+      expect([s.tier, s.targetHz]).toEqual(['high', 120]);
+    }
+  });
+
+  it('목표 이하의 값으로는 올리지 않는다 (작업 시간 1000/f가 예산의 절반을 넘는다)', () => {
+    for (const f of [57, 58, 60, 90]) expect(afterKeptDowngrade(injected(f)).queuedUpgrade).toBeNull();
+  });
+});
+
+describe('렌더링 최적화: 샘플마다 할당하지 않는다', () => {
+  it('고리 버퍼: 같은 typed array를 계속 쓰고, 가득 차면 오래된 것부터 버리며 구간 평균을 낸다', () => {
+    expect(SAMPLE_RING_SIZE).toBeGreaterThanOrEqual(240);
+    const ring = new SlidingAverage(1000, 64);
+    const { times, values } = ring;
+    expect(times).toBeInstanceOf(Float64Array);
+    for (let i = 0; i < 10_000; i += 1) ring.push(i * 4, i < 9_990 ? 60 : 30);
+    expect(ring.times).toBe(times);
+    expect(ring.values).toBe(values);
+    expect([ring.times.length, ring.count]).toEqual([64, 64]);
+    // 마지막 64개 = 60 54개 + 30 10개
+    expect(ring.average).toBeCloseTo((54 * 60 + 10 * 30) / 64, 9);
+    // 구간: 가장 최근 샘플보다 1초를 넘게 오래된 것은 뺀다(경계 포함)
+    const win = new SlidingAverage(1000);
+    win.push(0, 10);
+    win.push(1000, 20);
+    expect(win.average).toBe(15);
+    win.push(1000.5, 30);
+    expect([win.count, win.average]).toEqual([2, 25]);
+    win.clear();
+    expect([win.count, win.average]).toEqual([0, 0]);
+  });
+
+  it('감시 · 여유 감시 · 올린 뒤 확인 중에 배열을 늘리거나 당기지 않는다 (같은 측정 · 맥락 객체를 다시 쓴다)', () => {
+    const frame: FrameSample = { fps: 50, workP95: 12 };
+    const ctx: AdaptContext = { ...AT_60 };
+    // 하향 감시만 (되돌릴 단계 없음)
+    const plain = new AutoDowngrade();
+    plain.beginMatch(0);
+    expect(
+      countArrayCalls(() => {
+        for (let t = 0; t < 20_000; t += 1000 / 60) plain.sample(t, frame, 'high', ctx);
+      }),
+    ).toBe(0);
+    // 여유 감시 (되돌릴 단계가 있고 여유가 없다)
+    const withStep = afterKeptDowngrade({ fps: 60, workP95: 12 });
+    withStep.beginMatch(200_000);
+    frame.fps = 60;
+    expect(
+      countArrayCalls(() => {
+        for (let t = 200_000; t < 260_000; t += 1000 / 60) withStep.sample(t, frame, 'medium', ctx);
+      }),
+    ).toBe(0);
+    expect(withStep.steps.length).toBe(1);
+    // 올린 뒤 확인 (판단 전까지)
+    const probing = afterKeptDowngrade({ fps: 60, workP95: 4 });
+    expect(probing.takePendingUpgrade('online', 'medium')?.kind).toBe('upgrade');
+    probing.beginMatch(300_000);
+    frame.workP95 = 4;
+    expect(
+      countArrayCalls(() => {
+        for (let t = 300_000; t < 314_000; t += 1000 / 60) probing.sample(t, frame, 'high', ctx);
+      }),
+    ).toBe(0);
+    expect(probing.status).toBe('probation');
+  });
+
+  it('여유 감시 · 올린 뒤 확인 단위: 끊김은 처음부터, 판단은 평균으로', () => {
+    const w = new UpWatch();
+    let fired = -1;
+    for (let t = 0; t < 30_000 && fired < 0; t += 1000 / 60) if (w.sample(t, 60, 4, 60, 60, 5_000)) fired = t;
+    expect(fired).toBeGreaterThan(5_000 + UP_WATCH.sustainMs);
+    expect(fired).toBeLessThan(5_000 + UP_WATCH.sustainMs + 50);
+    // 끊기면(백그라운드 탭) 여유 시간을 이어 세지 않는다
+    const g = new UpWatch();
+    for (let t = 0; t < 10_000; t += 1000 / 60) expect(g.sample(t, 60, 4, 60, 60, 0)).toBe(false);
+    let again = -1;
+    for (let t = 20_000; t < 50_000 && again < 0; t += 1000 / 60)
+      if (g.sample(t, 60, 4, 60, 60, 0)) again = t;
+    expect(again - 20_000).toBeGreaterThan(UP_WATCH.sustainMs);
+
+    const p = new UpProbation(0);
+    let verdict: string | null = null;
+    for (let t = 0; t < 20_000 && verdict === null; t += 1000 / 60)
+      verdict = p.sample(t, t < UP_PROBATION.settleMs ? 10 : 45, 40);
+    expect(verdict).toBe('pass');
+    expect(p.average).toBeCloseTo(45, 5);
+    const q = new UpProbation(0);
+    verdict = null;
+    for (let t = 0; t < 20_000 && verdict === null; t += 1000 / 60) verdict = q.sample(t, 39, 40);
+    expect(verdict).toBe('fail');
   });
 });

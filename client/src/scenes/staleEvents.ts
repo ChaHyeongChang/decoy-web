@@ -11,15 +11,35 @@ export const STALE_EVENT_FRAMES = 3;
 export const STALL_FRAME_MS = 2500;
 
 /**
+ * 빨라질 때 내려오는 시간 상수 (ms). 예전에는 프레임마다 10%씩 내려왔다(60fps에서 시간 상수 −16.67 / ln 0.9 ≈ 158ms).
+ * 프레임 수가 아니라 시간으로 내려와야 120fps에서도 같은 빠르기다 (렌더링 최적화: 프레임 독립성)
+ */
+export const FRAME_MS_TAU = -(1000 / 60) / Math.log(0.9);
+
+/**
  * 최근 프레임 간격을 갱신한다. 느려지면 바로 따라가고(느려진 직후 첫 이벤트부터 버리지 않게) 빨라지면 천천히 내려온다.
+ * 내려오는 빠르기는 시간 상수 FRAME_MS_TAU의 지수 감쇠(1 − e^(−delta/τ)): 60fps에서는 예전과 같은 프레임당 10%다.
  * 멈춤 · 잘못된 값은 넣지 않는다. delta는 실제 간격(Phaser rawDelta — delta는 200ms를 넘으면 이전 값으로 바뀐다)
  */
 export function trackFrameMs(recent: number, delta: number): number {
   if (!(delta > 0) || delta > STALL_FRAME_MS) return recent;
-  return delta >= recent ? delta : recent + (delta - recent) * 0.1;
+  if (delta >= recent) return delta;
+  return recent + (delta - recent) * (1 - Math.exp(-delta / FRAME_MS_TAU));
 }
 
 /** 이보다 오래된(서버 시각 기준) 스냅샷의 일회성 이벤트는 지난 일로 거른다 (ms) */
 export function staleEventLimitMs(frameMs: number): number {
   return Math.max(STALE_EVENT_MS, STALE_EVENT_FRAMES * frameMs);
+}
+
+/** 한 프레임에 쌓는 시간의 상한 (ms): 멈췄다 돌아온 프레임에 보간 · 연출이 한꺼번에 뛰지 않게 */
+export const MAX_FRAME_DELTA_MS = 250;
+
+/**
+ * 시간으로 쌓는 연출(보정 어긋남 · 걷기 · 부채꼴 색)에 쓰는 프레임 간격: 실제 간격(Phaser rawDelta)을 [0, 250]ms로.
+ * Phaser의 delta(smoothStep)는 최근 10프레임 평균이고 시작 · 복귀 뒤 120프레임은 16.67ms로 막혀 실제 시간과 다르다
+ */
+export function frameDeltaMs(rawDelta: number): number {
+  if (!(rawDelta > 0)) return 0;
+  return Math.min(MAX_FRAME_DELTA_MS, rawDelta);
 }

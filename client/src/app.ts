@@ -19,6 +19,7 @@ import { sfx } from './audio';
 import { buildMismatch } from './buildInfo';
 import { UI_TEXT } from './data/storyText';
 import { device } from './device';
+import { isFrameLimit, type FrameLimit } from './gfx/framePacing';
 import type { QualityTier } from './gfx/presets';
 import { parseQuality } from './gfx/quality';
 import { haptics } from './haptics';
@@ -79,6 +80,11 @@ export interface AppParams {
   practice: boolean;
   /** ?touch=1|0: 터치 화면을 강제로 켜거나 끈다 (M11, device.ts detectTouchMode). 없으면 null(기기로 판단) */
   touch: string | null;
+  /**
+   * ?fpsLimit=auto|60|120: 이번 세션의 프레임 제한 (렌더링 최적화 시험용. 저장한 선택보다 우선, 저장하지 않음).
+   * 그 밖에는 null. 측정 표시는 ?debug=1 오버레이(ui/debugOverlay.ts)
+   */
+  fpsLimit: FrameLimit | null;
 }
 
 export function readParams(search: string): AppParams {
@@ -86,6 +92,8 @@ export function readParams(search: string): AppParams {
   const debugRaw = p.get('debug');
   const renderer = p.get('renderer');
   const lag = Number(p.get('lag') ?? 0);
+  // ?quality와 같이 앞뒤 공백 · 대소문자는 가리지 않는다
+  const fpsLimit = p.get('fpsLimit')?.trim().toLowerCase() ?? null;
   return {
     room: p.get('room')?.toUpperCase() ?? null,
     bots: p.get('bots') === '1' || p.get('bots') === 'true',
@@ -97,6 +105,7 @@ export function readParams(search: string): AppParams {
     name: p.get('name'),
     practice: p.get('practice') === '1',
     touch: p.get('touch'),
+    fpsLimit: isFrameLimit(fpsLimit) ? fpsLimit : null,
   };
 }
 

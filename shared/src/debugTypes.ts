@@ -104,6 +104,52 @@ export interface GfxDebugInfo {
   downgrades: number;
   /** 품질 판단에 쓴 최근 FPS */
   measuredFps: number;
+  /** 프레임 제한 설정 (렌더링 최적화): 자동(화면 주사율을 따른다) · 60 · 120 */
+  frameLimit: 'auto' | '60' | '120';
+  /** 잰 화면 주사율 (Hz, 60 아래로는 보지 않는다) */
+  displayHz: number;
+  /** 지금 목표 FPS = min(제한, 화면). 자동 제한에서 버티지 못하면 60으로 내려갈 수 있다 */
+  targetHz: number;
+  /** 판 중 자동으로 되돌려 올린 횟수 (품질 단계 · 목표 FPS) */
+  upgrades: number;
+}
+
+/** 프레임 측정 (렌더링 최적화, ?debug=1 오버레이 · 적응형 품질 · E2E). 최근 렌더 프레임들의 요약 */
+export interface FrameStatsInfo {
+  /** 요약에 쓴 프레임 수 */
+  frames: number;
+  /** 렌더한 프레임 수 / 초 (최근 1초) */
+  fps: number;
+  /** 렌더 프레임 사이 간격 (ms) */
+  intervalAvg: number;
+  intervalP95: number;
+  /** 한 프레임에 메인 스레드가 쓴 시간 (Phaser 한 걸음: 갱신 + 그리기 명령, ms) */
+  workAvg: number;
+  workP95: number;
+  /** 지난 프레임의 그리기 호출 수 (WebGL drawArrays · drawElements, Canvas 렌더러는 그린 객체 수). 재지 않으면 null */
+  drawCalls: number | null;
+  /** 프레임 제한 때문에 건너뛴 rAF 수 (누계) */
+  skipped: number;
+}
+
+/** 프레임 독립성 시험 (렌더링 최적화)용 연출 상태: 같은 시각이면 60fps · 120fps에서 같아야 하는 값들 */
+export interface AnimDebug {
+  /** 내 괴물 시야 모드 보간 (0 탐색 ~ 1 추적, 괴물이 아니면 null) */
+  myBlend: number | null;
+  /** 엔티티별 걷기 위상(라디안) · 걷기 자세 섞기(0 멈춤 ~ 1 걷는 중) (id → 값, 이번 프레임에 그린 것만) */
+  gait: Record<string, { phase: number; stepping: number }>;
+  /** 마지막 안개 · 시야 갱신 시각 (ms, performance.now 기준. 아직 없으면 null) */
+  fogAt: number | null;
+  /** 생존자 화면 괴물 부채꼴 빨강 정도 0~1 */
+  coneRed: number;
+  /** 돌진 잔상 수 */
+  dashGhosts: number;
+  /** 돌진 잔상마다 남긴 격자 시각(ms, performance.now 기준) · 알파 (오래된 것부터) */
+  ghosts: { at: number; alpha: number }[];
+  /** 살아 있는 입자 수 */
+  particles: number;
+  /** 판 장면을 만든 뒤 그린 프레임 수 (프레임 제한기가 건너뛴 rAF는 세지 않는다) */
+  frames: number;
 }
 
 /** 활성 장면의 Phaser 글자 점검 (M10a 선명도: 글자 해상도 = zoom, 격자 맞춤) */
@@ -178,8 +224,14 @@ export interface DecoyDebug {
   readonly gfx: Readonly<GfxDebugInfo>;
   /** 장식 애니메이션 · 입자 시계를 멈춘다(ms) / null이면 다시 흐름. 규칙 · 입력에는 영향 없음 */
   freezeClock(ms: number | null): void;
-  /** 품질 자동 하향 판단에 쓸 FPS를 덮어쓴다 / null이면 실제 측정값 */
+  /** 품질 자동 하향 판단에 쓸 FPS를 덮어쓴다 / null이면 실제 측정값. 렌더링 최적화부터는 프레임 시간(작업 시간 포함)도 1000/fps로 본다 */
   injectFps(fps: number | null): void;
+  /** 프레임 측정 요약 (렌더링 최적화). 판 장면 · 게임이 없으면 null */
+  getFrameStats(): FrameStatsInfo | null;
+  /** 프레임 독립성 시험용 연출 상태 (판 장면이 없으면 null) */
+  getAnimState(): AnimDebug | null;
+  /** 프레임 제한을 바꾼다 (로비 선택과 같은 경로, 저장하지 않음) */
+  setFrameLimit(limit: 'auto' | '60' | '120'): void;
   /** 선명도 검사: HUD에 글자를 그린다 (논리 좌표 x, y, 글자 크기 px) */
   probeText(text: string, x: number, y: number, px: number): void;
   /** 활성 장면의 모든 Phaser 글자 해상도 · 격자 어긋남 · 다시 그린 횟수 */

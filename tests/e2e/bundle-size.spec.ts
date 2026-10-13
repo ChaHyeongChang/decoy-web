@@ -13,7 +13,9 @@ const BEFORE_M10 = 346_679;
  * M10c는 Phaser 사용자 빌드 직후 243,281B에서 +25KiB였다. 다음 마일스톤에서 기준을 그 병합 값으로 옮긴다
  */
 // 출시 전 검토(M13~M15 PR #11~#16): 늦은 옛 방 메시지 거르기 · 방 나가기 · 연습 뒤로 가기 확인 · 연타 가드 · 연습 측정 모드 등 약 +1.1KiB
-const MILESTONE = { name: '출시 전 검토', base: 305_284, baseName: 'M15 병합', budget: 2048 };
+// 렌더링 최적화 1(PR #19): 프레임 페이싱(주사율 재기 · 제한기) · 프레임 측정 · ?debug=1 오버레이 확장(배포 빌드) · 적응형 품질 ·
+// 프레임 제한 설정 화면 · 프레임 독립성 (DECISIONS 7절 '번들 예산')
+const MILESTONE = { name: '렌더링 최적화 1', base: 306_806, baseName: 'PR #18 병합', budget: 10_240 };
 
 test('JS 번들 gzip: 마일스톤 예산 이하, 리마스터 전보다 작다', { tag: '@core' }, () => {
   const dir = join(process.cwd(), 'client/dist/assets');

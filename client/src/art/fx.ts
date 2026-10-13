@@ -336,6 +336,124 @@ export class FxSystem {
   }
 }
 
+// ───────────────────────── 돌진 잔상 (보이는 화면, monster.dash.duration) ─────────────────────────
+
+/** 돌진 잔상 기본 수명 (보이는 화면, balance monster.dash.duration = 0.25초를 setLife로 넣는다) */
+export const DASH_GHOST_MS = 250;
+/**
+ * 돌진 잔상 간격 (ms): 돌진 시작부터 1/30초 시간 격자 (렌더링 최적화: 프레임 수와 무관). 예전에는 '지난 잔상부터 28ms 넘게 지난
+ * 프레임'에 남겨서 60fps에서는 두 프레임(33.3ms)마다였지만 144fps에서는 5프레임(34.7ms) 등 fps마다 달랐다. 60fps 모양 그대로
+ */
+export const GHOST_EVERY_MS = 1000 / 30;
+/** 격자 시각보다 이만큼 이른 프레임이면 그 프레임에 남긴다 (ms) */
+const GHOST_TOLERANCE_MS = 1;
+/** 이보다 오래 그리지 않았으면(화면 숨김 · 루프 멈춤) 지난 돌진 격자 · 자리를 잇지 않는다 (ms, 프레임 간격 상한과 같다) */
+export const DASH_GAP_MS = 250;
+
+export interface Ghost {
+  x: number;
+  y: number;
+  aim: number;
+  /** 남긴 격자 시각 (ms) */
+  at: number;
+}
+
+/**
+ * 돌진 잔상: 돌진 시작 시각 + k × GHOST_EVERY_MS마다 하나. 격자 시각에 닿은 첫 프레임에 남기고, 자리는 지난 프레임과
+ * 이번 프레임 사이를 그 격자 시각으로 보간한다. 알파는 격자 시각부터 잰 수명이라 몇 fps든 같은 시각에 같은 수 · 같은 알파다
+ */
+export class DashTrail {
+  private ghosts: Ghost[] = [];
+  private lifeMs = DASH_GHOST_MS;
+  /** 이번 돌진의 격자 시작 (돌진 중이 아니면 null) · 다음 잔상 번호 */
+  private start: number | null = null;
+  private nextK = 0;
+  /** 지난 프레임의 돌진 자리 (hasPrev가 거짓이면 없음. 프레임마다 새 객체를 만들지 않는다) */
+  private hasPrev = false;
+  private prevX = 0;
+  private prevY = 0;
+  private prevAim = 0;
+  private prevT = 0;
+  /** 지난 프레임 시각 (update) */
+  private lastFrameAt: number | null = null;
+
+  /** 잔상 수명 = 돌진 시간 (balance) */
+  setLife(ms: number): void {
+    if (ms > 0) this.lifeMs = ms;
+  }
+
+  /**
+   * 프레임마다 부른다: dashing = 돌진 중인 괴물이 보이면 그 자리, 아니면 null. onset = 새 돌진의 첫 프레임에만 묻는 시작 순간.
+   * 지난 프레임에서 DASH_GAP_MS 넘게 지났으면(화면 숨김 · 루프 멈춤) 그 사이 돌진이 끝났다가 새로 시작했을 수 있으므로
+   * 지난 격자 · 자리를 잇지 않는다
+   */
+  update(dashing: { x: number; y: number; aim: number } | null, nowMs: number, onset: () => number): void {
+    if (this.lastFrameAt !== null && nowMs - this.lastFrameAt > DASH_GAP_MS) this.end();
+    this.lastFrameAt = nowMs;
+    if (!dashing) {
+      if (this.start !== null) this.end();
+      return;
+    }
+    const start = this.start ?? Math.min(nowMs, onset());
+    this.sample(dashing.x, dashing.y, dashing.aim, nowMs, start);
+  }
+
+  /** 돌진 중인 괴물이 보이는 프레임마다 부른다. startMs = 이번 돌진이 시작된 순간 (격자 기준) */
+  sample(x: number, y: number, aim: number, nowMs: number, startMs: number): void {
+    if (this.start !== startMs) {
+      this.start = startMs;
+      this.nextK = 0;
+      this.hasPrev = false;
+    }
+    // 지난 자리가 너무 오래됐으면(그리지 않은 틈) 그 자리에서 이어 보간하지 않는다
+    if (this.hasPrev && nowMs - this.prevT > DASH_GAP_MS) this.hasPrev = false;
+    // 처음 보는 프레임이면 지금까지의 마지막 격자 하나만 (돌진 도중 보이기 시작해도 지난 격자를 한 자리에 쌓지 않는다)
+    if (!this.hasPrev) {
+      const latest = Math.floor((nowMs + GHOST_TOLERANCE_MS - startMs) / GHOST_EVERY_MS);
+      if (latest > this.nextK) this.nextK = latest;
+    }
+    for (;;) {
+      const g = startMs + this.nextK * GHOST_EVERY_MS;
+      if (g > nowMs + GHOST_TOLERANCE_MS) break;
+      if (this.hasPrev && g > this.prevT && g < nowMs) {
+        const k = (g - this.prevT) / (nowMs - this.prevT);
+        this.ghosts.push({
+          x: this.prevX + (x - this.prevX) * k,
+          y: this.prevY + (y - this.prevY) * k,
+          aim: this.prevAim + angleDiff(this.prevAim, aim) * k,
+          at: g,
+        });
+      } else {
+        this.ghosts.push({ x, y, aim, at: g });
+      }
+      this.nextK += 1;
+    }
+    this.hasPrev = true;
+    this.prevX = x;
+    this.prevY = y;
+    this.prevAim = aim;
+    this.prevT = nowMs;
+  }
+
+  /** 돌진이 끝났다 (다음 돌진은 새 격자) */
+  end(): void {
+    this.start = null;
+    this.hasPrev = false;
+  }
+
+  /** 아직 남은 잔상과 알파 (0~1) */
+  live(nowMs: number): { g: Ghost; alpha: number }[] {
+    this.ghosts = this.ghosts.filter((g) => nowMs - g.at < this.lifeMs);
+    return this.ghosts.map((g) => ({ g, alpha: Math.min(1, 1 - (nowMs - g.at) / this.lifeMs) }));
+  }
+
+  /** 잔상을 모두 지운다 (출처가 시야에서 사라짐) */
+  clear(): void {
+    this.ghosts = [];
+    this.end();
+  }
+}
+
 // ───────────────────────── 수감 흩어짐 자리 (괴물 화면) ─────────────────────────
 
 /** 괴물 타격 이벤트 (attackHit: 타격 순간의 괴물 자리 · 방향 · 맞은 수) */

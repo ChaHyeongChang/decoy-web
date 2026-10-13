@@ -4,6 +4,8 @@ import { App, readParams } from './app';
 import { sfx } from './audio';
 import { installDebug } from './debug';
 import { canOfferFullscreen, device, enterFullscreen, initDevice, onDeviceChange } from './device';
+import { Pacer, loadFrameLimit, pacingHooks, patchTimeStep, targetHzFor } from './gfx/framePacing';
+import { sessionFrameStats } from './gfx/frameStats';
 import type { QualityPreset, QualityTier, RendererKind } from './gfx/presets';
 import {
   autoQuality,
@@ -53,6 +55,12 @@ const uiRoot = document.getElementById('ui-root') ?? document.body;
 const gameRoot = document.getElementById('game-root') ?? document.body;
 const app = new App(params, uiRoot);
 
+// 프레임 페이싱 상태 (아래 '프레임 페이싱'에서 Phaser 루프에 끼운다). 품질을 정할 때 시작 목표 FPS를 읽으므로 먼저 만든다.
+// ?fpsLimit(시험용)는 이번 접속에만, 아니면 로비에서 고른 저장값
+const pacer = new Pacer(params.fpsLimit ?? loadFrameLimit() ?? 'auto');
+// 판이 없을 때(로비 · 결과)는 30fps로 묶는다 (빈 캔버스를 120Hz로 그리지 않게, 배터리)
+pacer.setIdle(true);
+
 // ───────────── 기기 · 품질 ─────────────
 
 function mediaMatches(query: string): boolean {
@@ -100,15 +108,30 @@ function qualityEnv(): QualityEnv {
     cores,
     memory,
     perf: touch ? (loadPerfMemory()[perfMode] ?? null) : null,
+    targetHz: startTargetHz(),
   };
 }
+
+/**
+ * 판 시작 목표 FPS (적응형 품질이 낮추기 전): 프레임 제한과 잰 화면 주사율. 판 중 측정 기억(decoy:perf)은 같은 목표에서 잰 것만
+ * 쓴다 — 120Hz에서 내린 품질로 60 제한 판을 시작하지 않게. pacer는 아래에서 만든다(함수는 부팅 뒤에만 불린다)
+ */
+function startTargetHz(): number {
+  return targetHzFor(pacer.limit, pacer.displayHz, null);
+}
+/** 마지막으로 품질을 정할 때의 시작 목표 FPS (터치 기기 측정 기억을 맞춰 볼 기준) */
+let decidedAtHz = 60;
+/** 이번 판의 시작 목표 FPS (판 장면을 만들 때 잡는다). 측정 기억은 이 값으로 남긴다 — 판 중 잰 값이 아니라 */
+let matchStartHz = 60;
 
 /**
  * 판 시작 직전: 이번 판의 측정 모드로 바꾼다. 터치 기기에서 모드가 바뀌면 그 모드의 기억으로 품질을 다시 정한다
  * (PC는 기억을 쓰지 않으므로 다시 정하지 않는다 — 세션 하향이 풀리지 않게). 품질 단계가 바뀌었으면 true
  */
 function enterPerfMode(mode: PerfMode): boolean {
-  if (mode === perfMode) return false;
+  // 부팅 때는 화면 주사율을 아직 못 재 60으로 정했다: 판 시작 목표가 달라졌으면(120Hz 화면 등) 그 목표의 기억으로 다시 정한다
+  const hzChanged = touch && startTargetHz() !== decidedAtHz;
+  if (mode === perfMode && !hzChanged) return false;
   perfMode = mode;
   if (!touch) return false;
   const before = gfxState.quality;
@@ -118,6 +141,7 @@ function enterPerfMode(mode: PerfMode): boolean {
 
 function decideQuality(): { tier: QualityTier; source: QualitySource } {
   const env = qualityEnv();
+  decidedAtHz = env.targetHz ?? 60;
   const q = detectQuality(env);
   // 기억한 단계로 시작했는가 (디버그 · E2E: 'none'이면 기기 자동 그대로)
   gfxState.features.perfTier = q.source === 'auto' && q.tier !== autoQuality(env) ? q.tier : 'none';
@@ -154,7 +178,8 @@ function setQuality(q: { tier: QualityTier; source: QualitySource }): void {
 /** 판 중 자동 하향 상태 (on · checking · off)와 기준 FPS 표시 */
 function syncAutoStatus(): void {
   gfxState.features.autoDowngrade = sessionAutoDowngrade.status;
-  gfxState.features.autoMinFps = sessionAutoDowngrade.config.minFps;
+  // 지금 목표에서의 하향 기준 (60Hz에서 PC 40 · 터치 50, 목표 120이면 80 · 100)
+  gfxState.features.autoMinFps = sessionAutoDowngrade.minFps;
 }
 
 gfxState.touch = touch;
@@ -184,6 +209,39 @@ function measure(): RenderSize {
 
 const initial = measure();
 setRenderScale(initial.zoom);
+
+// ───────────── 프레임 페이싱 (렌더링 최적화) ─────────────
+// 화면 주사율을 따라 그린다(자동). 60 · 120 제한은 Phaser의 fps.limit 대신 우리 제한기로: Phaser 것은 생성 때 고정이고
+// 오차 허용이 없어 120Hz 흔들림에서 40fps로 떨어진다. TimeStep.start가 this.step을 rAF에 묶기 전에 끼워야 한다
+// 프레임 측정(gfx/frameStats.ts): 그리는 걸음만 잰다 — 측정을 안쪽에, 제한기를 바깥에 끼워 건너뛴 rAF는 세기만 한다.
+// 작업 시간 = Phaser 한 걸음(장면 갱신 + 그리기 명령)의 메인 스레드 시간, 간격 = 그린 프레임 사이 rAF 시각 차이
+const timeStep = Phaser.Core.TimeStep.prototype;
+const rawStep = timeStep.step;
+timeStep.step = function measuredStep(this: Phaser.Core.TimeStep, time: number): void {
+  sessionFrameStats.begin(time, performance.now());
+  rawStep.call(this, time);
+  sessionFrameStats.end(performance.now());
+};
+patchTimeStep(timeStep, pacer);
+pacer.onSkip = () => sessionFrameStats.noteSkipped();
+
+/** 디버그 훅 · 오버레이 · 적응형 품질이 읽는 페이싱 상태 */
+function syncPacing(): void {
+  gfxState.frameLimit = pacer.limit;
+  gfxState.displayHz = pacer.displayHz;
+  gfxState.targetHz = pacer.targetHz;
+}
+syncPacing();
+// 주사율은 재는 데 시간이 걸리고(30프레임 뒤부터) 바뀔 수 있다(가변 주사율 화면) — 0.5초마다 옮겨 적는다
+window.setInterval(syncPacing, 500);
+pacingHooks.setLimit = (limit) => {
+  pacer.setLimit(limit);
+  // 사용자가 정한 제한: 적응형 품질이 낮춰 둔 목표는 잊고 새 목표에서 다시 잰다
+  pacer.setFallback(null);
+  sessionAutoDowngrade.resetRate();
+  syncPacing();
+  syncAutoStatus();
+};
 /** 이 zoom(백버퍼 px / 논리 px) 이상으로 시작하면 WebGL MSAA를 켜지 않는다 (1920×1080 @1.25 = 1.25부터) */
 const MSAA_MAX_ZOOM = 1.25;
 
@@ -213,7 +271,10 @@ const game = new Phaser.Game({
     height: initial.backingH,
     zoom: 1 / initial.k,
   },
-  fps: { target: 60 },
+  // 60fps로 묶지 않는다: target은 상한이 아니라 Phaser 내부 기준값(actualFps 시작 값)이고 limit은 쓰지 않는다(위 페이싱).
+  // smoothStep을 끈다 — 켜 두면 delta가 최근 10프레임 평균인 데다 시작 · 포커스 뒤 120프레임 동안 16.7ms로 잘려
+  // 120Hz와 60Hz에서 시간 적분이 달라진다. 게임 코드는 실제 프레임 간격(rawDelta)으로 적분한다
+  fps: { target: 60, smoothStep: false },
   // 카메라 배경색이 매 프레임 화면 전체를 칠하므로 따로 지우지 않는다. 정수 좌표로 그려 비트맵 복사를 싸게.
   // pixelArt · antialias를 꼭 적는다: Phaser는 scale.zoom이 1이 아니면(기기 픽셀 배율 ≠ 1) pixelArt를 켜서
   // 모든 텍스처가 NEAREST(회전 스프라이트 계단, 확대한 빛 지도 블록)가 되고 WebGL 안티에일리어싱이 꺼진다
@@ -384,26 +445,61 @@ qualityHooks.choose = (choice) => {
   setQuality(decideQuality());
   applyResolution(true);
 };
-// 판 중 자동 조정: 한 단계 내리거나, 내렸는데 FPS가 오르지 않았으면(화면 갱신 상한 등) 원래 단계로 되돌린다.
-// 사용자가 고른 것보다 올리는 일은 없다. downgrades는 실제로 내린 횟수(되돌려도 그대로)
+// 판 중 적응형 품질 (gfx/quality.ts AutoDowngrade): 느리면 자동 제한에서는 목표 FPS부터 60으로, 그다음 품질을 한 단계 내린다.
+// 내렸는데 FPS가 오르지 않았으면(화면 갱신 상한 등) 되돌린다. 여유가 생기면 내린 것을 최근 것부터 되돌린다 — 목표 FPS는 판 중에,
+// 품질은 다음 판 시작 전에(판 중에 다시 굽는 끊김을 피한다). 시작 단계(사용자가 고른 것 · 주소 · 자동)보다 올리는 일은 없다.
+// downgrades = 실제로 내린 횟수(품질 · 목표 FPS, 되돌려도 그대로), upgrades = 되돌려 올린 횟수
 qualityHooks.auto = (a) => {
-  if (a.kind === 'downgrade') {
-    if (gfxState.quality === a.from) {
-      gfxState.measuredFps = a.fpsBefore;
+  switch (a.kind) {
+    case 'downgrade':
+      if (gfxState.quality === a.from) {
+        gfxState.measuredFps = a.fpsBefore;
+        gfxState.downgrades += 1;
+        setQuality({ tier: a.to, source: gfxState.qualitySource });
+        applyResolution(true);
+      } else {
+        // 그사이 단계가 바뀌었다(이론상): 내리지 않았으니 확인할 것도 없다
+        sessionAutoDowngrade.cancelPending();
+      }
+      break;
+    case 'revert':
+      if (gfxState.quality === a.from) {
+        gfxState.measuredFps = a.fpsAfter;
+        setQuality({ tier: a.to, source: gfxState.qualitySource });
+        applyResolution(true);
+      }
+      break;
+    case 'rateDown':
       gfxState.downgrades += 1;
-      setQuality({ tier: a.to, source: gfxState.qualitySource });
-      applyResolution(true);
-    } else {
-      // 그사이 단계가 바뀌었다(이론상): 내리지 않았으니 확인할 것도 없다
-      sessionAutoDowngrade.cancelPending();
-    }
-  } else if (a.kind === 'revert' && gfxState.quality === a.from) {
-    gfxState.measuredFps = a.fpsAfter;
-    setQuality({ tier: a.to, source: gfxState.qualitySource });
-    applyResolution(true);
+      pacer.setFallback(a.to);
+      break;
+    case 'rateUp':
+      gfxState.upgrades += 1;
+      pacer.setFallback(null);
+      break;
+    case 'upgrade':
+      // 판 시작 전에만 온다 (takePendingUpgrade). 백버퍼 · 그림은 판 배치(applyMatchLayout)가 바로 뒤에 맞춘다
+      if (gfxState.quality === a.from) {
+        gfxState.upgrades += 1;
+        setQuality({ tier: a.to, source: gfxState.qualitySource });
+      }
+      break;
+    case 'upRevert':
+      gfxState.downgrades += 1;
+      if (a.step === 'rate') pacer.setFallback(a.to);
+      else if (gfxState.quality === a.from) {
+        setQuality({ tier: a.to, source: gfxState.qualitySource });
+        applyResolution(true);
+      }
+      break;
+    case 'keep':
+    case 'upKeep':
+      break;
   }
-  // 터치 기기 · 자동: 효과를 확인한 하향은 다음 접속에도 그 단계로 시작한다 (같은 모드, 기기 자동 단계가 같을 때만)
-  const remember = perfToRemember(a, touch, gfxState.qualitySource, autoQuality(qualityEnv()));
+  syncPacing();
+  // 터치 기기 · 자동: 효과를 확인한 하향(과 확인을 통과한 올림)은 다음 접속에도 그 단계로 시작한다 (같은 모드 · 같은 기기 자동 단계 ·
+  // 같은 시작 목표 FPS일 때만)
+  const remember = perfToRemember(a, touch, gfxState.qualitySource, autoQuality(qualityEnv()), matchStartHz);
   if (remember && rememberPerf(remember.mode, remember.rec)) gfxState.features.perfSaved = remember.rec.tier;
   syncAutoStatus();
 };
@@ -430,6 +526,9 @@ document.addEventListener('contextmenu', (e) => {
 app.subscribe((e) => {
   if (e.kind === 'match') inMatch = true;
   else if (e.kind === 'lobby' && e.lobby.phase === 'lobby') inMatch = false;
+  // 판 중에만 제한 설정대로 그린다. 결과 · 로비는 30fps
+  if (e.kind === 'match') pacer.setIdle(false);
+  else if (e.kind === 'result' || (e.kind === 'lobby' && e.lobby.phase === 'lobby')) pacer.setIdle(true);
 });
 
 /**
@@ -529,8 +628,17 @@ app.subscribe((e) => {
       // 첫 받기가 시간 초과로 끝난 뒤 늦게 받았으면 loadUiFonts()는 계속 false다. 지금 준비됐는지로 기록한다
       fontState.atSceneStart = ok || uiFontsReady();
       game.scene.stop('game');
-      // 연습 · 온라인 판 사이를 오가면 그 모드의 측정 기억으로 시작 품질을 다시 정한다 (바뀌면 백버퍼도 다시 맞춘다)
-      applyMatchLayout(enterPerfMode(app.practicing ? 'practice' : 'online'));
+      // 연습 · 온라인 판 사이를 오가면 그 모드의 측정 기억으로 시작 품질을 다시 정한다 (바뀌면 백버퍼도 다시 맞춘다).
+      // 지난 판에서 여유를 확인한 품질 올리기는 여기서(판 장면을 만들기 전) 한다
+      const mode: PerfMode = app.practicing ? 'practice' : 'online';
+      let changed = enterPerfMode(mode);
+      matchStartHz = startTargetHz();
+      const up = sessionAutoDowngrade.takePendingUpgrade(mode, gfxState.quality);
+      if (up) {
+        qualityHooks.auto?.(up);
+        changed = true;
+      }
+      applyMatchLayout(changed);
       game.scene.start('game', { app });
     });
   } else if (e.kind === 'result') stopSettle();

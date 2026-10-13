@@ -62,4 +62,4 @@
 
 - 마일스톤(PR)마다 `origin/main`에서 브랜치를 만들어 PR로 병합한다(`docs/MOBILE_PLAN.md` 3절). 로컬 `main`은 쓰지 않고, push는 작업 단위를 마쳤을 때만 한다
 - `git push --force` 금지
-- `node_modules/`, `dist/`, `.env`, `artifacts/`는 커밋하지 않는다. 단, 다음은 예외로 커밋한다: 최종 보고용 스크린샷이 든 `artifacts/final/`, 리마스터 전후 비교 `artifacts/remaster/`, 스토어 이미지 `artifacts/store/`
+- `node_modules/`, `dist/`, `.env`, `artifacts/`는 커밋하지 않는다. 단, 다음은 예외로 커밋한다: 최종 보고용 스크린샷이 든 `artifacts/final/`, 리마스터 전후 비교 `artifacts/remaster/`, 스토어 이미지 `artifacts/store/`, 렌더링 최적화 전후 수치 · 스크린샷 `artifacts/perf/`

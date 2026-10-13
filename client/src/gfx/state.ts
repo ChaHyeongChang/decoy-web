@@ -31,6 +31,10 @@ export const gfxState: GfxState = {
   features: {},
   downgrades: 0,
   measuredFps: 0,
+  frameLimit: 'auto',
+  displayHz: 60,
+  targetHz: 60,
+  upgrades: 0,
 };
 
 /** 지금 품질 · 렌더러 · 기기에 맞춘 설정 */

@@ -246,6 +246,104 @@ export function nextConeRed(prev: number, wasShown: boolean, seesSomeone: boolea
 }
 
 /**
+ * 부채꼴 색을 바뀐 순간부터 잰다 (렌더링 최적화: 프레임 독립성). 예전에는 프레임마다 nextConeRed(prev, …, frameMs)를 더해
+ * 상태가 바뀐 프레임 전체(바뀌기 전 시간까지)를 보간했다 → 60 · 120fps에서 바뀐 뒤 같은 시각의 색이 달랐다.
+ * 이제 값 = nextConeRed(바뀐 순간 값, 보이는 중, 지금 상태, 바뀐 순간부터 지난 시간): 같은 보간 시간(0.1초 · 0.4초)의 닫힌 식이다
+ */
+export class ConeRedTrack {
+  private from = 0;
+  private at = 0;
+  private sees = false;
+  private shown = false;
+
+  /**
+   * 이번 프레임 값. shown = 괴물 부채꼴이 보이는가, flipAt = seesSomeone이 이번 프레임 사이에 바뀌었으면 그 순간(모르면 nowMs).
+   * 다시 보인 첫 프레임은 지금 상태 그대로(잔여 효과 규칙), 안 보이면 0
+   */
+  update(shown: boolean, sees: boolean, nowMs: number, flipAt: number): number {
+    if (!shown) {
+      this.shown = false;
+      return 0;
+    }
+    if (!this.shown) {
+      this.shown = true;
+      this.sees = sees;
+      this.from = nextConeRed(0, false, sees, 0);
+      this.at = nowMs;
+      return this.from;
+    }
+    if (sees !== this.sees) {
+      const t = Math.min(nowMs, Math.max(this.at, flipAt));
+      this.from = nextConeRed(this.from, true, this.sees, t - this.at);
+      this.at = t;
+      this.sees = sees;
+    }
+    return nextConeRed(this.from, true, sees, nowMs - this.at);
+  }
+}
+
+/** 갱신 주기 시계의 허용 오차 (ms): 프레임 시각이 정해진 시각보다 이만큼 이르면 그 프레임에 갱신한다 */
+export const PHASE_TOLERANCE_MS = 1;
+
+/**
+ * 이보다 짧은 프레임(약 58fps 이상)이면 정해진 시각에 위상을 고정한다. 더 긴 프레임은 예전 판단(지난 갱신 프레임부터 한 주기)
+ * 그대로다: 느린 기기에서 위상을 고정하면 프레임 배수로 맞추느라 예전보다 자주 다시 합성했다(45fps 생존자 화면 15Hz → 20Hz)
+ */
+export const PHASE_LOCK_FRAME_MS = 1000 / 58;
+
+/**
+ * 주기 갱신 시계 (안개 · 시야 갱신). 빠른 프레임(PHASE_LOCK_FRAME_MS 이하)에서는 정해진 시각(시작 + k × 주기)에 위상을 고정한다:
+ * 프레임 시각이 다음 정해진 시각 − 1ms에 닿은 첫 프레임에 갱신하고, 마지막 갱신 시각은 프레임 시각이 아니라 정해진 시각으로
+ * 둔다. 그래서 60 · 120 · 144fps 모두 같은 정해진 시각에 갱신한다(예전 '지난 갱신부터 50ms' 판단은 120fps에서 6 × 8.33 =
+ * 49.99ms라 7프레임마다 = 58ms였다). 한 주기 넘게 밀렸으면(멈춤) 따라잡지 않고 지금으로 다시 맞춘다.
+ * 느린 프레임에서는 예전처럼 지난 갱신 프레임부터 한 주기가 지났을 때 갱신하고 지금으로 다시 맞춘다 (비용이 예전보다 늘지 않게)
+ */
+export class PhaseClock {
+  /** 마지막 갱신의 정해진 시각 (없으면 null) */
+  last: number | null = null;
+  /** 마지막으로 갱신한 프레임 시각 */
+  private lastFrame = 0;
+  /** 정해진 시각의 기준 (anchor, 없으면 첫 갱신 프레임) */
+  private origin: number | null = null;
+
+  /**
+   * 정해진 시각의 기준을 정한다 (판 장면을 만든 순간 등 프레임과 무관한 시각). 첫 갱신은 그 뒤 첫 프레임에 하되 기준 + k × 주기
+   * 격자에 둔다: 첫 프레임 시각이 fps마다 달라도 같은 시각에 갱신한다
+   */
+  anchor(t: number): void {
+    this.origin = t;
+  }
+
+  /** 이 프레임에 갱신하는가 (갱신하면 last를 옮긴다). frameMs = 이번 프레임 간격 (모르면 0: 빠른 프레임으로 본다) */
+  due(nowMs: number, periodMs: number, frameMs = 0): boolean {
+    if (this.last === null) {
+      const o = this.origin;
+      this.last =
+        o === null || nowMs < o
+          ? nowMs
+          : o + Math.floor((nowMs + PHASE_TOLERANCE_MS - o) / periodMs) * periodMs;
+      this.lastFrame = nowMs;
+      return true;
+    }
+    if (frameMs > PHASE_LOCK_FRAME_MS) {
+      if (nowMs - this.lastFrame < periodMs) return false;
+      this.last = nowMs;
+      this.lastFrame = nowMs;
+      return true;
+    }
+    const next = this.last + periodMs;
+    if (nowMs < next - PHASE_TOLERANCE_MS) return false;
+    this.last = nowMs - next >= periodMs - PHASE_TOLERANCE_MS ? nowMs : next;
+    this.lastFrame = nowMs;
+    return true;
+  }
+
+  reset(): void {
+    this.last = null;
+  }
+}
+
+/**
  * 시야 다각형 캐시 (M12 휴대폰 성능). 눈 이름(역할 · 'cone' · 'near')마다 마지막 입력(자리 x · y와 모양 값 a · b)과
  * 결과를 하나씩 둔다. 입력이 정확히 같으면 같은 다각형(같은 참조)을 돌려준다 — 결과는 계산한 것과 같고, 같은 참조라서
  * 안개 레이어가 빛 지도를 다시 칠하지 않아도 되는지 바로 안다. 다각형은 만든 뒤 바꾸지 않는다

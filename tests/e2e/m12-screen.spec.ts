@@ -579,6 +579,10 @@ const HOME_IDS = [
   'quality-select',
   'privacy-link',
 ] as const;
+/** PC 첫 화면은 그래픽 줄 옆 프레임 제한 선택 상자까지 (렌더링 최적화, 터치는 설정 판 안이라 첫 화면에 없다) */
+const PC_HOME_IDS = [...HOME_IDS, 'frame-limit-select'] as const;
+/** 터치 첫 화면은 그래픽 줄 옆 설정 단추(진동 · 프레임 제한 · 안내 다시 보기)와 로고 칸의 전체 화면 버튼까지 */
+const TOUCH_HOME_IDS = [...HOME_IDS, 'settings-button', 'lobby-fullscreen'] as const;
 const PICK_IDS = [
   'server-status',
   'practice-role-monster',
@@ -622,8 +626,8 @@ test('로비: 태블릿 가로 · 낮은 노트북 창(1024×640 · 1138×712 ·
     await page.goto(`/?${BASE_QUERY.slice(1)}`);
     await expect(page.getByTestId('create-room')).toBeEnabled();
     const touch = (d.device.hasTouch ?? false) === true;
-    // 첫 화면 (터치 기기는 로고 칸의 전체 화면 버튼까지)
-    await expectInFirstView(page, touch ? [...HOME_IDS, 'lobby-fullscreen'] : HOME_IDS, `${d.name} 첫 화면`);
+    // 첫 화면 (PC는 프레임 제한 선택 상자, 터치 기기는 설정 단추 · 로고 칸의 전체 화면 버튼까지)
+    await expectInFirstView(page, touch ? TOUCH_HOME_IDS : PC_HOME_IDS, `${d.name} 첫 화면`);
     expect(await hScroll(page, '[data-testid="lobby"]'), `${d.name} 첫 화면 가로 스크롤`).toBe(false);
     // 봇과 연습 → 역할 고르기: 네 역할 · 취소 · 상태 줄
     await press(page.getByTestId('practice'));

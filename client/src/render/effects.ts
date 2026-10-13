@@ -101,45 +101,6 @@ export class ScreenEffects {
   }
 }
 
-/** 돌진 잔상 기본 수명 (보이는 화면, balance monster.dash.duration = 0.25초를 setLife로 넣는다) */
-export const DASH_GHOST_MS = 250;
-const GHOST_EVERY_MS = 28;
-
-export interface Ghost {
-  x: number;
-  y: number;
-  aim: number;
-  at: number;
-}
-
-export class DashTrail {
-  private ghosts: Ghost[] = [];
-  private lastAt = -1e9;
-  private lifeMs = DASH_GHOST_MS;
-
-  /** 잔상 수명 = 돌진 시간 (balance) */
-  setLife(ms: number): void {
-    if (ms > 0) this.lifeMs = ms;
-  }
-
-  /** 돌진 중인 괴물이 보이는 프레임마다 부른다 */
-  sample(x: number, y: number, aim: number, nowMs: number): void {
-    if (nowMs - this.lastAt < GHOST_EVERY_MS) return;
-    this.lastAt = nowMs;
-    this.ghosts.push({ x, y, aim, at: nowMs });
-  }
-
-  /** 아직 남은 잔상과 알파 (0~1) */
-  live(nowMs: number): { g: Ghost; alpha: number }[] {
-    this.ghosts = this.ghosts.filter((g) => nowMs - g.at < this.lifeMs);
-    return this.ghosts.map((g) => ({ g, alpha: 1 - (nowMs - g.at) / this.lifeMs }));
-  }
-
-  clear(): void {
-    this.ghosts = [];
-  }
-}
-
 // ───────────────────────── 월드 후처리 (비네트 · 색보정) ─────────────────────────
 
 const WORLD_GRADE = 'DecoyWorldGrade';

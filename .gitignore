@@ -6,10 +6,13 @@ artifacts/*
 !artifacts/final/
 !artifacts/remaster/
 !artifacts/store/
+# 렌더링 최적화 전 · 후 수치와 스크린샷 (사용자 요청)
+!artifacts/perf/
 test-results/
 playwright-report/
 tests/e2e/.results/
 tests/store/.results/
+tests/perf/.results/
 *.log
 .DS_Store
 # private 저장소지만 키 · 인증 파일이 실수로 들어가지 않게
@@ -30,3 +33,6 @@ id_ed25519*
 *.apk
 signing-key-info.txt
 signing.keystore
+
+# 에이전트 작업 트리 (로컬 도구)
+.claude/worktrees/

@@ -2,6 +2,7 @@
 import Phaser from 'phaser';
 import {
   BTN,
+  type AnimDebug,
   type DrawnEntity,
   type FxTarget,
   type GameEvent,
@@ -14,17 +15,19 @@ import {
   isKeptNote,
 } from '@decoy/shared';
 import type { App } from '../app';
+import { LinearRamp, isWalking, selfPieces, type SelfStep, type TravelPiece } from '../art/anim';
 import { sfx } from '../audio';
 import { STORY_TEXT, UI_TEXT, formatText } from '../data/storyText';
 import { device } from '../device';
-import { qualityHooks, sessionAutoDowngrade } from '../gfx/quality';
+import { FPS_WINDOW_MS, sessionFrameStats, type FrameWindow } from '../gfx/frameStats';
+import { qualityHooks, sessionAutoDowngrade, type AdaptContext, type FrameSample } from '../gfx/quality';
 import { getFpsOverride, gfxNow, gfxState, probeSlot } from '../gfx/state';
 import { haptics } from '../haptics';
 import { InputLog, InputSampler } from '../input';
 import { applyDashStart, applyWindupLock, predictMonsterPress, type LocalWindup } from '../localActions';
 import { COLOR } from '../render/colors';
 import { ScreenEffects, collectFxTargets } from '../render/effects';
-import { WorldRenderer } from '../render/worldRenderer';
+import { WorldRenderer, type MotionSource } from '../render/worldRenderer';
 import { TouchInput, type TouchFrameCtx } from '../touchInput';
 import { TOUCH_HINT_MS, takeTouchHints } from '../touchTutorial';
 import type { IconId } from '../art/icons';
@@ -37,7 +40,7 @@ import { Minimap } from '../ui/minimap';
 import { Scoreboard, TutorialOverlay } from '../ui/overlays';
 import { PROBE_DEPTH, drawProbeText } from '../ui/text';
 import { TouchControls } from '../ui/touchControls';
-import { staleEventLimitMs, trackFrameMs } from './staleEvents';
+import { frameDeltaMs, staleEventLimitMs, trackFrameMs } from './staleEvents';
 
 /** 안개 (M3부터) */
 export const FOG_ENABLED = true;
@@ -57,6 +60,9 @@ const ALERT_LOOK: Partial<Record<string, { tone: Tone; icon: IconId }>> = {
 };
 /** 발각 테두리 맥동 (Hz) */
 const SPOTTED_PULSE_HZ = 1.2;
+
+/** 적응형 품질이 최근 1초 측정을 다시 내는 간격 (ms). 매 프레임 백분위를 내지 않는다 */
+const ADAPT_WINDOW_EVERY_MS = 250;
 
 export class GameScene extends Phaser.Scene {
   private app!: App;
@@ -89,6 +95,46 @@ export class GameScene extends Phaser.Scene {
   private spottedEdge!: Slice;
   /** 괴물 화면: 내 부채꼴 모양 보간 (스냅샷 사이에도 0.4초 전환이 부드럽게) */
   private myBlend = 0;
+  /**
+   * myBlend의 시간 곡선: 시야 모드가 바뀐 스냅샷을 받은 순간부터 visionModeSwitchTime에 걸쳐 (렌더링 최적화: 프레임마다
+   * 더하면 바뀐 프레임에 그 전 시간까지 더해져 fps마다 달랐다). 판 장면마다 새로
+   */
+  private blendRamp: LinearRamp | null = null;
+  /** 판 장면을 만든 뒤 그린 프레임 수 (디버그 animDebug: 120Hz로 정말 그렸는지 시험이 본다) */
+  private renderedFrames = 0;
+  /** 괴물: 예측한 돌진을 누른 마지막 시각 (입력 틱, 돌진 잔상 격자의 시작) */
+  private localDashAt: number | null = null;
+  /** 지난 프레임의 렌더 시각 (보간 경로 조각 · 상태 경계를 잴 구간 시작) */
+  private lastRenderTime: number | null = null;
+  /** 이번 프레임 구간 (motion이 읽는다): 렌더 시각 r0 → r1, 이 기기 시각 prevNow(지난 프레임, 없으면 null) → now */
+  private motionSpan: { r0: number; r1: number; prevNow: number | null; now: number } = {
+    r0: 0,
+    r1: 0,
+    prevNow: null,
+    now: 0,
+  };
+  /**
+   * 내 캐릭터 걷기 기록 (입력 틱 · 스냅샷 보정마다, 시각 순서, 최근 16개 — anim SelfStep). 걷기 판단은 입력 틱에 예측 상태가
+   * 움직였는가로 한다: 스냅샷 보정 순간(보낸 입력을 서버가 모두 처리함) 그린 자리가 다음 틱까지 멈추는데, 그린 자리의
+   * 프레임 사이 거리로 재면 120fps는 그 사이 프레임을 '멈춤'으로 보고 60fps는 보지 못해 걷기 자세가 fps마다 달랐다
+   */
+  private readonly selfSteps: SelfStep[] = [];
+  /** 보간 엔티티의 프레임 사이 경로 · 상태 경계 (월드 렌더러가 걷기 · 바뀐 순간을 잰다) */
+  private readonly motion: MotionSource = {
+    travel: (kind: 'survivor' | 'monster', id: string, out: TravelPiece[]): number => {
+      const span = this.motionSpan;
+      return this.interpOf(kind).travel(id, span.r0, span.r1, out);
+    },
+    edgeAt: (kind: 'survivor' | 'monster', id: string): number | null => {
+      const span = this.motionSpan;
+      const r = this.interpOf(kind).edgeAt(id, span.r0, span.r1);
+      return r === null ? null : span.now - (span.r1 - r);
+    },
+    selfTravel: (out: TravelPiece[]): number => {
+      const { prevNow, now } = this.motionSpan;
+      return prevNow === null ? -1 : selfPieces(this.selfSteps, prevNow, now, out);
+    },
+  };
   drawn: DrawnEntity[] = [];
   /** 마지막으로 보낸 입력 (디버그) */
   lastFrame: InputFrame | null = null;
@@ -103,6 +149,11 @@ export class GameScene extends Phaser.Scene {
   private localWindup: LocalWindup | null = null;
   /** 판 중 FPS 감시를 하는가 (세션 상태는 sessionAutoDowngrade: 느리면 한 단계 내리고 효과를 확인한다) */
   private watchingFps = false;
+  /** 적응형 품질 입력 (프레임마다 새로 만들지 않는다). 최근 1초 측정은 ADAPT_WINDOW_EVERY_MS마다 다시 낸다 */
+  private readonly adaptSample: FrameSample = { fps: 0, workP95: 0 };
+  private readonly adaptCtx: AdaptContext = { targetHz: 60, displayHz: 60, canRateFallback: false };
+  private readonly adaptWindow: FrameWindow = { fps: 0, intervalAvg: 0, workP95: 0, frames: 0 };
+  private nextAdaptWindowAt = 0;
   /** 지금 처리하는 스냅샷이 서버에서 만들어진 뒤 지난 시간 (ms, 진동: 오래된 일은 울리지 않는다) */
   private eventAgeMs = 0;
 
@@ -235,6 +286,17 @@ export class GameScene extends Phaser.Scene {
     fitCamera(this.cameras.main);
     this.world = new WorldRenderer(this, FOG_ENABLED);
     this.myBlend = 0;
+    this.blendRamp = null;
+    this.renderedFrames = 0;
+    this.localDashAt = null;
+    this.selfSteps.length = 0;
+    // 보간 경로 조각 · 내 걷기 기록 · 시야 모드 보간은 판 장면을 만든 순간부터 잰다: 첫 프레임 시각은 fps마다 다르다
+    // (판 장면은 판 시작 메시지를 받은 순간에 만들고 첫 그리기는 다음 프레임이다)
+    const createdAt = performance.now();
+    this.lastRenderTime = app.renderTime();
+    this.motionSpan.now = createdAt;
+    this.motionSpan.prevNow = null;
+    if (app.lastSnap) this.noteBlend(app.lastSnap, createdAt);
     this.kit = new HudKit(this);
     this.hud = new Hud(this.kit, info, balance, device.touch);
     this.minimap = new Minimap(this, this.kit, info.role === 'monster');
@@ -302,6 +364,9 @@ export class GameScene extends Phaser.Scene {
       const age = app.link.synced ? Math.max(0, app.link.serverNow() - e.snap.st) : 0;
       const stale = app.link.synced && age > staleEventLimitMs(this.frameMs);
       this.eventAgeMs = age;
+      // 괴물 시야 모드 보간 · 내 걷기 기록은 받은 순간부터 잰다
+      this.noteBlend(e.snap, performance.now());
+      this.noteSelfReconcile(performance.now());
       // 진동 (터치 기기): 발각 꺼짐 → 켜짐 전환만 울린다(판단은 haptics, 지난 일은 그 시간으로 거른다)
       if (device.touch) haptics.spotted(e.snap.you.surv?.spotted === true, age);
       for (const ev of e.snap.events) {
@@ -441,6 +506,7 @@ export class GameScene extends Phaser.Scene {
     const status = app.lastSnap?.you.surv?.status;
     if (status === 'dead' || status === 'escaped') {
       this.acc = 0;
+      this.stopSelfWalk();
       return;
     }
     // 괴물 재접속 대기(판 전체 일시정지): 서버가 입력을 처리하지 않으므로 보내지도 예측하지도 않는다.
@@ -448,6 +514,7 @@ export class GameScene extends Phaser.Scene {
     if ((app.lastSnap?.world.paused ?? null) !== null || (this.touch !== null && device.portrait)) {
       this.acc = 0;
       this.sampler.clearPressed();
+      this.stopSelfWalk();
       return;
     }
     const dtMs = app.dt * 1000;
@@ -460,6 +527,8 @@ export class GameScene extends Phaser.Scene {
       if (frame.pressed !== 0 && app.match?.role === 'monster') this.predictMonster(frame);
       app.predictor.applyLocal(frame, env);
       this.lastStepAt = performance.now();
+      const moved = app.predictor.stepDistance;
+      this.noteSelfStep(this.lastStepAt, moved / dtMs, this.lastStepAt + dtMs, isWalking(moved, dtMs));
       frames.push(frame);
       this.lastFrame = frame;
       this.inputHistory.push(frame, this.lastStepAt, this.sampler.mode);
@@ -488,7 +557,10 @@ export class GameScene extends Phaser.Scene {
       this.localWindup = { seq: frame.seq, until: now + balance.monster.attack.windup * 1000, dir: st.face };
       sfx.play('windup');
     }
-    if (res.dash) app.predictor.predictAction(frame.seq, applyDashStart(balance));
+    if (res.dash) {
+      app.predictor.predictAction(frame.seq, applyDashStart(balance));
+      this.localDashAt = now;
+    }
   }
 
   /** 다음 입력 틱(쌓인 시간이 1/30초가 되는 때)에 깨어나도록 예약한다. 장면이 끝나면 SHUTDOWN에서 취소 */
@@ -509,6 +581,7 @@ export class GameScene extends Phaser.Scene {
     if (document.hidden) {
       // 백그라운드 탭: 입력을 보내지 않는다 (서버는 입력이 끊기면 제자리에 세운다)
       this.acc = 0;
+      this.stopSelfWalk();
       return;
     }
     this.stepInput(delta);
@@ -525,10 +598,78 @@ export class GameScene extends Phaser.Scene {
     return { dir: null, hideServer: now < lw.until + this.app.link.rtt + 150 };
   }
 
-  override update(_time: number, delta: number): void {
-    // Phaser의 delta는 200ms(최소 5fps)를 넘으면 이전 값으로 바꿔 넣으므로 느린 기기의 실제 간격은 rawDelta로 잰다
-    this.frameMs = trackFrameMs(this.frameMs, this.game.loop.rawDelta);
-    this.renderFrame(delta);
+  /** 프레임 독립성 시험용 연출 상태 (렌더링 최적화, 디버그 훅 getAnimState): 같은 시각이면 60 · 120fps에서 같아야 한다 */
+  get animDebug(): AnimDebug | null {
+    if (!this.world) return null;
+    const w = this.world.animDebug();
+    return {
+      myBlend: this.app.match?.role === 'monster' ? this.myBlend : null,
+      gait: w.gait,
+      fogAt: w.fogAt,
+      coneRed: w.coneRed,
+      dashGhosts: w.dashGhosts,
+      ghosts: w.ghosts,
+      particles: w.particles,
+      frames: this.renderedFrames,
+    };
+  }
+
+  /** 입력을 적용하지 않는 틱 (관전 · 판 정지 · 숨김): 예측 상태가 움직이지 않는다 */
+  private stopSelfWalk(): void {
+    const last = this.selfSteps[this.selfSteps.length - 1];
+    if (last?.walk || (last?.speed ?? 0) > 0) {
+      const now = performance.now();
+      this.noteSelfStep(now, 0, now, false);
+    }
+  }
+
+  /**
+   * 스냅샷 보정 뒤 (app이 reconcile한 바로 다음): 예측 보간의 두 상태가 바뀌었을 수 있다. 빠르기는 새 두 상태 사이 거리 /
+   * 틱 길이, 보간이 다 가는 시각(마지막 입력 틱 + 틱 길이)과 걷기 판단(마지막 입력 틱)은 그대로
+   */
+  private noteSelfReconcile(t: number): void {
+    const last = this.selfSteps[this.selfSteps.length - 1];
+    const p = this.app.predictor;
+    if (!last || !p) return;
+    this.noteSelfStep(t, p.stepDistance / (this.app.dt * 1000), last.until, last.walk);
+  }
+
+  /** 내 캐릭터 걷기 기록 하나 (최근 16개: 틱 30Hz + 보정 20Hz로 0.3초 남짓, 느린 프레임 하나보다 길게) */
+  private noteSelfStep(t: number, speed: number, until: number, walk: boolean): void {
+    const steps = this.selfSteps;
+    steps.push({ t, speed, until, walk });
+    if (steps.length > 16) steps.shift();
+  }
+
+  /** 보간기 (생존자 화면의 괴물 · 다른 생존자) */
+  private interpOf(kind: 'survivor' | 'monster'): App['survivorsInterp'] | App['monsterInterp'] {
+    return kind === 'monster' ? this.app.monsterInterp : this.app.survivorsInterp;
+  }
+
+  /**
+   * 괴물 시야 모드 보간의 목표를 스냅샷을 받은 순간 t에 맞춘다. 서버 값과 0.35 넘게 어긋나면 서버 값으로 (재접속 · 늦은 스냅샷).
+   * 스냅샷 사이에는 시간 곡선을 읽기만 한다 (프레임 수와 무관)
+   */
+  private noteBlend(snap: Snapshot, t: number): void {
+    const mon = snap.you.mon;
+    const balance = this.app.balance;
+    if (!mon || !balance) return;
+    const ramp = (this.blendRamp ??= new LinearRamp(
+      this.myBlend,
+      Math.max(1, balance.monster.visionModeSwitchTime * 1000),
+    ));
+    ramp.setTarget(mon.mode === 'hunt' ? 1 : 0, t);
+    if (Math.abs(ramp.valueAt(t) - mon.blend) > 0.35) ramp.jump(mon.blend, t);
+  }
+
+  override update(_time: number, _delta: number): void {
+    // Phaser의 delta는 200ms(최소 5fps)를 넘으면 이전 값으로 바꿔 넣으므로 느린 기기의 실제 간격은 rawDelta로 잰다.
+    // 시간으로 쌓는 연출(보정 어긋남 · 걷기 · 부채꼴 색)도 rawDelta를 쓴다: delta는 최근 10프레임 평균이고 시작 · 복귀 뒤
+    // 120프레임은 16.67ms로 막혀 120fps에서 실제와 다르다 (렌더링 최적화, smoothStep을 끄든 켜든 같게)
+    const raw = this.game.loop.rawDelta;
+    this.renderedFrames += 1;
+    this.frameMs = trackFrameMs(this.frameMs, raw);
+    this.renderFrame(frameDeltaMs(raw));
     this.watchFps();
   }
 
@@ -539,8 +680,25 @@ export class GameScene extends Phaser.Scene {
   private watchFps(): void {
     if (!this.watchingFps || document.hidden) return;
     if (!this.app.lastSnap || this.app.result) return;
-    const fps = getFpsOverride() ?? this.game.loop.actualFps;
-    const action = sessionAutoDowngrade.sample(performance.now(), fps, gfxState.quality);
+    const now = performance.now();
+    const sample = this.adaptSample;
+    // 측정: 그린 프레임의 최근 1초 FPS · 작업 시간 p95 (gfx/frameStats.ts). injectFps는 간격 = 작업 = 1000/fps로 본다
+    const forced = getFpsOverride();
+    if (forced !== null) {
+      sample.fps = forced;
+      sample.workP95 = 1000 / forced;
+    } else if (now >= this.nextAdaptWindowAt) {
+      this.nextAdaptWindowAt = now + ADAPT_WINDOW_EVERY_MS;
+      sessionFrameStats.window(FPS_WINDOW_MS, this.adaptWindow);
+      sample.fps = this.adaptWindow.fps;
+      sample.workP95 = this.adaptWindow.workP95;
+    }
+    // 목표: 프레임 제한 · 잰 화면 주사율 (main.ts가 페이싱 상태를 gfxState에 옮겨 적는다)
+    const ctx = this.adaptCtx;
+    ctx.targetHz = gfxState.targetHz;
+    ctx.displayHz = gfxState.displayHz;
+    ctx.canRateFallback = gfxState.frameLimit === 'auto' && gfxState.displayHz > 60;
+    const action = sessionAutoDowngrade.sample(now, sample, gfxState.quality, ctx);
     gfxState.measuredFps = sessionAutoDowngrade.average;
     if (action) qualityHooks.auto?.(action);
   }
@@ -554,18 +712,23 @@ export class GameScene extends Phaser.Scene {
     }
     const now = performance.now();
     const renderTime = app.renderTime();
+    const span = this.motionSpan;
+    span.r0 = this.lastRenderTime ?? renderTime;
+    span.r1 = renderTime;
+    span.prevNow = this.lastRenderTime === null ? null : span.now;
+    span.now = now;
+    this.lastRenderTime = renderTime;
     const alpha = (now - this.lastStepAt) / (app.dt * 1000);
     const windup = this.windupView(snap.ack, now);
-    const me = app.predictor?.renderPos(delta, alpha) ?? null;
+    const me = app.predictor?.renderPos(delta, alpha, now) ?? null;
     if (me) this.localPos = me;
     const mon = snap.you.mon;
     if (mon) {
-      const target = mon.mode === 'hunt' ? 1 : 0;
-      const step = delta / 1000 / Math.max(0.001, app.balance.monster.visionModeSwitchTime);
-      this.myBlend =
-        this.myBlend < target ? Math.min(target, this.myBlend + step) : Math.max(target, this.myBlend - step);
-      if (Math.abs(this.myBlend - mon.blend) > 0.35) this.myBlend = mon.blend;
+      // 이 장면이 생기기 전에 받은 스냅샷이면 첫 프레임에 시작한다
+      if (!this.blendRamp) this.noteBlend(snap, now);
+      this.myBlend = this.blendRamp?.valueAt(now) ?? this.myBlend;
     }
+    const lw = this.localWindup;
     this.world.draw(
       {
         balance: app.balance,
@@ -583,6 +746,10 @@ export class GameScene extends Phaser.Scene {
         hideServerWindup: windup.hideServer,
         myStunned: snap.you.role === 'monster' && (app.predictor?.state?.stun ?? 0) > 0,
         myDashing: snap.you.role === 'monster' && (app.predictor?.state?.dash ?? 0) > 0,
+        snapAt: app.lastSnapAt,
+        localWindupAt: windup.dir !== null && lw ? lw.until - app.balance.monster.attack.windup * 1000 : null,
+        localDashAt: this.localDashAt,
+        motion: this.motion,
       },
       delta,
     );
