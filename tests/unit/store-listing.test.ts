@@ -22,6 +22,39 @@ function textBlock(heading: string): string {
   return m[1] ?? '';
 }
 
+/** 마크다운 표 줄의 칸들 */
+const cells = (line: string): string[] =>
+  line
+    .trim()
+    .split('|')
+    .slice(1, -1)
+    .map((c) => c.trim());
+
+/** '### 제목' 절의 첫 표 (머리 줄 · 구분 줄을 뺀 행들) */
+function firstTable(heading: string): string[][] {
+  const at = LISTING.indexOf(`### ${heading}`);
+  if (at < 0) throw new Error(`제목 없음: ${heading}`);
+  const lines = LISTING.slice(at).split('\n');
+  const from = lines.findIndex((l) => l.startsWith('|'));
+  const rows: string[][] = [];
+  for (const l of lines.slice(from + 2)) {
+    if (!l.startsWith('|')) break;
+    rows.push(cells(l));
+  }
+  return rows;
+}
+
+/** 답 칸의 첫 낱말 (예 · 아니요 · 없음 · 게임, 굵게 표시 무시) */
+const lead = (answer: string): string | undefined => /^(?:\*\*)?(예|아니요|없음|게임)/.exec(answer)?.[1];
+
+/** PLAY_STORE_GUIDE 7단계 Console 표에서 '접두사 질문 | 답' 행 */
+function guideAnswers(prefix: string): Map<string, string> {
+  const rows = GUIDE.split('\n')
+    .filter((l) => l.trim().startsWith(`| ${prefix}`))
+    .map(cells);
+  return new Map(rows.map((c) => [(c[0] ?? '').slice(prefix.length), c[1] ?? '']));
+}
+
 /** 플레이 콘솔이 세는 글자 수 (코드 포인트, 한글 1자 = 1자) */
 const chars = (s: string): number => [...s].length;
 
@@ -60,6 +93,48 @@ describe('STORE_LISTING.md', () => {
     const access = textBlock('2.1 앱 액세스');
     expect(access).toContain('로그인');
     expect(access).toContain('봇과 연습');
+  });
+
+  it('남은 ⚠ 확인 필요는 지연 측정값 · 태그 둘뿐 — 데이터 보안 · 콘텐츠 등급 · 타깃 연령은 2026-10-13 결정 반영', () => {
+    const lines = LISTING.split('\n');
+    const head = lines.indexOf('---');
+    const flagged = lines.map((l, i) => ({ l, i })).filter(({ l }) => l.includes('⚠'));
+    // 표 밖의 ⚠는 머리의 안내 줄(표시를 설명하는 줄)에만
+    expect(flagged.filter(({ l, i }) => !l.startsWith('|') && i > head)).toEqual([]);
+    const rows = flagged.filter(({ l }) => l.startsWith('|')).map(({ l }) => l.split('|')[1]?.trim() ?? '');
+    expect(rows.sort()).toEqual(['지연 측정값', '태그 (최대 5개, Console 목록에서 고름)']);
+  });
+
+  it('콘텐츠 등급의 소통 문항 답이 결정 문구 그대로이고 안내서 Console 표와 같다', () => {
+    const phrase = '채팅 · 음성 없음, 보이는 것은 친구 방 닉네임뿐, 빠른 매칭은 익명';
+    const row = LISTING.split('\n').find((l) => l.startsWith('| 사용자 간 상호작용 |'));
+    expect(row).toContain(phrase);
+    const guideRow = GUIDE.split('\n').find((l) =>
+      l.trim().startsWith('| 콘텐츠 등급 › 사용자 간 상호작용 |'),
+    );
+    expect(guideRow).toContain(phrase);
+  });
+
+  it('안내서 7단계 Console 표의 콘텐츠 등급 · 데이터 보안 요약 행이 STORE_LISTING 2.3 · 2.5 표와 같은 답 (빠진 행 · 남는 행 없음)', () => {
+    const rating = firstTable('2.3 콘텐츠 등급 설문').filter((r) => r[0] !== '예상 등급');
+    expect(rating.length).toBeGreaterThanOrEqual(8);
+    const guideRating = guideAnswers('콘텐츠 등급 › ');
+    for (const [area = '', answer = ''] of rating) {
+      expect(lead(answer), `STORE_LISTING ${area}`).toBeDefined();
+      expect(lead(guideRating.get(area) ?? ''), `안내서 ${area}`).toBe(lead(answer));
+    }
+    // 안내서에만 있는 행은 설문 진행용 두 줄뿐
+    const extra = [...guideRating.keys()].filter((k) => !rating.some((r) => r[0] === k));
+    expect(extra.sort()).toEqual(['위 표에 없는 문항', '이메일 주소']);
+
+    const summary = firstTable('2.5 데이터 보안 양식');
+    expect(summary.length).toBeGreaterThanOrEqual(6);
+    const guideSafety = guideAnswers('데이터 보안 › ');
+    for (const [q = '', answer = ''] of summary) {
+      expect(lead(answer), `STORE_LISTING ${q}`).toBeDefined();
+      expect(lead(guideSafety.get(q) ?? ''), `안내서 ${q}`).toBe(lead(answer));
+    }
+    expect(guideSafety.size).toBe(summary.length);
   });
 
   it('그림 표의 파일이 artifacts/store/에 있다', () => {
