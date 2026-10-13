@@ -46,6 +46,11 @@ export interface FogPen {
     alpha: number,
   ): void;
   fillPoly(poly: readonly Vec2[], color: number, alpha: number): void;
+  /**
+   * 다각형 채우기 (꼭짓점 n개가 평평한 배열 xy[start..start + 2n) = x0, y0, x1, y1, …). 같은 수의 fillPoly와 같은 그림이다.
+   * 기록 펜을 재생할 때 꼭짓점 객체를 다시 만들지 않으려고 쓴다 (렌더링 최적화 2)
+   */
+  fillPolyFlat(xy: readonly number[], start: number, n: number, color: number, alpha: number): void;
   /** 선분 (두께는 논리 px) */
   line(x0: number, y0: number, x1: number, y1: number, width: number, color: number, alpha: number): void;
 }
@@ -58,8 +63,24 @@ export function nextFogKey(prefix: string): string {
   return `${prefix}-${keySeq}`;
 }
 
+/** rgba 문자열 캐시 칸 수 (2의 거듭제곱) */
+const RGBA_SLOTS = 256;
+const rgbaColor = new Float64Array(RGBA_SLOTS).fill(NaN);
+const rgbaAlpha = new Float64Array(RGBA_SLOTS).fill(NaN);
+const rgbaText: string[] = new Array<string>(RGBA_SLOTS).fill('');
+
+/**
+ * CSS 색 문자열. 안개 주기마다 같은 (색, 알파)로 수백 번 불리므로(눈금 · 패드 · 시야 채움) 최근 값을 칸 하나짜리 해시 캐시에
+ * 둔다(렌더링 최적화 2: 부를 때마다 새 문자열). 캐시에 없으면 예전과 같은 식으로 만든다 — 돌려주는 문자열은 늘 같다
+ */
 export function rgba(color: number, alpha: number): string {
-  return `rgba(${(color >> 16) & 255}, ${(color >> 8) & 255}, ${color & 255}, ${alpha})`;
+  const h = (color ^ (color >>> 11) ^ Math.floor(alpha * 4093)) & (RGBA_SLOTS - 1);
+  if (rgbaColor[h] === color && rgbaAlpha[h] === alpha) return rgbaText[h] ?? '';
+  const s = `rgba(${(color >> 16) & 255}, ${(color >> 8) & 255}, ${color & 255}, ${alpha})`;
+  rgbaColor[h] = color;
+  rgbaAlpha[h] = alpha;
+  rgbaText[h] = s;
+  return s;
 }
 
 /** 경로를 만드는 2D 컨텍스트 부분 */
@@ -129,6 +150,19 @@ export class CanvasPen implements FogPen {
     this.c.fill();
   }
 
+  fillPolyFlat(xy: readonly number[], start: number, n: number, color: number, alpha: number): void {
+    if (n < 3) return;
+    // polyPath와 같은 호출 (같은 수 × k)
+    const c = this.c;
+    const k = this.k;
+    c.beginPath();
+    c.moveTo((xy[start] ?? 0) * k, (xy[start + 1] ?? 0) * k);
+    for (let i = 1; i < n; i += 1) c.lineTo((xy[start + i * 2] ?? 0) * k, (xy[start + i * 2 + 1] ?? 0) * k);
+    c.closePath();
+    c.fillStyle = rgba(color, alpha);
+    c.fill();
+  }
+
   line(x0: number, y0: number, x1: number, y1: number, width: number, color: number, alpha: number): void {
     const c = this.c;
     c.beginPath();
@@ -153,18 +187,50 @@ const OP_LINE = 4;
  * 다시 그리지도 올리지도 않고, 다르면 replay로 캔버스 펜(조각 · 미니맵)에 그대로 다시 그린다
  */
 export class PenRecord implements FogPen {
-  readonly ops: number[] = [];
+  /**
+   * 기록 버퍼 (앞의 n개가 이번 기록). 비울 때 길이를 0으로 줄이지 않는다: V8은 length = 0이면 버퍼를 놓아 주고 다음 주기에
+   * push로 다시 키우므로(늘릴 때마다 새 버퍼) 안개 주기마다 기록 크기의 몇 배를 새로 할당했다 (렌더링 최적화 2)
+   */
+  private readonly buf: number[] = [];
+  private n = 0;
+
+  /** 기록한 수의 사본 (시험 · 디버그용: 할당한다) */
+  get ops(): number[] {
+    return this.buf.slice(0, this.n);
+  }
+
+  /** 기록한 수의 개수 */
+  get size(): number {
+    return this.n;
+  }
 
   reset(): void {
-    this.ops.length = 0;
+    this.n = 0;
   }
 
   fillCircle(x: number, y: number, r: number, color: number, alpha: number): void {
-    this.ops.push(OP_FILL_CIRCLE, x, y, r, color, alpha);
+    const o = this.buf;
+    let n = this.n;
+    o[n++] = OP_FILL_CIRCLE;
+    o[n++] = x;
+    o[n++] = y;
+    o[n++] = r;
+    o[n++] = color;
+    o[n++] = alpha;
+    this.n = n;
   }
 
   strokeCircle(x: number, y: number, r: number, width: number, color: number, alpha: number): void {
-    this.ops.push(OP_STROKE_CIRCLE, x, y, r, width, color, alpha);
+    const o = this.buf;
+    let n = this.n;
+    o[n++] = OP_STROKE_CIRCLE;
+    o[n++] = x;
+    o[n++] = y;
+    o[n++] = r;
+    o[n++] = width;
+    o[n++] = color;
+    o[n++] = alpha;
+    this.n = n;
   }
 
   strokeArc(
@@ -178,62 +244,144 @@ export class PenRecord implements FogPen {
     color: number,
     alpha: number,
   ): void {
-    this.ops.push(OP_STROKE_ARC, x, y, r, inset, from, to, width, color, alpha);
+    const o = this.buf;
+    let n = this.n;
+    o[n++] = OP_STROKE_ARC;
+    o[n++] = x;
+    o[n++] = y;
+    o[n++] = r;
+    o[n++] = inset;
+    o[n++] = from;
+    o[n++] = to;
+    o[n++] = width;
+    o[n++] = color;
+    o[n++] = alpha;
+    this.n = n;
   }
 
   fillPoly(poly: readonly Vec2[], color: number, alpha: number): void {
     if (poly.length < 3) return;
-    this.ops.push(OP_FILL_POLY, poly.length);
-    for (const p of poly) this.ops.push(p.x, p.y);
-    this.ops.push(color, alpha);
+    const o = this.buf;
+    let n = this.n;
+    o[n++] = OP_FILL_POLY;
+    o[n++] = poly.length;
+    for (let i = 0; i < poly.length; i += 1) {
+      const p = poly[i];
+      o[n++] = p ? p.x : 0;
+      o[n++] = p ? p.y : 0;
+    }
+    o[n++] = color;
+    o[n++] = alpha;
+    this.n = n;
+  }
+
+  fillPolyFlat(xy: readonly number[], start: number, count: number, color: number, alpha: number): void {
+    if (count < 3) return;
+    const o = this.buf;
+    let n = this.n;
+    o[n++] = OP_FILL_POLY;
+    o[n++] = count;
+    for (let i = start; i < start + count * 2; i += 1) o[n++] = xy[i] ?? 0;
+    o[n++] = color;
+    o[n++] = alpha;
+    this.n = n;
   }
 
   line(x0: number, y0: number, x1: number, y1: number, width: number, color: number, alpha: number): void {
-    this.ops.push(OP_LINE, x0, y0, x1, y1, width, color, alpha);
+    const o = this.buf;
+    let n = this.n;
+    o[n++] = OP_LINE;
+    o[n++] = x0;
+    o[n++] = y0;
+    o[n++] = x1;
+    o[n++] = y1;
+    o[n++] = width;
+    o[n++] = color;
+    o[n++] = alpha;
+    this.n = n;
   }
 
   /** 기록이 ops와 같은가 (같으면 다시 그릴 필요가 없다) */
   sameAs(ops: readonly number[]): boolean {
-    const a = this.ops;
-    if (a.length !== ops.length) return false;
-    for (let i = 0; i < a.length; i += 1) if (a[i] !== ops[i]) return false;
+    if (this.n !== ops.length) return false;
+    const a = this.buf;
+    for (let i = 0; i < this.n; i += 1) if (a[i] !== ops[i]) return false;
     return true;
   }
 
-  /** 기록한 명령을 다른 펜에 같은 순서로 그린다 */
+  /** 다른 기록과 같은 수인가 (sameAs와 같은 판단, 사본을 만들지 않는다) */
+  same(rec: PenRecord): boolean {
+    if (this.n !== rec.n) return false;
+    const a = this.buf;
+    const b = rec.buf;
+    for (let i = 0; i < this.n; i += 1) if (a[i] !== b[i]) return false;
+    return true;
+  }
+
+  /** 기록 rec의 명령을 그대로 이 기록에 덧붙인다 (재생해 기록한 것과 같은 수) */
+  append(rec: PenRecord): void {
+    const src = rec.buf;
+    const len = rec.n;
+    const o = this.buf;
+    let n = this.n;
+    for (let i = 0; i < len; i += 1) o[n++] = src[i] ?? 0;
+    this.n = n;
+  }
+
+  /**
+   * 기록한 명령을 다른 펜에 같은 순서로 그린다. 다각형은 기록한 평평한 배열 그대로 넘긴다(fillPolyFlat):
+   * 안개 주기마다 꼭짓점 객체 · 배열 · 접근 함수를 새로 만들지 않는다 (렌더링 최적화 2)
+   */
   replay(pen: FogPen): void {
-    const o = this.ops;
-    const at = (i: number): number => o[i] ?? 0;
+    if (pen instanceof PenRecord) {
+      pen.append(this);
+      return;
+    }
+    const o = this.buf;
+    const len = this.n;
     let i = 0;
-    while (i < o.length) {
-      const op = at(i);
+    while (i < len) {
+      const op = o[i] ?? 0;
       if (op === OP_FILL_CIRCLE) {
-        pen.fillCircle(at(i + 1), at(i + 2), at(i + 3), at(i + 4), at(i + 5));
+        pen.fillCircle(o[i + 1] ?? 0, o[i + 2] ?? 0, o[i + 3] ?? 0, o[i + 4] ?? 0, o[i + 5] ?? 0);
         i += 6;
       } else if (op === OP_STROKE_CIRCLE) {
-        pen.strokeCircle(at(i + 1), at(i + 2), at(i + 3), at(i + 4), at(i + 5), at(i + 6));
+        pen.strokeCircle(
+          o[i + 1] ?? 0,
+          o[i + 2] ?? 0,
+          o[i + 3] ?? 0,
+          o[i + 4] ?? 0,
+          o[i + 5] ?? 0,
+          o[i + 6] ?? 0,
+        );
         i += 7;
       } else if (op === OP_STROKE_ARC) {
         pen.strokeArc(
-          at(i + 1),
-          at(i + 2),
-          at(i + 3),
-          at(i + 4),
-          at(i + 5),
-          at(i + 6),
-          at(i + 7),
-          at(i + 8),
-          at(i + 9),
+          o[i + 1] ?? 0,
+          o[i + 2] ?? 0,
+          o[i + 3] ?? 0,
+          o[i + 4] ?? 0,
+          o[i + 5] ?? 0,
+          o[i + 6] ?? 0,
+          o[i + 7] ?? 0,
+          o[i + 8] ?? 0,
+          o[i + 9] ?? 0,
         );
         i += 10;
       } else if (op === OP_FILL_POLY) {
-        const n = at(i + 1);
-        const poly: Vec2[] = [];
-        for (let k = 0; k < n; k += 1) poly.push({ x: at(i + 2 + k * 2), y: at(i + 3 + k * 2) });
-        pen.fillPoly(poly, at(i + 2 + n * 2), at(i + 3 + n * 2));
+        const n = o[i + 1] ?? 0;
+        pen.fillPolyFlat(o, i + 2, n, o[i + 2 + n * 2] ?? 0, o[i + 3 + n * 2] ?? 0);
         i += 4 + n * 2;
       } else {
-        pen.line(at(i + 1), at(i + 2), at(i + 3), at(i + 4), at(i + 5), at(i + 6), at(i + 7));
+        pen.line(
+          o[i + 1] ?? 0,
+          o[i + 2] ?? 0,
+          o[i + 3] ?? 0,
+          o[i + 4] ?? 0,
+          o[i + 5] ?? 0,
+          o[i + 6] ?? 0,
+          o[i + 7] ?? 0,
+        );
         i += 8;
       }
     }
@@ -268,6 +416,41 @@ export function litTicks(progress: number, done: boolean, ticks = OBJ.ticks): nu
   return done ? ticks : clamp01(progress) * ticks;
 }
 
+/** 거점 하나의 고정 도형: 판정 반경 r에서의 눈금 24칸 사각형 띠 (자리 · 반경이 같으면 같은 수) */
+interface PointGeom {
+  readonly r: number;
+  readonly ticks: readonly (readonly Vec2[])[];
+}
+
+const pointGeoms = new Map<PointId, PointGeom>();
+
+/**
+ * 눈금 띠는 거점 자리와 판정 반경만의 함수라 (거점, 반경)마다 한 번만 계산한다 (렌더링 최적화 2: 안개 주기마다
+ * 눈금 24칸 × 꼭짓점 4개를 새로 만들던 것). 계산식은 그대로라 같은 수다
+ */
+function pointGeom(id: PointId, r: number): PointGeom {
+  const had = pointGeoms.get(id);
+  if (had && had.r === r) return had;
+  const { x: cx, y: cy } = CAPTURE_POINTS[id];
+  const slot = TAU / OBJ.ticks;
+  const ticks: Vec2[][] = [];
+  for (let i = 0; i < OBJ.ticks; i += 1) {
+    const a0 = TOP + slot * (i + (1 - OBJ.tickArc) / 2);
+    const a1 = a0 + slot * OBJ.tickArc;
+    ticks.push(arcQuad(cx, cy, r - OBJ.tickIn, r - OBJ.tickOut, a0, a1));
+  }
+  const g = { r, ticks };
+  pointGeoms.set(id, g);
+  return g;
+}
+
+/** 스캔선 꼬리 조각 (중심 + 원호 두 점). 펜은 받은 다각형을 바로 그리거나 수로 기록하고 붙잡지 않으므로 하나를 고쳐 쓴다 */
+const SCAN_TRI: [Vec2, Vec2, Vec2] = [
+  { x: 0, y: 0 },
+  { x: 0, y: 0 },
+  { x: 0, y: 0 },
+];
+
 /**
  * 거점 (공개 정보: 양쪽 화면). 판정 반경 원형 패드 + 바깥 24칸 눈금 링.
  * 진행 = 눈금이 위에서부터 시계 방향으로 청록 점등, 점령 중 = 회전 스캔선, 정지 = 주황 눈금(배지에 일시정지 아이콘),
@@ -296,13 +479,12 @@ export function paintPoints(
     // 판정 경계 (바깥 원): 번짐 + 선
     pen.strokeCircle(cx, cy, r, 6, C.neon, 0.07);
     pen.strokeCircle(cx, cy, r, 2, done ? C.neon : C.ring, 0.95);
-    // 눈금 24칸
+    // 눈금 24칸 (띠 도형은 거점 · 반경마다 한 번 계산해 둔 것)
     const lit = litTicks(p.progress, done);
-    const slot = TAU / OBJ.ticks;
-    for (let i = 0; i < OBJ.ticks; i += 1) {
-      const a0 = TOP + slot * (i + (1 - OBJ.tickArc) / 2);
-      const a1 = a0 + slot * OBJ.tickArc;
-      const q = arcQuad(cx, cy, r - OBJ.tickIn, r - OBJ.tickOut, a0, a1);
+    const ticks = pointGeom(p.id, r).ticks;
+    for (let i = 0; i < ticks.length; i += 1) {
+      const q = ticks[i];
+      if (!q) continue;
       pen.fillPoly(q, C.tickOff, 1);
       const on = clamp01(lit - i);
       if (on > 0) pen.fillPoly(q, accent, on);
@@ -312,11 +494,21 @@ export function paintPoints(
       const a = TOP + TAU * ((((now % OBJ.scanMs) + OBJ.scanMs) % OBJ.scanMs) / OBJ.scanMs);
       const rr = r - OBJ.tickIn - 0.05;
       const step = 0.075;
-      OBJ.scanTrail.forEach((alpha, n) => {
+      // 조각 = 중심 + arcQuad(rr, rr, a0, a1)의 두 번째 · 세 번째 꼭짓점 (같은 식)
+      const [c0, c1, c2] = SCAN_TRI;
+      c0.x = cx;
+      c0.y = cy;
+      let n = 0;
+      for (const alpha of OBJ.scanTrail) {
         const a1 = a - n * step;
         const a0 = a1 - step;
-        pen.fillPoly([{ x: cx, y: cy }, ...arcQuad(cx, cy, rr, rr, a0, a1).slice(1, 3)], C.neon, alpha);
-      });
+        c1.x = cx + Math.cos(a0) * rr;
+        c1.y = cy + Math.sin(a0) * rr;
+        c2.x = cx + Math.cos(a1) * rr;
+        c2.y = cy + Math.sin(a1) * rr;
+        pen.fillPoly(SCAN_TRI, C.neon, alpha);
+        n += 1;
+      }
       pen.line(cx, cy, cx + Math.cos(a) * rr, cy + Math.sin(a) * rr, 2, C.neon, 0.75);
     }
   }
@@ -378,6 +570,85 @@ export function exitArcRange(id: ExitId, r: number): [number, number] {
   return north ? [a, Math.PI - a] : [Math.PI - a, TAU + a];
 }
 
+/** 사각형 하나를 네 꼭짓점 다각형으로 (왼위 → 오른위 → 오른아래 → 왼아래) */
+function rectPoly(x0: number, y0: number, x1: number, y1: number): Vec2[] {
+  return [
+    { x: x0, y: y0 },
+    { x: x1, y: y0 },
+    { x: x1, y: y1 },
+    { x: x0, y: y1 },
+  ];
+}
+
+/**
+ * 탈출구 하나의 고정 도형 (판정 반경 r에서): 판정 원호 각 범위 · 셰브론 · 상태등 · 문 띠 · 게이지 칸 · 열린 문 빛 번짐.
+ * 모두 문 자리(EXITS)와 반경만의 함수라 (탈출구, 반경)마다 한 번만 계산한다 (렌더링 최적화 2: 안개 주기마다 새로 만들던 것).
+ * 계산식은 그대로라 같은 수다. 시간에 따라 움직이는 것(미닫이 폭)만 그릴 때 계산한다
+ */
+interface ExitGeom {
+  readonly r: number;
+  readonly arc: readonly [number, number];
+  readonly chev: readonly (readonly Vec2[])[];
+  readonly lamps: readonly (readonly Vec2[])[];
+  /** 문 위 상태 띠 (lx0 ~ lx1) */
+  readonly band: readonly Vec2[];
+  /** 개방 게이지 칸 띠 (OBJ.doorSegments개) */
+  readonly segs: readonly (readonly Vec2[])[];
+  /** 열린 문 바닥 빛 번짐 반원과 그 0.6배 */
+  readonly spill: readonly Vec2[];
+  readonly spillIn: readonly Vec2[];
+}
+
+const exitGeoms = new Map<ExitId, ExitGeom>();
+
+function exitGeom(id: ExitId, r: number): ExitGeom {
+  const had = exitGeoms.get(id);
+  if (had && had.r === r) return had;
+  const D = EXITS[id].door;
+  const north = D.y0 === 0;
+  const cx = (D.x0 + D.x1) / 2;
+  const edge = north ? D.y1 : D.y0;
+  const inward = north ? 1 : -1;
+  const lx0 = D.x0 + 0.14;
+  const lx1 = D.x1 - 0.14;
+  const bandA = edge - inward * 0.3;
+  const bandB = edge - inward * 0.18;
+  const segN = OBJ.doorSegments;
+  const w = (lx1 - lx0) / segN;
+  const segs: Vec2[][] = [];
+  for (let s = 0; s < segN; s += 1) {
+    const x0 = lx0 + s * w + 0.02;
+    const x1 = lx0 + (s + 1) * w - 0.02;
+    segs.push(rectPoly(x0, bandA, x1, bandB));
+  }
+  const spill: Vec2[] = [];
+  const sr = EXIT_SPILL_R;
+  for (let q = 0; q <= 16; q += 1) {
+    const a = (Math.PI * q) / 16;
+    spill.push({ x: cx + Math.cos(a) * sr, y: edge + inward * Math.sin(a) * sr });
+  }
+  const g: ExitGeom = {
+    r,
+    arc: exitArcRange(id, r),
+    chev: exitChevrons(id),
+    lamps: doorLamps(id).map((l) => rectPoly(l.x0, l.y0, l.x1, l.y1)),
+    band: rectPoly(lx0, bandA, lx1, bandB),
+    segs,
+    spill,
+    spillIn: spill.map((p) => ({ x: cx + (p.x - cx) * 0.6, y: edge + (p.y - edge) * 0.6 })),
+  };
+  exitGeoms.set(id, g);
+  return g;
+}
+
+/** 미닫이 틈 사각형 (폭이 시간에 따라 바뀐다). 펜은 다각형을 붙잡지 않으므로 하나를 고쳐 쓴다 */
+const SLIDE_QUAD: [Vec2, Vec2, Vec2, Vec2] = [
+  { x: 0, y: 0 },
+  { x: 0, y: 0 },
+  { x: 0, y: 0 },
+  { x: 0, y: 0 },
+];
+
 /**
  * 탈출구: 비활성 = 회색 소등, 활성 = 문에 초록 띠 맥동 + 셰브론이 문 쪽으로 차례로 점등,
  * 개방 진행(생존자에게만 오는 값, null이면 그리지 않음) = 문 칸 분할 게이지 + 판정 원 진행 호,
@@ -396,71 +667,43 @@ export function paintExits(
   for (const e of exits) {
     const def = EXITS[e.id];
     const D = def.door;
-    const north = D.y0 === 0;
     const cx = (D.x0 + D.x1) / 2;
     const on = e.state !== 'inactive';
     trackExit(e.id, e.state, now, real);
     const color = on ? C.go : C.off;
+    const g = exitGeom(e.id, r);
     // 판정 원 (바닥 쪽만)
-    const [a0, a1] = exitArcRange(e.id, r);
-    pen.strokeArc(def.center.x, def.center.y, r, 0, a0, a1, 2, color, on ? 0.75 : 0.45);
+    pen.strokeArc(def.center.x, def.center.y, r, 0, g.arc[0], g.arc[1], 2, color, on ? 0.75 : 0.45);
     // 셰브론
-    const chev = exitChevrons(e.id);
     if (on) {
-      chev.forEach((poly, n) => {
+      const chev = g.chev;
+      for (let n = 0; n < chev.length; n += 1) {
+        const poly = chev[n];
+        if (!poly) continue;
         const phase =
           e.state === 'open' ? 0 : (((now / OBJ.chaseMs - (chev.length - 1 - n) / chev.length) % 1) + 1) % 1;
         pen.fillPoly(poly, C.go, e.state === 'open' ? 0.9 : 0.35 + 0.6 * (1 - phase));
-      });
+      }
     }
     // 문 위 상태
-    const edge = north ? D.y1 : D.y0;
-    const inward = north ? 1 : -1;
-    const lx0 = D.x0 + 0.14;
-    const lx1 = D.x1 - 0.14;
-    const bandA = edge - inward * 0.3;
-    const bandB = edge - inward * 0.18;
-    const band = (x0: number, x1: number, col: number, alpha: number): void =>
-      pen.fillPoly(
-        [
-          { x: x0, y: bandA },
-          { x: x1, y: bandA },
-          { x: x1, y: bandB },
-          { x: x0, y: bandB },
-        ],
-        col,
-        alpha,
-      );
     const lampA =
       e.state === 'active' ? 0.45 + 0.55 * (0.5 + 0.5 * Math.sin((TAU * now) / OBJ.exitPulseMs)) : 1;
-    for (const l of doorLamps(e.id))
-      pen.fillPoly(
-        [
-          { x: l.x0, y: l.y0 },
-          { x: l.x1, y: l.y0 },
-          { x: l.x1, y: l.y1 },
-          { x: l.x0, y: l.y1 },
-        ],
-        color,
-        on ? lampA : 0.6,
-      );
+    for (const l of g.lamps) pen.fillPoly(l, color, on ? lampA : 0.6);
     if (e.state === 'inactive') {
-      band(lx0, lx1, C.off, 0.55);
+      pen.fillPoly(g.band, C.off, 0.55);
     } else if (e.state === 'active') {
       const pulse = 0.5 + 0.5 * Math.sin((TAU * now) / OBJ.exitPulseMs);
-      band(lx0, lx1, C.go, 0.35 + 0.5 * pulse);
+      pen.fillPoly(g.band, C.go, 0.35 + 0.5 * pulse);
       pen.line(cx, D.y0 + 0.16, cx, D.y1 - 0.16, 2, C.go, 0.5 + 0.4 * pulse);
       // 개방 진행: 문 칸 분할 게이지 + 판정 원 진행 호 (생존자 화면만: 괴물에게는 null이 온다)
       if (e.progress !== null) {
-        const segs = OBJ.doorSegments;
-        const lit = clamp01(e.progress) * segs;
-        const w = (lx1 - lx0) / segs;
-        for (let s = 0; s < segs; s += 1) {
-          const x0 = lx0 + s * w + 0.02;
-          const x1 = lx0 + (s + 1) * w - 0.02;
-          band(x0, x1, C.gaugeOff, 1);
+        const lit = clamp01(e.progress) * g.segs.length;
+        for (let s = 0; s < g.segs.length; s += 1) {
+          const seg = g.segs[s];
+          if (!seg) continue;
+          pen.fillPoly(seg, C.gaugeOff, 1);
           const f = clamp01(lit - s);
-          if (f > 0) band(x0, x1, C.gauge, f);
+          if (f > 0) pen.fillPoly(seg, C.gauge, f);
         }
         if (e.progress > 0)
           pen.strokeArc(
@@ -478,45 +721,29 @@ export function paintExits(
     } else {
       // 열림: 가운데부터 갈라지는 미닫이 + 문틈 빛 + 바닥 번짐 (반원: 바닥 쪽만)
       const t = exitSlide(e.id, now, real);
+      const lx0 = D.x0 + 0.14;
+      const lx1 = D.x1 - 0.14;
       const half = ((lx1 - lx0) / 2) * t;
       const ly0 = D.y0 + 0.16;
       const ly1 = D.y1 - 0.16;
       if (half > 0.001) {
-        pen.fillPoly(
-          [
-            { x: cx - half, y: ly0 },
-            { x: cx + half, y: ly0 },
-            { x: cx + half, y: ly1 },
-            { x: cx - half, y: ly1 },
-          ],
-          C.openVoid,
-          1,
-        );
-        pen.fillPoly(
-          [
-            { x: cx - half, y: ly0 },
-            { x: cx + half, y: ly0 },
-            { x: cx + half, y: ly1 },
-            { x: cx - half, y: ly1 },
-          ],
-          C.go,
-          0.55 * t,
-        );
-        for (const x of [cx - half, cx + half]) pen.line(x, ly0, x, ly1, 2, MAP_COLOR.doorLeafHi, 1);
+        const [q0, q1, q2, q3] = SLIDE_QUAD;
+        q0.x = cx - half;
+        q0.y = ly0;
+        q1.x = cx + half;
+        q1.y = ly0;
+        q2.x = cx + half;
+        q2.y = ly1;
+        q3.x = cx - half;
+        q3.y = ly1;
+        pen.fillPoly(SLIDE_QUAD, C.openVoid, 1);
+        pen.fillPoly(SLIDE_QUAD, C.go, 0.55 * t);
+        pen.line(cx - half, ly0, cx - half, ly1, 2, MAP_COLOR.doorLeafHi, 1);
+        pen.line(cx + half, ly0, cx + half, ly1, 2, MAP_COLOR.doorLeafHi, 1);
       }
-      band(lx0, lx1, C.go, 0.85);
-      const spill: Vec2[] = [];
-      const sr = EXIT_SPILL_R;
-      for (let q = 0; q <= 16; q += 1) {
-        const a = (Math.PI * q) / 16;
-        spill.push({ x: cx + Math.cos(a) * sr, y: edge + inward * Math.sin(a) * sr });
-      }
-      pen.fillPoly(spill, C.go, 0.13 * t);
-      pen.fillPoly(
-        spill.map((p) => ({ x: cx + (p.x - cx) * 0.6, y: edge + (p.y - edge) * 0.6 })),
-        C.go,
-        0.12 * t,
-      );
+      pen.fillPoly(g.band, C.go, 0.85);
+      pen.fillPoly(g.spill, C.go, 0.13 * t);
+      pen.fillPoly(g.spillIn, C.go, 0.12 * t);
     }
   }
 }
@@ -535,14 +762,35 @@ function padRect(xs: readonly number[], ys: readonly number[]): TileRect {
   };
 }
 
-/** 거점 하나(paintPoints)가 어떤 상태에서든 그리는 범위 (타일): 판정 원 + 바깥 번짐 선 */
-export function pointPaintBounds(id: PointId, r: number): TileRect {
-  const c = CAPTURE_POINTS[id];
-  return padRect([c.x - r, c.x + r], [c.y - r, c.y + r]);
+/** 범위 계산 결과 (반경마다 하나: 거점 · 탈출구 자리는 고정이라 같은 반경이면 같은 사각형) */
+interface BoundsMemo {
+  readonly r: number;
+  readonly rect: TileRect;
 }
 
-/** 탈출구 하나(paintExits)가 어떤 상태에서든 그리는 범위 (타일): 판정 원 · 문 · 상태등 · 셰브론 · 열린 문 빛 번짐 */
+const pointBounds = new Map<PointId, BoundsMemo>();
+const exitBounds = new Map<ExitId, BoundsMemo>();
+
+/**
+ * 거점 하나(paintPoints)가 어떤 상태에서든 그리는 범위 (타일): 판정 원 + 바깥 번짐 선.
+ * (거점, 반경)마다 한 번 계산해 같은 객체를 돌려준다 (안개 주기마다 다시 계산하지 않는다)
+ */
+export function pointPaintBounds(id: PointId, r: number): TileRect {
+  const had = pointBounds.get(id);
+  if (had && had.r === r) return had.rect;
+  const c = CAPTURE_POINTS[id];
+  const rect = padRect([c.x - r, c.x + r], [c.y - r, c.y + r]);
+  pointBounds.set(id, { r, rect });
+  return rect;
+}
+
+/**
+ * 탈출구 하나(paintExits)가 어떤 상태에서든 그리는 범위 (타일): 판정 원 · 문 · 상태등 · 셰브론 · 열린 문 빛 번짐.
+ * (탈출구, 반경)마다 한 번 계산해 같은 객체를 돌려준다
+ */
 export function exitPaintBounds(id: ExitId, r: number): TileRect {
+  const had = exitBounds.get(id);
+  if (had && had.r === r) return had.rect;
   const e = EXITS[id];
   const D = e.door;
   const north = D.y0 === 0;
@@ -558,7 +806,9 @@ export function exitPaintBounds(id: ExitId, r: number): TileRect {
     xs.push(p.x);
     ys.push(p.y);
   }
-  return padRect(xs, ys);
+  const rect = padRect(xs, ys);
+  exitBounds.set(id, { r, rect });
+  return rect;
 }
 
 // ───────────── 테두리 리프트 (곱하기 뒤에 더하는 정적 구조 색) ─────────────
@@ -794,15 +1044,20 @@ export class LightMap<C extends { readonly width: number; readonly height: numbe
 
   /** 경계가 부드러운 원형 시야: 판정 반경 안쪽 soft 타일에서 흰색 → 하한 (반경 밖은 하한 그대로) */
   addSoft(light: SoftLight): void {
-    if (light.poly.length < 3) return;
+    this.addSoftAt(light.poly, light.center.x, light.center.y, light.radius, light.soft);
+  }
+
+  /** addSoft와 같은 그림 (중심을 수로 받는다: 기록 재생이 객체를 만들지 않게) */
+  addSoftAt(poly: readonly Vec2[], centerX: number, centerY: number, radius: number, soft: number): void {
+    if (poly.length < 3) return;
     const l = this.ctx;
     const k = this.k;
-    const geo = softLightGeometry(light.radius, light.soft);
+    const geo = softLightGeometry(radius, soft);
     let fill: CanvasGradient | string = '#ffffff';
     // 흐림 띠가 없으면(soft ≤ 0) 딱 자른다. 같은 원 두 개로 만든 그라디언트는 캔버스 규칙상 아무것도 칠하지 않는다
     if (geo.outer > geo.inner) {
-      const cx = light.center.x * k;
-      const cy = light.center.y * k;
+      const cx = centerX * k;
+      const cy = centerY * k;
       const grad = l.createRadialGradient(cx, cy, geo.inner * k, cx, cy, geo.outer * k);
       grad.addColorStop(0, '#ffffff');
       grad.addColorStop(1, this.ambientCss);
@@ -810,7 +1065,7 @@ export class LightMap<C extends { readonly width: number; readonly height: numbe
     }
     l.save();
     l.globalCompositeOperation = 'lighten';
-    polyPath(l, light.poly, k);
+    polyPath(l, poly, k);
     l.fillStyle = fill;
     l.fill();
     l.restore();
@@ -857,53 +1112,81 @@ function sameNum(a: number, b: number): boolean {
   return a === b || (Number.isNaN(a) && Number.isNaN(b));
 }
 
+function sameLightOp(p: LightOp, q: LightOp): boolean {
+  return (
+    sameNum(p.cx, q.cx) &&
+    sameNum(p.cy, q.cy) &&
+    sameNum(p.radius, q.radius) &&
+    sameNum(p.soft, q.soft) &&
+    samePoly(p.poly, q.poly)
+  );
+}
+
 /**
  * 빛 지도 명령 기록. 안개 주기마다 기록해 지난번과 같으면(모두 가만히 서 있고 괴물 조준도 그대로) 빛 지도를 다시 칠하지도
  * GPU에 다시 올리지도 않는다. 다르면 지운 뒤 같은 순서로 칠한다(LightMap에 바로 칠하던 것과 같은 그림)
  */
 export class LightRecord {
-  private ops: LightOp[] = [];
-  /** 마지막으로 빛 지도에 칠한 기록 (아직 없으면 null — 첫 주기는 늘 칠한다) */
+  /** 이번 주기 기록 (앞의 n개). 명령 객체는 주기마다 고쳐 쓴다 (렌더링 최적화 2: 주기마다 배열 · 객체를 새로 만들던 것) */
+  private cur: LightOp[] = [];
+  private n = 0;
+  /** 마지막으로 빛 지도에 칠한 기록 (앞의 paintedN개. 아직 없으면 null — 첫 주기는 늘 칠한다) */
   private painted: LightOp[] | null = null;
+  private paintedN = 0;
+  /** 이번 주기 기록을 칠했는가 (칠했으면 이번 기록이 곧 마지막으로 칠한 기록이다) */
+  private curPainted = false;
 
-  /** 안개 주기 시작 */
+  /** 안개 주기 시작. 칠한 기록은 남기고, 다른 묶음의 명령 객체를 고쳐 쓴다 */
   reset(): void {
-    this.ops = [];
+    if (this.curPainted) {
+      const spare = this.painted ?? [];
+      this.painted = this.cur;
+      this.paintedN = this.n;
+      this.cur = spare;
+      this.curPainted = false;
+    }
+    this.n = 0;
+  }
+
+  private next(): LightOp {
+    let op = this.cur[this.n];
+    if (!op) {
+      op = { poly: [], cx: NaN, cy: NaN, radius: NaN, soft: NaN };
+      this.cur.push(op);
+    }
+    this.n += 1;
+    return op;
   }
 
   addSoft(light: SoftLight): void {
     if (light.poly.length < 3) return;
-    this.ops.push({
-      poly: light.poly,
-      cx: light.center.x,
-      cy: light.center.y,
-      radius: light.radius,
-      soft: light.soft,
-    });
+    const op = this.next();
+    op.poly = light.poly;
+    op.cx = light.center.x;
+    op.cy = light.center.y;
+    op.radius = light.radius;
+    op.soft = light.soft;
   }
 
   addHard(poly: readonly Vec2[]): void {
     if (poly.length < 3) return;
-    this.ops.push({ poly, cx: NaN, cy: NaN, radius: NaN, soft: NaN });
+    const op = this.next();
+    op.poly = poly;
+    op.cx = NaN;
+    op.cy = NaN;
+    op.radius = NaN;
+    op.soft = NaN;
   }
 
   /** 지난번에 칠한 기록과 같은가 */
   get unchanged(): boolean {
-    const a = this.ops;
+    if (this.curPainted) return true;
     const b = this.painted;
-    if (!b || a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i += 1) {
-      const p = a[i];
+    if (!b || this.n !== this.paintedN) return false;
+    for (let i = 0; i < this.n; i += 1) {
+      const p = this.cur[i];
       const q = b[i];
-      if (!p || !q) return false;
-      if (
-        !sameNum(p.cx, q.cx) ||
-        !sameNum(p.cy, q.cy) ||
-        !sameNum(p.radius, q.radius) ||
-        !sameNum(p.soft, q.soft)
-      )
-        return false;
-      if (!samePoly(p.poly, q.poly)) return false;
+      if (!p || !q || !sameLightOp(p, q)) return false;
     }
     return true;
   }
@@ -912,11 +1195,13 @@ export class LightRecord {
   paint<C extends { readonly width: number; readonly height: number }>(light: LightMap<C>): boolean {
     if (this.unchanged) return false;
     light.clear();
-    for (const op of this.ops) {
+    for (let i = 0; i < this.n; i += 1) {
+      const op = this.cur[i];
+      if (!op) continue;
       if (Number.isNaN(op.radius)) light.addHard(op.poly);
-      else light.addSoft({ poly: op.poly, center: { x: op.cx, y: op.cy }, radius: op.radius, soft: op.soft });
+      else light.addSoftAt(op.poly, op.cx, op.cy, op.radius, op.soft);
     }
-    this.painted = this.ops;
+    this.curPainted = true;
     return true;
   }
 }
@@ -956,20 +1241,20 @@ function asNode(v: unknown): CountNode | null {
  * 풀어 테셀레이션하므로(원호 100분할 · fillPath Earcut) 맵 레이어의 프레임당 비용 지표로 쓴다 (gfx.features.mapGfxCmds)
  */
 export function countGraphicsCmds(list: readonly unknown[]): { objects: number; cmds: number } {
-  let objects = 0;
-  let cmds = 0;
-  for (const o of list) {
-    const n = asNode(o);
+  const out = { objects: 0, cmds: 0 };
+  addGraphicsCmds(list, out);
+  return out;
+}
+
+/** countGraphicsCmds의 안쪽: 컨테이너마다 결과 객체를 만들지 않고 한 곳에 더한다 */
+function addGraphicsCmds(list: readonly unknown[], out: { objects: number; cmds: number }): void {
+  for (let i = 0; i < list.length; i += 1) {
+    const n = asNode(list[i]);
     if (!n) continue;
-    objects += 1;
-    if (Array.isArray(n.commandBuffer)) cmds += n.commandBuffer.length;
-    if (Array.isArray(n.list)) {
-      const sub = countGraphicsCmds(n.list);
-      objects += sub.objects;
-      cmds += sub.cmds;
-    }
+    out.objects += 1;
+    if (Array.isArray(n.commandBuffer)) out.cmds += n.commandBuffer.length;
+    if (Array.isArray(n.list)) addGraphicsCmds(n.list, out);
   }
-  return { objects, cmds };
 }
 
 /** 측정: 안개 합성 1회(begin~commit) 시간의 지수평균 (ms, gfx.features.fogCommitMs) */
@@ -1012,6 +1297,65 @@ export function uploadCanvasTexture(tex: CanvasTextureLike): void {
   tex.source[0]?.update();
 }
 
+/** 텍스처 일부 올리기에 쓰는 WebGL 컨텍스트 부분 */
+export type SubUploadGl = Pick<
+  WebGLRenderingContext,
+  | 'TEXTURE0'
+  | 'TEXTURE_2D'
+  | 'TEXTURE_BINDING_2D'
+  | 'UNPACK_PREMULTIPLY_ALPHA_WEBGL'
+  | 'UNPACK_FLIP_Y_WEBGL'
+  | 'RGBA'
+  | 'UNSIGNED_BYTE'
+  | 'activeTexture'
+  | 'getParameter'
+  | 'bindTexture'
+  | 'pixelStorei'
+  | 'texSubImage2D'
+  | 'isContextLost'
+>;
+
+/** 렌더러 중 여기서 쓰는 부분 (Phaser WebGLRenderer.gl. Canvas 렌더러에는 없다) */
+export interface SubUploadHost {
+  readonly gl?: SubUploadGl;
+}
+
+/** 텍스처 source 중 여기서 쓰는 부분 (Phaser TextureSource.glTexture: WebGLTextureWrapper) */
+export interface SubUploadSource {
+  readonly glTexture?: {
+    readonly webGLTexture: WebGLTexture | null;
+    readonly pma: boolean;
+    readonly flipY: boolean;
+  } | null;
+}
+
+/**
+ * 캔버스 src를 WebGL 텍스처의 (x, y) 자리에 그 크기만큼만 올린다 (texSubImage2D). Phaser가 캔버스 텍스처를 올릴 때
+ * (WebGLTextureWrapper._processTexture)와 같은 순서로 GL 상태를 다룬다: 0번 단위에서 묶인 텍스처를 기억 → 이 텍스처를 묶고
+ * 프리멀티플라이 · 뒤집기를 텍스처 설정대로 → 올림 → 묶음 되돌림. 그래서 Phaser가 기억하는 묶음 상태가 그대로 맞다.
+ * WebGL이 아니거나(Canvas 렌더러는 캔버스를 바로 그린다) 컨텍스트를 잃었거나 GL 텍스처가 없으면 false (호출한 쪽이 통째로 올린다)
+ */
+export function uploadCanvasSubTexture(
+  host: object,
+  source: SubUploadSource | undefined,
+  src: TexImageSource,
+  x: number,
+  y: number,
+): boolean {
+  const gl = (host as SubUploadHost).gl;
+  const wrap = source?.glTexture;
+  const tex = wrap?.webGLTexture;
+  if (!gl || !wrap || !tex || gl.isContextLost()) return false;
+  gl.activeTexture(gl.TEXTURE0);
+  const current = gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null;
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, wrap.pma);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, wrap.flipY);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, gl.RGBA, gl.UNSIGNED_BYTE, src);
+  gl.bindTexture(gl.TEXTURE_2D, current);
+  return true;
+}
+
 /** 캔버스 크기를 바꾸고 텍스처 · 기본 프레임을 맞춘다 (CanvasTexture.setSize와 같은 순서. 캔버스 내용은 지워진다) */
 export function resizeCanvasTexture<C extends { width: number; height: number }>(
   key: string,
@@ -1019,6 +1363,8 @@ export function resizeCanvasTexture<C extends { width: number; height: number }>
   canvas: C,
   width: number,
   height: number,
+  /** false = 곧 다시 그려 올릴 것이라 빈 캔버스는 올리지 않는다 (배지 아틀라스) */
+  upload = true,
 ): void {
   canvas.width = width;
   canvas.height = height;
@@ -1029,7 +1375,7 @@ export function resizeCanvasTexture<C extends { width: number; height: number }>
     src.isPowerOf2 = isPow2(width) && isPow2(height);
   }
   tex.get('__BASE').setSize(width, height, 0, 0);
-  uploadCanvasTexture(tex);
+  if (upload) uploadCanvasTexture(tex);
   trackTexture(key, width, height);
 }
 

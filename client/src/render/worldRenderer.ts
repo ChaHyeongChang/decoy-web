@@ -58,11 +58,13 @@ import { MOTE_R, cloakFrameName, ensureAtlas, type AtlasBuild } from '../art/atl
 import { starSlot } from '../art/shapes';
 import {
   DashTrail,
+  DustField,
   FX_LIMITS,
   FxSystem,
-  dustMotes,
   pickDissolveTarget,
   type DustEye,
+  type DustMote,
+  type LiveGhost,
   type StrikeHit,
 } from '../art/fx';
 import { CONE, DANGER, NEON, ROLE, WARN } from '../art/palette';
@@ -85,6 +87,8 @@ import {
   drawTrackMark,
   type BodyDisk,
   type CharacterLayers,
+  type MonsterPose,
+  type TeamSurvivorPose,
 } from './characters';
 import { STUN_VEIL, WorldPostFx } from './effects';
 import { ALPHA, FOG } from './colors';
@@ -111,11 +115,13 @@ import {
   drawRescueZone,
   drawRoarWave,
   drawShoveRange,
+  fillFanPolygon,
   fillPolygon,
   mixColor,
   shoveBlockPoint,
   shoveState,
   strokeSegments,
+  traceRim,
 } from './vision';
 
 export interface FrameView {
@@ -234,6 +240,52 @@ function countKind(items: readonly InfoItem[], kind: InfoItem['kind']): number {
   return n;
 }
 
+/** 거점 id가 점령 중인가 (프레임마다 조건 함수를 만들지 않게) */
+function capturing(points: readonly { id: string; state: string }[], id: 'A' | 'B'): boolean {
+  for (const p of points) if (p.id === id && p.state === 'capturing') return true;
+  return false;
+}
+
+// ── 렌더링 최적화 2: 프레임마다 새로 만들던 배열 · 객체 · 문자열을 다시 쓰는 그릇으로 (그림 · 정보 값은 같다) ──
+
+/** 망토 물결 프레임 이름 (cloakFrameName 결과를 미리: 프레임마다 문자열을 만들지 않게) */
+const CLOAK_NAMES: Readonly<Record<'idle' | 'move', readonly string[]>> = {
+  idle: Array.from({ length: ANIM.cloakFrames }, (_, i) => cloakFrameName('idle', i)),
+  move: Array.from({ length: ANIM.cloakFrames }, (_, i) => cloakFrameName('move', i)),
+};
+
+function cloakName(kind: 'idle' | 'move', i: number): string {
+  return CLOAK_NAMES[kind][i] ?? cloakFrameName(kind, i);
+}
+
+const NO_MOTES: readonly DustMote[] = [];
+
+/** 이번 안개 주기의 자기 팀 시야 하나 (먼지 · 림) */
+type Eye = DustEye & { role: RoleId | null; r: number };
+
+/** 생존자 팀 시야의 눈 (자기 + 팀원) */
+interface TeamEye {
+  pos: Vec2;
+  role: RoleId;
+}
+
+/** 몸 원 + 누구의 몸인가 */
+type IdDisk = BodyDisk & { id: string };
+
+/**
+ * 부채꼴 · 테두리 Graphics에 마지막으로 그린 것 (같으면 명령을 다시 만들지 않는다). key = 그린 다각형(시야 다각형 캐시의 같은 참조)
+ * 또는 괴물 화면 테두리 선분 목록, null = 비어 있음, DIRTY = 다음 프레임에 반드시 다시 (시계로 흐르는 해치를 그렸다)
+ */
+interface ConeDrawn {
+  key: object | null;
+  color: number;
+  fill: number;
+}
+
+const DIRTY: object = {};
+
+const NO_TEAM: readonly TeamEye[] = [];
+
 export class WorldRenderer {
   readonly container: Phaser.GameObjects.Container;
   /** 안개 레이어(구조 · 발광)를 담는 컨테이너. 캐릭터 컨테이너보다 먼저 만들어 항상 아래에 그린다. 후처리는 여기에만 */
@@ -289,7 +341,7 @@ export class WorldRenderer {
   /** 이번 프레임에 걷기를 진행한 엔티티 (디버그 animDebug) */
   private readonly gaitDrawn = new Set<string>();
   /** 이번 프레임의 돌진 잔상 (디버그 animDebug) */
-  private lastGhosts: ReturnType<DashTrail['live']> = [];
+  private lastGhosts: readonly LiveGhost[] = [];
   /** 돌진 잔상에 넘기는 자리 (프레임마다 새로 만들지 않는다. DashTrail은 값만 복사한다) */
   private readonly dashAt = { x: 0, y: 0, aim: 0 };
   /** 이번 프레임 (dashOnset이 읽는다) */
@@ -315,8 +367,62 @@ export class WorldRenderer {
   private survivorRigs = new Map<string, SurvivorRig>();
   private monsterRigs = new Map<string, MonsterRig>();
   private readonly fxs = new FxSystem(0x5eed, 400);
-  /** 이번 안개 주기의 자기 팀 시야 (먼지 · 림) */
-  private eyes: (DustEye & { role: RoleId | null; r: number })[] = [];
+  /** 이번 안개 주기의 자기 팀 시야 (먼지 · 림). 항목은 eyePool에서 다시 쓴다 */
+  private readonly eyes: Eye[] = [];
+  private readonly eyePool: Eye[] = [];
+  /** 빛 속 먼지 (칸 목록은 눈마다의 칸 범위가 바뀔 때만 다시 만든다) */
+  private readonly dustField = new DustField();
+  /** WebGL 렌더러인가 (부채 삼각형 채우기: Canvas는 fillPath 그대로) */
+  private readonly webgl: boolean;
+  /** 이번 프레임의 생존자 팀 시야 눈들 (survivorEyes, 항목은 teamEyePool에서) */
+  private readonly teamEyes: TeamEye[] = [];
+  private readonly teamEyePool: TeamEye[] = [];
+  /** 이번 프레임의 범위 · 부채꼴 · 캐릭터 정보 항목 (배지 정보 앞에 붙여 info로) */
+  private readonly infoLocal: InfoItem[] = [];
+  /** 노출 문양 · 기절 별 자리를 고를 몸 원 (diskPool에서) · 그중 자기를 뺀 것 */
+  private readonly disks: IdDisk[] = [];
+  private readonly diskPool: IdDisk[] = [];
+  private readonly others: BodyDisk[] = [];
+  /** 괴물 화면: 흩어짐 후보 */
+  private readonly dissolveCands: { id: string; x: number; y: number }[] = [];
+  /** 그리기 값 그릇 (그리기 함수는 동기라 하나를 다시 쓴다) */
+  private readonly teamPose: TeamSurvivorPose = {
+    role: 'runner',
+    x: 0,
+    y: 0,
+    face: 0,
+    walkPhase: 0,
+    stepping: 0,
+    protectedFlag: false,
+    self: false,
+    hitMs: null,
+    seed: 0,
+    clockMs: 0,
+    fade: 1,
+    gray: false,
+  };
+  private readonly monPose: MonsterPose = {
+    x: 0,
+    y: 0,
+    aim: 0,
+    frame: '',
+    raise: 0,
+    stretch: 0,
+    eyes: 'open',
+    glow: false,
+    scale: 1,
+    alpha: 1,
+  };
+  private readonly badgeAlpha: BadgeAlpha = { points: { A: 1, B: 1 }, exits: { N: 1, S: 1 }, prison: 1 };
+  private readonly badgeBlink: Record<'A' | 'B', boolean> = { A: false, B: false };
+  /** 부채꼴 채움 · 해치(coneOver)와 가장자리 · 테두리(coneEdge)에 마지막으로 그린 것 */
+  private readonly overDrawn: ConeDrawn = { key: null, color: -1, fill: -1 };
+  private readonly edgeDrawn: ConeDrawn = { key: null, color: -1, fill: -1 };
+  /** 기절 별 자리 고르기에 넘기는 중심 (값만 읽힌다) */
+  private readonly starAt = { x: 0, y: 0 };
+  /** 이번 프레임 기절 별 (drawCharacters) */
+  private stunAny = false;
+  private stunOpp = false;
   private gaits = new Map<string, Gait>();
   private lastStatus = new Map<string, { status: SurvivorStatus; x: number; y: number; face: number }>();
   private fades = new Map<string, Fade>();
@@ -370,6 +476,7 @@ export class WorldRenderer {
   constructor(scene: Phaser.Scene, useFog: boolean) {
     this.scene = scene;
     this.useFog = useFog;
+    this.webgl = scene.game.renderer.type === Phaser.WEBGL;
     this.fogRoot = scene.add.container(0, 0);
     this.preset = this.currentPreset();
     this.fog = this.buildFog();
@@ -686,17 +793,46 @@ export class WorldRenderer {
     };
   }
 
-  /** 생존자 팀 시야의 눈들 (자기 + 팀원, 사망 · 탈출 제외) */
-  private survivorEyes(v: FrameView): { pos: Vec2; role: RoleId }[] {
-    const eyes: { pos: Vec2; role: RoleId }[] = [];
+  /**
+   * 생존자 팀 시야의 눈들 (자기 + 팀원, 사망 · 탈출 제외). 프레임마다 한 번 teamEyes에 다시 쓴다 (안개 주기 · 배지 알파가 같이 쓴다)
+   */
+  private survivorEyes(v: FrameView): readonly TeamEye[] {
+    const eyes = this.teamEyes;
+    eyes.length = 0;
     const st = v.snap.you.surv?.status;
-    if (v.me && v.role !== 'monster' && st !== 'dead' && st !== 'escaped')
-      eyes.push({ pos: v.me, role: v.role });
+    if (v.me && v.role !== 'monster' && st !== 'dead' && st !== 'escaped') this.putTeamEye(v.me, v.role);
     for (const s of v.survivors.values()) {
       if (s.status === 'dead' || s.status === 'escaped' || !s.role) continue;
-      eyes.push({ pos: s, role: s.role });
+      this.putTeamEye(s, s.role);
     }
     return eyes;
+  }
+
+  private putTeamEye(pos: Vec2, role: RoleId): void {
+    const eyes = this.teamEyes;
+    let e = this.teamEyePool[eyes.length];
+    if (!e) {
+      e = { pos, role };
+      this.teamEyePool.push(e);
+    }
+    e.pos = pos;
+    e.role = role;
+    eyes.push(e);
+  }
+
+  /** 이번 안개 주기의 눈 하나를 eyes에 넣는다 (항목은 eyePool에서 다시 쓴다) */
+  private pushEye(poly: readonly Vec2[], center: Vec2, radius: number, role: RoleId | null, r: number): void {
+    let e = this.eyePool[this.eyes.length];
+    if (!e) {
+      e = { poly, center, radius, role, r };
+      this.eyePool.push(e);
+    }
+    e.poly = poly;
+    e.center = center;
+    e.radius = radius;
+    e.role = role;
+    e.r = r;
+    this.eyes.push(e);
   }
 
   draw(v: FrameView, frameMs: number): void {
@@ -705,8 +841,11 @@ export class WorldRenderer {
     this.lastBalance = balance;
     this.lastRole = v.role;
     this.lastMe = v.me;
-    const drawn: DrawnEntity[] = [];
-    const info: InfoItem[] = [];
+    // 이번 프레임 목록은 지난 프레임 배열을 비워 다시 쓴다 (GameScene · 미니맵 · 디버그는 그 프레임 안에서 읽거나 복사한다)
+    const drawn = this.drawn;
+    drawn.length = 0;
+    const info = this.infoLocal;
+    info.length = 0;
     const clockMs = gfxNow();
     this.gfxCount.arcs = 0;
     this.gfxCount.fills = 0;
@@ -719,6 +858,10 @@ export class WorldRenderer {
     void atlas;
     const sR = balance.survivor.radius;
     const mR = balance.monster.radius;
+    // 생존자 팀 시야의 눈들 (안개 주기 · 배지 알파가 같이 쓴다: 한 프레임에 한 번). 괴물 화면은 내 자리가 있으면 쓰지 않는다
+    // (배지 알파는 괴물이면 부채꼴로 잰다 — 예전과 같은 갈래)
+    const team = isMonster && v.me ? NO_TEAM : this.survivorEyes(v);
+    const myShape = isMonster ? monsterConeShape(balance, v.myBlend) : null;
 
     // 1~6. 바닥 · 거점 · 탈출구 영역 · 시야 채움 · 안개 — 갱신 주기마다 합성
     // (그림이 지난 주기와 같으면 안개 레이어가 합성 · 업로드를 건너뛰고, 미니맵도 다시 그리지 않는다)
@@ -730,13 +873,22 @@ export class WorldRenderer {
       b.begin();
       b.drawPoints(snap.world.points, balance);
       b.drawExits(snap.world.exits, balance);
-      this.eyes = [];
-      if (isMonster && v.me) {
+      this.eyes.length = 0;
+      if (isMonster && v.me && myShape) {
         const me = v.me;
-        const near = this.polys.get('near', me.x, me.y, 0, 0, () => monsterNearPolygon(balance, me));
-        const cone = this.polys.get('cone', me.x, me.y, me.face, v.myBlend, () =>
-          monsterConePolygon(balance, me, me.face, v.myBlend),
-        );
+        const near =
+          this.polys.peek('near', me.x, me.y, 0, 0) ??
+          this.polys.put('near', me.x, me.y, 0, 0, monsterNearPolygon(balance, me));
+        const cone =
+          this.polys.peek('cone', me.x, me.y, me.face, v.myBlend) ??
+          this.polys.put(
+            'cone',
+            me.x,
+            me.y,
+            me.face,
+            v.myBlend,
+            monsterConePolygon(balance, me, me.face, v.myBlend),
+          );
         b.fillPoly(near, DANGER, CONE_LOOK.nearFill);
         b.fillPoly(cone, CONE.idle, CONE_LOOK.selfFill);
         b.addHardLight(near);
@@ -746,30 +898,20 @@ export class WorldRenderer {
         else if (this.outlineOf[0] !== cone || this.outlineOf[1] !== near) {
           this.setOutline(unionOutline([cone, near]), cone, near);
         }
-        const shape = monsterConeShape(balance, v.myBlend);
-        this.eyes.push({ poly: cone, center: v.me, radius: shape.range, role: null, r: shape.range });
-        this.eyes.push({
-          poly: near,
-          center: v.me,
-          radius: balance.monster.nearVisionRadius,
-          role: null,
-          r: balance.monster.nearVisionRadius,
-        });
+        this.pushEye(cone, v.me, myShape.range, null, myShape.range);
+        const nr = balance.monster.nearVisionRadius;
+        this.pushEye(near, v.me, nr, null, nr);
       } else {
         this.setOutline([], null, null);
-        for (const e of this.survivorEyes(v)) {
+        for (const e of team) {
           const r = survivorVisionRadius(balance, e.role);
           const pos = e.pos;
-          const poly = this.polys.get(e.role, pos.x, pos.y, r, 0, () => survivorVisionPolygon(pos, r));
+          const poly =
+            this.polys.peek(e.role, pos.x, pos.y, r, 0) ??
+            this.polys.put(e.role, pos.x, pos.y, r, 0, survivorVisionPolygon(pos, r));
           b.fillPoly(poly, CONE_LOOK.visionTint, CONE_LOOK.visionTintAlpha);
           b.addSoftLight({ poly, center: e.pos, radius: r, soft: balance.survivor.visionSoftEdge });
-          this.eyes.push({
-            poly,
-            center: e.pos,
-            radius: r - balance.survivor.visionSoftEdge,
-            role: e.role,
-            r,
-          });
+          this.pushEye(poly, e.pos, r - balance.survivor.visionSoftEdge, e.role, r);
         }
       }
       b.commit();
@@ -779,16 +921,13 @@ export class WorldRenderer {
 
     // 빛 속 먼지 (장식: 자기 팀 시야 안에서만, 시계와 시드만의 함수). 그림 묶음 'mote' 이미지 (원호 테셀레이션 없음)
     const dustN = FX_LIMITS.dust[this.preset.tier];
-    const motes = this.useFog ? dustMotes(tS, this.eyes, dustN) : [];
+    const motes = this.useFog ? this.dustField.motes(tS, this.eyes, dustN) : NO_MOTES;
     this.drawDust(motes, balance.survivor.radius);
 
-    // 부채꼴
-    this.coneOver.clear();
-    this.coneEdge.clear();
-    if (isMonster && this.outline.length > 0)
-      strokeSegments(this.coneEdge, this.outline, CONE.idle, FOG.outlineAlpha, FOG.outlineWidth / MAP_SCALE);
-    if (isMonster && v.me) {
-      const shape = monsterConeShape(balance, v.myBlend);
+    // 부채꼴: 그린 것이 지난 프레임과 같으면(같은 다각형 캐시 참조 · 같은 색) Graphics 명령을 다시 만들지 않는다
+    if (isMonster) this.drawOutline();
+    if (isMonster && v.me && myShape) {
+      const shape = myShape;
       info.push({
         kind: 'cone',
         tag: 'self',
@@ -822,6 +961,7 @@ export class WorldRenderer {
       v.nowMs,
       coneShown ? this.flipAt(v, 'monster', 'monster') : v.nowMs,
     );
+    if (!isMonster && !v.monster) this.clearMonsterCone();
     if (!isMonster && v.monster) {
       const m = v.monster;
       this.drawMonsterCone(balance, m, tS);
@@ -1031,34 +1171,18 @@ export class WorldRenderer {
     const ghosts = this.dashTrail.live(v.nowMs);
     this.lastGhosts = ghosts;
     this.drawGhosts(ghosts, mR);
-    if (ghosts.length > 0)
-      drawDashStreak(
-        this.fxUnder,
-        ghosts.map(({ g, alpha }) => ({ x: g.x, y: g.y, a: alpha })),
-      );
+    if (ghosts.length > 0) drawDashStreak(this.fxUnder, ghosts);
     if (!isMonster) oppFx += ghosts.length;
 
     // 캐릭터
     for (const r of this.survivorRigs.values()) r.used = false;
     for (const r of this.monsterRigs.values()) r.used = false;
-    const stunStars = this.drawCharacters(
-      v,
-      drawn,
-      info,
-      tS,
-      animMs,
-      clockMs,
-      frameMs,
-      footDust,
-      oppVisible,
-      sR,
-      mR,
-    );
-    if (stunStars.opp) oppFx += 1;
+    this.drawCharacters(v, drawn, info, tS, animMs, clockMs, frameMs, footDust, oppVisible, sR, mR);
+    if (this.stunOpp) oppFx += 1;
 
-    // 이벤트 효과 갱신 · 그리기
+    // 이벤트 효과 갱신 · 그리기 (WebGL은 채운 점을 삼각형 부채로: Earcut 없음)
     this.fxs.update(clockMs / 1000, present);
-    this.fxs.draw(this.fxUnder, clockMs / 1000, 32);
+    this.fxs.draw(this.fxUnder, clockMs / 1000, 32, this.webgl);
     oppFx += this.fxs.oppCount;
     for (const [id, r] of this.survivorRigs)
       if (!r.used) {
@@ -1129,43 +1253,46 @@ export class WorldRenderer {
     }
 
     // 항상 표시 배지 (지금 안 보이는 곳이면 45%)
-    const eyes = isMonster ? [] : this.survivorEyes(v);
-    const seen = (p: Vec2): number => {
-      if (!this.useFog) return 1;
-      if (isMonster)
-        return v.me && monsterSees(balance, v.me, v.me.face, v.myBlend, p) ? 1 : ALPHA.badgeUnseen;
-      for (const e of eyes) if (inCircleVision(e.pos, survivorVisionRadius(balance, e.role), p)) return 1;
-      return ALPHA.badgeUnseen;
-    };
-    const alpha: BadgeAlpha = {
-      points: { A: seen(CAPTURE_POINTS.A), B: seen(CAPTURE_POINTS.B) },
-      exits: { N: seen(EXITS.N.center), S: seen(EXITS.S.center) },
-      prison: seen(PRISON_CENTER),
-    };
+    const alpha = this.badgeAlpha;
+    alpha.points.A = this.seenAlpha(v, team, CAPTURE_POINTS.A);
+    alpha.points.B = this.seenAlpha(v, team, CAPTURE_POINTS.B);
+    alpha.exits.N = this.seenAlpha(v, team, EXITS.N.center);
+    alpha.exits.S = this.seenAlpha(v, team, EXITS.S.center);
+    alpha.prison = this.seenAlpha(v, team, PRISON_CENTER);
     const blinkOn = Math.floor(v.nowMs / 500) % 2 === 0;
-    const blink = {
-      A: isMonster && blinkOn && snap.world.points.some((p) => p.id === 'A' && p.state === 'capturing'),
-      B: isMonster && blinkOn && snap.world.points.some((p) => p.id === 'B' && p.state === 'capturing'),
-    };
+    const blink = this.badgeBlink;
+    blink.A = isMonster && blinkOn && capturing(snap.world.points, 'A');
+    blink.B = isMonster && blinkOn && capturing(snap.world.points, 'B');
     this.badges.draw(snap.world.points, snap.world.exits, alpha, blink);
-    this.info = [...this.badges.info(), ...info];
-    this.drawn = drawn;
+    const all = this.info;
+    all.length = 0;
+    for (const item of this.badges.info()) all.push(item);
+    for (const item of info) all.push(item);
     this.post.measure();
     gfxState.features.charGfxArcs = this.gfxCount.arcs;
     gfxState.features.charGfxFills = this.gfxCount.fills;
     this.lastDrawAt = v.nowMs;
-    this.fx = {
-      stunStars: stunStars.any,
-      dashGhosts: ghosts.length,
-      attackRange,
-      attackFill,
-      oppFx,
-      cone: coneShown,
-      coneRed: this.coneRed,
-      particles: this.fxs.count,
-      dust: motes.length,
-      reveal: countKind(info, 'reveal'),
-    };
+    const fx = this.fx;
+    fx.stunStars = this.stunAny;
+    fx.dashGhosts = ghosts.length;
+    fx.attackRange = attackRange;
+    fx.attackFill = attackFill;
+    fx.oppFx = oppFx;
+    fx.cone = coneShown;
+    fx.coneRed = this.coneRed;
+    fx.particles = this.fxs.count;
+    fx.dust = motes.length;
+    fx.reveal = countKind(info, 'reveal');
+  }
+
+  /** 배지 자리 p가 지금 보이면 1, 아니면 ALPHA.badgeUnseen (괴물: 부채꼴 ∪ 근접 원, 생존자: 팀 시야 원) */
+  private seenAlpha(v: FrameView, team: readonly TeamEye[], p: Vec2): number {
+    if (!this.useFog) return 1;
+    const balance = v.balance;
+    if (v.role === 'monster')
+      return v.me && monsterSees(balance, v.me, v.me.face, v.myBlend, p) ? 1 : ALPHA.badgeUnseen;
+    for (const e of team) if (inCircleVision(e.pos, survivorVisionRadius(balance, e.role), p)) return 1;
+    return ALPHA.badgeUnseen;
   }
 
   private setOutline(seg: [Vec2, Vec2][], cone: readonly Vec2[] | null, near: readonly Vec2[] | null): void {
@@ -1173,49 +1300,88 @@ export class WorldRenderer {
     this.outlineOf = [cone, near];
   }
 
-  /** 생존자 시야 경계 림 (그 사람의 역할색, 원호 부분만 — 벽 그림자 선은 긋지 않는다) */
+  /**
+   * 생존자 시야 경계 림 (그 사람의 역할색, 원호 부분만 — 벽 그림자 선은 긋지 않는다).
+   * WebGL은 이어진 변들을 한 줄(moveTo 한 번 + lineTo 여럿)로 긋는다 (렌더링 최적화 2): 선 두께 1.72px ≤ 2라 이음매 사각형을
+   * 넣지 않아 변마다 같은 사각형 · 같은 순서다(같은 화소). 매 프레임 그리는 Graphics 명령 · 경로 객체가 변 수 × 2 → 변 수 + 줄 수로 준다.
+   * Canvas는 이어 그으면 마이터 이음이 생겨 화소가 달라지므로 예전처럼 변마다 (vision.ts traceRim)
+   */
   private drawRims(): void {
     // 눈들의 다각형 · 역할이 지난 주기와 같으면(다각형 캐시의 같은 참조) 이미 그린 선 그대로
     const sig = this.rimsOf;
-    if (
-      sig.length === this.eyes.length &&
-      this.eyes.every((e, i) => sig[i]?.poly === e.poly && sig[i]?.role === e.role)
-    )
-      return;
-    this.rimsOf = this.eyes.map((e) => ({ poly: e.poly, role: e.role }));
+    const eyes = this.eyes;
+    let same = sig.length === eyes.length;
+    for (let i = 0; same && i < eyes.length; i += 1)
+      same = sig[i]?.poly === eyes[i]?.poly && sig[i]?.role === eyes[i]?.role;
+    if (same) return;
+    this.rimsOf = eyes.map((e) => ({ poly: e.poly, role: e.role }));
     const g = this.rims;
     g.clear();
-    for (const e of this.eyes) {
+    for (const e of eyes) {
       if (!e.role) continue;
       const color = ROLE[e.role];
       g.lineStyle(CONE_LOOK.rimWidth / MAP_SCALE, color, CONE_LOOK.rimAlpha);
       g.beginPath();
-      const poly = e.poly;
-      for (let i = 0; i < poly.length; i += 1) {
-        const a = poly[i];
-        const b = poly[(i + 1) % poly.length];
-        if (!a || !b) continue;
-        const da = Math.hypot(a.x - e.center.x, a.y - e.center.y);
-        const db = Math.hypot(b.x - e.center.x, b.y - e.center.y);
-        if (da < e.r - 0.06 || db < e.r - 0.06) continue;
-        g.moveTo(a.x * 32, a.y * 32);
-        g.lineTo(b.x * 32, b.y * 32);
-      }
+      traceRim(g, e.poly, e.center, e.r, this.webgl);
       g.strokePath();
     }
   }
 
   /**
+   * 괴물 화면 자기 시야 테두리 (coneEdge). 테두리 선분이 지난 프레임과 같으면(안개 주기에 다시 만들지 않았으면) 명령을 다시 만들지
+   * 않는다. 선 두께 2.15px > 2라 WebGL은 이어진 선에 이음매 사각형을 넣으므로 선분마다 따로 긋는 것은 그대로다
+   */
+  private drawOutline(): void {
+    const d = this.edgeDrawn;
+    if (d.key === this.outline) return;
+    this.coneEdge.clear();
+    if (this.outline.length > 0)
+      strokeSegments(this.coneEdge, this.outline, CONE.idle, FOG.outlineAlpha, FOG.outlineWidth / MAP_SCALE);
+    d.key = this.outline;
+  }
+
+  /** 생존자 화면에 괴물이 안 보이면 부채꼴을 지운다 (이미 비었으면 그대로) */
+  private clearMonsterCone(): void {
+    if (this.overDrawn.key !== null) {
+      this.coneOver.clear();
+      this.overDrawn.key = null;
+    }
+    if (this.edgeDrawn.key !== null) {
+      this.coneEdge.clear();
+      this.edgeDrawn.key = null;
+    }
+  }
+
+  /**
    * 생존자 화면 괴물 부채꼴: 채움 + (빨강) 꼭짓점에서 퍼지는 사선 해치 · 펄스는 그림자 아래(coneOver),
-   * 가장자리 선은 그림자 위(coneEdge)에 그려 팀원 몸 둘레에서도 끊기지 않는다
+   * 가장자리 선은 그림자 위(coneEdge)에 그려 팀원 몸 둘레에서도 끊기지 않는다.
+   * 렌더링 최적화 2: 다각형은 시야 다각형 캐시(괴물이 그대로면 같은 참조), 채움은 WebGL에서 꼭짓점(다각형 첫 점)에서 퍼지는 삼각형
+   * 부채(Earcut 없음, 같은 화소 — vision.ts fillFanPolygon). 다각형 · 색 · 채움이 지난 프레임과 같고 해치가 없으면 명령을 다시 만들지 않는다
    */
   private drawMonsterCone(balance: Balance, m: MonsterView, tS: number): void {
-    const cone = monsterConePolygon(balance, m, m.aim, m.blend);
+    const cone =
+      this.polys.peek('monsterCone', m.x, m.y, m.aim, m.blend) ??
+      this.polys.put('monsterCone', m.x, m.y, m.aim, m.blend, monsterConePolygon(balance, m, m.aim, m.blend));
     const color = mixColor(CONE.idle, CONE.seen, this.coneRed);
     const fill = CONE_LOOK.fillIdle + (CONE_LOOK.fillSeen - CONE_LOOK.fillIdle) * this.coneRed;
-    fillPolygon(this.coneOver, cone, color, fill);
-    drawConeHatch(this.coneOver, cone, m, m.aim, this.coneRed, tS, color);
-    drawConeEdge(this.coneEdge, cone, color);
+    const over = this.overDrawn;
+    if (over.key !== cone || over.color !== color || over.fill !== fill) {
+      this.coneOver.clear();
+      if (this.webgl) fillFanPolygon(this.coneOver, cone, color, fill);
+      else fillPolygon(this.coneOver, cone, color, fill);
+      // 해치는 시계로 흐른다: 그었으면 다음 프레임에 다시 그린다
+      const hatched = drawConeHatch(this.coneOver, cone, m, m.aim, this.coneRed, tS, color) > 0;
+      over.key = hatched || this.coneRed > 0.01 ? DIRTY : cone;
+      over.color = color;
+      over.fill = fill;
+    }
+    const edge = this.edgeDrawn;
+    if (edge.key !== cone || edge.color !== color) {
+      this.coneEdge.clear();
+      drawConeEdge(this.coneEdge, cone, color);
+      edge.key = cone;
+      edge.color = color;
+    }
   }
 
   /** 빛 속 먼지 이미지 (그림 묶음 'mote': 반지름 MOTE_R × 생존자 반지름으로 구운 둥근 점) */
@@ -1230,11 +1396,14 @@ export class WorldRenderer {
     }
     const tpw = this.atlas?.texPerWorld ?? 1;
     const baked = MOTE_R * sR * TILE_PX;
-    this.dustImgs.forEach((img, i) => {
+    const imgs = this.dustImgs;
+    for (let i = 0; i < imgs.length; i += 1) {
+      const img = imgs[i];
+      if (!img) continue;
       const m = motes[i];
       if (!m) {
         img.setVisible(false);
-        return;
+        continue;
       }
       // 장식 입자 상한: 알파 0.2 · 반지름 2 논리 px
       const r = Math.min(FX_LIMITS.decorSizeMaxPx, m.size) / MAP_SCALE;
@@ -1244,14 +1413,11 @@ export class WorldRenderer {
         .setScale(k)
         .setAlpha(Math.min(FX_LIMITS.decorAlphaMax, m.alpha))
         .setVisible(true);
-    });
+    }
   }
 
   /** 돌진 잔상 이미지 (망토 늘어난 프레임) */
-  private drawGhosts(
-    ghosts: { g: { x: number; y: number; aim: number }; alpha: number }[],
-    mR: number,
-  ): void {
+  private drawGhosts(ghosts: readonly LiveGhost[], mR: number): void {
     void mR;
     while (this.ghostImgs.length < ghosts.length) {
       const img = this.scene.make.image({ key: this.atlasKey, frame: 'monster-dash' }, false);
@@ -1259,11 +1425,14 @@ export class WorldRenderer {
       this.ghostImgs.push(img);
     }
     const s = 1 / (this.atlas?.texPerWorld ?? 1);
-    this.ghostImgs.forEach((img, i) => {
+    const imgs = this.ghostImgs;
+    for (let i = 0; i < imgs.length; i += 1) {
+      const img = imgs[i];
+      if (!img) continue;
       const gh = ghosts[i];
       if (!gh) {
         img.setVisible(false);
-        return;
+        continue;
       }
       img
         .setPosition(gh.g.x * 32, gh.g.y * 32)
@@ -1271,13 +1440,18 @@ export class WorldRenderer {
         .setScale(s * 1.12, s * 0.92)
         .setAlpha(0.42 * gh.alpha)
         .setVisible(true);
-    });
+    }
   }
 
   /**
    * 상태 변화 (수감 · 탈출 · 사망)를 보고 효과를 만든다. 페이드 · 흩어짐은 상태가 바뀐 순간(flip: 보간 표본 경계 · 받은
    * 스냅샷, 렌더링 최적화)부터 잰다 — 바뀐 것을 처음 본 프레임 시각은 fps마다 다르다
    */
+  /** 상태가 바뀐 순간: 내 상태는 받은 스냅샷, 다른 생존자는 보간 표본 경계 (바뀐 프레임에만 잰다) */
+  private statusFlip(v: FrameView, id: string, self: boolean): number {
+    return self ? this.snapEdge(v) : this.flipAt(v, 'survivor', id);
+  }
+
   private transition(
     id: string,
     status: SurvivorStatus,
@@ -1288,20 +1462,107 @@ export class WorldRenderer {
     realMs: number,
     isMonster: boolean,
     sR: number,
-    flip: () => number,
+    v: FrameView,
+    self: boolean,
   ): void {
     const prev = this.lastStatus.get(id);
     if (prev && prev.status === 'free' && status === 'imprisoned') {
-      const t0 = flip();
+      const t0 = this.statusFlip(v, id, self);
       this.fxs.dissolve(prev.x, prev.y, sR, (clockMs - (realMs - t0)) / 1000, null, isMonster);
       this.fades.set(id, { kind: 'appear', t0, x, y, face });
     } else if (prev && prev.status === 'free' && status === 'escaped' && !isMonster) {
-      this.fades.set(id, { kind: 'escape', t0: flip(), x: prev.x, y: prev.y, face: prev.face });
+      this.fades.set(id, {
+        kind: 'escape',
+        t0: this.statusFlip(v, id, self),
+        x: prev.x,
+        y: prev.y,
+        face: prev.face,
+      });
     } else if (prev && prev.status !== 'dead' && status === 'dead' && !isMonster) {
-      this.fades.set(id, { kind: 'death', t0: flip(), x: prev.x, y: prev.y, face: prev.face });
+      this.fades.set(id, {
+        kind: 'death',
+        t0: this.statusFlip(v, id, self),
+        x: prev.x,
+        y: prev.y,
+        face: prev.face,
+      });
     }
-    if (status === 'free' || !prev) this.lastStatus.set(id, { status, x, y, face });
-    else this.lastStatus.set(id, { ...prev, status });
+    // 지난 상태는 제자리에서 고친다 (프레임마다 새 객체를 만들지 않게. 자유가 아니면 마지막 자유 자리 · 방향을 둔다)
+    if (!prev) this.lastStatus.set(id, { status, x, y, face });
+    else {
+      prev.status = status;
+      if (status === 'free') {
+        prev.x = x;
+        prev.y = y;
+        prev.face = face;
+      }
+    }
+  }
+
+  /** 걷기 위상 (품질 낮음은 4단계로 끊는다) */
+  private phaseOf(g: Gait): number {
+    return this.preset.halfFrameAnims ? quantizePhase(g.phase, 4) : g.phase;
+  }
+
+  /**
+   * 기절 별 자리 (shapes.ts starSlot). 자기(self)를 뺀 몸 원은 others에 다시 쓴다 (프레임마다 걸러 새 배열을 만들지 않게)
+   */
+  private pickStarDir(cx: number, cy: number, mR: number, self: string): number {
+    const others = this.others;
+    others.length = 0;
+    for (const d of this.disks) if (d.id !== self) others.push(d);
+    const at = this.starAt;
+    at.x = cx;
+    at.y = cy;
+    this.starDir = starSlot(at, mR, TILE_PX, others, this.starDir);
+    return this.starDir;
+  }
+
+  /** 몸 원 하나를 disks에 넣는다 (diskPool에서 다시 쓴다) */
+  private pushDisk(id: string, x: number, y: number, r: number): void {
+    let d = this.diskPool[this.disks.length];
+    if (!d) {
+      d = { id, x, y, r };
+      this.diskPool.push(d);
+    }
+    d.id = id;
+    d.x = x;
+    d.y = y;
+    d.r = r;
+    this.disks.push(d);
+  }
+
+  /** 생존자 화면 팀원 · 나의 그리기 값 (teamPose에 써서 돌려준다) */
+  private teamPoseOf(
+    role: RoleId,
+    x: number,
+    y: number,
+    face: number,
+    walkPhase: number,
+    stepping: number,
+    protectedFlag: boolean,
+    self: boolean,
+    hitMs: number | null,
+    seed: number,
+    clockMs: number,
+    fade: number,
+    gray: boolean,
+  ): TeamSurvivorPose {
+    const p = this.teamPose;
+    p.role = role;
+    p.x = x;
+    p.y = y;
+    p.face = face;
+    p.walkPhase = walkPhase;
+    p.stepping = stepping;
+    p.protectedFlag = protectedFlag;
+    p.self = self;
+    p.hitMs = hitMs;
+    p.seed = seed;
+    p.clockMs = clockMs;
+    p.fade = fade;
+    p.gray = gray;
+    return p;
   }
 
   private drawCharacters(
@@ -1316,23 +1577,26 @@ export class WorldRenderer {
     oppVisible: boolean,
     sR: number,
     mR: number,
-  ): { any: boolean; opp: boolean } {
+  ): void {
     const { snap, balance } = v;
     const isMonster = v.role === 'monster';
     const half = this.preset.halfFrameAnims;
-    const phaseOf = (g: Gait): number => (half ? quantizePhase(g.phase, 4) : g.phase);
     let stunAny = false;
     let stunOpp = false;
     const realMs = v.nowMs;
-    /** 이 기기 시각 t(ms)를 장식 시계(초)로: 입자의 태어난 시각을 바뀐 순간으로 둔다 */
-    const clockAt = (t: number): number => (clockMs - (realMs - t)) / 1000;
-    this.hits = this.hits.filter((h) => realMs - h.t0 < 400);
+    // 입자의 태어난 시각 = 바뀐 순간: 이 기기 시각 t(ms) → 장식 시계(초) (clockMs − (realMs − t)) / 1000
+    // 지난 피격 정리 (제자리에서, 같은 순서)
+    const hits = this.hits;
+    let kept = 0;
+    for (const h of hits) if (realMs - h.t0 < 400) hits[kept++] = h;
+    hits.length = kept;
 
     if (isMonster) {
       // 괴물 화면: 잡힘 알림 직후 사라진(또는 수감된) 생존자는 보이던 자리에서 흩어진다. 후보는 같은 순간 타격 부채꼴 안에
       // 있던 생존자뿐이다(같은 순간 시야를 벗어난 다른 생존자 자리에서 흩어지지 않게). 맞는 후보가 없으면 연출을 생략한다
       if (realMs - this.captureAt < 400 && v.me) {
-        const cands: { id: string; x: number; y: number }[] = [];
+        const cands = this.dissolveCands;
+        cands.length = 0;
         for (const [id, st] of this.lastStatus) {
           if (st.status !== 'free') continue;
           const now = v.survivors.get(id);
@@ -1350,38 +1614,29 @@ export class WorldRenderer {
         );
         if (best) {
           // 보이던 생존자가 사라진(수감된) 순간부터
-          this.fxs.dissolve(best.x, best.y, sR, clockAt(this.flipAt(v, 'survivor', best.id)), null, true);
+          const t = this.flipAt(v, 'survivor', best.id);
+          this.fxs.dissolve(best.x, best.y, sR, (clockMs - (realMs - t)) / 1000, null, true);
           this.lastStatus.delete(best.id);
           this.captureAt = -1e9;
         }
       }
-      for (const id of [...this.lastStatus.keys()]) if (!v.survivors.has(id)) this.lastStatus.delete(id);
+      // 시야에서 사라진 별칭 정리 (Map을 돌며 지워도 된다: 아직 안 본 항목만 남는다)
+      for (const id of this.lastStatus.keys()) if (!v.survivors.has(id)) this.lastStatus.delete(id);
     }
 
     // 노출 문양 · 기절 별 자리를 고를 몸 원 (이 화면에 그리는 생존자 · 괴물 화면은 괴물 자신, 생존자 화면은 나)
-    const disks: (BodyDisk & { id: string })[] = [];
+    const disks = this.disks;
+    disks.length = 0;
     for (const [id, s] of v.survivors)
-      if (s.status !== 'dead' && s.status !== 'escaped') disks.push({ id, x: s.x, y: s.y, r: sR });
+      if (s.status !== 'dead' && s.status !== 'escaped') this.pushDisk(id, s.x, s.y, sR);
     const myStatus = snap.you.surv?.status;
     if (v.me && myStatus !== 'dead' && myStatus !== 'escaped')
-      disks.push({ id: v.selfId, x: v.me.x, y: v.me.y, r: isMonster ? mR : sR });
-    const starDir = (cx: number, cy: number, self: string): number => {
-      this.starDir = starSlot(
-        { x: cx, y: cy },
-        mR,
-        TILE_PX,
-        disks.filter((d) => d.id !== self),
-        this.starDir,
-      );
-      return this.starDir;
-    };
+      this.pushDisk(v.selfId, v.me.x, v.me.y, isMonster ? mR : sR);
     let starsDrawn = false;
 
     // 다른 생존자
     for (const [id, s] of v.survivors) {
-      this.transition(id, s.status, s.x, s.y, s.face, clockMs, realMs, isMonster, sR, () =>
-        this.flipAt(v, 'survivor', id),
-      );
+      this.transition(id, s.status, s.x, s.y, s.face, clockMs, realMs, isMonster, sR, v, false);
       const fade = this.fades.get(id);
       if (s.status === 'dead' || s.status === 'escaped') {
         if (!isMonster && s.role && fade) this.drawFade(id, s.role, fade, realMs, sR);
@@ -1391,13 +1646,15 @@ export class WorldRenderer {
       const rig = this.survivorRig(id);
       if (isMonster) {
         // 흰색 위장: 역할 · 체력 · 능력 인자 없이 (reveal은 서버가 노출 창에 보낸 역할뿐)
-        const others = s.role ? disks.filter((d) => d.id !== id) : [];
+        const others = this.others;
+        others.length = 0;
+        if (s.role) for (const d of disks) if (d.id !== id) others.push(d);
         drawHiddenSurvivor(
           rig,
           s.x,
           s.y,
           s.face,
-          phaseOf(g),
+          this.phaseOf(g),
           g.stepping,
           s.protected,
           s.role,
@@ -1419,34 +1676,36 @@ export class WorldRenderer {
             alpha: 1,
           });
         }
-        if (footDust && g.footfall) this.fxs.footDust(s.x, s.y, clockAt(g.footAt), id, true);
+        if (footDust && g.footfall)
+          this.fxs.footDust(s.x, s.y, (clockMs - (realMs - g.footAt)) / 1000, id, true);
       } else {
         const role = s.role ?? 'runner';
         const appear = fade?.kind === 'appear' ? 1 - fadeOut(realMs - fade.t0, ANIM.imprisonAppearMs) : 1;
         drawTeamSurvivor(
           rig,
-          {
+          this.teamPoseOf(
             role,
-            x: s.x,
-            y: s.y,
-            face: s.face,
-            walkPhase: phaseOf(g),
-            stepping: g.stepping,
-            protectedFlag: s.protected,
-            self: false,
-            hitMs: this.hitFor(s.x, s.y, false, realMs),
-            seed: seedOf(id),
-            clockMs: animMs,
-            fade: appear,
-            gray: false,
-          },
+            s.x,
+            s.y,
+            s.face,
+            this.phaseOf(g),
+            g.stepping,
+            s.protected,
+            false,
+            this.hitFor(s.x, s.y, false, realMs),
+            seedOf(id),
+            animMs,
+            appear,
+            false,
+          ),
           sR,
         );
         if (s.hp !== null && s.hp < balance.survivor.maxHp && s.status === 'free')
           drawInjury(this.attachG, s.x, s.y, s.face, sR);
         if (role === 'runner' && v.nowMs < this.sprintUntil && g.stepping > 0.3)
           drawSpeedLines(this.fxUnder, s.x, s.y, s.face, sR, tS);
-        if (footDust && g.footfall) this.fxs.footDust(s.x, s.y, clockAt(g.footAt), null, false);
+        if (footDust && g.footfall)
+          this.fxs.footDust(s.x, s.y, (clockMs - (realMs - g.footAt)) / 1000, null, false);
         if (s.rescue !== null && s.rescue > 0) {
           drawRescueRing(this.attachG, s.x, s.y, s.rescue);
           info.push({
@@ -1474,15 +1733,23 @@ export class WorldRenderer {
       const pose = this.monsterPose(m.x, m.y, m.aim, m.stunned, m.dashing, m.windup > 0 ? 1 : 0, g, tS, half);
       drawMonsterRig(rig, pose, mR);
       if (m.stunned && oppVisible) {
-        drawStunStars(this.starsG, m.x, m.y, tS, mR, starDir(m.x, m.y, 'monster'));
+        drawStunStars(this.starsG, m.x, m.y, tS, mR, this.pickStarDir(m.x, m.y, mR, 'monster'));
         starsDrawn = true;
         stunAny = true;
         stunOpp = true;
       }
       if (this.stunnedPending && oppVisible)
-        this.fxs.ring('impact', m.x, m.y, mR * 2.4, clockAt(this.stunnedAt), 'monster', true);
+        this.fxs.ring(
+          'impact',
+          m.x,
+          m.y,
+          mR * 2.4,
+          (clockMs - (realMs - this.stunnedAt)) / 1000,
+          'monster',
+          true,
+        );
       if (footDust && g.footfall && oppVisible)
-        this.fxs.footDust(m.x, m.y, clockAt(g.footAt), 'monster', true);
+        this.fxs.footDust(m.x, m.y, (clockMs - (realMs - g.footAt)) / 1000, 'monster', true);
       drawn.push({
         id: 'monster',
         kind: 'monster',
@@ -1515,18 +1782,27 @@ export class WorldRenderer {
         );
         drawMonsterRig(rig, pose, mR);
         if (v.myStunned) {
-          drawStunStars(this.starsG, v.me.x, v.me.y, tS, mR, starDir(v.me.x, v.me.y, v.selfId));
+          drawStunStars(this.starsG, v.me.x, v.me.y, tS, mR, this.pickStarDir(v.me.x, v.me.y, mR, v.selfId));
           starsDrawn = true;
           stunAny = true;
         }
         if (this.stunnedPending) {
           // 가드가 보였으면 그 자리에서 충격파가 이미 났다. 안 보였으면 몸 중심에서 방향 없이
           if (!this.shoveSeen)
-            this.fxs.ring('impact', v.me.x, v.me.y, mR * 2.4, clockAt(this.stunnedAt), null, false);
+            this.fxs.ring(
+              'impact',
+              v.me.x,
+              v.me.y,
+              mR * 2.4,
+              (clockMs - (realMs - this.stunnedAt)) / 1000,
+              null,
+              false,
+            );
           this.stunnedPending = false;
           this.shoveSeen = false;
         }
-        if (footDust && g.footfall) this.fxs.footDust(v.me.x, v.me.y, clockAt(g.footAt), null, false);
+        if (footDust && g.footfall)
+          this.fxs.footDust(v.me.x, v.me.y, (clockMs - (realMs - g.footAt)) / 1000, null, false);
         drawn.push({
           id: v.selfId,
           kind: 'self',
@@ -1539,8 +1815,18 @@ export class WorldRenderer {
       } else {
         const role = v.role as RoleId;
         // 내 상태는 스냅샷으로 바뀐다: 그 스냅샷을 받은 순간부터
-        this.transition(v.selfId, st ?? 'free', v.me.x, v.me.y, v.me.face, clockMs, realMs, false, sR, () =>
-          this.snapEdge(v),
+        this.transition(
+          v.selfId,
+          st ?? 'free',
+          v.me.x,
+          v.me.y,
+          v.me.face,
+          clockMs,
+          realMs,
+          false,
+          sR,
+          v,
+          true,
         );
         const fade = this.fades.get(v.selfId);
         if (st !== 'dead' && st !== 'escaped') {
@@ -1550,21 +1836,21 @@ export class WorldRenderer {
           const appear = fade?.kind === 'appear' ? 1 - fadeOut(realMs - fade.t0, ANIM.imprisonAppearMs) : 1;
           drawTeamSurvivor(
             rig,
-            {
+            this.teamPoseOf(
               role,
-              x: v.me.x,
-              y: v.me.y,
-              face: v.me.face,
-              walkPhase: phaseOf(g),
-              stepping: g.stepping,
-              protectedFlag: prot,
-              self: true,
-              hitMs: this.hitFor(v.me.x, v.me.y, true, realMs),
-              seed: seedOf(v.selfId),
-              clockMs: animMs,
-              fade: appear,
-              gray: false,
-            },
+              v.me.x,
+              v.me.y,
+              v.me.face,
+              this.phaseOf(g),
+              g.stepping,
+              prot,
+              true,
+              this.hitFor(v.me.x, v.me.y, true, realMs),
+              seedOf(v.selfId),
+              animMs,
+              appear,
+              false,
+            ),
             sR,
           );
           const s = snap.you.surv;
@@ -1572,7 +1858,8 @@ export class WorldRenderer {
             drawInjury(this.attachG, v.me.x, v.me.y, v.me.face, sR);
           if (role === 'runner' && s && s.abilityActive > 0 && g.stepping > 0.3)
             drawSpeedLines(this.fxUnder, v.me.x, v.me.y, v.me.face, sR, tS);
-          if (footDust && g.footfall) this.fxs.footDust(v.me.x, v.me.y, clockAt(g.footAt), null, false);
+          if (footDust && g.footfall)
+            this.fxs.footDust(v.me.x, v.me.y, (clockMs - (realMs - g.footAt)) / 1000, null, false);
           const rescue = s?.rescue ?? 0;
           if (rescue > 0) {
             drawRescueRing(this.attachG, v.me.x, v.me.y, rescue);
@@ -1615,7 +1902,8 @@ export class WorldRenderer {
             : ANIM.deathGrayMs + ANIM.deathFadeMs;
       if (realMs - f.t0 > dur || realMs < f.t0) this.fades.delete(id);
     }
-    return { any: stunAny, opp: stunOpp };
+    this.stunAny = stunAny;
+    this.stunOpp = stunOpp;
   }
 
   /** 최근 피격이 이 자리(이벤트 좌표 0.8타일 이내)에 있었으면 지난 시간 (ms) */
@@ -1642,21 +1930,7 @@ export class WorldRenderer {
     const rig = this.survivorRig(id);
     drawTeamSurvivor(
       rig,
-      {
-        role,
-        x: f.x,
-        y: f.y,
-        face: f.face,
-        walkPhase: 0,
-        stepping: 0,
-        protectedFlag: false,
-        self: false,
-        hitMs: null,
-        seed: 0,
-        clockMs: 0,
-        fade: alpha,
-        gray,
-      },
+      this.teamPoseOf(role, f.x, f.y, f.face, 0, 0, false, false, null, 0, 0, alpha, gray),
       sR,
     );
     if (!gray)
@@ -1676,7 +1950,7 @@ export class WorldRenderer {
     g: Gait,
     tS: number,
     half: boolean,
-  ): Parameters<typeof drawMonsterRig>[1] {
+  ): MonsterPose {
     const frames = frameCount(ANIM.cloakFrames, half);
     const moving = g.stepping > 0.3;
     const i = cloakFrame(tS, moving, frames) * (ANIM.cloakFrames / frames);
@@ -1684,19 +1958,20 @@ export class WorldRenderer {
       ? 'monster-stun'
       : dashing
         ? 'monster-dash'
-        : cloakFrameName(moving ? 'move' : 'idle', i);
+        : cloakName(moving ? 'move' : 'idle', i);
     const blink = eyeBlink(tS, 0.7);
-    return {
-      x,
-      y,
-      aim,
-      frame,
-      raise: stunned ? 0 : raise,
-      stretch: dashing ? dashStretch(0, 1) * 0.6 : 0,
-      eyes: stunned ? 'stun' : blink ? 'blink' : 'open',
-      glow: this.preset.tier !== 'low',
-      scale: 1 + 0.012 * Math.sin(tS * 2.4),
-      alpha: 1,
-    };
+    // 그릇 하나를 다시 쓴다 (drawMonsterRig가 바로 읽는다)
+    const p = this.monPose;
+    p.x = x;
+    p.y = y;
+    p.aim = aim;
+    p.frame = frame;
+    p.raise = stunned ? 0 : raise;
+    p.stretch = dashing ? dashStretch(0, 1) * 0.6 : 0;
+    p.eyes = stunned ? 'stun' : blink ? 'blink' : 'open';
+    p.glow = this.preset.tier !== 'low';
+    p.scale = 1 + 0.012 * Math.sin(tS * 2.4);
+    p.alpha = 1;
+    return p;
   }
 }

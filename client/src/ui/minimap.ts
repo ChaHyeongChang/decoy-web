@@ -3,6 +3,8 @@
 // 많은 정보가 나올 수 없다. 캔버스는 백버퍼 배율로 그리고 이미지는 1/배율로 표시해 화면에 1:1로 찍힌다.
 // M10c: 깎은 모서리 틀 + 제목, 엔티티는 역할 실루엣 축소판(생존자 화면) / 흰 공통 실루엣(괴물 화면) / 괴물 망토.
 // 엔티티 그림은 HUD 아틀라스 프레임을 쓰는 이미지라 매 프레임 자리 · 방향만 바꾼다 (Graphics 없음)
+// 렌더링 최적화 2: 바닥은 안개 그림이 바뀐 다음 프레임에 그린다(안개 합성과 같은 프레임에 겹치지 않게, hudGate.ts
+// BaseRefreshPacer). 엔티티 줄은 매 프레임 새 배열 · 사본 · 닫힘 함수를 만들지 않는다(디버그 drawn은 읽을 때 사본)
 // M12 터치 배치: 오른쪽 칸 남는 자리(HUD.touch 역할별 minimap)에 둔다. 자리가 없으면 만들지 않는다 — 터치 배치는 판 화면
 // 전체가 늘 보여 같은 정보다(축소 합성도 하지 않아 그만큼 싸다). 판 중 창이 낮아져 엄지 버튼이 덮으면 숨긴다(setHidden, 같은 이유)
 import Phaser from 'phaser';
@@ -21,6 +23,7 @@ import { gfxState, onGfxChange } from '../gfx/state';
 import { minimapScaleFor } from '../render/fogMath';
 import { createCanvasTexture, resizeCanvasTexture, uploadCanvasTexture } from '../render/fogPaint';
 import { FR } from './hudArt';
+import { BaseRefreshPacer } from './hudGate';
 import type { HudKit, Slice, Spr } from './hudKit';
 import type { CrispText } from './text';
 import { HUD } from './layout';
@@ -44,6 +47,18 @@ function placeFor(monster: boolean): Place | null {
 }
 
 const MINIMAP_KEY = 'minimap';
+/** 미니맵 그림 프레임 이름 (프레임마다 만들지 않는다) */
+const MM = {
+  track: FR.mm('track'),
+  roarSelf: FR.mm('roarSelf'),
+  roarPing: FR.mm('roarPing'),
+  monster: FR.mm('monster'),
+  self: FR.mm('self'),
+  hidden: FR.mm('hidden'),
+  runner: FR.mm('runner'),
+  guard: FR.mm('guard'),
+  scout: FR.mm('scout'),
+} as const;
 
 export class Minimap {
   private readonly canvas: HTMLCanvasElement;
@@ -54,9 +69,14 @@ export class Minimap {
   private readonly at: Place | null;
   /** 엔티티 그림 (재사용) */
   private readonly pool: Spr[] = [];
+  /** 이번 프레임에 이 미니맵이 다시 찍은 메인 화면 엔티티 (배열 재사용, 디버그 drawn이 읽을 때 사본을 만든다) */
+  private readonly src: DrawnEntity[] = [];
+  /** 엔티티 그림을 몇 개 썼는가 (update 안) */
+  private used = 0;
+  /** 바닥을 그릴 프레임 (안개 그림이 바뀐 다음 프레임, hudGate.ts) */
+  private readonly pacer = new BaseRefreshPacer();
   readonly w: number;
   readonly h: number;
-  drawn: DrawnEntity[] = [];
   /** 캔버스 배율 (백버퍼 px / 논리 px) */
   private scale: number;
   /** 백버퍼 배율이 바뀌어 다음 갱신 때 캔버스 크기를 다시 잡는다 */
@@ -137,7 +157,15 @@ export class Minimap {
       else p.setVisible(!on);
     }
     for (const s of this.pool) s.show(false);
-    this.drawn = [];
+    this.src.length = 0;
+  }
+
+  /**
+   * 디버그 · 테스트: 미니맵에 다시 찍은 엔티티 (layer = 'minimap' 사본). 마지막 update 때 메인 화면 목록에서 고른 것이다 —
+   * update는 메인 그리기 바로 뒤 매 프레임 불리므로 그 항목은 지금도 마지막 메인 그림 그대로다
+   */
+  get drawn(): DrawnEntity[] {
+    return this.src.map((d) => ({ ...d, layer: 'minimap' }));
   }
 
   /** 백버퍼 배율이 바뀌었으면 캔버스를 그 배율로 다시 잡는다 (다음 바닥 갱신 때 다시 그려진다) */
@@ -158,7 +186,22 @@ export class Minimap {
     this.image.setScale(this.w / this.canvas.width, this.h / this.canvas.height);
   }
 
-  /** 메인 바닥 합성이 갱신될 때 함께 줄여 그린다 */
+  /**
+   * 프레임마다 (메인 그리기 뒤): 메인 바닥 합성(안개)이 바뀌었으면 줄여 그린다. 바뀐 프레임에는 미루고 다음 프레임에 그려
+   * 안개 합성 · 업로드와 한 프레임에 겹치지 않게 한다(BaseRefreshPacer). 숨겼다가 다시 보이면 바로 그린다.
+   * 미니맵이 없거나 숨었으면 축소 합성 원본(baseCanvas)을 읽지 않는다 — 읽을 때 합성되므로 그 비용도 없다
+   */
+  syncBase(changed: boolean, world: { readonly baseCanvas: HTMLCanvasElement }): void {
+    if (!this.shown) return;
+    if (this.pacer.frame(changed, this.stale)) this.refreshBase(world.baseCanvas);
+  }
+
+  /** 디버그 · 테스트: 안개 그림이 바뀌었는데 아직 미니맵 바닥에 그리지 않았다 */
+  get basePending(): boolean {
+    return this.pacer.waiting;
+  }
+
+  /** 메인 바닥 합성을 줄여 그린다 */
   refreshBase(base: HTMLCanvasElement): void {
     if (!this.texture) return;
     this.stale = false;
@@ -186,35 +229,37 @@ export class Minimap {
     return s;
   }
 
-  /** 메인 화면에 그린 엔티티만 다시 찍는다 */
+  /** 엔티티 그림 하나를 다음 칸에 놓는다 */
+  private put(frame: string, x: number, y: number, rot: number): void {
+    const s = this.sprite(this.used);
+    this.used += 1;
+    s.set(frame, x, y).show(true);
+    s.img.setRotation(rot);
+  }
+
+  /** 메인 화면에 그린 엔티티만 다시 찍는다 (프레임마다: 새 배열 · 사본 · 닫힘 함수 없이) */
   update(mainDrawn: readonly DrawnEntity[], myRole: Role, roleOf: (id: string) => Role | null): void {
     if (!this.shown) return;
-    const out: DrawnEntity[] = [];
-    let n = 0;
-    const put = (frame: string, x: number, y: number, rot: number): void => {
-      const s = this.sprite(n);
-      n += 1;
-      s.set(frame, x, y).show(true);
-      s.img.setRotation(rot);
-    };
+    const src = this.src;
+    src.length = 0;
+    this.used = 0;
     for (const d of mainDrawn) {
       if (d.layer === 'minimap') continue;
       const x = this.px(d.x);
       const y = this.py(d.y);
       if (d.kind === 'mark') {
-        put(FR.mm(d.tag === 'track' || d.tag === 'roarSelf' ? d.tag : 'roarPing'), x, y, 0);
+        this.put(d.tag === 'track' ? MM.track : d.tag === 'roarSelf' ? MM.roarSelf : MM.roarPing, x, y, 0);
       } else if (d.kind === 'monster' || (d.kind === 'self' && myRole === 'monster')) {
-        put(FR.mm('monster'), x, y, d.face);
+        this.put(MM.monster, x, y, d.face);
       } else {
         // 생존자 화면: 역할 실루엣 (나는 흰 고리를 아래에). 괴물 화면: 흰 공통 실루엣 (역할 · 체력 없음)
         const role = d.kind === 'self' ? myRole : myRole === 'monster' ? null : roleOf(d.id);
-        if (d.kind === 'self') put(FR.mm('self'), x, y, 0);
-        put(FR.mm(role && role !== 'monster' ? role : 'hidden'), x, y, d.face);
+        if (d.kind === 'self') this.put(MM.self, x, y, 0);
+        this.put(role && role !== 'monster' ? MM[role] : MM.hidden, x, y, d.face);
       }
-      out.push({ ...d, layer: 'minimap' });
+      src.push(d);
     }
-    for (let i = n; i < this.pool.length; i += 1) this.pool[i]?.show(false);
-    this.drawn = out;
+    for (let i = this.used; i < this.pool.length; i += 1) this.pool[i]?.show(false);
   }
 
   destroy(): void {

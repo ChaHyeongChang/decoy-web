@@ -9,7 +9,11 @@
 import { expect, test, type Page } from '@playwright/test';
 import { BASE_QUERY, newPlayerPage, press } from './helpers';
 
-/** 페이지 안: rAF를 120Hz로 돌린다 (setTimeout으로 마감 1.5ms 앞까지, 그다음 MessageChannel로 마감을 맞춘다) */
+/**
+ * 페이지 안: rAF를 120Hz로 돌린다 (setTimeout으로 마감 1.5ms 앞까지, 그다음 MessageChannel로 마감을 맞춘다).
+ * 콜백 시각은 실제 브라우저처럼 그 프레임의 vsync 시각(격자 위, 지금 이하의 마지막 칸)이다 — 깨어난 실제 시각을 주면 늦게 깬
+ * 프레임 다음의 간격이 8.33ms보다 짧아져(바쁜 CI 러너에서 7.5ms) 화면 주사율을 133Hz로 잘못 잰다
+ */
 function pump120(): void {
   const period = 1000 / 120;
   const queue: FrameRequestCallback[] = [];
@@ -20,10 +24,11 @@ function pump120(): void {
   const fire = (): void => {
     scheduled = false;
     const t = performance.now();
-    // 실제 화면처럼 vsync 격자에 맞춘다: 늦게 깨어나도 다음 마감은 격자 위의 다음 칸 (늦은 만큼 밀지 않는다)
-    next += period;
-    while (next <= t) next += period;
-    for (const cb of queue.splice(0)) cb(t);
+    // 실제 화면처럼 vsync 격자에 맞춘다: 이 프레임의 시각은 지금 이하의 마지막 칸, 다음 마감은 그다음 칸 (늦은 만큼 밀지 않는다)
+    let due = next;
+    while (due + period <= t) due += period;
+    next = due + period;
+    for (const cb of queue.splice(0)) cb(due);
   };
   const spin = (): void => {
     if (performance.now() >= next) fire();

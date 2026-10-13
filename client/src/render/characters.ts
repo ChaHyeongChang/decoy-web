@@ -14,8 +14,11 @@ import {
   breathScale,
   hiddenSurvivorPose,
   hitReact,
+  newHiddenSurvivorPose,
+  newWalkPose,
   protectBlink,
   walkPose,
+  type HitReact,
   type WalkPose,
 } from '../art/anim';
 import { CONE, DANGER, OUTLINE, ROLE, WARN } from '../art/palette';
@@ -35,6 +38,53 @@ import {
 } from '../art/shapes';
 
 const T = TILE_PX;
+
+// ── 렌더링 최적화 2: 프레임마다 만들던 그림 키 문자열 · 자세 객체를 미리 만들어 둔다 (값은 같다) ──
+
+/** 역할별 그림 키 (atlas.ts frameDefs의 이름과 같다) */
+interface RoleFrames {
+  body: string;
+  gray: string;
+  flash: string;
+  foot: string;
+  ring: string;
+  glyph: string;
+}
+
+function roleFrames(role: RoleId): RoleFrames {
+  return {
+    body: `survivor-${role}`,
+    gray: `survivor-${role}-gray`,
+    flash: `survivor-${role}-flash`,
+    foot: `foot-${role}`,
+    ring: `ring-reveal-${role}`,
+    glyph: `glyph-${role}`,
+  };
+}
+
+const ROLE_FRAMES: Readonly<Record<RoleId, RoleFrames>> = {
+  runner: roleFrames('runner'),
+  guard: roleFrames('guard'),
+  scout: roleFrames('scout'),
+};
+
+/** 괴물 눈 그림 키 */
+const EYE_FRAMES: Readonly<Record<MonsterPose['eyes'], string>> = {
+  open: 'eyes-open',
+  blink: 'eyes-blink',
+  stun: 'eyes-stun',
+};
+
+/** 숨은 생존자 번쩍 그림 키 (hiddenSurvivorPose.sprite + '-flash') */
+const HIDDEN_FLASH = 'survivor-hidden-flash';
+
+/** 그리는 동안만 쓰는 그릇 (그리기 함수는 동기라 하나를 다시 쓴다) */
+const hiddenScratch = newHiddenSurvivorPose();
+const walkScratch = newWalkPose();
+const hitScratch: HitReact = { flash: 0, squash: 0 };
+const glyphAt = { x: 0, y: 0 };
+/** 기절 별 꼭짓점 10개 (strokePoints · fillPoints가 바로 명령으로 옮겨 적는다) */
+const starPts: Phaser.Math.Vector2[] = Array.from({ length: 10 }, () => new Phaser.Math.Vector2());
 
 /** 그림자 · 몸 · 부착 표시를 담는 레이어 (월드 컨테이너 안, 이 순서로) */
 export interface CharacterLayers {
@@ -214,9 +264,10 @@ export function drawHiddenSurvivor(
     reveal,
     clockMs,
     PROTECTED_ALPHA,
+    hiddenScratch,
   );
   placeSurvivor(rig, p.sprite, p.foot, p.x, p.y, p.rotation, p.scale, p.feet, p.alpha, bodyR, 0);
-  put(rig.flash, `${p.sprite}-flash`, x * T, y * T, p.rotation, p.scale / rig.tpw, p.scale / rig.tpw, 0);
+  put(rig.flash, HIDDEN_FLASH, x * T, y * T, p.rotation, p.scale / rig.tpw, p.scale / rig.tpw, 0);
   attachments(rig, x, y, p.scale, p.alpha, protectedFlag, p.blinkOutline, p.reveal, bodyR, others);
 }
 
@@ -245,16 +296,24 @@ export interface TeamSurvivorPose {
   gray: boolean;
 }
 
+/** 빈 몸 원 목록 (생존자 화면의 팀원은 노출 문양이 없다) */
+const NO_DISCS: readonly BodyDisk[] = [];
+
 export function drawTeamSurvivor(rig: SurvivorRig, p: TeamSurvivorPose, bodyR: number): void {
-  const w = walkPose(p.walkPhase, p.stepping);
+  const w = walkPose(p.walkPhase, p.stepping, walkScratch);
   const scale = breathScale(p.clockMs / 1000, p.seed);
-  const hit = p.hitMs === null ? { flash: 0, squash: 0 } : hitReact(p.hitMs);
+  let hit = hitScratch;
+  if (p.hitMs === null) {
+    hit.flash = 0;
+    hit.squash = 0;
+  } else hit = hitReact(p.hitMs, hitScratch);
   const alpha = (p.protectedFlag ? PROTECTED_ALPHA : 1) * p.fade;
   const rot = p.face + w.lean;
-  const body = p.gray ? `survivor-${p.role}-gray` : `survivor-${p.role}`;
-  placeSurvivor(rig, body, `foot-${p.role}`, p.x, p.y, rot, scale, w.feet, alpha, bodyR, hit.squash);
+  const frames = ROLE_FRAMES[p.role];
+  const body = p.gray ? frames.gray : frames.body;
+  placeSurvivor(rig, body, frames.foot, p.x, p.y, rot, scale, w.feet, alpha, bodyR, hit.squash);
   const s = scale / rig.tpw;
-  put(rig.flash, `survivor-${p.role}-flash`, p.x * T, p.y * T, rot, s, s, hit.flash * 0.9 * p.fade);
+  put(rig.flash, frames.flash, p.x * T, p.y * T, rot, s, s, hit.flash * 0.9 * p.fade);
   attachments(
     rig,
     p.x,
@@ -265,7 +324,7 @@ export function drawTeamSurvivor(rig: SurvivorRig, p: TeamSurvivorPose, bodyR: n
     p.protectedFlag && protectBlink(p.clockMs),
     null,
     bodyR,
-    [],
+    NO_DISCS,
   );
   put(rig.ring, 'ring-self', p.x * T, p.y * T, 0, s, s, p.self ? 0.85 * p.fade : 0);
 }
@@ -288,14 +347,17 @@ function attachments(
   const s = scale / rig.tpw;
   put(rig.bubble, 'bubble', px, py, 0, s, s, protectedFlag ? (blinkOutline ? 1 : 0.7) : 0);
   if (reveal) {
-    put(rig.ring, `ring-reveal-${reveal}`, px, py, 0, s, s, 1);
+    const frames = ROLE_FRAMES[reveal];
+    put(rig.ring, frames.ring, px, py, 0, s, s, 1);
     // 문양: 옆 몸과 겹치지 않는 자리 (기본 머리 위). 몸 아래 레이어라 겹쳐도 남의 몸을 덮지 않는다
-    const dir = glyphSlot({ x, y }, bodyR, others, rig.glyphDir);
+    glyphAt.x = x;
+    glyphAt.y = y;
+    const dir = glyphSlot(glyphAt, bodyR, others, rig.glyphDir);
     rig.glyphDir = dir;
     const d = GLYPH_PLACE.dist * bodyR * T;
     put(
       rig.glyph,
-      `glyph-${reveal}`,
+      frames.glyph,
       px + Math.cos(dir) * d,
       py + Math.sin(dir) * d,
       0,
@@ -363,20 +425,20 @@ export function drawMonsterRig(rig: MonsterRig, p: MonsterPose, bodyR: number): 
   const c = Math.cos(p.aim);
   const sn = Math.sin(p.aim);
   const rp = bodyR * T * p.scale;
-  const at = (lx: number, ly: number): [number, number] => [
-    px + (lx * c - ly * sn) * rp,
-    py + (lx * sn + ly * c) * rp,
-  ];
   put(rig.shadow, 'shadow-monster', px, py, 0, s, s, p.alpha);
   put(rig.body, p.frame, px, py, p.aim, sx, sy, p.alpha);
-  // 발톱: 망토 앞 가장자리 위. 공격 준비에는 앞으로 내밀고 더 벌린다
-  for (const side of [1, -1] as const) {
+  // 발톱: 망토 앞 가장자리 위. 공격 준비에는 앞으로 내밀고 더 벌린다 (side 1 = clawA, −1 = clawB)
+  const lx = CLAW_ANCHOR.x + 0.14 * p.raise;
+  for (let side = 1; side >= -1; side -= 2) {
     const img = side === 1 ? rig.clawA : rig.clawB;
-    const [cx, cy] = at(CLAW_ANCHOR.x + 0.14 * p.raise, (CLAW_ANCHOR.y + 0.06 * p.raise) * side);
+    const ly = (CLAW_ANCHOR.y + 0.06 * p.raise) * side;
+    const cx = px + (lx * c - ly * sn) * rp;
+    const cy = py + (lx * sn + ly * c) * rp;
     put(img, 'claw', cx, cy, p.aim + side * (CLAW_SPREAD + 0.3 * p.raise), s, s * side, p.alpha);
   }
-  const [ex, ey] = at(MONSTER_FACE.cx, 0);
-  put(rig.eyes, `eyes-${p.eyes}`, ex, ey, p.aim, s, s, p.alpha);
+  const ex = px + (MONSTER_FACE.cx * c - 0 * sn) * rp;
+  const ey = py + (MONSTER_FACE.cx * sn + 0 * c) * rp;
+  put(rig.eyes, EYE_FRAMES[p.eyes], ex, ey, p.aim, s, s, p.alpha);
   put(rig.glow, 'eye-glow', ex, ey, 0, s, s, p.glow && p.eyes !== 'blink' ? 0.9 * p.alpha : 0);
   rig.sprite = p.frame;
 }
@@ -538,11 +600,11 @@ function drawStar(
   inner: number,
   color: number,
 ): void {
-  const pts: Phaser.Math.Vector2[] = [];
+  const pts = starPts;
   for (let i = 0; i < 10; i += 1) {
     const r = i % 2 === 0 ? outer : inner;
     const a = -Math.PI / 2 + (i * Math.PI) / 5;
-    pts.push(new Phaser.Math.Vector2(x + Math.cos(a) * r, y + Math.sin(a) * r));
+    pts[i]?.set(x + Math.cos(a) * r, y + Math.sin(a) * r);
   }
   g.lineStyle(STUN_STARS.edge * 2, OUTLINE, 0.85);
   g.strokePoints(pts, true);
@@ -608,19 +670,19 @@ export function drawSpeedLines(
   }
 }
 
-/** 돌진 붉은 줄 (잔상 사이) */
+/** 돌진 붉은 줄 (잔상 사이). ghosts = DashTrail.live 그대로 (자리 g · 알파) */
 export function drawDashStreak(
   g: Phaser.GameObjects.Graphics,
-  pts: readonly { x: number; y: number; a: number }[],
+  ghosts: readonly { g: { x: number; y: number }; alpha: number }[],
 ): void {
-  for (let i = 1; i < pts.length; i += 1) {
-    const p = pts[i - 1];
-    const q = pts[i];
+  for (let i = 1; i < ghosts.length; i += 1) {
+    const p = ghosts[i - 1];
+    const q = ghosts[i];
     if (!p || !q) continue;
-    g.lineStyle(5, DANGER, 0.35 * q.a);
+    g.lineStyle(5, DANGER, 0.35 * q.alpha);
     g.beginPath();
-    g.moveTo(p.x * T, p.y * T);
-    g.lineTo(q.x * T, q.y * T);
+    g.moveTo(p.g.x * T, p.g.y * T);
+    g.lineTo(q.g.x * T, q.g.y * T);
     g.strokePath();
   }
 }

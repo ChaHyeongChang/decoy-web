@@ -131,10 +131,13 @@ export class CanvasFog implements FogLayer {
   private readonly light: LightMap | null;
   private readonly pen: CanvasPen;
   /** 이번 주기의 바닥 명령 (거점 · 탈출구 · 시야 채움, 그린 순서대로)과 빛 명령 */
-  private readonly rec = new PenRecord();
+  private rec = new PenRecord();
   private readonly lightRec = new LightRecord();
-  /** 마지막으로 합성한 바닥 명령 (null = 아직 없음 — 첫 주기는 늘 합성한다) */
-  private last: number[] | null = null;
+  /**
+   * 마지막으로 합성한 바닥 명령 (null = 아직 없음 — 첫 주기는 늘 합성한다). 합성하면 rec과 맞바꾼다:
+   * 주기마다 기록을 복사하지 않는다 (렌더링 최적화 2)
+   */
+  private last: PenRecord | null = null;
   /** 테두리 리프트 (곱하기 뒤 더하기) */
   private readonly lift: Path2D;
   private readonly key: string;
@@ -215,7 +218,8 @@ export class CanvasFog implements FogLayer {
 
   commit(): void {
     const lightChanged = this.light !== null && this.lightRec.paint(this.light);
-    this.changed = lightChanged || this.last === null || !this.rec.sameAs(this.last);
+    const last = this.last;
+    this.changed = lightChanged || last === null || !this.rec.same(last);
     if (this.changed) {
       const c = this.ctx;
       c.globalCompositeOperation = 'source-over';
@@ -230,7 +234,8 @@ export class CanvasFog implements FogLayer {
       }
       addRimLift(c, this.lift);
       uploadCanvasTexture(this.texture);
-      this.last = this.rec.ops.slice();
+      this.last = this.rec;
+      this.rec = last ?? new PenRecord();
     } else {
       gfxState.features.fogSkips = Number(gfxState.features.fogSkips ?? 0) + 1;
     }

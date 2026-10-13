@@ -202,15 +202,23 @@ export class WorldPostFx {
 
   /**
    * 후처리 파이프라인이 붙잡은 렌더 타깃 바이트 (백버퍼 크기 RGBA: 1080p 8.3MB · 4K 33.2MB). 창 크기가 바뀌면 렌더 타깃도
-   * 따라 커지므로 매 프레임 다시 잰다(곱셈 몇 번). Canvas · 낮음은 0
+   * 따라 커지므로 매 프레임 다시 잰다(곱셈 몇 번). Canvas · 낮음은 0.
+   * 걸린 파이프라인 목록을 그대로 훑는다(getPostPipeline은 부를 때마다 이름으로 걸러 새 배열을 만든다 — 렌더링 최적화 2).
+   * 이 파이프라인은 모두 이름이 WORLD_GRADE라 '이름으로 거른 뒤 WorldGradePipeline인 것'과 같은 것을 센다
    */
   measure(): void {
     let bytes = 0;
     if (this.piped) {
-      const p = this.root.getPostPipeline(WORLD_GRADE);
-      for (const pipe of Array.isArray(p) ? p : [p])
-        if (pipe instanceof WorldGradePipeline)
-          for (const rt of pipe.renderTargets) bytes += rt.width * rt.height * 4;
+      const pipes = this.root.postPipelines;
+      for (let i = 0; i < pipes.length; i += 1) {
+        const pipe = pipes[i];
+        if (!(pipe instanceof WorldGradePipeline)) continue;
+        const rts = pipe.renderTargets;
+        for (let k = 0; k < rts.length; k += 1) {
+          const rt = rts[k];
+          if (rt) bytes += rt.width * rt.height * 4;
+        }
+      }
     }
     gfxState.features.postFxBytes = bytes;
   }

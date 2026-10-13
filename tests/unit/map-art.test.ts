@@ -702,6 +702,12 @@ class RecPen implements FogPen {
   fillPoly(poly: readonly Vec2[], color: number, alpha: number): void {
     this.calls.push({ op: 'fillPoly', color, alpha, poly: poly.map((p) => ({ ...p })) });
   }
+  fillPolyFlat(xy: readonly number[], start: number, n: number, color: number, alpha: number): void {
+    const poly: Vec2[] = [];
+    for (let i = 0; i < n; i += 1)
+      poly.push({ x: xy[start + i * 2] ?? NaN, y: xy[start + i * 2 + 1] ?? NaN });
+    this.fillPoly(poly, color, alpha);
+  }
   line(x0: number, y0: number, _x1: number, _y1: number, _w: number, color: number, alpha: number): void {
     this.calls.push({ op: 'line', x: x0, y: y0, color, alpha });
   }

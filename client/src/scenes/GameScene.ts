@@ -39,7 +39,7 @@ import { HUD, VIEW_H, VIEW_W, fitCamera, screenToTile } from '../ui/layout';
 import { Minimap } from '../ui/minimap';
 import { Scoreboard, TutorialOverlay } from '../ui/overlays';
 import { PROBE_DEPTH, drawProbeText } from '../ui/text';
-import { TouchControls } from '../ui/touchControls';
+import { TouchControls, type TouchView } from '../ui/touchControls';
 import { frameDeltaMs, staleEventLimitMs, trackFrameMs } from './staleEvents';
 
 /** 안개 (M3부터) */
@@ -60,6 +60,19 @@ const ALERT_LOOK: Partial<Record<string, { tone: Tone; icon: IconId }>> = {
 };
 /** 발각 테두리 맥동 (Hz) */
 const SPOTTED_PULSE_HZ = 1.2;
+/** 늘 같은 배너 줄 (프레임마다 새 객체를 만들지 않는다. Banners는 줄을 붙잡지 않고 값만 읽는다) */
+const LINE = {
+  campSlow: { text: UI_TEXT.campSlow, tone: 'warn', icon: 'prison' },
+  campWarn: { text: UI_TEXT.campWarn, tone: 'warn', icon: 'prison' },
+  pointWarn: { text: UI_TEXT.pointWarn, tone: 'warn', icon: 'point' },
+  spotted: { text: UI_TEXT.spotted, tone: 'danger', icon: 'eye' },
+} as const satisfies Record<string, BannerLine>;
+let last30: BannerLine | null = null;
+/** 최후의 30초 줄 (문구 틀을 프레임마다 채우지 않는다: 매개변수가 없어 늘 같은 글) */
+function lastChanceLine(): BannerLine {
+  last30 ??= { text: formatText('ALERT_LAST_30'), tone: 'warn', icon: 'exit' };
+  return last30;
+}
 
 /** 적응형 품질이 최근 1초 측정을 다시 내는 간격 (ms). 매 프레임 백분위를 내지 않는다 */
 const ADAPT_WINDOW_EVERY_MS = 250;
@@ -156,6 +169,15 @@ export class GameScene extends Phaser.Scene {
   private nextAdaptWindowAt = 0;
   /** 지금 처리하는 스냅샷이 서버에서 만들어진 뒤 지난 시간 (ms, 진동: 오래된 일은 울리지 않는다) */
   private eventAgeMs = 0;
+  /** 터치 화면에 넘기는 값 (프레임마다 새로 만들지 않는다) */
+  private readonly touchView: TouchView = { slots: [] };
+  /** 괴물 재접속 대기 줄 (남은 초가 바뀔 때만 새로) */
+  private pausedMemo: { sec: number; line: BannerLine } | null = null;
+  /** 미니맵: 팀원 id → 역할 (이 판 명단. 프레임마다 · 엔티티마다 닫힘 함수를 만들지 않는다) */
+  private readonly roleOf = (id: string): Role | null => {
+    for (const r of this.app.match?.roster ?? []) if (r.id === id) return r.role;
+    return null;
+  };
 
   constructor() {
     super('game');
@@ -756,21 +778,20 @@ export class GameScene extends Phaser.Scene {
     this.drawn = this.world.drawn;
     this.screenFx.update(now, snap.you.role === 'monster' && (app.predictor?.state?.stun ?? 0) > 0);
     this.kit.sync();
-    // 미니맵이 없거나 숨었으면 축소 합성 원본(baseCanvas)을 읽지 않는다. 다시 보이면 그 프레임에 한 번 그린다
-    if (this.minimap.shown && (this.world.baseRefreshed || this.minimap.stale))
-      this.minimap.refreshBase(this.world.baseCanvas);
-    const roster = app.match.roster;
-    const roleOf = (id: string): Role | null => roster.find((r) => r.id === id)?.role ?? null;
-    this.minimap.update(this.drawn, snap.you.role, roleOf);
+    // 미니맵 바닥: 안개 그림이 바뀐 다음 프레임에 줄여 그린다 (없거나 숨었으면 읽지 않는다. 다시 보이면 그 프레임에 한 번)
+    this.minimap.syncBase(this.world.baseRefreshed, this.world);
+    this.minimap.update(this.drawn, snap.you.role, this.roleOf);
     this.hud.update(snap, now);
 
     // 괴물 경고 줄 (감옥 캠핑 · 거점 지키기): 지속 배너 자리에 주황 리본 + 아이콘
     const warn: BannerLine | null = !mon
       ? null
       : mon.camp > 0
-        ? { text: mon.camp === 2 ? UI_TEXT.campSlow : UI_TEXT.campWarn, tone: 'warn', icon: 'prison' }
+        ? mon.camp === 2
+          ? LINE.campSlow
+          : LINE.campWarn
         : mon.blockWarn
-          ? { text: UI_TEXT.pointWarn, tone: 'warn', icon: 'point' }
+          ? LINE.pointWarn
           : null;
     const spotted = snap.you.surv?.spotted === true;
     this.spottedEdge.show(spotted);
@@ -780,11 +801,11 @@ export class GameScene extends Phaser.Scene {
     const paused = snap.world.paused;
     const persistent: BannerLine | null =
       paused !== null
-        ? { text: `${UI_TEXT.monsterReconnect} ${Math.ceil(paused)}초`, tone: 'warn', icon: 'disconnected' }
+        ? this.pausedLine(Math.ceil(paused))
         : spotted
-          ? { text: UI_TEXT.spotted, tone: 'danger', icon: 'eye' }
+          ? LINE.spotted
           : lastChance
-            ? { text: formatText('ALERT_LAST_30'), tone: 'warn', icon: 'exit' }
+            ? lastChanceLine()
             : null;
     this.banners.update(persistent, warn, now);
     this.updateTouch(snap);
@@ -815,6 +836,22 @@ export class GameScene extends Phaser.Scene {
       controls.setActive(active);
       if (!active) this.touch?.reset();
     }
-    if (active) controls.update({ slots: this.hud.lastSlots });
+    if (active) {
+      this.touchView.slots = this.hud.lastSlots;
+      controls.update(this.touchView);
+    }
+  }
+
+  /** 괴물 재접속 대기 줄 (남은 초가 같으면 같은 객체) */
+  private pausedLine(sec: number): BannerLine {
+    const m = this.pausedMemo;
+    if (m && m.sec === sec) return m.line;
+    const line: BannerLine = {
+      text: `${UI_TEXT.monsterReconnect} ${sec}초`,
+      tone: 'warn',
+      icon: 'disconnected',
+    };
+    this.pausedMemo = { sec, line };
+    return line;
   }
 }

@@ -217,8 +217,12 @@ interface Part {
   ico: HTMLElement;
   secs: HTMLElement | null;
   cap: HTMLElement;
+  /** 방향 표시 (조준 스틱 · 돌진만, 끄는 동안 transform만 바꾼다) */
+  dir: HTMLElement | null;
   /** 마지막으로 쓴 값 (바뀔 때만 DOM에) */
-  key: string;
+  state: string;
+  lit: number;
+  secsText: string;
   accent: string;
   icon: string;
   label: string;
@@ -235,7 +239,15 @@ interface Finger {
   r: number;
   /** 조준: 데드존 밖에 한 번이라도 나갔다 (가운데로 돌아오면 '취소' 표시) */
   out: boolean;
+  /** 방향 표시 요소 (조준 스틱 · 돌진의 .tc-dir, 없으면 null) */
+  dir: HTMLElement | null;
+  /** 마지막으로 쓴 손잡이 · 방향 transform (같으면 쓰지 않는다) */
+  knobT: string;
+  dirT: string;
 }
+
+/** 위치 표시가 사라지는 전환 시간 (ms, style.css .tc-hints.gone의 0.6s와 같다 — hud-gate.test.ts가 견준다) */
+export const HINT_FADE_MS = 600;
 
 /** 탭 버튼 → 누름 비트 */
 const TAP_BITS: Partial<Record<SlotId, number>> = { roar: BTN.ROAR, mode: BTN.MODE, ability: BTN.ABILITY };
@@ -260,6 +272,10 @@ export class TouchControls {
   /** 첫 판 위치 표시 (M12): 반투명 도형 + 이름표, 입력을 막지 않는다 */
   private hints: HTMLDivElement | null = null;
   private hintTimer: number | null = null;
+  /** 위치 표시가 다 사라진 뒤 배치에서 빼는 타이머 */
+  private hintIdleTimer: number | null = null;
+  /** 지난번 update의 행동 칸 배열 (같은 객체면 건너뛴다) */
+  private seenSlots: readonly ActionSlot[] | null = null;
 
   constructor(
     readonly root: HTMLElement,
@@ -281,9 +297,11 @@ export class TouchControls {
     this.zone.addEventListener('pointerdown', (e) => this.startStick(e, 'move', this.zone, this.moveKnob));
     if (role === 'monster') {
       const aim = this.part('attack', 'aim-stick', 'attack', HUD_TEXT.attack, 'tc-aim');
-      aim.el.addEventListener('pointerdown', (e) => this.startStick(e, 'aim', aim.el, aim.face));
+      aim.el.addEventListener('pointerdown', (e) => this.startStick(e, 'aim', aim.el, aim.face, aim.dir));
       const dash = this.part('dash', 'dash', 'dash', HUD_TEXT.dash, 'tc-btn tc-dash');
-      dash.el.addEventListener('pointerdown', (e) => this.startStick(e, 'dash', dash.el, dash.face));
+      dash.el.addEventListener('pointerdown', (e) =>
+        this.startStick(e, 'dash', dash.el, dash.face, dash.dir),
+      );
       this.tapButton('roar', 'roar', HUD_TEXT.roar);
       this.tapButton('mode', 'visionSearch', HUD_TEXT.mode);
     } else {
@@ -368,6 +386,7 @@ export class TouchControls {
     const face = h('span', { class: 'tc-face cut' });
     // 조준 스틱: 눈금 링(공격 쿨타임)은 움직이지 않는 바닥에, 손잡이에는 아이콘 · 남은 초
     face.append(...(sys || stick ? [] : [ring]), ico, ...(secs ? [secs] : []));
+    const dir = sys ? null : h('span', { class: 'tc-dir' });
     const el = h(
       stick ? 'div' : 'button',
       {
@@ -378,7 +397,7 @@ export class TouchControls {
         tabindex: '-1',
       },
       ...(stick ? [h('span', { class: 'tc-base' }, ring)] : []),
-      ...(sys ? [] : [h('span', { class: 'tc-dir' })]),
+      ...(dir ? [dir] : []),
       face,
     );
     if (!sys) el.dataset.state = 'blocked';
@@ -386,7 +405,20 @@ export class TouchControls {
     el.append(cap);
     if (el instanceof HTMLButtonElement) el.type = 'button';
     this.layer.append(el);
-    const p: Part = { el, face, ico, secs, cap, key: '', accent: '', icon, label };
+    const p: Part = {
+      el,
+      face,
+      ico,
+      secs,
+      cap,
+      dir,
+      state: '',
+      lit: -1,
+      secsText: '',
+      accent: '',
+      icon,
+      label,
+    };
     this.parts.set(id, p);
     return p;
   }
@@ -409,19 +441,37 @@ export class TouchControls {
     } catch {
       // 이미 사라진 손가락
     }
-    this.fingers.set(e.pointerId, { kind, el, knob: null, cx: 0, cy: 0, r: 1, out: false, ...f });
+    this.fingers.set(e.pointerId, {
+      kind,
+      el,
+      knob: null,
+      cx: 0,
+      cy: 0,
+      r: 1,
+      out: false,
+      dir: null,
+      knobT: '',
+      dirT: '',
+      ...f,
+    });
     el.classList.add('down');
     return true;
   }
 
   /** 스틱 시작: 이동 · 돌진은 누른 자리가 중심, 조준은 고정 중심(stickCenter). 종류마다 손가락 하나 */
-  private startStick(e: PointerEvent, kind: StickKind, el: HTMLElement, knob: HTMLElement): void {
+  private startStick(
+    e: PointerEvent,
+    kind: StickKind,
+    el: HTMLElement,
+    knob: HTMLElement,
+    dir: HTMLElement | null = null,
+  ): void {
     const L = this.layout;
     if (!L) return;
     for (const f of this.fingers.values()) if (f.kind === kind) return;
     const c = stickCenter(kind, L, e.clientX, e.clientY);
     const r = kind === 'aim' && L.aim ? L.aim.w / 2 : kind === 'dash' ? L.dashR : L.moveR;
-    if (!this.grab(e, kind, el, { knob, cx: c.x, cy: c.y, r })) return;
+    if (!this.grab(e, kind, el, { knob, cx: c.x, cy: c.y, r, dir, dirT: dir?.style.transform ?? '' })) return;
     this.opts.feed.stickStart(e.pointerId, kind, performance.now());
     if (kind === 'move') {
       this.move.style.transform = `translate(${c.x}px,${c.y}px)`;
@@ -436,12 +486,23 @@ export class TouchControls {
     this.opts.feed.stickMove(e.pointerId, v.x, v.y);
     // 손잡이는 바닥 원 안에서만 (반지름 0.4 손잡이 → 0.6까지). 돌진은 버튼 전체가 끄는 고리까지 빠진다
     const travel = f.kind === 'dash' ? f.r : f.r * 0.6;
-    f.knob.style.transform = `translate(${v.x * travel}px,${v.y * travel}px)`;
+    const knobT = `translate(${v.x * travel}px,${v.y * travel}px)`;
+    if (knobT !== f.knobT) {
+      f.knobT = knobT;
+      f.knob.style.transform = knobT;
+    }
     const outside = Math.hypot(v.x, v.y) > TOUCH.deadZone;
     if (outside) {
       f.out = true;
-      // 방향 표시: 12시가 0, 시계 방향
-      f.el.style.setProperty('--dir', `${Math.atan2(v.x, -v.y)}rad`);
+      // 방향 표시: 12시가 0, 시계 방향. 방향 표시 요소의 transform만 바꾼다 (스틱 전체에 CSS 변수를 쓰면 하위 요소 모두
+      // 스타일을 다시 계산한다, 렌더링 최적화 2. 그림은 style.css .tc-dir의 rotate(var(--dir))와 같다)
+      if (f.dir) {
+        const dirT = `rotate(${Math.atan2(v.x, -v.y)}rad)`;
+        if (dirT !== f.dirT) {
+          f.dirT = dirT;
+          f.dir.style.transform = dirT;
+        }
+      }
     }
     f.el.classList.toggle('aiming', outside);
     // 데드존 밖에 나갔다가 돌아오면 취소 표시 (조준 · 돌진, 상태 기계도 떼면 취소한다)
@@ -557,11 +618,25 @@ export class TouchControls {
       this.layer.append(this.hints);
     }
     this.drawHints();
-    this.hints.classList.remove('gone');
+    const el = this.hints;
+    if (this.hintIdleTimer !== null) window.clearTimeout(this.hintIdleTimer);
+    this.hintIdleTimer = null;
+    if (el.classList.contains('idle')) {
+      // 배치에서 뺐던 것을 되살린 뒤 한 번 스타일을 확정해야 나타나는 전환(투명도)이 예전처럼 보인다
+      el.classList.remove('idle');
+      void el.offsetWidth;
+    }
+    el.classList.remove('gone');
     if (this.hintTimer !== null) window.clearTimeout(this.hintTimer);
     this.hintTimer = window.setTimeout(() => {
       this.hintTimer = null;
       this.hints?.classList.add('gone');
+      // 사라지는 전환이 끝나면 배치에서 뺀다(display: none): 숨은 고리의 무한 맥동 애니메이션 · 스타일 갱신이 멈춘다.
+      // 전환 동안의 그림은 예전과 같다 (렌더링 최적화 2)
+      this.hintIdleTimer = window.setTimeout(() => {
+        this.hintIdleTimer = null;
+        this.hints?.classList.add('idle');
+      }, HINT_FADE_MS);
     }, ms);
   }
 
@@ -588,14 +663,18 @@ export class TouchControls {
     return this.hints !== null && !this.hints.classList.contains('gone');
   }
 
-  /** 프레임마다: 쿨타임 게이지 · 버튼 상태 (바뀐 것만) */
+  /**
+   * 프레임마다: 쿨타임 게이지 · 버튼 상태 (바뀐 것만). 행동 칸 배열이 지난번과 같은 객체면(HUD가 새 스냅샷에만 다시 계산한다)
+   * 값도 같아 아무것도 하지 않는다
+   */
   update(view: TouchView): void {
+    if (view.slots === this.seenSlots) return;
+    this.seenSlots = view.slots;
     for (const s of view.slots) {
       const p = this.parts.get(s.id);
       if (!p) continue;
       const lit = s.state === 'blocked' ? 0 : s.fill >= 1 ? TICKS : litTicks(s.fill);
       const secs = s.state === 'cooldown' ? String(Math.ceil(s.cd)) : '';
-      const key = `${s.state}|${lit}|${secs}`;
       if (s.accent !== p.accent) {
         p.accent = s.accent;
         const a = ACCENT[s.accent];
@@ -604,8 +683,10 @@ export class TouchControls {
         st.setProperty('--acc-t', hexCss(a.text));
         st.setProperty('--acc-a', `rgba(${[16, 8, 0].map((sh) => (a.line >> sh) & 255).join()},.3)`);
       }
-      if (key !== p.key) {
-        p.key = key;
+      if (s.state !== p.state || lit !== p.lit || secs !== p.secsText) {
+        p.state = s.state;
+        p.lit = lit;
+        p.secsText = secs;
         p.el.dataset.state = s.state;
         p.el.style.setProperty('--lit', String(lit));
         if (p.secs) p.secs.textContent = secs;
@@ -643,6 +724,7 @@ export class TouchControls {
 
   destroy(): void {
     if (this.hintTimer !== null) window.clearTimeout(this.hintTimer);
+    if (this.hintIdleTimer !== null) window.clearTimeout(this.hintIdleTimer);
     this.cancelAll();
     for (const f of this.cleanup.splice(0)) f();
     this.layer.remove();

@@ -265,17 +265,35 @@ export interface WalkPose {
   lean: number;
 }
 
-/** 걷기 자세: 발 교차 + 기울기. stepping 0~1 (멈춰 있으면 0 → 두 발 나란히) */
-export function walkPose(phase: number, stepping: number): WalkPose {
-  const k = clamp01(stepping);
-  const s = Math.sin(phase);
+/** 새 걷기 자세 그릇 (walkPose · hiddenSurvivorPose의 out) */
+export function newWalkPose(): WalkPose {
   return {
     feet: [
-      { x: ANIM.footReach * s * k, y: -ANIM.footSide },
-      { x: -ANIM.footReach * s * k, y: ANIM.footSide },
+      { x: 0, y: 0 },
+      { x: 0, y: 0 },
     ],
-    lean: ((ANIM.leanDeg * Math.PI) / 180) * Math.sin(phase) * k,
+    lean: 0,
   };
+}
+
+/** 두 발 자리를 feet에 쓰고 기울기를 돌려준다 (walkPose의 식 그대로) */
+function writeWalk(phase: number, stepping: number, feet: WalkPose['feet']): number {
+  const k = clamp01(stepping);
+  const s = Math.sin(phase);
+  feet[0].x = ANIM.footReach * s * k;
+  feet[0].y = -ANIM.footSide;
+  feet[1].x = -ANIM.footReach * s * k;
+  feet[1].y = ANIM.footSide;
+  return ((ANIM.leanDeg * Math.PI) / 180) * Math.sin(phase) * k;
+}
+
+/**
+ * 걷기 자세: 발 교차 + 기울기. stepping 0~1 (멈춰 있으면 0 → 두 발 나란히).
+ * out을 주면 그 객체에 써서 돌려준다 (렌더링 최적화 2: 프레임마다 자세 객체를 만들지 않게. 값은 같다)
+ */
+export function walkPose(phase: number, stepping: number, out: WalkPose = newWalkPose()): WalkPose {
+  out.lean = writeWalk(phase, stepping, out.feet);
+  return out;
 }
 
 /**
@@ -308,13 +326,22 @@ export function dashStretch(elapsedS: number, durationS: number): number {
   return clamp01(1 - elapsedS / durationS);
 }
 
-/** 피격 반응: 흰 번쩍(80ms) · 찌그러짐(120ms) 세기 0~1 */
-export function hitReact(elapsedMs: number): { flash: number; squash: number } {
-  if (elapsedMs < 0) return { flash: 0, squash: 0 };
-  return {
-    flash: clamp01(1 - elapsedMs / ANIM.hitFlashMs),
-    squash: elapsedMs >= ANIM.squashMs ? 0 : Math.sin((Math.PI * elapsedMs) / ANIM.squashMs),
-  };
+/** 피격 반응 세기 */
+export interface HitReact {
+  flash: number;
+  squash: number;
+}
+
+/** 피격 반응: 흰 번쩍(80ms) · 찌그러짐(120ms) 세기 0~1. out을 주면 그 객체에 써서 돌려준다 (값은 같다) */
+export function hitReact(elapsedMs: number, out: HitReact = { flash: 0, squash: 0 }): HitReact {
+  if (elapsedMs < 0) {
+    out.flash = 0;
+    out.squash = 0;
+    return out;
+  }
+  out.flash = clamp01(1 - elapsedMs / ANIM.hitFlashMs);
+  out.squash = elapsedMs >= ANIM.squashMs ? 0 : Math.sin((Math.PI * elapsedMs) / ANIM.squashMs);
+  return out;
 }
 
 /** 선형 페이드 (1 → 0) */
@@ -397,6 +424,30 @@ export interface HiddenSurvivorPose {
 /** 숨은 생존자 공통 숨쉬기 위상 (모두 같은 값: 위상 차이로도 구분되지 않게) */
 export const HIDDEN_BREATH_SEED = 0;
 
+/** hiddenSurvivorPose가 값을 쓰는 그릇 (같은 모양의 쓸 수 있는 판) */
+export type HiddenSurvivorPoseOut = { -readonly [K in keyof HiddenSurvivorPose]: HiddenSurvivorPose[K] };
+
+/** 새 그릇 (hiddenSurvivorPose의 out) */
+export function newHiddenSurvivorPose(): HiddenSurvivorPoseOut {
+  return {
+    sprite: 'survivor-hidden',
+    foot: 'foot-hidden',
+    shadow: 'shadow-survivor',
+    x: 0,
+    y: 0,
+    rotation: 0,
+    scale: 1,
+    feet: newWalkPose().feet,
+    alpha: 1,
+    blinkOutline: false,
+    reveal: null,
+  };
+}
+
+/**
+ * out = 값을 쓸 그릇(없으면 새로). 프레임마다 자세 객체를 만들지 않게 그리는 쪽이 하나를 다시 쓴다 (렌더링 최적화 2, 값은 같다).
+ * 기본값이 있는 인자라 함수 인자 수(length)는 그대로 9개다 — 역할 · 체력 · 능력 인자가 없다는 시험이 그대로 본다
+ */
 export function hiddenSurvivorPose(
   x: number,
   y: number,
@@ -407,19 +458,18 @@ export function hiddenSurvivorPose(
   reveal: RoleId | null,
   clockMs: number,
   protectedAlpha: number,
+  out: HiddenSurvivorPoseOut = newHiddenSurvivorPose(),
 ): HiddenSurvivorPose {
-  const w = walkPose(walkPhase, stepping);
-  return {
-    sprite: 'survivor-hidden',
-    foot: 'foot-hidden',
-    shadow: 'shadow-survivor',
-    x,
-    y,
-    rotation: face + w.lean,
-    scale: breathScale(clockMs / 1000, HIDDEN_BREATH_SEED),
-    feet: w.feet,
-    alpha: protectedFlag ? protectedAlpha : 1,
-    blinkOutline: protectedFlag && protectBlink(clockMs),
-    reveal,
-  };
+  const lean = writeWalk(walkPhase, stepping, out.feet);
+  out.sprite = 'survivor-hidden';
+  out.foot = 'foot-hidden';
+  out.shadow = 'shadow-survivor';
+  out.x = x;
+  out.y = y;
+  out.rotation = face + lean;
+  out.scale = breathScale(clockMs / 1000, HIDDEN_BREATH_SEED);
+  out.alpha = protectedFlag ? protectedAlpha : 1;
+  out.blinkOutline = protectedFlag && protectBlink(clockMs);
+  out.reveal = reveal;
+  return out;
 }
