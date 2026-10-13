@@ -7,8 +7,14 @@
 //  - JS 힙: performance.memory(--enable-precise-memory-info)를 프레임마다 읽어 늘어난 양의 합 = 할당량 어림, 줄어든 횟수 = GC 어림
 //  - Math.random을 시드 난수로 바꿔 연습 판 봇 시드 · 장면이 두 빌드에서 같게 한다(시계는 실제 시계라 완전히 같지는 않다)
 
-/** addInitScript로 페이지보다 먼저 심는다 (직렬화되어 페이지 안에서 돈다 — 바깥 변수를 쓰지 않는다) */
-export function installPerfHooks(seed: number): void {
+/**
+ * addInitScript로 페이지보다 먼저 심는다 (직렬화되어 페이지 안에서 돈다 — 바깥 변수를 쓰지 않는다).
+ * hz가 있으면 rAF를 그 주기로 직접 돌린다: 헤드리스 크롬은 화면 갱신이 60Hz로 묶여 있어서(플래그로도 안 풀림)
+ * 120Hz 화면을 흉내 내려면 setTimeout으로 마감 1.5ms 앞까지 기다린 뒤 MessageChannel로 마감을 맞춘다.
+ * 합성기는 여전히 60Hz로 내보내지만 게임은 120번 걷는다 — 프레임마다 8.33ms 안에 끝나는지를 메인 스레드에서 잰다
+ */
+export function installPerfHooks(cfg: { seed: number; hz: number | null }): void {
+  const { seed, hz } = cfg;
   type Frame = {
     t: number;
     work: number;
@@ -56,6 +62,43 @@ export function installPerfHooks(seed: number): void {
   };
   (window as unknown as { __PERF__: PerfStore }).__PERF__ = store;
 
+  if (hz !== null && hz > 0) {
+    const period = 1000 / hz;
+    const queue: FrameRequestCallback[] = [];
+    const mc = new MessageChannel();
+    let scheduled = false;
+    let next = performance.now() + period;
+    let id = 0;
+    const fire = (): void => {
+      scheduled = false;
+      const t = performance.now();
+      // 늦어진 프레임은 따라잡지 않는다 (실제 화면처럼 다음 주기로)
+      next = Math.max(next + period, t + 1);
+      const cbs = queue.splice(0);
+      for (const cb of cbs) cb(t);
+    };
+    const spin = (): void => {
+      if (performance.now() >= next) fire();
+      else mc.port2.postMessage(0);
+    };
+    mc.port1.onmessage = spin;
+    const schedule = (): void => {
+      if (scheduled) return;
+      scheduled = true;
+      const wait = next - performance.now();
+      if (wait > 2) window.setTimeout(spin, wait - 1.5);
+      else spin();
+    };
+    window.requestAnimationFrame = (cb: FrameRequestCallback): number => {
+      queue.push(cb);
+      schedule();
+      id += 1;
+      return id;
+    };
+    window.cancelAnimationFrame = (): void => {
+      // 게임은 rAF를 끊지 않는다 (탭을 숨길 때만) — 측정 중에는 무시해도 된다
+    };
+  }
   const raf = window.requestAnimationFrame.bind(window);
   window.requestAnimationFrame = (cb: FrameRequestCallback): number =>
     raf((t: number) => {
