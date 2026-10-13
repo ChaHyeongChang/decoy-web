@@ -370,6 +370,8 @@ export function browserWakeLock(): WakeLockLike | null {
 
 /** 뒤로 가기를 막는 기록 항목 표시 */
 const GUARD_STATE = { decoyGuard: 1 } as const;
+/** 걷어 내기의 popstate가 끝내 오지 않을 때 whenSettled를 대신 부르는 시간 (ms) */
+export const SETTLE_FALLBACK_MS = 1000;
 
 /**
  * 판 중 뒤로 가기 확인 (MOBILE_PLAN M12 8번, 터치 · 설치 앱만). 크롬은 사용자 활성화 없이 넣은 기록 항목을 뒤로 가기에서
@@ -382,6 +384,8 @@ export class BackGuard {
   private armed = false;
   private pushed: boolean;
   private ignorePops = 0;
+  private settled: (() => void)[] = [];
+  private settleTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly history: Pick<History, 'pushState' | 'back'>,
@@ -410,6 +414,26 @@ export class BackGuard {
     this.history.back();
   }
 
+  /**
+   * 걷어 내기(disarm)의 뒤로 순회가 끝난 뒤에 fn을 부른다 (순회 중이 아니면 바로). history.back()은 순회를 큐에 넣을 뿐이라,
+   * 그 전에 replaceState로 주소를 고치면 걷어 낼 내 항목의 주소만 바뀌고 순회 뒤 아래 항목의 주소(?room)가 남는다
+   * (출시 전 검토의 수정 검토). popstate가 끝내 오지 않으면 fallbackMs 뒤에 부른다
+   */
+  whenSettled(fn: () => void, fallbackMs = SETTLE_FALLBACK_MS): void {
+    if (this.ignorePops === 0) {
+      fn();
+      return;
+    }
+    this.settled.push(fn);
+    this.settleTimer ??= globalThis.setTimeout(() => this.flushSettled(), fallbackMs);
+  }
+
+  private flushSettled(): void {
+    if (this.settleTimer !== null) globalThis.clearTimeout(this.settleTimer);
+    this.settleTimer = null;
+    for (const fn of this.settled.splice(0)) fn();
+  }
+
   /** 사용자 활성화가 있는 핸들러 안 (판 안 탭 · "계속" 버튼) */
   gesture(): void {
     if (!this.armed || this.pushed) return;
@@ -421,6 +445,7 @@ export class BackGuard {
   popped(): boolean {
     if (this.ignorePops > 0) {
       this.ignorePops -= 1;
+      if (this.ignorePops === 0) this.flushSettled();
       return true;
     }
     if (!this.pushed) return false;

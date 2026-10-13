@@ -4,6 +4,7 @@
 //  - 서버만 꺼짐(온라인): 새로 열기 → 상태 줄 안내 + 봇과 연습
 //  - Render 정지 흉내: 표시 헤더 없이 503을 주는 가짜 서버 → 깨우기 화면의 "기다리는 동안 봇과 연습"으로 판 시작
 //  - (검토 반영) 오프라인 + 서버 꺼짐에서 방 주소(?room=)로 열면 깨우기 패널의 "첫 화면으로" → 봇과 연습
+//  - (수정 검토) 뒤로 가기 항목이 남은 채 다시 열려도 "첫 화면으로" 뒤 주소에 room이 돌아오지 않는다
 //  - 서비스 워커 업데이트: 빌드 ID만 다른 두 빌드를 차례로 서빙하면 새 워커로 바뀌고 옛 셸 캐시가 지워지고,
 //    화면은 "새 버전이 있어요"를 띄운다
 // 서버를 일부러 끄는 시험이라 브라우저가 스스로 찍는 연결 실패 로그만 허용한다(MOBILE_PLAN 3절 콘솔 규칙의 예외)
@@ -221,6 +222,46 @@ test('오프라인 + 서버 꺼짐에서 방 주소(?room=)로 열면 깨우기 
     expect(await page.evaluate(() => window.__DECOY__?.transport)).toBe('local');
     expect(sockets).toBe(0);
     expect(unexpected(problems)).toEqual([]);
+  } finally {
+    await context.close();
+    await server.stop();
+  }
+});
+
+// 수정 검토: 판 중 새로고침 · 탭 복원이면 지금 기록 항목이 뒤로 가기 항목이다. '첫 화면으로'가 그 항목을 걷어 내는 순회(비동기)
+// 전에 주소를 고치면, 순회 뒤 아래 항목의 ?room=이 돌아와 다음 새로고침이 다시 방 경로로 부팅했다
+test('뒤로 가기 항목이 남은 채 방 주소로 다시 열려도 "첫 화면으로" 뒤 주소에 room이 남지 않는다 (휴대폰)', async ({
+  browser,
+}) => {
+  const port = await freePort();
+  const server = await startServer(['--test-hooks'], { port });
+  const base = `http://127.0.0.1:${port}`;
+  const { context, page, problems } = await newPlayerPage(browser, dpr1(PHONE_LANDSCAPE));
+  try {
+    await page.goto(`${base}/?debug=hook&renderer=canvas`);
+    await shellReady(page);
+    await context.setOffline(true);
+    await server.stop();
+    await page.goto(`${base}/?debug=hook&renderer=canvas&room=ABCD`);
+    await expect(page.getByTestId('server-waking')).toBeVisible({ timeout: 10_000 });
+    // 판 안 탭이 넣는 뒤로 가기 항목(주소는 그대로) → 새로고침: 그 항목에서 다시 열린다
+    await page.evaluate(() => window.history.pushState({ decoyGuard: 1 }, ''));
+    await page.reload();
+    expect(await page.evaluate(() => JSON.stringify(window.history.state))).toBe('{"decoyGuard":1}');
+    const wake = page.getByTestId('server-waking');
+    await expect(wake).toBeVisible({ timeout: 10_000 });
+    await press(page.getByTestId('wake-home'));
+    await expect(wake).toBeHidden();
+    await expect(page.getByTestId('room-code-input')).toHaveValue('ABCD');
+    // 순회가 끝나 아래 항목에 와 있고, 그 주소에도 room이 없다 (잠시 뒤에도)
+    await expect.poll(() => page.evaluate(() => window.history.state)).toBeNull();
+    await page.waitForTimeout(500);
+    expect(page.url()).not.toContain('room=');
+    expect(page.url()).toContain('debug=hook');
+    // 오프라인에서 깨우기 패널을 띄운 방 주소를 새로고침하면 크롬이 글꼴 미리 받기(preload)를 '쓰지 않음'으로 찍는다(뒤로 가기
+    // 항목 없이 새로고침만 해도 같다 — 이 수정과 무관한 브라우저 경고, PROGRESS 알려진 문제). 이 시험에서만 그 한 줄을 허용한다
+    const fontPreload = /noto-sans-kr-ui\.woff2 was preloaded using link preload but not used/;
+    expect(unexpected(problems).filter((p) => !fontPreload.test(p))).toEqual([]);
   } finally {
     await context.close();
     await server.stop();

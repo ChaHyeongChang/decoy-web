@@ -10,6 +10,7 @@ import {
   RECONNECT_MAX_MS,
   RECV_TIMEOUT_MS,
   REJOIN_RETRY_MS,
+  SETTLE_FALLBACK_MS,
   ScreenAwake,
   WATCH_TICK_MS,
   encodeLastRoom,
@@ -521,6 +522,93 @@ describe('뒤로 가기 (터치 · 설치 앱)', () => {
     expect(g.popped()).toBe(false);
     g.disarm();
     expect(calls).toEqual([]);
+  });
+
+  // 수정 검토: 판 중 새로고침 · 탭 복원으로 남은 항목을 '첫 화면으로'에서 걷어 낼 때, 주소의 room을 순회 전에 지우면
+  // 걷어 낼 항목의 주소만 바뀌고 순회 뒤 아래 항목의 /?room=이 돌아왔다
+  describe('걷어 내는 순회가 끝난 뒤에 주소를 고친다 (whenSettled)', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /** 명세처럼 동작하는 기록: pushState · replaceState는 바로, back은 작업 큐에 넣었다가 순회 뒤 popstate */
+    function browser(entries: { url: string; state: unknown }[], start: number) {
+      let index = start;
+      const pops: (() => void)[] = [];
+      const history = {
+        pushState: (state: unknown) => {
+          entries.splice(index + 1);
+          entries.push({ url: entries[index]!.url, state });
+          index += 1;
+        },
+        back: () => {
+          globalThis.setTimeout(() => {
+            index = Math.max(0, index - 1);
+            for (const pop of pops) pop();
+          }, 0);
+        },
+      };
+      return {
+        history,
+        onPop: (fn: () => void) => pops.push(fn),
+        url: () => entries[index]!.url,
+        replace: (url: string) => {
+          entries[index]!.url = url;
+        },
+      };
+    }
+
+    it('새로고침 뒤 남은 내 항목: 순회 전에는 고치지 않고, 순회 뒤 아래 항목의 room을 지운다', () => {
+      vi.useFakeTimers();
+      const guardState = { decoyGuard: 1 };
+      const b = browser(
+        [
+          { url: '/?room=ABCD', state: null },
+          { url: '/?room=ABCD', state: guardState },
+        ],
+        1,
+      );
+      const g = new BackGuard(b.history, () => undefined, guardState);
+      b.onPop(() => void g.popped());
+      g.disarm();
+      g.whenSettled(() => b.replace('/'));
+      expect(b.url()).toBe('/?room=ABCD');
+      vi.advanceTimersByTime(0);
+      expect(b.url()).toBe('/');
+      // 대조: 순회 전에 바로 고치면 아래 항목의 room이 남는다 (고치기 전 동작)
+      const c = browser(
+        [
+          { url: '/?room=ABCD', state: null },
+          { url: '/?room=ABCD', state: guardState },
+        ],
+        1,
+      );
+      const h = new BackGuard(c.history, () => undefined, guardState);
+      c.onPop(() => void h.popped());
+      h.disarm();
+      c.replace('/');
+      vi.advanceTimersByTime(0);
+      expect(c.url()).toBe('/?room=ABCD');
+    });
+
+    it('걷어 낼 항목이 없으면 바로, popstate가 오지 않으면 대신 시간이 지난 뒤 부른다', () => {
+      vi.useFakeTimers();
+      const { g } = guard();
+      const calls: string[] = [];
+      g.whenSettled(() => calls.push('now'));
+      expect(calls).toEqual(['now']);
+      g.arm();
+      g.gesture();
+      g.disarm();
+      g.whenSettled(() => calls.push('late'));
+      vi.advanceTimersByTime(SETTLE_FALLBACK_MS - 1);
+      expect(calls).toEqual(['now']);
+      vi.advanceTimersByTime(1);
+      expect(calls).toEqual(['now', 'late']);
+      // 늦게 온 popstate는 무시하고 다시 부르지 않는다
+      expect(g.popped()).toBe(true);
+      expect(calls).toEqual(['now', 'late']);
+    });
   });
 
   it('사용자 활성화가 생기는 입력: 키 · click · 마우스가 아닌 pointerup', () => {

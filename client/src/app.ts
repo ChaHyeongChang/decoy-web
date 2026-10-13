@@ -659,9 +659,15 @@ export class App {
     // 옛 연결이 남아 다시 시도하던 중(연결은 열림)이면 기다림 표시를 내린다
     if (this.net.connected) this.wake.opened();
     this.toHome(code);
-    const url = new URL(window.location.href);
-    url.searchParams.delete('room');
-    window.history.replaceState(window.history.state, '', url.toString());
+    // 주소의 room은 뒤로 가기 항목을 걷어 내는 순회(toHome → disarm)가 끝난 뒤에 지운다 — 판 중 새로고침 · 탭 복원으로
+    // 그 항목이 남아 있으면, 먼저 지운 주소가 순회 뒤 아래 항목의 ?room으로 되돌아갔다 (출시 전 검토의 수정 검토)
+    const dropRoomFromUrl = (): void => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('room');
+      window.history.replaceState(window.history.state, '', url.toString());
+    };
+    if (this.backGuard) this.backGuard.whenSettled(dropRoomFromUrl);
+    else dropRoomFromUrl();
     this.renderWake();
   }
 
