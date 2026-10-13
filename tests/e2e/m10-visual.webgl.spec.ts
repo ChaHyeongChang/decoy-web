@@ -98,12 +98,18 @@ async function startRoom(
   const id = (r: string): string => truth.players.find((p) => p.role === r)?.id ?? '';
   const send = (cmd: TestCommand): Promise<void> =>
     host.page.evaluate((c) => window.__DECOY__?.sendTest(c), cmd);
+  // 순간이동은 멈춤을 풀고(서버 test 훅), 봇은 쉬지 않고 움직인다. 순간이동과 멈춤을 page.evaluate 두 번에 나눠 보내면
+  // 느린 러너(2코어 · WebGL 소프트웨어 렌더)에서 그 사이에 서버 틱이 끼어 봇이 자리를 벗어나고, 다시 시도해도 같은 틈이
+  // 생겨 여섯 번 모두 실패했다(출시 전 검토 전체 검사). 한 번의 evaluate(같은 작업)에서 이어 보내 틈을 없앤다
   const placeBots = async (spots: readonly (readonly [string, number, number, number])[]): Promise<void> => {
     for (let attempt = 0; attempt < 6; attempt += 1) {
-      for (const [r, x, y, face] of spots) {
-        await send({ kind: 'teleport', target: id(r), x, y, face });
-        await send({ kind: 'freeze', target: id(r), frozen: true });
-      }
+      const cmds: TestCommand[] = spots.flatMap(([r, x, y, face]): TestCommand[] => [
+        { kind: 'teleport', target: id(r), x, y, face },
+        { kind: 'freeze', target: id(r), frozen: true },
+      ]);
+      await host.page.evaluate((cs) => {
+        for (const c of cs) window.__DECOY__?.sendTest(c);
+      }, cmds);
       await host.page.waitForTimeout(150);
       const now = (await (await host.page.request.get(`/test/state?room=${room}`)).json()) as {
         players: { role: string; x: number; y: number }[];
