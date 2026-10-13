@@ -4,6 +4,7 @@ import { App, readParams } from './app';
 import { sfx } from './audio';
 import { installDebug } from './debug';
 import { canOfferFullscreen, device, enterFullscreen, initDevice, onDeviceChange } from './device';
+import { Pacer, loadFrameLimit, pacingHooks, patchTimeStep } from './gfx/framePacing';
 import type { QualityPreset, QualityTier, RendererKind } from './gfx/presets';
 import {
   autoQuality,
@@ -184,6 +185,28 @@ function measure(): RenderSize {
 
 const initial = measure();
 setRenderScale(initial.zoom);
+
+// ───────────── 프레임 페이싱 (렌더링 최적화) ─────────────
+// 화면 주사율을 따라 그린다(자동). 60 · 120 제한은 Phaser의 fps.limit 대신 우리 제한기로: Phaser 것은 생성 때 고정이고
+// 오차 허용이 없어 120Hz 흔들림에서 40fps로 떨어진다. TimeStep.start가 this.step을 rAF에 묶기 전에 끼워야 한다
+const pacer = new Pacer(loadFrameLimit() ?? 'auto');
+// 판이 없을 때(로비 · 결과)는 30fps로 묶는다 (빈 캔버스를 120Hz로 그리지 않게, 배터리)
+pacer.setIdle(true);
+patchTimeStep(Phaser.Core.TimeStep.prototype, pacer);
+
+/** 디버그 훅 · 오버레이 · 적응형 품질이 읽는 페이싱 상태 */
+function syncPacing(): void {
+  gfxState.frameLimit = pacer.limit;
+  gfxState.displayHz = pacer.displayHz;
+  gfxState.targetHz = pacer.targetHz;
+}
+syncPacing();
+// 주사율은 재는 데 시간이 걸리고(30프레임 뒤부터) 바뀔 수 있다(가변 주사율 화면) — 0.5초마다 옮겨 적는다
+window.setInterval(syncPacing, 500);
+pacingHooks.setLimit = (limit) => {
+  pacer.setLimit(limit);
+  syncPacing();
+};
 /** 이 zoom(백버퍼 px / 논리 px) 이상으로 시작하면 WebGL MSAA를 켜지 않는다 (1920×1080 @1.25 = 1.25부터) */
 const MSAA_MAX_ZOOM = 1.25;
 
@@ -213,7 +236,10 @@ const game = new Phaser.Game({
     height: initial.backingH,
     zoom: 1 / initial.k,
   },
-  fps: { target: 60 },
+  // 60fps로 묶지 않는다: target은 상한이 아니라 Phaser 내부 기준값(actualFps 시작 값)이고 limit은 쓰지 않는다(위 페이싱).
+  // smoothStep을 끈다 — 켜 두면 delta가 최근 10프레임 평균인 데다 시작 · 포커스 뒤 120프레임 동안 16.7ms로 잘려
+  // 120Hz와 60Hz에서 시간 적분이 달라진다. 게임 코드는 실제 프레임 간격(rawDelta)으로 적분한다
+  fps: { target: 60, smoothStep: false },
   // 카메라 배경색이 매 프레임 화면 전체를 칠하므로 따로 지우지 않는다. 정수 좌표로 그려 비트맵 복사를 싸게.
   // pixelArt · antialias를 꼭 적는다: Phaser는 scale.zoom이 1이 아니면(기기 픽셀 배율 ≠ 1) pixelArt를 켜서
   // 모든 텍스처가 NEAREST(회전 스프라이트 계단, 확대한 빛 지도 블록)가 되고 WebGL 안티에일리어싱이 꺼진다
@@ -430,6 +456,9 @@ document.addEventListener('contextmenu', (e) => {
 app.subscribe((e) => {
   if (e.kind === 'match') inMatch = true;
   else if (e.kind === 'lobby' && e.lobby.phase === 'lobby') inMatch = false;
+  // 판 중에만 제한 설정대로 그린다. 결과 · 로비는 30fps
+  if (e.kind === 'match') pacer.setIdle(false);
+  else if (e.kind === 'result' || (e.kind === 'lobby' && e.lobby.phase === 'lobby')) pacer.setIdle(true);
 });
 
 /**
