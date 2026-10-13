@@ -546,7 +546,17 @@ export class GameScene extends Phaser.Scene {
     if (!this.watchingFps || document.hidden) return;
     if (!this.app.lastSnap || this.app.result) return;
     const fps = getFpsOverride() ?? this.game.loop.actualFps;
-    const action = sessionAutoDowngrade.sample(performance.now(), fps, gfxState.quality);
+    // 통합 전 임시: 작업 시간은 프레임 간격(1000 / fps)으로, 목표는 60Hz 고정으로 본다 (예전 동작 그대로)
+    const action = sessionAutoDowngrade.sample(
+      performance.now(),
+      { fps, workP95: 1000 / fps },
+      gfxState.quality,
+      {
+        targetHz: 60,
+        displayHz: 60,
+        canRateFallback: false,
+      },
+    );
     gfxState.measuredFps = sessionAutoDowngrade.average;
     if (action) qualityHooks.auto?.(action);
   }

@@ -524,15 +524,26 @@ M10 비주얼 리마스터(어두운 시설 · 청록 네온 · 붉은 괴물) �
 
 - Canvas 렌더러는 어느 단계든 WebGL 전용 기능(셰이더 · postFX · 색보정 · 블룸)이 0개가 되게 낮추고(postFX 비네트 → 구운 오버레이), 합성 배율을 1 이하로 둔다(`effectivePreset`)
 - 자동 선택: `?quality=` > 로비에서 고른 값(localStorage `decoy:quality`) > 자동(Canvas · 소프트웨어 WebGL = 낮음, 터치 기기 = 중간(코어 4개 이하 또는 메모리 3GB 이하면 낮음), 하드웨어 WebGL PC = 높음 — PC는 코어 · 메모리로 내리지 않는다)
-- 판 중 자동 하향: 예열 5초 뒤 평균이 기준(PC 40fps · 터치 기기 50fps) 미만인 상태가 10초 넘게 이어지면 한 단계(판당 한 번). 3초 뒤 10초 평균이 15% 또는 5fps 이상 오르지 않으면 되돌리고 그 세션에서 끈다(`quality.FPS_WATCH` · `TOUCH_FPS_WATCH` · `DOWNGRADE_CHECK`). 터치 기준 50은 성능 목표(중급 휴대폰 품질 중간 평균 50fps · 저사양 낮음 30fps, MOBILE_PLAN M12)의 중간 값이다
-- 판 중 측정 기억 (터치 기기만, M12): 자동 단계에서 내린 뒤 효과를 확인한 단계(유지)는 localStorage `decoy:perf`에 온라인 · 연습 따로 남아 다음 접속을 그 단계로 시작한다(자동보다 낮을 때만, 그때의 자동 단계가 지금과 같을 때만). 로비에서 품질을 직접 고르면(자동 포함) 지운다. PC는 M10 그대로 세션 단위
+- 판 중 자동 하향: 예열 5초 뒤 1초 평균이 하향 기준 미만인 상태가 10초 넘게 이어지면 내린다. 하향 기준 = 60Hz 값(PC 40fps · 터치 기기 50fps) × min(목표 FPS, 120) / 60 — PC는 기준 목표의 2/3, 터치 기기는 5/6이다(120Hz에서 80 · 100, 144 · 165Hz도 기준 목표 120, `quality.minFpsFor`). 프레임 제한이 자동이고 화면이 60Hz보다 빠르면 첫 단계는 품질 대신 목표 FPS 60(품질 그대로, 효과 확인 없음, 판당 품질 하향 한도에 세지 않음)이고, 그다음은 품질 한 단계(판당 한 번). 고정 제한(60 · 120)은 목표를 바꾸지 않는다. 품질 하향 3초 뒤 10초 평균이 15% 또는 5fps 이상 오르지 않으면 되돌리고 그 세션에서 끈다(`quality.FPS_WATCH` · `TOUCH_FPS_WATCH` · `DOWNGRADE_CHECK`). 성능 목표(사용자 2026-10-13)는 120Hz 고사양 120fps · 중급 휴대폰 60fps 안정 · 저사양 30fps 이상이고, 터치 기준 50은 60Hz 목표의 5/6이다
+- 판 중 자동 올리기 (렌더링 최적화): 자동으로 내린 단계(품질 · 목표 FPS)를 가장 최근 것부터 하나씩 되돌린다. 예열 뒤 · 마지막 변경 20초 뒤부터 1초 평균 FPS ≥ 목표 × 0.95이고 작업 시간 p95 ≤ 프레임 예산(1000 / 목표, 목표 FPS를 올릴 때는 올린 뒤 목표)의 절반인 상태가 15초 넘게 이어지면 올린다. 목표 FPS는 판 중에 바로, 품질은 다시 굽기 끊김을 피해 다음 판 시작 전에 올린다. 올린 뒤 3초(다음 판이면 예열 5초) 뒤 10초 평균이 하향 기준 미만이면 다시 내리고 그 세션에서는 더 올리지 않는다(`quality.UP_WATCH` · `UP_PROBATION`). 자동으로 내리기 전 상태(시작 단계 · 로비에서 고른 값 · `?quality=`, 시작 목표 FPS)보다 올리지 않고, 효과 없는 하향을 되돌려 꺼진 세션은 올리지도 않는다
+- 판 중 측정 기억 (터치 기기만, M12): 자동 단계에서 내린 뒤 효과를 확인한 단계(유지)와 올린 뒤 확인을 통과한 단계는 localStorage `decoy:perf`에 온라인 · 연습 따로 남아 다음 접속을 그 단계로 시작한다(자동보다 낮을 때만, 그때의 자동 단계와 시작 목표 FPS가 지금과 같을 때만). 저장 형식 2판은 시작 목표 FPS를 같이 둔다(60이면 적지 않음, 1판 값은 버림). 로비에서 품질을 직접 고르면(자동 포함) 지운다. PC는 세션 단위
 
 | 항목 | 값 | 코드 |
 |---|---|---|
 | 자동 하향 예열(ms) | `5000` | `quality.FPS_WATCH.warmupMs` |
-| 자동 하향 기준(fps) | `40` | `quality.FPS_WATCH.minFps` |
-| 터치 기기 자동 하향 기준(fps) | `50` | `quality.TOUCH_FPS_WATCH.minFps` |
+| 자동 하향 기준(fps, 목표 60) | `40` | `quality.FPS_WATCH.minFps` |
+| 터치 기기 자동 하향 기준(fps, 목표 60) | `50` | `quality.TOUCH_FPS_WATCH.minFps` |
 | 자동 하향 지속(ms) | `10000` | `quality.FPS_WATCH.sustainMs` |
+| 하향 기준을 정한 목표(Hz) | `60` | `quality.BASE_TARGET_HZ` |
+| 하향 기준 목표 상한(Hz) | `120` | `quality.THRESHOLD_CAP_HZ` |
+| 자동 제한에서 낮추는 목표 FPS(Hz) | `60` | `quality.RATE_FALLBACK_HZ` |
+| 자동 올리기 조용한 시간(ms) | `20000` | `quality.UP_WATCH.quietMs` |
+| 자동 올리기 여유 지속(ms) | `15000` | `quality.UP_WATCH.sustainMs` |
+| 자동 올리기 FPS 비율(목표 대비) | `0.95` | `quality.UP_WATCH.minFpsRatio` |
+| 자동 올리기 작업 시간 비율(예산 대비) | `0.5` | `quality.UP_WATCH.maxWorkRatio` |
+| 올린 뒤 확인 가라앉는 시간(ms) | `3000` | `quality.UP_PROBATION.settleMs` |
+| 올린 뒤 확인 측정(ms) | `10000` | `quality.UP_PROBATION.measureMs` |
+| 판 중 측정 기억 저장 형식 판 | `2` | `quality.PERF_MEMORY_VERSION` |
 
 ### 7.4 후처리 대상과 레이어 순서 (R1 · R2)
 

@@ -1,4 +1,5 @@
 // M12 성능: 터치 기기 품질 자동 선택 · 판 중 하향 기준(50fps) · 온라인/연습 따로 기억 · 터치 낮음 해상도 하한
+// 렌더링 최적화: 목표 FPS에 비례한 터치 기준(5/6) · 120Hz 휴대폰의 목표 FPS 낮춤 · 기억 2판(시작 목표 FPS)
 import { describe, expect, it } from 'vitest';
 import { PRESETS, TOUCH_LOW_OVERRIDE, effectivePreset, type QualityTier } from '../../client/src/gfx/presets';
 import {
@@ -16,6 +17,7 @@ import {
   parsePerfMemory,
   perfToRemember,
   rememberPerf,
+  type AdaptContext,
   type AutoQualityAction,
   type PerfMode,
   type QualityEnv,
@@ -23,6 +25,10 @@ import {
 } from '../../client/src/gfx/quality';
 import { computeRenderSize, presetScaleCap } from '../../client/src/render/resolution';
 import { STORAGE_KEYS } from '../../client/src/storageKeys';
+import { AdaptiveSession, injected, kinds, roomy } from '../helpers/adaptiveSession';
+
+/** 60Hz 화면 · 목표 60 (렌더링 최적화 전과 같은 조건) */
+const AT_60: AdaptContext = { targetHz: 60, displayHz: 60, canRateFallback: false };
 
 const PHONE: QualityEnv = {
   url: null,
@@ -73,7 +79,7 @@ class Session {
     const out: AutoQualityAction[] = [];
     this.auto.beginMatch(start, mode);
     for (; this.t < start + ms; this.t += 1000 / 60) {
-      const a = this.auto.sample(this.t, fps(this.tier), this.tier);
+      const a = this.auto.sample(this.t, injected(fps(this.tier)), this.tier, AT_60);
       if (!a) continue;
       out.push(a);
       if ((a.kind === 'downgrade' || a.kind === 'revert') && this.tier === a.from) this.tier = a.to;
@@ -117,7 +123,8 @@ describe('터치 기기 판 중 하향 기준 (목표: 중간 50fps · 낮음 30
     const auto = new AutoDowngrade(TOUCH_FPS_WATCH);
     auto.beginMatch(0);
     let at = -1;
-    for (let t = 0; t < 30_000 && at < 0; t += 1000 / 60) if (auto.sample(t, 45, 'medium')) at = t;
+    for (let t = 0; t < 30_000 && at < 0; t += 1000 / 60)
+      if (auto.sample(t, injected(45), 'medium', AT_60)) at = t;
     expect(at).toBeGreaterThan(TOUCH_FPS_WATCH.warmupMs + TOUCH_FPS_WATCH.sustainMs);
     expect(at).toBeLessThan(TOUCH_FPS_WATCH.warmupMs + TOUCH_FPS_WATCH.sustainMs + 1200);
   });
@@ -180,22 +187,22 @@ describe('판 중 측정 기억 (decoy:perf, 온라인 · 연습 따로)', () =>
   it('모드마다 따로 쓰고 읽는다 (다른 모드 기억은 그대로)', () => {
     const s = memStorage();
     expect(loadPerfMemory(s)).toEqual({});
-    expect(rememberPerf('online', { tier: 'low', base: 'medium' }, s)).toBe(true);
-    expect(rememberPerf('practice', { tier: 'medium', base: 'high' }, s)).toBe(true);
+    expect(rememberPerf('online', { tier: 'low', base: 'medium', hz: 60 }, s)).toBe(true);
+    expect(rememberPerf('practice', { tier: 'medium', base: 'high', hz: 60 }, s)).toBe(true);
     expect(loadPerfMemory(s)).toEqual({
-      online: { tier: 'low', base: 'medium' },
-      practice: { tier: 'medium', base: 'high' },
+      online: { tier: 'low', base: 'medium', hz: 60 },
+      practice: { tier: 'medium', base: 'high', hz: 60 },
     });
     expect(JSON.parse(s.data.get(PERF_KEY) ?? 'null')).toMatchObject({ v: PERF_MEMORY_VERSION });
-    expect(rememberPerf('online', { tier: 'medium', base: 'high' }, s)).toBe(true);
-    expect(loadPerfMemory(s).practice).toEqual({ tier: 'medium', base: 'high' });
-    expect(loadPerfMemory(s).online).toEqual({ tier: 'medium', base: 'high' });
+    expect(rememberPerf('online', { tier: 'medium', base: 'high', hz: 60 }, s)).toBe(true);
+    expect(loadPerfMemory(s).practice).toEqual({ tier: 'medium', base: 'high', hz: 60 });
+    expect(loadPerfMemory(s).online).toEqual({ tier: 'medium', base: 'high', hz: 60 });
   });
 
   it('사용자가 품질을 고르면 모두 지운다', () => {
     const s = memStorage();
-    rememberPerf('online', { tier: 'low', base: 'medium' }, s);
-    rememberPerf('practice', { tier: 'low', base: 'medium' }, s);
+    rememberPerf('online', { tier: 'low', base: 'medium', hz: 60 }, s);
+    rememberPerf('practice', { tier: 'low', base: 'medium', hz: 60 }, s);
     expect(forgetPerfMemory(s)).toBe(true);
     expect(s.data.has(PERF_KEY)).toBe(false);
     expect(loadPerfMemory(s)).toEqual({});
@@ -209,7 +216,7 @@ describe('판 중 측정 기억 (decoy:perf, 온라인 · 연습 따로)', () =>
     expect(
       parsePerfMemory(
         JSON.stringify({
-          v: 1,
+          v: PERF_MEMORY_VERSION,
           online: { tier: 'ultra', base: 'medium' },
           practice: { tier: 'low', base: 'x' },
         }),
@@ -217,17 +224,31 @@ describe('판 중 측정 기억 (decoy:perf, 온라인 · 연습 따로)', () =>
     ).toEqual({});
     expect(
       parsePerfMemory(
-        JSON.stringify({ v: 1, online: { tier: 'low', base: 'medium' }, other: { tier: 'low' } }),
+        JSON.stringify({
+          v: PERF_MEMORY_VERSION,
+          online: { tier: 'low', base: 'medium' },
+          other: { tier: 'low' },
+        }),
       ),
-    ).toEqual({ online: { tier: 'low', base: 'medium' } });
+    ).toEqual({ online: { tier: 'low', base: 'medium', hz: 60 } });
+    // 이상한 시작 목표 FPS는 그 줄만 버린다
+    expect(
+      parsePerfMemory(
+        JSON.stringify({
+          v: PERF_MEMORY_VERSION,
+          online: { tier: 'low', base: 'medium', hz: 'fast' },
+          practice: { tier: 'low', base: 'medium', hz: -60 },
+        }),
+      ),
+    ).toEqual({});
   });
 
   it('저장소를 못 쓰면 예외 없이 기억 없음', () => {
     expect(loadPerfMemory(brokenStorage)).toEqual({});
-    expect(rememberPerf('online', { tier: 'low', base: 'medium' }, brokenStorage)).toBe(false);
+    expect(rememberPerf('online', { tier: 'low', base: 'medium', hz: 60 }, brokenStorage)).toBe(false);
     expect(forgetPerfMemory(brokenStorage)).toBe(false);
     expect(loadPerfMemory(null)).toEqual({});
-    expect(rememberPerf('online', { tier: 'low', base: 'medium' }, null)).toBe(false);
+    expect(rememberPerf('online', { tier: 'low', base: 'medium', hz: 60 }, null)).toBe(false);
   });
 
   it('기억할 결과: 터치 · 자동 · 효과를 확인한 하향(keep)만', () => {
@@ -240,7 +261,7 @@ describe('판 중 측정 기억 (decoy:perf, 온라인 · 연습 따로)', () =>
     };
     expect(perfToRemember(keep, true, 'auto', 'medium')).toEqual({
       mode: 'online',
-      rec: { tier: 'low', base: 'medium' },
+      rec: { tier: 'low', base: 'medium', hz: 60 },
     });
     expect(perfToRemember({ ...keep, mode: 'practice' }, true, 'auto', 'medium')?.mode).toBe('practice');
     // PC는 M10 그대로 세션 단위
@@ -279,7 +300,7 @@ describe('시작 단계: 터치 기기 자동 선택 + 기억', () => {
   });
 
   it('기억한 단계가 자동보다 낮으면 그것으로 시작한다 (출처는 자동)', () => {
-    expect(detectQuality({ ...PHONE, perf: { tier: 'low', base: 'medium' } })).toEqual({
+    expect(detectQuality({ ...PHONE, perf: { tier: 'low', base: 'medium', hz: 60 } })).toEqual({
       tier: 'low',
       source: 'auto',
     });
@@ -287,21 +308,23 @@ describe('시작 단계: 터치 기기 자동 선택 + 기억', () => {
   });
 
   it('기억은 낮추기만 한다: 자동보다 높은 기억은 쓰지 않는다', () => {
-    expect(detectQuality({ ...PHONE, perf: { tier: 'high', base: 'medium' } }).tier).toBe('medium');
+    expect(detectQuality({ ...PHONE, perf: { tier: 'high', base: 'medium', hz: 60 } }).tier).toBe('medium');
   });
 
   it('그때의 자동 단계(base)가 지금과 다르면 옛 측정이라 쓰지 않는다', () => {
     // 그때는 하드웨어 WebGL(자동 중간)이었는데 지금은 Canvas(자동 낮음) → 지금 자동 그대로
-    expect(detectQuality({ ...PHONE, renderer: 'canvas', perf: { tier: 'low', base: 'medium' } })).toEqual({
+    expect(
+      detectQuality({ ...PHONE, renderer: 'canvas', perf: { tier: 'low', base: 'medium', hz: 60 } }),
+    ).toEqual({
       tier: 'low',
       source: 'auto',
     });
     // 그때는 저사양 판단(자동 낮음)이었는데 지금은 중간 → 기억(낮음)을 쓰지 않는다
-    expect(detectQuality({ ...PHONE, perf: { tier: 'low', base: 'low' } }).tier).toBe('medium');
+    expect(detectQuality({ ...PHONE, perf: { tier: 'low', base: 'low', hz: 60 } }).tier).toBe('medium');
   });
 
   it('?quality · 로비에서 고른 값이 기억보다 우선', () => {
-    const perf = { tier: 'low', base: 'medium' } as const;
+    const perf = { tier: 'low', base: 'medium', hz: 60 } as const;
     expect(detectQuality({ ...PHONE, url: 'high', perf })).toEqual({ tier: 'high', source: 'url' });
     expect(detectQuality({ ...PHONE, saved: 'medium', perf })).toEqual({ tier: 'medium', source: 'saved' });
   });
@@ -393,5 +416,121 @@ describe('PC는 M10 그대로', () => {
   it('PC 낮음 · 중간 · 높음 해상도 값', () => {
     expect([PRESETS.low.dprCap, PRESETS.medium.dprCap, PRESETS.high.dprCap]).toEqual([1, 1.5, 2]);
     expect(effectivePreset('low', 'webgl', false).dprCap).toBe(1);
+  });
+});
+
+describe('렌더링 최적화: 터치 기준은 기준 목표의 5/6', () => {
+  it('120 고정 제한 · 120Hz 휴대폰: 평균 95fps면 한 단계(100 미만), 105fps면 그대로', () => {
+    const slow = new AdaptiveSession('medium', new AutoDowngrade(TOUCH_FPS_WATCH), '120', 120);
+    expect(kinds(slow.play(20_000, () => injected(95)))).toEqual(['downgrade']);
+    expect([slow.tier, slow.targetHz]).toEqual(['low', 120]);
+    const ok = new AdaptiveSession('medium', new AutoDowngrade(TOUCH_FPS_WATCH), '120', 120);
+    expect(ok.play(60_000, () => injected(105))).toEqual([]);
+    expect(ok.auto.minFps).toBe(100);
+  });
+
+  it('자동 제한 · 120Hz 휴대폰: 90fps면 먼저 목표 60(품질 그대로), 60에서 45fps면 중간 → 낮음', () => {
+    const s = new AdaptiveSession('medium', new AutoDowngrade(TOUCH_FPS_WATCH), 'auto', 120);
+    const acts = s.play(40_000, (_tier, hz) => injected(hz > 60 ? 90 : 45));
+    expect(acts.map((l) => l.action)).toEqual([
+      { kind: 'rateDown', mode: 'online', from: 120, to: 60, fpsBefore: 90 },
+      { kind: 'downgrade', mode: 'online', from: 'medium', to: 'low', fpsBefore: 45 },
+    ]);
+    expect([s.tier, s.targetHz]).toEqual(['low', 60]);
+  });
+
+  it('60Hz 휴대폰은 M12 그대로 50 (목표 FPS를 바꿀 것이 없다)', () => {
+    const s = new AdaptiveSession('medium', new AutoDowngrade(TOUCH_FPS_WATCH), 'auto', 60);
+    expect(s.play(60_000, () => injected(52))).toEqual([]);
+    expect(kinds(s.play(20_000, () => injected(45)))).toEqual(['downgrade']);
+    expect(s.fallback).toBeNull();
+  });
+
+  it('올린 뒤 확인을 통과한 품질(upKeep)은 기억할 결과다: 다음 접속이 내린 단계에 묶이지 않는다', () => {
+    const s = new AdaptiveSession('medium', new AutoDowngrade(TOUCH_FPS_WATCH), 'auto', 60);
+    expect(kinds(s.play(60_000, (t, hz, e) => (e < 20_000 ? injected(40) : roomy()(t, hz, e))))).toEqual([
+      'downgrade',
+      'keep',
+    ]);
+    const up = s.play(30_000, roomy());
+    expect(kinds(up)).toEqual(['upgrade', 'upKeep']);
+    const kept = up[1]!.action;
+    expect(perfToRemember(kept, true, 'auto', 'medium')).toEqual({
+      mode: 'online',
+      rec: { tier: 'medium', base: 'medium', hz: 60 },
+    });
+  });
+});
+
+describe('렌더링 최적화: 판 중 측정 기억 2판 (시작 목표 FPS)', () => {
+  it('저장 형식 2판: 1판 값(어느 목표에서 쟀는지 모름)은 버린다', () => {
+    expect(PERF_MEMORY_VERSION).toBe(2);
+    expect(parsePerfMemory(JSON.stringify({ v: 1, online: { tier: 'low', base: 'medium' } }))).toEqual({});
+  });
+
+  it('시작 목표 FPS를 함께 기억한다: 60이면 적지 않고(M12 모양 그대로), 다른 목표는 hz로', () => {
+    const s = memStorage();
+    expect(rememberPerf('online', { tier: 'low', base: 'medium', hz: 60 }, s)).toBe(true);
+    // m12-perf.webgl E2E가 그대로 단언하는 모양
+    expect(JSON.parse(s.data.get(PERF_KEY) ?? 'null')).toEqual({
+      v: PERF_MEMORY_VERSION,
+      online: { tier: 'low', base: 'medium' },
+    });
+    expect(rememberPerf('practice', { tier: 'medium', base: 'high', hz: 120 }, s)).toBe(true);
+    expect(JSON.parse(s.data.get(PERF_KEY) ?? 'null')).toEqual({
+      v: PERF_MEMORY_VERSION,
+      online: { tier: 'low', base: 'medium' },
+      practice: { tier: 'medium', base: 'high', hz: 120 },
+    });
+    expect(loadPerfMemory(s)).toEqual({
+      online: { tier: 'low', base: 'medium', hz: 60 },
+      practice: { tier: 'medium', base: 'high', hz: 120 },
+    });
+  });
+
+  it('기억은 시작 목표 FPS가 같을 때만 쓴다 (없으면 60으로 본다)', () => {
+    const at120 = { tier: 'low', base: 'medium', hz: 120 } as const;
+    expect(detectQuality({ ...PHONE, perf: at120, targetHz: 120 }).tier).toBe('low');
+    expect(detectQuality({ ...PHONE, perf: at120, targetHz: 60 }).tier).toBe('medium');
+    expect(detectQuality({ ...PHONE, perf: at120 }).tier).toBe('medium');
+    const at60 = { tier: 'low', base: 'medium', hz: 60 } as const;
+    expect(detectQuality({ ...PHONE, perf: at60 }).tier).toBe('low');
+    expect(detectQuality({ ...PHONE, perf: at60, targetHz: 120 }).tier).toBe('medium');
+  });
+
+  it('perfToRemember는 시작 목표 FPS를 싣는다. 목표 FPS 낮춤 · 올림 · 확인 전 단계는 기억하지 않는다', () => {
+    const keep: AutoQualityAction = {
+      kind: 'keep',
+      mode: 'online',
+      tier: 'low',
+      fpsBefore: 90,
+      fpsAfter: 118,
+    };
+    expect(perfToRemember(keep, true, 'auto', 'medium', 120)?.rec).toEqual({
+      tier: 'low',
+      base: 'medium',
+      hz: 120,
+    });
+    expect(perfToRemember(keep, true, 'auto', 'medium')?.rec.hz).toBe(60);
+    const none: AutoQualityAction[] = [
+      { kind: 'rateDown', mode: 'online', from: 120, to: 60, fpsBefore: 70 },
+      { kind: 'rateUp', mode: 'online', from: 60, to: 120, fps: 60, workP95: 3 },
+      { kind: 'upgrade', mode: 'online', from: 'low', to: 'medium', fps: 60, workP95: 3 },
+      { kind: 'upKeep', mode: 'online', step: 'rate', hz: 120, fpsAfter: 118 },
+      { kind: 'upRevert', mode: 'online', step: 'tier', from: 'medium', to: 'low', fpsAfter: 40 },
+      { kind: 'upRevert', mode: 'online', step: 'rate', from: 120, to: 60, fpsAfter: 70 },
+    ];
+    for (const a of none) expect(perfToRemember(a, true, 'auto', 'medium', 120)).toBeNull();
+    // 터치 · 자동만 (PC · 고른 단계 · ?quality는 기억하지 않는다)
+    const upKeep: AutoQualityAction = {
+      kind: 'upKeep',
+      mode: 'online',
+      step: 'tier',
+      tier: 'medium',
+      fpsAfter: 58,
+    };
+    expect(perfToRemember(upKeep, false, 'auto', 'medium')).toBeNull();
+    expect(perfToRemember(upKeep, true, 'saved', 'medium')).toBeNull();
+    expect(perfToRemember(upKeep, true, 'url', 'medium')).toBeNull();
   });
 });
