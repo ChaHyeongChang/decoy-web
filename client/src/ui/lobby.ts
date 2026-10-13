@@ -14,6 +14,13 @@ import {
 } from '../touchTutorial';
 import type { ServerStatusView } from '../serverStatus';
 import {
+  loadFrameLimit,
+  pacingHooks,
+  parseFrameLimit,
+  saveFrameLimit,
+  type FrameLimit,
+} from '../gfx/framePacing';
+import {
   loadSavedQuality,
   parseQualityChoice,
   qualityHooks,
@@ -76,6 +83,13 @@ const QUALITY_OPTIONS: readonly { value: QualityChoice; label: string }[] = [
   { value: 'low', label: UI_TEXT.qualityLow },
 ];
 
+/** 프레임 제한 선택지 (렌더링 최적화): 자동(화면 주사율) · 60(배터리 절약) · 120 */
+const FRAME_LIMIT_OPTIONS: readonly { value: FrameLimit; label: string }[] = [
+  { value: 'auto', label: UI_TEXT.frameLimitAuto },
+  { value: '60', label: UI_TEXT.frameLimit60 },
+  { value: '120', label: UI_TEXT.frameLimit120 },
+];
+
 /**
  * 능력 줄 (M12 입력 방식별): 키보드 "Space 질주 — 3초간 …" · "좌클릭 공격 · 우클릭 시야 전환 · …" → 아이콘 · 키캡 · 이름 · 설명,
  * 터치 "질주 — 3초간 …" · "공격 · 시야 전환 · …" → 아이콘 · 이름 · 설명 (키캡 없음, 이름은 터치 버튼과 같다)
@@ -121,9 +135,11 @@ export class LobbyUI {
   private lastRoom: string | null = null;
   /** 이번 접속에서 고른 품질 (저장하지 못했어도 선택 상자를 다시 그릴 때 이 값을 보여 준다) */
   private qualityChoice: QualityChoice | null = null;
+  /** 이번 접속에서 고른 프레임 제한 (품질과 같다: 저장하지 못했어도 다시 그릴 때 이 값) */
+  private frameLimitChoice: FrameLimit | null = null;
   /** "전체 화면" (휴대폰 브라우저에서만): 첫 화면은 로고 아래, 방 화면은 오른쪽 위 구석 */
   private readonly fsButton: HTMLButtonElement | null = null;
-  /** 설정 (M12, 터치 모드에서만: 진동 · 터치 안내 다시 보기). 첫 화면은 그래픽 줄 옆, 방 화면은 명령 줄 왼쪽 */
+  /** 설정 (M12, 터치 모드에서만: 진동 · 프레임 제한 · 터치 안내 다시 보기). 첫 화면은 그래픽 줄 옆, 방 화면은 명령 줄 왼쪽 */
   private readonly settings: SettingsMenu | null = null;
   /** 판 직전 터치 안내 (M12, 터치 모드 · 이 기기에서 처음): 준비 뒤 방장 시작을 기다리는 동안 명령 줄 위 */
   private readonly tutorial = new TouchTutorialCard(() => this.tutorialSeen());
@@ -178,9 +194,12 @@ export class LobbyUI {
     if (device.touch) {
       const menu = new SettingsMenu(this.root, {
         haptics: haptics.supported,
+        frameLimit: true,
         tutorial: true,
         hapticsOn: () => haptics.enabled,
         setHaptics: (on) => haptics.setEnabled(on),
+        frameLimitNow: () => this.frameLimitNow(),
+        setFrameLimit: (limit) => this.chooseFrameLimit(limit),
         replayTutorial: () => {
           resetTouchTutorial();
           // 방에서 준비한 채 기다리는 중이면 바로 다시 보인다
@@ -506,9 +525,13 @@ export class LobbyUI {
 
   /**
    * 그래픽: 자동 / 높음 / 중간 / 낮음. 고르면 저장하고 바로 적용한다 (gfx/quality.ts, main.ts).
-   * 저장하지 못해도 이번 접속에는 고른 값이 적용되고, 저장되지 않는다는 안내를 짧게 띄운다
+   * 저장하지 못해도 이번 접속에는 고른 값이 적용되고, 저장되지 않는다는 안내를 짧게 띄운다.
+   * 같은 줄 오른쪽: PC는 프레임 제한 선택 상자, 터치는 설정 단추(프레임 제한은 설정 판 안)
    */
   private qualityRow(): HTMLElement[] {
+    // 저장 실패 안내는 품질 · 프레임 제한이 함께 쓴다 (저장소가 막히면 둘 다 못 쓴다)
+    let qualityUnsaved = false;
+    let frameUnsaved = false;
     const select = h('select', { 'data-testid': 'quality-select' });
     const current: QualityChoice = this.qualityChoice ?? loadSavedQuality() ?? 'auto';
     for (const o of QUALITY_OPTIONS) {
@@ -522,11 +545,15 @@ export class LobbyUI {
       UI_TEXT.qualityNotSaved,
     );
     note.hidden = true;
+    const syncNote = (): void => {
+      note.hidden = !(qualityUnsaved || frameUnsaved);
+    };
     select.addEventListener('change', () => {
       const choice = parseQualityChoice(select.value);
       if (!choice) return;
       this.qualityChoice = choice;
-      note.hidden = saveQualityChoice(choice);
+      qualityUnsaved = !saveQualityChoice(choice);
+      syncNote();
       qualityHooks.choose?.(choice);
     });
     const row = h(
@@ -536,9 +563,52 @@ export class LobbyUI {
       h('span', { class: 'field-label' }, UI_TEXT.graphics),
       select,
     );
-    // 터치 모드: 그래픽 줄 오른쪽에 설정 단추 (진동 · 터치 안내 다시 보기)
+    // 터치 모드: 그래픽 줄 오른쪽에 설정 단추 (진동 · 프레임 제한 · 터치 안내 다시 보기)
     if (this.settings) return [h('div', { class: 'row' }, row, this.settings.button()), note];
-    return [row, note];
+    // PC: 그래픽 줄 오른쪽에 프레임 제한 (좁으면 다음 줄로)
+    const frame = this.frameLimitField((saved) => {
+      frameUnsaved = !saved;
+      syncNote();
+    });
+    return [h('div', { class: 'row gfx-row' }, row, frame), note];
+  }
+
+  /** 지금 프레임 제한: 이번 접속에서 고른 값 > 저장값 > 자동 */
+  private frameLimitNow(): FrameLimit {
+    return this.frameLimitChoice ?? loadFrameLimit() ?? 'auto';
+  }
+
+  /** 프레임 제한을 고른다: 저장(자동이면 저장값을 지움) 뒤 바로 적용 (main.ts pacingHooks). 저장하지 못하면 false */
+  private chooseFrameLimit(limit: FrameLimit): boolean {
+    this.frameLimitChoice = limit;
+    const saved = saveFrameLimit(limit);
+    pacingHooks.setLimit?.(limit);
+    return saved;
+  }
+
+  /**
+   * 프레임 제한 선택 상자 (PC 첫 화면, 그래픽 줄 옆): 자동 / 60 / 120. 고르면 저장하고 바로 적용한다.
+   * 저장하지 못해도 이번 접속에는 적용되고, 그래픽 줄과 같은 '저장되지 않아요' 안내를 띄운다(onSaved)
+   */
+  private frameLimitField(onSaved: (saved: boolean) => void): HTMLElement {
+    const select = h('select', { 'data-testid': 'frame-limit-select', title: UI_TEXT.frameLimitHint });
+    const current = this.frameLimitNow();
+    for (const o of FRAME_LIMIT_OPTIONS) {
+      const opt = h('option', { value: o.value }, o.label);
+      if (o.value === current) opt.selected = true;
+      select.appendChild(opt);
+    }
+    select.addEventListener('change', () => {
+      const limit = parseFrameLimit(select.value);
+      if (!limit) return;
+      onSaved(this.chooseFrameLimit(limit));
+    });
+    return h(
+      'label',
+      { class: 'field field-select field-frame' },
+      h('span', { class: 'field-label' }, UI_TEXT.frameLimit),
+      select,
+    );
   }
 
   /** 방 로비 (빠른 매칭 방이면 대기 화면) */

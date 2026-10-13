@@ -1,8 +1,9 @@
-// 앱 생명주기 화면 (M12, MOBILE_PLAN M12 5 · 6 · 8번): 판 직전 터치 안내 카드, 설정(진동 · 터치 안내 다시 보기),
+// 앱 생명주기 화면 (M12, MOBILE_PLAN M12 5 · 6 · 8번): 판 직전 터치 안내 카드, 설정(진동 · 프레임 제한 · 터치 안내 다시 보기),
 // 판 중 뒤로 가기 확인, 다른 탭 안내 + "여기서 계속하기". 모양은 로비와 같은 깎은 패널 · 버튼(lifecycle.css, style.css 토큰),
 // 문구는 storyText.ts(APP_TEXT · TOUCH_TEXT · UI_TEXT)에서만. 판 중 매 프레임 건드리지 않는다(열고 닫을 때만 DOM을 바꾼다)
 import { teamOf, type Role } from '@decoy/shared';
 import { APP_TEXT, TOUCH_TEXT, UI_TEXT } from '../data/storyText';
+import type { FrameLimit } from '../gfx/framePacing';
 import type { LeaveKind } from '../lifecycle';
 import { h, icon, roleVars, svgSpan } from './uiArt';
 import './lifecycle.css';
@@ -297,21 +298,35 @@ export class TouchTutorialCard {
   }
 }
 
-// ───────────── 설정 (진동 · 터치 안내 다시 보기) ─────────────
+// ───────────── 설정 (진동 · 프레임 제한 · 터치 안내 다시 보기) ─────────────
 
 export interface SettingsHooks {
   /** 진동 줄을 보이는가 (터치 모드 + 진동 API가 있는 기기) */
   haptics: boolean;
+  /** 프레임 제한 줄을 보이는가 (렌더링 최적화: 터치 모드. 진동이 없는 기기에도 있다. PC는 첫 화면 그래픽 줄 옆 선택 상자) */
+  frameLimit: boolean;
   /** 터치 안내 다시 보기 줄을 보이는가 (터치 모드) */
   tutorial: boolean;
   hapticsOn(): boolean;
   /** 진동 설정을 바꾼다. 저장하지 못하면 false (이번 접속에는 적용) */
   setHaptics(on: boolean): boolean;
+  /** 지금 프레임 제한 (이번 접속에서 고른 값 > 저장값 > 자동) */
+  frameLimitNow(): FrameLimit;
+  /** 프레임 제한을 바꾼다 (저장 뒤 바로 적용). 저장하지 못하면 false (이번 접속에는 적용) */
+  setFrameLimit(limit: FrameLimit): boolean;
   replayTutorial(): void;
 }
 
+/** 설정 판 프레임 제한 선택지 (자동 · 60 · 120) */
+const FRAME_LIMIT_SEGS: readonly { value: FrameLimit; label: string }[] = [
+  { value: 'auto', label: UI_TEXT.frameLimitAuto },
+  { value: '60', label: UI_TEXT.frameLimit60 },
+  { value: '120', label: UI_TEXT.frameLimit120 },
+];
+
 /**
- * 설정 단추 + 떠 있는 설정 판 (터치 모드에서만 만든다 — PC 로비는 그대로). 단추를 다시 누르거나 바깥을 누르거나
+ * 설정 단추 + 떠 있는 설정 판 (터치 모드에서만 만든다 — PC 로비는 그대로). 줄: 진동(있는 기기만) · 프레임 제한 · 저장 실패
+ * 안내 · 터치 안내 다시 보기. 고른 쪽 = ✓ + 바탕(색만으로 구분하지 않기). 단추를 다시 누르거나 바깥을 누르거나
  * Esc · 스크롤 · 창 크기 변화면 닫힌다. 판은 로비 루트에 고정 위치(창 기준)로 붙여 패널 모서리 깎기(clip-path)에 잘리지
  * 않게 하고, 열 때 한 번 단추 자리를 잰다
  */
@@ -321,6 +336,8 @@ export class SettingsMenu {
   private readonly done: HTMLDivElement;
   private readonly onOn: HTMLButtonElement | null = null;
   private readonly onOff: HTMLButtonElement | null = null;
+  /** 프레임 제한 단추 (줄이 없으면 비어 있다) */
+  private readonly frameSegs: { value: FrameLimit; button: HTMLButtonElement }[] = [];
   private trigger: HTMLButtonElement | null = null;
   private readonly outside = (e: Event): void => {
     const t = e.target;
@@ -350,14 +367,14 @@ export class SettingsMenu {
     );
     this.done.hidden = true;
     const rows: HTMLElement[] = [h('h2', { id: title, class: 'life-settings-title' }, APP_TEXT.settings)];
+    const seg = (testid: string, label: string): HTMLButtonElement =>
+      h(
+        'button',
+        { class: 'seg', type: 'button', 'data-testid': testid },
+        icon('check', 16, 'seg-ico'),
+        label,
+      );
     if (hooks.haptics) {
-      const seg = (testid: string, label: string): HTMLButtonElement =>
-        h(
-          'button',
-          { class: 'seg', type: 'button', 'data-testid': testid },
-          icon('check', 16, 'seg-ico'),
-          label,
-        );
       this.onOn = seg('haptics-on', APP_TEXT.hapticsOn);
       this.onOff = seg('haptics-off', APP_TEXT.hapticsOff);
       this.onOn.addEventListener('click', () => this.setHaptics(true));
@@ -369,9 +386,37 @@ export class SettingsMenu {
           h('span', { class: 'field-label' }, APP_TEXT.haptics),
           h('span', { class: 'segs' }, this.onOn, this.onOff),
         ),
-        this.note,
       );
     }
+    if (hooks.frameLimit) {
+      for (const o of FRAME_LIMIT_SEGS) {
+        const button = seg(`frame-limit-${o.value}`, o.label);
+        button.addEventListener('click', () => this.setFrameLimit(o.value));
+        this.frameSegs.push({ value: o.value, button });
+      }
+      const hint = nextId('frame-limit-hint');
+      rows.push(
+        h(
+          'div',
+          {
+            class: 'life-row life-frame',
+            role: 'group',
+            'aria-label': UI_TEXT.frameLimit,
+            'aria-describedby': hint,
+            'data-testid': 'frame-limit-row',
+          },
+          h('span', { class: 'field-label' }, UI_TEXT.frameLimit),
+          h('span', { class: 'segs' }, ...this.frameSegs.map((s) => s.button)),
+        ),
+        h(
+          'div',
+          { id: hint, class: 'life-frame-hint', 'data-testid': 'frame-limit-hint' },
+          UI_TEXT.frameLimitHint,
+        ),
+      );
+    }
+    // 저장 실패 안내는 진동 · 프레임 제한 줄 아래 하나 (저장소가 막히면 둘 다 못 쓴다)
+    if (hooks.haptics || hooks.frameLimit) rows.push(this.note);
     if (hooks.tutorial) {
       const replay = h(
         'button',
@@ -397,7 +442,7 @@ export class SettingsMenu {
 
   /** 설정에 보일 것이 있는가 */
   get useful(): boolean {
-    return this.hooks.haptics || this.hooks.tutorial;
+    return this.hooks.haptics || this.hooks.frameLimit || this.hooks.tutorial;
   }
 
   get isOpen(): boolean {
@@ -436,6 +481,7 @@ export class SettingsMenu {
     this.trigger = trigger;
     trigger.setAttribute('aria-expanded', 'true');
     this.syncHaptics();
+    this.syncFrameLimit();
     this.done.hidden = true;
     this.panel.hidden = false;
     this.place(trigger);
@@ -479,6 +525,17 @@ export class SettingsMenu {
   private setHaptics(on: boolean): void {
     this.note.hidden = this.hooks.setHaptics(on);
     this.syncHaptics();
+  }
+
+  private setFrameLimit(limit: FrameLimit): void {
+    this.note.hidden = this.hooks.setFrameLimit(limit);
+    this.syncFrameLimit();
+  }
+
+  private syncFrameLimit(): void {
+    if (this.frameSegs.length === 0) return;
+    const now = this.hooks.frameLimitNow();
+    for (const s of this.frameSegs) s.button.setAttribute('aria-pressed', String(s.value === now));
   }
 
   private syncHaptics(): void {

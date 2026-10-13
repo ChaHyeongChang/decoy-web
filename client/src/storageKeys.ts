@@ -24,6 +24,12 @@ export const STORAGE_KEYS = {
     what: '그래픽 품질 선택 (자동이면 저장하지 않음)',
     keep: '사용자가 바꾸거나 브라우저 데이터를 지울 때까지',
   },
+  frameLimit: {
+    key: 'decoy:frameLimit',
+    area: 'local',
+    what: '프레임 제한 선택 (자동이면 저장하지 않음)',
+    keep: '사용자가 바꾸거나 브라우저 데이터를 지울 때까지',
+  },
   name: {
     key: 'decoy:name',
     area: 'local',

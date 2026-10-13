@@ -114,6 +114,12 @@ export const UI_TEXT = {
   qualityMedium: '중간',
   qualityLow: '낮음',
   qualityNotSaved: '이 브라우저에서는 설정이 저장되지 않아요(이번 접속에만 적용)',
+  // ── 프레임 제한 (렌더링 최적화): PC는 첫 화면 그래픽 줄 옆 선택 상자, 터치는 설정 판 ──
+  frameLimit: '프레임 제한',
+  frameLimitAuto: '자동',
+  frameLimit60: '60',
+  frameLimit120: '120',
+  frameLimitHint: '배터리를 아끼려면 60',
   recorderMemo: '기록자 메모',
   matchLength: '판 길이',
   colPlayer: '플레이어',
