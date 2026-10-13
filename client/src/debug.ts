@@ -1,12 +1,15 @@
-// window.__DECOY__ 디버그 훅과 ?debug=1 오버레이 (FPS, 핑, 서버 틱, 예측 오차)
+// window.__DECOY__ 디버그 훅과 ?debug=1 오버레이 (FPS · 프레임 시간 · 그리기 호출 · 핑 · 서버 틱 · 예측 오차 · 품질 …,
+// 표시는 ui/debugOverlay.ts). 오버레이는 배포 빌드에서도 ?debug=1이면 뜨고, 그때만 그리기 호출을 센다
 import Phaser from 'phaser';
 import type { DecoyDebug, HudLayout, TouchTarget } from '@decoy/shared';
 import type { App } from './app';
 import { sfx } from './audio';
+import { device } from './device';
 import { pacingHooks } from './gfx/framePacing';
-import { frameStatsInfo } from './gfx/frameStats';
+import { frameStatsInfo, installDrawCounter, sessionFrameStats } from './gfx/frameStats';
 import { freezeGfxClock, gfxState, probeSlot, setFpsOverride } from './gfx/state';
 import type { GameScene } from './scenes/GameScene';
+import { installDebugOverlay, type DebugOverlayData, type OverlayAnchor } from './ui/debugOverlay';
 import { MAP_RECT, VIEW_H, VIEW_W, layout, tileToScreen } from './ui/layout';
 import { fontState, uiFontsReady } from './ui/fonts';
 import { auditTexts } from './ui/text';
@@ -178,18 +181,81 @@ export function installDebug(app: App, overlay: boolean): void {
   };
   window.__DECOY__ = hook;
   if (!overlay) return;
-  const box = document.createElement('div');
-  box.id = 'debug-overlay';
-  document.body.appendChild(box);
-  window.setInterval(() => {
-    const snap = app.lastSnap;
-    box.textContent = [
-      `FPS ${hook.fps.toFixed(0)}  렌더러 ${hook.renderer}`,
-      `핑 ${hook.ping.toFixed(0)}ms  지연설정 ${app.params.lag}ms`,
-      `서버 틱 ${snap?.tick ?? '-'}  스냅샷 ${app.snapCount}`,
-      `예측 대기 ${hook.pendingInputs}  보정 ${hook.correction.toFixed(3)}타일  입력 ${hook.inputMode}`,
-      `밸런스 ${app.balanceHash}`,
-      `그래픽 ${gfxState.quality}(${gfxState.qualitySource})  배율 ${gfxState.zoom.toFixed(2)}  ${gfxState.backingW}×${gfxState.backingH}  자동 하향 ${String(gfxState.features.autoDowngrade ?? '-')}`,
-    ].join('\n');
-  }, 250);
+  watchDrawCalls(app);
+  installDebugOverlay({
+    data: () => overlayData(app, hook),
+    // 터치 기기는 접은 칩으로 시작한다 (판 HUD를 가리지 않게). PC는 펼친 채
+    expanded: !device.touch,
+    anchor: () => overlayAnchor(app),
+  });
+}
+
+/** 터치 기기 칩의 맵 왼쪽 끝에서 띄우는 거리 (CSS px) */
+const OVERLAY_MAP_INSET = 6;
+/** 터치 기기 칩의 화면(안전 영역) 위쪽에서 띄우는 거리 (CSS px) */
+const OVERLAY_TOP_INSET = 2;
+
+/**
+ * 터치 기기의 칩 자리: 맵 사각형 왼쪽 끝 바로 안 · 화면 맨 위. 늘 떠 있는 판 HUD(타이머 · 게이지 · 팀 카드 · 미니맵)는
+ * 맵 밖 기둥에 있고(m12-screen이 맵과 겹치지 않음을 본다), 이동 영역은 왼쪽 HUD 아래에서 시작하고, 시스템 버튼 ·
+ * 엄지 버튼은 오른쪽이라 여기에 닿지 않는다. 배너 · 메모는 맵 위쪽 가운데에 뜨지만 칩 높이(약 20px)보다 아래에서 시작한다.
+ * 태블릿(맵 위 HUD 띠)은 띠 가운데의 타이머와 왼쪽 끝 게이지 사이다. PC는 null(CSS 기본: 왼쪽 아래)
+ */
+function overlayAnchor(app: App): OverlayAnchor | null {
+  if (!device.touch) return null;
+  const canvas = app.game?.canvas;
+  if (!canvas) return null;
+  const rect = canvas.getBoundingClientRect();
+  if (rect.height <= 0) return null;
+  const k = rect.height / VIEW_H;
+  return { left: rect.left + MAP_RECT.x * k + OVERLAY_MAP_INSET, top: rect.top + OVERLAY_TOP_INSET };
+}
+
+function overlayData(app: App, hook: DecoyDebug): DebugOverlayData {
+  const renderer = hook.renderer;
+  return {
+    stats: frameStatsInfo(),
+    targetHz: gfxState.targetHz,
+    displayHz: gfxState.displayHz,
+    frameLimit: gfxState.frameLimit,
+    ping: app.link.rtt,
+    lag: app.params.lag,
+    tick: app.lastSnap?.tick ?? null,
+    snapCount: app.snapCount,
+    correction: app.predictor?.lastCorrection ?? 0,
+    pending: app.predictor?.pendingCount ?? 0,
+    inputMode: hook.inputMode,
+    renderer: renderer === 'webgl' || renderer === 'canvas' ? renderer : 'none',
+    quality: gfxState.quality,
+    qualitySource: gfxState.qualitySource,
+    adapt: String(gfxState.features.autoDowngrade ?? '-'),
+    dpr: gfxState.dpr,
+    zoom: gfxState.zoom,
+    backingW: gfxState.backingW,
+    backingH: gfxState.backingH,
+    balanceHash: app.balanceHash,
+  };
+}
+
+/**
+ * 그리기 호출 수를 프레임 측정에 넣는다 (오버레이를 켰을 때만). WebGL: Phaser 컨텍스트의 그리기 호출을 세고 POST_RENDER마다
+ * 읽고 비운다(한 걸음 = 갱신 중 렌더 텍스처 그리기 + 렌더 + 마지막 flush). Canvas: Phaser가 그 프레임에 그린 객체 수
+ */
+function watchDrawCalls(app: App): void {
+  const game = app.game;
+  if (!game) return;
+  const start = (): void => {
+    const r = game.renderer;
+    if (r instanceof Phaser.Renderer.WebGL.WebGLRenderer) {
+      const counter = installDrawCounter(r.gl, (n) => sessionFrameStats.setDrawCalls(n));
+      game.events.on(Phaser.Core.Events.POST_RENDER, () => {
+        counter.endCount();
+        counter.beginCount();
+      });
+    } else if (r instanceof Phaser.Renderer.Canvas.CanvasRenderer) {
+      game.events.on(Phaser.Core.Events.POST_RENDER, () => sessionFrameStats.setDrawCalls(r.drawCount));
+    }
+  };
+  if (game.isBooted) start();
+  else game.events.once(Phaser.Core.Events.READY, start);
 }

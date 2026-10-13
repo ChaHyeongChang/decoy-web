@@ -117,7 +117,7 @@ decoy-web/
 ## 6. 디버그와 테스트 훅
 
 - `window.__DECOY__ = { role, getLocalState(), getLastSnapshot(), fps, ping }` (개발 빌드와 `?debug=1`에서만)
-- `?debug=1` 오버레이: FPS, 핑, 서버 틱, 예측 오차
+- `?debug=1` 오버레이 (`client/src/ui/debugOverlay.ts`, 배포 빌드에서도 뜬다): FPS · 목표 · 화면 주사율 · 프레임 제한, 프레임 간격 · 작업 시간(평균 · p95), 그리기 호출(WebGL 호출 수 · Canvas는 그린 객체 수, 이 오버레이를 켰을 때만 센다), 핑 · 서버 틱 · 스냅샷, 예측 오차 · 대기 입력, 품질 · 자동 조정, DPR · 백버퍼, 렌더러 · 입력 방식 · 밸런스 해시. 칩을 눌러 접고 펼친다(터치 기기는 접은 채, PC는 펼친 채 시작, 저장하지 않음). 칩만 입력을 받고 판 입력으로 보내지 않는다. 터치 기기의 칩은 맵 왼쪽 위(판 HUD · 터치 대상과 겹치지 않음, `tests/e2e/debug-overlay.spec.ts`)
 - M10 그래픽 검사 훅: `gfx`(렌더 해상도 · 품질 · 안개 방식), `freezeClock`(장식 애니메이션 시계 고정), `injectFps`(품질 자동 하향 시험), `probeText`(선명도 탐침). 타입은 `shared/src/debugTypes.ts`. 리마스터 전후 비교 촬영은 `npm run shots:remaster`(`scripts/remaster-shots.mjs`)
 - 서버 `--seed` 옵션으로 무작위 요소 고정
 - 봇: `server/bots.ts`가 실제 WebSocket 클라이언트로 접속해 정해진 행동(순찰, 따라가기, 거점 머물기, 구조)을 한다

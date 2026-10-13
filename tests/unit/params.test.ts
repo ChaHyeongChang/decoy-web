@@ -1,4 +1,4 @@
-// 주소 매개변수: ?scale 재정의(빈 값 → 0.25배 버그 수정) · ?quality (M10a)
+// 주소 매개변수: ?scale 재정의(빈 값 → 0.25배 버그 수정) · ?quality (M10a) · ?fpsLimit (렌더링 최적화)
 // app.ts가 로비 → 로고 PNG를 import하므로 Vite 자산 타입이 필요하다 (vitest는 Vite로 불러온다)
 /// <reference types="vite/client" />
 import { describe, expect, it } from 'vitest';
@@ -44,6 +44,25 @@ describe('readParams', () => {
     expect(readParams('').quality).toBeNull();
   });
 
+  it('?fpsLimit=auto|60|120 (앞뒤 공백 · 대소문자 무시), 그 밖에는 null', () => {
+    expect(readParams('?fpsLimit=auto').fpsLimit).toBe('auto');
+    expect(readParams('?fpsLimit=60').fpsLimit).toBe('60');
+    expect(readParams('?fpsLimit=120').fpsLimit).toBe('120');
+    expect(readParams('?fpsLimit=AUTO').fpsLimit).toBe('auto');
+    expect(readParams('?fpsLimit=%20120%20').fpsLimit).toBe('120');
+    for (const bad of ['', '30', '90', '144', '60fps', 'abc', 'null'])
+      expect(readParams(`?fpsLimit=${bad}`).fpsLimit, bad).toBeNull();
+    expect(readParams('').fpsLimit).toBeNull();
+    // 이름은 대소문자를 가린다 (다른 매개변수와 같다)
+    expect(readParams('?fpslimit=60').fpsLimit).toBeNull();
+  });
+
+  it('측정 표시는 ?debug=1 오버레이: 따로 ?fps 매개변수는 없다', () => {
+    expect(readParams('?fps=1')).not.toHaveProperty('fps');
+    expect(readParams('?debug=1').debug).toBe('overlay');
+    expect(readParams('?debug=hook').debug).toBe('hook');
+  });
+
   it('다른 매개변수는 그대로', () => {
     const p = readParams('?room=abcd&bots=1&debug=hook&renderer=canvas&lag=120&name=x');
     expect(p).toMatchObject({
@@ -55,6 +74,7 @@ describe('readParams', () => {
       name: 'x',
       scaleOverride: null,
       quality: null,
+      fpsLimit: null,
     });
   });
 });
