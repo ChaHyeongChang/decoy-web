@@ -37,6 +37,8 @@ interface PlayerBase {
   processed: number;
   /** 빈 입력으로 흘려보낸 틱 수 (늦게 온 입력은 이만큼 이동 없이 처리) */
   debt: number;
+  /** 큐를 다 비운 뒤 빚을 남겨 둔 틱 수 (밀린 입력의 뒤 조각을 기다린다) */
+  debtHold: number;
   connected: boolean;
   /** 접속이 끊긴 뒤 지난 시간 (끊겨 있지 않으면 null) */
   droppedFor: number | null;
@@ -105,8 +107,9 @@ export interface ExitRuntime {
   progress: number;
 }
 
+/** humansLeft: 빠른 매칭에서 사람이 모두 나가 봇만 남음 (무효, 출시 전 검토) */
 export type MatchOutcomeReason =
-  'escaped' | 'deaths' | 'allImprisoned' | 'noFreeSurvivors' | 'timeout' | 'monsterLeft';
+  'escaped' | 'deaths' | 'allImprisoned' | 'noFreeSurvivors' | 'timeout' | 'monsterLeft' | 'humansLeft';
 
 export interface MatchEnd {
   winner: 'survivors' | 'monster' | 'void';

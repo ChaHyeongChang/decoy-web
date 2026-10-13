@@ -1,7 +1,7 @@
 // M11 터치 기능 시험 (MOBILE_PLAN M11 자동 검증 'E2E m11-touch'): 휴대폰 가로 에뮬레이션(기능 시험은 기기 배율 1)에서
 // 감지 · 멀티터치(왼쪽 이동 + 오른쪽 조준, 조준 스틱만 떼면 공격 1번) · 오입력 회귀 · 버튼 → 입력 비트(돌진 · 포효 ·
 // 시야 · 능력 · 구조) · 손가락이 사라질 때(pointercancel · blur) · 터치 대상 크기와 자리 ·
-// 브라우저 기본 동작 막기 · 세로 안내 · 전체 화면 호출 시점 · 결과 화면 레이어 · 오디오 열기.
+// 브라우저 기본 동작 막기 · 세로 안내 · 전체 화면 호출 시점 · 결과 화면 레이어(버튼 크기 · 간격) · 새 버전 띠 · 오디오 열기.
 // 혼자 봇 방(?bots=1)에서 판을 시작해 빠르게 돈다. 판정은 서버 정답(/test/state, 틱마다 쓰는 정답 기록 truth.jsonl)으로 본다.
 // 느린 CI 대비: 간격 폴링(100~200ms), 시간 창은 고정 sleep 대신 입력 프레임 수 · 서버 틱 수로 재고, 시간이 지나 바뀌는 판 상태
 // (괴물 위치 · 대기)는 시험 동작 직전에 시험 명령으로 다시 맞춘다
@@ -44,6 +44,7 @@ import {
   touchTargets,
   viewportScale,
   waitForTouchTarget,
+  type MeasuredTarget,
   type TouchLayout,
 } from './touch';
 
@@ -1294,7 +1295,44 @@ test('전체 화면 + 가로 고정: 서버 match를 받을 때는 부르지 않
 
 // ───────────── 결과 화면 레이어 ─────────────
 
-test('결과 화면: 터치 화면이 꺼지고 입력이 없으며, 버튼(왼쪽 40% 안 포함)을 탭하면 동작하고 왼쪽 영역에서 스크롤된다', async ({
+/** 결과 화면 버튼을 탭하면 나타나는 것 (홈으로 → 첫 화면, 다시 하기 → 방 화면) */
+const RESULT_TAP_LEADS_TO: Record<string, string> = { 'result-home': 'create-room', rematch: 'ready-button' };
+
+/** 결과 화면의 보이는 버튼을 터치 대상처럼 잰다 (touchLayoutProblems에 넘긴다. 창 · 안전 영역은 measureTouchLayout과 같이) */
+async function measureResultButtons(page: Page): Promise<TouchLayout> {
+  return page.evaluate(() => {
+    const px = (v: string) => Number.parseFloat(v) || 0;
+    const probe = document.createElement('div');
+    probe.style.cssText =
+      'position:fixed;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)';
+    document.body.appendChild(probe);
+    const ps = getComputedStyle(probe);
+    const insets = {
+      top: px(ps.paddingTop),
+      right: px(ps.paddingRight),
+      bottom: px(ps.paddingBottom),
+      left: px(ps.paddingLeft),
+    };
+    probe.remove();
+    const targets = [...document.querySelectorAll<HTMLElement>('[data-testid="result"] button')]
+      .filter((b) => b.checkVisibility({ checkVisibilityCSS: true }))
+      .map((b) => {
+        const r = b.getBoundingClientRect();
+        return {
+          id: b.dataset.testid ?? b.textContent ?? '',
+          kind: 'button' as const,
+          x: r.left,
+          y: r.top,
+          w: r.width,
+          h: r.height,
+          round: false,
+        };
+      });
+    return { viewport: { w: window.innerWidth, h: window.innerHeight }, insets, targets };
+  });
+}
+
+test('결과 화면: 터치 화면이 꺼지고 입력이 없으며, 버튼은 48px · 8px 간격 · 띠 밖이고 왼쪽 40% 안을 탭해도 동작하며, 왼쪽 영역에서 스크롤된다', async ({
   browser,
 }) => {
   test.setTimeout(120_000);
@@ -1340,6 +1378,11 @@ test('결과 화면: 터치 화면이 꺼지고 입력이 없으며, 버튼(왼�
     layerVisibility: 'hidden',
   });
   expect(layer.scrollable, '결과 화면이 휴대폰 높이보다 길다(스크롤 시험이 의미 있음)').toBeGreaterThan(20);
+  // 보이는 결과 버튼마다 48px 이상 · 서로 8px 이상(겹침 없음) · 화면 안 · 가장자리 띠 밖 — 판 터치 대상과 같은 규칙.
+  // 두 버튼은 반대로 동작한다(홈으로 = 자리를 비움, 다시 하기 = 다음 판)
+  const shown = await measureResultButtons(page);
+  expect(shown.targets.map((t) => t.id)).toEqual(['result-home', 'rematch']);
+  expect(touchLayoutProblems(shown), '결과 버튼 (처음 뜬 화면)').toEqual([]);
 
   // 글자 선택: 결과 글(결말 메모)을 끌어도 선택되지 않는다 (헤드리스는 길게 누르기로 선택을 만들지 못해 마우스 끌기로 본다).
   // 대조: 같은 자리에서 막기(user-select: none)를 잠시 풀면 선택된다
@@ -1374,28 +1417,99 @@ test('결과 화면: 터치 화면이 꺼지고 입력이 없으며, 버튼(왼�
   const during = (await inputLog(page)).filter((e) => e.t > shownAt);
   expect(during.filter((e) => e.mx !== 0 || e.my !== 0 || e.pressed !== 0 || e.held !== 0)).toEqual([]);
 
-  // 다시 하기: 왼쪽 40% 안에 걸친 부분을 탭한다 (안 걸치면 가운데)
-  const box = (await page.getByTestId('rematch').boundingBox())!;
-  const x = box.x < leftW ? (box.x + Math.min(box.x + box.width, leftW)) / 2 : box.x + box.width / 2;
-  const y = box.y + box.height / 2;
+  // 스크롤한 뒤에도 결과 버튼은 터치 대상 규칙 안 (아래 줄은 스크롤해도 남는다)
+  const scrolled = await measureResultButtons(page);
+  expect(touchLayoutProblems(scrolled), '결과 버튼 (스크롤 뒤)').toEqual([]);
+
+  // 왼쪽 40%(이동 스틱 영역 자리)에 걸친 결과 버튼을 그 안쪽 부분에서 탭한다. 걸친 버튼이 없으면 이 검사가 빈 갈래가
+  // 되므로 실패로 본다 (M13b가 '홈으로'를 더하며 '다시 하기'가 40% 밖으로 밀려 빈 갈래였던 것을 고침)
+  const inLeft = scrolled.targets.find((b) => b.x < leftW);
+  if (!inLeft)
+    throw new Error(`왼쪽 40%(${leftW.toFixed(1)}px)에 걸친 결과 버튼이 없다: ${JSON.stringify(scrolled)}`);
+  const after = RESULT_TAP_LEADS_TO[inLeft.id];
+  expect(after, `탭한 뒤 기대 화면을 아는 버튼 (${inLeft.id})`).toBeDefined();
+  const x = (inLeft.x + Math.min(inLeft.x + inLeft.w, leftW)) / 2;
+  const y = inLeft.y + inLeft.h / 2;
+  expect(x).toBeLessThan(leftW);
   expect(
     await page.evaluate(
       ([px, py]) =>
         document.elementFromPoint(px!, py!)?.closest('[data-testid]')?.getAttribute('data-testid'),
       [x, y],
     ),
-  ).toBe('rematch');
+  ).toBe(inLeft.id);
   const ups = (await pointerCounts(page))['pointerup:touch'] ?? 0;
   await page.touchscreen.tap(x, y);
-  await expect(page.getByTestId('ready-button')).toBeVisible();
+  await expect(page.getByTestId(after!)).toBeVisible();
+  await expect(result).toBeHidden();
   expect((await pointerCounts(page))['pointerup:touch'] ?? 0).toBeGreaterThan(ups);
+  const rect = (t: MeasuredTarget) => `${t.id} [${[t.x, t.y, t.w, t.h].map((v) => v.toFixed(1)).join(', ')}]`;
   console.log(
-    `[m11-touch] 결과 화면: 다시 하기 [${[box.x, box.y, box.width, box.height].map((v) => v.toFixed(1)).join(', ')}], ` +
-      `탭 (${x.toFixed(1)}, ${y.toFixed(1)}), 왼쪽 40% = ${leftW.toFixed(1)}px, 스크롤 가능 ${layer.scrollable}px`,
+    `[m11-touch] 결과 화면: ${shown.targets.map(rect).join(' · ')} (스크롤 뒤 ${scrolled.targets.map(rect).join(' · ')}), ` +
+      `탭 ${inLeft.id} (${x.toFixed(1)}, ${y.toFixed(1)}), 왼쪽 40% = ${leftW.toFixed(1)}px, 스크롤 가능 ${layer.scrollable}px`,
   );
   await t.detach();
   expect(s.problems).toEqual([]);
   await s.context.close();
+});
+
+// ───────────── 새 버전 띠 (M13d) ─────────────
+
+/** 서버가 보내는 빌드 ID(pong · welcome)만 바꿔 전한다 → 화면이 "새 버전이 있어요" 띠를 띄운다 (빌드를 둘 만들지 않고) */
+async function fakeNewServerBuild(page: Page): Promise<void> {
+  await page.routeWebSocket(/\/ws$/, (ws) => {
+    const server = ws.connectToServer();
+    // 어느 쪽이 먼저 닫히든 중계를 멈춘다 (닫힌 소켓에 보내면 페이지 콘솔 에러가 난다)
+    let open = true;
+    ws.onMessage((m) => {
+      if (open) server.send(m);
+    });
+    server.onMessage((m) => {
+      if (!open) return;
+      const relabel = typeof m === 'string' && /^\{"t":"(pong|welcome)"/.test(m);
+      ws.send(relabel ? m.replace(/"build":"[^"]*"/, '"build":"e2e-newer-build"') : m);
+    });
+    ws.onClose(() => {
+      open = false;
+      void server.close();
+    });
+    server.onClose(() => {
+      open = false;
+      void ws.close();
+    });
+  });
+}
+
+test('새 버전 띠: 손가락 화면에서 새로고침 버튼이 48px 이상이고, 실제 판이 시작되면(body.in-match) 숨어 판 화면을 가리지 않다가 결과에서 다시 보인다', async ({
+  browser,
+}) => {
+  const { context, page, problems } = await newPlayerPage(browser, PHONE);
+  await context.addInitScript(stubFullscreen);
+  await fakeNewServerBuild(page);
+  const inMatch = (): Promise<boolean> => page.evaluate(() => document.body.classList.contains('in-match'));
+  // 첫 화면 → 봇 방 (welcome · pong의 빌드가 달라 띠가 뜬다)
+  await createRoom(page, '&bots=1');
+  const banner = page.getByTestId('update-available');
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText('새 버전이 있어요');
+  const btn = (await banner.getByRole('button').boundingBox())!;
+  expect(btn.height, '새로고침 버튼 높이').toBeGreaterThanOrEqual(48 - 0.05);
+  expect(await inMatch()).toBe(false);
+  // 실제 판 시작: App.setPlaying이 body에 in-match를 달아 띠를 숨긴다(검토 반영 F08). 손으로 클래스를 달지 않는다 —
+  // 옛 app.ts(in-match를 달지 않음)에서는 판 중에도 띠가 남은 시간 · 맵 위쪽을 가려 여기서 실패한다
+  await pickRoleAndReady(page, 'runner');
+  await press(page.getByTestId('start-button'));
+  await waitForSnapshots(page, 3);
+  expect(await inMatch()).toBe(true);
+  await expect(banner).toBeHidden();
+  await expect.poll(() => page.evaluate(() => window.__DECOY__?.phase), POLL).toBe('playing');
+  // 판이 끝나면(결과 · 첫 화면 · 방 화면) 다시 보인다 — 새로고침하기 좋은 때
+  await sendTest(page, { kind: 'setTime', timeLeft: 0.1 });
+  await expect(page.getByTestId('result')).toBeVisible({ timeout: 15_000 });
+  expect(await inMatch()).toBe(false);
+  await expect(banner).toBeVisible();
+  expect(problems).toEqual([]);
+  await context.close();
 });
 
 // ───────────── 오디오 ─────────────

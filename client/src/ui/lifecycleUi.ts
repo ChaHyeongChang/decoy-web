@@ -3,6 +3,7 @@
 // 문구는 storyText.ts(APP_TEXT · TOUCH_TEXT · UI_TEXT)에서만. 판 중 매 프레임 건드리지 않는다(열고 닫을 때만 DOM을 바꾼다)
 import { teamOf, type Role } from '@decoy/shared';
 import { APP_TEXT, TOUCH_TEXT, UI_TEXT } from '../data/storyText';
+import type { LeaveKind } from '../lifecycle';
 import { h, icon, roleVars, svgSpan } from './uiArt';
 import './lifecycle.css';
 
@@ -58,10 +59,28 @@ class CenterCard {
 let ids = 0;
 const nextId = (p: string): string => `${p}-${++ids}`;
 
-/** 판 중 뒤로 가기 확인 (터치 · 설치 앱): "판에서 나가시겠어요?" + 계속 / 나가기 */
+/**
+ * 뒤로 가기 확인 제목 · 본문 (LeaveKind별): 친구 방은 30초 유예 안내, 빠른 매칭 판은 나가기가 바로 판정된다는 안내
+ * (GAME_DESIGN 11.2 — 유예 없음 · 이어서 할 수 없음, 검토 반영 F10), 연습 판은 기기 안 판을 닫고 첫 화면으로 간다는 안내
+ * (다른 사람과 무관, 검토 반영 F16)
+ */
+export function leaveTextFor(kind: LeaveKind): { title: string; body: string } {
+  switch (kind) {
+    case 'practice':
+      return { title: APP_TEXT.leaveTitlePractice, body: APP_TEXT.leaveBodyPractice };
+    case 'quick':
+      return { title: APP_TEXT.leaveTitle, body: APP_TEXT.leaveBodyQuick };
+    case 'match':
+      return { title: APP_TEXT.leaveTitle, body: APP_TEXT.leaveBody };
+  }
+}
+
+/** 판 중 뒤로 가기 확인 (터치 · 설치 앱): "판에서 나가시겠어요?"(연습은 연습 문구) + 계속 / 나가기 */
 export class LeaveDialog {
   private readonly box: CenterCard;
   private readonly stayBtn: HTMLButtonElement;
+  private readonly titleText: HTMLHeadingElement;
+  private readonly bodyText: HTMLParagraphElement;
 
   constructor(host: HTMLElement, actions: { stay: () => void; leave: () => void }) {
     const title = nextId('leave-title');
@@ -81,15 +100,12 @@ export class LeaveDialog {
     );
     this.stayBtn.addEventListener('click', () => actions.stay());
     go.addEventListener('click', () => actions.leave());
+    this.titleText = h('h2', { id: title }, APP_TEXT.leaveTitle);
+    this.bodyText = h('p', { id: body, class: 'life-body' }, APP_TEXT.leaveBody);
     this.box.card.classList.add('life-leave');
     this.box.card.append(
-      h(
-        'div',
-        { class: 'life-head' },
-        icon('exit', 24, 'life-head-ico'),
-        h('h2', { id: title }, APP_TEXT.leaveTitle),
-      ),
-      h('p', { id: body, class: 'life-body' }, APP_TEXT.leaveBody),
+      h('div', { class: 'life-head' }, icon('exit', 24, 'life-head-ico'), this.titleText),
+      this.bodyText,
       h('div', { class: 'life-buttons' }, go, this.stayBtn),
     );
     // Esc(키보드 · 일부 기기의 뒤로 가기 키) = 계속
@@ -102,7 +118,11 @@ export class LeaveDialog {
     return this.box.isOpen;
   }
 
-  open(): void {
+  /** kind = 지금 판의 종류 (제목 · 본문이 다르다, leaveTextFor) */
+  open(kind: LeaveKind = 'match'): void {
+    const text = leaveTextFor(kind);
+    this.titleText.textContent = text.title;
+    this.bodyText.textContent = text.body;
     this.box.show(this.stayBtn);
   }
 

@@ -6,7 +6,7 @@
       "scene": "feature",
       "width": 1024,
       "height": 500,
-      "bytes": 398941,
+      "bytes": 224046,
       "touchTargets": [],
       "renderer": "webgl",
       "quality": "high"

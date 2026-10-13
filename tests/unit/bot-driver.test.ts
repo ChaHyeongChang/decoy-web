@@ -1,10 +1,19 @@
 // M13b 계약: 같은 프로세스 봇(BotDriver), 기기 안 연습 방(practice), 나가기('leave')
+import { isDeepStrictEqual } from 'node:util';
 import { describe, expect, it } from 'vitest';
-import { PRACTICE_ROOM_PREFIX, ROOM_CODE_ALPHABET, type ClientMessage, type Role } from '@decoy/shared';
+import {
+  PRACTICE_ROOM_PREFIX,
+  ROOM_CODE_ALPHABET,
+  type ClientMessage,
+  type Role,
+  type Snapshot,
+} from '@decoy/shared';
 import {
   BotDriver,
   ServerCore,
+  computeVisibility,
   devBotBrain,
+  practiceBrain,
   type BotBrain,
   type Room,
   type RoomHooks,
@@ -103,13 +112,81 @@ describe('기기 안 연습 방', () => {
     const { core, driver, clock } = practiceCore();
     const { room } = startPractice(core, 'runner');
     const monsterBot = driver.botsOf(room).find((b) => b.seat.role === 'monster');
-    runTicks(core, clock, 60);
-    const snap = monsterBot?.lastSnap;
-    expect(snap?.you.role).toBe('monster');
-    for (const s of snap?.survivors ?? []) {
-      // 괴물 스냅샷의 생존자 ID는 임시 ID다 (실제 자리 ID가 아니다)
-      expect(room.seats.some((seat) => seat.id === s.id)).toBe(false);
+    let prev = monsterBot?.lastSnap;
+    let checked = 0;
+    for (let t = 0; t < 600 && room.phase === 'playing'; t += 1) {
+      runTicks(core, clock, 1);
+      const snap = monsterBot?.lastSnap;
+      if (!snap || snap === prev) continue;
+      prev = snap;
+      expect(snap.you.role).toBe('monster');
+      for (const s of snap.survivors) {
+        // 괴물 스냅샷의 생존자 ID는 임시 ID다 (실제 자리 ID가 아니다)
+        expect(room.seats.some((seat) => seat.id === s.id)).toBe(false);
+        checked += 1;
+      }
     }
+    // 검사가 헛돌지 않게: 괴물 봇이 생존자를 실제로 본 스냅샷이 있었다 (60틱만 보던 옛 시험은 0명이었다)
+    expect(checked).toBeGreaterThanOrEqual(10);
+  });
+
+  // 출시 전 검토: 실서비스 봇 경로(빠른 매칭 · 기기 안 연습의 BotDriver → 실전 두뇌)의 정보 차단. SimMatch 경로 시험
+  // (tests/bots/practice.test.ts)과 달리, 두뇌가 실제로 받는 입력이 그 봇 자리에 온 정보 차단 스냅샷인지 본다
+  it('실전 두뇌가 받는 view는 그 자리에 온 스냅샷 그대로(내 위치 예측만 다름)이고, 괴물 봇의 생존자는 그 틱 괴물 시야 안이다', () => {
+    const clock = { t: 0 };
+    /** 틱 → 그 틱 괴물 시야 안 실제 생존자 위치 (recordTruth: step 직후 · 스냅샷 직전, 스냅샷과 같은 판정) */
+    const truth = new Map<number, { x: number; y: number }[]>();
+    const stats = { decide: 0, mismatch: 0, monsterSurvivors: 0, leaks: 0 };
+    const problems: string[] = [];
+    const withoutMove = (s: Snapshot): unknown => ({ ...s, you: { ...s.you, move: null } });
+    const driver: BotDriver = new BotDriver((info, seat, room) => {
+      const inner = practiceBrain(info.role, 7);
+      return {
+        decide(view, matchInfo, bal, seq) {
+          stats.decide += 1;
+          const own = driver.botsOf(room).find((b) => b.seat === seat)?.lastSnap;
+          if (!own || !isDeepStrictEqual(withoutMove(view), withoutMove(own))) {
+            stats.mismatch += 1;
+            if (problems.length < 3) problems.push(`${seat.role} tick ${view.tick}: 자리 스냅샷과 다름`);
+          }
+          if (view.you.role === 'monster') {
+            const seen = truth.get(view.tick) ?? [];
+            for (const s of view.survivors) {
+              stats.monsterSurvivors += 1;
+              if (seen.some((p) => Math.abs(p.x - s.x) <= 6e-4 && Math.abs(p.y - s.y) <= 6e-4)) continue;
+              stats.leaks += 1;
+              if (problems.length < 3)
+                problems.push(`괴물 tick ${view.tick}: 시야 밖 생존자 (${s.x}, ${s.y})`);
+            }
+          }
+          return inner.decide(view, matchInfo, bal, seq);
+        },
+      };
+    }, balance);
+    const hooks: RoomHooks = {
+      ...driver.hooks(),
+      recordTruth: (room) => {
+        const game = room.game;
+        if (!game) return;
+        const facts = computeVisibility(game);
+        truth.set(
+          game.tick,
+          game.survivors
+            .filter((s) => facts.monsterSees.has(s.id))
+            .map((s) => ({ x: s.move.x, y: s.move.y })),
+        );
+      },
+    };
+    const core = new ServerCore({ balance, seed: 9, testHooks: true, practice: true }, hooks, () => clock.t);
+    const { room } = startPractice(core, 'scout');
+    expect(driver.botsOf(room)).toHaveLength(3);
+    for (let t = 0; t < 4500 && room.phase === 'playing'; t += 1) runTicks(core, clock, 1);
+    expect(problems).toEqual([]);
+    expect(stats.mismatch).toBe(0);
+    expect(stats.leaks).toBe(0);
+    // 검사가 헛돌지 않게: 봇 셋이 많이 결정했고, 괴물 봇이 생존자를 실제로 많이 봤다
+    expect(stats.decide).toBeGreaterThan(1000);
+    expect(stats.monsterSurvivors).toBeGreaterThan(30);
   });
 
   it('결과에서 다시 하기를 누르면 같은 역할로 바로 다음 판, 봇 연결은 정리하고 새로 붙인다', () => {

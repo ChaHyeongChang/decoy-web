@@ -10,11 +10,14 @@ export interface SentDataInfo {
   label: string;
   /** 보내는 ClientMessage 필드: '메시지.필드' (조작 입력은 'input.frames.필드') */
   fields: readonly string[];
-  /** Play Console 데이터 보안 양식의 데이터 유형 (해당 없으면 '해당 없음') */
+  /**
+   * Play Console 데이터 보안 양식의 데이터 유형 (해당 없으면 '해당 없음'). 공개 처리방침에 그대로 나가므로 초안 표시
+   * ('확인 필요' 등)를 넣지 않는다 — 사람이 확인할 판단은 confirm: true로 두고 STORE_LISTING 표의 4번째 칸에만 적는다
+   */
   playType: string;
   /** 왜 보내는가 */
   purpose: string;
-  /** 판단을 사람이 다시 확인해야 하는가 (docs/HUMAN_CHECKS.md M15) */
+  /** 판단을 사람이 다시 확인해야 하는가 (docs/HUMAN_CHECKS.md M15). 바꾸면 이 파일 · privacy.html · STORE_LISTING.md를 같은 값으로 */
   confirm: boolean;
 }
 
@@ -30,9 +33,9 @@ export const SENT_DATA = {
   seatToken: {
     label: '자리 토큰',
     fields: ['join.token', 'join.altTokens'],
-    playType: '기기 또는 기타 ID (해당 여부 확인 필요)',
+    playType: '해당 없음',
     purpose:
-      '새로고침 · 끊김 뒤 같은 방의 같은 자리로 돌아가기. 서버가 방마다 무작위로 만들어 주는 값으로, 기기 · 계정과 묶이지 않고 방이 사라지면 쓸모가 없다',
+      '새로고침 · 끊김 뒤 같은 방의 같은 자리로 돌아가기. 서버가 방의 자리마다 무작위로 만들어 주는 값으로, 기기 · 계정과 묶이지 않고 방이 사라지면 쓸모가 없다',
     confirm: true,
   },
   roomChoice: {
@@ -60,8 +63,9 @@ export const SENT_DATA = {
   pingClock: {
     label: '지연 측정값',
     fields: ['ping.c'],
-    playType: '해당 없음 (확인 필요)',
-    purpose: '기기 시계 숫자를 보내 그대로 돌려받아 연결 지연을 잰다. 서버는 저장하지 않는다',
+    playType: '해당 없음',
+    purpose:
+      '페이지를 연 뒤 흐른 시간(ms, performance.now)을 보내 그대로 돌려받아 연결 지연을 잰다(지연 계산은 기기에서). 서버는 저장하지 않는다',
     confirm: true,
   },
   testCommand: {

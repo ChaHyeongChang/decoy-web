@@ -16,6 +16,25 @@ export interface WakeView {
   offline: boolean;
 }
 
+/** 깨우기 패널에 '첫 화면으로'를 보일지 정하는 상황 (검토 반영 F23) */
+export interface WakeHomeCtx {
+  /** 들어가려는 방 코드 (?room= 링크 · 마지막 방 복귀 · 입력한 코드). 없으면 null */
+  roomCode: string | null;
+  /** 방 상태(lobby)나 판(match)을 받았다 — 이미 방 · 판 안이다 */
+  inRoom: boolean;
+  /** 기기 안 연습 중 */
+  practicing: boolean;
+}
+
+/**
+ * 방 경로로 부팅해 아직 방에 들어가지 못한 채 기다리는 중이면(방 링크 · 마지막 방 복귀 · 옛 연결이 남아 다시 시도) 가운데
+ * 패널에 '첫 화면으로'를 보인다. 오프라인 · 서버 꺼짐이면 연결이 열리지 않아 이 패널에 갇히므로 첫 화면(봇과 연습)으로 갈
+ * 길이 필요하다. 판 중 재연결(방 · 판 안)은 지금처럼 버튼 없이 기다린다
+ */
+export function wakeOffersHome(ctx: WakeHomeCtx): boolean {
+  return ctx.roomCode !== null && !ctx.inRoom && !ctx.practicing;
+}
+
 export class WakeNoticeState {
   private everOpened = false;
   private waitStart: number | null = null;

@@ -2,6 +2,7 @@
 // 판단하는 부품은 시계 · 타이머 · 브라우저 API를 주입받아 단위 테스트로 확인한다(tests/unit/lifecycle.test.ts).
 // 브라우저 이벤트를 듣는 것은 listenLifecycle 하나이고, 무엇을 할지는 App(app.ts)이 정한다.
 // 숨겨진 동안 소켓을 일부러 끊지 않는다: OS가 끊으면 서버 하트비트로 잡히고 서버의 30초 유예가 적용된다(DECISIONS M12)
+import type { RoomKind } from '@decoy/shared';
 
 /** 수신 감시: 화면이 보이는 동안 이만큼 서버 메시지가 하나도 없으면 끊고 바로 다시 연결한다 (서버 pong은 1초마다) */
 export const RECV_TIMEOUT_MS = 4000;
@@ -255,10 +256,36 @@ export function freshLastRoom(raw: string | null, now: number): LastRoom | null 
 
 /**
  * 다시 연 앱이 돌아갈 마지막 방: 주소에 방 코드가 없거나, 주소의 방이 마지막 방과 같을 때(같은 방 링크 · 기록으로 다시 엶).
- * 주소의 방이 다르면 null (처음 들어가는 방이라 거절돼도 다시 시도하지 않는다)
+ * 주소의 방이 다르면 null (처음 들어가는 방이라 거절돼도 다시 시도하지 않는다).
+ * practice = 주소에 ?practice=1(깨우기 화면의 "봇과 연습"): 방 링크 없이 연습을 고른 것이므로 마지막 방보다 우선한다 (검토 반영 F12).
+ * 방 링크와 함께 오면 지금처럼 방 링크가 이긴다
  */
-export function returnTarget(urlRoom: string | null, last: LastRoom | null): LastRoom | null {
+export function returnTarget(
+  urlRoom: string | null,
+  last: LastRoom | null,
+  practice = false,
+): LastRoom | null {
+  if (practiceEntry(practice, urlRoom)) return null;
   return last && (urlRoom === null || urlRoom === last.room) ? last : null;
+}
+
+/** ?practice=1이 방 링크 없이 왔다: 마지막 방 복귀를 건너뛰고(기억도 지운다) 연습 역할 고르기를 연다 (검토 반영 F12) */
+export function practiceEntry(practice: boolean, urlRoom: string | null): boolean {
+  return practice && urlRoom === null;
+}
+
+// ───────────── 방을 나온 뒤 늦게 온 메시지 (검토 반영 F07) ─────────────
+
+/** 떠난 방에서 늦게 올 수 있는 메시지: 다음 welcome(새 방) 전에 오면 버린다 */
+const ROOM_MESSAGES: ReadonlySet<string> = new Set(['lobby', 'match', 'snap', 'result']);
+
+/**
+ * 같은 소켓으로 'leave'를 보낸 뒤(빠른 매칭 취소 · 숨김, 결과 · 방 화면 "홈으로") 다음 welcome까지 받은 방 메시지는 떠난 방
+ * 것이다: 서버가 leave를 처리하기 전에 이미 보낸 lobby · match · snap · result. 한 소켓 안의 순서는 지켜지므로 welcome 뒤의
+ * 메시지는 새 방 것이다. pong · error · welcome은 늘 통과한다. 연습(기기 안 서버)은 이 거르기를 거치지 않는다
+ */
+export function staleAfterLeave(awaitingWelcome: boolean, type: string): boolean {
+  return awaitingWelcome && ROOM_MESSAGES.has(type);
 }
 
 /**
@@ -343,6 +370,8 @@ export function browserWakeLock(): WakeLockLike | null {
 
 /** 뒤로 가기를 막는 기록 항목 표시 */
 const GUARD_STATE = { decoyGuard: 1 } as const;
+/** 걷어 내기의 popstate가 끝내 오지 않을 때 whenSettled를 대신 부르는 시간 (ms) */
+export const SETTLE_FALLBACK_MS = 1000;
 
 /**
  * 판 중 뒤로 가기 확인 (MOBILE_PLAN M12 8번, 터치 · 설치 앱만). 크롬은 사용자 활성화 없이 넣은 기록 항목을 뒤로 가기에서
@@ -355,6 +384,8 @@ export class BackGuard {
   private armed = false;
   private pushed: boolean;
   private ignorePops = 0;
+  private settled: (() => void)[] = [];
+  private settleTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly history: Pick<History, 'pushState' | 'back'>,
@@ -383,6 +414,26 @@ export class BackGuard {
     this.history.back();
   }
 
+  /**
+   * 걷어 내기(disarm)의 뒤로 순회가 끝난 뒤에 fn을 부른다 (순회 중이 아니면 바로). history.back()은 순회를 큐에 넣을 뿐이라,
+   * 그 전에 replaceState로 주소를 고치면 걷어 낼 내 항목의 주소만 바뀌고 순회 뒤 아래 항목의 주소(?room)가 남는다
+   * (출시 전 검토의 수정 검토). popstate가 끝내 오지 않으면 fallbackMs 뒤에 부른다
+   */
+  whenSettled(fn: () => void, fallbackMs = SETTLE_FALLBACK_MS): void {
+    if (this.ignorePops === 0) {
+      fn();
+      return;
+    }
+    this.settled.push(fn);
+    this.settleTimer ??= globalThis.setTimeout(() => this.flushSettled(), fallbackMs);
+  }
+
+  private flushSettled(): void {
+    if (this.settleTimer !== null) globalThis.clearTimeout(this.settleTimer);
+    this.settleTimer = null;
+    for (const fn of this.settled.splice(0)) fn();
+  }
+
   /** 사용자 활성화가 있는 핸들러 안 (판 안 탭 · "계속" 버튼) */
   gesture(): void {
     if (!this.armed || this.pushed) return;
@@ -394,6 +445,7 @@ export class BackGuard {
   popped(): boolean {
     if (this.ignorePops > 0) {
       this.ignorePops -= 1;
+      if (this.ignorePops === 0) this.flushSettled();
       return true;
     }
     if (!this.pushed) return false;
@@ -401,6 +453,18 @@ export class BackGuard {
     if (this.armed) this.onBack();
     return true;
   }
+}
+
+/**
+ * 판 중 뒤로 가기 확인의 종류 (문구와 '나가기'가 다르다): 친구 방 판(30초 유예) · 빠른 매칭 판(유예 없이 바로 판정,
+ * 검토 반영 F10) · 연습 판(기기 안 판을 닫고 첫 화면으로, 검토 반영 F16)
+ */
+export type LeaveKind = 'match' | 'quick' | 'practice';
+
+/** 지금 판의 뒤로 가기 확인 종류. 연습(기기 안 서버)이 먼저다 — 연습 방도 로비 상태(kind 'practice')를 갖는다 */
+export function leaveKindFor(practicing: boolean, roomKind: RoomKind | null): LeaveKind {
+  if (practicing) return 'practice';
+  return roomKind === 'quick' ? 'quick' : 'match';
 }
 
 // ───────────── 시험 훅 ─────────────

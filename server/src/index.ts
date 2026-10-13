@@ -4,7 +4,7 @@ import type { Duplex } from 'node:stream';
 import { performance } from 'node:perf_hooks';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { LagQueue, Rng } from '@decoy/shared';
-import { BotDriver, ServerCore, practiceBrain, truthOf, type Conn, type Room } from '@decoy/shared/sim';
+import { ServerCore, truthOf, type Conn, type Room } from '@decoy/shared/sim';
 import {
   BUILD_HEADER,
   HEALTH_PATH,
@@ -20,6 +20,7 @@ import { serveStatic } from './static';
 import { TruthLog } from './truthLog';
 import { ASSETLINKS_PATH, assetLinksFromEnv } from './wellKnown';
 import { spawnLocalBot } from './bots';
+import { createQuickBots } from './quickBots';
 
 const options = parseOptions(process.argv.slice(2), process.env);
 const balance = loadBalance(options.balancePath);
@@ -33,21 +34,14 @@ const servePrivacy = privacyHandler(options.staticDir, process.env);
 const truthLog = options.truthLogPath ? new TruthLog(options.truthLogPath) : null;
 const lagRng = new Rng(options.seed ^ 0x5bd1e995);
 
-/** 방 코드 → 정수 (한 방의 봇이 같은 시드를 쓰게) */
-function codeSeed(code: string): number {
-  let h = options.seed | 0;
-  for (let i = 0; i < code.length; i += 1) h = (Math.imul(h, 31) + code.charCodeAt(i)) | 0;
-  return h;
-}
+// 빠른 매칭 빈자리 봇 (M13c): 같은 프로세스 실전 봇 (quickBots.ts). 실전 봇 지도를 여기서(listen 전) 미리 계산한다 —
+// 서버 시작 뒤 첫 봇 판의 시작 틱 안에서 계산하지 않게 (출시 전 검토)
+const quickBots = createQuickBots(balance, options.seed);
 
-// 빠른 매칭 빈자리 봇 (M13c): 같은 프로세스 실전 봇 (기기 안 연습과 같은 두뇌 · 드라이버, 소켓 없음).
-// 한 방의 봇은 같은 시드 (생존자 봇의 점령 계획이 서로 맞물린다), 판마다 다르게 판 수를 섞는다
-const quickBots = new BotDriver(
-  (info, _seat, room) => practiceBrain(info.role, (codeSeed(room.code) + room.matchCount * 7919) | 0),
-  balance,
-);
-
-/** 지금 봇을 채워 판을 하는 빠른 매칭 방 수 (동시 봇 방 상한, DECISIONS M13c) */
+/**
+ * 지금 봇을 채워 판을 하는 빠른 매칭 방 수 (동시 봇 방 상한, DECISIONS M13c). 개발용 봇 방(?bots=1)은 세지 않는다 —
+ * 배포 서버에서는 꺼져 있다(options.devBots)
+ */
 function botRoomsPlaying(except: Room): number {
   let n = 0;
   for (const r of core.manager.rooms.values())
@@ -57,11 +51,11 @@ function botRoomsPlaying(except: Room): number {
 
 // 방 · 연결 처리 · 틱 스케줄러는 기기 안 연습과 같은 코드 (shared/src/sim/core.ts). 여기는 HTTP · ws 소켓 · setInterval만
 const core = new ServerCore(
-  { balance, seed: options.seed, testHooks: options.testHooks, buildId },
+  { balance, seed: options.seed, testHooks: options.testHooks, buildId, devBots: options.devBots },
   {
     log: (m) => console.log(m),
     recordTruth: truthLog ? (room) => truthLog.record(room) : undefined,
-    // ?bots=1 개발용 방은 WebSocket 봇, 빠른 매칭은 같은 프로세스 실전 봇
+    // ?bots=1 개발용 방(개발 서버에서만)은 WebSocket 봇, 빠른 매칭은 같은 프로세스 실전 봇
     spawnBot: (room, seat) => {
       if (room.kind === 'quick') quickBots.attach(room, seat);
       else spawnLocalBot(`ws://127.0.0.1:${actualPort()}/ws`, room.code, seat.token);
@@ -255,8 +249,11 @@ setInterval(() => core.advance(performance.now()), core.tickMs / 4);
 
 httpServer.listen(options.port, options.host, () => {
   const lag = options.lag > 0 ? ` (지연 ${options.lag}ms)` : '';
-  const hooks = options.testHooks ? ' [테스트 훅]' : '';
-  console.log(`DECOY 서버 시작: http://localhost:${actualPort()}${lag}${hooks}`);
+  const hooks = (options.testHooks ? ' [테스트 훅]' : '') + (options.devBots ? ' [개발용 봇 방]' : '');
+  // 봇 방 상한은 Render 로그에서 환경 변수(DECOY_MAX_BOT_ROOMS)가 들어갔는지 확인하라고 같이 찍는다
+  console.log(
+    `DECOY 서버 시작: http://localhost:${actualPort()}${lag}${hooks} (빠른 매칭 봇 방 상한 ${options.maxBotRooms})`,
+  );
 });
 
 // 종료 신호: 컨테이너에서 PID 1로 돌면 Node가 SIGTERM · SIGINT를 기본 처리하지 않으므로 직접 끝낸다

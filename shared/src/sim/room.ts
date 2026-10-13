@@ -25,7 +25,7 @@ import {
 import { Game } from './game';
 import { AliasBook, buildSnapshot, computeVisibility } from './interest';
 import { newSeatToken } from './random';
-import { applyDropExpired, buildResult } from './systems/match';
+import { applyDropExpired, buildResult, finish } from './systems/match';
 
 export interface Conn {
   readonly id: number;
@@ -82,6 +82,12 @@ export interface RoomConfig {
   practice?: boolean;
   /** 서버 빌드 ID (M13d): welcome · pong에 실어 화면 빌드와 비교하게 한다. 없으면 null */
   buildId?: string | null;
+  /**
+   * 개발용 봇 방(`?bots=1`, join.bots)을 받는가 (출시 전 검토). false면 join.bots를 무시하고 일반 방을 만든다 —
+   * 배포 서버는 끈다(server/src/config.ts: --dev · --test-hooks · DECOY_DEV_BOTS=1일 때만 켬). 없으면 받는다
+   * (단위 시험 · 측정 스크립트). 연습 · 빠른 매칭은 방 종류(kind)로 봇을 채우므로 이 값과 무관하다
+   */
+  devBots?: boolean;
 }
 
 const ALL_ROLES: readonly Role[] = ['monster', ...ROLE_IDS];
@@ -91,6 +97,8 @@ export const ROOM_IDLE_TIMEOUT_MS = 60_000;
 export const QUICK_STALE_MS = 3000;
 /** 빠른 매칭: 봇을 채우지 못해 사람만 기다리는 중 (로비 안내) */
 export const WAITING_HUMANS_ONLY = '사람만 기다리는 중';
+/** 빠른 매칭에서 다른 사람의 익명 이름을 찾지 못했을 때 (실제 닉네임으로 돌아가지 않게) */
+export const ANON_NAME_FALLBACK = '플레이어';
 
 export class Room {
   phase: RoomPhase = 'lobby';
@@ -101,8 +109,15 @@ export class Room {
   private aliases = new AliasBook();
   /** 이번 판에 괴물이 끊겨 있던 시간의 합 (초). 재접속해도 줄지 않는다 */
   private monsterAway = 0;
+  /** 이번 판에 '나가기'로 빠진 사람 자리 (끊김과 달리 돌아오지 않는다고 본다) */
+  private leftInMatch = new Set<string>();
   matchCount = 0;
   lastResult: Extract<ServerMessage, { t: 'result' }> | null = null;
+  /**
+   * 판이 끝난 순간의 자리별 익명 이름 · 봇 여부 (결과를 다시 보낼 때). 결과 단계에서 다시 하기 · 나가기 · 유예 만료로
+   * 자리가 지워져도 결과 줄의 이름을 익명으로 보내기 위해 (빠른 매칭, 출시 전 검토)
+   */
+  private resultSeats = new Map<string, { alias: string; bot: boolean }>();
   emptySince: number | null = null;
   private joinCounter = 0;
   private readonly rng: Rng;
@@ -187,6 +202,7 @@ export class Room {
     seat.conn = conn;
     seat.droppedAt = null;
     seat.lastLobby = null;
+    this.leftInMatch.delete(seat.id);
     this.emptySince = null;
     const p = this.game?.players.get(seat.id);
     if (p) {
@@ -207,7 +223,7 @@ export class Room {
       balanceHash: this.balanceHash,
       build: this.config.buildId ?? null,
     });
-    this.sendLobby();
+    this.sendLobby(seat);
     if (this.phase === 'playing' && this.game) seat.conn?.send({ t: 'match', info: this.matchInfo(seat) });
     if (this.phase === 'result' && this.lastResult) seat.conn?.send(this.resultFor(seat, this.lastResult));
   }
@@ -234,6 +250,7 @@ export class Room {
     if (this.phase === 'playing') {
       // 판 중 나가기는 유예 없이 바로 (M13c): 괴물이면 무효, 생존자면 사망 처리 후 판정
       this.detach(seat, nowMs);
+      this.leftInMatch.add(seat.id);
       const p = this.game?.players.get(seat.id);
       if (p) p.droppedFor = null;
       if (this.game) applyDropExpired(this.game, seat.id);
@@ -266,14 +283,19 @@ export class Room {
     };
   }
 
-  sendLobby(): void {
+  /**
+   * 자리마다 로비를 보낸다. 받는 사람에게 갈 내용이 지난번과 같으면 어느 단계든 보내지 않는다:
+   *  - 판 중: 괴물에게 "생존자 누군가 끊김 · 재접속"이 메시지 도착 자체로 새지 않게
+   *  - 로비: 내용 없는 메시지(같은 이름 · 거절된 역할 · 빠른 매칭 start)를 되풀이해 남의 대기 화면을 흔들지 못하게 (출시 전 검토)
+   * force(요청한 사람)에게는 같아도 보낸다: 거절된 요청에 지금 상태로 답한다. 재접속은 attach가 lastLobby를 비운다
+   */
+  sendLobby(force?: Seat): void {
     const full = this.lobbyState();
     for (const s of this.seats) {
       if (!s.conn) continue;
       const lobby = this.lobbyFor(s, full);
       const json = JSON.stringify(lobby);
-      // 판 중에는 내용이 같으면 보내지 않는다: 괴물에게 "생존자 누군가 끊김 · 재접속"이 메시지 도착 자체로 새지 않게
-      if (this.phase === 'playing' && json === s.lastLobby) continue;
+      if (s !== force && json === s.lastLobby) continue;
       s.lastLobby = json;
       s.conn.send({ t: 'lobby', lobby });
     }
@@ -292,19 +314,23 @@ export class Room {
       players: full.players.map((p): LobbyPlayer => {
         if (p.id === seat.id) return p;
         const other = this.seatById(p.id);
-        const masked = { ...p, name: other?.alias ?? p.name, bot: false };
+        const masked = { ...p, name: other?.alias ?? ANON_NAME_FALLBACK, bot: false };
         return monsterInMatch ? { ...masked, role: null, connected: true, ready: true } : masked;
       }),
     };
   }
 
-  /** 받는 사람별 결과: 봇 표시를 넣고, 빠른 매칭이면 다른 사람 이름을 익명으로 (M13c) */
+  /**
+   * 받는 사람별 결과: 봇 표시를 넣고, 빠른 매칭이면 다른 사람 이름을 익명으로 (M13c). 결과 단계에서 지워진 자리는
+   * 판이 끝난 순간의 기록(resultSeats)으로 찾고, 그래도 없으면 실제 닉네임 대신 "플레이어"
+   */
   resultFor(seat: Seat, msg: Extract<ServerMessage, { t: 'result' }>): ServerMessage {
     const result: MatchResult = {
       ...msg.result,
       players: msg.result.players.map((p) => {
-        const other = this.seatById(p.id);
-        const name = this.kind === 'quick' && p.id !== seat.id ? (other?.alias ?? p.name) : p.name;
+        const other = this.seatById(p.id) ?? this.resultSeats.get(p.id);
+        const name =
+          this.kind === 'quick' && p.id !== seat.id ? (other?.alias ?? ANON_NAME_FALLBACK) : p.name;
         return { ...p, name, bot: other?.bot ?? false };
       }),
     };
@@ -336,28 +362,29 @@ export class Room {
         const role = msg.role;
         if (role !== null && !ALL_ROLES.includes(role)) return;
         if (role !== null && this.seats.some((s) => s !== seat && s.role === role)) {
-          this.sendLobby();
+          // 거절: 요청한 사람에게만 지금 상태로 답한다 (다른 사람에게는 바뀐 것이 없다)
+          this.sendLobby(seat);
           return;
         }
         seat.role = role;
         seat.ready = false;
-        this.sendLobby();
+        this.sendLobby(seat);
         return;
       }
       case 'ready':
         // 빠른 매칭에는 준비가 없다
         if (this.phase !== 'lobby' || this.kind === 'quick') return;
         seat.ready = msg.ready && seat.role !== null;
-        this.sendLobby();
+        this.sendLobby(seat);
         return;
       case 'name':
         seat.name = cleanName(msg.name) || seat.name;
-        this.sendLobby();
+        this.sendLobby(seat);
         return;
       case 'start':
         if (seat.id !== this.hostId) return;
         if (!this.startCheck().ok) {
-          this.sendLobby();
+          this.sendLobby(seat);
           return;
         }
         this.startMatch();
@@ -433,10 +460,21 @@ export class Room {
       .map((s) => ({ id: s.id, name: s.name, role: s.role, bot: s.bot }));
     this.matchCount += 1;
     this.game = new Game(setup, this.config.balance, { seed: this.rng.int(2 ** 31) });
+    // 시작 순간 연결이 없는 사람 자리(빠른 매칭: 최근 3초 안에 소식은 있었지만 그사이 소켓이 닫힘)는 판에서도
+    // 끊김으로 시작한다 — 9장 유예: 괴물이면 판 정지 뒤 무효, 생존자면 유예 뒤 사망, 돌아오면(attach) 이어서 (출시 전 검토)
+    for (const s of this.seats) {
+      if (s.bot || s.conn !== null) continue;
+      const p = this.game.players.get(s.id);
+      if (!p) continue;
+      p.connected = false;
+      p.droppedFor = 0;
+    }
     this.aliases = new AliasBook();
     this.monsterAway = 0;
+    this.leftInMatch.clear();
     this.phase = 'playing';
     this.lastResult = null;
+    this.resultSeats.clear();
     for (const s of this.seats) s.conn?.send({ t: 'match', info: this.matchInfo(s) });
     for (const s of this.seats) s.matchesPlayed += 1;
     this.sendLobby();
@@ -451,6 +489,8 @@ export class Room {
     const result = buildResult(game);
     this.phase = 'result';
     this.lastResult = { t: 'result', result };
+    // 판 중에는 자리가 지워지지 않으므로 여기에 이번 판 자리가 모두 있다
+    this.resultSeats = new Map(this.seats.map((s) => [s.id, { alias: s.alias, bot: s.bot }]));
     for (const s of this.seats) {
       const last = this.lastResult;
       s.conn?.send(this.resultFor(s, last));
@@ -465,6 +505,7 @@ export class Room {
     this.phase = 'lobby';
     this.game = null;
     this.lastResult = null;
+    this.resultSeats.clear();
     // 봇 자리는 비우고, 사람은 역할을 유지한 채 준비만 푼다
     for (let i = this.seats.length - 1; i >= 0; i -= 1) {
       const s = this.seats[i];
@@ -495,6 +536,13 @@ export class Room {
     const game = this.game;
     if (this.phase !== 'playing' || !game) return;
     this.updateDrops(game);
+    // 빠른 매칭: 사람이 모두 나갔으면(연결된 사람도, 끊김 유예 중인 사람도 없음) 봇끼리 판을 계속하지 않고 무효로 끝낸다
+    // (봇 방 상한 한 칸을 60초 동안 차지하지 않게, 출시 전 검토). 끊김 유예 중인 사람이 있으면 그대로 기다린다.
+    // 최후의 30초(생존자 승리 확정) 중이면 무효가 아니라 생존자 승리 — 괴물 나가기와 같은 규칙(9장)
+    if (this.kind === 'quick' && !game.end && this.humansGone(game, nowMs)) {
+      if (game.grace !== null) finish(game, 'survivors', 'escaped');
+      else finish(game, 'void', 'humansLeft');
+    }
     this.hooks.beforeStep?.(this);
     game.step();
     this.hooks.recordTruth?.(this);
@@ -539,6 +587,20 @@ export class Room {
       else applyDropExpired(game, s.id);
     }
     game.paused = monsterAway && !game.end ? Math.max(0, grace - this.monsterAway) : null;
+  }
+
+  /**
+   * 판에 사람이 아무도 없다: 연결된 사람도, 끊김 유예를 세는 사람도 없다 (나가기 · 유예 만료). 사망 · 탈출해 관전하던
+   * 사람은 끊겨도 판정 유예(droppedFor)를 세지 않으므로, 끊긴 지 유예 시간이 지나야 나간 것으로 본다 — 그 전에 돌아오면
+   * 이어서 관전하고 결과를 받는다 (9장, 출시 전 검토의 수정 검토)
+   */
+  private humansGone(game: Game, nowMs: number): boolean {
+    const graceMs = this.config.balance.match.reconnectGrace * 1000;
+    return this.humanSeats.every((s) => {
+      if (s.conn !== null || (game.players.get(s.id)?.droppedFor ?? null) !== null) return false;
+      if (this.leftInMatch.has(s.id) || s.droppedAt === null) return true;
+      return nowMs - s.droppedAt >= graceMs;
+    });
   }
 
   /**
@@ -741,8 +803,21 @@ export class RoomManager {
         };
     }
     if (!msg.create) return { error: { t: 'error', code: 'bad-request', message: '방 코드가 필요합니다' } };
-    const room = this.createRoom(Boolean(msg.bots));
+    // 개발용 봇 방(?bots=1)은 개발 서버에서만 (배포 서버에서는 일반 방, 출시 전 검토)
+    const room = this.createRoom(Boolean(msg.bots) && this.config.devBots !== false);
     return { room, seat: room.addSeat(conn, msg.name, false, nowMs) };
+  }
+
+  /**
+   * 나가기로 사람 자리가 하나도 남지 않은 로비 · 결과 단계 방은 빈 방 시계(60초)를 기다리지 않고 바로 지운다
+   * (연결 하나로 방 만들기 · 나가기를 되풀이해 빈 방을 쌓지 못하게, 출시 전 검토). 남은 봇 연결(결과 단계)은 닫는다.
+   * 판 중인 방 · 끊겨 유예 중인 사람 자리가 남은 방은 그대로
+   */
+  dropIfAbandoned(room: Room): void {
+    if (room.phase === 'playing' || room.humanSeats.length > 0) return;
+    if (this.rooms.get(room.code) !== room) return;
+    this.rooms.delete(room.code);
+    for (const s of room.seats) s.conn?.close();
   }
 
   tick(nowMs: number): void {

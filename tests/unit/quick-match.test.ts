@@ -5,6 +5,7 @@ import type { ClientMessage, Role, ServerMessage } from '@decoy/shared';
 import {
   BotDriver,
   QUICK_STALE_MS,
+  ROOM_IDLE_TIMEOUT_MS,
   ServerCore,
   WAITING_HUMANS_ONLY,
   devBotBrain,
@@ -25,7 +26,7 @@ interface Client {
   name: string;
 }
 
-function setup(opts: { canFillBots?: () => boolean } = {}): {
+function setup(opts: { canFillBots?: (room: Room) => boolean } = {}): {
   core: ServerCore;
   clock: { t: number };
   logs: string[];
@@ -75,6 +76,27 @@ function roomOf(core: ServerCore, c: Client): Room {
   if (!room) throw new Error(`${c.name}: 방 없음`);
   return room;
 }
+
+/** 소켓을 닫고 새 연결로 같은 자리 토큰을 들고 돌아온다 (새로고침 · 재연결) */
+function rejoin(env: ReturnType<typeof setup>, c: Client, code: string): Client {
+  const token = c.conn.last('welcome')?.token ?? null;
+  c.link.close();
+  const fresh = env.client(c.name);
+  fresh.link.receive(
+    raw({ t: 'join', room: code, create: false, name: c.name, token, altTokens: [], bots: false }),
+  );
+  return fresh;
+}
+
+/** 서버(server/src/index.ts)와 같은 방식으로 센 '봇을 채워 판 중인 빠른 매칭 방' 수 */
+function botRoomsPlaying(core: ServerCore, except: Room | null = null): number {
+  let n = 0;
+  for (const r of core.manager.rooms.values())
+    if (r !== except && r.kind === 'quick' && r.phase === 'playing' && r.seats.some((s) => s.bot)) n += 1;
+  return n;
+}
+
+const GRACE_MS = balance.match.reconnectGrace * 1000;
 
 describe('빠른 매칭: 대기열 · 자동 시작', () => {
   it('둘이 들어오면 같은 방, 대기 시간이 지나면 봇 2명과 시작 (역할을 안 고른 사람은 남은 역할 중 하나)', () => {
@@ -153,6 +175,30 @@ describe('빠른 매칭: 대기열 · 자동 시작', () => {
     expect(QUICK_STALE_MS).toBe(3000);
   });
 
+  // 출시 전 검토: 대기열에서 빠진 연결이 지운 방 객체(다른 사람 닉네임 포함)를 연결이 닫힐 때까지 붙잡던 문제
+  it('대기열에서 빠진 연결은 다음 메시지(첫 화면 ping)에서 그 방을 놓고, 방이 지워진 뒤에도 붙잡지 않는다', () => {
+    const { core, client, run } = setup();
+    const a = client('살아');
+    const b = client('멈춤');
+    quick(a);
+    quick(b);
+    const room = roomOf(core, a);
+    run(2000, [a, b]);
+    run(WAIT_MS, [a]);
+    expect(b.conn.last('error')?.code).toBe('queue-dropped');
+    expect(room.phase).toBe('playing');
+    expect(a.link.boundRoom).toBe(room.code);
+    b.link.receive(raw({ t: 'ping', c: 1 }));
+    expect(b.conn.last('pong')).toBeDefined();
+    expect(b.link.boundRoom).toBeNull();
+    // 남은 사람도 나가 방이 지워진 뒤: 어느 연결도 그 방을 가리키지 않는다
+    a.link.receive(raw({ t: 'leave' }));
+    run(ROOM_IDLE_TIMEOUT_MS + 1000, [b]);
+    expect(core.manager.rooms.has(room.code)).toBe(false);
+    expect(a.link.boundRoom).toBeNull();
+    expect(b.link.boundRoom).toBeNull();
+  });
+
   it('방 코드 방은 매칭에 섞이지 않고, 빠른 매칭 방에는 코드로 새로 들어갈 수 없다', () => {
     const { core, client } = setup();
     const host = client('방장');
@@ -180,6 +226,42 @@ describe('빠른 매칭: 대기열 · 자동 시작', () => {
     expect(quickRoom.seats).toHaveLength(1);
   });
 
+  // 출시 전 검토: 대기 방에 들어온 모르는 사람이 내용 없는 메시지를 되풀이해 다른 사람 대기 화면에 lobby를 쏟아붓던 문제
+  // (받을 때마다 화면을 다시 그려 역할 카드 · 취소를 누를 수 없었다). 같은 내용은 어느 단계든 다시 보내지 않는다
+  it('같은 이름 · 남이 가진 역할 · start를 100번씩 보내도 다른 사람에게 lobby가 다시 가지 않고, 실제로 바뀌면 간다', () => {
+    const { core, client } = setup();
+    // 흔드는 쪽이 먼저 들어와 방장이다 (빠른 매칭에는 방장 시작이 없어 start는 늘 거절된다)
+    const b = client('흔들기');
+    const a = client('기다림');
+    quick(b);
+    quick(a);
+    const room = roomOf(core, a);
+    expect(roomOf(core, b)).toBe(room);
+    expect(room.hostId).toBe(b.conn.last('welcome')?.you);
+    a.link.receive(raw({ t: 'role', role: 'monster' }));
+    const aBefore = a.conn.count('lobby');
+    const bBefore = b.conn.count('lobby');
+    for (let i = 0; i < 100; i += 1) {
+      b.link.receive(raw({ t: 'name', name: b.name }));
+      b.link.receive(raw({ t: 'role', role: 'monster' }));
+      b.link.receive(raw({ t: 'start' }));
+    }
+    // 빠른 매칭에서 남의 이름은 익명이라, b가 이름을 바꿔도 a가 받을 내용은 같다
+    b.link.receive(raw({ t: 'name', name: '새이름' }));
+    expect(a.conn.count('lobby')).toBe(aBefore);
+    expect(room.phase).toBe('lobby');
+    // 요청한 사람에게는 늘 답한다 (거절된 역할 · 시작 → 지금 상태로 화면을 되돌린다)
+    expect(b.conn.count('lobby') - bBefore).toBeGreaterThanOrEqual(200);
+    expect(room.seats.find((s) => s.name === '새이름')?.role).toBeNull();
+    // 실제로 바뀌면 간다
+    b.link.receive(raw({ t: 'role', role: 'guard' }));
+    expect(a.conn.count('lobby')).toBe(aBefore + 1);
+    const aId = a.conn.last('welcome')?.you;
+    const other = a.conn.last('lobby')?.lobby.players.find((p) => p.id !== aId);
+    expect(other?.role).toBe('guard');
+    expect(other?.name).toMatch(/^플레이어 [1-4]$/);
+  });
+
   it('대기 중 나가기(숨김 · 취소)는 자리를 지운다', () => {
     const { core, client } = setup();
     const a = client('가');
@@ -190,6 +272,87 @@ describe('빠른 매칭: 대기열 · 자동 시작', () => {
     b.link.receive(raw({ t: 'leave' }));
     expect(room.seats).toHaveLength(1);
     expect(a.conn.last('lobby')?.lobby.players).toHaveLength(1);
+  });
+});
+
+// 출시 전 검토: 3초 안에 소식은 있었지만 자동 시작 직전에 소켓이 닫힌 자리는 판에 남되, 판에서도 '끊김'으로 시작한다
+// (9장 유예). 옛 코드는 '연결됨'으로 시작해 괴물이면 판이 멈추지도 무효가 되지도 않았다
+describe('빠른 매칭: 자동 시작 직전에 소켓이 닫힌 자리 (9장 유예)', () => {
+  function closedBeforeStart(closer: 'monster' | 'survivor'): ReturnType<typeof setup> & {
+    mon: Client;
+    sur: Client;
+    room: Room;
+  } {
+    const env = setup();
+    const mon = env.client('괴물');
+    const sur = env.client('생존');
+    quick(mon);
+    quick(sur);
+    mon.link.receive(raw({ t: 'role', role: 'monster' }));
+    sur.link.receive(raw({ t: 'role', role: 'runner' }));
+    const room = roomOf(env.core, mon);
+    env.run(WAIT_MS - 1500, [mon, sur]);
+    const gone = closer === 'monster' ? mon : sur;
+    const stays = closer === 'monster' ? sur : mon;
+    gone.link.close();
+    env.run(2000, [stays]);
+    expect(room.phase).toBe('playing');
+    // 빠지지 않고 판에 남았다 (봇으로 바뀌지 않음)
+    const seat = room.seats.find((s) => s.name === gone.name);
+    expect(seat?.bot).toBe(false);
+    expect(room.game?.players.get(seat?.id ?? '')?.connected).toBe(false);
+    return { ...env, mon, sur, room };
+  }
+
+  it('괴물 자리면 판이 멈추고, 유예(30초)가 지나도 돌아오지 않으면 무효', () => {
+    const { sur, room, run } = closedBeforeStart('monster');
+    expect(room.game?.paused).not.toBeNull();
+    run(GRACE_MS + 1000, [sur]);
+    expect(room.phase).toBe('result');
+    expect(sur.conn.last('result')?.result.winner).toBe('void');
+  });
+
+  it('생존자 자리면 판은 흐르고, 유예가 지나면 사망 처리', () => {
+    const { mon, room, run } = closedBeforeStart('survivor');
+    expect(room.game?.paused).toBeNull();
+    const id = room.seats.find((s) => s.name === '생존')?.id ?? '';
+    run(GRACE_MS + 1000, [mon]);
+    expect(room.game?.survivorById(id)?.status).toBe('dead');
+  });
+
+  it('유예 안에 같은 토큰으로 돌아오면 이어서 한다 (판 정지가 풀린다)', () => {
+    const env = closedBeforeStart('monster');
+    const { sur, room, run } = env;
+    run(5000, [sur]);
+    expect(room.game?.paused).not.toBeNull();
+    const back = rejoin(env, env.mon, room.code);
+    run(100, [back, sur]);
+    expect(room.phase).toBe('playing');
+    expect(room.game?.monster.connected).toBe(true);
+    expect(room.game?.paused).toBeNull();
+    expect(back.conn.last('match')?.info.role).toBe('monster');
+  });
+
+  it('4명이 차 바로 시작하는 경로에서도 직전에 닫힌 자리는 끊김으로 시작한다', () => {
+    const { core, client, run } = setup();
+    const cs = ['하나', '둘', '셋'].map((n) => client(n));
+    cs.forEach(quick);
+    cs[0]!.link.receive(raw({ t: 'role', role: 'monster' }));
+    const room = roomOf(core, cs[0]!);
+    run(1000, cs);
+    cs[1]!.link.close();
+    const fourth = client('넷');
+    quick(fourth);
+    expect(roomOf(core, fourth)).toBe(room);
+    run(100, [cs[0]!, cs[2]!, fourth]);
+    expect(room.phase).toBe('playing');
+    expect(room.seats.some((s) => s.bot)).toBe(false);
+    const seat = room.seats.find((s) => s.name === '둘');
+    expect(room.game?.players.get(seat?.id ?? '')?.connected).toBe(false);
+    for (const name of ['하나', '셋', '넷']) {
+      const s = room.seats.find((q) => q.name === name);
+      expect(room.game?.players.get(s?.id ?? '')?.connected).toBe(true);
+    }
   });
 });
 
@@ -262,6 +425,94 @@ describe('빠른 매칭: 판 중 · 판 뒤', () => {
     }
   });
 
+  // 출시 전 검토: 봇 표시는 결과 화면에서만 (GAME_DESIGN 11장, DECISIONS M13c). 괴물 쪽만 보던 시험을 생존자 명단 · 로비까지
+  it('결과 전에는 생존자의 match 명단 · 로비 원문에 다른 자리의 봇 여부가 없다 (괴물 쪽도)', () => {
+    const { a, b, room } = startedPair();
+    const botIds = room.seats.filter((s) => s.bot).map((s) => s.id);
+    expect(botIds).toHaveLength(2);
+    // b = 생존자: 4자리 명단을 받지만 자기 말고는 모두 봇 아님으로 보인다 (봇 자리 둘이 명단에 있다)
+    const info = b.conn.last('match')?.info;
+    expect(info?.role).toBe('runner');
+    expect(info?.roster).toHaveLength(4);
+    expect(info?.roster.filter((r) => botIds.includes(r.id))).toHaveLength(2);
+    for (const r of info?.roster ?? []) if (r.id !== info?.you) expect(r.bot).toBe(false);
+    for (const me of [a, b]) {
+      const beforeResult = me.conn.inbox.filter((m) => m.t !== 'snap' && m.t !== 'result');
+      expect(beforeResult.filter((m) => m.t === 'lobby').length).toBeGreaterThan(0);
+      expect(JSON.stringify(beforeResult)).not.toContain('"bot":true');
+    }
+  });
+
+  // 출시 전 검토: 결과 단계에서 자리가 지워진 뒤(다시 하기 · 나가기 · 유예 만료) 다시 보내는 결과에 그 사람 실제 닉네임이 갔다
+  it.each(['none', 'rematch', 'leave', 'drop'] as const)(
+    '결과 단계에서 다른 사람 자리가 지워져도(%s) 다시 접속해 받은 원문에 그 사람 닉네임이 없다',
+    (how) => {
+      const env = startedPair();
+      const { a, b, room, run } = env;
+      a.link.receive(raw({ t: 'test', cmd: { kind: 'setTime', timeLeft: 0.05 } }));
+      run(200, [a, b]);
+      expect(room.phase).toBe('result');
+      const aId = room.seats.find((s) => s.name === a.name)?.id ?? '';
+      const bId = room.seats.find((s) => s.name === b.name)?.id ?? '';
+      const seenAlias = b.conn.last('result')?.result.players.find((p) => p.id === aId)?.name;
+      expect(seenAlias).toMatch(/^플레이어 [1-4]$/);
+      if (how === 'rematch') a.link.receive(raw({ t: 'rematch' }));
+      else if (how === 'leave') a.link.receive(raw({ t: 'leave' }));
+      else if (how === 'drop') {
+        a.link.close();
+        run(GRACE_MS + 1000, [b]);
+      }
+      expect(room.seats.some((s) => s.id === aId)).toBe(how === 'none');
+      const fresh = rejoin(env, b, room.code);
+      const text = JSON.stringify(fresh.conn.inbox);
+      expect(text).not.toContain(a.name);
+      const result = fresh.conn.last('result')?.result;
+      expect(result?.players).toHaveLength(4);
+      for (const p of result?.players ?? []) if (p.id !== bId) expect(p.name).toMatch(/^플레이어 [1-4]$/);
+      // 처음 받은 결과와 같은 익명 이름, 봇 표시도 그대로
+      expect(result?.players.find((p) => p.id === aId)).toMatchObject({ name: seenAlias, bot: false });
+      expect(result?.players.filter((p) => p.bot)).toHaveLength(2);
+      expect(result?.players.find((p) => p.id === bId)?.name).toBe(b.name);
+    },
+  );
+
+  // 출시 전 검토: 생존자 승리가 확정된 '최후의 30초'에 괴물이 나가거나 끊겨도 무효가 아니라 생존자 승리 (9장)
+  function graceStarted(): ReturnType<typeof startedPair> {
+    const env = startedPair();
+    for (const s of env.room.seats.filter((q) => q.bot))
+      env.a.link.receive(raw({ t: 'test', cmd: { kind: 'setSurvivor', target: s.id, status: 'escaped' } }));
+    env.run(200, [env.a, env.b]);
+    expect(env.room.phase).toBe('playing');
+    expect(env.room.game?.grace).not.toBeNull();
+    return env;
+  }
+
+  it('최후의 30초 중 괴물이 나가면 무효가 아니라 생존자 승리 (탈출 2명 → 탈출 성공)', () => {
+    const { a, b, room, run } = graceStarted();
+    a.link.receive(raw({ t: 'leave' }));
+    run(100, [b]);
+    expect(room.phase).toBe('result');
+    expect(room.lastResult?.result.winner).toBe('survivors');
+    expect(b.conn.last('result')?.result).toMatchObject({
+      winner: 'survivors',
+      grade: 'success',
+      escaped: 2,
+    });
+  });
+
+  it('최후의 30초 중 괴물이 끊기면 판은 멈추고(유예 동안), 돌아오지 않으면 생존자 승리', () => {
+    const { a, b, room, run } = graceStarted();
+    const grace = room.game?.grace ?? 0;
+    a.link.close();
+    run(1000, [b]);
+    expect(room.phase).toBe('playing');
+    expect(room.game?.paused).not.toBeNull();
+    expect(room.game?.grace).toBeCloseTo(grace, 1);
+    run(GRACE_MS, [b]);
+    expect(room.phase).toBe('result');
+    expect(b.conn.last('result')?.result).toMatchObject({ winner: 'survivors', grade: 'success' });
+  });
+
   it('빠른 매칭 시작 직후 괴물이 받은 모든 메시지 원문에 다른 자리의 역할 문자열과 봇 여부가 없다', () => {
     const env = setup();
     const a = env.client('괴물');
@@ -303,10 +554,163 @@ describe('빠른 매칭: 판 중 · 판 뒤', () => {
   });
 });
 
+// 출시 전 검토: 사람이 모두 나간 빠른 매칭 판은 봇끼리 60초를 돌며 봇 방 상한 한 칸을 차지하지 않고 바로 무효로 끝난다.
+// 끊김(30초 유예) 중인 사람이 있으면 그대로 기다린다. 사람이 남지 않은 결과 방은 바로 지운다
+describe('빠른 매칭: 사람이 모두 나간 판 · 방', () => {
+  function soloPlaying(cap = Infinity): ReturnType<typeof setup> & { a: Client; room: Room } {
+    const env = setup({ canFillBots: (room) => botRoomsPlaying(env.core, room) < cap });
+    const a = env.client('혼자');
+    quick(a);
+    a.link.receive(raw({ t: 'role', role: 'runner' }));
+    env.run(WAIT_MS + 100, [a]);
+    const room = roomOf(env.core, a);
+    expect(room.phase).toBe('playing');
+    expect(room.seats.filter((s) => s.bot)).toHaveLength(3);
+    return { ...env, a, room };
+  }
+
+  it('혼자 봇 셋과 하다가 나가면 곧 무효로 끝나고, 봇 방으로 세지 않는다', () => {
+    const { core, a, room, run } = soloPlaying();
+    expect(botRoomsPlaying(core)).toBe(1);
+    a.link.receive(raw({ t: 'leave' }));
+    run(100);
+    expect(room.phase).toBe('result');
+    expect(room.lastResult?.result.winner).toBe('void');
+    expect(botRoomsPlaying(core)).toBe(0);
+  });
+
+  it('혼자 하던 사람이 끊긴 채 유예(30초)가 지나면 그때 무효 (유예 동안은 그대로)', () => {
+    const { a, room, run } = soloPlaying();
+    a.link.close();
+    run(GRACE_MS - 1000);
+    expect(room.phase).toBe('playing');
+    run(2000);
+    expect(room.phase).toBe('result');
+    expect(room.lastResult?.result.winner).toBe('void');
+  });
+
+  // 사망 · 탈출 뒤 관전 중인 사람은 끊겨도 판정 유예를 세지 않는다. 그래도 소켓이 잠깐 닫힌 것(망 전환 · 백그라운드)을
+  // '모두 나감'으로 보면 안 된다 (출시 전 검토의 수정 검토)
+  it.each(['escaped', 'dead'] as const)(
+    '혼자 하던 사람이 %s 뒤 관전 중 잠깐 끊겼다 돌아오면 판은 그대로, 안 돌아오면 유예 뒤 무효',
+    (status) => {
+      const env = soloPlaying();
+      const { a, room, run } = env;
+      const me = room.seats.find((s) => !s.bot);
+      a.link.receive(raw({ t: 'test', cmd: { kind: 'setSurvivor', target: me?.id ?? '', status } }));
+      run(200, [a]);
+      expect(room.phase).toBe('playing');
+      const back = rejoin(env, a, room.code);
+      // rejoin은 닫고 바로 붙는다: 다시 닫고 5초 뒤 돌아온다
+      back.link.close();
+      run(5000);
+      expect(room.phase).toBe('playing');
+      const again = rejoin(env, back, room.code);
+      run(100, [again]);
+      expect(room.phase).toBe('playing');
+      expect(again.conn.last('welcome')?.room).toBe(room.code);
+      // 이번에는 돌아오지 않는다
+      again.link.close();
+      run(GRACE_MS - 1000);
+      expect(room.phase).toBe('playing');
+      run(2000);
+      expect(room.phase).toBe('result');
+      expect(room.lastResult?.result.winner).toBe('void');
+    },
+  );
+
+  it('최후의 30초(생존자 승리 확정) 중에 사람이 모두 나가면 무효가 아니라 생존자 승리', () => {
+    const { a, room, run } = soloPlaying();
+    // 사람(러너)과 봇 생존자 하나가 탈출 → 최후의 30초
+    const me = room.seats.find((s) => !s.bot);
+    const botSurvivor = room.seats.find((s) => s.bot && s.role !== 'monster');
+    for (const s of [me, botSurvivor])
+      a.link.receive(
+        raw({ t: 'test', cmd: { kind: 'setSurvivor', target: s?.id ?? '', status: 'escaped' } }),
+      );
+    run(200, [a]);
+    expect(room.phase).toBe('playing');
+    expect(room.game?.grace).not.toBeNull();
+    a.link.receive(raw({ t: 'leave' }));
+    run(100);
+    expect(room.phase).toBe('result');
+    expect(room.lastResult?.result).toMatchObject({ winner: 'survivors', escaped: 2 });
+  });
+
+  it('끊김 유예 중인 사람이 남아 있으면 다른 사람이 나가도 판은 계속되고, 그 사람은 돌아올 수 있다', () => {
+    const env = setup();
+    const a = env.client('나감');
+    const b = env.client('끊김');
+    quick(a);
+    quick(b);
+    a.link.receive(raw({ t: 'role', role: 'runner' }));
+    b.link.receive(raw({ t: 'role', role: 'guard' }));
+    env.run(WAIT_MS + 100, [a, b]);
+    const room = roomOf(env.core, a);
+    expect(room.phase).toBe('playing');
+    b.link.close();
+    a.link.receive(raw({ t: 'leave' }));
+    env.run(5000);
+    expect(room.phase).toBe('playing');
+    const back = rejoin(env, b, room.code);
+    env.run(100, [back]);
+    expect(room.phase).toBe('playing');
+    const seat = room.seats.find((s) => s.name === '끊김');
+    expect(room.game?.players.get(seat?.id ?? '')?.connected).toBe(true);
+  });
+
+  it('봇 방 상한 1: 앞사람이 나간 방이 상한을 붙잡지 않아 다음 사람이 바로 봇과 시작한다', () => {
+    const env = soloPlaying(1);
+    const { a, client, run, core } = env;
+    a.link.receive(raw({ t: 'leave' }));
+    const b = client('다음');
+    quick(b);
+    const next = roomOf(core, b);
+    expect(next).not.toBe(env.room);
+    run(WAIT_MS + 200, [b]);
+    expect(next.phase).toBe('playing');
+    expect(next.seats.filter((s) => s.bot)).toHaveLength(3);
+    expect(b.conn.last('lobby')?.lobby.waitingFor).not.toBe(WAITING_HUMANS_ONLY);
+  });
+
+  it.each(['rematch', 'leave'] as const)(
+    '결과 단계에서 마지막 사람이 %s를 보내면 옛 방은 바로 지워지고 봇 연결도 닫힌다',
+    (how) => {
+      const { a, core, driver, room, run } = soloPlaying();
+      a.link.receive(raw({ t: 'test', cmd: { kind: 'setTime', timeLeft: 0.05 } }));
+      run(200, [a]);
+      expect(room.phase).toBe('result');
+      const bots = driver.botsOf(room);
+      expect(bots).toHaveLength(3);
+      a.link.receive(raw({ t: how }));
+      expect(core.manager.rooms.has(room.code)).toBe(false);
+      expect(bots.every((bot) => bot.closed)).toBe(true);
+      // 다시 하기는 새 대기열 방 하나만 남는다
+      expect(core.manager.rooms.size).toBe(how === 'rematch' ? 1 : 0);
+    },
+  );
+
+  it('결과 단계에서 다른 사람이 남아 있으면 한 사람이 나가도 방은 남고, 마지막 사람까지 나가면 지운다', () => {
+    const env = setup();
+    const a = env.client('가');
+    const b = env.client('나');
+    quick(a);
+    quick(b);
+    env.run(WAIT_MS + 100, [a, b]);
+    const room = roomOf(env.core, a);
+    a.link.receive(raw({ t: 'test', cmd: { kind: 'setTime', timeLeft: 0.05 } }));
+    env.run(200, [a, b]);
+    expect(room.phase).toBe('result');
+    a.link.receive(raw({ t: 'leave' }));
+    expect(env.core.manager.rooms.get(room.code)).toBe(room);
+    b.link.receive(raw({ t: 'leave' }));
+    expect(env.core.manager.rooms.has(room.code)).toBe(false);
+  });
+});
+
 describe('빠른 매칭: 동시 봇 방 상한', () => {
   it('상한이면 봇을 채우지 않고 "사람만 기다리는 중", 4명이 모이면 시작', () => {
-    let allow = false;
-    const { core, client, run } = setup({ canFillBots: () => allow });
+    const { core, client, run } = setup({ canFillBots: () => false });
     const a = client('가');
     quick(a);
     const room = roomOf(core, a);
@@ -320,8 +724,24 @@ describe('빠른 매칭: 동시 봇 방 상한', () => {
     run(100, [a, ...others]);
     expect(room.phase).toBe('playing');
     expect(room.seats.some((s) => s.bot)).toBe(false);
-    void allow;
+  });
+
+  it('상한이 풀리면 다음 틱에 빈자리를 봇으로 채워 시작한다 ("사람만 기다리는 중" → 봇과 판)', () => {
+    let allow = false;
+    const { core, client, run } = setup({ canFillBots: () => allow });
+    const a = client('가');
+    quick(a);
+    const room = roomOf(core, a);
+    run(WAIT_MS + 200, [a]);
+    expect(room.phase).toBe('lobby');
+    expect(a.conn.last('lobby')?.lobby).toMatchObject({ waitingFor: WAITING_HUMANS_ONLY, autoStartAt: null });
+    expect(a.conn.count('match')).toBe(0);
     allow = true;
+    run(100, [a]);
+    expect(room.phase).toBe('playing');
+    expect(room.seats.filter((s) => s.bot)).toHaveLength(3);
+    expect(a.conn.count('match')).toBe(1);
+    expect(a.conn.last('lobby')?.lobby.waitingFor).not.toBe(WAITING_HUMANS_ONLY);
   });
 });
 

@@ -3,15 +3,19 @@
 // 돌려 시작해도 · 세로인 채 시작하면 가로가 될 때까지 판 장면을 미뤄(세로 · 가로 크기가 비대칭이어도) · 판 중 회전해도 가로 기준
 // 논리 크기, 안전 영역(CDP setSafeAreaInsetsOverride) 안쪽, 로비 · 결과가 낮은 휴대폰에서 화면 안(또는 스크롤로 닿음)이고 가로
 // 스크롤 없음, 터치 로비가 판 배치로 미리 구움, PC는 1920×1080 배치 그대로.
+// 검토 반영: 태블릿 가로 · 낮은 노트북 창에서 첫 화면 · 연습 역할 고르기 · 빠른 매칭 대기가 스크롤 없이 한 화면(F19), 결과 버튼이
+// 아래 24px 띠 밖(1024×640 태블릿 포함), 처리방침 링크 48px(F20), 연습 역할 격자 arming 동안 탭이 버튼에 닿지 않음(F17).
 // 혼자 봇 방(?bots=1)에서 판을 시작한다. 판 배치 · 캔버스는 판 장면이 생긴 뒤(배치 적용 뒤)에 읽는다. 기능 시험은 기기 배율 1.
 // 느린 CI 대비: 간격 폴링(100~200ms)
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import type { HudLayout, HudLayoutItem, Role, TouchTarget } from '@decoy/shared';
 import {
+  BASE_QUERY,
   PHONE_BROWSER,
   PHONE_LANDSCAPE,
   PHONE_NARROW,
   PHONE_SMALL,
+  TABLET_LANDSCAPE,
   createRoom,
   dpr1,
   myId,
@@ -24,6 +28,7 @@ import {
   type DeviceOptions,
 } from './helpers';
 import {
+  TOUCH_LAYOUT,
   centerOf,
   emulateSafeArea,
   measureTouchLayout,
@@ -485,14 +490,16 @@ async function outsideSafe(
 
 // ───────────── 로비 · 결과 ─────────────
 
-test('로비 · 결과: 640×360 · 802×293에서 버튼이 화면 안(또는 스크롤로 닿음), 가로 스크롤 없음', async ({
+test('로비 · 결과: 640×360 · 802×293 · 태블릿 1024×640에서 버튼이 화면 안(또는 스크롤로 닿음), 결과 버튼은 처음 뜬 화면에서 아래 24px 띠 밖, 가로 스크롤 없음', async ({
   browser,
 }) => {
-  test.setTimeout(150_000);
+  test.setTimeout(210_000);
   const none = { left: 0, right: 0, bottom: 0 };
   for (const [name, device] of [
     ['640×360', touchDevice(640, 360)],
     ['802×293', dpr1(PHONE_SMALL)],
+    // 태블릿 가로: 넓은 결과 배치에서는 버튼 아래끝(616.2)이 띠(616)에 걸렸다 (검토 반영, F18 후속)
+    ['태블릿 1024×640', dpr1(TABLET_LANDSCAPE)],
   ] as const) {
     const s = await soloMatch(browser, device, 'runner', {
       beforeStart: async (page) => {
@@ -505,6 +512,20 @@ test('로비 · 결과: 640×360 · 802×293에서 버튼이 화면 안(또는 �
     await waitForTouchTarget(page, 'move-zone');
     await sendTest(page, { kind: 'setTime', timeLeft: 0.1 });
     await expect(page.getByTestId('result')).toBeVisible({ timeout: 15_000 });
+    // 처음 뜬 화면(스크롤 전): 홈으로 · 다시 하기 아래끝이 아래 24px 띠(안드로이드 홈 제스처) 밖 — 판 터치 대상과 같은 규칙
+    const feet = await page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('[data-testid="result"] .result-foot button')].map((b) => ({
+        id: b.dataset.testid ?? '',
+        bottom: b.getBoundingClientRect().bottom,
+      })),
+    );
+    expect(feet.map((f) => f.id)).toEqual(['result-home', 'rematch']);
+    const bandTop = page.viewportSize()!.height - TOUCH_LAYOUT.bottomBand;
+    console.log(
+      `[결과 버튼] ${name}: 아래끝 ${feet.map((f) => f.bottom.toFixed(1)).join(' · ')}, 띠 위 ${bandTop}`,
+    );
+    for (const f of feet)
+      expect(f.bottom, `${name} 결과 ${f.id} 아래끝 (띠 위 ${bandTop})`).toBeLessThanOrEqual(bandTop + 0.05);
     expect(await outsideSafe(page, '[data-testid="result"] button', none), `${name} 결과`).toEqual([]);
     expect(await hScroll(page, '[data-testid="result"]'), `${name} 결과 가로 스크롤`).toBe(false);
     // 결과 제목(위)이 잘리지 않는다: 맨 위로 스크롤하면 화면 안
@@ -529,6 +550,179 @@ async function hScroll(page: Page, selector: string): Promise<boolean> {
     );
   }, selector);
 }
+
+// ───────────── 로비: 태블릿 · 낮은 노트북 가로 (검토 반영 F19 · F20 · F17) ─────────────
+
+/** 태블릿 가로 (Galaxy Tab S4 1138×712, 터치, 브라우저 안이라 전체 화면 버튼이 있다) */
+const TABLET_WIDE: DeviceOptions = { ...TABLET_LANDSCAPE, viewport: { width: 1138, height: 712 } };
+
+/**
+ * 높이 501 ~ 860 가로 화면: 태블릿(브라우저 — 전체 화면 버튼 · 48px 처리방침 링크까지 든 가장 긴 로고 칸) · 16:9 손가락 화면 ·
+ * 낮은 노트북 창(마우스). 예전에는 큰 로고가 위에 쌓여 연습 역할 아랫줄 · 취소 · 코드 입장이 첫 화면 밖이었다
+ */
+const LOW_WIDE: { name: string; device: DeviceOptions }[] = [
+  { name: '태블릿 1024×640', device: dpr1(TABLET_LANDSCAPE) },
+  { name: '태블릿 1138×712', device: dpr1(TABLET_WIDE) },
+  { name: '손가락 16:9 960×540', device: touchDevice(960, 540) },
+  { name: 'PC 1280×720', device: { viewport: { width: 1280, height: 720 } } },
+  { name: 'PC 1366×768', device: { viewport: { width: 1366, height: 768 } } },
+  { name: 'PC 960×540', device: { viewport: { width: 960, height: 540 } } },
+];
+const HOME_IDS = [
+  'name-input',
+  'server-status',
+  'quick-match',
+  'practice',
+  'create-room',
+  'room-code-input',
+  'join-room',
+  'quality-select',
+  'privacy-link',
+] as const;
+const PICK_IDS = [
+  'server-status',
+  'practice-role-monster',
+  'practice-role-runner',
+  'practice-role-guard',
+  'practice-role-scout',
+  'practice-cancel',
+] as const;
+const QUICK_IDS = [
+  'quick-count',
+  'quick-countdown',
+  'role-monster',
+  'role-runner',
+  'role-guard',
+  'role-scout',
+  'quick-cancel',
+  'lobby-hint',
+] as const;
+
+/**
+ * 스크롤하지 않은 첫 화면에 통째로 들어오는가 (toBeVisible · click은 스크롤해야 닿는 곳도 통과시킨다).
+ * 한 화면의 어긋난 것을 모두 보이게 soft로 본다
+ */
+async function expectInFirstView(page: Page, ids: readonly string[], label: string): Promise<void> {
+  expect(
+    await page.getByTestId('lobby').evaluate((el) => el.scrollTop),
+    `${label}: 로비가 스크롤되지 않은 채`,
+  ).toBe(0);
+  for (const id of ids)
+    await expect.soft(page.getByTestId(id), `${label}: ${id}`).toBeInViewport({ ratio: 1, timeout: 3000 });
+}
+
+test('로비: 태블릿 가로 · 낮은 노트북 창(1024×640 · 1138×712 · 960×540 · 1280×720 · 1366×768)에서 첫 화면 · 연습 역할 고르기 · 빠른 매칭 대기의 버튼과 상태 줄이 스크롤 없이 한 화면, 휴대폰 연습 고르기는 4 × 1 그대로', async ({
+  browser,
+}) => {
+  test.setTimeout(240_000);
+  for (const d of LOW_WIDE) {
+    const { context, page, problems } = await newPlayerPage(browser, d.device);
+    // 빠른 매칭 탭이 진짜 전체 화면을 켜면 전체 화면 버튼이 숨는다: 버튼이 든 브라우저 배치를 그대로 본다
+    await context.addInitScript(stubFullscreen);
+    await page.goto(`/?${BASE_QUERY.slice(1)}`);
+    await expect(page.getByTestId('create-room')).toBeEnabled();
+    const touch = (d.device.hasTouch ?? false) === true;
+    // 첫 화면 (터치 기기는 로고 칸의 전체 화면 버튼까지)
+    await expectInFirstView(page, touch ? [...HOME_IDS, 'lobby-fullscreen'] : HOME_IDS, `${d.name} 첫 화면`);
+    expect(await hScroll(page, '[data-testid="lobby"]'), `${d.name} 첫 화면 가로 스크롤`).toBe(false);
+    // 봇과 연습 → 역할 고르기: 네 역할 · 취소 · 상태 줄
+    await press(page.getByTestId('practice'));
+    await expect(page.getByTestId('practice-picker')).toBeVisible();
+    await expectInFirstView(page, PICK_IDS, `${d.name} 연습 고르기`);
+    expect(await hScroll(page, '[data-testid="lobby"]'), `${d.name} 연습 고르기 가로 스크롤`).toBe(false);
+    await press(page.getByTestId('practice-cancel'));
+    // 빠른 매칭 대기: 인원 · 남은 시간 · 역할 카드 넷 · 취소 · 안내 (자동 시작 20초 전에 취소한다)
+    await expect(page.getByTestId('quick-match')).toBeEnabled();
+    await press(page.getByTestId('quick-match'));
+    await expect(page.getByTestId('quick-cancel')).toBeVisible();
+    await expect(page.getByTestId('quick-countdown')).not.toBeEmpty();
+    await expectInFirstView(page, QUICK_IDS, `${d.name} 빠른 매칭 대기`);
+    expect(await hScroll(page, '[data-testid="lobby"]'), `${d.name} 빠른 매칭 대기 가로 스크롤`).toBe(false);
+    await press(page.getByTestId('quick-cancel'));
+    await expect(page.getByTestId('quick-match')).toBeVisible();
+    expect(problems, d.name).toEqual([]);
+    await context.close();
+  }
+  // 휴대폰 가로(높이 500 이하): 연습 역할은 그대로 한 줄 4 × 1이고 취소까지 한 화면
+  const { context, page, problems } = await newPlayerPage(browser, dpr1(PHONE_LANDSCAPE));
+  await page.goto(`/?${BASE_QUERY.slice(1)}`);
+  await press(page.getByTestId('practice'));
+  await expect(page.getByTestId('practice-picker')).toBeVisible();
+  await expectInFirstView(page, PICK_IDS, '휴대폰 915×412 연습 고르기');
+  const tops = await page.evaluate(() =>
+    [...document.querySelectorAll('.practice-role')].map((b) => Math.round(b.getBoundingClientRect().top)),
+  );
+  expect(tops).toHaveLength(4);
+  expect(new Set(tops).size, `휴대폰 연습 역할 한 줄 (위 ${tops.join(', ')})`).toBe(1);
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
+test('손가락 화면 첫 화면: 처리방침 링크가 48px 이상이고 전체 화면 버튼과 8px 이상 떨어져 있다 (휴대폰 · 태블릿)', async ({
+  browser,
+}) => {
+  for (const [name, device] of [
+    ['Pixel 7 브라우저 863×360', dpr1(PHONE_BROWSER)],
+    ['Galaxy S9+ 658×320', dpr1(PHONE_NARROW)],
+    ['태블릿 1024×640', dpr1(TABLET_LANDSCAPE)],
+  ] as const) {
+    const { context, page, problems } = await newPlayerPage(browser, device);
+    await page.goto(`/?${BASE_QUERY.slice(1)}`);
+    const link = page.getByTestId('privacy-link');
+    const fs = page.getByTestId('lobby-fullscreen');
+    await expect(link).toBeVisible();
+    await expect(fs).toBeVisible();
+    const [l, f] = [(await link.boundingBox())!, (await fs.boundingBox())!];
+    console.log(
+      `[처리방침 링크] ${name}: ${l.width.toFixed(1)}×${l.height.toFixed(1)} (${l.x.toFixed(1)}, ${l.y.toFixed(1)}), ` +
+        `전체 화면 버튼 아래끝 ${(f.y + f.height).toFixed(1)}`,
+    );
+    expect(l.height, `${name} 링크 높이`).toBeGreaterThanOrEqual(TOUCH_LAYOUT.minSize);
+    expect(l.width, `${name} 링크 폭`).toBeGreaterThanOrEqual(TOUCH_LAYOUT.minSize);
+    // 두 대상 사이 (가로 · 세로 중 떨어진 쪽, 겹치면 음수)
+    const gap = Math.max(
+      l.y - (f.y + f.height),
+      f.y - (l.y + l.height),
+      l.x - (f.x + f.width),
+      f.x - (l.x + l.width),
+    );
+    expect(gap, `${name} 링크 ↔ 전체 화면 버튼`).toBeGreaterThanOrEqual(TOUCH_LAYOUT.minGap);
+    expect(problems).toEqual([]);
+    await context.close();
+  }
+});
+
+test('연습 역할 고르기: 격자에 arming이 붙어 있는 동안에는 그 자리 탭이 역할 버튼에 닿지 않아 판이 시작되지 않는다 (CSS, 검토 반영 F17)', async ({
+  browser,
+}) => {
+  const { context, page, problems } = await newPlayerPage(browser, dpr1(TABLET_LANDSCAPE));
+  await context.addInitScript(stubFullscreen);
+  await page.goto(`/?${BASE_QUERY.slice(1)}`);
+  await press(page.getByTestId('practice'));
+  const grid = page.locator('.practice-roles');
+  await expect(grid).toBeVisible();
+  // 그린 직후 가드(lobby.ts가 잠깐 단다)가 풀린 뒤, 같은 클래스를 다시 달아 CSS만 본다
+  await expect(grid).not.toHaveClass(/\barming\b/);
+  await grid.evaluate((el) => el.classList.add('arming'));
+  const box = (await page.getByTestId('practice-role-runner').boundingBox())!;
+  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  await page.touchscreen.tap(x, y);
+  // 버튼에 닿았으면 기기 안 연습 판이 바로 시작해 고르기 화면이 사라진다 (보통 0.1 ~ 0.4초)
+  await page.waitForTimeout(1000);
+  await expect(page.getByTestId('practice-picker')).toBeVisible();
+  expect(await page.evaluate(() => window.__DECOY__?.phase ?? null), '판이 시작되지 않는다').toBeNull();
+  // 가드가 풀리면 같은 자리가 역할 버튼이다 (위 탭이 빈 갈래가 아님)
+  await grid.evaluate((el) => el.classList.remove('arming'));
+  expect(
+    await page.evaluate(
+      ([px, py]) =>
+        document.elementFromPoint(px!, py!)?.closest('[data-testid]')?.getAttribute('data-testid') ?? null,
+      [x, y],
+    ),
+  ).toBe('practice-role-runner');
+  expect(problems).toEqual([]);
+  await context.close();
+});
 
 // ───────────── 미리 굽기 ─────────────
 

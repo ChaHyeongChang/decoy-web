@@ -12,7 +12,8 @@ const BEFORE_M10 = 346_679;
  * 마일스톤마다의 예산: 직전 마일스톤 병합 값에서 이번 마일스톤이 더 쓸 수 있는 양 (DECISIONS M11 "번들 예산").
  * M10c는 Phaser 사용자 빌드 직후 243,281B에서 +25KiB였다. 다음 마일스톤에서 기준을 그 병합 값으로 옮긴다
  */
-const MILESTONE = { name: 'M15 스토어 자료', base: 305_194, baseName: 'M14 병합', budget: 1024 };
+// 출시 전 검토(M13~M15 PR #11~#16): 늦은 옛 방 메시지 거르기 · 방 나가기 · 연습 뒤로 가기 확인 · 연타 가드 · 연습 측정 모드 등 약 +1.1KiB
+const MILESTONE = { name: '출시 전 검토', base: 305_284, baseName: 'M15 병합', budget: 2048 };
 
 test('JS 번들 gzip: 마일스톤 예산 이하, 리마스터 전보다 작다', { tag: '@core' }, () => {
   const dir = join(process.cwd(), 'client/dist/assets');

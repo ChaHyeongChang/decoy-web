@@ -250,7 +250,9 @@ export class GameScene extends Phaser.Scene {
     // 선명도 검사 글자는 판 동안 이 장면(HUD와 같은 곳)에 그린다. 장면이 끝나면 대기 장면 것으로 돌려놓는다
     const prevProbe = probeSlot.draw;
     probeSlot.draw = (text, x, y, px) => drawProbeText(this, text, x, y, px);
-    sessionAutoDowngrade.beginMatch(performance.now());
+    // 판 중 측정은 온라인 · 연습을 따로 재고 기억한다 (기기 안 시뮬레이션이 CPU를 더 쓴다, 검토 반영 F11).
+    // 시작 품질은 main.ts가 판 장면을 만들기 전에 같은 모드로 정했다(enterPerfMode)
+    sessionAutoDowngrade.beginMatch(performance.now(), app.practicing ? 'practice' : 'online');
     this.watchingFps = true;
 
     // 판 시작 문구 (괴물 대기 5초 동안)
@@ -263,7 +265,11 @@ export class GameScene extends Phaser.Scene {
     this.inputHistory.clear();
     this.touch = device.touch ? new TouchInput() : null;
     this.touchActive = null;
-    this.sampler.attach(host, { touch: this.touch, touchAim: info.role === 'monster' });
+    this.sampler.attach(host, {
+      touch: this.touch,
+      touchAim: info.role === 'monster',
+      aimSurface: this.game.canvas,
+    });
     if (this.touch) {
       const uiRoot = document.getElementById('ui-root') ?? document.body;
       // 판 HUD 자리 (논리 px): 터치 화면이 이동 영역을 그 아래에서 시작한다. 캔버스 자리는 창 크기가 바뀔 때마다 다시 잰다.
@@ -389,9 +395,11 @@ export class GameScene extends Phaser.Scene {
     if (this.app.match?.role !== 'monster') return Number.NaN;
     const me = this.app.predictor?.state;
     if (!me) return Number.NaN;
-    // 터치 모드에서 마우스를 쓴 적이 없으면 포인터(0,0 · 마지막 터치 자리)를 따라 돌지 않는다: 지금 방향 유지
-    if (!this.sampler.mouseAimUsable) return me.face;
-    const p = this.touch ? (this.input.mousePointer ?? this.input.activePointer) : this.input.activePointer;
+    // 이 판에서 마우스가 캔버스 위에서 움직이거나 판 화면을 누른 적이 없으면 포인터 자리(로비에서 누른 버튼 자리 · 0,0 · 마지막 터치 자리)를
+    // 따라 돌지 않는다: 지금 방향 유지 (검토 반영 — 판 시작 조준이 로비 클릭 자리를 향하던 것)
+    if (!this.sampler.aimPointerReady) return me.face;
+    // 손가락 포인터는 조준을 바꾸지 않는다(터치스크린 노트북의 손가락 · 손바닥): 마우스 포인터만
+    const p = this.input.mousePointer ?? this.input.activePointer;
     const w = this.cameras.main.getWorldPoint(p.x, p.y);
     const t = screenToTile(w.x, w.y);
     if (Math.hypot(t.x - me.x, t.y - me.y) < 0.05) return me.face;

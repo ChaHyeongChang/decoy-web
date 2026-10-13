@@ -184,7 +184,11 @@ export function savedForSession(
 
 // ───────────── 판 중 측정 기억 (터치 기기, M12) ─────────────
 
-/** 판 중 측정을 따로 기억하는 모드: 온라인(서버 판) · 연습(기기 안 시뮬레이션이 CPU를 더 쓴다, M13b). 지금은 온라인만 쓴다 */
+/**
+ * 판 중 측정을 따로 기억하는 모드: 온라인(서버 판) · 연습(기기 안 시뮬레이션이 CPU를 더 쓴다, M13b). 둘 다 쓴다 — 판 장면은
+ * app.practicing으로 모드를 골라 beginMatch에 넘기고, main.ts는 판 장면을 만들기 전에 같은 모드의 기억으로 시작 품질을 정한다
+ * (enterPerfMode, 검토 반영 F11)
+ */
 export type PerfMode = 'online' | 'practice';
 export const PERF_MODES: readonly PerfMode[] = ['online', 'practice'];
 
@@ -440,7 +444,7 @@ export class AutoDowngrade {
     return now > 0 ? now : this.lastAverage;
   }
 
-  /** 판 시작. mode = 이 판의 모드 (지금은 늘 온라인, 연습 판은 M13b) */
+  /** 판 시작. mode = 이 판의 모드 (온라인 판 'online', 봇과 연습 판 'practice' — GameScene이 app.practicing으로 고른다) */
   beginMatch(nowMs: number, mode: PerfMode = 'online'): void {
     this.watch = null;
     this.check = null;

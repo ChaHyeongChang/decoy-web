@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { frame, newGame } from '../helpers/fixtures';
+import { frame, newGame, readyGame } from '../helpers/fixtures';
 
 describe('서버 입력 처리 (seq, 틱당 소비)', () => {
   it('이미 처리한 seq와 중복은 버린다', () => {
@@ -76,6 +76,136 @@ describe('입력 막힘 뒤 회복 (M1 검토 반영)', () => {
     }
     expect(seq - s.ack).toBe(0);
     expect(s.queue.length).toBe(0);
+  });
+
+  // 빚 루프 (출시 전 검토): 빚을 갚는 경로는 처리한 입력 수를 올리지 않아, 끊긴 뒤 입력이 틱당 하나씩 오면
+  // 굶은 틱으로 다시 세어 빚이 도로 쌓였다 → 끊긴 순간부터 약 1초(31틱) 동안 이동 · 조준이 무시됐다
+  it('판 시작 뒤 첫 입력이 8틱 늦게 와도, 입력이 온 그 틱(9틱째)부터 움직이고 조준이 돈다', () => {
+    const game = newGame();
+    const s = game.survivors[0]!;
+    const m = game.monster;
+    const x0 = s.move.x;
+    const face0 = m.move.face;
+    for (let t = 0; t < 8; t += 1) game.step();
+    expect(s.move.x).toBe(x0);
+    let seq = 0;
+    let movedAt = -1;
+    let turnedAt = -1;
+    for (let t = 0; t < 40; t += 1) {
+      seq += 1;
+      game.queueInput(s.id, [frame(seq, 1, 0)]);
+      game.queueInput(m.id, [frame(seq, 0, 0, { aim: face0 + Math.PI / 2 })]);
+      game.step();
+      if (movedAt < 0 && s.move.x > x0 + 1e-6) movedAt = t;
+      if (turnedAt < 0 && Math.abs(m.move.face - face0) > 1e-6) turnedAt = t;
+    }
+    expect(movedAt).toBe(0);
+    expect(turnedAt).toBe(0);
+    expect(seq - s.ack).toBe(0);
+    expect(s.debt).toBe(0);
+  });
+
+  it('판 중 10틱 끊겼다가 틱당 하나씩 다시 오면 바로 움직이고 괴물 face가 바뀐다', () => {
+    const game = readyGame();
+    const s = game.survivors[0]!;
+    const m = game.monster;
+    let seq = 0;
+    for (let t = 0; t < 30; t += 1) {
+      seq += 1;
+      game.queueInput(s.id, [frame(seq, 0, 0)]);
+      game.queueInput(m.id, [frame(seq, 0, 0, { aim: m.move.face })]);
+      game.step();
+    }
+    for (let t = 0; t < 10; t += 1) game.step();
+    const sx = s.move.x;
+    const mx = m.move.x;
+    const face0 = m.move.face;
+    const trail: { sx: number; mx: number; face: number }[] = [];
+    for (let t = 0; t < 5; t += 1) {
+      seq += 1;
+      game.queueInput(s.id, [frame(seq, 1, 0)]);
+      game.queueInput(m.id, [frame(seq, 1, 0, { aim: face0 + Math.PI / 2 })]);
+      game.step();
+      trail.push({ sx: s.move.x, mx: m.move.x, face: m.move.face });
+    }
+    // 첫 틱부터: 생존자 · 괴물 모두 x가 늘고, 괴물 face가 조준 쪽으로 돈다
+    expect(trail[0]!.sx).toBeGreaterThan(sx + 1e-6);
+    expect(trail[0]!.mx).toBeGreaterThan(mx + 1e-6);
+    expect(Math.abs(trail[0]!.face - face0)).toBeGreaterThan(1e-6);
+    // 그 뒤로도 틱마다 계속 움직인다 (한 틱만 움직이고 다시 빚에 먹히지 않는다)
+    for (let i = 1; i < trail.length; i += 1) expect(trail[i]!.sx).toBeGreaterThan(trail[i - 1]!.sx + 1e-6);
+    expect(s.debt).toBe(0);
+    expect(m.debt).toBe(0);
+  });
+
+  it.each([6, 8, 10, 12, 20])(
+    '%i틱 끊긴 뒤 그동안의 입력이 한꺼번에 와도(큐 상한에 잘려도) 밀림 · 빚이 남지 않고 다시 움직인다',
+    (gap) => {
+      const game = newGame();
+      const s = game.survivors[0]!;
+      // 오른쪽으로 3타일 넘게 벽이 없는 자리
+      s.move.x = 15;
+      s.move.y = 30;
+      let seq = 0;
+      for (let t = 0; t < 30; t += 1) {
+        seq += 1;
+        game.queueInput(s.id, [frame(seq, 0, 0)]);
+        game.step();
+      }
+      for (let t = 0; t < gap; t += 1) game.step();
+      const burst = [];
+      for (let k = 0; k < gap; k += 1) burst.push(frame(++seq, 0, 0));
+      game.queueInput(s.id, burst);
+      game.step();
+      const x0 = s.move.x;
+      for (let t = 0; t < 10; t += 1) {
+        game.queueInput(s.id, [frame(++seq, 1, 0)]);
+        game.step();
+      }
+      expect(seq - s.ack).toBe(0);
+      expect(s.queue.length).toBe(0);
+      expect(s.debt).toBe(0);
+      // 이어 온 10개 중 적어도 9개는 이동으로 처리된다 (빚으로 먹힌 이동이 없다)
+      const speed = (s.move.x - x0) / (10 * game.dt);
+      expect(speed).toBeGreaterThan(game.balance.survivor.moveSpeed * 0.85);
+    },
+  );
+
+  // 끊김 뒤 밀린 입력은 한 틱에 다 오지 않고 TCP 재전송 · 혼잡 창 때문에 조각으로 오기도 한다. 첫 조각을 처리한 틱에 빚을
+  // 지우면 다음 조각이 갚을 빚 없이 큐에 남아, 틱당 1개 도착 · 1개 처리로 밀림이 굳었다 (출시 전 검토의 수정 검토)
+  it.each([
+    { label: '두 조각(다음 틱에 나머지)', gap: 12, deliver: (t: number, n: number) => (t === 0 ? 7 : n) },
+    { label: '두 조각(다음 틱에 나머지)', gap: 20, deliver: (t: number, n: number) => (t === 0 ? 10 : n) },
+    {
+      label: '한 왕복(3틱) 뒤 나머지',
+      gap: 12,
+      deliver: (t: number, n: number) => (t === 0 ? 7 : t < 3 ? 0 : n),
+    },
+    { label: '틱당 2개씩 흘러나옴', gap: 10, deliver: (_t: number, n: number) => Math.min(2, n) },
+    { label: '틱당 2개씩 흘러나옴', gap: 12, deliver: (_t: number, n: number) => Math.min(2, n) },
+  ])('끊긴 뒤 밀린 입력이 $label 와도 밀림이 남지 않는다 (끊긴 틱 $gap)', ({ gap, deliver }) => {
+    const game = newGame();
+    const s = game.survivors[0]!;
+    let seq = 0;
+    for (let t = 0; t < 30; t += 1) {
+      game.queueInput(s.id, [frame(++seq, 0, 0)]);
+      game.step();
+    }
+    // 클라이언트는 틱마다 입력 하나를 만들고, 망은 순서를 지켜 정해진 만큼만 넘긴다
+    const net: ReturnType<typeof frame>[] = [];
+    for (let t = 0; t < gap; t += 1) {
+      net.push(frame(++seq, 0, 0));
+      game.step();
+    }
+    for (let t = 0; t < 60; t += 1) {
+      net.push(frame(++seq, 0, 0));
+      const k = Math.min(net.length, deliver(t, net.length));
+      if (k > 0) game.queueInput(s.id, net.splice(0, k));
+      game.step();
+    }
+    expect(net.length).toBe(0);
+    expect(seq - s.ack).toBeLessThanOrEqual(1);
+    expect(s.queue.length).toBeLessThanOrEqual(1);
   });
 
   it('사망 · 탈출 뒤에는 입력을 버리되 ack는 올린다 (관전 중 예측이 쌓이지 않게)', () => {

@@ -129,6 +129,29 @@ describe('승패 조건', () => {
     expect(endingOf(game)).toBe('END_VOID');
   });
 
+  it('최후의 30초(생존자 승리 확정) 중 괴물이 나가거나 유예가 끝나면 무효가 아니라 생존자 승리 (그때 탈출 수로 등급)', () => {
+    const game = readyGame();
+    setStatus(game, { p2: 'escaped', p3: 'escaped' });
+    matchTick(game);
+    expect(game.grace).not.toBeNull();
+    expect(game.end).toBeNull();
+    applyDropExpired(game, 'p1');
+    expect(game.end).toMatchObject({ winner: 'survivors', reason: 'escaped' });
+    const r = buildResult(game);
+    expect(r.winner).toBe('survivors');
+    expect(r.grade).toBe('success');
+    expect(r.ending).toBe('END_TWO');
+    // 남은 생존자는 탈출하지 못했으니 그대로 (사망 처리하지 않는다)
+    expect(game.survivorById('p4')!.status).toBe('free');
+    // 대조: 최후의 30초가 아니면 그대로 무효
+    const before = readyGame();
+    setStatus(before, { p2: 'escaped' });
+    matchTick(before);
+    expect(before.grace).toBeNull();
+    applyDropExpired(before, 'p1');
+    expect(before.end).toMatchObject({ winner: 'void', reason: 'monsterLeft' });
+  });
+
   it('생존자 접속 끊김(유예 만료) → 사망 처리 후 판정', () => {
     const game = readyGame();
     applyDropExpired(game, 'p2');

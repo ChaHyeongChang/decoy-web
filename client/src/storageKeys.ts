@@ -47,7 +47,7 @@ export const STORAGE_KEYS = {
     key: 'decoy:lastRoom',
     area: 'local',
     what: '마지막 방 코드와 시각 (터치 · 설치 앱에서 30초 안에 같은 자리로 복귀)',
-    keep: '30초 (지나면 쓰지 않고 지움)',
+    keep: '다음에 앱을 열 때 30초가 지났으면 지움(나가기를 누르면 바로)',
   },
   haptics: {
     key: 'decoy:haptics',

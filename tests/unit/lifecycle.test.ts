@@ -10,14 +10,17 @@ import {
   RECONNECT_MAX_MS,
   RECV_TIMEOUT_MS,
   REJOIN_RETRY_MS,
+  SETTLE_FALLBACK_MS,
   ScreenAwake,
   WATCH_TICK_MS,
   encodeLastRoom,
   freshLastRoom,
   isActivationEvent,
+  practiceEntry,
   reconnectDelay,
   rejoinRetryDelay,
   returnTarget,
+  staleAfterLeave,
   type Clock,
   type WakeLockLike,
 } from '../../client/src/lifecycle';
@@ -327,6 +330,31 @@ describe('마지막 방 (터치 · 설치 앱)', () => {
     expect(returnTarget(null, null)).toBeNull();
     expect(returnTarget('ABCD', null)).toBeNull();
   });
+
+  it('?practice=1이 방 링크 없이 오면 30초 안 마지막 방보다 연습이 우선, 방 링크와 함께면 방 링크가 이긴다 (검토 반영 F12)', () => {
+    const last = { room: 'ABCD', at: 0 };
+    // 깨우기 화면의 "봇과 연습"(방 코드를 뺀 ?practice=1): 방 복귀 대신 역할 고르기
+    expect(returnTarget(null, last, true)).toBeNull();
+    expect(practiceEntry(true, null)).toBe(true);
+    // 방 링크 + practice: 지금처럼 방 링크(같은 방이면 복귀)
+    expect(returnTarget('ABCD', last, true)).toBe(last);
+    expect(practiceEntry(true, 'ABCD')).toBe(false);
+    // practice가 없으면 그대로
+    expect(returnTarget(null, last, false)).toBe(last);
+    expect(practiceEntry(false, null)).toBe(false);
+  });
+});
+
+describe('방을 나온 뒤 늦게 온 메시지 (검토 반영 F07)', () => {
+  it("'leave' 뒤 다음 welcome 전의 lobby · match · snap · result는 버리고, pong · error · welcome은 통과", () => {
+    for (const t of ['lobby', 'match', 'snap', 'result']) expect(staleAfterLeave(true, t), t).toBe(true);
+    for (const t of ['pong', 'error', 'welcome']) expect(staleAfterLeave(true, t), t).toBe(false);
+  });
+
+  it('나가지 않았거나 다음 welcome을 받은 뒤에는 모두 통과', () => {
+    for (const t of ['lobby', 'match', 'snap', 'result', 'pong', 'error', 'welcome'])
+      expect(staleAfterLeave(false, t), t).toBe(false);
+  });
 });
 
 describe('화면 꺼짐 방지', () => {
@@ -496,6 +524,93 @@ describe('뒤로 가기 (터치 · 설치 앱)', () => {
     expect(calls).toEqual([]);
   });
 
+  // 수정 검토: 판 중 새로고침 · 탭 복원으로 남은 항목을 '첫 화면으로'에서 걷어 낼 때, 주소의 room을 순회 전에 지우면
+  // 걷어 낼 항목의 주소만 바뀌고 순회 뒤 아래 항목의 /?room=이 돌아왔다
+  describe('걷어 내는 순회가 끝난 뒤에 주소를 고친다 (whenSettled)', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /** 명세처럼 동작하는 기록: pushState · replaceState는 바로, back은 작업 큐에 넣었다가 순회 뒤 popstate */
+    function browser(entries: { url: string; state: unknown }[], start: number) {
+      let index = start;
+      const pops: (() => void)[] = [];
+      const history = {
+        pushState: (state: unknown) => {
+          entries.splice(index + 1);
+          entries.push({ url: entries[index]!.url, state });
+          index += 1;
+        },
+        back: () => {
+          globalThis.setTimeout(() => {
+            index = Math.max(0, index - 1);
+            for (const pop of pops) pop();
+          }, 0);
+        },
+      };
+      return {
+        history,
+        onPop: (fn: () => void) => pops.push(fn),
+        url: () => entries[index]!.url,
+        replace: (url: string) => {
+          entries[index]!.url = url;
+        },
+      };
+    }
+
+    it('새로고침 뒤 남은 내 항목: 순회 전에는 고치지 않고, 순회 뒤 아래 항목의 room을 지운다', () => {
+      vi.useFakeTimers();
+      const guardState = { decoyGuard: 1 };
+      const b = browser(
+        [
+          { url: '/?room=ABCD', state: null },
+          { url: '/?room=ABCD', state: guardState },
+        ],
+        1,
+      );
+      const g = new BackGuard(b.history, () => undefined, guardState);
+      b.onPop(() => void g.popped());
+      g.disarm();
+      g.whenSettled(() => b.replace('/'));
+      expect(b.url()).toBe('/?room=ABCD');
+      vi.advanceTimersByTime(0);
+      expect(b.url()).toBe('/');
+      // 대조: 순회 전에 바로 고치면 아래 항목의 room이 남는다 (고치기 전 동작)
+      const c = browser(
+        [
+          { url: '/?room=ABCD', state: null },
+          { url: '/?room=ABCD', state: guardState },
+        ],
+        1,
+      );
+      const h = new BackGuard(c.history, () => undefined, guardState);
+      c.onPop(() => void h.popped());
+      h.disarm();
+      c.replace('/');
+      vi.advanceTimersByTime(0);
+      expect(c.url()).toBe('/?room=ABCD');
+    });
+
+    it('걷어 낼 항목이 없으면 바로, popstate가 오지 않으면 대신 시간이 지난 뒤 부른다', () => {
+      vi.useFakeTimers();
+      const { g } = guard();
+      const calls: string[] = [];
+      g.whenSettled(() => calls.push('now'));
+      expect(calls).toEqual(['now']);
+      g.arm();
+      g.gesture();
+      g.disarm();
+      g.whenSettled(() => calls.push('late'));
+      vi.advanceTimersByTime(SETTLE_FALLBACK_MS - 1);
+      expect(calls).toEqual(['now']);
+      vi.advanceTimersByTime(1);
+      expect(calls).toEqual(['now', 'late']);
+      // 늦게 온 popstate는 무시하고 다시 부르지 않는다
+      expect(g.popped()).toBe(true);
+      expect(calls).toEqual(['now', 'late']);
+    });
+  });
+
   it('사용자 활성화가 생기는 입력: 키 · click · 마우스가 아닌 pointerup', () => {
     expect(isActivationEvent('pointerup', 'touch')).toBe(true);
     expect(isActivationEvent('pointerup', 'pen')).toBe(true);
@@ -593,6 +708,47 @@ describe('새 소켓의 시계 다시 맞추기 (net.ts)', () => {
     ws2.fire('message', pong(ws2.lastPing()));
     expect(resynced).toBe(2);
     expect(net.clockFresh).toBe(true);
+    net.drop();
+  });
+
+  it('버린(drop) 소켓의 늦은 open · message · close는 무시한다: 새 소켓의 연결 상태 · 알림 · 메시지를 건드리지 않는다 (net.ts 가드)', () => {
+    vi.stubGlobal('WebSocket', FakeWs);
+    vi.stubGlobal('window', {
+      setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
+      clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
+    });
+    const net = new NetClient('ws://test/ws', { lag: 0, jitterMs: 0 });
+    const got: string[] = [];
+    net.on((m) => got.push(m.t));
+    let opens = 0;
+    let closes = 0;
+    let heard = 0;
+    net.onOpen = () => (opens += 1);
+    net.onClose = () => (closes += 1);
+    net.onHeard = () => (heard += 1);
+    // 옛 소켓: 열리기 전에 버림(연결 시간 초과 · 감시 · 나가기) → 새 소켓이 열림
+    net.connect();
+    const ws1 = FakeWs.all[0]!;
+    net.drop();
+    expect(closes).toBe(1);
+    net.connect();
+    const ws2 = FakeWs.all[1]!;
+    ws2.fire('open');
+    expect([opens, net.connected]).toEqual([1, true]);
+    // 옛 소켓에서 늦게 온 이벤트
+    const lobby = JSON.stringify({ t: 'lobby', lobby: { room: 'OLDR' } });
+    ws1.fire('open');
+    ws1.fire('message', lobby);
+    ws1.fire('close');
+    expect(opens).toBe(1);
+    expect(got).toEqual([]);
+    expect(heard).toBe(0);
+    expect(closes).toBe(1);
+    expect(net.connected).toBe(true);
+    // 새 소켓은 그대로 받는다
+    ws2.fire('message', lobby);
+    expect(got).toEqual(['lobby']);
+    expect(heard).toBe(1);
     net.drop();
   });
 });

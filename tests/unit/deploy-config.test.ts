@@ -76,14 +76,33 @@ describe('서버 포트 · 주소 옵션', () => {
     expect(parseOptions([], { PORT: 'abc' }).port).toBe(8080);
   });
 
-  it('동시 봇 방 상한 (M13c): 기본값, DECOY_MAX_BOT_ROOMS · --max-bot-rooms로 바꾸고, 잘못된 값은 기본값 · 음수는 0', () => {
+  it('동시 봇 방 상한 (M13c, 출시 전 검토 2): 기본값, DECOY_MAX_BOT_ROOMS · --max-bot-rooms로 바꾸고, 잘못된 값은 기본값 · 음수는 0', () => {
+    // 무료 플랜(render.yaml plan: free) 기준값: CPU 0.1개 할당량 흉내 실측에서 봇 방 3개부터 끊겼다(출시 전 검토, DECISIONS 5절).
+    // Starter로 바꾸면 Render 환경 변수 DECOY_MAX_BOT_ROOMS로 올린다 — 기본값을 올리지 않는다
+    expect(DEFAULT_MAX_BOT_ROOMS).toBe(2);
     expect(parseOptions([], {}).maxBotRooms).toBe(DEFAULT_MAX_BOT_ROOMS);
     expect(parseOptions([], { DECOY_MAX_BOT_ROOMS: '12' }).maxBotRooms).toBe(12);
     expect(parseOptions(['--max-bot-rooms=3'], { DECOY_MAX_BOT_ROOMS: '12' }).maxBotRooms).toBe(3);
     expect(parseOptions([], { DECOY_MAX_BOT_ROOMS: '' }).maxBotRooms).toBe(DEFAULT_MAX_BOT_ROOMS);
     expect(parseOptions([], { DECOY_MAX_BOT_ROOMS: 'x' }).maxBotRooms).toBe(DEFAULT_MAX_BOT_ROOMS);
     expect(parseOptions([], { DECOY_MAX_BOT_ROOMS: '-2' }).maxBotRooms).toBe(0);
-    expect(parseOptions([], { DECOY_MAX_BOT_ROOMS: '2.7' }).maxBotRooms).toBe(2);
+    // 소수는 내린다 (기본값과 다른 값으로 본다 — 2.7 → 2는 기본값과 같아 '소수면 기본값' 변이를 못 잡았다, 수정 검토)
+    expect(parseOptions([], { DECOY_MAX_BOT_ROOMS: '16.9' }).maxBotRooms).toBe(16);
+  });
+
+  it('개발용 봇 방(?bots=1)은 --dev · --test-hooks · DECOY_DEV_BOTS=1일 때만 받고, 배포 설정에서는 꺼져 있다', () => {
+    expect(parseOptions([], {}).devBots).toBe(false);
+    expect(parseOptions([], { NODE_ENV: 'production', PORT: '10000' }).devBots).toBe(false);
+    expect(parseOptions(['--dev'], {}).devBots).toBe(true);
+    expect(parseOptions(['--test-hooks'], {}).devBots).toBe(true);
+    expect(parseOptions([], { DECOY_DEV_BOTS: '1' }).devBots).toBe(true);
+    expect(parseOptions([], { DECOY_DEV_BOTS: '0' }).devBots).toBe(false);
+    expect(parseOptions([], { DECOY_DEV_BOTS: 'true' }).devBots).toBe(false);
+    // Render Blueprint · Dockerfile은 개발 플래그를 켜지 않는다
+    const keys = blueprint.services[0]!.envVars.map((v) => v.key);
+    expect(keys).not.toContain('DECOY_DEV_BOTS');
+    const dockerfile = readFileSync('Dockerfile', 'utf8');
+    expect(dockerfile).not.toMatch(/DECOY_DEV_BOTS|--dev\b|--test-hooks/);
   });
 
   it('컨테이너 밖에서 접속할 수 있게 기본 주소는 0.0.0.0', () => {

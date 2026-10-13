@@ -1,0 +1,206 @@
+// 출시 전 검토 반영 (클라이언트 흐름): PC 괴물 조준이 판 장면에서 캔버스 포인터를 받은 뒤에만 커서를 따르는지,
+// 판 중 뒤로 가기 확인 문구가 판 종류(친구 방 · 빠른 매칭 · 연습)에 맞는지, '봇과 연습' 역할 격자의 연타 가드.
+// DOM 없이(jsdom 없음) 최소한의 EventTarget · 가짜 classList로 본다
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { InputSampler, type InputEnv } from '../../client/src/input';
+import { TouchInput } from '../../client/src/touchInput';
+import { APP_TEXT } from '../../client/src/data/storyText';
+import { leaveKindFor } from '../../client/src/lifecycle';
+import { leaveTextFor } from '../../client/src/ui/lifecycleUi';
+import { ARMING_CLASS, PRACTICE_ARM_MS, armAgainstDoubleTap } from '../../client/src/ui/lobby';
+import { oneShotButtons, type OneShotButton } from '../../client/src/ui/result';
+
+class FakeDoc extends EventTarget {
+  visibilityState: DocumentVisibilityState = 'visible';
+}
+
+function rig(touch: TouchInput | null): { sampler: InputSampler; host: EventTarget; win: EventTarget } {
+  const env: InputEnv = { win: new EventTarget(), doc: new FakeDoc(), orientation: new EventTarget() };
+  const host = new EventTarget();
+  const sampler = new InputSampler();
+  sampler.attach(host, { touch, touchAim: touch !== null, env });
+  return { sampler, host, win: env.win };
+}
+
+const ptrEv = (type: string, pointerType: string, button = 0): Event =>
+  Object.assign(new Event(type, { cancelable: true }), { pointerType, button });
+
+describe('PC 괴물 조준: 판 장면에서 캔버스 포인터를 받기 전에는 지금 방향 (검토 반영)', () => {
+  it('붙인 직후에는 커서 조준을 쓰지 않는다 — 포인터 자리는 로비에서 누른 버튼 자리다', () => {
+    const r = rig(null);
+    expect(r.sampler.aimPointerReady).toBe(false);
+    // 창 단위 이벤트(로비 · 판 밖)는 세지 않는다
+    r.win.dispatchEvent(ptrEv('pointermove', 'mouse'));
+    expect(r.sampler.aimPointerReady).toBe(false);
+  });
+
+  it('캔버스 위 마우스 · 펜이 움직이거나 누르면 커서를 따른다. 손가락은 세지 않는다(터치스크린 노트북)', () => {
+    const moved = rig(null);
+    moved.host.dispatchEvent(ptrEv('pointermove', 'touch'));
+    moved.host.dispatchEvent(ptrEv('pointerdown', 'touch'));
+    expect(moved.sampler.aimPointerReady).toBe(false);
+    moved.host.dispatchEvent(ptrEv('pointermove', 'mouse'));
+    expect(moved.sampler.aimPointerReady).toBe(true);
+    const pen = rig(null);
+    pen.host.dispatchEvent(ptrEv('pointermove', 'pen'));
+    expect(pen.sampler.aimPointerReady).toBe(true);
+    const clicked = rig(null);
+    clicked.host.dispatchEvent(ptrEv('pointerdown', 'mouse'));
+    expect(clicked.sampler.aimPointerReady).toBe(true);
+  });
+
+  // 수정 검토: Phaser는 마우스 움직임을 캔버스에서만 받는다. 캔버스 둘레 레터박스 · 필러박스(16:9가 아닌 창) 위 움직임을 세면
+  // 포인터가 로비에서 누른 자리에 남은 채 커서 조준을 써서, 막으려던 '로비 클릭 자리를 향한 판 시작 조준'이 다시 나왔다
+  it('PC: 캔버스 둘레(레터박스) 위 움직임은 세지 않고, 캔버스 위 움직임 · 어디서든 누르기는 센다', () => {
+    const env: InputEnv = { win: new EventTarget(), doc: new FakeDoc(), orientation: null };
+    const host = new EventTarget();
+    const canvas = new EventTarget();
+    /** host가 받은 이벤트의 target (실제 DOM에서는 캔버스의 이벤트가 host로 올라온다) */
+    const on = (type: string, target: EventTarget, pointerType = 'mouse'): Event =>
+      Object.defineProperty(ptrEv(type, pointerType), 'target', { value: target });
+    const moved = new InputSampler();
+    moved.attach(host, { touch: null, aimSurface: canvas, env });
+    host.dispatchEvent(on('pointermove', host));
+    host.dispatchEvent(on('pointermove', host, 'pen'));
+    expect(moved.aimPointerReady).toBe(false);
+    host.dispatchEvent(on('pointermove', canvas, 'touch'));
+    expect(moved.aimPointerReady).toBe(false);
+    host.dispatchEvent(on('pointermove', canvas));
+    expect(moved.aimPointerReady).toBe(true);
+    moved.detach();
+    const clicked = new InputSampler();
+    clicked.attach(host, { touch: null, aimSurface: canvas, env });
+    host.dispatchEvent(on('pointerdown', host));
+    expect(clicked.aimPointerReady).toBe(true);
+    clicked.detach();
+  });
+
+  it('새 판(다시 붙임)마다 처음부터', () => {
+    const r = rig(null);
+    r.host.dispatchEvent(ptrEv('pointermove', 'mouse'));
+    expect(r.sampler.aimPointerReady).toBe(true);
+    r.sampler.detach();
+    const env: InputEnv = { win: new EventTarget(), doc: new FakeDoc(), orientation: null };
+    r.sampler.attach(new EventTarget(), { env });
+    expect(r.sampler.aimPointerReady).toBe(false);
+  });
+
+  it('터치 모드는 지금처럼 실제 마우스를 쓴 뒤에만 (창 어디서든)', () => {
+    const r = rig(new TouchInput());
+    expect(r.sampler.aimPointerReady).toBe(false);
+    r.win.dispatchEvent(ptrEv('pointermove', 'touch'));
+    expect(r.sampler.aimPointerReady).toBe(false);
+    r.win.dispatchEvent(ptrEv('pointermove', 'mouse'));
+    expect(r.sampler.aimPointerReady).toBe(true);
+  });
+});
+
+describe('판 중 뒤로 가기 확인 문구 (검토 반영 F10 · F16)', () => {
+  it('빠른 매칭 판은 바로 판정된다는 안내(30초 유예 없음), 친구 방은 30초 유예 안내', () => {
+    expect(leaveTextFor('quick').body).toBe(APP_TEXT.leaveBodyQuick);
+    expect(leaveTextFor('quick').body).not.toContain('30초');
+    expect(leaveTextFor('quick').body).toContain('바로');
+    expect(leaveTextFor('match').body).toBe(APP_TEXT.leaveBody);
+    expect(leaveTextFor('match').body).toContain('30초');
+    expect(leaveTextFor('match').title).toBe(APP_TEXT.leaveTitle);
+    expect(leaveTextFor('quick').title).toBe(APP_TEXT.leaveTitle);
+  });
+
+  it('괴물이 나가면 무효라는 안내에 최후의 30초 예외(생존자 승리)가 같이 있다 (수정 검토, GAME_DESIGN 9장)', () => {
+    for (const kind of ['match', 'quick'] as const) {
+      const body = leaveTextFor(kind).body;
+      expect(body).toContain('괴물이면 판이 무효');
+      expect(body).toContain('이미 탈출했다면 생존자 승리');
+    }
+  });
+
+  it('연습 판은 연습 문구(첫 화면으로) — 온라인 판의 유예 · 판정 안내가 섞이지 않는다', () => {
+    const t = leaveTextFor('practice');
+    expect(t).toEqual({ title: APP_TEXT.leaveTitlePractice, body: APP_TEXT.leaveBodyPractice });
+    expect(t.title).toContain('연습');
+    expect(t.title).toContain('첫 화면');
+    for (const online of [APP_TEXT.leaveTitle, APP_TEXT.leaveBody, APP_TEXT.leaveBodyQuick])
+      expect([t.title, t.body]).not.toContain(online);
+    expect(`${t.title} ${t.body}`).not.toMatch(/30초|사망|무효/);
+  });
+
+  it('판 종류: 연습(기기 안 서버)이 먼저, 그다음 빠른 매칭 방, 나머지는 친구 방', () => {
+    // 연습 방도 로비 상태(kind 'practice')를 갖는다 — 연습 중이면 방 종류와 상관없이 연습
+    expect(leaveKindFor(true, 'practice')).toBe('practice');
+    expect(leaveKindFor(true, null)).toBe('practice');
+    expect(leaveKindFor(true, 'quick')).toBe('practice');
+    expect(leaveKindFor(false, 'quick')).toBe('quick');
+    expect(leaveKindFor(false, 'code')).toBe('match');
+    expect(leaveKindFor(false, null)).toBe('match');
+  });
+});
+
+describe("'봇과 연습' 연타 가드 (검토 반영 F17)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** classList만 있는 가짜 요소 */
+  const fakeEl = (): {
+    classList: { add(t: string): void; remove(t: string): void };
+    has(t: string): boolean;
+  } => {
+    const set = new Set<string>(['practice-roles']);
+    return {
+      classList: { add: (t) => set.add(t), remove: (t) => set.delete(t) },
+      has: (t) => set.has(t),
+    };
+  };
+
+  it('가드 시간은 안드로이드 더블 탭 판정(300ms)보다 길고, 역할 고르기를 굼뜨게 하지 않을 만큼 짧다', () => {
+    expect(PRACTICE_ARM_MS).toBeGreaterThan(300);
+    expect(PRACTICE_ARM_MS).toBeLessThanOrEqual(500);
+    expect(ARMING_CLASS).toBe('arming');
+  });
+
+  it(`그린 순간 'arming'이 붙고 PRACTICE_ARM_MS 동안 남았다가 그 뒤 떨어진다`, () => {
+    vi.useFakeTimers();
+    const el = fakeEl();
+    armAgainstDoubleTap(el);
+    expect(el.has('arming')).toBe(true);
+    vi.advanceTimersByTime(PRACTICE_ARM_MS - 1);
+    expect(el.has('arming')).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(el.has('arming')).toBe(false);
+    // 원래 클래스는 그대로
+    expect(el.has('practice-roles')).toBe(true);
+  });
+});
+
+describe('결과 화면 버튼은 한 번만 (수정 검토: 다시 하기 직후 홈으로)', () => {
+  const button = (): OneShotButton => Object.assign(new EventTarget(), { disabled: false });
+
+  it("'다시 하기'를 누르면 '홈으로'도 꺼진다 — 왕복 안에 홈으로를 눌러 떠난 방의 대기 화면이 되살아나지 않게", () => {
+    const again = button();
+    const home = button();
+    const calls: string[] = [];
+    oneShotButtons([
+      [again, () => calls.push('rematch')],
+      [home, () => calls.push('home')],
+    ]);
+    again.dispatchEvent(new Event('click'));
+    home.dispatchEvent(new Event('click'));
+    again.dispatchEvent(new Event('click'));
+    expect(calls).toEqual(['rematch']);
+    expect(again.disabled).toBe(true);
+    expect(home.disabled).toBe(true);
+  });
+
+  it("'홈으로'를 먼저 누르면 '다시 하기'는 보내지 않는다", () => {
+    const again = button();
+    const home = button();
+    const calls: string[] = [];
+    oneShotButtons([
+      [again, () => calls.push('rematch')],
+      [home, () => calls.push('home')],
+    ]);
+    home.dispatchEvent(new Event('click'));
+    again.dispatchEvent(new Event('click'));
+    expect(calls).toEqual(['home']);
+  });
+});

@@ -242,7 +242,9 @@ test('진행 중인 판에 새로고침으로 다시 들어오면 폰트를 기�
   browser,
 }) => {
   // 서비스 워커(M13d 앱 셸)가 있으면 새로고침 때 폰트가 캐시에서 바로 와 '느린 회선'이 생기지 않는다(route도 워커가 받은
-  // 요청은 가로채지 못한다). 이 시험은 앱 셸이 아직 없는 기기 — 첫 방문 · 워커를 못 쓰는 브라우저 — 를 흉내 낸다
+  // 요청은 가로채지 못한다). 이 시험은 서비스 워커가 없거나 아직 이 페이지를 맡지 않은 기기(워커를 못 쓰는 브라우저 등)를
+  // 흉내 낸다. 실제 첫 방문(워커 설치 중)은 이것과 다를 수 있다: 페이지의 폰트 요청이 워커 사전 캐시의 같은 주소 요청이
+  // 끝날 때까지 네트워크로 나가지 않는 것을 봤다(브라우저 HTTP 캐시가 같은 주소를 하나씩 처리하는 것으로 추정, 검토 q1a)
   const { context, page, problems } = await newPlayerPage(browser, { serviceWorkers: 'block' });
   await page.goto(`/?bots=1${BASE_QUERY}`);
   await page.getByTestId('create-room').click();
@@ -434,6 +436,34 @@ test('결과 화면: 글자 대비, 960×540 · 1366×768 · 더 낮은 창에�
       await page.getByTestId('rematch').scrollIntoViewIfNeeded();
       await expect(page.getByTestId('rematch')).toBeInViewport();
     }
+  }
+  // 좁은 PC 창(420 · 520 폭): 결과 버튼 줄(홈으로 · 다시 하기)이 상자 밖으로 넘치지 않고(넘친 부분은 상자의 깎은 모서리에
+  // 잘린다) 가로 스크롤도 없으며, 두 버튼 사이가 8px 이상 — 간격 때문에 한 줄에 안 들어가면 두 줄로 내려간다
+  for (const w of [420, 520] as const) {
+    await page.setViewportSize({ width: w, height: 820 });
+    const m = await page.evaluate(() => {
+      const root = document.querySelector('[data-testid="result"]')!;
+      const box = root.querySelector('.result-box')!.getBoundingClientRect();
+      const [a, b] = [...root.querySelectorAll('.result-foot button')].map((el) =>
+        el.getBoundingClientRect(),
+      );
+      const gapX = Math.max(b!.left - a!.right, a!.left - b!.right);
+      const gapY = Math.max(b!.top - a!.bottom, a!.top - b!.bottom);
+      return {
+        hScroll: root.scrollWidth - root.clientWidth,
+        box: [box.left, box.right],
+        buttons: [a!, b!].map((r) => [r.left, r.right]),
+        // 가로 · 세로 중 떨어진 쪽의 간격 (겹치면 둘 다 음수라 음수)
+        gap: Math.max(gapX, gapY),
+      };
+    });
+    console.log(`[결과] ${w}×820 버튼 줄: ${JSON.stringify(m)}`);
+    expect(m.hScroll, `${w} 폭 가로 스크롤`).toBeLessThanOrEqual(0);
+    for (const [left, right] of m.buttons) {
+      expect(left, `${w} 폭 버튼 왼쪽 끝`).toBeGreaterThanOrEqual(m.box[0]! - 0.5);
+      expect(right, `${w} 폭 버튼 오른쪽 끝`).toBeLessThanOrEqual(m.box[1]! + 0.5);
+    }
+    expect(m.gap, `${w} 폭 버튼 사이`).toBeGreaterThanOrEqual(8);
   }
   await page.setViewportSize({ width: 960, height: 540 });
 

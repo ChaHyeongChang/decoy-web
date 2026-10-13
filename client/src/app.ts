@@ -28,9 +28,12 @@ import {
   ScreenAwake,
   browserClock,
   browserWakeLock,
+  leaveKindFor,
   listenLifecycle,
+  practiceEntry,
   rejoinRetryDelay,
   returnTarget,
+  staleAfterLeave,
   type LastRoom,
   type LifecycleDebug,
 } from './lifecycle';
@@ -54,7 +57,7 @@ import { LeaveDialog, ReplacedNotice } from './ui/lifecycleUi';
 import { LobbyUI } from './ui/lobby';
 import { ResultUI } from './ui/result';
 import { WakeNoticeUI } from './ui/wakeNotice';
-import { WakeNoticeState } from './wakeNotice';
+import { WakeNoticeState, wakeOffersHome } from './wakeNotice';
 
 export type DebugMode = 'off' | 'hook' | 'overlay';
 
@@ -180,13 +183,21 @@ export class App {
   /** 기기 안 연습 서버. 연습 중이면 판 화면 · 디버그 훅은 이것으로 주고받는다 (app.link) */
   private local: LocalTransport | null = null;
   private localUnsub: (() => void) | null = null;
+  /**
+   * 이 소켓으로 'leave'를 보냈고 아직 다음 welcome을 받지 않았다 (검토 반영 F07): 그사이 온 lobby · match · snap · result는
+   * 서버가 leave를 처리하기 전에 보낸 떠난 방 것이라 버린다(staleAfterLeave). 새 소켓이 열리면 푼다
+   */
+  private awaitingWelcome = false;
 
   constructor(
     readonly params: AppParams,
     uiRoot: HTMLElement,
   ) {
     this.lifeApp = device.touch || device.installed;
-    this.returning = this.lifeApp ? returnTarget(params.room, loadLastRoom()) : null;
+    // ?practice=1이 방 링크 없이 왔으면(깨우기 화면의 "봇과 연습") 마지막 방 복귀보다 우선한다: 복귀를 건너뛰고 기억도 지운다.
+    // 지우지 않으면 주소에서 practice를 지운 뒤 30초 안에 새로고침할 때 복귀가 되살아난다 (검토 반영 F12)
+    if (practiceEntry(params.practice, params.room)) clearLastRoom();
+    this.returning = this.lifeApp ? returnTarget(params.room, loadLastRoom(), params.practice) : null;
     this.roomCode = params.room ?? this.returning?.room ?? null;
     this.net = new NetClient(defaultWsUrl(), { lag: params.lag, jitterMs: 20 });
     this.keeper = new LinkKeeper(
@@ -227,6 +238,7 @@ export class App {
           this.net.send({ t: 'quick', name });
         },
         leaveQueue: () => this.leaveToHome(),
+        leaveRoom: () => this.leaveToHome(),
         join: (code, name) => {
           saveName(name);
           this.roomCode = code.toUpperCase();
@@ -246,7 +258,7 @@ export class App {
       () => this.link.send({ t: 'rematch' }),
       () => this.leaveToHome(),
     );
-    this.wakeUi = new WakeNoticeUI(uiRoot);
+    this.wakeUi = new WakeNoticeUI(uiRoot, () => this.leaveBootRoom());
     this.leaveDialog = new LeaveDialog(uiRoot, {
       stay: () => {
         // "계속"을 누른 이 핸들러(사용자 활성화)에서 뒤로 가기 항목을 다시 넣는다
@@ -256,12 +268,22 @@ export class App {
       leave: () => this.leaveRoom(),
     });
     this.replacedNotice = new ReplacedNotice(uiRoot, () => this.continueHere());
+    // 확인 창 문구는 판 종류마다 다르다 (leaveRoom의 분기와 같은 조건): 빠른 매칭 판은 나가기가 바로 판정되고(검토 반영 F10),
+    // 연습 판은 기기 안 판을 닫고 첫 화면으로 간다(검토 반영 F16)
     this.backGuard = this.lifeApp
-      ? new BackGuard(window.history, () => this.leaveDialog.open(), window.history.state)
+      ? new BackGuard(
+          window.history,
+          () => this.leaveDialog.open(leaveKindFor(this.local !== null, this.lobby?.kind ?? null)),
+          window.history.state,
+        )
       : null;
     // 연습 중에는 서버 메시지를 쓰지 않는다 (연결도 쉰다)
     this.net.on((msg) => {
-      if (!this.local) this.onMessage(msg);
+      if (this.local) return;
+      // 'leave' 뒤 같은 소켓으로 늦게 온 떠난 방 메시지는 다음 welcome까지 버린다 (검토 반영 F07)
+      if (staleAfterLeave(this.awaitingWelcome, msg.t)) return;
+      if (msg.t === 'welcome') this.awaitingWelcome = false;
+      this.onMessage(msg);
     });
     this.net.onHeard = () => this.keeper.heard();
     // 숨겨진 채 받은 첫 표본으로는 풀지 않는다 (보이면 다시 맞추고 그때 푼다)
@@ -270,6 +292,8 @@ export class App {
     };
     this.net.onOpen = () => {
       this.wasOpen = true;
+      // 새 소켓에는 떠난 방 메시지가 없다
+      this.awaitingWelcome = false;
       // 나가기가 끊긴 채 기다리던 중이었으면(닫힘 이벤트 없이 바로 연결) 그 표시가 남아 다음 진짜 끊김 알림을 삼킨다
       this.quietClose = false;
       this.keeper.opened();
@@ -320,8 +344,18 @@ export class App {
     this.keeper.start();
     // 첫 화면은 연결과 상관없이 바로 그린다 (M13b). 방 링크 · 마지막 방 복귀로 들어가는 중이면 지금처럼 깨우기 패널
     if (!this.roomCode) {
+      // 연습 판 중 새로고침 · 탭 폐기 뒤 복원으로 왔으면 그 판의 뒤로 가기 항목({decoyGuard:1})이 남아 있다: 첫 화면을 그리기
+      // 전에 걷는다. 남기면 첫 화면에서 누른 첫 뒤로 가기가 아무 일 없이 먹힌다 (검토 반영 F16. 방 판은 다시 들어가 그 항목을 쓴다)
+      this.backGuard?.disarm();
       if (this.params.practice) this.lobbyUi.renderPracticePicker(this.params.name ?? getSavedName());
       else this.lobbyUi.renderHome(this.homePrefill);
+    }
+    // ?practice=1은 읽었으면 주소에서 지운다 (검토 반영 F12): 남으면 연습 → '홈으로' 뒤 새로고침 · '새 버전' 새로고침이 다시
+    // 역할 고르기를 열고, 서비스 워커는 이 주소를 캐시 먼저로 준다. 뒤로 가기 항목 표시(history.state)는 그대로 둔다
+    if (this.params.practice) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('practice');
+      window.history.replaceState(window.history.state, '', url.toString());
     }
     // 기다린 시간(초)을 세려고 주기적으로 다시 그린다. 바뀐 게 없으면 DOM을 건드리지 않는다
     this.wakeTimer ??= window.setInterval(() => this.renderWake(), 250);
@@ -341,7 +375,13 @@ export class App {
     // 빠른 매칭 대기 남은 시간 (서버 시계)
     if (this.net.synced) this.lobbyUi.tick(this.net.serverNow());
     const panel = this.wake.view(now);
-    this.wakeUi.render(this.local || this.lobbyUi.atHome ? { ...panel, visible: false } : panel);
+    // 방 경로로 들어가려다 기다리는 중이면 '첫 화면으로' (검토 반영 F23)
+    const canGoHome = wakeOffersHome({
+      roomCode: this.roomCode,
+      inRoom: this.lobby !== null || this.match !== null,
+      practicing: this.local !== null,
+    });
+    this.wakeUi.render(this.local || this.lobbyUi.atHome ? { ...panel, visible: false } : panel, canGoHome);
   }
 
   /** 서버 빌드가 이 화면과 다르다 (M13d) */
@@ -372,7 +412,8 @@ export class App {
   /**
    * 봇과 연습 (M13b): 기기 안 서버를 만들고 고른 역할로 바로 시작한다. 서버 연결은 쉰다 — 연습 중에는 새 연결을 시도하지
    * 않는다(오프라인 · 서버 잠듦에서도 소켓 시도 0). 주소 ?room= · 자리 토큰 · 마지막 방은 저장하지 않고,
-   * 수신 감시 · 재연결 · 다른 탭 처리 · 뒤로 가기 확인도 쓰지 않는다(연습은 다른 사람과 무관하다)
+   * 수신 감시 · 재연결 · 다른 탭 처리도 쓰지 않는다(연습은 다른 사람과 무관하다). 뒤로 가기 확인은 쓴다 — 설치 앱(TWA)에서는
+   * 뒤로 가기가 곧 앱 종료이고 판 중 첫 화면으로 갈 다른 길이 없다. 연습 문구로 묻고 '나가기'면 첫 화면 (검토 반영 F16)
    */
   private startPractice(role: Role, name: string): void {
     if (this.local) return;
@@ -411,26 +452,32 @@ export class App {
   }
 
   /**
-   * 결과 화면 "홈으로" (M13b): 연습이면 연습을 닫고, 서버 방이면 'leave'로 자리를 비우고 첫 화면으로.
-   * 연결은 방에서 풀려 그대로 첫 화면에서 쓴다 (방 만들기 · 입장)
+   * 결과 화면 "홈으로" (M13b) · 빠른 매칭 대기 취소 · 친구 방 로비 "나가기": 연습이면 연습을 닫고, 서버 방이면 'leave'로 자리를
+   * 비우고 첫 화면으로. 연결은 방에서 풀려 그대로 첫 화면에서 쓴다 (방 만들기 · 입장). 다음 welcome까지 늦게 온 떠난 방
+   * 메시지는 버린다(awaitingWelcome). 친구 방에 다른 사람이 남아 있으면 코드 칸에 방 코드를 남긴다 — 결과 화면에서 잘못
+   * 눌렀어도 '다시 하기'로 방이 대기로 돌아가면 입장 한 번에 돌아올 수 있다 (빠른 매칭 방은 코드로 들어갈 수 없다). 마지막
+   * 사람이면 서버가 방을 바로 지우므로 남기지 않는다 — 남기면 '입장'이 방을 찾을 수 없다고 했다 (수정 검토)
    */
   private leaveToHome(queueDropped = false): void {
     if (this.local) {
       this.stopPractice();
       return;
     }
+    const others = this.lobby?.players.some((p) => p.id !== this.you && !p.bot) ?? false;
+    const prefill = this.lobby?.kind === 'code' && others ? (this.roomCode ?? '') : '';
     this.net.send({ t: 'leave' });
-    this.forgetRoom(queueDropped);
+    this.awaitingWelcome = true;
+    this.forgetRoom(queueDropped, prefill);
   }
 
   /** 방을 잊고 첫 화면으로 (나가기 뒤 · 대기열에서 빠짐): 주소 room · 마지막 방을 지운다. 연결은 그대로 쓴다 */
-  private forgetRoom(queueDropped: boolean): void {
+  private forgetRoom(queueDropped: boolean, prefill = ''): void {
     clearLastRoom();
     this.clearRejoin();
     this.returning = null;
     this.you = null;
-    this.homePrefill = '';
-    this.toHome('', queueDropped);
+    this.homePrefill = prefill;
+    this.toHome(prefill, queueDropped);
     const url = new URL(window.location.href);
     url.searchParams.delete('room');
     window.history.replaceState(window.history.state, '', url.toString());
@@ -489,12 +536,15 @@ export class App {
     }
   }
 
-  /** 판 중인가 (화면 꺼짐 방지 · 뒤로 가기 확인) */
+  /** 판 중인가 (화면 꺼짐 방지 · 뒤로 가기 확인 · 새 버전 띠 숨김) */
   private setPlaying(on: boolean): void {
     this.awake.set(on);
-    // 뒤로 가기 확인은 다른 사람과 함께하는 판에서만 (연습은 나가도 남에게 영향이 없다)
-    if (on && !this.local) this.backGuard?.arm();
-    else if (on) this.backGuard?.disarm();
+    // 판 중에는 "새 버전이 있어요" 띠를 숨긴다(style.css .in-match): 남은 시간 · 거점 게이지 · 맵 위쪽을 가렸다.
+    // 결과 · 로비 · 첫 화면에서 다시 보인다 (검토 반영 F08)
+    document.body.classList.toggle('in-match', on);
+    // 뒤로 가기 확인은 연습 판도 쓴다 (검토 반영 F16): 설치 앱(TWA)에서는 뒤로 가기가 곧 앱 종료이고, 연습 판 중에는 첫 화면으로
+    // 갈 다른 길이 없다. 문구는 판 종류별(leaveKindFor), 연습의 '나가기'는 첫 화면(leaveRoom)
+    if (on) this.backGuard?.arm();
     else {
       this.leaveDialog.close();
       this.backGuard?.disarm();
@@ -565,8 +615,17 @@ export class App {
       });
   }
 
-  /** 판 중 뒤로 가기 확인에서 "나가기": 방에서 나가 첫 화면으로 (서버는 끊김으로 보고 30초 유예를 센다) */
+  /**
+   * 판 중 뒤로 가기 확인에서 "나가기": 방에서 나가 첫 화면으로. 친구 방은 서버가 끊김으로 보고 30초 유예를 센다.
+   * 빠른 매칭 판은 유예 없이 바로 판정한다. 연습 판은 기기 안 판을 닫는다 (확인 창 문구도 다르다, leaveTextFor)
+   */
   private leaveRoom(): void {
+    // 연습 판: 기기 안 서버를 닫고 첫 화면으로, 서버 연결은 다시 시작한다 (검토 반영 F16). 연습 방도 로비 상태를 가지므로
+    // 아래 친구 방 경로(마지막 방 지우기 · 새 소켓)를 타지 않게 먼저 거른다
+    if (this.local) {
+      this.stopPractice();
+      return;
+    }
     // 빠른 매칭 판: 나가기는 서버에 알려 그 자리를 바로 판정한다(유예 없음, M13c). 연결은 그대로 첫 화면에서 쓴다
     if (this.lobby?.kind === 'quick') {
       this.leaveToHome();
@@ -585,6 +644,33 @@ export class App {
     // 이 소켓은 그 자리에 묶여 있다: 버리고 새로 연결해 첫 화면에서 쓴다
     this.quietClose = true;
     this.keeper.restart();
+  }
+
+  /**
+   * 깨우기 패널의 '첫 화면으로' (검토 반영 F23): 방 링크 · 마지막 방 복귀로 들어가려고 기다리다 첫 화면으로. 오프라인 · 서버 꺼짐이면
+   * 연결이 열리지 않아 패널에 갇혔다. 마지막 방 · 주소 room을 지우고 코드는 첫 화면 코드 칸에 남긴다(연결되면 입장 한 번으로 같은
+   * 자리). 연결은 그대로 둔다 — 열리면 roomCode가 없으므로 첫 화면에 머문다
+   */
+  private leaveBootRoom(): void {
+    const code = this.roomCode ?? '';
+    clearLastRoom();
+    this.clearRejoin();
+    this.returning = null;
+    this.joinFromLink = false;
+    this.homePrefill = code;
+    // 옛 연결이 남아 다시 시도하던 중(연결은 열림)이면 기다림 표시를 내린다
+    if (this.net.connected) this.wake.opened();
+    this.toHome(code);
+    // 주소의 room은 뒤로 가기 항목을 걷어 내는 순회(toHome → disarm)가 끝난 뒤에 지운다 — 판 중 새로고침 · 탭 복원으로
+    // 그 항목이 남아 있으면, 먼저 지운 주소가 순회 뒤 아래 항목의 ?room으로 되돌아갔다 (출시 전 검토의 수정 검토)
+    const dropRoomFromUrl = (): void => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('room');
+      window.history.replaceState(window.history.state, '', url.toString());
+    };
+    if (this.backGuard) this.backGuard.whenSettled(dropRoomFromUrl);
+    else dropRoomFromUrl();
+    this.renderWake();
   }
 
   /** 다른 탭 안내의 "여기서 계속하기": 이 기기로 다시 들어온다 (서버는 저쪽에 'replaced'를 보낸다) */
@@ -766,11 +852,17 @@ export class App {
           this.returning = null;
           clearLastRoom();
         }
-        // 판 중 다시 연결했는데 방이 사라졌거나 자리가 없으면 나가기처럼 정리한다 (화면 꺼짐 방지 · 뒤로 가기 항목 · 판 장면)
+        // 판 중 다시 연결했는데 방이 사라졌거나 자리가 없으면 나가기처럼 정리한다 (화면 꺼짐 방지 · 뒤로 가기 항목 · 판 장면).
+        // 방 밖(첫 화면)에서 들어가려던 방이 진행 중 · 가득 참이면 친 코드는 남긴다: 결과 단계 방은 '다시 하기'로 대기로
+        // 돌아가면 다시 들어갈 수 있다 (검토 반영)
         if (msg.code === 'room-not-found' || msg.code === 'in-progress' || msg.code === 'room-full') {
+          const keep =
+            msg.code !== 'room-not-found' && this.lobby === null && this.match === null
+              ? (this.roomCode ?? '')
+              : '';
           this.wake.opened();
           this.renderWake();
-          this.toHome('');
+          this.toHome(keep);
         }
         // 링크 · 재연결로 들어가려던 방이 없으면 대개 서버가 잠들었다 깨어났거나 다시 시작한 것이다 (방은 메모리에만 있다)
         if (msg.code === 'room-not-found' && this.joinFromLink) {

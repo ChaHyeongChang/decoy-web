@@ -2,7 +2,9 @@
 //  - ClientMessage(shared/src/types.ts)에서 뽑은 보내는 필드가 대응표(client/src/privacyData.ts)에 빠짐없이 있고,
 //    대응표의 이름 · 유형이 처리방침(client/public/privacy.html)과 docs/STORE_LISTING.md 둘 다에 나온다
 //  - 기기 저장 키(storageKeys.ts) · 오프라인 캐시 이름(sw.js)이 두 문서에 모두 나온다
-//  - 처리방침 문서 형식(lang · 필수 제목 · 스크립트 · 외부 주소 없음 · 문의처 자리), 서버 응답(/privacy · /privacy.html, 문의처 바꿔 넣기)
+//  - 공개 처리방침에는 초안 표시(확인 필요 · ⚠)가 없다. 사람이 확인할 판단(confirm)은 STORE_LISTING 표 4번째 칸에만
+//  - 처리방침 문서 형식(lang · 필수 제목 · 스크립트 · 외부 주소 없음 · 문의처 자리), 사실 문구(보내는 시점 · 처리 근거 ·
+//    보관 기간 · 기기 저장 값의 전송), 서버 응답(/privacy · /privacy.html, 문의처 바꿔 넣기)
 //  - 외부 전송 없음(정적): 클라이언트 코드 · 공개 파일에 밖으로 가는 주소가 없다(XML 네임스페이스만 허용). 실제 요청은 E2E(m15-privacy)
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer, request, type Server } from 'node:http';
@@ -11,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import ts from 'typescript';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PROTOCOL_FIELDS, SENT_DATA } from '../../client/src/privacyData';
 import { STORAGE_KEYS } from '../../client/src/storageKeys';
 import {
@@ -86,6 +88,35 @@ function listingRow(label: string): string | undefined {
   return LISTING.split('\n').find((l) => l.startsWith(`| ${label} |`));
 }
 
+/** STORE_LISTING 표 줄의 칸들 */
+function listingCells(label: string): string[] {
+  return (listingRow(label) ?? '')
+    .split('|')
+    .slice(1, -1)
+    .map((c) => c.trim());
+}
+
+/** 태그를 지우고 공백을 하나로 */
+function plain(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** 처리방침의 한 절 (id가 붙은 h2부터 다음 h2 앞까지) */
+function section(id: string): string {
+  const at = PRIVACY.indexOf(`<h2 id="${id}">`);
+  if (at < 0) throw new Error(`절 없음: ${id}`);
+  const next = PRIVACY.indexOf('<h2', at + 1);
+  return PRIVACY.slice(at, next < 0 ? undefined : next);
+}
+
+/** data-label이 label인 칸의 글자 */
+function labeledCell(html: string, label: string): string {
+  return plain(new RegExp(`<td data-label="${label}">([\\s\\S]*?)</td>`).exec(html)?.[1] ?? '');
+}
+
 function swCacheNames(): string[] {
   const sw = readFileSync('client/public/sw.js', 'utf8');
   // const 이름에 CACHE가 든 선언의 값: 'decoy-wake-v2' · `decoy-shell-${BUILD}` → 접두사 (주석 속 이름은 보지 않는다)
@@ -133,9 +164,16 @@ describe('보내는 항목 대응표 (privacyData.ts ↔ ClientMessage)', () => 
     expect(rows.length).toBe(Object.keys(SENT_DATA).length);
   });
 
-  it('확인이 필요한 판단은 문서에도 확인 필요로 표시한다', () => {
-    for (const d of Object.values(SENT_DATA))
-      if (d.confirm) expect(`${d.playType} ${listingRow(d.label) ?? ''}`).toMatch(/확인 필요/);
+  it('공개 처리방침에는 초안 표시(확인 필요 · ⚠)가 없고, 사람이 확인할 판단은 STORE_LISTING 표 4번째 칸에만 적는다', () => {
+    expect(PRIVACY).not.toMatch(/확인 필요|⚠/);
+    expect(Object.values(SENT_DATA).some((d) => d.confirm)).toBe(true);
+    for (const d of Object.values(SENT_DATA)) {
+      // 데이터 유형은 처리방침 표에 그대로 나간다
+      expect(d.playType, d.label).not.toMatch(/확인 필요|⚠/);
+      const cells = listingCells(d.label);
+      expect(cells[2], `${d.label} STORE_LISTING 유형 칸`).toBe(d.playType);
+      if (d.confirm) expect(cells[3], `${d.label} STORE_LISTING 4번째 칸`).toMatch(/⚠ 확인 필요/);
+    }
   });
 });
 
@@ -208,10 +246,141 @@ describe('처리방침 문서', () => {
     expect(PRIVACY.match(/<!--\/contact-->/g)?.length).toBe(1);
   });
 
-  it('서버 보관 사실이 코드와 같다: 방이 비면 60초 (ROOM_IDLE_TIMEOUT_MS)', async () => {
+  it('서버 보관 사실이 코드와 같다: 방이 비면 60초가 지난 뒤 (ROOM_IDLE_TIMEOUT_MS, 끊김을 알아채는 시간이 더 걸릴 수 있다)', async () => {
     const { ROOM_IDLE_TIMEOUT_MS } = await import('@decoy/shared/sim');
-    expect(PRIVACY).toContain(`${ROOM_IDLE_TIMEOUT_MS / 1000}초 안에`);
-    expect(LISTING).toContain(`${ROOM_IDLE_TIMEOUT_MS / 1000}초 안에`);
+    const sec = ROOM_IDLE_TIMEOUT_MS / 1000;
+    // 빈 방은 그 시간이 '지난 뒤' 지운다 ('안에'가 아니다 — 갑자기 끊긴 연결은 서버가 알아채는 데 시간이 더 걸린다)
+    for (const [name, doc] of [
+      ['처리방침', plain(PRIVACY)],
+      ['STORE_LISTING', LISTING],
+    ] as const) {
+      expect(doc, name).toContain(`${sec}초가 지난 뒤`);
+      expect(doc, name).not.toContain(`${sec}초 안에`);
+      expect(doc, name).toMatch(/알아채는 데 시간이 더 걸릴 수 있/);
+    }
+  });
+
+  // 수정 검토: 대기 · 결과 화면의 나가기는 그 자리를 바로 지우고, 사람이 남지 않은 방은 방째 바로 지운다(RoomManager.dropIfAbandoned).
+  // 문서가 '모두 나가면 60초가 지난 뒤'만 적어 가장 흔한 경로와 달랐다. 코드와 문서 한쪽만 바뀌어도 실패한다
+  it('서버 보관 사실이 코드와 같다: 대기 · 결과 화면에서 나가면 그 자리 · 빈 방을 바로 지운다', async () => {
+    const { ServerCore } = await import('@decoy/shared/sim');
+    const { FakeConn } = await import('../helpers/fakeConn');
+    const { loadTestBalance } = await import('../helpers/fixtures');
+    const core = new ServerCore({ balance: loadTestBalance(), seed: 3, testHooks: false }, {}, () => 1000);
+    const join = (name: string, room: string | null) =>
+      JSON.stringify({
+        t: 'join',
+        room,
+        create: room === null,
+        name,
+        token: null,
+        altTokens: [],
+        bots: false,
+      });
+    const a = new FakeConn();
+    const b = new FakeConn();
+    const la = core.connect(a, (err) => {
+      throw err;
+    });
+    const lb = core.connect(b, (err) => {
+      throw err;
+    });
+    la.receive(join('가', null));
+    const code = a.last('welcome')?.room ?? '';
+    lb.receive(join('나', code));
+    const room = core.manager.rooms.get(code);
+    expect(room?.seats.map((x) => x.name)).toEqual(['가', '나']);
+    // 시계를 움직이지 않는다: 60초를 기다리지 않고 바로
+    lb.receive(JSON.stringify({ t: 'leave' }));
+    expect(room?.seats.map((x) => x.name)).toEqual(['가']);
+    la.receive(JSON.stringify({ t: 'leave' }));
+    expect(core.manager.rooms.size).toBe(0);
+    for (const [name, doc] of [
+      ['처리방침', plain(PRIVACY)],
+      ['STORE_LISTING', LISTING],
+    ] as const) {
+      expect(doc, name).toMatch(/결과 화면에서 나가면[^.|]*닉네임은 바로 지우고/);
+      expect(doc, name).toContain('방째');
+    }
+  });
+
+  it('보내는 시점이 사실과 같다: 앱을 인터넷에 연결된 상태로 열면 첫 화면 연결(지연 측정값 · IP 주소), 나머지는 온라인 대전에서만', () => {
+    expect(PRIVACY).not.toMatch(/온라인 대전을 할 때만/);
+    expect(PRIVACY).not.toMatch(/온라인 대전을 하지 않으면 이전되지 않습니다/);
+    const when = plain(/<p data-testid="sent-when">([\s\S]*?)<\/p>/.exec(section('items'))?.[1] ?? '');
+    expect(when).toMatch(/앱을 인터넷에 연결된 상태로 열면.*지연 측정값/);
+    expect(when).toContain('IP 주소');
+    // 온라인 대전에서만 보내는 것: 대응표에서 지연 측정값 · 시험 명령을 뺀 나머지 전부
+    for (const d of [SENT_DATA.nickname, SENT_DATA.seatToken, SENT_DATA.roomChoice, SENT_DATA.controls])
+      expect(when, d.label).toContain(d.label);
+    expect(when).toMatch(/온라인 대전[^.]*에서만 보냅니다/);
+    // 7번 국외 이전: 시기에 '앱을 … 열 때', 거부 방법은 인터넷을 끈 채 봇과 연습
+    const transfer = section('transfer');
+    expect(labeledCell(transfer, '시기 · 방법')).toMatch(/앱을[^.]*열 때/);
+    const refuse = labeledCell(transfer, '거부');
+    expect(refuse).toContain('IP 주소');
+    expect(refuse).toMatch(/인터넷을 끈 채[^.]*봇과 연습/);
+    // 스토어 문서도 같은 사실
+    expect(LISTING).toMatch(/앱을 인터넷에 연결된 상태로 열면[^\n]*지연 측정값[^\n]*IP 주소/);
+  });
+
+  it('처리 근거: 2번에 동의 없이 처리하는 항목과 법적 근거(개인정보 보호법 제15조 제1항 제4호), 동의 받는 항목 없음', () => {
+    const purpose = plain(section('purpose'));
+    expect(purpose).toMatch(/동의 없이/);
+    expect(purpose).toMatch(/제15조\s*제1항\s*제4호/);
+    expect(purpose).toContain('동의를 받아 처리하는 항목은 없습니다');
+    const basis = plain(/<p data-testid="legal-basis">([\s\S]*?)<\/p>/.exec(PRIVACY)?.[1] ?? '');
+    // 배포 서버가 받는 항목은 모두 근거 문단에 이름이 나온다 (시험 명령은 배포 서버가 받지 않는다)
+    for (const d of Object.values(SENT_DATA))
+      if (d !== SENT_DATA.testCommand) expect(basis, d.label).toContain(d.label);
+    expect(basis).toContain('IP 주소');
+    expect(basis).toMatch(/닉네임은 선택/);
+  });
+
+  it('마지막 방(lastRoom)은 저절로 지우지 않고 다음에 앱을 열어 읽을 때 30초가 지났으면 지운다 — 문서도 그렇게', async () => {
+    const { LAST_ROOM_MS } = await import('../../client/src/lifecycle');
+    const store = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => store.set(k, v),
+      removeItem: (k: string) => store.delete(k),
+    });
+    try {
+      const { loadLastRoom, saveLastRoom } = await import('../../client/src/session');
+      saveLastRoom('ABCD', 0);
+      // 읽기 전에는 30초가 훨씬 지나도 남아 있다 (타이머가 없다)
+      expect(store.has(STORAGE_KEYS.lastRoom.key)).toBe(true);
+      expect(loadLastRoom(LAST_ROOM_MS)?.room).toBe('ABCD');
+      expect(loadLastRoom(LAST_ROOM_MS + 1)).toBeNull();
+      expect(store.has(STORAGE_KEYS.lastRoom.key)).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    const phrase = `다음에 앱을 열 때 ${LAST_ROOM_MS / 1000}초가 지났으면 지움`;
+    expect(STORAGE_KEYS.lastRoom.keep).toContain(phrase);
+    expect(LISTING.split('\n').find((l) => l.startsWith('| `decoy:lastRoom`'))).toContain(phrase);
+  });
+
+  it("4번 '서버로 보내지 않습니다'의 예외에 방에 들어갈 때 보내는 저장 값(이름 · 마지막 방 코드 · 자리 토큰)이 모두 있다", () => {
+    // 저장 키 → 방에 들어갈 때 실리는 join 필드 (client/src/app.ts sendJoin) → 문서의 이름
+    const sentFromStorage = [
+      { key: 'name', field: 'join.name', word: '이름' },
+      { key: 'lastRoom', field: 'join.room', word: '마지막 방 코드' },
+      { key: 'seat', field: 'join.token', word: '자리 토큰' },
+      { key: 'seats', field: 'join.altTokens', word: '자리 토큰' },
+    ] as const;
+    const fields: string[] = Object.values(SENT_DATA).flatMap((d) => [...d.fields]);
+    const first = plain(/<p>([\s\S]*?)<\/p>/.exec(section('device'))?.[1] ?? '');
+    expect(first).toContain('서버로 보내지 않습니다');
+    const except = /서버로 보내지 않습니다\(([^)]*)\)/.exec(first)?.[1] ?? '';
+    const listingHead = LISTING.split('\n').find((l) => l.startsWith('**기기에만 저장하는 것**')) ?? '';
+    for (const s of sentFromStorage) {
+      expect(STORAGE_KEYS[s.key].key, s.key).toBeDefined();
+      expect(fields, s.field).toContain(s.field);
+      expect(except, s.word).toContain(s.word);
+      expect(listingHead, s.word).toContain(s.word);
+    }
+    expect(except).toMatch(/방에 들어갈 때/);
   });
 });
 

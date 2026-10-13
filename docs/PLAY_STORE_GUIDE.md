@@ -185,6 +185,7 @@ PWABuilder(마이크로소프트가 운영하는 무료 사이트)가 이 웹 �
    - 그림 파일은 저장소 GitHub 화면에서 파일을 열고 **Download raw file**로 태블릿에 받는다
 3. **스토어 설정**: 카테고리 · 태그 · 연락처(STORE_LISTING 1장 표). 이메일은 스토어에 공개된다
 4. **앱 콘텐츠**(정책 신고): STORE_LISTING 2장의 답을 차례로 넣는다 — 개인정보처리방침 URL(`<서비스 주소>/privacy`), 앱 액세스, 광고, 콘텐츠 등급 설문, 타깃 연령층, 데이터 보안, 그 밖의 신고. **⚠ 확인 필요** 표시는 직접 판단한다
+   - 데이터 유형 판단을 초안과 다르게 정하면 `client/src/privacyData.ts` · `client/public/privacy.html` · `docs/STORE_LISTING.md` 세 곳을 같은 값으로 고친다(단위 시험 `tests/unit/privacy.test.ts`가 셋을 대조한다. `main`에 병합하면 검사 통과 뒤 Render가 다시 배포해 공개 처리방침도 바뀐다)
 5. 처리방침 문의처를 넣는다: Render 대시보드 → 서비스 `decoy-web` → **Environment** → **Add Environment Variable** → 키 `PRIVACY_CONTACT`, 값은 공개해도 되는 이메일 → **Save Changes**. 저장하면 서버가 다시 배포된다(그 순간 열려 있던 방은 사라진다 — 아무도 없을 때). `<서비스 주소>/privacy`의 11번 문의처에 그 이메일이 보이면 된다
 
 ---
@@ -230,7 +231,9 @@ PWABuilder(마이크로소프트가 운영하는 무료 사이트)가 이 웹 �
 
 1. Render 대시보드 → 서비스 `decoy-web` → **Settings › Instance Type**(또는 **Upgrade**) → **Starter**(약 US$7/월, 전환할 때 가격 확인) → 결제 카드 등록
 2. **`render.yaml`은 고치지 않는다**(`plan: free` 그대로 — 저장소 설정은 개발용 무료 기준이다). 전환 뒤 다음 배포(코드 병합)가 끝나면 대시보드에서 Instance Type이 Starter 그대로인지 한 번 확인한다
-3. 확인: 30분 넘게 아무도 접속하지 않은 뒤 `<서비스 주소>`를 열어도 '서버를 깨우는 중' 없이 바로 열린다
+3. 같은 서비스 **Environment**에 키 `DECOY_MAX_BOT_ROOMS`, 값 `16`을 넣고 **Save Changes**(다시 배포된다 — 아무도 없을 때). 코드 기본값 2는 무료 플랜(CPU 0.1개) 기준이라, 넣지 않으면 Starter에서도 빠른 매칭 봇 방이 동시에 2개까지만 열린다(그 이상은 '사람만 기다리는 중'). 근거는 `docs/DECISIONS.md` 5절
+4. 송신량: Render 요금제의 월 송신 포함량을 대시보드 **Billing**에서 확인한다(사람 한 명이 한 시간 하면 약 80MB를 받는다 — 검토 때 검색으로 본 Hobby 포함량은 월 5GB였고 직접 확인하지 못했다)
+5. 확인: 30분 넘게 아무도 접속하지 않은 뒤 `<서비스 주소>`를 열어도 '서버를 깨우는 중' 없이 바로 열린다
 
 ---
 

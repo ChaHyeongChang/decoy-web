@@ -11,9 +11,11 @@ export class WakeNoticeUI {
   private readonly title: HTMLDivElement;
   private readonly body: HTMLDivElement;
   private readonly elapsed: HTMLDivElement;
+  /** '첫 화면으로' (방 경로로 부팅해 기다리는 중에만, 검토 반영 F23 — 오프라인 · 서버 꺼짐에서 갇히지 않게) */
+  private readonly home: HTMLButtonElement;
   private lastKey = '';
 
-  constructor(host: HTMLElement) {
+  constructor(host: HTMLElement, onHome: () => void) {
     this.root = document.createElement('div');
     this.root.className = 'wake-notice';
     this.root.setAttribute('data-testid', 'server-waking');
@@ -39,12 +41,20 @@ export class WakeNoticeUI {
     this.elapsed.className = 'wake-elapsed';
     // 매초 바뀌는 숫자 때문에 스크린 리더가 안내 전체를 계속 다시 읽지 않게
     this.elapsed.setAttribute('aria-hidden', 'true');
-    this.root.append(this.logo, this.title, body, bar, this.elapsed);
+    this.home = document.createElement('button');
+    this.home.type = 'button';
+    this.home.className = 'btn wake-home';
+    this.home.setAttribute('data-testid', 'wake-home');
+    this.home.textContent = UI_TEXT.wakeHome;
+    this.home.hidden = true;
+    this.home.addEventListener('click', onHome);
+    this.root.append(this.logo, this.title, body, bar, this.elapsed, this.home);
     host.appendChild(this.root);
   }
 
-  render(view: WakeView): void {
-    const key = view.visible ? `${view.variant}:${view.seconds}:${view.offline}` : 'hidden';
+  /** canGoHome: '첫 화면으로'를 보인다 (판단은 wakeOffersHome) */
+  render(view: WakeView, canGoHome = false): void {
+    const key = view.visible ? `${view.variant}:${view.seconds}:${view.offline}:${canGoHome}` : 'hidden';
     if (key === this.lastKey) return;
     this.lastKey = key;
     if (!view.visible) {
@@ -56,6 +66,7 @@ export class WakeNoticeUI {
     // 오프라인이면 서버가 잠든 것이 아니라 기기 연결 문제다 (wake.html과 같은 문구)
     this.body.textContent = view.offline ? UI_TEXT.offline : UI_TEXT.wakingBody;
     this.elapsed.textContent = UI_TEXT.wakingElapsed.replace('{n}', String(view.seconds));
+    this.home.hidden = !canGoHome;
     this.root.style.display = '';
   }
 }

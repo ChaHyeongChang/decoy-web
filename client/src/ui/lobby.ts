@@ -32,6 +32,8 @@ export interface LobbyActions {
   quick(name: string): void;
   /** 빠른 매칭 대기 취소 (M13c): 자리를 비우고 첫 화면으로 */
   leaveQueue(): void;
+  /** 친구 방 로비에서 나가기 (검토 반영 F09): 자리를 비우고 첫 화면으로 */
+  leaveRoom(): void;
   pickRole(role: Role | null): void;
   setReady(ready: boolean): void;
   setName(name: string): void;
@@ -39,6 +41,24 @@ export interface LobbyActions {
 }
 
 const ROLE_ORDER: Role[] = ['monster', 'runner', 'guard', 'scout'];
+
+/**
+ * 연습 역할 고르기의 연타 가드 시간 (검토 반영 F17): '봇과 연습'을 빠르게 두 번 탭하면 두 번째 탭이 같은 자리에 막 그려진
+ * 역할 버튼에 떨어져, 고르지 않은 역할로 판이 바로 시작됐다. 그린 뒤 이만큼 역할 격자가 포인터를 받지 않는다
+ * (style.css '.practice-roles.arming'). 안드로이드 더블 탭 판정 시간(300ms)보다 길게. 키보드(Enter · Space)는 막지 않는다
+ */
+export const PRACTICE_ARM_MS = 400;
+/** 연타 가드 중인 역할 격자에 붙는 클래스 */
+export const ARMING_CLASS = 'arming';
+
+/** 막 그린 요소에 연타 가드를 붙였다가 ms 뒤 뗀다 (클래스만 바꾼다 — 포인터를 막는 것은 CSS) */
+export function armAgainstDoubleTap(
+  el: { classList: { add(token: string): void; remove(token: string): void } },
+  ms = PRACTICE_ARM_MS,
+): void {
+  el.classList.add(ARMING_CLASS);
+  globalThis.setTimeout(() => el.classList.remove(ARMING_CLASS), ms);
+}
 
 /** 능력 줄(ROLE_CARDS.ability · abilityTouch)의 항목마다 붙는 아이콘 — 문구의 순서와 같다 */
 const ABILITY_ICONS: Record<Role, IconId[]> = {
@@ -285,10 +305,14 @@ export class LobbyUI {
     code.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') doJoin();
     });
+    // 상태 줄 · 오류 줄은 이름 칸 바로 아래 (검토 반영 F14): 패널 맨 아래면 높이 360 이하 휴대폰 가로 · 태블릿에서 화면 밖이라
+    // 꺼진 빠른 매칭 · 방 만들기 · 입장의 이유와 입장 실패 오류가 보이지 않았다
     const panel = h(
       'div',
       { class: 'panel home-panel' },
       h('label', { class: 'field' }, name),
+      this.statusLine,
+      this.errorBox,
       ...(queueDropped ? [this.droppedRow(() => this.actions.quick(name.value))] : []),
       quickBtn,
       practice,
@@ -296,8 +320,6 @@ export class LobbyUI {
       h('div', { class: 'divider' }),
       h('div', { class: 'row' }, h('label', { class: 'field field-code' }, code), join),
       ...this.qualityRow(),
-      this.statusLine,
-      this.errorBox,
     );
     this.netButtons = [quickBtn, create, join];
     this.applyStatus();
@@ -320,6 +342,8 @@ export class LobbyUI {
     this.tutorial.hide();
     this.settings?.close();
     const grid = h('div', { class: 'practice-roles' });
+    // '봇과 연습'을 두 번 탭한 두 번째 탭이 막 그린 역할 버튼에 떨어지지 않게 잠깐 포인터를 막는다 (검토 반영 F17)
+    armAgainstDoubleTap(grid);
     for (const role of ROLE_ORDER) {
       const info = ROLE_CARDS[role];
       const b = h(
@@ -343,14 +367,15 @@ export class LobbyUI {
     }
     const cancel = h('button', { class: 'btn', 'data-testid': 'practice-cancel' }, UI_TEXT.practiceCancel);
     cancel.addEventListener('click', () => this.renderHome());
+    // 상태 줄 · 오류 줄은 안내 바로 아래 (첫 화면과 같은 자리, 검토 반영 F14)
     const panel = h(
       'div',
       { class: 'panel home-panel practice-panel', 'data-testid': 'practice-picker' },
       h('div', { class: 'lobby-hint' }, UI_TEXT.practicePick),
-      grid,
-      h('div', { class: 'action-row' }, cancel),
       this.statusLine,
       this.errorBox,
+      grid,
+      h('div', { class: 'action-row' }, cancel),
     );
     this.netButtons = [];
     this.applyStatus();
@@ -599,9 +624,19 @@ export class LobbyUI {
       if (!me?.ready) enterFullscreen();
       this.actions.setReady(!(me?.ready ?? false));
     });
+    // 나가기 (검토 반영 F09): 방에서 나가 첫 화면으로. 없으면 설치 앱 · 휴대폰에서 방 로비가 막다른 길이었다
+    // (뒤로 가기는 앱을 닫고, 30초 안에 다시 열면 같은 방으로 돌아온다)
+    const leave = h(
+      'button',
+      { class: 'btn room-leave', 'data-testid': 'room-leave' },
+      icon('back', 18),
+      UI_TEXT.roomLeave,
+    );
+    leave.addEventListener('click', () => this.actions.leaveRoom());
     const buttons = h(
       'div',
       { class: 'action-row' },
+      leave,
       ...(this.settings ? [this.settings.button()] : []),
       ready,
     );

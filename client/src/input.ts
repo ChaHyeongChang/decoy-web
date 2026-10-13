@@ -38,6 +38,12 @@ export interface AttachOptions {
   touch?: TouchSource | null;
   /** 터치가 조준을 정하는가 (괴물). 생존자는 aim을 보내지 않는다(NaN) */
   touchAim?: boolean;
+  /**
+   * Phaser가 마우스 움직임을 받는 요소(캔버스). 주면 그 위 움직임만 PC 조준 준비로 센다 — 캔버스 둘레 레터박스 · 필러박스 위
+   * 움직임은 Phaser 포인터를 옮기지 않아, 세면 로비에서 누른 자리를 향한 조준이 다시 나왔다 (출시 전 검토의 수정 검토).
+   * 누르기는 어디서든 센다(창 단위 mousedown이 포인터를 그 자리로 옮긴다)
+   */
+  aimSurface?: EventTarget;
   env?: InputEnv;
 }
 
@@ -67,6 +73,8 @@ export class InputSampler {
   private touchAim = false;
   /** 터치 모드에서 실제 마우스를 쓴 적이 있다 (그때만 마우스 커서로 조준한다) */
   private mouseSeen = false;
+  /** PC 모드: 이 판(attach 뒤)에서 캔버스 위 마우스 · 펜 포인터가 움직이거나 누른 적이 있다 (그 전 포인터 자리는 로비의 것) */
+  private canvasPointerSeen = false;
   /** Tab 누르고 있기 (점수판) */
   tabHeld = false;
   /** 아무 키나 눌림 (안내 오버레이 닫기용) */
@@ -83,12 +91,22 @@ export class InputSampler {
     return !this.touch || this.mouseSeen;
   }
 
+  /**
+   * 마우스 커서 조준을 지금 쓸 수 있는가: 터치 모드는 실제 마우스를 쓴 뒤(mouseAimUsable), PC 모드는 이 판에서 캔버스 위
+   * 마우스 · 펜이 움직이거나 누른 뒤. 그 전에는 포인터 자리가 로비에서 누른 버튼 자리라 판 시작 조준이 엉뚱한 곳을 향했다 (검토 반영)
+   */
+  get aimPointerReady(): boolean {
+    return this.touch ? this.mouseSeen : this.canvasPointerSeen;
+  }
+
   attach(canvasHost: EventTarget, opts: AttachOptions = {}): void {
     const env = opts.env ?? browserEnv();
     this.touch = opts.touch ?? null;
     this.touchAim = opts.touchAim ?? false;
     this.mouseSeen = false;
+    this.canvasPointerSeen = false;
     const touchMode = this.touch !== null;
+    const aimSurface = opts.aimSurface ?? null;
     /**
      * 캔버스 클릭을 공격 · 시야 전환으로 쓰는 포인터: 터치 모드는 마우스만(손가락은 터치 화면이 받는다),
      * PC 모드는 손가락만 뺀다(터치스크린 노트북에서 손바닥 · 손가락이 닿아 공격이 나가지 않게. 펜은 마우스처럼)
@@ -123,6 +141,7 @@ export class InputSampler {
       this.recomputeHeld();
     };
     const onPointerDown = (e: PointerEvent): void => {
+      if (e.pointerType !== 'touch') this.canvasPointerSeen = true;
       if (clicks(e)) {
         if (e.button === 0) {
           this.pressed |= BTN.ATTACK;
@@ -141,6 +160,12 @@ export class InputSampler {
       else if (e.button === 2) this.mouse &= ~BTN.MODE;
       this.recomputeHeld();
     };
+    /** 캔버스 위 마우스 · 펜 움직임 (PC 조준을 쓸 수 있게 됨). 손가락과 캔버스 밖(레터박스) 움직임은 세지 않는다 */
+    const onCanvasMove = (e: PointerEvent): void => {
+      if (e.pointerType === 'touch') return;
+      if (aimSurface !== null && e.target !== aimSurface) return;
+      this.canvasPointerSeen = true;
+    };
     const onContext = (e: Event): void => e.preventDefault();
     const onBlur = (): void => this.reset();
     const onVisibility = (): void => {
@@ -150,6 +175,7 @@ export class InputSampler {
       listen(env.win, 'keydown', onKeyDown),
       listen(env.win, 'keyup', onKeyUp),
       listen(canvasHost, 'pointerdown', onPointerDown),
+      listen(canvasHost, 'pointermove', onCanvasMove),
       listen(env.win, 'pointerup', onPointerUp),
       listen(canvasHost, 'contextmenu', onContext),
       listen(env.win, 'blur', onBlur),

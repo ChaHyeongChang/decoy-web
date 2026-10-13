@@ -277,6 +277,11 @@ export function preparePracticeMap(): void {
   });
 }
 
+/** 실전 봇 지도 준비(preparePracticeMap)를 이미 했는가 (서버가 시작 때 미리 하는지 보는 시험용) */
+export function practiceMapReady(): boolean {
+  return openness !== null;
+}
+
 function opennessOf(index: number): number {
   if (!openness) preparePracticeMap();
   return openness?.[index] ?? 0;
