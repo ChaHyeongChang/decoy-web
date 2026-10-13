@@ -1,7 +1,7 @@
 // 글자 상자 크기 (렌더링 최적화 2): Phaser Text.updateText가 고정 크기 없이 그릴 때 정하는 width · height를 그리지 않고 잰다.
 // Phaser 3.90 GetTextSize(줄 폭 = 획 두께 + measureText 폭(글자 간격이면 글자마다 + 간격), 올림 / 높이 = (글꼴 높이 + 획 두께) ×
 // 줄 수 + 줄 간격) + 여백과 같은 식이다. text.ts CrispText가 소수 배율에서 '자연 크기를 재려고 한 번 더 그리던' 것을 없앤다.
-// 줄바꿈(wordWrap) 글자는 Phaser의 줄 나누기를 거쳐야 해 여기서 재지 않는다. DOM · Phaser 없음 (tests/unit/text-size.test.ts가
+// 줄바꿈(wordWrap) 글자는 Phaser의 줄 나누기를 거쳐야 해 여기서 재지 않는다. DOM · Phaser 없음 (tests/unit/hud-gate.test.ts가
 // Phaser의 GetTextSize 원본과 견준다)
 
 export interface TextBoxStyle {
