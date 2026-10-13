@@ -283,6 +283,27 @@ describe('빛 속 먼지 DustField: 칸 목록을 다시 쓰는 계산기 — �
     expect(field.rebuilds).toBeLessThan(250);
   });
 
+  it('걷는 눈 (프레임마다 조금씩 움직임): 칸 경계를 넘을 때만 다시 만들고 결과는 같다', () => {
+    const field = new DustField();
+    const r = b.survivor.visionRadius;
+    let frames = 0;
+    for (let k = 0; k < 400; k += 1) {
+      // 내 눈은 오른쪽 아래로 0.07타일씩, 팀원 눈은 제자리 · 위로 0.03타일씩
+      const me = { x: 10 + k * 0.07, y: 12 + k * 0.02 };
+      const mate = { x: 30, y: 20 - k * 0.03 };
+      const eyes: DustEye[] = [
+        { poly: survivorVisionPolygon(me, r), center: me, radius: r - b.survivor.visionSoftEdge },
+        { poly: survivorVisionPolygon(mate, r), center: mate, radius: r - b.survivor.visionSoftEdge },
+      ];
+      const t = k / 60;
+      expect(moteText(field.motes(t, eyes, 40))).toEqual(moteText(dustMotesOld(t, eyes, 40)));
+      frames += 1;
+    }
+    // 칸(1.6타일) 경계를 넘은 때만: 400프레임 중 일부
+    expect(field.rebuilds).toBeGreaterThan(5);
+    expect(field.rebuilds).toBeLessThan(frames / 4);
+  });
+
   it('중심 객체를 제자리에서 바꿔도(예측한 내 자리) 바뀐 값으로 다시 만든다 · 괴물 시야 (부채꼴 + 근접 원) · 빈 입력', () => {
     const field = new DustField();
     const center = { x: 24, y: 20.5 };

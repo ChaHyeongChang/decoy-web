@@ -569,20 +569,21 @@ function hash2(i: number, j: number, salt: number): number {
  * 고르는 순서(우선값 pri)는 시계와 상관없는 칸의 값이라, 칸을 우선값 순서로 먼저 늘어놓고(같으면 나열 순서, 안정 정렬)
  * 앞에서부터 자리 · 시야 안을 재다가 count개를 채우면 멈춘다: '시야 안 칸을 모두 재서 우선값 순으로 count개'와 결과가 같고,
  * 다각형 검사는 칸 전부(시야 3개면 약 150번)가 아니라 count개 남짓만 한다 (M12 휴대폰 성능, 프레임마다 부른다).
- * 새 배열 · 객체를 돌려준다 — 프레임마다 부르는 쪽은 DustField(칸 목록을 눈의 자리 · 반경이 바뀔 때만 다시 만든다)를 쓴다
+ * 새 배열 · 객체를 돌려준다 — 프레임마다 부르는 쪽은 DustField(칸 목록을 눈마다의 칸 범위가 바뀔 때만 다시 만든다)를 쓴다
  */
 export function dustMotes(tS: number, eyes: readonly DustEye[], count: number): DustMote[] {
   return new DustField().motes(tS, eyes, count).slice();
 }
 
 /**
- * 빛 속 먼지 계산기 (렌더링 최적화 2). 칸 목록(우선값 순서) · 칸마다의 시계와 무관한 해시 값은 눈들의 중심 · 반경에만 달려 있어
- * 그것이 바뀔 때(안개 주기에 눈이 움직였을 때)만 다시 만들고, 프레임마다는 sin · cos와 시야 안 검사만 한다.
+ * 빛 속 먼지 계산기 (렌더링 최적화 2). 칸 목록(우선값 순서) · 칸마다의 시계와 무관한 해시 값은 눈마다의 칸 범위(중심 ± 반경을
+ * 칸 크기 1.6타일로 내린 정수 i0 · i1 · j0 · j1, 눈 순서대로)에만 달려 있어 그것이 바뀔 때(눈이 칸 경계를 넘었을 때)만 다시 만들고,
+ * 프레임마다는 sin · cos와 시야 안 검사(그 순간의 중심 · 반경 · 다각형)만 한다.
  * 결과는 dustMotes의 예전 구현과 비트 단위로 같다(같은 식 · 같은 계산 순서, 옛 구현과 대조하는 단위 테스트).
  * motes가 돌려준 목록 · 항목은 다음 motes 호출 때 다시 쓴다
  */
 export class DustField {
-  /** 칸 목록을 만든 눈들 (중심 x · y · 반경을 차례로) */
+  /** 칸 목록을 만든 눈들의 칸 범위 (눈마다 i0 · i1 · j0 · j1) */
   private sig: number[] = [];
   private n = 0;
   /** 칸마다: 자리 바탕 (i + 0.2 + 0.6·h1)·cell, (j + 0.2 + 0.6·h2)·cell, 주기, 위상 h4, 흔들림 h5·6.28, 크기 */
@@ -640,23 +641,25 @@ export class DustField {
     return out;
   }
 
-  /** 눈들의 중심 · 반경이 지난번과 다르면 칸 목록을 다시 만든다 (예전 dustMotes의 칸 나열 · 정렬 그대로) */
+  /**
+   * 눈마다의 칸 범위가 지난번과 다르면 칸 목록을 다시 만든다 (예전 dustMotes의 칸 나열 · 정렬 그대로: 나열은 칸 범위만의 함수다)
+   */
   private prepare(eyes: readonly DustEye[]): void {
+    const cell = DUST.cell;
     const sig = this.sig;
-    let same = sig.length === eyes.length * 3;
+    let same = sig.length === eyes.length * 4;
     for (let k = 0; same && k < eyes.length; k += 1) {
       const e = eyes[k];
       same =
         e !== undefined &&
-        sig[k * 3] === e.center.x &&
-        sig[k * 3 + 1] === e.center.y &&
-        sig[k * 3 + 2] === e.radius;
+        sig[k * 4] === Math.floor((e.center.x - e.radius) / cell) &&
+        sig[k * 4 + 1] === Math.floor((e.center.x + e.radius) / cell) &&
+        sig[k * 4 + 2] === Math.floor((e.center.y - e.radius) / cell) &&
+        sig[k * 4 + 3] === Math.floor((e.center.y + e.radius) / cell);
     }
     if (same) return;
     sig.length = 0;
-    for (const e of eyes) sig.push(e.center.x, e.center.y, e.radius);
     this.rebuilds += 1;
-    const cell = DUST.cell;
     const seen = new Set<number>();
     const cells: { pri: number; i: number; j: number }[] = [];
     for (const e of eyes) {
@@ -664,6 +667,7 @@ export class DustField {
       const i1 = Math.floor((e.center.x + e.radius) / cell);
       const j0 = Math.floor((e.center.y - e.radius) / cell);
       const j1 = Math.floor((e.center.y + e.radius) / cell);
+      sig.push(i0, i1, j0, j1);
       for (let j = j0; j <= j1; j += 1) {
         for (let i = i0; i <= i1; i += 1) {
           const key = j * 4096 + i;

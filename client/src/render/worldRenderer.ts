@@ -370,7 +370,7 @@ export class WorldRenderer {
   /** 이번 안개 주기의 자기 팀 시야 (먼지 · 림). 항목은 eyePool에서 다시 쓴다 */
   private readonly eyes: Eye[] = [];
   private readonly eyePool: Eye[] = [];
-  /** 빛 속 먼지 (칸 목록은 눈의 자리 · 반경이 바뀔 때만 다시 만든다) */
+  /** 빛 속 먼지 (칸 목록은 눈마다의 칸 범위가 바뀔 때만 다시 만든다) */
   private readonly dustField = new DustField();
   /** WebGL 렌더러인가 (부채 삼각형 채우기: Canvas는 fillPath 그대로) */
   private readonly webgl: boolean;
