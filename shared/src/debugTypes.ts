@@ -144,8 +144,12 @@ export interface AnimDebug {
   coneRed: number;
   /** 돌진 잔상 수 */
   dashGhosts: number;
+  /** 돌진 잔상마다 남긴 격자 시각(ms, performance.now 기준) · 알파 (오래된 것부터) */
+  ghosts: { at: number; alpha: number }[];
   /** 살아 있는 입자 수 */
   particles: number;
+  /** 판 장면을 만든 뒤 그린 프레임 수 (프레임 제한기가 건너뛴 rAF는 세지 않는다) */
+  frames: number;
 }
 
 /** 활성 장면의 Phaser 글자 점검 (M10a 선명도: 글자 해상도 = zoom, 격자 맞춤) */

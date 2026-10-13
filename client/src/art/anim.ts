@@ -92,6 +92,19 @@ export interface TravelPiece {
   walk?: boolean;
 }
 
+/**
+ * out[i]에 조각을 쓴다: 있는 객체를 다시 쓰고 없을 때만 만든다 (프레임마다 새 객체를 만들지 않게). 조각을 만드는 함수들은
+ * out을 줄이지 않고 쓴 수를 돌려준다 — 뒤에 남은 객체는 다음에 다시 쓴다
+ */
+export function writePiece(out: TravelPiece[], i: number, ms: number, dist: number, walk?: boolean): void {
+  const p = out[i];
+  if (p) {
+    p.ms = ms;
+    p.dist = dist;
+    p.walk = walk;
+  } else out.push({ ms, dist, walk });
+}
+
 /** 이 조각 동안 걷는 중인가 */
 function pieceWalks(p: TravelPiece, ms: number): boolean {
   if (p.walk === undefined) return isWalking(p.dist, ms);
@@ -126,37 +139,39 @@ export interface SelfStep {
 /**
  * 내 캐릭터의 프레임 사이(from → to) 조각들: 기록이 바뀐 순간 · 보간이 다 간 순간(until)에서 나눈다. 거리는 예측 보간의
  * 빠르기로 잰다(보정 어긋남 · 보정 순간의 건너뜀은 걷기로 치지 않는다): 그린 자리의 프레임 사이 직선으로 재면 틱 · 보정이
- * 프레임 사이에 있어 fps마다 모퉁이 · 되돌림을 다르게 잰다 (렌더링 최적화). from 전의 기록이 없으면 false
+ * 프레임 사이에 있어 fps마다 모퉁이 · 되돌림을 다르게 잰다 (렌더링 최적화). 쓴 조각 수를 돌려준다 (out 앞에서부터, writePiece).
+ * 첫 기록 전 구간은 서 있던 것으로 본다. 기록이 없거나 이 구간 안에 아직 없으면 −1 (프레임 사이 직선으로 대신)
  */
-export function selfPieces(
-  steps: readonly SelfStep[],
-  from: number,
-  to: number,
-  out: TravelPiece[],
-): boolean {
-  out.length = 0;
-  if (!(to > from)) return false;
+export function selfPieces(steps: readonly SelfStep[], from: number, to: number, out: TravelPiece[]): number {
+  if (!(to > from)) return -1;
   let i = -1;
   for (let k = 0; k < steps.length; k += 1) if ((steps[k]?.t ?? Infinity) <= from) i = k;
-  const push = (a: number, b: number, speed: number, walk: boolean): void => {
-    if (b > a) out.push({ ms: b - a, dist: speed * (b - a), walk });
-  };
-  if (i < 0) return false;
+  const first = steps[0];
+  if (!first) return -1;
+  let n = 0;
   let t = from;
+  if (i < 0) {
+    // 첫 기록(판 시작 뒤 첫 입력 틱) 전에는 예측 보간이 없었다: 서 있던 것으로 본다
+    if (first.t >= to) return -1;
+    writePiece(out, n++, first.t - from, 0, false);
+    t = first.t;
+    i = 0;
+  }
   for (;;) {
     const cur = steps[i];
     if (!cur) break;
     const next = steps[i + 1];
     const end = next && next.t <= to ? Math.max(t, next.t) : to;
-    if (cur.until > t && cur.until < end) {
-      push(t, cur.until, cur.speed, cur.walk);
-      push(cur.until, end, 0, cur.walk);
-    } else push(t, end, cur.until > t ? cur.speed : 0, cur.walk);
+    // 보간이 이 구간 안에서 다 가면 거기서 나눈다 (그 뒤는 멈춤)
+    const split = cur.until > t && cur.until < end ? cur.until : end;
+    const speed = cur.until > t ? cur.speed : 0;
+    if (split > t) writePiece(out, n++, split - t, speed * (split - t), cur.walk);
+    if (end > split) writePiece(out, n++, end - split, 0, cur.walk);
     t = end;
     if (!next || next.t > to) break;
     i += 1;
   }
-  return true;
+  return n;
 }
 
 /**
@@ -164,10 +179,12 @@ export function selfPieces(
  * 걷는 동안 stepInMs, 멈춘 동안 stepOutMs에 걸쳐 시간으로 바뀐다. 같은 경로를 몇 조각(프레임)으로 나눠도 결과가 같다
  * (렌더링 최적화: 60 · 120fps 같음). 돌려주는 값: 이번에 처음 발이 닿은 순간 (첫 조각 시작부터 ms, 없으면 null)
  */
-export function stepGait(g: GaitState, pieces: readonly TravelPiece[]): number | null {
+export function stepGait(g: GaitState, pieces: readonly TravelPiece[], n = pieces.length): number | null {
   let t = 0;
   let fall: number | null = null;
-  for (const p of pieces) {
+  for (let i = 0; i < n; i += 1) {
+    const p = pieces[i];
+    if (!p) break;
     const ms = Math.max(0, p.ms);
     const moving = pieceWalks(p, ms);
     if (moving && p.dist > 0) {

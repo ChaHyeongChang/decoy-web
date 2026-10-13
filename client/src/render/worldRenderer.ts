@@ -51,6 +51,7 @@ import {
   seedOf,
   stepGait,
   windupFill,
+  writePiece,
   type TravelPiece,
 } from '../art/anim';
 import { MOTE_R, cloakFrameName, ensureAtlas, type AtlasBuild } from '../art/atlas';
@@ -154,15 +155,15 @@ export interface FrameView {
  * 걷기는 보간 경로를 표본 시각에서 나눈 조각으로 재고, 상태(준비 · 돌진 · 수감 · 발각)가 바뀐 프레임은 바뀐 경계 시각부터 잰다
  */
 export interface MotionSource {
-  /** 보간 경로 조각들 (시간 순서). 보간 엔티티가 아니면 false */
-  travel(kind: 'survivor' | 'monster', id: string, out: TravelPiece[]): boolean;
+  /** 보간 경로 조각들 (시간 순서, out 앞에서부터 쓴 수). 보간 엔티티가 아니면 −1 */
+  travel(kind: 'survivor' | 'monster', id: string, out: TravelPiece[]): number;
   /** 이번 프레임 사이에 보간 상태가 바뀔 수 있었던 경계의 이 기기 시각 (ms, 없으면 null) */
   edgeAt(kind: 'survivor' | 'monster', id: string): number | null;
   /**
    * 내 캐릭터의 조각들 (anim selfPieces): 걷는 중인지는 입력 틱마다 예측 상태가 움직였는가로, 거리는 예측 보간(직전 틱 상태 →
-   * 지금 틱 상태)의 빠르기로 잰다. 입력 틱 · 스냅샷 보정 · 보간이 다 간 순간에서 나눈다. 기록이 없으면 false
+   * 지금 틱 상태)의 빠르기로 잰다. 입력 틱 · 스냅샷 보정 · 보간이 다 간 순간에서 나눈다. 쓴 조각 수, 기록이 없으면 −1
    */
-  selfTravel(out: TravelPiece[]): boolean;
+  selfTravel(out: TravelPiece[]): number;
 }
 
 /** 프레임 독립성 시험용 월드 연출 상태 (AnimDebug의 월드 부분) */
@@ -171,6 +172,7 @@ export interface WorldAnimDebug {
   fogAt: number | null;
   coneRed: number;
   dashGhosts: number;
+  ghosts: { at: number; alpha: number }[];
   particles: number;
 }
 
@@ -286,8 +288,23 @@ export class WorldRenderer {
   private readonly pieces: TravelPiece[] = [];
   /** 이번 프레임에 걷기를 진행한 엔티티 (디버그 animDebug) */
   private readonly gaitDrawn = new Set<string>();
-  /** 이번 돌진이 시작된 순간 (돌진 잔상 격자, 돌진 중이 아니면 null) */
-  private dashSince: number | null = null;
+  /** 이번 프레임의 돌진 잔상 (디버그 animDebug) */
+  private lastGhosts: ReturnType<DashTrail['live']> = [];
+  /** 돌진 잔상에 넘기는 자리 (프레임마다 새로 만들지 않는다. DashTrail은 값만 복사한다) */
+  private readonly dashAt = { x: 0, y: 0, aim: 0 };
+  /** 이번 프레임 (dashOnset이 읽는다) */
+  private dashView: FrameView | null = null;
+  /** 새 돌진이 시작된 순간: 내 돌진은 누른 입력 틱(이번 프레임 사이면), 아니면 받은 스냅샷 · 상대는 보간 표본 경계 */
+  private readonly dashOnset = (): number => {
+    const v = this.dashView;
+    if (!v) return 0;
+    if (v.role !== 'monster') return this.flipAt(v, 'monster', 'monster');
+    const pressed = v.localDashAt;
+    const prev = this.lastDrawAt;
+    return pressed !== null && prev !== null && pressed > prev && pressed <= v.nowMs
+      ? pressed
+      : this.snapEdge(v);
+  };
   drawn: DrawnEntity[] = [];
   baseRefreshed = false;
   private readonly dashTrail = new DashTrail();
@@ -356,6 +373,9 @@ export class WorldRenderer {
     this.fogRoot = scene.add.container(0, 0);
     this.preset = this.currentPreset();
     this.fog = this.buildFog();
+    // 안개 갱신 격자의 기준 = 시계 0 (주기의 배수 시각). 첫 프레임 · 판 장면을 만든 순간은 fps · 판마다 다르지만
+    // 시계의 배수는 같다: 60 · 120fps가 같은 시각에 갱신한다
+    this.fogClock.anchor(0);
     this.post = new WorldPostFx(scene, this.fogRoot);
     this.post.apply(this.preset, this.fog.shader);
     this.container = scene.add.container(MAP_X, MAP_Y).setScale(MAP_SCALE);
@@ -616,15 +636,19 @@ export class WorldRenderer {
     }
     const pieces = this.pieces;
     const chord = Math.hypot(x - g.x, y - g.y);
-    const known =
-      v.motion !== null && (kind === null ? v.motion.selfTravel(pieces) : v.motion.travel(kind, id, pieces));
-    if (!known) {
-      pieces.length = 0;
-      pieces.push({ ms: frameMs, dist: chord });
+    let n =
+      v.motion === null
+        ? -1
+        : kind === null
+          ? v.motion.selfTravel(pieces)
+          : v.motion.travel(kind, id, pieces);
+    if (n < 0) {
+      writePiece(pieces, 0, frameMs, chord);
+      n = 1;
     }
-    const fall = stepGait(g, pieces);
+    const fall = stepGait(g, pieces, n);
     let total = 0;
-    for (const p of pieces) total += p.ms;
+    for (let i = 0; i < n; i += 1) total += pieces[i]?.ms ?? 0;
     g.footfall = fall !== null;
     g.footAt = fall === null ? v.nowMs : v.nowMs - (total - fall);
     g.x = x;
@@ -657,6 +681,7 @@ export class WorldRenderer {
       fogAt: this.fogClock.last,
       coneRed: this.coneRed,
       dashGhosts: this.fx.dashGhosts,
+      ghosts: this.lastGhosts.map(({ g, alpha }) => ({ at: g.at, alpha })),
       particles: this.fxs.count,
     };
   }
@@ -697,7 +722,7 @@ export class WorldRenderer {
 
     // 1~6. 바닥 · 거점 · 탈출구 영역 · 시야 채움 · 안개 — 갱신 주기마다 합성
     // (그림이 지난 주기와 같으면 안개 레이어가 합성 · 업로드를 건너뛰고, 미니맵도 다시 그리지 않는다)
-    const fogDue = this.fogClock.due(v.nowMs, isMonster ? MONSTER_FOG_MS : SURVIVOR_FOG_MS);
+    const fogDue = this.fogClock.due(v.nowMs, isMonster ? MONSTER_FOG_MS : SURVIVOR_FOG_MS, frameMs);
     this.baseRefreshed = false;
     this.gaitDrawn.clear();
     if (fogDue) {
@@ -994,23 +1019,17 @@ export class WorldRenderer {
       : oppVisible && v.monster?.dashing
         ? v.monster
         : null;
+    const at = this.dashAt;
     if (dashing) {
-      const face = 'aim' in dashing ? dashing.aim : dashing.face;
-      if (this.dashSince === null) {
-        const pressed = v.localDashAt;
-        const prev = this.lastDrawAt;
-        this.dashSince = isMonster
-          ? pressed !== null && prev !== null && pressed > prev && pressed <= v.nowMs
-            ? pressed
-            : this.snapEdge(v)
-          : this.flipAt(v, 'monster', 'monster');
-      }
-      this.dashTrail.sample(dashing.x, dashing.y, face, v.nowMs, this.dashSince);
-    } else if (this.dashSince !== null) {
-      this.dashSince = null;
-      this.dashTrail.end();
+      at.x = dashing.x;
+      at.y = dashing.y;
+      at.aim = 'aim' in dashing ? dashing.aim : dashing.face;
     }
+    this.dashView = v;
+    // 그리지 않은 틈(숨김 · 루프 멈춤)이 길면 DashTrail이 지난 돌진을 잇지 않는다
+    this.dashTrail.update(dashing ? at : null, v.nowMs, this.dashOnset);
     const ghosts = this.dashTrail.live(v.nowMs);
+    this.lastGhosts = ghosts;
     this.drawGhosts(ghosts, mR);
     if (ghosts.length > 0)
       drawDashStreak(

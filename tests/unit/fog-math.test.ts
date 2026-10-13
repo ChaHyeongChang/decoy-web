@@ -373,12 +373,44 @@ function frameTimes(hz: number, to: number, jitter = 0): number[] {
 }
 
 describe('안개 · 시야 갱신 시계 (정해진 시각에 위상 고정)', () => {
+  /** 프레임 시각들을 차례로 넣는다 (프레임 간격 = 앞 프레임과의 차이) */
   const refreshes = (times: readonly number[], period: number): { at: number; due: number }[] => {
     const c = new PhaseClock();
     const out: { at: number; due: number }[] = [];
-    for (const t of times) if (c.due(t, period)) out.push({ at: t, due: c.last ?? Number.NaN });
+    let prev = times[0] ?? 0;
+    for (const t of times) {
+      if (c.due(t, period, t - prev)) out.push({ at: t, due: c.last ?? Number.NaN });
+      prev = t;
+    }
     return out;
   };
+  /** 예전(origin/main) 판단: 지난 갱신 프레임부터 한 주기가 지났으면 */
+  const oldRefreshes = (times: readonly number[], period: number): number[] => {
+    let last: number | null = null;
+    const out: number[] = [];
+    for (const t of times)
+      if (last === null || t - last >= period) {
+        last = t;
+        out.push(t);
+      }
+    return out;
+  };
+
+  it('60fps보다 느린 기기(30 · 35 · 40 · 45 · 50 · 55fps)에서는 예전처럼 지난 갱신 프레임부터 한 주기: 더 자주 다시 합성하지 않는다', () => {
+    for (const period of [50, 1000 / 30])
+      for (const fps of [30, 35, 40, 45, 50, 55])
+        for (const jitter of [0, 0.4]) {
+          const times = [0, ...frameTimes(fps, 6000, jitter)];
+          const now = refreshes(times, period).map((r) => r.at);
+          // 같은 프레임에 갱신한다 (45fps 생존자 화면: 예전 15Hz — 위상 고정만 하면 20Hz로 늘었다)
+          expect(now, `${fps}fps 주기 ${period.toFixed(1)}ms 흔들림 ${jitter}`).toEqual(
+            oldRefreshes(times, period),
+          );
+        }
+    // 45fps 생존자 화면은 3프레임마다 = 15Hz
+    const at45 = refreshes([0, ...frameTimes(45, 3000)], 50);
+    expect(at45.length).toBeLessThanOrEqual(46);
+  });
 
   it('생존자 50ms · 괴물 1/30초: 60 · 120 · 144fps 모두 같은 정해진 시각에 갱신한다', () => {
     for (const period of [50, 1000 / 30]) {
@@ -412,6 +444,23 @@ describe('안개 · 시야 갱신 시계 (정해진 시각에 위상 고정)', (
     // ±0.3ms로 흔들려도 평균 50ms
     expect(refreshes(frameTimes(120, 3000, 0.3), 50).length).toBeGreaterThanOrEqual(59);
     expect(PHASE_TOLERANCE_MS).toBe(1);
+  });
+
+  it('시작 시각(판 장면을 만든 순간)에 맞추면 첫 프레임이 60 · 120fps에서 달라도 같은 정해진 시각에 갱신한다', () => {
+    // 판 장면은 받은 순간(프레임 사이 4ms 자리)에 생기고 첫 프레임은 120Hz가 8.33ms 먼저다
+    const run = (hz: number): number[] => {
+      const c = new PhaseClock();
+      c.anchor(1004);
+      const out: number[] = [];
+      for (let k = Math.ceil((1004 * hz) / 1000); (k * 1000) / hz <= 2000; k += 1)
+        if (c.due((k * 1000) / hz, 50, 1000 / hz)) out.push(c.last ?? Number.NaN);
+      return out;
+    };
+    const a = run(60);
+    const b = run(120);
+    expect(b).toEqual(a);
+    expect(a[0]).toBe(1004);
+    expect(a[1]).toBe(1054);
   });
 
   it('한 주기 넘게 밀리면(멈춤) 따라잡지 않고 지금으로 다시 맞춘다', () => {

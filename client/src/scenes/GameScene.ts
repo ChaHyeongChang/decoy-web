@@ -100,6 +100,8 @@ export class GameScene extends Phaser.Scene {
    * 더하면 바뀐 프레임에 그 전 시간까지 더해져 fps마다 달랐다). 판 장면마다 새로
    */
   private blendRamp: LinearRamp | null = null;
+  /** 판 장면을 만든 뒤 그린 프레임 수 (디버그 animDebug: 120Hz로 정말 그렸는지 시험이 본다) */
+  private renderedFrames = 0;
   /** 괴물: 예측한 돌진을 누른 마지막 시각 (입력 틱, 돌진 잔상 격자의 시작) */
   private localDashAt: number | null = null;
   /** 지난 프레임의 렌더 시각 (보간 경로 조각 · 상태 경계를 잴 구간 시작) */
@@ -119,7 +121,7 @@ export class GameScene extends Phaser.Scene {
   private readonly selfSteps: SelfStep[] = [];
   /** 보간 엔티티의 프레임 사이 경로 · 상태 경계 (월드 렌더러가 걷기 · 바뀐 순간을 잰다) */
   private readonly motion: MotionSource = {
-    travel: (kind: 'survivor' | 'monster', id: string, out: TravelPiece[]): boolean => {
+    travel: (kind: 'survivor' | 'monster', id: string, out: TravelPiece[]): number => {
       const span = this.motionSpan;
       return this.interpOf(kind).travel(id, span.r0, span.r1, out);
     },
@@ -128,9 +130,9 @@ export class GameScene extends Phaser.Scene {
       const r = this.interpOf(kind).edgeAt(id, span.r0, span.r1);
       return r === null ? null : span.now - (span.r1 - r);
     },
-    selfTravel: (out: TravelPiece[]): boolean => {
+    selfTravel: (out: TravelPiece[]): number => {
       const { prevNow, now } = this.motionSpan;
-      return prevNow !== null && selfPieces(this.selfSteps, prevNow, now, out);
+      return prevNow === null ? -1 : selfPieces(this.selfSteps, prevNow, now, out);
     },
   };
   drawn: DrawnEntity[] = [];
@@ -285,10 +287,16 @@ export class GameScene extends Phaser.Scene {
     this.world = new WorldRenderer(this, FOG_ENABLED);
     this.myBlend = 0;
     this.blendRamp = null;
+    this.renderedFrames = 0;
     this.localDashAt = null;
-    this.lastRenderTime = null;
-    this.motionSpan.prevNow = null;
     this.selfSteps.length = 0;
+    // 보간 경로 조각 · 내 걷기 기록 · 시야 모드 보간은 판 장면을 만든 순간부터 잰다: 첫 프레임 시각은 fps마다 다르다
+    // (판 장면은 판 시작 메시지를 받은 순간에 만들고 첫 그리기는 다음 프레임이다)
+    const createdAt = performance.now();
+    this.lastRenderTime = app.renderTime();
+    this.motionSpan.now = createdAt;
+    this.motionSpan.prevNow = null;
+    if (app.lastSnap) this.noteBlend(app.lastSnap, createdAt);
     this.kit = new HudKit(this);
     this.hud = new Hud(this.kit, info, balance, device.touch);
     this.minimap = new Minimap(this, this.kit, info.role === 'monster');
@@ -600,7 +608,9 @@ export class GameScene extends Phaser.Scene {
       fogAt: w.fogAt,
       coneRed: w.coneRed,
       dashGhosts: w.dashGhosts,
+      ghosts: w.ghosts,
       particles: w.particles,
+      frames: this.renderedFrames,
     };
   }
 
@@ -657,6 +667,7 @@ export class GameScene extends Phaser.Scene {
     // 시간으로 쌓는 연출(보정 어긋남 · 걷기 · 부채꼴 색)도 rawDelta를 쓴다: delta는 최근 10프레임 평균이고 시작 · 복귀 뒤
     // 120프레임은 16.67ms로 막혀 120fps에서 실제와 다르다 (렌더링 최적화, smoothStep을 끄든 켜든 같게)
     const raw = this.game.loop.rawDelta;
+    this.renderedFrames += 1;
     this.frameMs = trackFrameMs(this.frameMs, raw);
     this.renderFrame(frameDeltaMs(raw));
     this.watchFps();

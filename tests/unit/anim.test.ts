@@ -304,7 +304,7 @@ describe('걷기 판단 · 자세 섞기 (프레임 독립성)', () => {
       { t: tick, speed: 0.004, until: tick * 2, walk: false },
     ];
     const out: TravelPiece[] = [];
-    expect(selfPieces(steps, 10, 40, out)).toBe(true);
+    expect(selfPieces(steps, 10, 40, out)).toBe(3);
     expect(out.map((p) => [p.ms, p.dist, p.walk])).toEqual(
       [
         [10, 0.04, true],
@@ -319,8 +319,8 @@ describe('걷기 판단 · 자세 섞기 (프레임 독립성)', () => {
       let walkMs = 0;
       let prev = 0;
       for (const t of frameTimes(hz, 0, 50)) {
-        selfPieces(steps, prev, t, out);
-        for (const p of out) {
+        const n = selfPieces(steps, prev, t, out);
+        for (const p of out.slice(0, n)) {
           ms += p.ms;
           dist += p.dist;
           if (p.walk) walkMs += p.ms;
@@ -334,8 +334,19 @@ describe('걷기 판단 · 자세 섞기 (프레임 독립성)', () => {
     expect(b.ms).toBeCloseTo(a.ms, 9);
     expect(b.dist).toBeCloseTo(a.dist, 9);
     expect(b.walkMs).toBeCloseTo(a.walkMs, 9);
-    // 시작 전 기록이 없으면 모른다 (프레임 사이 직선으로 대신)
-    expect(selfPieces(steps, -5, 3, out)).toBe(false);
+    // 기록이 하나도 없으면 모른다 (프레임 사이 직선으로 대신)
+    expect(selfPieces([], -5, 3, out)).toBe(-1);
+    // 첫 기록 전(판 시작 뒤 첫 입력 틱 전)은 서 있었다: 첫 입력 틱이 프레임 사이에 와도 60 · 120fps 걷기가 같다
+    expect(selfPieces(steps, -5, 3, out)).toBe(2);
+    expect(out.slice(0, 2).map((p) => [p.ms, p.dist, p.walk])).toEqual([
+      [5, 0, false],
+      [3, expect.closeTo(0.012, 9), true],
+    ]);
+    // 조각 객체는 다시 쓴다 (프레임마다 새로 만들지 않는다): 줄어도 배열을 자르지 않는다
+    const first = out[0];
+    expect(selfPieces(steps, 0, 5, out)).toBe(1);
+    expect(out[0]).toBe(first);
+    expect(out.length).toBeGreaterThanOrEqual(3);
   });
 });
 

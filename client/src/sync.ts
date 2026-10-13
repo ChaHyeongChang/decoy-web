@@ -1,5 +1,5 @@
 // 지연 대응: 내 캐릭터 예측 + 보정, 다른 캐릭터 100ms 보간
-import type { TravelPiece } from './art/anim';
+import { writePiece, type TravelPiece } from './art/anim';
 import {
   angleDiff,
   cloneMoveState,
@@ -57,13 +57,18 @@ export class Predictor {
     this.errAt = this.timed ? this.clock() : this.frameClock;
   }
 
+  /** errAtTime이 돌려주는 값 (프레임마다 새로 만들지 않는다: 받은 쪽은 바로 읽고 버린다) */
+  private readonly errNow = { x: 0, y: 0 };
+
   /** 시각 t의 보정 어긋남 (errAt부터 지수로 줄어든다, 아주 작으면 0) */
-  private errAtTime(t: number): { x: number; y: number } {
+  private errAtTime(t: number): { readonly x: number; readonly y: number } {
     const tau = Math.max(1, this.balance.network.correctionSmoothMs);
     const k = Math.exp(-Math.max(0, t - this.errAt) / (tau / 3));
     const x = this.errX * k;
     const y = this.errY * k;
-    return { x: Math.abs(x) < ERR_EPSILON ? 0 : x, y: Math.abs(y) < ERR_EPSILON ? 0 : y };
+    this.errNow.x = Math.abs(x) < ERR_EPSILON ? 0 : x;
+    this.errNow.y = Math.abs(y) < ERR_EPSILON ? 0 : y;
+    return this.errNow;
   }
 
   /** applyLocal 전에 부른다: 이 입력을 적용할 때 이동 상태에 먼저 반영할 행동 */
@@ -217,14 +222,10 @@ export class Interpolator<T extends Lerpable> {
     this.tracks.clear();
   }
 
-  /** 렌더 시각 r0 → r1 사이에 id가 보간 경로를 따라 움직인 조각들 (travelOf). 트랙이 없으면 false */
-  travel(id: string, r0: number, r1: number, out: TravelPiece[]): boolean {
+  /** 렌더 시각 r0 → r1 사이에 id가 보간 경로를 따라 움직인 조각들 (travelOf): 쓴 조각 수, 트랙이 없으면 −1 */
+  travel(id: string, r0: number, r1: number, out: TravelPiece[]): number {
     const track = this.tracks.get(id);
-    if (!track) {
-      out.length = 0;
-      return false;
-    }
-    return travelOf(track.samples, r0, r1, out);
+    return track ? travelOf(track.samples, r0, r1, out) : -1;
   }
 
   /**
@@ -282,54 +283,71 @@ export class Interpolator<T extends Lerpable> {
 }
 
 /**
- * 보간 경로 위치 (sample과 같은 식: 첫 표본 전 · 마지막 표본 뒤는 그 표본 자리, 사이는 앞뒤 표본의 직선 보간).
- * travel이 꺾인 점 사이를 잴 때 쓴다
+ * 보간 경로 위치를 into에 쓴다 (sample과 같은 식: 첫 표본 전 · 마지막 표본 뒤는 그 표본 자리, 사이는 앞뒤 표본의 직선 보간).
+ * travel이 꺾인 점 사이를 잴 때 쓴다. 표본이 없으면 false
  */
-function pathPos<T extends Lerpable>(s: readonly InterpSample<T>[], r: number): Lerpable | null {
+function pathPos<T extends Lerpable>(s: readonly InterpSample<T>[], r: number, into: Lerpable): boolean {
   const first = s[0];
   const last = s[s.length - 1];
-  if (!first || !last) return null;
-  if (r <= first.t) return first.v;
-  if (r >= last.t) return last.v;
-  for (let i = s.length - 2; i >= 0; i -= 1) {
-    const a = s[i];
-    const b = s[i + 1];
-    if (!a || !b) continue;
-    if (a.t <= r) {
-      const k = b.t > a.t ? (r - a.t) / (b.t - a.t) : 1;
-      return { x: lerpNum(a.v.x, b.v.x, k), y: lerpNum(a.v.y, b.v.y, k) };
+  if (!first || !last) return false;
+  let x = first.v.x;
+  let y = first.v.y;
+  if (r >= last.t) {
+    x = last.v.x;
+    y = last.v.y;
+  } else if (r > first.t) {
+    for (let i = s.length - 2; i >= 0; i -= 1) {
+      const a = s[i];
+      const b = s[i + 1];
+      if (!a || !b) continue;
+      if (a.t <= r) {
+        const k = b.t > a.t ? (r - a.t) / (b.t - a.t) : 1;
+        x = lerpNum(a.v.x, b.v.x, k);
+        y = lerpNum(a.v.y, b.v.y, k);
+        break;
+      }
     }
   }
-  return first.v;
+  into.x = x;
+  into.y = y;
+  return true;
 }
+
+/** travelOf가 꺾인 점 둘을 번갈아 쓰는 자리 (호출 안에서만 쓰고 밖에 내주지 않는다) */
+const PATH_A: Lerpable = { x: 0, y: 0 };
+const PATH_B: Lerpable = { x: 0, y: 0 };
 
 /**
  * 보간 경로를 따라 렌더 시각 r0 → r1 사이에 움직인 조각들 (렌더링 최적화: 걷기 위상 · 자세를 프레임 수와 무관하게).
  * 표본 시각(꺾인 점)마다 나눠서, 프레임 사이 직선(현)으로 재면 모퉁이를 깎아 120fps가 더 멀리 걸은 것으로 되던 것을 없앤다.
- * 조각은 시간 순서 { ms(렌더 시간), dist(타일) }. 트랙이 없으면 false
+ * 조각은 시간 순서 { ms(렌더 시간), dist(타일) }로 out 앞에서부터 쓰고(writePiece) 쓴 수를 돌려준다. 표본이 없으면 −1
  */
 export function travelOf<T extends Lerpable>(
   samples: readonly InterpSample<T>[],
   r0: number,
   r1: number,
   out: TravelPiece[],
-): boolean {
-  out.length = 0;
-  if (samples.length === 0) return false;
-  if (!(r1 > r0)) return true;
+): number {
+  if (samples.length === 0) return -1;
+  if (!(r1 > r0)) return 0;
+  let n = 0;
   let t = r0;
-  let p = pathPos(samples, r0);
+  let p = PATH_A;
+  let q = PATH_B;
+  pathPos(samples, r0, p);
   for (const smp of samples) {
     if (smp.t <= t) continue;
     if (smp.t >= r1) break;
-    const q = pathPos(samples, smp.t);
-    if (p && q) out.push({ ms: smp.t - t, dist: Math.hypot(q.x - p.x, q.y - p.y) });
+    pathPos(samples, smp.t, q);
+    writePiece(out, n++, smp.t - t, Math.hypot(q.x - p.x, q.y - p.y));
     t = smp.t;
+    const swap = p;
     p = q;
+    q = swap;
   }
-  const q = pathPos(samples, r1);
-  if (p && q) out.push({ ms: r1 - t, dist: Math.hypot(q.x - p.x, q.y - p.y) });
-  return true;
+  pathPos(samples, r1, q);
+  writePiece(out, n++, r1 - t, Math.hypot(q.x - p.x, q.y - p.y));
+  return n;
 }
 
 export function lerpNum(a: number, b: number, k: number): number {

@@ -347,6 +347,8 @@ export const DASH_GHOST_MS = 250;
 export const GHOST_EVERY_MS = 1000 / 30;
 /** 격자 시각보다 이만큼 이른 프레임이면 그 프레임에 남긴다 (ms) */
 const GHOST_TOLERANCE_MS = 1;
+/** 이보다 오래 그리지 않았으면(화면 숨김 · 루프 멈춤) 지난 돌진 격자 · 자리를 잇지 않는다 (ms, 프레임 간격 상한과 같다) */
+export const DASH_GAP_MS = 250;
 
 export interface Ghost {
   x: number;
@@ -366,12 +368,34 @@ export class DashTrail {
   /** 이번 돌진의 격자 시작 (돌진 중이 아니면 null) · 다음 잔상 번호 */
   private start: number | null = null;
   private nextK = 0;
-  /** 지난 프레임의 돌진 자리 */
-  private prev: { x: number; y: number; aim: number; t: number } | null = null;
+  /** 지난 프레임의 돌진 자리 (hasPrev가 거짓이면 없음. 프레임마다 새 객체를 만들지 않는다) */
+  private hasPrev = false;
+  private prevX = 0;
+  private prevY = 0;
+  private prevAim = 0;
+  private prevT = 0;
+  /** 지난 프레임 시각 (update) */
+  private lastFrameAt: number | null = null;
 
   /** 잔상 수명 = 돌진 시간 (balance) */
   setLife(ms: number): void {
     if (ms > 0) this.lifeMs = ms;
+  }
+
+  /**
+   * 프레임마다 부른다: dashing = 돌진 중인 괴물이 보이면 그 자리, 아니면 null. onset = 새 돌진의 첫 프레임에만 묻는 시작 순간.
+   * 지난 프레임에서 DASH_GAP_MS 넘게 지났으면(화면 숨김 · 루프 멈춤) 그 사이 돌진이 끝났다가 새로 시작했을 수 있으므로
+   * 지난 격자 · 자리를 잇지 않는다
+   */
+  update(dashing: { x: number; y: number; aim: number } | null, nowMs: number, onset: () => number): void {
+    if (this.lastFrameAt !== null && nowMs - this.lastFrameAt > DASH_GAP_MS) this.end();
+    this.lastFrameAt = nowMs;
+    if (!dashing) {
+      if (this.start !== null) this.end();
+      return;
+    }
+    const start = this.start ?? Math.min(nowMs, onset());
+    this.sample(dashing.x, dashing.y, dashing.aim, nowMs, start);
   }
 
   /** 돌진 중인 괴물이 보이는 프레임마다 부른다. startMs = 이번 돌진이 시작된 순간 (격자 기준) */
@@ -379,23 +403,24 @@ export class DashTrail {
     if (this.start !== startMs) {
       this.start = startMs;
       this.nextK = 0;
-      this.prev = null;
+      this.hasPrev = false;
     }
+    // 지난 자리가 너무 오래됐으면(그리지 않은 틈) 그 자리에서 이어 보간하지 않는다
+    if (this.hasPrev && nowMs - this.prevT > DASH_GAP_MS) this.hasPrev = false;
     // 처음 보는 프레임이면 지금까지의 마지막 격자 하나만 (돌진 도중 보이기 시작해도 지난 격자를 한 자리에 쌓지 않는다)
-    if (!this.prev) {
+    if (!this.hasPrev) {
       const latest = Math.floor((nowMs + GHOST_TOLERANCE_MS - startMs) / GHOST_EVERY_MS);
       if (latest > this.nextK) this.nextK = latest;
     }
     for (;;) {
       const g = startMs + this.nextK * GHOST_EVERY_MS;
       if (g > nowMs + GHOST_TOLERANCE_MS) break;
-      const p = this.prev;
-      if (p && g > p.t && g < nowMs) {
-        const k = (g - p.t) / (nowMs - p.t);
+      if (this.hasPrev && g > this.prevT && g < nowMs) {
+        const k = (g - this.prevT) / (nowMs - this.prevT);
         this.ghosts.push({
-          x: p.x + (x - p.x) * k,
-          y: p.y + (y - p.y) * k,
-          aim: p.aim + angleDiff(p.aim, aim) * k,
+          x: this.prevX + (x - this.prevX) * k,
+          y: this.prevY + (y - this.prevY) * k,
+          aim: this.prevAim + angleDiff(this.prevAim, aim) * k,
           at: g,
         });
       } else {
@@ -403,13 +428,17 @@ export class DashTrail {
       }
       this.nextK += 1;
     }
-    this.prev = { x, y, aim, t: nowMs };
+    this.hasPrev = true;
+    this.prevX = x;
+    this.prevY = y;
+    this.prevAim = aim;
+    this.prevT = nowMs;
   }
 
   /** 돌진이 끝났다 (다음 돌진은 새 격자) */
   end(): void {
     this.start = null;
-    this.prev = null;
+    this.hasPrev = false;
   }
 
   /** 아직 남은 잔상과 알파 (0~1) */

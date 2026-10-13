@@ -286,24 +286,55 @@ export class ConeRedTrack {
 export const PHASE_TOLERANCE_MS = 1;
 
 /**
- * 주기 갱신 시계 (안개 · 시야 갱신): 정해진 시각(시작 + k × 주기)에 위상을 고정한다. 프레임 시각이 다음 정해진 시각 − 1ms에
- * 닿은 첫 프레임에 갱신하고, 마지막 갱신 시각은 프레임 시각이 아니라 정해진 시각으로 둔다. 그래서 60 · 120fps 모두 같은
- * 정해진 시각에 갱신한다(예전 '지난 갱신부터 50ms' 판단은 120fps에서 6 × 8.33 = 49.99ms라 7프레임마다 = 58ms였다).
- * 한 주기 넘게 밀렸으면(멈춤 · 느린 프레임) 따라잡지 않고 지금으로 다시 맞춘다
+ * 이보다 짧은 프레임(약 58fps 이상)이면 정해진 시각에 위상을 고정한다. 더 긴 프레임은 예전 판단(지난 갱신 프레임부터 한 주기)
+ * 그대로다: 느린 기기에서 위상을 고정하면 프레임 배수로 맞추느라 예전보다 자주 다시 합성했다(45fps 생존자 화면 15Hz → 20Hz)
+ */
+export const PHASE_LOCK_FRAME_MS = 1000 / 58;
+
+/**
+ * 주기 갱신 시계 (안개 · 시야 갱신). 빠른 프레임(PHASE_LOCK_FRAME_MS 이하)에서는 정해진 시각(시작 + k × 주기)에 위상을 고정한다:
+ * 프레임 시각이 다음 정해진 시각 − 1ms에 닿은 첫 프레임에 갱신하고, 마지막 갱신 시각은 프레임 시각이 아니라 정해진 시각으로
+ * 둔다. 그래서 60 · 120 · 144fps 모두 같은 정해진 시각에 갱신한다(예전 '지난 갱신부터 50ms' 판단은 120fps에서 6 × 8.33 =
+ * 49.99ms라 7프레임마다 = 58ms였다). 한 주기 넘게 밀렸으면(멈춤) 따라잡지 않고 지금으로 다시 맞춘다.
+ * 느린 프레임에서는 예전처럼 지난 갱신 프레임부터 한 주기가 지났을 때 갱신하고 지금으로 다시 맞춘다 (비용이 예전보다 늘지 않게)
  */
 export class PhaseClock {
   /** 마지막 갱신의 정해진 시각 (없으면 null) */
   last: number | null = null;
+  /** 마지막으로 갱신한 프레임 시각 */
+  private lastFrame = 0;
+  /** 정해진 시각의 기준 (anchor, 없으면 첫 갱신 프레임) */
+  private origin: number | null = null;
 
-  /** 이 프레임에 갱신하는가 (갱신하면 last를 옮긴다) */
-  due(nowMs: number, periodMs: number): boolean {
+  /**
+   * 정해진 시각의 기준을 정한다 (판 장면을 만든 순간 등 프레임과 무관한 시각). 첫 갱신은 그 뒤 첫 프레임에 하되 기준 + k × 주기
+   * 격자에 둔다: 첫 프레임 시각이 fps마다 달라도 같은 시각에 갱신한다
+   */
+  anchor(t: number): void {
+    this.origin = t;
+  }
+
+  /** 이 프레임에 갱신하는가 (갱신하면 last를 옮긴다). frameMs = 이번 프레임 간격 (모르면 0: 빠른 프레임으로 본다) */
+  due(nowMs: number, periodMs: number, frameMs = 0): boolean {
     if (this.last === null) {
+      const o = this.origin;
+      this.last =
+        o === null || nowMs < o
+          ? nowMs
+          : o + Math.floor((nowMs + PHASE_TOLERANCE_MS - o) / periodMs) * periodMs;
+      this.lastFrame = nowMs;
+      return true;
+    }
+    if (frameMs > PHASE_LOCK_FRAME_MS) {
+      if (nowMs - this.lastFrame < periodMs) return false;
       this.last = nowMs;
+      this.lastFrame = nowMs;
       return true;
     }
     const next = this.last + periodMs;
     if (nowMs < next - PHASE_TOLERANCE_MS) return false;
     this.last = nowMs - next >= periodMs - PHASE_TOLERANCE_MS ? nowMs : next;
+    this.lastFrame = nowMs;
     return true;
   }
 

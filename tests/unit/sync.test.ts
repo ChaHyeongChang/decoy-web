@@ -270,7 +270,7 @@ describe('보간 경로 조각 · 상태 경계 (프레임 독립성)', () => {
 
   it('표본 시각(꺾인 점)에서 나눈다: 모퉁이를 현으로 깎지 않는다', () => {
     const out: TravelPiece[] = [];
-    expect(travelOf(samples, 40, 60, out)).toBe(true);
+    expect(travelOf(samples, 40, 60, out)).toBe(2);
     expect(out).toHaveLength(2);
     expect(out[0]?.ms).toBeCloseTo(10, 9);
     expect(out[0]?.dist).toBeCloseTo(0.2, 9);
@@ -282,7 +282,12 @@ describe('보간 경로 조각 · 상태 경계 (프레임 독립성)', () => {
     expect(out.map((p) => p.dist)).toEqual([0, expect.closeTo(0.2, 9)]);
     travelOf(samples, 90, 130, out);
     expect(out.map((p) => p.dist)).toEqual([expect.closeTo(0.2, 9), 0]);
-    expect(travelOf([], 0, 10, out)).toBe(false);
+    expect(travelOf([], 0, 10, out)).toBe(-1);
+    // 조각 객체는 다시 쓰고 쓴 수만 돌려준다 (프레임마다 새로 만들지 않는다)
+    const kept = out[0];
+    expect(travelOf(samples, 10, 20, out)).toBe(1);
+    expect(out[0]).toBe(kept);
+    expect(out[0]?.dist).toBeCloseTo(0.2, 9);
   });
 
   it('60 · 120fps로 나눠도 걸은 거리 · 시간의 합이 같다', () => {
@@ -292,8 +297,8 @@ describe('보간 경로 조각 · 상태 경계 (프레임 독립성)', () => {
       let dist = 0;
       let prev = -20;
       for (const t of frameTimes(hz, 150).map((x) => x - 20)) {
-        travelOf(samples, prev, t, out);
-        for (const p of out) {
+        const n = travelOf(samples, prev, t, out);
+        for (const p of out.slice(0, n)) {
           ms += p.ms;
           dist += p.dist;
         }
@@ -320,8 +325,8 @@ describe('보간 경로 조각 · 상태 경계 (프레임 독립성)', () => {
     expect(interp.edgeAt('a', 60, 200)).toBeNull();
     expect(interp.edgeAt('b', 0, 100)).toBeNull();
     const out: TravelPiece[] = [];
-    expect(interp.travel('a', 40, 60, out)).toBe(true);
-    expect(interp.travel('b', 40, 60, out)).toBe(false);
+    expect(interp.travel('a', 40, 60, out)).toBe(2);
+    expect(interp.travel('b', 40, 60, out)).toBe(-1);
     // 다음 스냅샷에 없으면 사라진다: 마지막 표본 시각이 경계
     interp.push(150, []);
     expect(interp.edgeAt('a', 95, 105)).toBe(100);

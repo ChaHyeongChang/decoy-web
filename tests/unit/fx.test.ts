@@ -5,6 +5,7 @@ import { validateBalance } from '../../shared/src/balance';
 import { survivorVisionPolygon } from '../../shared/src/visibility';
 import { circleIntersectsSector, pointInPolygon } from '../../shared/src/geometry';
 import {
+  DASH_GAP_MS,
   DASH_GHOST_MS,
   DUST,
   DashTrail,
@@ -299,5 +300,40 @@ describe('돌진 잔상: 돌진 시작부터 1/30초 격자 (렌더링 최적화
     const g = trail.live(1020)[0];
     expect(g?.g).toEqual({ x: 1, y: 2, aim: 0.5, at: 1020 });
     expect(g?.alpha).toBe(1);
+  });
+});
+
+describe('돌진 잔상: 그리지 않은 틈 (화면 숨김 · 루프 멈춤)', () => {
+  it('지난 프레임에서 250ms 넘게 지났으면 지난 자리에서 이어 보간하지 않는다 (가짜 직선 위 잔상 없음)', () => {
+    expect(DASH_GAP_MS).toBe(250);
+    const trail = new DashTrail();
+    trail.setLife(250);
+    trail.sample(0, 0, 0, 100, 100);
+    // 같은 돌진 시작 값으로 1.2초 뒤 (그 사이 프레임이 없었다): 격자를 한꺼번에 채우며 (0,0) → (5,0) 직선에 늘어놓지 않는다
+    trail.sample(5, 0, 0, 1300, 100);
+    const live = trail.live(1300);
+    expect(live).toHaveLength(1);
+    expect(live[0]?.g.x).toBe(5);
+  });
+
+  it('돌진이 끝난 프레임을 그리지 못하고 다음 돌진이 오면 시작 순간을 다시 묻는다 (지난 돌진의 격자를 쓰지 않는다)', () => {
+    const trail = new DashTrail();
+    trail.setLife(250);
+    const asked: number[] = [];
+    const onset = (t: number) => (): number => {
+      asked.push(t);
+      return t;
+    };
+    for (let t = 100; t <= 200; t += 1000 / 60)
+      trail.update({ x: (t - 100) * 0.01, y: 0, aim: 0 }, t, onset(100));
+    // 숨김: 1초 동안 프레임 없음 → 새 돌진 (1300ms 시작) 중에 다시 그린다
+    trail.update({ x: 9, y: 0, aim: 0 }, 1310, onset(1300));
+    expect(asked).toEqual([100, 1300]);
+    const ats = trail.live(1310).map((g) => g.g.at);
+    expect(ats).toEqual([1300]);
+    // 돌진이 끝난 프레임을 그리면 다음 돌진도 새로 (틈이 없어도)
+    trail.update(null, 1320, onset(0));
+    trail.update({ x: 1, y: 0, aim: 0 }, 1330, onset(1325));
+    expect(asked).toEqual([100, 1300, 1325]);
   });
 });
