@@ -17,8 +17,15 @@ const SHELL = ['index.html', 'assets/index-a1.js', 'assets/index-a1.css', 'fonts
 class FakeCache {
   readonly store = new Map<string, Response>();
   constructor(private readonly fetcher: (req: Request) => Promise<Response>) {}
+  /**
+   * 실제 Cache.put처럼 본문을 다 읽어 저장하고, 이미 읽힌 본문이면 TypeError (수정 검토: clone()만 저장하면 sw.js가 화면으로 보낸
+   * 응답을 복제하지 않고 넘기는 회귀 — 처리방침 사본이 조용히 갱신되지 않음 — 를 잡지 못했다)
+   */
   async put(req: string | Request, res: Response): Promise<void> {
-    this.store.set(typeof req === 'string' ? req : req.url, res.clone());
+    if (res.bodyUsed) throw new TypeError('Cache.put: 이미 읽힌 응답 본문');
+    const body = await res.arrayBuffer();
+    const stored = new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+    this.store.set(typeof req === 'string' ? req : req.url, stored);
   }
   async add(req: string | Request): Promise<void> {
     const r = typeof req === 'string' ? new Request(req) : req;
