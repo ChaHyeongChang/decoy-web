@@ -176,7 +176,11 @@ describe('입력 막힘 뒤 회복 (M1 검토 반영)', () => {
   it.each([
     { label: '두 조각(다음 틱에 나머지)', gap: 12, deliver: (t: number, n: number) => (t === 0 ? 7 : n) },
     { label: '두 조각(다음 틱에 나머지)', gap: 20, deliver: (t: number, n: number) => (t === 0 ? 10 : n) },
-    { label: '한 왕복(3틱) 뒤 나머지', gap: 12, deliver: (t: number, n: number) => (t === 0 ? 7 : t < 3 ? 0 : n) },
+    {
+      label: '한 왕복(3틱) 뒤 나머지',
+      gap: 12,
+      deliver: (t: number, n: number) => (t === 0 ? 7 : t < 3 ? 0 : n),
+    },
     { label: '틱당 2개씩 흘러나옴', gap: 10, deliver: (_t: number, n: number) => Math.min(2, n) },
     { label: '틱당 2개씩 흘러나옴', gap: 12, deliver: (_t: number, n: number) => Math.min(2, n) },
   ])('끊긴 뒤 밀린 입력이 $label 와도 밀림이 남지 않는다 (끊긴 틱 $gap)', ({ gap, deliver }) => {

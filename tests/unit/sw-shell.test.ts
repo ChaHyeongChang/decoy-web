@@ -24,7 +24,11 @@ class FakeCache {
   async put(req: string | Request, res: Response): Promise<void> {
     if (res.bodyUsed) throw new TypeError('Cache.put: 이미 읽힌 응답 본문');
     const body = await res.arrayBuffer();
-    const stored = new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+    const stored = new Response(body, {
+      status: res.status,
+      statusText: res.statusText,
+      headers: res.headers,
+    });
     this.store.set(typeof req === 'string' ? req : req.url, stored);
   }
   async add(req: string | Request): Promise<void> {
