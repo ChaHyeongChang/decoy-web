@@ -24,11 +24,11 @@
       "resizePerSec": 16.6,
       "readbackPerSec": 0.8
     },
-    "webgl-high-runner": {
+    "webgl-high-runner-s25": {
       "drawsPerFrame": 10,
       "uploadsPerSec": 83.7,
-      "uploadPxPerFrame": 76100.98,
-      "bufferBytesPerFrame": 123408.98,
+      "uploadPxPerFrame": 72526.1,
+      "bufferBytesPerFrame": 112488.98,
       "programsPerFrame": 6,
       "framebuffersPerFrame": 3,
       "pathOffPerFrame": 447.01,

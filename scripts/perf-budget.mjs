@@ -7,8 +7,8 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(ROOT, 'tests/e2e/perf-budget.json');
-/** 예산을 거는 장면 (E2E 시간을 아끼려 tests/perf/workScene.ts 장면 가운데 셋만) */
-const SCENES = ['canvas-high-runner', 'canvas-high-monster', 'webgl-high-runner'];
+/** 예산을 거는 장면 (E2E 시간을 아끼려 tests/perf/workScene.ts 장면 가운데 셋만, WebGL은 백버퍼 1/4 장면) */
+const SCENES = ['canvas-high-runner', 'canvas-high-monster', 'webgl-high-runner-s25'];
 /** 렌더러마다 막는 셈 */
 const KEYS = {
   canvas: [

@@ -42,6 +42,6 @@
   "m9-reconnect.spec.ts": 85,
   "m9-screens.spec.ts": 3,
   "perf-budget.spec.ts": 30,
-  "perf-budget.webgl.spec.ts": 210,
+  "perf-budget.webgl.spec.ts": 30,
   "smoke.spec.ts": 1
 }
