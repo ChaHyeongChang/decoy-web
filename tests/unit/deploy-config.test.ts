@@ -86,7 +86,8 @@ describe('서버 포트 · 주소 옵션', () => {
     expect(parseOptions([], { DECOY_MAX_BOT_ROOMS: '' }).maxBotRooms).toBe(DEFAULT_MAX_BOT_ROOMS);
     expect(parseOptions([], { DECOY_MAX_BOT_ROOMS: 'x' }).maxBotRooms).toBe(DEFAULT_MAX_BOT_ROOMS);
     expect(parseOptions([], { DECOY_MAX_BOT_ROOMS: '-2' }).maxBotRooms).toBe(0);
-    expect(parseOptions([], { DECOY_MAX_BOT_ROOMS: '2.7' }).maxBotRooms).toBe(2);
+    // 소수는 내린다 (기본값과 다른 값으로 본다 — 2.7 → 2는 기본값과 같아 '소수면 기본값' 변이를 못 잡았다, 수정 검토)
+    expect(parseOptions([], { DECOY_MAX_BOT_ROOMS: '16.9' }).maxBotRooms).toBe(16);
   });
 
   it('개발용 봇 방(?bots=1)은 --dev · --test-hooks · DECOY_DEV_BOTS=1일 때만 받고, 배포 설정에서는 꺼져 있다', () => {
