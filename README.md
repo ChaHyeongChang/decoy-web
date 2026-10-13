@@ -108,7 +108,7 @@ push · PR마다(그리고 main에 들어갈 때) GitHub Actions(`.github/workfl
 | [docs/DEPLOY.md](docs/DEPLOY.md) | 로컬 · 같은 와이파이 · 인터넷 배포 (Render 무료 플랜 단계별 절차 포함) |
 | [docs/MOBILE_PLAN.md](docs/MOBILE_PLAN.md) | M10~M15 계획: 비주얼 리마스터 · 터치 · 모바일 · 봇과 연습 · PWA/TWA · 스토어 |
 | [docs/PLAY_STORE_GUIDE.md](docs/PLAY_STORE_GUIDE.md) | 구글 플레이 등록: 계정 · 패키지 · 서명 키 · 비공개 테스트 · 출시 · 운영 종료 (사람이 할 일) |
-| [docs/STORE_LISTING.md](docs/STORE_LISTING.md) | 스토어 등록정보 · 콘텐츠 등급 · 데이터 보안 답변 초안 |
+| [docs/STORE_LISTING.md](docs/STORE_LISTING.md) | 스토어 등록정보 · 콘텐츠 등급 · 데이터 보안 답변 (2026-10-13 결정 반영, 남은 ⚠는 지연 측정값 · 태그) |
 | [docs/PLAYTEST_GUIDE.md](docs/PLAYTEST_GUIDE.md) | 테스터용 플레이테스트 방법 |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | 설계와 다르게 만든 것 · 문서에 없어 정한 것 |
 | [docs/HUMAN_CHECKS.md](docs/HUMAN_CHECKS.md) | 사람이 직접 확인할 것 |

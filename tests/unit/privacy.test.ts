@@ -200,6 +200,21 @@ describe('보내는 항목 대응표 (privacyData.ts ↔ ClientMessage)', () => 
       // 같은 유형으로 가는 항목(방 · 역할 선택 · 조작 입력)은 답도 같아야 표 한 줄에 맞는다
       expect(row, `${d.label} 안내서 답`).toContain(`| ${answer} |`);
     }
+    // 거꾸로: 안내서의 '데이터 유형 ›' 행은 대응표가 신고하는 유형뿐이다 (처리방침 · 대응표는 해당 없음인데 안내서만 신고하라는 일이 없게)
+    const guideTypes = GUIDE.split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith('| 데이터 유형 › '))
+      .map((l) =>
+        (l.split('|')[1] ?? '')
+          .trim()
+          .slice('데이터 유형 › '.length)
+          .replace(/ \(.*\)$/, ''),
+      );
+    const declaredTypes = (Object.values(SENT_DATA) as SentDataInfo[])
+      .filter((d) => d.form)
+      .map((d) => d.playType);
+    expect(new Set(guideTypes)).toEqual(new Set(declaredTypes));
+    expect(guideTypes.length).toBe(new Set(declaredTypes).size);
     // 사용자가 정한 값 그대로 (바꾸려면 사용자 결정 → 네 곳을 함께)
     expect(SENT_DATA.seatToken.playType).toBe('기기 또는 기타 ID');
     expect(formAnswer(SENT_DATA.seatToken.form)).toBe(
@@ -401,7 +416,10 @@ describe('처리방침 문서', () => {
       GUIDE.split('\n')
         .map((l) => l.trim())
         .find((l) => l.startsWith(`| ${q} |`)) ?? '';
-    for (const g of TARGET_AGE.playGroups) expect(guideRow('타깃 연령층'), g).toContain(`**${g}**`);
+    // 안내서의 굵은 연령 칸이 고르는 칸과 정확히 같고(더 어린 칸이 끼지 않게), 처리방침의 '만 n세'가 가장 어린 칸의 하한이다
+    const boldGroups = [...guideRow('타깃 연령층').matchAll(/\*\*([^*]+)\*\*/g)].map((m) => m[1]);
+    expect(boldGroups).toEqual([...TARGET_AGE.playGroups]);
+    expect(TARGET_AGE.playGroups[0].startsWith(`${TARGET_AGE.minAge}`)).toBe(true);
     expect(guideRow('앱이 아동의 관심을 끌 수 있나요?')).toContain(appeal);
   });
 
