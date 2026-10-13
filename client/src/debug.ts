@@ -3,6 +3,8 @@ import Phaser from 'phaser';
 import type { DecoyDebug, HudLayout, TouchTarget } from '@decoy/shared';
 import type { App } from './app';
 import { sfx } from './audio';
+import { pacingHooks } from './gfx/framePacing';
+import { frameStatsInfo } from './gfx/frameStats';
 import { freezeGfxClock, gfxState, probeSlot, setFpsOverride } from './gfx/state';
 import type { GameScene } from './scenes/GameScene';
 import { MAP_RECT, VIEW_H, VIEW_W, layout, tileToScreen } from './ui/layout';
@@ -84,6 +86,9 @@ export function installDebug(app: App, overlay: boolean): void {
     },
     freezeClock: (ms) => freezeGfxClock(ms),
     injectFps: (fps) => setFpsOverride(fps),
+    getFrameStats: () => frameStatsInfo(),
+    getAnimState: () => gameScene(app)?.animDebug ?? null,
+    setFrameLimit: (limit) => pacingHooks.setLimit?.(limit),
     probeText: (text, x, y, px) => probeSlot.draw?.(text, x, y, px),
     textAudit: () => auditTexts(app.game?.scene.getScenes(true) ?? []),
     get fonts() {

@@ -2,6 +2,7 @@
 import Phaser from 'phaser';
 import {
   BTN,
+  type AnimDebug,
   type DrawnEntity,
   type FxTarget,
   type GameEvent,
@@ -523,6 +524,11 @@ export class GameScene extends Phaser.Scene {
     if (!lw) return { dir: null, hideServer: false };
     if (ack < lw.seq) return { dir: now < lw.until ? lw.dir : null, hideServer: false };
     return { dir: null, hideServer: now < lw.until + this.app.link.rtt + 150 };
+  }
+
+  /** 프레임 독립성 시험용 연출 상태 (렌더링 최적화, 디버그 훅 getAnimState). 계약 커밋: 구현은 다음 커밋 */
+  get animDebug(): AnimDebug | null {
+    return null;
   }
 
   override update(_time: number, delta: number): void {
