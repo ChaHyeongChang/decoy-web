@@ -207,7 +207,7 @@ describe('화면 주사율 재기 (RefreshEstimator)', () => {
     }
   });
 
-  it('잡음: 120Hz에 놓친 vsync(간격 두 배) 20% · 50ms 끊김 5% · 숨김 공백(300ms)이 섞여도 중앙값이라 120', () => {
+  it('잡음: 120Hz에 놓친 vsync(간격 두 배) 20% · 50ms 끊김 5% · 숨김 공백(300ms)이 섞여도 짧은 쪽 20% 백분위라 120', () => {
     const e = new RefreshEstimator();
     const r = rng(7);
     let t = 5000;

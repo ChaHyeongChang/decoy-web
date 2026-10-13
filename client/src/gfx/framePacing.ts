@@ -6,7 +6,7 @@
 //    rAF마다 '다음 차례 시각'과 견주어 Phaser 한 걸음(TimeStep.step)을 부르거나 건너뛴다. 건너뛰면 Phaser lastTime이
 //    그대로라 다음 delta = 마지막으로 그린 프레임부터의 시간이다
 //  - 판이 없을 때(로비 · 결과)는 제한 설정과 상관없이 30fps로 묶는다(Pacer.setIdle, main.ts가 판 시작 · 끝에 부른다)
-//  - 매 프레임 메모리를 새로 잡지 않는다(고정 크기 typed array 고리, 중앙값은 미리 잡은 배열을 정렬)
+//  - 매 프레임 메모리를 새로 잡지 않는다(고정 크기 typed array 고리, 백분위는 미리 잡은 배열을 정렬)
 import { STORAGE_KEYS, readKey, removeKey, writeKey, type StorageLike } from '../storageKeys';
 
 /** 프레임 제한 선택: 자동 = 화면 주사율을 따른다(제한 없음), 60 = 배터리 절약, 120 */
