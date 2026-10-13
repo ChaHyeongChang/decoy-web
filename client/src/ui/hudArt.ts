@@ -713,17 +713,63 @@ export interface KitSpec {
 
 export type AtlasSpec = FrameSpec | KitSpec;
 
+// 프레임 이름은 HUD가 매 갱신마다 수십 번 묻는다 (눈금 링 24칸 · 아이콘 · 미니맵 그림). 같은 문자열을 다시 만들지 않게
+// 눈금 · 링은 미리 만든 표에서, 아이콘 · 미니맵 · 실루엣은 처음 만든 문자열을 기억해 돌려준다 (렌더링 최적화 2). 결과 문자열은
+// 예전 템플릿과 같다 (tests/unit/hud-gate.test.ts가 옛 함수와 견준다)
+const ALL_ACCENTS: readonly Accent[] = [...ACCENTS, 'warn'];
+const TICK_NAMES = new Map<Accent, readonly string[]>(
+  ALL_ACCENTS.map((a) => [a, Array.from({ length: TICKS }, (_, i) => `t:${a}:${i}`)]),
+);
+const RING_NAMES = new Map<Accent | 'off', string>(
+  [...ALL_ACCENTS, 'off' as const].map((a) => [a, `r:${a}`]),
+);
+/** 아이콘 이름: 아이콘별 (색 × 1024 + 크기) → 이름. 크기 · 색이 정수가 아니거나 범위 밖이면 기억하지 않고 만든다 */
+const ICON_NAMES = new Map<IconId, Map<number, string>>();
+const MM_NAMES = new Map<string, string>();
+const SIL_NAMES = new Map<SurvivorShapeId, readonly [string, string]>();
+
+function iconName(id: IconId, color: number, size: number): string {
+  if (!(Number.isInteger(size) && size >= 0 && size < 1024 && Number.isInteger(color) && color >= 0))
+    return `i:${id}:${color.toString(16)}:${size}`;
+  let byKey = ICON_NAMES.get(id);
+  if (!byKey) {
+    byKey = new Map();
+    ICON_NAMES.set(id, byKey);
+  }
+  const key = color * 1024 + size;
+  let name = byKey.get(key);
+  if (name === undefined) {
+    name = `i:${id}:${color.toString(16)}:${size}`;
+    byKey.set(key, name);
+  }
+  return name;
+}
+
 /** 아틀라스 프레임 이름 */
 export const FR = {
-  icon: (id: IconId, color: number, size: number): string => `i:${id}:${color.toString(16)}:${size}`,
-  tick: (a: Accent, i: number): string => `t:${a}:${i}`,
-  ring: (a: Accent | 'off'): string => `r:${a}`,
+  icon: iconName,
+  tick: (a: Accent, i: number): string => TICK_NAMES.get(a)?.[i] ?? `t:${a}:${i}`,
+  ring: (a: Accent | 'off'): string => RING_NAMES.get(a) ?? `r:${a}`,
   /** 카드 원판 실루엣 (오른쪽 위를 봄, DIAL.rot), on = 살아 있음 */
-  sil: (s: SurvivorShapeId, on: boolean): string => `s:${s}:${on ? 1 : 0}`,
+  sil: (s: SurvivorShapeId, on: boolean): string => {
+    let pair = SIL_NAMES.get(s);
+    if (!pair) {
+      pair = [`s:${s}:0`, `s:${s}:1`];
+      SIL_NAMES.set(s, pair);
+    }
+    return pair[on ? 1 : 0];
+  },
   /** 정면 문양 (점수판 · 조작 안내) */
   glyph: (g: RoleId | 'monster' | 'hidden', size: number): string => `g:${g}:${size}`,
   /** 미니맵 그림 */
-  mm: (k: string): string => `m:${k}`,
+  mm: (k: string): string => {
+    let name = MM_NAMES.get(k);
+    if (name === undefined) {
+      name = `m:${k}`;
+      MM_NAMES.set(k, name);
+    }
+    return name;
+  },
 } as const;
 
 const square = (name: string, half: number, paint: (c: Ctx, z: number) => void): FrameSpec => ({

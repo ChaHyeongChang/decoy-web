@@ -10,11 +10,13 @@
 // 쌓은 메모가 감옥(맵 14타일) 위 끝을 넘으면 알림이 빠질 때까지 메모를 미룬다(메모에는 만료가 없다, 알림은 1~2초). 알림 없이
 // 지속 배너만으로 넘으면 그대로 띄운다(지속 배너는 30초까지 이어져 미루면 비밀번호를 놓친다. 802×293도 지속 + 메모 아래 끝이 감옥
 // 위 23px 앞이라 시험 화면에서는 생기지 않는다, E2E m12-hud). PC는 고정 자리 그대로
+// 렌더링 최적화 2: 프레임마다 서명 문자열 · 새 배열을 만들지 않는다(리본은 값을 하나씩 견주고, 끝난 알림은 제자리에서 뺀다)
 import { PRISON_RECT, TILE_PX } from '@decoy/shared';
 import type { IconId } from '../art/icons';
 import { NEON_DIM, UI } from '../art/palette';
 import { fontGeneration } from './fonts';
 import { FR, TONE, type Tone } from './hudArt';
+import { dropEnded, dropStale } from './hudGate';
 import { hexColor, setText, type HudKit, type Slice, type Spr } from './hudKit';
 import { HUD, MAP_SCALE, MAP_Y, VIEW_W } from './layout';
 import { UI_FONT, makeText, type CrispText } from './text';
@@ -50,7 +52,8 @@ class Ribbon {
   private readonly plate: Slice;
   private readonly icon: Spr;
   readonly text: CrispText;
-  private sig = '';
+  /** 마지막으로 그린 줄 (null = 숨김). 같으면 아무것도 하지 않는다 — 매 프레임 서명 문자열을 만들지 않는다 */
+  private last: { gen: number; tone: Tone; icon: IconId; text: string; cy: number } | null = null;
 
   constructor(
     kit: HudKit,
@@ -73,17 +76,26 @@ class Ribbon {
 
   show(line: BannerLine | null, cy: number): void {
     if (!line) {
-      if (this.sig === '') return;
-      this.sig = '';
+      if (this.last === null) return;
+      this.last = null;
       this.plate.show(false);
       this.icon.show(false);
       this.text.setVisible(false);
       return;
     }
-    // 폰트 세대도 넣는다: 늦게 받은 폰트로 글자 폭이 바뀌면 리본 폭을 다시 잰다
-    const sig = `${fontGeneration()}|${line.tone}|${line.icon}|${line.text}|${cy}`;
-    if (sig === this.sig) return;
-    this.sig = sig;
+    // 폰트 세대도 본다: 늦게 받은 폰트로 글자 폭이 바뀌면 리본 폭을 다시 잰다
+    const gen = fontGeneration();
+    const m = this.last;
+    if (
+      m &&
+      m.gen === gen &&
+      m.tone === line.tone &&
+      m.icon === line.icon &&
+      m.text === line.text &&
+      m.cy === cy
+    )
+      return;
+    this.last = { gen, tone: line.tone, icon: line.icon, text: line.text, cy };
     const t = TONE[line.tone];
     const k = HUD.s;
     const notch = Math.round(this.h * 0.28) * k;
@@ -111,17 +123,25 @@ export class Banners {
   private readonly persistent: Ribbon;
   private readonly rows: Ribbon[];
   private readonly note: { plate: Slice; icon: Spr; text: CrispText };
-  private queue: Item[] = [];
-  private shown: Item[] = [];
+  private readonly queue: Item[] = [];
+  private readonly shown: Item[] = [];
   private notes: { text: string; ms: number }[] = [];
   private noteUntil = 0;
+  /** 지금 보이는 지속형 문구 (visible용, null = 없음) */
+  private persistentText: string | null = null;
   /** 메모 상자 폭을 잰 폰트 세대 */
   private noteGen = 0;
   /** 메모 상자 위 끝: PC 고정(HUD.noteY), 터치는 보이는 배너 아래 · 지금 놓인 자리 */
   private noteY = HUD.noteY;
   private noteAt = HUD.noteY;
-  /** 디버그 · 테스트: 지금 보이는 문구들 (지속형 · 알림 · 메모. 괴물 경고 줄은 넣지 않는다) */
-  visible: string[] = [];
+  /** 디버그 · 테스트: 지금 보이는 문구들 (지속형 · 알림 · 메모. 괴물 경고 줄은 넣지 않는다). 읽을 때 만든다 */
+  get visible(): string[] {
+    const out: string[] = [];
+    if (this.persistentText !== null) out.push(this.persistentText);
+    for (const b of this.shown) out.push(b.text);
+    if (this.note.text.visible) out.push(this.note.text.text);
+    return out;
+  }
 
   constructor(kit: HudKit) {
     const B = HUD.banner;
@@ -169,8 +189,9 @@ export class Banners {
     } else {
       this.persistent.show(top, HUD.bannerY);
     }
-    this.shown = this.shown.filter((b) => b.until > nowMs);
-    this.queue = this.queue.filter((b) => nowMs - b.created <= MAX_QUEUE_WAIT_MS);
+    // 끝난 알림 · 너무 오래 기다린 알림을 제자리에서 뺀다 (매 프레임 새 배열을 만들지 않는다)
+    dropEnded(this.shown, nowMs);
+    dropStale(this.queue, nowMs, MAX_QUEUE_WAIT_MS);
     while (this.shown.length < this.rows.length && this.queue.length > 0) {
       const next = this.queue.shift();
       if (!next) break;
@@ -210,11 +231,7 @@ export class Banners {
     ) {
       this.showNote(cur.text);
     }
-    this.visible = [
-      ...(persistent ? [persistent.text] : []),
-      ...this.shown.map((b) => b.text),
-      ...(this.note.text.visible ? [this.note.text.text] : []),
-    ];
+    this.persistentText = persistent ? persistent.text : null;
   }
 
   /** 터치: 알림이 떠 있고 이 글의 메모 상자가 감옥 위 끝을 넘는가 (넘으면 미룬다, 사이 간격은 더하지 않는다) */

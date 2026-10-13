@@ -81,6 +81,11 @@ class ControlsBlock {
     this.layout();
   }
 
+  /** 폰트 세대가 바뀌어 다시 재야 하는가 */
+  get stale(): boolean {
+    return this.gen !== fontGeneration();
+  }
+
   /** 폰트 세대가 바뀌었으면 다시 잰다 (true = 다시 쟀다) */
   relayoutIfStale(): boolean {
     if (this.gen === fontGeneration()) return false;
@@ -298,6 +303,8 @@ export class Scoreboard {
   private readonly cols: typeof COLS_TEAM;
   private on = false;
   private last = '';
+  /** 마지막으로 그린 스냅샷 (열려 있는 동안 같은 스냅샷 · 같은 폰트 세대면 행을 다시 만들지 않는다) */
+  private seen: Snapshot | null = null;
   /** 터치: 낮은 화면이라 조작 안내 줄을 뺐다 */
   private ctrlShown = true;
 
@@ -383,6 +390,9 @@ export class Scoreboard {
       if (this.on) this.apply(false);
       return;
     }
+    // 열려 있고 스냅샷 · 폰트 세대가 그대로면 행 값도 그대로다 (렌더링 최적화 2: 프레임마다 행 · JSON 서명을 만들지 않는다)
+    if (this.on && snap === this.seen && !this.controls.stale) return;
+    this.seen = snap;
     const max = this.balance.survivor.maxImprisonments;
     // 행: 생존자 화면 = 역할 문양 · 역할 · 이름 · 상태 · 수감 · 능력 (+ 괴물 이름), 괴물 화면 = 익명 상태 목록
     type R = {

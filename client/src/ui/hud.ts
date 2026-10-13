@@ -8,6 +8,8 @@
 // M12 터치 배치(layout.HUD.touch): 그림 HUD.s배 · 글자 CSS 12px 이상. 타이머 · 링 게이지(배지 + 24눈금 진행 + 상태 칩) ·
 // 팀 카드(실루엣 + 상태 아이콘 + 체력 칸 + 수감 눈금, 이름 · 상태 글자 생략)를 좌우 칸 위쪽(16:9는 타이머만 위 띠)에 두고,
 // 행동 칸은 그리지 않는다(터치 버튼). 안내 줄은 맨 아래 가장자리 띠(터치 대상이 없는 곳)에 입력 방식 문구로
+// 렌더링 최적화 2: 값은 새 스냅샷(20Hz) · 짧은 안내 · 글꼴 세대 · 배율이 바뀐 프레임에만 다시 계산하고(HudGate), 그 사이 프레임은
+// 시간 연출(흐르는 사선 · 깜빡임)만 움직인다. 눈금 링은 같은 값이면 아무것도 하지 않는다
 import type { AnonStatus, Balance, MatchInfo, PointView, Snapshot } from '@decoy/shared';
 import { gfxNow } from '../gfx/state';
 import { HUD_TEXT, ROLE_CARDS, UI_TEXT } from '../data/storyText';
@@ -34,7 +36,9 @@ import {
   type TimerMode,
 } from './hudArt';
 import { Digits, fitText, setText, type HudKit, type Slice, type Spr } from './hudKit';
-import { HUD, TOUCH_PART, VIEW_W, type TouchHudPlan } from './layout';
+import { fontGeneration } from './fonts';
+import { HudGate } from './hudGate';
+import { HUD, RENDER_SCALE, TOUCH_PART, VIEW_W, type TouchHudPlan } from './layout';
 import type { CrispText } from './text';
 
 /** HUD 깊이: 패널 40 · 그림 41 · 글자 42 */
@@ -43,6 +47,8 @@ const D_ART = 41;
 const D_TEXT = 42;
 /** 점령 중 사선 흐름 속도 (논리 px / 초) */
 const STRIPE_SPEED = 26;
+/** 행동 칸 없음 (수감 · 관전 · 대기 안내 중, 터치) */
+const NO_SLOTS: readonly ActionSlot[] = [];
 
 /** 쿨타임 눈금 링: 꺼진 링 위에 켜진 눈금, 또는 다 켜진 링 한 장 */
 class Ring {
@@ -50,6 +56,10 @@ class Ring {
   private readonly ticks: Spr[] = [];
   /** 부품 이름 (나중에 만드는 눈금에도) */
   private readonly tag: string;
+  /** 마지막 set 값 (같으면 아무것도 하지 않는다). show가 부르면 지운다 — 그 뒤 같은 값의 set도 다시 그린다 */
+  private last: { accent: Accent; lit: number; x: number; y: number } | null = null;
+  /** 지금 알파 (나중에 만드는 눈금에도) */
+  private alpha = 1;
 
   constructor(private readonly kit: HudKit) {
     this.base = kit.spr(D_ART);
@@ -58,6 +68,14 @@ class Ring {
 
   /** lit = 켜진 눈금 수 (TICKS면 다 켜진 링, −1이면 숨김) */
   set(accent: Accent, lit: number, x: number, y: number): void {
+    const m = this.last;
+    if (m && m.accent === accent && m.lit === lit && m.x === x && m.y === y) return;
+    if (m) {
+      m.accent = accent;
+      m.lit = lit;
+      m.x = x;
+      m.y = y;
+    } else this.last = { accent, lit, x, y };
     if (lit < 0) {
       this.base.show(false);
       for (const t of this.ticks) t.show(false);
@@ -74,6 +92,7 @@ class Ring {
       }
       if (!t) {
         t = this.kit.named(this.tag, () => this.kit.spr(D_ART + 0.5));
+        t.img.setAlpha(this.alpha);
         this.ticks[i] = t;
       }
       t.set(FR.tick(accent, i), x, y).show(true);
@@ -81,11 +100,14 @@ class Ring {
   }
 
   show(on: boolean): void {
+    this.last = null;
     this.base.show(on);
     if (!on) for (const t of this.ticks) t.show(false);
   }
 
   setAlpha(a: number): void {
+    if (a === this.alpha) return;
+    this.alpha = a;
     this.base.img.setAlpha(a);
     for (const t of this.ticks) t.img.setAlpha(a);
   }
@@ -126,11 +148,19 @@ class Gauge {
       .setText(id);
   }
 
-  update(p: PointView | undefined, blinkOff: boolean): void {
+  /** 사선 구간 (점령 중 · 보일 때, 논리 px). null = 사선 없음. 스냅샷마다 update가 정하고 animate가 매 프레임 흘린다 */
+  private stripeAt: { x: number; y: number; a: number; b: number } | null = null;
+  /** 괴물 화면 · 점령 중이라 깜빡이는가 (update가 정한다) */
+  private blinkable = false;
+  private alpha = -1;
+
+  /** 스냅샷 값: 상태 · 채움 · 사선 구간 (새 스냅샷 · 글꼴 · 배율이 바뀐 프레임에만) */
+  update(p: PointView | undefined, blinkable: boolean): void {
     if (!p) return;
     const G = HUD.gauge;
     const s = gaugeState(p.state);
     this.state = s;
+    this.blinkable = blinkable;
     const y = HUD.gaugeA.y;
     this.frame.set(`gbar:${s}`, this.bar.x, this.bar.y, G.barW, G.barH);
     this.dia.set(`dia:${s}`, this.diaX, y);
@@ -148,17 +178,28 @@ class Gauge {
     const tip = (G.barH - 6) / 2;
     const sa = Math.max(a, tip);
     const sb = Math.min(b, fw - tip);
-    if (s === 'capturing' && sb > sa) {
+    this.stripeAt = s === 'capturing' && sb > sa ? { x: fx, y: fy, a: sa, b: sb } : null;
+  }
+
+  /** 매 프레임: 흐르는 사선 · 깜빡임 (시간만의 함수) */
+  animate(blinkOff: boolean): void {
+    const st = this.stripeAt;
+    if (st) {
       const z = this.kit.zoom;
       const period = Math.round(STRIPE_P * z);
       const n = Math.floor((gfxNow() / 1000) * STRIPE_SPEED * z) % period;
-      this.stripe.set('gstripe', fx, fy).crop(sa, sb, this.side === 1 ? period - n : n);
+      this.stripe.set('gstripe', st.x, st.y).crop(st.a, st.b, this.side === 1 ? period - n : n);
     } else {
       this.stripe.show(false);
     }
-    const alpha = blinkOff ? 0.3 : 1;
+    const alpha = this.blinkable && blinkOff ? 0.3 : 1;
+    if (alpha === this.alpha) return;
+    this.alpha = alpha;
     this.frame.setAlpha(alpha);
-    for (const sp of [this.fill, this.stripe, this.dia, this.chip]) sp.img.setAlpha(alpha);
+    this.fill.img.setAlpha(alpha);
+    this.stripe.img.setAlpha(alpha);
+    this.dia.img.setAlpha(alpha);
+    this.chip.img.setAlpha(alpha);
     this.letter.setAlpha(alpha);
   }
 }
@@ -188,10 +229,16 @@ class RingGauge {
       .setText(id);
   }
 
-  update(p: PointView | undefined, blinkOff: boolean): void {
+  /** 괴물 화면 · 점령 중이라 깜빡이는가 (update가 정한다) */
+  private blinkable = false;
+  private alpha = -1;
+
+  /** 스냅샷 값 (새 스냅샷 · 글꼴 · 배율이 바뀐 프레임에만) */
+  update(p: PointView | undefined, blinkable: boolean): void {
     if (!p) return;
     const s = gaugeState(p.state);
     this.state = s;
+    this.blinkable = blinkable;
     const { x, y } = this.at;
     const k = HUD.s;
     // 진행은 상태와 따로 보인다 (PC 막대와 같이: 아무도 없어 멈춘 진행도 남아 보인다)
@@ -199,9 +246,16 @@ class RingGauge {
     this.ring.set(s === 'paused' ? 'warn' : 'neon', lit, x, y);
     this.dia.set(`dia:${s}`, x, y);
     this.chip.set(GAUGE_ICON[s] ? `chip:${s}` : '', x + 16 * k, y + 16 * k);
-    const alpha = blinkOff ? 0.3 : 1;
+  }
+
+  /** 매 프레임: 깜빡임 (링의 새 눈금은 링이 지금 알파로 만든다) */
+  animate(blinkOff: boolean): void {
+    const alpha = this.blinkable && blinkOff ? 0.3 : 1;
+    if (alpha === this.alpha) return;
+    this.alpha = alpha;
     this.ring.setAlpha(alpha);
-    for (const sp of [this.dia, this.chip]) sp.img.setAlpha(alpha);
+    this.dia.img.setAlpha(alpha);
+    this.chip.img.setAlpha(alpha);
     this.letter.setAlpha(alpha);
   }
 }
@@ -245,12 +299,14 @@ export class Hud {
     keycap: Slice;
     key: CrispText;
   }[] = [];
-  private slotState: ActionSlot[] = [];
+  private slotState: readonly ActionSlot[] = [];
   private readonly hint: { panel: Slice; icon: Spr; text: CrispText };
   private hintText = '';
-  /** 이번 프레임 행동 칸 (안내 줄과 무관하게 계산, 터치 버튼이 같이 쓴다) */
+  /** 지금 스냅샷의 행동 칸 (안내 줄과 무관하게 계산, 터치 버튼이 같이 쓴다). 다시 계산한 프레임에만 새 배열 — 같은 배열이면 같은 값 */
   lastSlots: ActionSlot[] = [];
   private toast: { text: string; until: number } | null = null;
+  /** 다시 계산할 프레임인가 (스냅샷 · 짧은 안내 · 글꼴 세대 · 아틀라스 · 백버퍼 배율) */
+  private readonly gate = new HudGate();
 
   constructor(
     private readonly kit: HudKit,
@@ -328,16 +384,25 @@ export class Hud {
     this.toast = { text, until: nowMs + ms };
   }
 
+  /**
+   * 매 프레임. HUD 값은 스냅샷(20Hz) · 짧은 안내 · 글꼴 세대 · 백버퍼 배율로만 정해지므로 그중 하나가 바뀐 프레임에만 다시
+   * 계산한다(hudGate.ts HudGate). 시간 연출(흐르는 사선 · 괴물 화면 깜빡임)은 매 프레임 (렌더링 최적화 2)
+   */
   update(snap: Snapshot, nowMs: number): void {
-    this.drawTop(snap, nowMs);
-    if (this.isMonster) this.drawAnon(snap.world.statusList ?? []);
-    else this.drawTeam(snap);
-    const hint = this.persistentHint(snap);
-    this.drawHint(hint);
-    this.lastSlots = actionSlots(snap, this.balance, snap.you.role);
-    const slots = hint ? [] : this.lastSlots;
-    this.drawSlots(this.touchMode ? [] : slots, nowMs);
-    this.slotState = slots;
+    const toast = this.toast && nowMs < this.toast.until ? this.toast.text : '';
+    if (this.gate.fresh(snap, toast, fontGeneration(), this.kit.key, RENDER_SCALE)) {
+      this.drawTop(snap);
+      if (this.isMonster) this.drawAnon(snap.world.statusList ?? []);
+      else this.drawTeam(snap);
+      const hint = this.persistentHint(snap);
+      this.drawHint(hint);
+      this.lastSlots = actionSlots(snap, this.balance, snap.you.role);
+      const slots = hint ? NO_SLOTS : this.lastSlots;
+      this.drawSlots(this.touchMode ? NO_SLOTS : slots, toast);
+      this.slotState = slots;
+    }
+    const blinkOff = Math.floor(nowMs / 500) % 2 === 1;
+    for (const g of this.gauges) g.animate(blinkOff);
   }
 
   private persistentHint(snap: Snapshot): { text: string; icon: string } | null {
@@ -357,12 +422,11 @@ export class Hud {
     return null;
   }
 
-  private drawTop(snap: Snapshot, nowMs: number): void {
+  private drawTop(snap: Snapshot): void {
     const w = snap.world;
-    const blinkOff = Math.floor(nowMs / 500) % 2 === 1;
     this.gauges.forEach((g, i) => {
       const p = w.points[i];
-      g.update(p, this.isMonster && p?.state === 'capturing' && blinkOff);
+      g.update(p, this.isMonster && p?.state === 'capturing');
     });
     // 타이머: [아이콘] [최후] 0:00 — 가운데 정렬. 터치는 자리가 모자라면 '최후' 글자 없이 (색 + 문 아이콘)
     const T = this.plan?.timer ?? HUD.timer;
@@ -588,13 +652,12 @@ export class Hud {
     this.hintText = h.text;
   }
 
-  private drawSlots(list: readonly ActionSlot[], nowMs: number): void {
-    this.slotState = list.slice();
+  /** 행동 칸. toast = 지금 보이는 짧은 안내 ('' = 없음) */
+  private drawSlots(list: readonly ActionSlot[], toast: string): void {
     const S = HUD.slot;
     const total = list.length * S.w + Math.max(0, list.length - 1) * S.gap;
     const x0 = VIEW_W / 2 - total / 2;
     const cy = HUD.bottom.y;
-    const toast = this.toast && nowMs < this.toast.until ? this.toast.text : '';
     this.slots.forEach((p, i) => {
       const s = list[i];
       if (!s) {

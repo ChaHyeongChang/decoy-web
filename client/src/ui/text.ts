@@ -8,6 +8,7 @@ import Phaser from 'phaser';
 import type { TextAudit } from '@decoy/shared';
 import { UI_FONT } from './fonts';
 import { RENDER_SCALE } from './layout';
+import { textBoxSize } from './textSize';
 
 /** UI 글꼴 스택 (원본은 fonts.ts. 기존 import 경로를 지키려고 다시 내보낸다) */
 export { UI_FONT };
@@ -131,17 +132,29 @@ export class CrispText extends Phaser.GameObjects.Text {
       const sig = layoutSig(this);
       if (sig !== s.sig) {
         counters.relayouts += 1;
-        // 자연 크기를 잰다 (고정 크기를 풀고 한 번 그린다)
-        st.fixedWidth = 0;
-        st.fixedHeight = 0;
-        super.updateText();
+        // 자연 크기를 잰다: 줄바꿈 없는 글자는 그리지 않고 재고(textSize.ts, Phaser와 같은 식), 줄바꿈 글자는 고정 크기를
+        // 풀고 한 번 그린다 (렌더링 최적화 2: 소수 배율에서 바뀔 때마다 두 번 그리고 올리던 것을 한 번으로)
+        const nat = this.naturalSize();
+        let nw: number;
+        let nh: number;
+        if (nat) {
+          nw = nat.width;
+          nh = nat.height;
+        } else {
+          st.fixedWidth = 0;
+          st.fixedHeight = 0;
+          super.updateText();
+          nw = this.width;
+          nh = this.height;
+        }
         s.sig = sig;
-        const tw = this.width * res;
-        const th = this.height * res;
+        const tw = nw * res;
+        const th = nh * res;
         const exact = Math.abs(tw - Math.round(tw)) < 1e-6 && Math.abs(th - Math.round(th)) < 1e-6;
         s.fixedW = exact ? 0 : (Math.ceil(tw - 1e-6) + TEXEL_EPS) / res;
         s.fixedH = exact ? 0 : (Math.ceil(th - 1e-6) + TEXEL_EPS) / res;
-        if (exact) return this.afterUpdate();
+        // 이미 자연 크기로 그렸고 그 크기가 정수 텍셀이면 끝
+        if (exact && !nat) return this.afterUpdate();
       }
       st.fixedWidth = s.fixedW;
       st.fixedHeight = s.fixedH;
@@ -150,6 +163,28 @@ export class CrispText extends Phaser.GameObjects.Text {
     } finally {
       s.busy = false;
     }
+  }
+
+  /**
+   * 고정 크기 없이 그릴 때의 width · height (그리지 않고 잰다). 줄바꿈 글자는 null (Phaser의 줄 나누기를 거친다).
+   * 글꼴은 Phaser가 그리기 전에 하듯 이 글자의 캔버스 문맥에 맞춘다
+   */
+  private naturalSize(): { width: number; height: number } | null {
+    const st = this.style;
+    if (st.wordWrapWidth || st.wordWrapCallback) return null;
+    st.syncFont(this.canvas, this.context);
+    const re = this.splitRegExp;
+    const lines = this.text.split(re instanceof RegExp ? re : /(?:\r\n|\r|\n)/);
+    const ctx = this.context;
+    return textBoxSize(lines, (t) => ctx.measureText(t).width, {
+      fontSize: st.getTextMetrics().fontSize,
+      strokeThickness: st.strokeThickness,
+      maxLines: st.maxLines,
+      wordWrap: Boolean(Reflect.get(st, 'wordWrap')),
+      letterSpacing: this.letterSpacing,
+      lineSpacing: this.lineSpacing,
+      padding: this.padding,
+    });
   }
 
   /** 격자 위치를 다시 맞춘다 (카메라 zoom이 바뀐 뒤) */

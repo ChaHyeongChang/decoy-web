@@ -278,12 +278,18 @@ export function setText(t: CrispText, value: string, color?: number): void {
   }
 }
 
+const fitOf = new WeakMap<CrispText, { gen: number; value: string }>();
+
 /** 이름이 칸보다 길면 뒤를 줄인다 (이름이 바뀔 때만) */
 export function fitText(t: CrispText, value: string, maxW: number): void {
-  // 폰트 세대를 열쇠에 넣는다: 늦게 받은 폰트로 폭이 바뀌면 다시 줄인다
-  const key = `${fontGeneration()}|${value}`;
-  if (t.getData('full') === key) return;
-  t.setData('full', key);
+  // 폰트 세대도 본다: 늦게 받은 폰트로 폭이 바뀌면 다시 줄인다 (열쇠 문자열 · 데이터 관리자 없이)
+  const gen = fontGeneration();
+  const last = fitOf.get(t);
+  if (last && last.gen === gen && last.value === value) return;
+  if (last) {
+    last.gen = gen;
+    last.value = value;
+  } else fitOf.set(t, { gen, value });
   t.setText(value);
   let s = value;
   while (t.width > maxW && s.length > 1) {
@@ -475,16 +481,30 @@ export class Slice implements Prim {
   }
 }
 
-/** 고정폭 숫자: 글자 하나에 칸 하나 (칸 폭 = 그 글꼴에서 가장 넓은 숫자). 바뀐 칸만 다시 그린다 */
+/** 고정폭 숫자의 한 자리: 이 자리에 나온 글자마다 글자 객체 하나 (보이기만 바꾼다) */
+interface DigitCell {
+  glyphs: Map<string, CrispText>;
+  /** 지금 보이는 글자 객체 */
+  shown: CrispText | null;
+}
+
+/**
+ * 고정폭 숫자: 글자 하나에 칸 하나 (칸 폭 = 그 글꼴에서 가장 넓은 숫자). 자리마다 처음 나온 글자의 글자 객체를 만들어 두고
+ * 다음부터는 보이기만 바꾼다 — 남은 시간이 1초마다 바뀌어도 글자를 다시 그리거나 올리지 않는다(렌더링 최적화 2. 자리 · 글자 ·
+ * 글꼴 · 해상도가 같은 글자 객체라 그림은 예전처럼 한 칸 글자를 다시 그리던 것과 같다)
+ */
 export class Digits {
-  private readonly cells: CrispText[] = [];
-  private readonly at: number[] = [];
+  private readonly cells: DigitCell[] = [];
+  /** 글자 객체마다 마지막으로 놓은 자리 · 색 (같으면 다시 놓지 · 칠하지 않는다) */
+  private readonly at = new Map<CrispText, number>();
+  private readonly colors = new Map<CrispText, number>();
   private digitW = 0;
   private sepW = 0;
   /** 칸 폭을 잰 폰트 세대 (늦게 받은 폰트면 다시 잰다) */
   private gen = -1;
   private value = '';
-  private color = -1;
+  /** 보이는 칸 수 (value의 글자 수) */
+  private count = 0;
   /** 칸 글자 이름 (만들 때의 kit.tag) */
   private readonly tag: string;
   width = 0;
@@ -509,7 +529,7 @@ export class Digits {
     for (let d = 0; d <= 9; d += 1) w = Math.max(w, ctx.measureText(String(d)).width);
     this.digitW = Math.ceil(w);
     this.sepW = Math.ceil(ctx.measureText(':').width + this.size * 0.08);
-    this.at.length = 0;
+    this.at.clear();
   }
 
   private cellW(ch: string): number {
@@ -524,32 +544,58 @@ export class Digits {
     return w;
   }
 
+  /** i번째 칸에 ch를 쓰는 글자 객체 (처음이면 만든다) */
+  private glyph(i: number, ch: string, color: number): CrispText {
+    let cell = this.cells[i];
+    if (!cell) {
+      cell = { glyphs: new Map(), shown: null };
+      this.cells[i] = cell;
+    }
+    let t = cell.glyphs.get(ch);
+    if (!t) {
+      t = this.kit.text(0, 0, this.size, color, this.depth, true).setOrigin(0.5, 0.5).setName(this.tag);
+      t.setText(ch);
+      this.colors.set(t, color);
+      cell.glyphs.set(ch, t);
+    }
+    return t;
+  }
+
   /** 왼쪽 x에서 시작, 세로 가운데 y */
   set(text: string, x: number, y: number, color: number): void {
     this.remeasure();
-    const chars = [...text];
-    while (this.cells.length < chars.length)
-      this.cells.push(
-        this.kit.text(0, 0, this.size, color, this.depth, true).setOrigin(0.5, 0.5).setName(this.tag),
-      );
     let cx = x;
-    chars.forEach((ch, i) => {
-      const t = this.cells[i];
-      if (!t) return;
+    let i = 0;
+    for (const ch of text) {
+      const t = this.glyph(i, ch, color);
+      const cell = this.cells[i];
+      if (cell && cell.shown !== t) {
+        cell.shown?.setVisible(false);
+        cell.shown = t;
+      }
       const w = this.cellW(ch);
-      if (t.text !== ch) t.setText(ch);
-      if (color !== this.color) t.setColor(hexColor(color));
+      if (this.colors.get(t) !== color) {
+        this.colors.set(t, color);
+        t.setColor(hexColor(color));
+      }
       const key = (cx + w / 2) * 4096 + y;
-      if (this.at[i] !== key) {
-        this.at[i] = key;
+      if (this.at.get(t) !== key) {
+        this.at.set(t, key);
         t.setPosition(cx + w / 2, y);
       }
       t.setVisible(true);
       cx += w;
-    });
-    for (let i = chars.length; i < this.cells.length; i += 1) this.cells[i]?.setVisible(false);
+      i += 1;
+    }
+    for (let j = i; j < this.cells.length; j += 1) {
+      const cell = this.cells[j];
+      if (cell?.shown) {
+        cell.shown.setVisible(false);
+        cell.shown = null;
+      }
+    }
     this.value = text;
-    this.color = color;
+    this.count = i;
     this.width = cx - x;
   }
 
@@ -563,6 +609,6 @@ export class Digits {
   }
 
   show(on: boolean): void {
-    this.cells.forEach((c, i) => c.setVisible(on && i < [...this.value].length));
+    this.cells.forEach((c, i) => c.shown?.setVisible(on && i < this.count));
   }
 }
