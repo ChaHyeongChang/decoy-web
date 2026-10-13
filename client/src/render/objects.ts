@@ -4,11 +4,20 @@
 //  - 탈출구: 문 오른쪽 문틀의 표지판 + 달리는 사람 (비활성 회색 · 활성 초록). 문짝 · 미닫이 연출을 가리지 않는다
 //  - 감옥: 남쪽 문 칸의 자물쇠 (수감자가 서는 안쪽을 덮지 않는다)
 // 알파는 어두운 바닥 위 합성과 같은 색으로 미리 섞어 불투명하게 그린다(dimmed): 선이 겹친 곳이 진해지지 않는다.
-// 배지마다 작은 캔버스(기기 픽셀 1:1)에 구워 이미지로 보이고, 상태 · 알파 · 백버퍼 배율이 바뀔 때만 다시 굽는다
-// (프레임마다 다시 테셀레이션하는 Graphics를 쓰지 않는다: gfx.features.badgeGfxCmds = 0).
+// 배지 다섯 장을 한 아틀라스 캔버스(기기 픽셀 1:1)의 칸마다 구워 이미지로 보이고, 상태 · 알파 · 백버퍼 배율이 바뀐 배지만
+// 다시 굽는다(프레임마다 다시 테셀레이션하는 Graphics를 쓰지 않는다: gfx.features.badgeGfxCmds = 0). 텍스처가 하나라 휴대폰
+// MobilePipeline에서도 배지 그리기가 한 번이다 (렌더링 최적화 2).
 // 정보 레이어(info)는 art/mapArtBadges.ts badgeInfo로 만들고, 품질과 상관없이 같다.
 import type Phaser from 'phaser';
-import { CAPTURE_POINTS, TILE_PX, type ExitView, type InfoItem, type PointView } from '@decoy/shared';
+import {
+  CAPTURE_POINTS,
+  TILE_PX,
+  type ExitState,
+  type ExitView,
+  type InfoItem,
+  type PointState,
+  type PointView,
+} from '@decoy/shared';
 import {
   BADGE,
   PRISON_COLOR,
@@ -245,58 +254,183 @@ export function paintLockBadge(c: BadgeCtx, x: number, y: number, a: number): vo
   c.fillRect(x - 1.2, y + h * 0.04, 2.4, h * 0.16);
 }
 
-/** 배지 하나를 구운 캔버스 텍스처 + 이미지 (맵 컨테이너 안, 텍셀 = 기기 픽셀) */
-class BadgePatch {
-  private readonly key = nextFogKey('badge');
+/** 배지 다섯 장 (아틀라스 칸 순서 = 프레임 이름) */
+export type BadgeId = 'point-A' | 'point-B' | 'exit-N' | 'exit-S' | 'prison';
+export const BADGE_IDS: readonly BadgeId[] = ['point-A', 'point-B', 'exit-N', 'exit-S', 'prison'];
+const BADGE_KIND: Readonly<Record<BadgeId, keyof typeof BADGE_BOX>> = {
+  'point-A': 'point',
+  'point-B': 'point',
+  'exit-N': 'exit',
+  'exit-S': 'exit',
+  prison: 'lock',
+};
+const POINT_BADGE: Readonly<Record<'A' | 'B', BadgeId>> = { A: 'point-A', B: 'point-B' };
+const EXIT_BADGE: Readonly<Record<'N' | 'S', BadgeId>> = { N: 'exit-N', S: 'exit-S' };
+
+/** 배지 기준점 (월드 px): 거점 = 패드 위쪽 가장자리, 탈출구 = 문 옆 표지판, 감옥 = 남쪽 문 칸 */
+function badgeAnchor(id: BadgeId): Pt {
+  if (id === 'point-A' || id === 'point-B') {
+    const c = CAPTURE_POINTS[id === 'point-A' ? 'A' : 'B'];
+    return [c.x * T, (c.y + BADGE.pointDy) * T];
+  }
+  if (id === 'exit-N' || id === 'exit-S') {
+    const s = exitSignAt(id === 'exit-N' ? 'N' : 'S');
+    return [s.x * T, s.y * T];
+  }
+  return [PRISON_LOCK.x * T, PRISON_LOCK.y * T];
+}
+
+const BADGE_AT: Readonly<Record<BadgeId, Pt>> = {
+  'point-A': badgeAnchor('point-A'),
+  'point-B': badgeAnchor('point-B'),
+  'exit-N': badgeAnchor('exit-N'),
+  'exit-S': badgeAnchor('exit-S'),
+  prison: badgeAnchor('prison'),
+};
+
+/** 배지를 구울 기기 px 사각형 (배지 하나 = 캔버스 한 장이던 때의 캔버스 위치 · 크기 그대로) */
+export interface BadgeRect {
+  /** 백버퍼 기기 px 왼쪽 위 (정수) */
+  readonly dx0: number;
+  readonly dy0: number;
+  readonly w: number;
+  readonly h: number;
+}
+
+/** 배지 하나가 배율 zoom에서 차지하는 기기 픽셀 사각형: 기준점 + 굽는 범위를 기기 픽셀 격자로 넓힌 것 */
+export function badgeRect(id: BadgeId, zoom: number): BadgeRect {
+  const at = BADGE_AT[id];
+  const box = BADGE_BOX[BADGE_KIND[id]];
+  const kd = MAP_SCALE * zoom;
+  const ex = zoom * MAP_X;
+  const ey = zoom * MAP_Y;
+  const dx0 = Math.floor(ex + (at[0] + box.x0) * kd);
+  const dy0 = Math.floor(ey + (at[1] + box.y0) * kd);
+  return {
+    dx0,
+    dy0,
+    w: Math.ceil(ex + (at[0] + box.x1) * kd) - dx0,
+    h: Math.ceil(ey + (at[1] + box.y1) * kd) - dy0,
+  };
+}
+
+/** 아틀라스 칸 (아틀라스 px) */
+export interface BadgeSlot {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+}
+
+export interface BadgeAtlasLayout {
+  readonly width: number;
+  readonly height: number;
+  readonly slots: Readonly<Record<BadgeId, BadgeSlot>>;
+}
+
+/** 칸 사이 투명 테 (px): 선형 보간이 이웃 칸을 끌어오지 않게 */
+const SLOT_GAP = 2;
+
+/**
+ * 배지 아틀라스 배치 (배율 zoom): 다섯 칸을 한 줄로. 칸 크기 = 그 배지가 어떤 소수 자리에서든 차지할 수 있는 가장 큰
+ * 사각형(굽는 범위 × 기기 배율, 올림 + 1)이라 배지가 늘 칸 안에 들어간다. 칸 사이 · 가장자리는 투명 테
+ */
+export function layoutBadgeAtlas(zoom: number): BadgeAtlasLayout {
+  const kd = MAP_SCALE * zoom;
+  let x = SLOT_GAP;
+  let height = 0;
+  const slots = {} as Record<BadgeId, BadgeSlot>;
+  for (const id of BADGE_IDS) {
+    const box = BADGE_BOX[BADGE_KIND[id]];
+    const w = Math.ceil((box.x1 - box.x0) * kd) + 1;
+    const h = Math.ceil((box.y1 - box.y0) * kd) + 1;
+    slots[id] = { x, y: SLOT_GAP, w, h };
+    x += w + SLOT_GAP;
+    height = Math.max(height, h + SLOT_GAP * 2);
+  }
+  return { width: x, height, slots };
+}
+
+/** 상태 코드 (서명용 수) */
+const POINT_CODE: Readonly<Record<PointState, number>> = { idle: 0, capturing: 1, blocked: 2, done: 3 };
+const EXIT_CODE: Readonly<Record<ExitState, number>> = { inactive: 0, active: 1, open: 2 };
+const POINT_STATES: readonly PointState[] = ['idle', 'capturing', 'blocked', 'done'];
+const EXIT_STATES: readonly ExitState[] = ['inactive', 'active', 'open'];
+
+/** 배지 한 장의 마지막으로 구운 서명 (배율 · 상태 코드 · 알파: 문자열 대신 수) */
+interface BadgeSig {
+  zoom: number;
+  code: number;
+  alpha: number;
+}
+
+/**
+ * 배지 다섯 장을 한 캔버스(아틀라스)에 굽고 이미지 다섯 개가 그 프레임을 그린다 (렌더링 최적화 2): 텍스처가 하나라
+ * 텍스처 단위가 하나뿐인 휴대폰 MobilePipeline에서도 배지 그리기가 한 번이다(예전: 배지마다 텍스처 → 그리기 다섯 번).
+ * 배지는 굽을 때마다 새로 만든 작업 캔버스(예전 배지 캔버스와 같은 크기 · 같은 변환)에 그린 뒤 제 칸에 정수 자리로 1:1
+ * 복사한다. 크롬은 2D 캔버스의 래스터 방식(가속 여부)을 쓰임새 이력(다른 캔버스에 그려짐 · 지운 뒤 다시 씀 · 텍스처
+ * 올리기)으로 바꾸고, 그러면 얇은 선 끝 안티에일리어싱이 최대 12~20 달라진다(아틀라스에 바로 그리거나 작업 캔버스 하나를
+ * 다시 쓰면 스크린샷에서 그랬다). 새 캔버스는 예전 배지 캔버스의 첫 굽기와 같은 래스터라 텍스처 화소가 예전과 같고,
+ * 이미지 자리 · 배율(텍셀 = 기기 픽셀)도 그대로다. 굽기는 상태 · 알파 · 배율이 바뀔 때만이라 캔버스를 만드는 일은 드물다.
+ * 바뀐 배지만 다시 굽고, 한 프레임에 여러 장이 바뀌어도 한 번만 올린다
+ */
+class BadgeAtlas {
+  readonly key = nextFogKey('badges');
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
   private readonly texture: Phaser.Textures.Texture;
-  readonly image: Phaser.GameObjects.Image;
-  private drawn = '';
+  private layout: BadgeAtlasLayout | null = null;
+  private zoom = NaN;
+  private dirty = false;
 
-  constructor(
-    private readonly scene: Phaser.Scene,
-    box: Phaser.GameObjects.Container,
-  ) {
+  constructor(private readonly scene: Phaser.Scene) {
     const { canvas, ctx } = makeCanvas(1, 1);
     this.canvas = canvas;
     this.ctx = ctx;
     this.texture = createCanvasTexture(scene.textures, this.key, canvas);
-    this.image = scene.make.image({ x: 0, y: 0, key: this.key }, false).setOrigin(0, 0).setVisible(false);
-    box.add(this.image);
   }
 
-  /** sig가 지난번과 다를 때만 다시 굽는다. at = 기준점(월드 px), paint는 월드 px 좌표로 그린다 */
-  bake(sig: string, zoom: number, at: Pt, box: Box, paint: (c: BadgeCtx) => void): void {
-    if (sig === this.drawn) return;
-    this.drawn = sig;
+  /** 배율이 바뀌었으면 칸을 다시 나눈다 (캔버스 크기를 바꾸면 내용이 지워진다: 모두 다시 구워야 한다). 바뀌었으면 true */
+  ensure(zoom: number): boolean {
+    if (this.layout && zoom === this.zoom) return false;
+    this.zoom = zoom;
+    const l = layoutBadgeAtlas(zoom);
+    this.layout = l;
+    // 빈 캔버스는 올리지 않는다: 칸을 다시 나누면 같은 draw에서 모두 다시 굽고 flush가 한 번 올린다
+    resizeCanvasTexture(this.key, this.texture, this.canvas, l.width, l.height, false);
+    return true;
+  }
+
+  /** 배지 한 장을 제 칸에 굽고 프레임을 맞춘다. 돌려주는 값은 구운 사각형 */
+  bake(id: BadgeId, zoom: number, paint: (c: BadgeCtx, x: number, y: number) => void): BadgeRect {
+    const slot = this.layout?.slots[id] ?? { x: 0, y: 0, w: 0, h: 0 };
+    const r = badgeRect(id, zoom);
     const kd = MAP_SCALE * zoom;
-    const ex = zoom * MAP_X;
-    const ey = zoom * MAP_Y;
-    const dx0 = Math.floor(ex + (at[0] + box.x0) * kd);
-    const dy0 = Math.floor(ey + (at[1] + box.y0) * kd);
-    const w = Math.ceil(ex + (at[0] + box.x1) * kd) - dx0;
-    const h = Math.ceil(ey + (at[1] + box.y1) * kd) - dy0;
+    // 1) 새 작업 캔버스 = 예전 배지 캔버스 (같은 크기 · 같은 변환)
+    const { canvas: wc, ctx: w } = makeCanvas(r.w, r.h);
+    w.setTransform(kd, 0, 0, kd, zoom * MAP_X - r.dx0, zoom * MAP_Y - r.dy0);
+    const at = BADGE_AT[id];
+    paint(w, at[0], at[1]);
+    // 2) 지운 칸에 화소 그대로 복사 (정수 자리 · 같은 크기, 투명 위 보통 섞기 = 원본 그대로).
+    //    'copy'는 그린 범위 밖(다른 칸)까지 지우므로 쓰지 않는다
     const c = this.ctx;
-    if (this.canvas.width !== w || this.canvas.height !== h) {
-      resizeCanvasTexture(this.key, this.texture, this.canvas, w, h);
-      this.image.setSizeToFrame();
-    } else {
-      c.setTransform(1, 0, 0, 1, 0, 0);
-      c.clearRect(0, 0, w, h);
-    }
-    c.setTransform(kd, 0, 0, kd, ex - dx0, ey - dy0);
-    paint(c);
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(slot.x, slot.y, slot.w, slot.h);
+    c.drawImage(wc, slot.x, slot.y);
+    if (this.texture.has(id)) this.texture.get(id).setSize(r.w, r.h, slot.x, slot.y);
+    else this.texture.add(id, 0, slot.x, slot.y, r.w, r.h);
+    this.dirty = true;
+    return r;
+  }
+
+  /** 이번 프레임에 구운 것이 있으면 한 번 올린다 */
+  flush(): void {
+    if (!this.dirty) return;
+    this.dirty = false;
     uploadCanvasTexture(this.texture);
-    this.image
-      .setPosition((dx0 / zoom - MAP_X) / MAP_SCALE, (dy0 / zoom - MAP_Y) / MAP_SCALE)
-      .setScale(1 / kd)
-      .setVisible(true);
-    gfxState.features.badgeBakes = Number(gfxState.features.badgeBakes ?? 0) + 1;
   }
 
   destroy(): void {
-    this.image.destroy();
     removeCanvasTexture(this.scene.textures, this.key);
   }
 }
@@ -305,7 +439,9 @@ class BadgePatch {
 export class Badges {
   /** 배지 이미지를 담는 상자: 맵 컨테이너에 캐릭터보다 먼저 넣어 늘 아래에 그린다 */
   private readonly box: Phaser.GameObjects.Container;
-  private readonly patches = new Map<string, BadgePatch>();
+  private readonly atlas: BadgeAtlas;
+  private readonly images = new Map<BadgeId, Phaser.GameObjects.Image>();
+  private readonly sigs: Record<BadgeId, BadgeSig>;
   private readonly labels = new Map<'A' | 'B', CrispText>();
   private last: InfoItem[] = [];
 
@@ -316,6 +452,9 @@ export class Badges {
     // make로 만든 컨테이너는 혼합 모드가 NORMAL로 잡힌다 (배지는 모두 NORMAL이라 그대로 둔다)
     this.box = scene.make.container({ x: 0, y: 0 }, false);
     container.add(this.box);
+    this.atlas = new BadgeAtlas(scene);
+    const sig = (): BadgeSig => ({ zoom: NaN, code: -1, alpha: NaN });
+    this.sigs = { 'point-A': sig(), 'point-B': sig(), 'exit-N': sig(), 'exit-S': sig(), prison: sig() };
     // A · B 글자는 맵 컨테이너(0.93배) 밖 화면 좌표에 둔다(글자 텍셀 = 화면 픽셀). 캐릭터를 덮지 않게 맵 컨테이너 바로 아래로 내린다
     // (안개 레이어보다는 위: 시야 밖에서도 45%로 보인다)
     for (const id of ['A', 'B'] as const) {
@@ -330,9 +469,11 @@ export class Badges {
       scene.children.moveBelow(t, container);
       this.labels.set(id, t);
     }
+    gfxState.features.badgeGfxCmds = countGraphicsCmds(this.box.list).cmds;
     scene.events.once('shutdown', () => {
-      for (const p of this.patches.values()) p.destroy();
-      this.patches.clear();
+      for (const img of this.images.values()) img.destroy();
+      this.images.clear();
+      this.atlas.destroy();
     });
   }
 
@@ -341,13 +482,40 @@ export class Badges {
     return this.last;
   }
 
-  private patch(key: string): BadgePatch {
-    let p = this.patches.get(key);
-    if (!p) {
-      p = new BadgePatch(this.scene, this.box);
-      this.patches.set(key, p);
+  /**
+   * 서명(배율 · 상태 코드 · 알파)이 지난번과 다를 때만 굽는다. 구우면 이미지를 그 프레임 · 자리에 맞춘다
+   * (텍셀 = 기기 픽셀: 자리는 기기 픽셀 정수, 배율 1/(맵 배율 × zoom))
+   */
+  private bake(id: BadgeId, zoom: number, code: number, alpha: number): void {
+    const s = this.sigs[id];
+    if (s.zoom === zoom && s.code === code && s.alpha === alpha) return;
+    s.zoom = zoom;
+    s.code = code;
+    s.alpha = alpha;
+    const r = this.atlas.bake(id, zoom, (c, x, y) => {
+      if (BADGE_KIND[id] === 'point') {
+        const st = POINT_STATES[code] ?? 'idle';
+        paintPointBadge(c, x, y, pointColor(st), pointIcon(st), alpha);
+      } else if (BADGE_KIND[id] === 'exit') {
+        paintExitBadge(c, x, y, exitColor(EXIT_STATES[code] ?? 'inactive'), alpha);
+      } else {
+        paintLockBadge(c, x, y, alpha);
+      }
+    });
+    let img = this.images.get(id);
+    if (!img) {
+      img = this.scene.make.image({ x: 0, y: 0, key: this.atlas.key, frame: id }, false).setOrigin(0, 0);
+      this.box.add(img);
+      this.images.set(id, img);
+      gfxState.features.badgeGfxCmds = countGraphicsCmds(this.box.list).cmds;
     }
-    return p;
+    const kd = MAP_SCALE * zoom;
+    img
+      .setFrame(id)
+      .setPosition((r.dx0 / zoom - MAP_X) / MAP_SCALE, (r.dy0 / zoom - MAP_Y) / MAP_SCALE)
+      .setScale(1 / kd)
+      .setVisible(true);
+    gfxState.features.badgeBakes = Number(gfxState.features.badgeBakes ?? 0) + 1;
   }
 
   draw(
@@ -359,27 +527,18 @@ export class Badges {
     this.last = badgeInfo(points, exits, alpha, blink, paintedRadii);
     // 그림은 상태 · 알파 · 백버퍼 배율이 바뀐 배지만 다시 굽는다 (진행 값은 배지 그림에 쓰지 않는다)
     const zoom = gfxState.zoom;
+    if (this.atlas.ensure(zoom)) {
+      // 칸을 다시 나누면 아틀라스가 지워진다: 모두 다시 굽는다 (이번 프레임에 그리지 않는 배지는 감춘다)
+      for (const id of BADGE_IDS) this.sigs[id].zoom = NaN;
+      for (const img of this.images.values()) img.setVisible(false);
+    }
     for (const p of points) {
       const a = pointBadgeAlpha(p.id, alpha, blink);
-      const c = CAPTURE_POINTS[p.id];
-      const at: Pt = [c.x * T, (c.y + BADGE.pointDy) * T];
-      this.patch(`point-${p.id}`).bake(`${zoom}|${p.state}|${a}`, zoom, at, BADGE_BOX.point, (g) =>
-        paintPointBadge(g, at[0], at[1], pointColor(p.state), pointIcon(p.state), a),
-      );
+      this.bake(POINT_BADGE[p.id], zoom, POINT_CODE[p.state], a);
       this.labels.get(p.id)?.setAlpha(a);
     }
-    for (const e of exits) {
-      const s = exitSignAt(e.id);
-      const at: Pt = [s.x * T, s.y * T];
-      const a = alpha.exits[e.id];
-      this.patch(`exit-${e.id}`).bake(`${zoom}|${e.state}|${a}`, zoom, at, BADGE_BOX.exit, (g) =>
-        paintExitBadge(g, at[0], at[1], exitColor(e.state), a),
-      );
-    }
-    const lock: Pt = [PRISON_LOCK.x * T, PRISON_LOCK.y * T];
-    this.patch('prison').bake(`${zoom}|${alpha.prison}`, zoom, lock, BADGE_BOX.lock, (g) =>
-      paintLockBadge(g, lock[0], lock[1], alpha.prison),
-    );
-    gfxState.features.badgeGfxCmds = countGraphicsCmds(this.box.list).cmds;
+    for (const e of exits) this.bake(EXIT_BADGE[e.id], zoom, EXIT_CODE[e.state], alpha.exits[e.id]);
+    this.bake('prison', zoom, 0, alpha.prison);
+    this.atlas.flush();
   }
 }

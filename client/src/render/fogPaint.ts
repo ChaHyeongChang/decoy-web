@@ -1211,6 +1211,8 @@ export function resizeCanvasTexture<C extends { width: number; height: number }>
   canvas: C,
   width: number,
   height: number,
+  /** false = 곧 다시 그려 올릴 것이라 빈 캔버스는 올리지 않는다 (배지 아틀라스) */
+  upload = true,
 ): void {
   canvas.width = width;
   canvas.height = height;
@@ -1221,7 +1223,7 @@ export function resizeCanvasTexture<C extends { width: number; height: number }>
     src.isPowerOf2 = isPow2(width) && isPow2(height);
   }
   tex.get('__BASE').setSize(width, height, 0, 0);
-  uploadCanvasTexture(tex);
+  if (upload) uploadCanvasTexture(tex);
   trackTexture(key, width, height);
 }
 
