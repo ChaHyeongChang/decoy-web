@@ -454,15 +454,17 @@ export class App {
   /**
    * 결과 화면 "홈으로" (M13b) · 빠른 매칭 대기 취소 · 친구 방 로비 "나가기": 연습이면 연습을 닫고, 서버 방이면 'leave'로 자리를
    * 비우고 첫 화면으로. 연결은 방에서 풀려 그대로 첫 화면에서 쓴다 (방 만들기 · 입장). 다음 welcome까지 늦게 온 떠난 방
-   * 메시지는 버린다(awaitingWelcome). 친구 방이면 코드 칸에 방 코드를 남긴다 — 결과 화면에서 잘못 눌렀어도 '다시 하기'로
-   * 방이 대기로 돌아가면 입장 한 번에 돌아올 수 있다 (빠른 매칭 방은 코드로 들어갈 수 없다)
+   * 메시지는 버린다(awaitingWelcome). 친구 방에 다른 사람이 남아 있으면 코드 칸에 방 코드를 남긴다 — 결과 화면에서 잘못
+   * 눌렀어도 '다시 하기'로 방이 대기로 돌아가면 입장 한 번에 돌아올 수 있다 (빠른 매칭 방은 코드로 들어갈 수 없다). 마지막
+   * 사람이면 서버가 방을 바로 지우므로 남기지 않는다 — 남기면 '입장'이 방을 찾을 수 없다고 했다 (수정 검토)
    */
   private leaveToHome(queueDropped = false): void {
     if (this.local) {
       this.stopPractice();
       return;
     }
-    const prefill = this.lobby?.kind === 'code' ? (this.roomCode ?? '') : '';
+    const others = this.lobby?.players.some((p) => p.id !== this.you && !p.bot) ?? false;
+    const prefill = this.lobby?.kind === 'code' && others ? (this.roomCode ?? '') : '';
     this.net.send({ t: 'leave' });
     this.awaitingWelcome = true;
     this.forgetRoom(queueDropped, prefill);

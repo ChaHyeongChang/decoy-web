@@ -229,7 +229,9 @@ test('연습 중 10초 숨겼다 돌아오면 같은 판이 그대로 이어지�
 test('PC 괴물: 판 시작 조준은 지금 방향, 레터박스 위 움직임은 그대로, 캔버스 위로 오면 커서를 따른다 (1280×900 창)', async ({
   browser,
 }) => {
-  const { context, page, problems } = await newPlayerPage(browser, { viewport: { width: 1280, height: 900 } });
+  const { context, page, problems } = await newPlayerPage(browser, {
+    viewport: { width: 1280, height: 900 },
+  });
   await page.goto(QUERY);
   await page.getByTestId('practice').click();
   const card = page.getByTestId('practice-role-monster');
@@ -256,16 +258,18 @@ test('PC 괴물: 판 시작 조준은 지금 방향, 레터박스 위 움직임�
   };
   const me = await page.evaluate(() => window.__DECOY__?.getRenderPos() ?? null);
   if (!me) throw new Error('내 위치 없음');
-  const meClient = await page.evaluate(
-    ([x, y]) => window.__DECOY__?.tileToClient(x, y) ?? null,
-    [me.x, me.y] as const,
-  );
+  const meClient = await page.evaluate(([x, y]) => window.__DECOY__?.tileToClient(x, y) ?? null, [
+    me.x,
+    me.y,
+  ] as const);
   if (!meClient || !cardBox) throw new Error('좌표 없음');
   const towardCard = Math.atan2(
     cardBox.y + cardBox.height / 2 - meClient.y,
     cardBox.x + cardBox.width / 2 - meClient.x,
   );
-  expect(angDiff(towardCard, me.face), '역할 카드 쪽이 지금 방향과 달라야 이 시험이 가린다').toBeGreaterThan(0.3);
+  expect(angDiff(towardCard, me.face), '역할 카드 쪽이 지금 방향과 달라야 이 시험이 가린다').toBeGreaterThan(
+    0.3,
+  );
   // 1) 마우스를 움직이지 않음: 지금 방향
   const still = await recentAims(1000);
   expect(still.length).toBeGreaterThan(10);
@@ -277,10 +281,10 @@ test('PC 괴물: 판 시작 조준은 지금 방향, 레터박스 위 움직임�
   await page.waitForTimeout(300);
   for (const a of await recentAims()) expect(angDiff(a, me.face)).toBeLessThan(0.02);
   // 3) 캔버스 위 동쪽 4타일: 커서를 따른다
-  const east = await page.evaluate(
-    ([x, y]) => window.__DECOY__?.tileToClient(x + 4, y) ?? null,
-    [me.x, me.y] as const,
-  );
+  const east = await page.evaluate(([x, y]) => window.__DECOY__?.tileToClient(x + 4, y) ?? null, [
+    me.x,
+    me.y,
+  ] as const);
   if (!east) throw new Error('좌표 없음');
   await page.mouse.move(east.x, east.y, { steps: 4 });
   await page.waitForTimeout(300);
@@ -482,7 +486,7 @@ for (const d of LOW_SCREENS) {
   });
 }
 
-test('친구 방 로비의 "나가기": 자리를 비우고(방장 넘김) 첫 화면, 코드 칸에 방 코드 · 주소와 마지막 방은 지워 다시 열어도 첫 화면', async ({
+test('친구 방 로비의 "나가기": 자리를 비우고(방장 넘김) 첫 화면, 코드 칸에 방 코드 · 주소와 마지막 방은 지워 다시 열어도 첫 화면 · 마지막 사람은 코드 칸 비움', async ({
   browser,
 }) => {
   const phone = await newPlayerPage(browser, dpr1(PHONE_LANDSCAPE));
@@ -515,6 +519,10 @@ test('친구 방 로비의 "나가기": 자리를 비우고(방장 넘김) 첫 �
   await phone.page.waitForTimeout(1500);
   await expect(phone.page.getByTestId('room-code')).toHaveCount(0);
   await expect(pcPlayers).toHaveCount(1);
+  // 마지막 사람이 나가면 서버가 방을 바로 지운다: 코드 칸에 남기지 않는다 (수정 검토 — 남기면 '입장'이 방을 찾을 수 없다고 했다)
+  await pc.page.getByTestId('room-leave').click();
+  await expect(pc.page.getByTestId('create-room')).toBeVisible();
+  await expect(pc.page.getByTestId('room-code-input')).toHaveValue('');
   expect(phone.problems).toEqual([]);
   expect(pc.problems).toEqual([]);
   await phone.context.close();
