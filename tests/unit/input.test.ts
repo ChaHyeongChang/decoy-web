@@ -171,6 +171,39 @@ describe('입력 막힘 뒤 회복 (M1 검토 반영)', () => {
     },
   );
 
+  // 끊김 뒤 밀린 입력은 한 틱에 다 오지 않고 TCP 재전송 · 혼잡 창 때문에 조각으로 오기도 한다. 첫 조각을 처리한 틱에 빚을
+  // 지우면 다음 조각이 갚을 빚 없이 큐에 남아, 틱당 1개 도착 · 1개 처리로 밀림이 굳었다 (출시 전 검토의 수정 검토)
+  it.each([
+    { label: '두 조각(다음 틱에 나머지)', gap: 12, deliver: (t: number, n: number) => (t === 0 ? 7 : n) },
+    { label: '두 조각(다음 틱에 나머지)', gap: 20, deliver: (t: number, n: number) => (t === 0 ? 10 : n) },
+    { label: '한 왕복(3틱) 뒤 나머지', gap: 12, deliver: (t: number, n: number) => (t === 0 ? 7 : t < 3 ? 0 : n) },
+    { label: '틱당 2개씩 흘러나옴', gap: 10, deliver: (_t: number, n: number) => Math.min(2, n) },
+    { label: '틱당 2개씩 흘러나옴', gap: 12, deliver: (_t: number, n: number) => Math.min(2, n) },
+  ])('끊긴 뒤 밀린 입력이 $label 와도 밀림이 남지 않는다 (끊긴 틱 $gap)', ({ gap, deliver }) => {
+    const game = newGame();
+    const s = game.survivors[0]!;
+    let seq = 0;
+    for (let t = 0; t < 30; t += 1) {
+      game.queueInput(s.id, [frame(++seq, 0, 0)]);
+      game.step();
+    }
+    // 클라이언트는 틱마다 입력 하나를 만들고, 망은 순서를 지켜 정해진 만큼만 넘긴다
+    const net: ReturnType<typeof frame>[] = [];
+    for (let t = 0; t < gap; t += 1) {
+      net.push(frame(++seq, 0, 0));
+      game.step();
+    }
+    for (let t = 0; t < 60; t += 1) {
+      net.push(frame(++seq, 0, 0));
+      const k = Math.min(net.length, deliver(t, net.length));
+      if (k > 0) game.queueInput(s.id, net.splice(0, k));
+      game.step();
+    }
+    expect(net.length).toBe(0);
+    expect(seq - s.ack).toBeLessThanOrEqual(1);
+    expect(s.queue.length).toBeLessThanOrEqual(1);
+  });
+
   it('사망 · 탈출 뒤에는 입력을 버리되 ack는 올린다 (관전 중 예측이 쌓이지 않게)', () => {
     const game = newGame();
     const s = game.survivors[0]!;

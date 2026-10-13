@@ -54,6 +54,11 @@ const STARVE_TICKS = 4;
 const LONG_STARVE_TICKS = 30;
 /** 늦게 온 입력을 이동 없이 처리할 최대 개수 */
 const DEBT_CAP = 8;
+/**
+ * 큐를 다 비운 뒤에도 빚을 이만큼(틱) 더 둔다. 밀린 입력이 조각으로 나뉘어 오면(TCP 재전송 · 혼잡 창) 다음 조각을
+ * 갚을 빚이 남아 있어야 밀림이 굳지 않는다 (출시 전 검토의 수정 검토)
+ */
+const DEBT_HOLD_TICKS = 3;
 
 function newStats(): PlayerStats {
   return { hitsTaken: 0, hitsLanded: 0, rescues: 0, captureSeconds: 0 };
@@ -137,6 +142,7 @@ export class Game {
           starved: 0,
           processed: 0,
           debt: 0,
+          debtHold: 0,
           connected: true,
           droppedFor: null,
           outbox: [],
@@ -172,6 +178,7 @@ export class Game {
           starved: 0,
           processed: 0,
           debt: 0,
+          debtHold: 0,
           connected: true,
           droppedFor: null,
           outbox: [],
@@ -297,6 +304,7 @@ export class Game {
         // (안 그러면 입력이 영구히 몇 틱씩 밀린다). 버튼 눌림은 살린다
         p.queue.shift();
         p.debt -= 1;
+        p.debtHold = 0;
         p.ack = input.seq;
         p.held = input.held;
         this.handleActions(p, input);
@@ -314,8 +322,11 @@ export class Game {
     }
     if (processed > 0) {
       p.starved = 0;
-      // 밀린 입력을 다 처리했으면 밀림이 없다: 남은 빚은 갚을 대상이 없으니 지운다
-      if (p.queue.length === 0) p.debt = 0;
+      // 밀린 입력을 다 처리했으면 지금은 밀림이 없다. 남은 빚은 뒤 조각을 위해 몇 틱 두었다가, 그래도 안 오면 지운다
+      if (p.queue.length === 0 && p.debt > 0) {
+        p.debtHold += 1;
+        if (p.debtHold > DEBT_HOLD_TICKS) p.debt = 0;
+      }
       return;
     }
     p.starved += 1;
@@ -324,6 +335,7 @@ export class Game {
       p.credit = Math.max(0, p.credit - 1);
       // 잠깐 막힌 경우 그동안의 입력이 늦게 올 수 있다: 그만큼을 빚으로 센다. 오래 끊기면(탭 숨김) 빚을 비운다
       p.debt = p.starved > LONG_STARVE_TICKS ? 0 : Math.min(DEBT_CAP, p.debt + 1);
+      p.debtHold = 0;
       p.held = 0;
       this.stepBody(p, idleInput(p));
     }
