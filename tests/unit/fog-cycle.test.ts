@@ -39,6 +39,7 @@ import {
   paintPoints,
   pointPaintBounds,
   resetExitTracking,
+  rgba,
   trackExit,
   type FogPen,
   type LightCtx,
@@ -886,6 +887,31 @@ describe('LightRecord: 명령 객체를 고쳐 쓰는 기록이 예전과 같은
     expect(lc.calls).toEqual(la.calls);
     expect(changes).toBeGreaterThan(50);
     expect(changes).toBeLessThan(400);
+  });
+});
+
+describe('rgba: 최근 값 캐시가 있어도 예전 식과 같은 문자열', () => {
+  const oldRgba = (color: number, alpha: number): string =>
+    `rgba(${(color >> 16) & 255}, ${(color >> 8) & 255}, ${color & 255}, ${alpha})`;
+
+  it('무작위 · 되풀이 · 해시 충돌 · −0 · NaN · 아주 작은 알파 · 1 넘는 알파', () => {
+    const rand = rng(31);
+    const colors = [0, 0xffffff, 0x22d3ee, 0x1b3240, 0xf59e0b, 0x0b4a5a];
+    for (let k = 0; k < 20; k += 1) colors.push(Math.floor(rand() * 0x1000000));
+    const alphas = [0, -0, 1, 0.11, 0.06, 0.55, 0.95, 1e-7, 1.5, NaN, 0.1 + 0.2];
+    for (let k = 0; k < 40; k += 1) alphas.push(rand());
+    for (let round = 0; round < 3; round += 1)
+      for (let i = 0; i < 4000; i += 1) {
+        const c = colors[Math.floor(rand() * colors.length)] ?? 0;
+        const a = alphas[Math.floor(rand() * alphas.length)] ?? 0;
+        expect(rgba(c, a)).toBe(oldRgba(c, a));
+      }
+    // 같은 칸에 번갈아 들어오는 값 (캐시가 덮어써져도 틀리지 않는다)
+    for (let i = 0; i < 1000; i += 1) {
+      const a = (i % 7) / 7;
+      expect(rgba(0x22d3ee, a)).toBe(oldRgba(0x22d3ee, a));
+      expect(rgba(0x22d3ee ^ (i * 2048), a)).toBe(oldRgba(0x22d3ee ^ (i * 2048), a));
+    }
   });
 });
 

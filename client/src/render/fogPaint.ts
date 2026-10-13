@@ -63,8 +63,24 @@ export function nextFogKey(prefix: string): string {
   return `${prefix}-${keySeq}`;
 }
 
+/** rgba 문자열 캐시 칸 수 (2의 거듭제곱) */
+const RGBA_SLOTS = 256;
+const rgbaColor = new Float64Array(RGBA_SLOTS).fill(NaN);
+const rgbaAlpha = new Float64Array(RGBA_SLOTS).fill(NaN);
+const rgbaText: string[] = new Array<string>(RGBA_SLOTS).fill('');
+
+/**
+ * CSS 색 문자열. 안개 주기마다 같은 (색, 알파)로 수백 번 불리므로(눈금 · 패드 · 시야 채움) 최근 값을 칸 하나짜리 해시 캐시에
+ * 둔다(렌더링 최적화 2: 부를 때마다 새 문자열). 캐시에 없으면 예전과 같은 식으로 만든다 — 돌려주는 문자열은 늘 같다
+ */
 export function rgba(color: number, alpha: number): string {
-  return `rgba(${(color >> 16) & 255}, ${(color >> 8) & 255}, ${color & 255}, ${alpha})`;
+  const h = (color ^ (color >>> 11) ^ Math.floor(alpha * 4093)) & (RGBA_SLOTS - 1);
+  if (rgbaColor[h] === color && rgbaAlpha[h] === alpha) return rgbaText[h] ?? '';
+  const s = `rgba(${(color >> 16) & 255}, ${(color >> 8) & 255}, ${color & 255}, ${alpha})`;
+  rgbaColor[h] = color;
+  rgbaAlpha[h] = alpha;
+  rgbaText[h] = s;
+  return s;
 }
 
 /** 경로를 만드는 2D 컨텍스트 부분 */
