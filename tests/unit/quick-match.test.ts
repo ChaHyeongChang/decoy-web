@@ -589,6 +589,36 @@ describe('빠른 매칭: 사람이 모두 나간 판 · 방', () => {
     expect(room.lastResult?.result.winner).toBe('void');
   });
 
+  // 사망 · 탈출 뒤 관전 중인 사람은 끊겨도 판정 유예를 세지 않는다. 그래도 소켓이 잠깐 닫힌 것(망 전환 · 백그라운드)을
+  // '모두 나감'으로 보면 안 된다 (출시 전 검토의 수정 검토)
+  it.each(['escaped', 'dead'] as const)(
+    '혼자 하던 사람이 %s 뒤 관전 중 잠깐 끊겼다 돌아오면 판은 그대로, 안 돌아오면 유예 뒤 무효',
+    (status) => {
+      const env = soloPlaying();
+      const { a, room, run } = env;
+      const me = room.seats.find((s) => !s.bot);
+      a.link.receive(raw({ t: 'test', cmd: { kind: 'setSurvivor', target: me?.id ?? '', status } }));
+      run(200, [a]);
+      expect(room.phase).toBe('playing');
+      const back = rejoin(env, a, room.code);
+      // rejoin은 닫고 바로 붙는다: 다시 닫고 5초 뒤 돌아온다
+      back.link.close();
+      run(5000);
+      expect(room.phase).toBe('playing');
+      const again = rejoin(env, back, room.code);
+      run(100, [again]);
+      expect(room.phase).toBe('playing');
+      expect(again.conn.last('welcome')?.room).toBe(room.code);
+      // 이번에는 돌아오지 않는다
+      again.link.close();
+      run(GRACE_MS - 1000);
+      expect(room.phase).toBe('playing');
+      run(2000);
+      expect(room.phase).toBe('result');
+      expect(room.lastResult?.result.winner).toBe('void');
+    },
+  );
+
   it('최후의 30초(생존자 승리 확정) 중에 사람이 모두 나가면 무효가 아니라 생존자 승리', () => {
     const { a, room, run } = soloPlaying();
     // 사람(러너)과 봇 생존자 하나가 탈출 → 최후의 30초

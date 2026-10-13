@@ -109,6 +109,8 @@ export class Room {
   private aliases = new AliasBook();
   /** 이번 판에 괴물이 끊겨 있던 시간의 합 (초). 재접속해도 줄지 않는다 */
   private monsterAway = 0;
+  /** 이번 판에 '나가기'로 빠진 사람 자리 (끊김과 달리 돌아오지 않는다고 본다) */
+  private leftInMatch = new Set<string>();
   matchCount = 0;
   lastResult: Extract<ServerMessage, { t: 'result' }> | null = null;
   /**
@@ -200,6 +202,7 @@ export class Room {
     seat.conn = conn;
     seat.droppedAt = null;
     seat.lastLobby = null;
+    this.leftInMatch.delete(seat.id);
     this.emptySince = null;
     const p = this.game?.players.get(seat.id);
     if (p) {
@@ -247,6 +250,7 @@ export class Room {
     if (this.phase === 'playing') {
       // 판 중 나가기는 유예 없이 바로 (M13c): 괴물이면 무효, 생존자면 사망 처리 후 판정
       this.detach(seat, nowMs);
+      this.leftInMatch.add(seat.id);
       const p = this.game?.players.get(seat.id);
       if (p) p.droppedFor = null;
       if (this.game) applyDropExpired(this.game, seat.id);
@@ -467,6 +471,7 @@ export class Room {
     }
     this.aliases = new AliasBook();
     this.monsterAway = 0;
+    this.leftInMatch.clear();
     this.phase = 'playing';
     this.lastResult = null;
     this.resultSeats.clear();
@@ -534,7 +539,7 @@ export class Room {
     // 빠른 매칭: 사람이 모두 나갔으면(연결된 사람도, 끊김 유예 중인 사람도 없음) 봇끼리 판을 계속하지 않고 무효로 끝낸다
     // (봇 방 상한 한 칸을 60초 동안 차지하지 않게, 출시 전 검토). 끊김 유예 중인 사람이 있으면 그대로 기다린다.
     // 최후의 30초(생존자 승리 확정) 중이면 무효가 아니라 생존자 승리 — 괴물 나가기와 같은 규칙(9장)
-    if (this.kind === 'quick' && !game.end && this.humansGone(game)) {
+    if (this.kind === 'quick' && !game.end && this.humansGone(game, nowMs)) {
       if (game.grace !== null) finish(game, 'survivors', 'escaped');
       else finish(game, 'void', 'humansLeft');
     }
@@ -584,11 +589,18 @@ export class Room {
     game.paused = monsterAway && !game.end ? Math.max(0, grace - this.monsterAway) : null;
   }
 
-  /** 판에 사람이 아무도 없다: 연결된 사람도, 끊김 유예를 세는 사람도 없다 (나가기 · 유예 만료 · 사망이나 탈출 뒤 끊김) */
-  private humansGone(game: Game): boolean {
-    return this.humanSeats.every(
-      (s) => s.conn === null && (game.players.get(s.id)?.droppedFor ?? null) === null,
-    );
+  /**
+   * 판에 사람이 아무도 없다: 연결된 사람도, 끊김 유예를 세는 사람도 없다 (나가기 · 유예 만료). 사망 · 탈출해 관전하던
+   * 사람은 끊겨도 판정 유예(droppedFor)를 세지 않으므로, 끊긴 지 유예 시간이 지나야 나간 것으로 본다 — 그 전에 돌아오면
+   * 이어서 관전하고 결과를 받는다 (9장, 출시 전 검토의 수정 검토)
+   */
+  private humansGone(game: Game, nowMs: number): boolean {
+    const graceMs = this.config.balance.match.reconnectGrace * 1000;
+    return this.humanSeats.every((s) => {
+      if (s.conn !== null || (game.players.get(s.id)?.droppedFor ?? null) !== null) return false;
+      if (this.leftInMatch.has(s.id) || s.droppedAt === null) return true;
+      return nowMs - s.droppedAt >= graceMs;
+    });
   }
 
   /**
