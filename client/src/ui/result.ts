@@ -45,6 +45,24 @@ const DOORS: Record<NonNullable<MatchResult['grade']>, { n: number; text: string
 
 const nil = (): HTMLElement => h('span', { class: 'nil' }, '—');
 
+/** 누르면 꺼지는 버튼 (HTMLButtonElement의 필요한 부분만) */
+export type OneShotButton = EventTarget & { disabled: boolean };
+
+/**
+ * 결과 화면 버튼은 한 번만 (출시 전 검토의 수정 검토): 하나를 누르면 둘 다 끈다. 빠른 매칭 '다시 하기' 직후(왕복 안에)
+ * '홈으로'를 누르면, 서버가 먼저 보낸 새 대기열 방의 welcome · lobby가 첫 화면 위에 떠난 방의 대기 화면을 되살렸다.
+ * 다음 결과 표시(재접속 뒤 다시 받은 결과 포함)는 버튼을 새로 그리므로 다시 켜진다
+ */
+export function oneShotButtons(pairs: readonly (readonly [OneShotButton, () => void])[]): void {
+  for (const [button, action] of pairs) {
+    button.addEventListener('click', () => {
+      if (button.disabled) return;
+      for (const [b] of pairs) b.disabled = true;
+      action();
+    });
+  }
+}
+
 export class ResultUI {
   private readonly root: HTMLDivElement;
 
@@ -177,9 +195,11 @@ export class ResultUI {
       icon('replay', 20),
       UI_TEXT.rematch,
     );
-    again.addEventListener('click', () => this.onRematch());
     const home = h('button', { class: 'btn', 'data-testid': 'result-home' }, icon('back', 20), UI_TEXT.home);
-    home.addEventListener('click', () => this.onHome());
+    oneShotButtons([
+      [again, () => this.onRematch()],
+      [home, () => this.onHome()],
+    ]);
     const box = h(
       'div',
       { class: 'panel result-box' },

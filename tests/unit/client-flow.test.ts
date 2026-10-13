@@ -8,6 +8,7 @@ import { APP_TEXT } from '../../client/src/data/storyText';
 import { leaveKindFor } from '../../client/src/lifecycle';
 import { leaveTextFor } from '../../client/src/ui/lifecycleUi';
 import { ARMING_CLASS, PRACTICE_ARM_MS, armAgainstDoubleTap } from '../../client/src/ui/lobby';
+import { oneShotButtons, type OneShotButton } from '../../client/src/ui/result';
 
 class FakeDoc extends EventTarget {
   visibilityState: DocumentVisibilityState = 'visible';
@@ -134,5 +135,38 @@ describe("'봇과 연습' 연타 가드 (검토 반영 F17)", () => {
     expect(el.has('arming')).toBe(false);
     // 원래 클래스는 그대로
     expect(el.has('practice-roles')).toBe(true);
+  });
+});
+
+describe('결과 화면 버튼은 한 번만 (수정 검토: 다시 하기 직후 홈으로)', () => {
+  const button = (): OneShotButton => Object.assign(new EventTarget(), { disabled: false });
+
+  it("'다시 하기'를 누르면 '홈으로'도 꺼진다 — 왕복 안에 홈으로를 눌러 떠난 방의 대기 화면이 되살아나지 않게", () => {
+    const again = button();
+    const home = button();
+    const calls: string[] = [];
+    oneShotButtons([
+      [again, () => calls.push('rematch')],
+      [home, () => calls.push('home')],
+    ]);
+    again.dispatchEvent(new Event('click'));
+    home.dispatchEvent(new Event('click'));
+    again.dispatchEvent(new Event('click'));
+    expect(calls).toEqual(['rematch']);
+    expect(again.disabled).toBe(true);
+    expect(home.disabled).toBe(true);
+  });
+
+  it("'홈으로'를 먼저 누르면 '다시 하기'는 보내지 않는다", () => {
+    const again = button();
+    const home = button();
+    const calls: string[] = [];
+    oneShotButtons([
+      [again, () => calls.push('rematch')],
+      [home, () => calls.push('home')],
+    ]);
+    home.dispatchEvent(new Event('click'));
+    again.dispatchEvent(new Event('click'));
+    expect(calls).toEqual(['home']);
   });
 });
