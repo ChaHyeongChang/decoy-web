@@ -23,7 +23,8 @@
 | M13d 앱 셸 캐시 · 오프라인 진입 | #14 | 2026-10-10 14:42 |
 | M14 PWA · TWA 준비 | #15 | 2026-10-10 15:12 |
 | M15 스토어 자료 · 최종 보고 | #16 | 2026-10-10 16:06 |
-| 출시 전 검토(M13a~M15) 반영 | #17 | 2026-10-13 (이 PR) |
+| 출시 전 검토(M13a~M15) 반영 | #17 | 2026-10-13 04:08 |
+| 스토어 ⚠ 항목 결정 반영 | #18 | 2026-10-13 (이 PR) |
 
 main에 병합하면 Render에 자동 배포된다(`render.yaml`, `plan: free` — **유료 전환은 사용자가 직접 한다. 파일의 플랜은 바꾸지 않는다**).
 
@@ -31,7 +32,7 @@ main에 병합하면 Render에 자동 배포된다(`render.yaml`, `plan: free` �
 1. `docs/PLAY_STORE_GUIDE.md` 1부(개발자 계정 US$25 · 신원 확인 · Android 실기기 인증 · 테스터 12명)와 2부(패키지 이름 · PWABuilder · 서명 키 두 곳 보관 · 스토어 등록정보 · 지문 · 비공개 테스트 14일 · Render 유료 플랜 · 정식 출시 · 해마다 target API · 운영 종료)
 2. Render 대시보드 환경 변수: `PRIVACY_CONTACT`(처리방침 문의처, 공개 이메일), 첫 업로드 뒤 `TWA_PACKAGE_NAME` · `TWA_SHA256_FINGERPRINTS`. 저장하면 재배포 = 열린 방이 사라진다
 3. 정식 출시 전 Render 유료 플랜(Starter) 전환 — 대시보드에서. **`render.yaml`의 `plan: free`는 그대로 둔다.** 전환하면 환경 변수 `DECOY_MAX_BOT_ROOMS=16`도 넣는다(코드 기본값 2는 무료 CPU 기준, PLAY_STORE_GUIDE 10단계)
-4. `docs/STORE_LISTING.md`의 **⚠ 확인 필요** 답(데이터 보안 · 콘텐츠 등급 · 타깃 연령)과 `docs/HUMAN_CHECKS.md`의 실기기 · 손맛 항목
+4. `docs/STORE_LISTING.md`에 남은 **⚠ 확인 필요** 답(지연 측정값 · 태그 — 데이터 보안 · 콘텐츠 등급 · 타깃 연령은 2026-10-13 사용자가 정해 반영, DECISIONS 6절)과 `docs/HUMAN_CHECKS.md`의 실기기 · 손맛 항목
 
 MOBILE_PLAN과 달라진 점
 - 정적 파일 gzip은 M13d가 아니라 **M12에서 이미 했다**(`server/src/static.ts`, DECISIONS 'M12: 정적 파일 gzip'). M13d 서버 갈래에는 다음이 남는다: 약한 ETag(크기-수정 시각) + `If-None-Match` 304, MIME에 `.woff2 → font/woff2` · `.txt` · (M14) `.webmanifest`. M12 성능 검토에서 나온 제안이고 패치는 저장소에 없다(다시 만든다)
@@ -364,3 +365,11 @@ MOBILE_PLAN과 달라진 점
 - 스토어 그림을 찍으며 정한 것: 시험 전용 `setTime`에 `elapsed`(결과의 판 길이), 터치 괴물의 조준은 이동 스틱을 짧게 끌어 정함, 16:9 휴대폰은 엄지 버튼이 맵 오른쪽 아래를 덮어 장면을 왼쪽 · 가운데에 둠, 발각 장면은 배너가 보이는 순간 바로 찍음(DECISIONS)
 - 시험: 단위 `privacy` 17개(ClientMessage 필드 ↔ 대응표 · 처리방침 · STORE_LISTING, 저장 키 · 캐시 이름, 문서 형식, 문의처 바꿔 넣기, 서버 응답, 외부 주소 정적 검사, 채팅 · 광고 · 결제 의존성 없음), `store-listing` 10개(글자 수 · 과장 표현 · 규칙 숫자 · 안내서 단계 제목 · 환경 변수 이름 · manifest 값 · render.yaml), `store-images` 6개(규격 · 불투명 · 장면 차이 · 터치 UI · git 추적), `storage-keys`의 처리방침 대조가 건너뜀에서 실행으로, `bot-driver`에 `elapsed` 1개. E2E `m15-privacy` 3개(로비 링크 → 처리방침 · 360px · 돌아가기, 오프라인 처리방침, 혼합 판 + 봇과 연습 동안 외부 요청 0)
 - 검증: `npm run check` 통과, 단위 924개(+35, 건너뜀 0 — 처리방침 대조가 이제 돈다), 골든 해시 · 정보 차단 시험 그대로, 로컬 전체 E2E 149개 통과(27.2분, 콘솔 에러 · 경고 0), `verify:deploy --no-docker` 통과. JS gzip 305,284B(M14 병합 + 0.1KiB, 처리방침 링크)
+
+## 스토어 ⚠ 항목 결정 반영 (2026-10-13, PR #18)
+사용자가 정한 답을 대응표 · 처리방침 · STORE_LISTING · PLAY_STORE_GUIDE에 넣었다(DECISIONS 6절)
+- 데이터 보안: 자리 토큰 = '기기 또는 기타 ID'(수집 예 · 공유 아니요 · 필수 · 앱 기능 · 일시적 처리 아니요), 닉네임 일시적 처리 아니요, 앱 상호작용도 같은 기준으로 아니요. `privacyData.ts`에 항목별 `form`과 `formAnswer()`를 두고 STORE_LISTING 4번째 칸 · 안내서 7단계 Console 표가 같은 글자를 쓴다
+- 콘텐츠 등급: STORE_LISTING 2.3 추천 답대로, 소통 문항 "채팅 · 음성 없음, 보이는 것은 친구 방 닉네임뿐, 빠른 매칭은 익명"
+- 타깃 연령: 16~17세 · 18세 이상, 아동 관심 아니요(`TARGET_AGE`). 처리방침 머리 · 2번 '대상 연령' · 9번에 "이 서비스는 만 16세 이상을 대상으로 합니다", 만 14세 미만 아동을 대상으로 하지 않는다는 문장으로 옛 '만 14세 미만 닉네임 권고'를 바꿈
+- 남은 ⚠: 지연 측정값 · 태그
+- 시험: privacy 2개(양식 답 네 곳 대조 · 대상 연령) + 기존 대조 강화(확인 끝난 항목에 ⚠가 남지 않음), store-listing 2개(남은 ⚠ 줄 · 소통 문항 문구). 고치기 전 문서에서 6개 실패 확인

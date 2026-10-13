@@ -3,6 +3,8 @@
 //    대응표의 이름 · 유형이 처리방침(client/public/privacy.html)과 docs/STORE_LISTING.md 둘 다에 나온다
 //  - 기기 저장 키(storageKeys.ts) · 오프라인 캐시 이름(sw.js)이 두 문서에 모두 나온다
 //  - 공개 처리방침에는 초안 표시(확인 필요 · ⚠)가 없다. 사람이 확인할 판단(confirm)은 STORE_LISTING 표 4번째 칸에만
+//  - 데이터 보안 양식의 답(form)과 타깃 연령(TARGET_AGE)은 2026-10-13 사용자 결정이다. 대응표 · 처리방침 · STORE_LISTING ·
+//    PLAY_STORE_GUIDE 7단계 표가 같은 값을 쓴다
 //  - 처리방침 문서 형식(lang · 필수 제목 · 스크립트 · 외부 주소 없음 · 문의처 자리), 사실 문구(보내는 시점 · 처리 근거 ·
 //    보관 기간 · 기기 저장 값의 전송), 서버 응답(/privacy · /privacy.html, 문의처 바꿔 넣기)
 //  - 외부 전송 없음(정적): 클라이언트 코드 · 공개 파일에 밖으로 가는 주소가 없다(XML 네임스페이스만 허용). 실제 요청은 E2E(m15-privacy)
@@ -14,7 +16,13 @@ import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import ts from 'typescript';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { PROTOCOL_FIELDS, SENT_DATA } from '../../client/src/privacyData';
+import {
+  PROTOCOL_FIELDS,
+  SENT_DATA,
+  TARGET_AGE,
+  formAnswer,
+  type SentDataInfo,
+} from '../../client/src/privacyData';
 import { STORAGE_KEYS } from '../../client/src/storageKeys';
 import {
   PRIVACY_CONTACT_ENV,
@@ -26,6 +34,7 @@ import {
 
 const PRIVACY = readFileSync('client/public/privacy.html', 'utf8');
 const LISTING = readFileSync('docs/STORE_LISTING.md', 'utf8');
+const GUIDE = readFileSync('docs/PLAY_STORE_GUIDE.md', 'utf8');
 const TYPES = 'shared/src/types.ts';
 
 /** ClientMessage 유니온의 각 메시지에서 보내는 필드 ('메시지.필드', 같은 파일 인터페이스 배열은 '메시지.필드.하위필드') */
@@ -173,7 +182,36 @@ describe('보내는 항목 대응표 (privacyData.ts ↔ ClientMessage)', () => 
       const cells = listingCells(d.label);
       expect(cells[2], `${d.label} STORE_LISTING 유형 칸`).toBe(d.playType);
       if (d.confirm) expect(cells[3], `${d.label} STORE_LISTING 4번째 칸`).toMatch(/⚠ 확인 필요/);
+      else expect(cells[3], `${d.label} STORE_LISTING 4번째 칸`).not.toMatch(/⚠|확인 필요/);
     }
+  });
+
+  it('데이터 보안 양식의 답: 신고하는 유형마다 form이 있고 STORE_LISTING 4번째 칸 · PLAY_STORE_GUIDE 7단계 표가 같은 답 글자 (자리 토큰 = 기기 또는 기타 ID, 2026-10-13 결정)', () => {
+    for (const d of Object.values(SENT_DATA) as SentDataInfo[]) {
+      const declared = d.playType !== '해당 없음';
+      expect(d.form !== undefined, `${d.label} form`).toBe(declared);
+      if (!d.form) continue;
+      const answer = formAnswer(d.form);
+      expect(listingCells(d.label)[3], `${d.label} STORE_LISTING 4번째 칸`).toContain(answer);
+      const row = GUIDE.split('\n')
+        .map((l) => l.trim())
+        .find((l) => l.startsWith(`| 데이터 유형 › ${d.playType} `));
+      expect(row, `PLAY_STORE_GUIDE 표에 ${d.playType}`).toBeDefined();
+      // 같은 유형으로 가는 항목(방 · 역할 선택 · 조작 입력)은 답도 같아야 표 한 줄에 맞는다
+      expect(row, `${d.label} 안내서 답`).toContain(`| ${answer} |`);
+    }
+    // 사용자가 정한 값 그대로 (바꾸려면 사용자 결정 → 네 곳을 함께)
+    expect(SENT_DATA.seatToken.playType).toBe('기기 또는 기타 ID');
+    expect(formAnswer(SENT_DATA.seatToken.form)).toBe(
+      '수집 예 · 공유 아니요 · 필수 · 목적 앱 기능 · 일시적 처리 아니요',
+    );
+    expect(SENT_DATA.nickname.form).toEqual({ required: false, ephemeral: false });
+    // 요약 표의 '수집함' 줄에 신고하는 유형이 모두 나온다
+    const summary = LISTING.split('\n').find((l) =>
+      l.startsWith('| 필수 데이터 유형을 수집하거나 공유하나요?'),
+    );
+    expect(summary).toContain('기기 또는 기타 ID');
+    expect(LISTING).not.toMatch(/신고하지 않는 것:[^\n]*기기 ID\(/);
   });
 });
 
@@ -335,6 +373,36 @@ describe('처리방침 문서', () => {
       if (d !== SENT_DATA.testCommand) expect(basis, d.label).toContain(d.label);
     expect(basis).toContain('IP 주소');
     expect(basis).toMatch(/닉네임은 선택/);
+  });
+
+  it('대상 연령: 처리방침 머리 · 2번 · 9번이 만 16세 이상, STORE_LISTING 2.4 · PLAY_STORE_GUIDE가 같은 칸만 고르고 아동 관심 아니요 (2026-10-13 결정)', () => {
+    const sentence = `이 서비스는 만 ${TARGET_AGE.minAge}세 이상을 대상으로 합니다`;
+    const intro = /<strong data-testid="target-age-intro">([\s\S]*?)<\/strong>/.exec(PRIVACY)?.[1] ?? '';
+    expect(plain(intro)).toContain(sentence);
+    expect(PRIVACY.indexOf('data-testid="target-age-intro"')).toBeLessThan(PRIVACY.indexOf('<h2'));
+    expect(section('purpose')).toContain('<p data-testid="target-age">');
+    const age = plain(/<p data-testid="target-age">([\s\S]*?)<\/p>/.exec(PRIVACY)?.[1] ?? '');
+    expect(age).toContain(sentence);
+    // 처리 근거(동의 없이 처리)와 맞게: 한국법상 아동(만 14세 미만)을 대상으로 하지 않고, 알게 되면 파기
+    expect(age).toMatch(/만 14세 미만 아동을 대상으로 하지 않/);
+    expect(age).toMatch(/알게 되면[^.]*파기/);
+    expect(plain(section('rights'))).toContain(sentence);
+    // 만 13세 이상을 대상으로 하던 때의 옛 문구는 없다
+    expect(PRIVACY).not.toContain('실명이 아닌 닉네임을 쓰기를 권합니다');
+
+    const at = LISTING.indexOf('### 2.4 타깃 연령층');
+    const sec = LISTING.slice(at, LISTING.indexOf('\n### ', at + 1));
+    const groups = `**${TARGET_AGE.playGroups.join(', ')}**`;
+    expect(sec.split('\n').find((l) => l.startsWith('- 답'))).toContain(groups);
+    expect(sec).toContain(sentence);
+    const appeal = TARGET_AGE.appealsToChildren ? '**예**' : '**아니요**';
+    expect(sec.split('\n').find((l) => l.includes('아동의 관심'))).toContain(appeal);
+    const guideRow = (q: string): string =>
+      GUIDE.split('\n')
+        .map((l) => l.trim())
+        .find((l) => l.startsWith(`| ${q} |`)) ?? '';
+    for (const g of TARGET_AGE.playGroups) expect(guideRow('타깃 연령층'), g).toContain(`**${g}**`);
+    expect(guideRow('앱이 아동의 관심을 끌 수 있나요?')).toContain(appeal);
   });
 
   it('마지막 방(lastRoom)은 저절로 지우지 않고 다음에 앱을 열어 읽을 때 30초가 지났으면 지운다 — 문서도 그렇게', async () => {

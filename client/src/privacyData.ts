@@ -19,6 +19,11 @@ export interface SentDataInfo {
   purpose: string;
   /** 판단을 사람이 다시 확인해야 하는가 (docs/HUMAN_CHECKS.md M15). 바꾸면 이 파일 · privacy.html · STORE_LISTING.md를 같은 값으로 */
   confirm: boolean;
+  /**
+   * 데이터 보안 양식에 신고하는 유형의 답 (playType이 '해당 없음'이면 없음). 수집은 늘 '예' · 공유는 늘 '아니요' ·
+   * 목적은 늘 '앱 기능'이라 칸으로 두지 않는다. STORE_LISTING 표 4번째 칸과 PLAY_STORE_GUIDE 7단계 표가 formAnswer 글자를 그대로 쓴다
+   */
+  form?: { required: boolean; ephemeral: boolean };
 }
 
 export const SENT_DATA = {
@@ -29,14 +34,18 @@ export const SENT_DATA = {
     purpose:
       '같은 방 사람들 화면에 표시 (빠른 매칭에서는 다른 사람에게 "플레이어 n"으로만 보임). 비워 두면 서버가 "플레이어 n"을 붙인다',
     confirm: false,
+    // 일시적 처리 아니요 (2026-10-13 사용자 결정): 방이 살아 있는 동안 내내 메모리에 두고 다른 사람 화면에 계속 보인다
+    form: { required: false, ephemeral: false },
   },
   seatToken: {
     label: '자리 토큰',
     fields: ['join.token', 'join.altTokens'],
-    playType: '해당 없음',
+    // '기기 또는 기타 ID'로 신고 (2026-10-13 사용자 결정, 보수적인 쪽). 기기 · 설치 단위 ID는 아니지만 같은 자리를 다시 알아보는 값이다
+    playType: '기기 또는 기타 ID',
     purpose:
       '새로고침 · 끊김 뒤 같은 방의 같은 자리로 돌아가기. 서버가 방의 자리마다 무작위로 만들어 주는 값으로, 기기 · 계정과 묶이지 않고 방이 사라지면 쓸모가 없다',
-    confirm: true,
+    confirm: false,
+    form: { required: true, ephemeral: false },
   },
   roomChoice: {
     label: '방 · 역할 선택',
@@ -45,6 +54,8 @@ export const SENT_DATA = {
     purpose:
       '방 만들기 · 입장 · 빈자리 봇 채우기 · 역할 고르기 · 준비 (시작 · 다시 하기 · 나가기는 내용 없는 신호)',
     confirm: false,
+    // 일시적 처리 아니요: 고른 방 · 역할은 방이 살아 있는 동안 메모리에 남는다 (닉네임 · 자리 토큰과 같은 기준)
+    form: { required: true, ephemeral: false },
   },
   controls: {
     label: '조작 입력',
@@ -59,6 +70,8 @@ export const SENT_DATA = {
     playType: '앱 활동 › 앱 상호작용',
     purpose: '이동 방향 · 조준 각도 · 누른 버튼. 서버가 판정하고 결과를 같은 방 사람들에게 보낸다',
     confirm: false,
+    // 방 · 역할 선택과 같은 데이터 유형(앱 상호작용)이라 양식의 답도 하나다
+    form: { required: true, ephemeral: false },
   },
   pingClock: {
     label: '지연 측정값',
@@ -76,6 +89,24 @@ export const SENT_DATA = {
     confirm: false,
   },
 } as const satisfies Record<string, SentDataInfo>;
+
+/** 데이터 보안 양식 한 유형의 답 글자 (STORE_LISTING 표 4번째 칸 · PLAY_STORE_GUIDE 7단계 표가 이 글자를 그대로 쓴다) */
+export function formAnswer(form: { required: boolean; ephemeral: boolean }): string {
+  return `수집 예 · 공유 아니요 · ${form.required ? '필수' : '선택'} · 목적 앱 기능 · 일시적 처리 ${form.ephemeral ? '예' : '아니요'}`;
+}
+
+/**
+ * 타깃 연령 (2026-10-13 사용자 결정). 처리방침 머리 · 2번 '대상 연령', STORE_LISTING 2.4, PLAY_STORE_GUIDE 7단계가 같은 값을 쓴다.
+ * 만 13세 미만을 고르지 않으므로 가족 정책 대상이 아니고, 한국법상 아동(만 14세 미만)을 대상으로 하지 않는다
+ */
+export const TARGET_AGE = {
+  /** 처리방침의 '만 n세 이상' */
+  minAge: 16,
+  /** Play Console 타깃 연령층에서 고르는 칸 (이 밖의 칸은 고르지 않는다) */
+  playGroups: ['16~17세', '18세 이상'],
+  /** "앱이 아동의 관심을 끌 수 있나요?" */
+  appealsToChildren: false,
+} as const;
 
 /** 메시지 종류 표시('t')는 보내는 데이터가 아니라 메시지 이름이라 대응표에 넣지 않는다 */
 export const PROTOCOL_FIELDS = ['t'] as const;

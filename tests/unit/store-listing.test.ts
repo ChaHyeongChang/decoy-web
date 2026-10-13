@@ -62,6 +62,26 @@ describe('STORE_LISTING.md', () => {
     expect(access).toContain('봇과 연습');
   });
 
+  it('남은 ⚠ 확인 필요는 지연 측정값 · 태그 둘뿐 — 데이터 보안 · 콘텐츠 등급 · 타깃 연령은 2026-10-13 결정 반영', () => {
+    const lines = LISTING.split('\n');
+    const head = lines.indexOf('---');
+    const flagged = lines.map((l, i) => ({ l, i })).filter(({ l }) => l.includes('⚠'));
+    // 표 밖의 ⚠는 머리의 안내 줄(표시를 설명하는 줄)에만
+    expect(flagged.filter(({ l, i }) => !l.startsWith('|') && i > head)).toEqual([]);
+    const rows = flagged.filter(({ l }) => l.startsWith('|')).map(({ l }) => l.split('|')[1]?.trim() ?? '');
+    expect(rows.sort()).toEqual(['지연 측정값', '태그 (최대 5개, Console 목록에서 고름)']);
+  });
+
+  it('콘텐츠 등급의 소통 문항 답이 결정 문구 그대로이고 안내서 Console 표와 같다', () => {
+    const phrase = '채팅 · 음성 없음, 보이는 것은 친구 방 닉네임뿐, 빠른 매칭은 익명';
+    const row = LISTING.split('\n').find((l) => l.startsWith('| 사용자 간 상호작용 |'));
+    expect(row).toContain(phrase);
+    const guideRow = GUIDE.split('\n').find((l) =>
+      l.trim().startsWith('| 콘텐츠 등급 › 사용자 간 상호작용 |'),
+    );
+    expect(guideRow).toContain(phrase);
+  });
+
   it('그림 표의 파일이 artifacts/store/에 있다', () => {
     const files = [...LISTING.matchAll(/\| `([a-z0-9-]+\.png)` \|/g)].map((m) => m[1] ?? '');
     expect(files.length).toBeGreaterThanOrEqual(7);
