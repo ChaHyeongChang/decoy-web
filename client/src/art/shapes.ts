@@ -499,6 +499,33 @@ export function fillCirclePen(pen: PathPen, cx: number, cy: number, r: number): 
   pen.fillPath();
 }
 
+/** 삼각형을 바로 채우는 펜 (Phaser Graphics fillTriangle: WebGL은 Earcut 없이 삼각형 하나) */
+export interface FanPen extends PathPen {
+  fillTriangle(x0: number, y0: number, x1: number, y1: number, x2: number, y2: number): unknown;
+}
+
+/**
+ * 채운 원을 첫 꼭짓점에서 퍼지는 삼각형 부채로 (WebGL 전용). fillCirclePen과 같은 꼭짓점(penArc의 점 0 ~ n)이고, 볼록 다각형이라
+ * 부채 삼각형들이 Earcut 삼각형들과 같은 영역을 겹침 없이 덮는다 → 같은 화소(공유 변은 GPU 채우기 규칙으로 한 번만).
+ * WebGL fillPath는 칠할 때마다 Earcut + 점 객체를 만든다. Canvas는 삼각형마다 따로 칠하면 경계 안티앨리어싱이 겹쳐 이음매가
+ * 보이므로 fillCirclePen을 쓴다
+ */
+export function fillCircleFan(pen: FanPen, cx: number, cy: number, r: number): void {
+  const n = arcSteps(r, TAU);
+  const x0 = cx + Math.cos(0) * r;
+  const y0 = cy + Math.sin(0) * r;
+  let px = x0;
+  let py = y0;
+  for (let i = 1; i <= n; i += 1) {
+    const a = 0 + ((TAU - 0) * i) / n;
+    const x = cx + Math.cos(a) * r;
+    const y = cy + Math.sin(a) * r;
+    if (i >= 2) pen.fillTriangle(x0, y0, px, py, x, y);
+    px = x;
+    py = y;
+  }
+}
+
 /** 원 테두리 */
 export function strokeCirclePen(pen: PathPen, cx: number, cy: number, r: number): void {
   circlePath(pen, cx, cy, r);
@@ -555,15 +582,30 @@ export const GLYPH_SLOTS: readonly number[] = [-90, -45, -135, 0, 180, 45, 135, 
   (d) => (d * Math.PI) / 180,
 );
 
-/** 노출 문양을 둘 방향 (기본 머리 위). others = 이 화면에 그린 다른 캐릭터 몸 원 */
+/** 원 (x, y, r)이 다른 몸 원 + 바깥 링(RING_PAD) 모두와 겹치지 않는가 (pickSlot의 free와 같은 비교 · 같은 덧셈 순서) */
+function discFree(x: number, y: number, r: number, others: readonly Disc[]): boolean {
+  for (let k = 0; k < others.length; k += 1) {
+    const o = others[k];
+    if (o && !(Math.hypot(x - o.x, y - o.y) >= r + o.r + RING_PAD)) return false;
+  }
+  return true;
+}
+
+/**
+ * 노출 문양을 둘 방향 (기본 머리 위). others = 이 화면에 그린 다른 캐릭터 몸 원.
+ * pickSlot(GLYPH_SLOTS, 원 하나)과 같은 결과를 후보마다 배열 · 객체를 만들지 않고 낸다 (렌더링 최적화 2, 옛 구현과 대조하는 단위 테스트)
+ */
 export function glyphSlot(self: Vec2, bodyR: number, others: readonly Disc[], prev: number | null): number {
   const d = GLYPH_PLACE.dist * bodyR;
-  return pickSlot(
-    GLYPH_SLOTS,
-    (a) => [{ x: self.x + Math.cos(a) * d, y: self.y + Math.sin(a) * d, r: GLYPH_PLACE.r * bodyR }],
-    others,
-    prev,
-  );
+  const r = GLYPH_PLACE.r * bodyR;
+  const free = (a: number): boolean =>
+    discFree(self.x + Math.cos(a) * d, self.y + Math.sin(a) * d, r, others);
+  if (prev !== null && free(prev)) return prev;
+  for (let k = 0; k < GLYPH_SLOTS.length; k += 1) {
+    const a = GLYPH_SLOTS[k];
+    if (a !== undefined && free(a)) return a;
+  }
+  return GLYPH_SLOTS[0] ?? -Math.PI / 2;
 }
 
 /** 기절 별 배치 (그래픽 값, 월드 px): 궤도 반지름 가로 · 세로, 별 바깥 · 안 반지름, 외곽선 반폭, 회전 속도 (라디안/초) */
@@ -579,7 +621,10 @@ export function stunOrbitDist(bodyR: number, tilePx: number, dir = -Math.PI / 2)
   return bodyR * 1.12 + (reach + S.outer + S.edge) / tilePx;
 }
 
-/** 기절 별을 둘 방향 (기본 머리 위, 옆 몸 · 링이 있으면 비어 있는 쪽). 궤도 위 별 자리들이 차지하는 원으로 판단 */
+/**
+ * 기절 별을 둘 방향 (기본 머리 위, 옆 몸 · 링이 있으면 비어 있는 쪽). 궤도 위 별 자리 12곳이 차지하는 원으로 판단.
+ * pickSlot(GLYPH_SLOTS, 별 자리 원 12개)과 같은 결과를 후보마다 원 12개를 만들지 않고 낸다 (렌더링 최적화 2, 옛 구현과 대조하는 단위 테스트)
+ */
 export function starSlot(
   center: Vec2,
   bodyR: number,
@@ -589,24 +634,23 @@ export function starSlot(
 ): number {
   const S = STUN_STARS;
   const sr = (S.outer + S.edge) / tilePx;
-  return pickSlot(
-    GLYPH_SLOTS,
-    (a) => {
-      const d = stunOrbitDist(bodyR, tilePx, a);
-      const cx = center.x + Math.cos(a) * d;
-      const cy = center.y + Math.sin(a) * d;
-      const out: Disc[] = [];
-      for (let i = 0; i < 12; i += 1) {
-        const t = (i / 12) * TAU;
-        out.push({
-          x: cx + (Math.cos(t) * S.orbitX) / tilePx,
-          y: cy + (Math.sin(t) * S.orbitY) / tilePx,
-          r: sr,
-        });
-      }
-      return out;
-    },
-    others,
-    prev,
-  );
+  const free = (a: number): boolean => {
+    const d = stunOrbitDist(bodyR, tilePx, a);
+    const cx = center.x + Math.cos(a) * d;
+    const cy = center.y + Math.sin(a) * d;
+    for (let i = 0; i < 12; i += 1) {
+      const t = (i / 12) * TAU;
+      if (
+        !discFree(cx + (Math.cos(t) * S.orbitX) / tilePx, cy + (Math.sin(t) * S.orbitY) / tilePx, sr, others)
+      )
+        return false;
+    }
+    return true;
+  };
+  if (prev !== null && free(prev)) return prev;
+  for (let k = 0; k < GLYPH_SLOTS.length; k += 1) {
+    const a = GLYPH_SLOTS[k];
+    if (a !== undefined && free(a)) return a;
+  }
+  return GLYPH_SLOTS[0] ?? -Math.PI / 2;
 }

@@ -188,15 +188,56 @@ export function rgbCss(rgb: readonly [number, number, number]): string {
 }
 
 /**
+ * 점 (px, py)가 다각형 안인가: @decoy/shared pointInPolygon과 같은 식 · 같은 순서(짝홀 규칙)를 좌표 숫자로 (임시 객체 없음).
+ * 결과가 비트 단위로 같다 (tests/unit/render-alloc.test.ts)
+ */
+function insidePolyXY(px: number, py: number, poly: readonly Vec2[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i, i += 1) {
+    const a = poly[i];
+    const b = poly[j];
+    if (!a || !b) continue;
+    if (a.y > py !== b.y > py && px < ((b.x - a.x) * (py - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+/** 경계 상자 밖 판정의 여유 (타일): 교차 x 계산의 반올림(몇 ulp)보다 훨씬 크고 조각 간격(0.1)보다 훨씬 작다 */
+const BOX_EPS = 1e-9;
+
+/**
  * 다각형들의 합집합 테두리를 선분으로 (괴물 화면: 부채꼴 ∪ 근접 원). 각 변을 step 타일 이하 조각으로 나눠
  * 다른 다각형 안에 들어간 조각을 뺀다. 판정 다각형 그대로라 빛 지도 해상도와 상관없이 경계가 딱 맞다.
+ * 렌더링 최적화 2: 조각 가운데가 다른 다각형의 경계 상자(+ BOX_EPS) 밖이면 점-다각형 검사를 건너뛴다 — 상자 밖 점은 짝홀
+ * 검사가 항상 '밖'이다(가로선이 닫힌 다각형을 짝수 번 가로지르고, 상자 왼쪽 밖이면 그 교차가 모두 오른쪽이다). 임시 객체 없이
+ * 숫자로 재고, 끝점은 조각이 시작 · 끝나는 곳에서만 만든다. 결과는 예전 구현과 같다 (옛 구현과 대조하는 단위 테스트)
  */
 export function unionOutline(polys: readonly (readonly Vec2[])[], step = 0.1): [Vec2, Vec2][] {
   const out: [Vec2, Vec2][] = [];
-  for (let pi = 0; pi < polys.length; pi += 1) {
+  // 다각형마다 경계 상자 (꼭짓점 3개 미만은 '다른 다각형'에서 빠진다: 예전 filter와 같다)
+  const m = polys.length;
+  const box = new Float64Array(m * 4);
+  for (let qi = 0; qi < m; qi += 1) {
+    const q = polys[qi];
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
+    if (q && q.length >= 3)
+      for (const p of q) {
+        if (p.x < x0) x0 = p.x;
+        if (p.x > x1) x1 = p.x;
+        if (p.y < y0) y0 = p.y;
+        if (p.y > y1) y1 = p.y;
+      }
+    box[qi * 4] = x0 - BOX_EPS;
+    box[qi * 4 + 1] = y0 - BOX_EPS;
+    box[qi * 4 + 2] = x1 + BOX_EPS;
+    box[qi * 4 + 3] = y1 + BOX_EPS;
+  }
+  for (let pi = 0; pi < m; pi += 1) {
     const poly = polys[pi];
     if (!poly || poly.length < 3) continue;
-    const others = polys.filter((q, qi) => qi !== pi && q.length >= 3);
     for (let i = 0; i < poly.length; i += 1) {
       const a = poly[i];
       const b = poly[(i + 1) % poly.length];
@@ -207,12 +248,26 @@ export function unionOutline(polys: readonly (readonly Vec2[])[], step = 0.1): [
       for (let k = 0; k < n; k += 1) {
         const t0 = k / n;
         const t1 = (k + 1) / n;
-        const mid = { x: a.x + (b.x - a.x) * ((t0 + t1) / 2), y: a.y + (b.y - a.y) * ((t0 + t1) / 2) };
-        const hidden = others.some((q) => pointInPolygon(mid, q));
-        const p0 = { x: a.x + (b.x - a.x) * t0, y: a.y + (b.y - a.y) * t0 };
-        if (!hidden && runStart === null) runStart = p0;
+        const mx = a.x + (b.x - a.x) * ((t0 + t1) / 2);
+        const my = a.y + (b.y - a.y) * ((t0 + t1) / 2);
+        let hidden = false;
+        for (let qi = 0; qi < m && !hidden; qi += 1) {
+          if (qi === pi) continue;
+          const q = polys[qi];
+          if (!q || q.length < 3) continue;
+          const o = qi * 4;
+          if (
+            mx < (box[o] ?? 0) ||
+            my < (box[o + 1] ?? 0) ||
+            mx > (box[o + 2] ?? 0) ||
+            my > (box[o + 3] ?? 0)
+          )
+            continue;
+          hidden = insidePolyXY(mx, my, q);
+        }
+        if (!hidden && runStart === null) runStart = { x: a.x + (b.x - a.x) * t0, y: a.y + (b.y - a.y) * t0 };
         if (hidden && runStart !== null) {
-          out.push([runStart, p0]);
+          out.push([runStart, { x: a.x + (b.x - a.x) * t0, y: a.y + (b.y - a.y) * t0 }]);
           runStart = null;
         }
       }
@@ -354,11 +409,26 @@ export class PolyCache {
   misses = 0;
 
   get(id: string, x: number, y: number, a: number, b: number, make: () => Vec2[]): Vec2[] {
+    return this.peek(id, x, y, a, b) ?? this.put(id, x, y, a, b, make());
+  }
+
+  /** 입력이 정확히 같으면 지난 다각형, 아니면 null (프레임마다 부르는 쪽이 만들기 함수를 만들지 않게: peek ?? put) */
+  peek(id: string, x: number, y: number, a: number, b: number): Vec2[] | null {
     const e = this.map.get(id);
-    if (e && e.x === x && e.y === y && e.a === a && e.b === b) return e.poly;
-    const poly = make();
+    return e && e.x === x && e.y === y && e.a === a && e.b === b ? e.poly : null;
+  }
+
+  /** 새로 계산한 다각형을 넣고 그대로 돌려준다 (항목 객체는 다시 쓴다) */
+  put(id: string, x: number, y: number, a: number, b: number, poly: Vec2[]): Vec2[] {
     this.misses += 1;
-    this.map.set(id, { x, y, a, b, poly });
+    const e = this.map.get(id);
+    if (e) {
+      e.x = x;
+      e.y = y;
+      e.a = a;
+      e.b = b;
+      e.poly = poly;
+    } else this.map.set(id, { x, y, a, b, poly });
     return poly;
   }
 }

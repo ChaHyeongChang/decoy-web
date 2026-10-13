@@ -9,7 +9,7 @@
 // 난수는 시드 고정(mulberry32, @decoy/shared Rng). Math.random()을 쓰지 않는다.
 import { Rng, angleDiff, circleIntersectsSector, pointInPolygon, type Vec2 } from '@decoy/shared';
 import type { QualityTier } from '../gfx/presets';
-import { fillCirclePen, penArc, strokeCirclePen, type PathPen } from './shapes';
+import { fillCircleFan, fillCirclePen, penArc, strokeCirclePen, type FanPen, type PathPen } from './shapes';
 
 /** 품질별 상한과 규칙 한도 */
 export const FX_LIMITS = {
@@ -74,9 +74,15 @@ export const FX_COLOR = {
 
 /**
  * 효과를 그리는 펜 (Phaser Graphics의 부분 집합). 좌표는 월드 px. 원 · 호는 shapes.ts penArc로 반지름에 맞춰 편다
- * (Phaser 원호 명령은 크기와 상관없이 100분할이라 매 프레임 그리는 작은 점에 쓰지 않는다)
+ * (Phaser 원호 명령은 크기와 상관없이 100분할이라 매 프레임 그리는 작은 점에 쓰지 않는다).
+ * fillTriangle이 있으면 draw(…, fan = true)에서 채운 점(흩어짐 · 발먼지)을 삼각형 부채로 칠한다 (WebGL: Earcut 없음)
  */
-export type FxPen = PathPen;
+export type FxPen = PathPen & Partial<Pick<FanPen, 'fillTriangle'>>;
+
+/** 삼각형 부채로 칠할 수 있는 펜인가 */
+function isFanPen(p: FxPen): p is FanPen {
+  return typeof p.fillTriangle === 'function';
+}
 
 interface Fx {
   kind: FxKind;
@@ -246,24 +252,27 @@ export class FxSystem {
 
   /** 수명이 끝난 효과와, 출처가 이번 스냅샷에서 사라진 상대 효과를 없앤다 */
   update(nowS: number, presentSources: ReadonlySet<string>): void {
-    this.keep(
-      (f) =>
-        nowS - f.born < f.life &&
-        nowS >= f.born - 1 &&
-        (!f.opp || f.src === null || presentSources.has(f.src)),
-    );
+    this.keep(nowS, presentSources);
   }
 
   /** 출처가 사라진 상대 효과를 바로 없앤다 (src = null인 이벤트 좌표 효과는 수명까지) */
   pruneSources(presentSources: ReadonlySet<string>): void {
-    this.keep((f) => !f.opp || f.src === null || presentSources.has(f.src));
+    this.keep(null, presentSources);
   }
 
-  /** 조건에 맞는 효과만 같은 순서로 남긴다 (프레임마다 새 배열을 만들지 않게 제자리에서) */
-  private keep(pred: (f: Fx) => boolean): void {
+  /**
+   * 남길 효과만 같은 순서로 제자리에 남긴다 (프레임마다 새 배열 · 조건 함수를 만들지 않게). nowS가 있으면 수명도 본다
+   */
+  private keep(nowS: number | null, presentSources: ReadonlySet<string>): void {
     const list = this.list;
     let n = 0;
-    for (const f of list) if (pred(f)) list[n++] = f;
+    for (let i = 0; i < list.length; i += 1) {
+      const f = list[i];
+      if (!f) continue;
+      if (nowS !== null && !(nowS - f.born < f.life && nowS >= f.born - 1)) continue;
+      if (f.opp && f.src !== null && !presentSources.has(f.src)) continue;
+      list[n++] = f;
+    }
     list.length = n;
   }
 
@@ -271,8 +280,12 @@ export class FxSystem {
     this.list = [];
   }
 
-  /** 그리기. k = 월드 px / 타일 */
-  draw(pen: FxPen, nowS: number, k: number): void {
+  /**
+   * 그리기. k = 월드 px / 타일. fan = 채운 점을 삼각형 부채(첫 꼭짓점에서)로 칠한다 — WebGL에서 fillPath는 입자마다 Earcut이고
+   * 볼록 다각형이라 부채가 같은 영역을 겹침 없이 덮는다(같은 화소). Canvas는 fillPath 그대로(삼각형마다 따로 칠하면 이음매가 보인다)
+   */
+  draw(pen: FxPen, nowS: number, k: number, fan = false): void {
+    const fanPen = fan && isFanPen(pen) ? pen : null;
     for (const f of this.list) {
       const t = nowS - f.born;
       const lk = lifeK(f, nowS);
@@ -289,14 +302,20 @@ export class FxSystem {
           pen.strokePath();
           break;
         }
-        case 'dissolve':
+        case 'dissolve': {
           pen.fillStyle(f.color, f.alpha * lk);
-          fillCirclePen(pen, x, y, f.size * (0.6 + 0.4 * lk));
+          const r = f.size * (0.6 + 0.4 * lk);
+          if (fanPen) fillCircleFan(fanPen, x, y, r);
+          else fillCirclePen(pen, x, y, r);
           break;
-        case 'footDust':
+        }
+        case 'footDust': {
           pen.fillStyle(f.color, Math.min(FX_LIMITS.decorAlphaMax, f.alpha) * lk);
-          fillCirclePen(pen, x, y, Math.min(FX_LIMITS.decorSizeMaxPx, f.size * (1 + (1 - lk))));
+          const r = Math.min(FX_LIMITS.decorSizeMaxPx, f.size * (1 + (1 - lk)));
+          if (fanPen) fillCircleFan(fanPen, x, y, r);
+          else fillCirclePen(pen, x, y, r);
           break;
+        }
         case 'shockwave':
         case 'shutter':
         case 'impact': {
@@ -356,6 +375,12 @@ export interface Ghost {
   aim: number;
   /** 남긴 격자 시각 (ms) */
   at: number;
+}
+
+/** 남은 잔상 하나와 그 알파 (DashTrail.live) */
+export interface LiveGhost {
+  g: Ghost;
+  alpha: number;
 }
 
 /**
@@ -441,15 +466,39 @@ export class DashTrail {
     this.hasPrev = false;
   }
 
-  /** 아직 남은 잔상과 알파 (0~1) */
-  live(nowMs: number): { g: Ghost; alpha: number }[] {
-    this.ghosts = this.ghosts.filter((g) => nowMs - g.at < this.lifeMs);
-    return this.ghosts.map((g) => ({ g, alpha: Math.min(1, 1 - (nowMs - g.at) / this.lifeMs) }));
+  /** live()가 돌려주는 항목 (프레임마다 새로 만들지 않고 다시 쓴다) */
+  private readonly livePool: LiveGhost[] = [];
+  private readonly liveOut: LiveGhost[] = [];
+
+  /**
+   * 아직 남은 잔상과 알파 (0~1). 돌려준 목록 · 항목은 다음 live() 호출 때 다시 쓴다(렌더링 최적화 2: 프레임마다 새 배열 ·
+   * 객체를 만들지 않는다) — 다음 호출 뒤까지 들고 있지 않는다
+   */
+  live(nowMs: number): readonly LiveGhost[] {
+    const list = this.ghosts;
+    let n = 0;
+    for (const g of list) if (nowMs - g.at < this.lifeMs) list[n++] = g;
+    list.length = n;
+    const out = this.liveOut;
+    out.length = 0;
+    for (let i = 0; i < n; i += 1) {
+      const g = list[i];
+      if (!g) continue;
+      let o = this.livePool[i];
+      if (!o) {
+        o = { g, alpha: 0 };
+        this.livePool.push(o);
+      }
+      o.g = g;
+      o.alpha = Math.min(1, 1 - (nowMs - g.at) / this.lifeMs);
+      out.push(o);
+    }
+    return out;
   }
 
   /** 잔상을 모두 지운다 (출처가 시야에서 사라짐) */
   clear(): void {
-    this.ghosts = [];
+    this.ghosts.length = 0;
     this.end();
   }
 }
@@ -519,53 +568,135 @@ function hash2(i: number, j: number, salt: number): number {
  * 시계(tS)만의 함수라 시계를 멈추면 멈춘다. 자기 팀 시야 다각형 안(완전히 밝은 반경 안)에 있는 것만 돌려준다.
  * 고르는 순서(우선값 pri)는 시계와 상관없는 칸의 값이라, 칸을 우선값 순서로 먼저 늘어놓고(같으면 나열 순서, 안정 정렬)
  * 앞에서부터 자리 · 시야 안을 재다가 count개를 채우면 멈춘다: '시야 안 칸을 모두 재서 우선값 순으로 count개'와 결과가 같고,
- * 다각형 검사는 칸 전부(시야 3개면 약 150번)가 아니라 count개 남짓만 한다 (M12 휴대폰 성능, 프레임마다 부른다)
+ * 다각형 검사는 칸 전부(시야 3개면 약 150번)가 아니라 count개 남짓만 한다 (M12 휴대폰 성능, 프레임마다 부른다).
+ * 새 배열 · 객체를 돌려준다 — 프레임마다 부르는 쪽은 DustField(칸 목록을 눈의 자리 · 반경이 바뀔 때만 다시 만든다)를 쓴다
  */
 export function dustMotes(tS: number, eyes: readonly DustEye[], count: number): DustMote[] {
-  if (count <= 0 || eyes.length === 0) return [];
-  const cell = DUST.cell;
-  const seen = new Set<number>();
-  const cells: { pri: number; i: number; j: number }[] = [];
-  for (const e of eyes) {
-    const i0 = Math.floor((e.center.x - e.radius) / cell);
-    const i1 = Math.floor((e.center.x + e.radius) / cell);
-    const j0 = Math.floor((e.center.y - e.radius) / cell);
-    const j1 = Math.floor((e.center.y + e.radius) / cell);
-    for (let j = j0; j <= j1; j += 1) {
-      for (let i = i0; i <= i1; i += 1) {
-        const key = j * 4096 + i;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        cells.push({ pri: hash2(i, j, 7), i, j });
+  return new DustField().motes(tS, eyes, count).slice();
+}
+
+/**
+ * 빛 속 먼지 계산기 (렌더링 최적화 2). 칸 목록(우선값 순서) · 칸마다의 시계와 무관한 해시 값은 눈들의 중심 · 반경에만 달려 있어
+ * 그것이 바뀔 때(안개 주기에 눈이 움직였을 때)만 다시 만들고, 프레임마다는 sin · cos와 시야 안 검사만 한다.
+ * 결과는 dustMotes의 예전 구현과 비트 단위로 같다(같은 식 · 같은 계산 순서, 옛 구현과 대조하는 단위 테스트).
+ * motes가 돌려준 목록 · 항목은 다음 motes 호출 때 다시 쓴다
+ */
+export class DustField {
+  /** 칸 목록을 만든 눈들 (중심 x · y · 반경을 차례로) */
+  private sig: number[] = [];
+  private n = 0;
+  /** 칸마다: 자리 바탕 (i + 0.2 + 0.6·h1)·cell, (j + 0.2 + 0.6·h2)·cell, 주기, 위상 h4, 흔들림 h5·6.28, 크기 */
+  private bx = new Float64Array(0);
+  private by = new Float64Array(0);
+  private period = new Float64Array(0);
+  private h4 = new Float64Array(0);
+  private w5 = new Float64Array(0);
+  private size = new Float64Array(0);
+  private readonly out: DustMote[] = [];
+  private readonly pool: DustMote[] = [];
+  /** 시야 안 검사에 넘기는 점 (값만 읽힌다) */
+  private readonly probe = { x: 0, y: 0 };
+  /** 칸 목록을 다시 만든 횟수 (테스트 · 진단) */
+  rebuilds = 0;
+
+  motes(tS: number, eyes: readonly DustEye[], count: number): readonly DustMote[] {
+    const out = this.out;
+    out.length = 0;
+    if (count <= 0 || eyes.length === 0) return out;
+    this.prepare(eyes);
+    const probe = this.probe;
+    for (let c = 0; c < this.n; c += 1) {
+      if (out.length >= count) break;
+      const period = this.period[c] ?? 1;
+      const ph = (tS / period + (this.h4[c] ?? 0)) % 1;
+      const wob = tS * 0.21 + (this.w5[c] ?? 0);
+      const x = (this.bx[c] ?? 0) + Math.sin(wob) * DUST.drift;
+      const y = (this.by[c] ?? 0) + Math.cos(wob * 0.8) * DUST.drift - ph * 0.3;
+      let inside = false;
+      for (let k = 0; k < eyes.length; k += 1) {
+        const q = eyes[k];
+        if (!q) continue;
+        if (Math.hypot(x - q.center.x, y - q.center.y) > q.radius) continue;
+        probe.x = x;
+        probe.y = y;
+        if (pointInPolygon(probe, q.poly)) {
+          inside = true;
+          break;
+        }
+      }
+      if (!inside) continue;
+      const i = out.length;
+      let m = this.pool[i];
+      if (!m) {
+        m = { x: 0, y: 0, alpha: 0, size: 0 };
+        this.pool.push(m);
+      }
+      m.x = x;
+      m.y = y;
+      m.alpha = DUST.alpha * Math.sin(Math.PI * ph);
+      m.size = this.size[c] ?? 0;
+      out.push(m);
+    }
+    return out;
+  }
+
+  /** 눈들의 중심 · 반경이 지난번과 다르면 칸 목록을 다시 만든다 (예전 dustMotes의 칸 나열 · 정렬 그대로) */
+  private prepare(eyes: readonly DustEye[]): void {
+    const sig = this.sig;
+    let same = sig.length === eyes.length * 3;
+    for (let k = 0; same && k < eyes.length; k += 1) {
+      const e = eyes[k];
+      same =
+        e !== undefined &&
+        sig[k * 3] === e.center.x &&
+        sig[k * 3 + 1] === e.center.y &&
+        sig[k * 3 + 2] === e.radius;
+    }
+    if (same) return;
+    sig.length = 0;
+    for (const e of eyes) sig.push(e.center.x, e.center.y, e.radius);
+    this.rebuilds += 1;
+    const cell = DUST.cell;
+    const seen = new Set<number>();
+    const cells: { pri: number; i: number; j: number }[] = [];
+    for (const e of eyes) {
+      const i0 = Math.floor((e.center.x - e.radius) / cell);
+      const i1 = Math.floor((e.center.x + e.radius) / cell);
+      const j0 = Math.floor((e.center.y - e.radius) / cell);
+      const j1 = Math.floor((e.center.y + e.radius) / cell);
+      for (let j = j0; j <= j1; j += 1) {
+        for (let i = i0; i <= i1; i += 1) {
+          const key = j * 4096 + i;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          cells.push({ pri: hash2(i, j, 7), i, j });
+        }
       }
     }
-  }
-  cells.sort((a, b) => a.pri - b.pri);
-  const out: DustMote[] = [];
-  for (const { i, j } of cells) {
-    if (out.length >= count) break;
-    const period = DUST.periodMinS + hash2(i, j, 3) * (DUST.periodMaxS - DUST.periodMinS);
-    const ph = (tS / period + hash2(i, j, 4)) % 1;
-    const wob = tS * 0.21 + hash2(i, j, 5) * 6.28;
-    const x = (i + 0.2 + 0.6 * hash2(i, j, 1)) * cell + Math.sin(wob) * DUST.drift;
-    const y = (j + 0.2 + 0.6 * hash2(i, j, 2)) * cell + Math.cos(wob * 0.8) * DUST.drift - ph * 0.3;
-    let inside = false;
-    for (const q of eyes) {
-      if (Math.hypot(x - q.center.x, y - q.center.y) > q.radius) continue;
-      if (pointInPolygon({ x, y }, q.poly)) {
-        inside = true;
-        break;
-      }
+    cells.sort((a, b) => a.pri - b.pri);
+    const n = cells.length;
+    if (this.bx.length < n) {
+      const cap = Math.max(n, this.bx.length * 2);
+      this.bx = new Float64Array(cap);
+      this.by = new Float64Array(cap);
+      this.period = new Float64Array(cap);
+      this.h4 = new Float64Array(cap);
+      this.w5 = new Float64Array(cap);
+      this.size = new Float64Array(cap);
     }
-    if (!inside) continue;
-    out.push({
-      x,
-      y,
-      alpha: DUST.alpha * Math.sin(Math.PI * ph),
-      size: DUST.sizePx * (0.6 + 0.4 * hash2(i, j, 6)),
-    });
+    for (let c = 0; c < n; c += 1) {
+      const cl = cells[c];
+      if (!cl) continue;
+      const { i, j } = cl;
+      this.period[c] = DUST.periodMinS + hash2(i, j, 3) * (DUST.periodMaxS - DUST.periodMinS);
+      this.h4[c] = hash2(i, j, 4);
+      this.w5[c] = hash2(i, j, 5) * 6.28;
+      this.bx[c] = (i + 0.2 + 0.6 * hash2(i, j, 1)) * cell;
+      this.by[c] = (j + 0.2 + 0.6 * hash2(i, j, 2)) * cell;
+      this.size[c] = DUST.sizePx * (0.6 + 0.4 * hash2(i, j, 6));
+    }
+    this.n = n;
   }
-  return out;
 }
 
 // ───────────────────────── 후처리 수식 (effects.ts WorldPostFx · 셰이더 · 구운 오버레이가 같이 쓴다) ─────────────────────────

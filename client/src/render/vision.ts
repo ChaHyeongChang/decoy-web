@@ -5,10 +5,10 @@
 import { TILE_PX, blocksStrike, raycast, segmentBlocked, type InfoItem, type Vec2 } from '@decoy/shared';
 import { ANIM, hatchPulse } from '../art/anim';
 import { OUTLINE, ROLE, WARN } from '../art/palette';
-import { penArc, roundRectPath, type PathPen } from '../art/shapes';
+import { penArc, roundRectPath, type FanPen, type LinePen, type PathPen } from '../art/shapes';
 import { MAP_SCALE } from '../ui/layout';
 
-export type { PathPen } from '../art/shapes';
+export type { FanPen, PathPen } from '../art/shapes';
 
 const T = TILE_PX;
 
@@ -37,6 +37,17 @@ export const CONE_LOOK = {
 /** 공격 준비 범위 색 (흰색: 지금 규칙) */
 export const ATTACK_RANGE = { color: 0xffffff, fill: 0.2, sweep: 0.16, edge: 0.85, width: 2 } as const;
 
+/** 선 두 번 긋기 (두께 · 색 · 알파): 어두운 받침 → 색 선. 부를 때마다 배열을 만들지 않게 모듈에 둔다 */
+type StrokePass = readonly [number, number, number];
+const ATTACK_EDGE_PASSES: readonly StrokePass[] = [
+  [ATTACK_RANGE.width + 2.5, OUTLINE, 0.55],
+  [ATTACK_RANGE.width, ATTACK_RANGE.color, ATTACK_RANGE.edge],
+];
+const SHOVE_MARK_PASSES: readonly StrokePass[] = [
+  [5, OUTLINE, 0.85],
+  [2.5, ROLE.guard, 1],
+];
+
 /** 다각형 경로 (점들은 타일 좌표) */
 function polyPath(g: PathPen, pts: readonly Vec2[]): boolean {
   const first = pts[0];
@@ -56,6 +67,26 @@ export function fillPolygon(g: PathPen, pts: readonly Vec2[], color: number, alp
   if (pts.length < 3) return;
   g.fillStyle(color, alpha);
   if (polyPath(g, pts)) g.fillPath();
+}
+
+/**
+ * 첫 꼭짓점에서 본 별 모양 다각형(시야 부채꼴: [꼭짓점, 각도 순서의 호 점들…])을 삼각형 부채로 채운다 (WebGL 전용, 점들은 타일 좌표).
+ * 부채꼴 다각형은 꼭짓점에서 쏜 광선으로 만들어 각도 순서라, 부채 삼각형 (0, i, i+1)의 합이 다각형과 같고 서로 겹치지 않는다 →
+ * Earcut(fillPath)과 같은 화소. WebGL fillPath는 칠할 때마다 Earcut + 점 객체를 만든다. Canvas는 fillPolygon 그대로
+ * (삼각형마다 따로 칠하면 안티앨리어싱 이음매가 보인다)
+ */
+export function fillFanPolygon(g: FanPen, pts: readonly Vec2[], color: number, alpha: number): void {
+  if (pts.length < 3) return;
+  const first = pts[0];
+  if (!first) return;
+  g.fillStyle(color, alpha);
+  const x0 = first.x * T;
+  const y0 = first.y * T;
+  for (let i = 1; i + 1 < pts.length; i += 1) {
+    const p = pts[i];
+    const q = pts[i + 1];
+    if (p && q) g.fillTriangle(x0, y0, p.x * T, p.y * T, q.x * T, q.y * T);
+  }
 }
 
 /** 다각형 외곽선 */
@@ -89,6 +120,38 @@ export function strokeSegments(
   g.strokePath();
 }
 
+/** 시야 다각형 꼭짓점이 원호 위(판정 반경 r에서 이만큼 안까지)인가 — 림은 원호 부분만 긋는다 (벽 그림자 선은 긋지 않는다) */
+const RIM_EPS = 0.06;
+
+/**
+ * 생존자 시야 경계 림 경로 (점들은 타일 좌표, 펜은 월드 px). 두 끝이 모두 원호 위인 변만 긋는다.
+ * join = true면 이어진 변들을 한 줄(moveTo 한 번 + lineTo 여럿)로 낸다 (렌더링 최적화 2, WebGL): 림 선 두께(1.72px)는 2 이하라
+ * WebGL이 이음매 사각형을 넣지 않아 변마다 같은 사각형이 같은 순서로 나온다(같은 화소). 경로 객체 · 점 객체가 변 수 × 2 → 변 수 + 줄 수.
+ * join = false는 예전처럼 변마다 moveTo + lineTo (Canvas: 이어 그으면 꺾인 곳에 마이터 이음이 생겨 안티앨리어싱이 최대 12 달라진다).
+ * 부르는 쪽이 lineStyle · beginPath · strokePath
+ */
+export function traceRim(g: LinePen, poly: readonly Vec2[], center: Vec2, r: number, join = true): void {
+  // 앞 변을 그었으면 그 끝(= 이 변의 시작)에서 이어 긋는다
+  let open = false;
+  for (let i = 0; i < poly.length; i += 1) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    if (!a || !b) {
+      open = false;
+      continue;
+    }
+    const da = Math.hypot(a.x - center.x, a.y - center.y);
+    const db = Math.hypot(b.x - center.x, b.y - center.y);
+    if (da < r - RIM_EPS || db < r - RIM_EPS) {
+      open = false;
+      continue;
+    }
+    if (!open) g.moveTo(a.x * T, a.y * T);
+    g.lineTo(b.x * T, b.y * T);
+    open = join;
+  }
+}
+
 /** 두 색 사이 보간 (0xRRGGBB) */
 export function mixColor(a: number, b: number, k: number): number {
   const t = Math.max(0, Math.min(1, k));
@@ -104,22 +167,44 @@ export function mixColor(a: number, b: number, k: number): number {
   return (r << 16) | (gg << 8) | bl;
 }
 
-/** 직선 p + t·d와 다각형의 교차 구간 (짝홀): 다각형 안인 [t0, t1] 목록 */
-export function clipLine(p: Vec2, d: Vec2, poly: readonly Vec2[]): [number, number][] {
-  const ts: number[] = [];
+/**
+ * 직선 (px, py) + t·(dx, dy)와 다각형 변의 교차 t들을 ts에 오름차순으로 쓴다 (clipLine과 같은 식 · 같은 순서. ts는 비우고 쓴다)
+ */
+function crossings(
+  px: number,
+  py: number,
+  dx: number,
+  dy: number,
+  poly: readonly Vec2[],
+  ts: number[],
+): void {
+  ts.length = 0;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i, i += 1) {
     const a = poly[j];
     const b = poly[i];
     if (!a || !b) continue;
     const ex = b.x - a.x;
     const ey = b.y - a.y;
-    const den = d.x * ey - d.y * ex;
+    const den = dx * ey - dy * ex;
     if (Math.abs(den) < 1e-9) continue;
-    const t = ((a.x - p.x) * ey - (a.y - p.y) * ex) / den;
-    const u = ((a.x - p.x) * d.y - (a.y - p.y) * d.x) / den;
+    const t = ((a.x - px) * ey - (a.y - py) * ex) / den;
+    const u = ((a.x - px) * dy - (a.y - py) * dx) / den;
     if (u >= 0 && u < 1) ts.push(t);
   }
-  ts.sort((x, y) => x - y);
+  ts.sort(ascending);
+}
+
+function ascending(x: number, y: number): number {
+  return x - y;
+}
+
+/** 해치 줄마다 다시 쓰는 교차 목록 (drawConeHatch) */
+const hatchTs: number[] = [];
+
+/** 직선 p + t·d와 다각형의 교차 구간 (짝홀): 다각형 안인 [t0, t1] 목록 */
+export function clipLine(p: Vec2, d: Vec2, poly: readonly Vec2[]): [number, number][] {
+  const ts: number[] = [];
+  crossings(p.x, p.y, d.x, d.y, poly, ts);
   const out: [number, number][] = [];
   for (let i = 0; i + 1 < ts.length; i += 2) {
     const a = ts[i];
@@ -146,28 +231,38 @@ export function drawConeHatch(
   if (!(coneRed > 0.01) || cone.length < 3) return 0;
   const pulse = hatchPulse(tS);
   const a = (CONE_LOOK.hatchAlpha + CONE_LOOK.hatchPulse * pulse) * Math.min(1, coneRed);
-  const dir = { x: Math.cos(aim + Math.PI / 4), y: Math.sin(aim + Math.PI / 4) };
-  const n = { x: -dir.y, y: dir.x };
+  // 줄 방향 (dx, dy) · 법선 (nx, ny): 예전 dir · n 객체와 같은 값 (렌더링 최적화 2: 줄마다 객체 · 배열을 만들지 않는다)
+  const dx = Math.cos(aim + Math.PI / 4);
+  const dy = Math.sin(aim + Math.PI / 4);
+  const nx = -dy;
+  const ny = dx;
   const sp = CONE_LOOK.hatchSpacing;
   const shift = ((((tS / ANIM.hatchPulseS) % 1) + 1) % 1) * sp;
   let lo = Infinity;
   let hi = -Infinity;
   for (const p of cone) {
-    const c = (p.x - apex.x) * n.x + (p.y - apex.y) * n.y;
+    const c = (p.x - apex.x) * nx + (p.y - apex.y) * ny;
     lo = Math.min(lo, c);
     hi = Math.max(hi, c);
   }
   g.lineStyle(CONE_LOOK.hatchWidth / MAP_SCALE, color, a);
   g.beginPath();
   // 흐름 방향: n이 조준 방향과 같은 쪽을 향하면 +, 아니면 −
-  const sign = n.x * Math.cos(aim) + n.y * Math.sin(aim) >= 0 ? 1 : -1;
+  const sign = nx * Math.cos(aim) + ny * Math.sin(aim) >= 0 ? 1 : -1;
   let segs = 0;
+  const ts = hatchTs;
   for (let c = Math.floor(lo / sp) * sp - sp; c <= hi + sp; c += sp) {
     const off = c + sign * shift;
-    const o = { x: apex.x + n.x * off, y: apex.y + n.y * off };
-    for (const [t0, t1] of clipLine(o, dir, cone)) {
-      g.moveTo((o.x + dir.x * t0) * T, (o.y + dir.y * t0) * T);
-      g.lineTo((o.x + dir.x * t1) * T, (o.y + dir.y * t1) * T);
+    const ox = apex.x + nx * off;
+    const oy = apex.y + ny * off;
+    crossings(ox, oy, dx, dy, cone, ts);
+    // 짝홀: 안인 구간 [ts[0], ts[1]], [ts[2], ts[3]], … (clipLine과 같다)
+    for (let k = 0; k + 1 < ts.length; k += 2) {
+      const t0 = ts[k];
+      const t1 = ts[k + 1];
+      if (t0 === undefined || t1 === undefined) continue;
+      g.moveTo((ox + dx * t0) * T, (oy + dy * t0) * T);
+      g.lineTo((ox + dx * t1) * T, (oy + dy * t1) * T);
       segs += 1;
     }
   }
@@ -215,10 +310,7 @@ export function drawAttackRange(fillPen: PathPen, linePen: PathPen, item: InfoIt
     linePen.strokePath();
   }
   // 판정 경계 (어두운 받침 + 흰 선)
-  for (const [w, color, a] of [
-    [ATTACK_RANGE.width + 2.5, OUTLINE, 0.55],
-    [ATTACK_RANGE.width, ATTACK_RANGE.color, ATTACK_RANGE.edge],
-  ] as const) {
+  for (const [w, color, a] of ATTACK_EDGE_PASSES) {
     linePen.lineStyle(w, color, a);
     sectorPath(linePen, cx, cy, R, dir - half, dir + half);
     linePen.strokePath();
@@ -309,10 +401,7 @@ export function drawShoveRange(g: PathPen, item: InfoItem, mark: Vec2 | null): v
   const mx = mark.x * T;
   const my = mark.y * T;
   const s = 6;
-  for (const [w, color, a] of [
-    [5, OUTLINE, 0.85],
-    [2.5, ROLE.guard, 1],
-  ] as const) {
+  for (const [w, color, a] of SHOVE_MARK_PASSES) {
     g.lineStyle(w, color, a);
     g.beginPath();
     g.moveTo(mx - s, my - s);
