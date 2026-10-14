@@ -1,8 +1,8 @@
 // 괴물 새 캐릭터 (캐릭터 리디자인): 붉은 두건을 깊게 쓴 구부정한 사냥꾼. 옛 그림의 정체성(붉은 두건 · 톱니 자락 망토 ·
 // 어둠 속 빛나는 눈 · 앞 발톱)을 잇고, 두건 위로 뒤로 휜 뿔 둘 · 긴 팔과 뼈 갈고리 발톱 셋 · 등뼈 돌기를 더했다.
-// 위에서 보면 둥근 생존자와 달리 앞(발톱 여섯) · 옆(뿔) · 뒤(톱니 자락 + 등뼈)가 모두 뾰족하다.
+// 위에서 보면 둥근 생존자와 달리 앞(흰 발톱 쐐기 둘) · 옆(어깨 가시) · 뒤(갈라진 두건 뿔 · 톱니 자락 + 등뼈)가 모두 뾰족하다.
 // 색: 두건 = 괴물 역할색 원색(몸 가운데), 망토 = 짙은 진홍, 얼굴 = 아주 어두운 #1A0B0E, 눈 = 흰 분홍 + 분홍 빛,
-// 발톱 · 뿔 끝 = 뼈 색. 네온 포인트는 눈 빛 · 등뼈 틈 · (정면) 가슴 틈과 이빨 빛뿐이다. 청록은 쓰지 않는다.
+// 발톱 · 뿔 끝 = 뼈 색. 네온 포인트는 눈 빛 · 등뼈 틈 · (정면) 이빨 빛, 망토 틈에 희미한 불씨뿐이다. 청록은 쓰지 않는다.
 //
 // 위에서 본 그림: 단위 = 몸 반지름 1(판정 반지름 0.35타일), +x = 바라보는 방향. 빛은 위에서 (돔 음영, 회전과 무관).
 // 정면 그림: 상자 [−1, 1]², 빛은 왼쪽 위.
@@ -68,9 +68,9 @@ function rad(m: Mat, cx: number, cy: number, r: number, stops: readonly Stop[]):
 }
 
 /** 위에서 비춘 돔 음영 (가운데 밝고 가장자리 어둡게) */
-function dome(m: Mat, base: number, ink: Ink, cx: number, cy: number, reach: number): Paint {
+function dome(m: Mat, base: number, ink: Ink, cx: number, cy: number, reach: number, hi = 0.14): Paint {
   return rad(m, cx, cy, reach, [
-    [0, ink(tint(base, 0.14))],
+    [0, ink(tint(base, hi))],
     [0.5, ink(base)],
     [0.85, ink(shade(base, 0.25))],
     [1, ink(shade(base, 0.45))],
@@ -103,16 +103,25 @@ function hook(m: Mat, bx: number, by: number, ang: number, len: number, w: numbe
   return path(m).curve(left).curve(right, 1, false).Z().d;
 }
 
-/** 뼈 갈고리 칠 (밑동 쪽 그늘 → 끝 밝게) */
-function bonePaint(m: Mat, bx: number, by: number, ang: number, len: number, ink: Ink): Paint {
-  return lin(m, bx, by, bx + Math.cos(ang) * len, by + Math.sin(ang) * len, [
-    [0, ink(mix(MONSTER_COLOR.boneShade, MONSTER_COLOR.bone, 0.7))],
-    [0.35, ink(MONSTER_COLOR.bone)],
-    [1, ink(0xffffff)],
-  ]);
+/** 뼈 갈고리 칠 (끝으로 갈수록 밝게). shaded = 밑동 그늘 (정면 큰 그림용 — 위 그림은 작은 크기에서 밝은 쐐기로 읽히게 뺀다) */
+function bonePaint(m: Mat, bx: number, by: number, ang: number, len: number, ink: Ink, shaded = true): Paint {
+  const stops: Stop[] = shaded
+    ? [
+        [0, ink(mix(MONSTER_COLOR.boneShade, MONSTER_COLOR.bone, 0.7))],
+        [0.35, ink(MONSTER_COLOR.bone)],
+        [1, ink(0xffffff)],
+      ]
+    : [
+        [0, ink(MONSTER_COLOR.bone)],
+        [1, ink(0xffffff)],
+      ];
+  return lin(m, bx, by, bx + Math.cos(ang) * len, by + Math.sin(ang) * len, stops);
 }
 
-/** 발톱 셋 + 손. ang = 가운데 발톱 방향, spread = 발톱 사이 각, k = 크기(들어 올리면 카메라에 가까워 커짐) */
+/**
+ * 위 그림 발톱 셋 + 손. ang = 가운데 발톱 방향, spread = 발톱 사이 각, k = 크기(들어 올리면 카메라에 가까워 커짐).
+ * 발톱은 굵고 촘촘하게 모아, 작은 크기에서 외곽선에 묻히지 않고 하나의 흰 쐐기로 읽히게 한다
+ */
 function clawHand(
   sk: Sketch,
   m: Mat,
@@ -123,21 +132,21 @@ function clawHand(
   spread: number,
   k: number,
   ink: Ink,
-  palmR = 0.15,
-  palm: number = MONSTER_COLOR.hand,
+  palmR = 0.11,
+  palm: number = MONSTER_COLOR.boneShade,
 ): void {
   for (const i of [-1, 0, 1]) {
     const a = ang + i * spread;
-    const len = (i === 0 ? 0.46 : 0.36) * k;
+    const len = (i === 0 ? 0.5 : 0.42) * k;
     const bx = hx + Math.cos(a) * palmR * 0.55;
     const by = hy + Math.sin(a) * palmR * 0.55;
     // 갈고리는 몸 안쪽(−side)으로 휜다
     sk.part(
-      hook(m, bx, by, a, len, 0.3 * k, -0.3 * side),
-      bonePaint(m, bx, by, a, len, ink),
+      hook(m, bx, by, a, len, 0.42 * k, -0.3 * side),
+      bonePaint(m, bx, by, a, len, ink, false),
       ink(OUTLINE),
       undefined,
-      0.35,
+      0.2,
     );
   }
   sk.part(
@@ -226,8 +235,6 @@ interface MonsterRig {
   valRy: number;
   wave: number;
   sway: number;
-  /** 발톱 자국 (타격) */
-  slash: number;
 }
 
 const SHOULDER: Pt = [0.0, 0.64];
@@ -245,10 +252,10 @@ function monsterRig(p: MonsterPose): MonsterRig {
   ];
   let ang: [number, number] = [-0.1, 0.1];
   let clawK = 1;
-  let spread = 0.28;
+  let spread = 0.2;
   let headX = 0.04 + 0.03 * Math.abs(s);
   let headK = 1;
-  let faceX = 0.52;
+  let faceX = 0.46;
   let faceRx = 0.18;
   let faceRy = 0.25;
   let tipRx = 1.1;
@@ -264,20 +271,20 @@ function monsterRig(p: MonsterPose): MonsterRig {
     ang = [lerp(ang[0], a[0], k), lerp(ang[1], a[1], k)];
   };
 
-  // 공격 준비: 팔을 뒤 · 바깥으로 젖혀 발톱을 높이 든다 (카메라에 가까워 커 보임), 자락이 부푼다
+  // 공격 준비: 팔을 뒤 · 바깥으로 젖혀 발톱이 어깨선 뒤로 넘어간다 (높이 들어 카메라에 가까워 커 보임), 자락이 부푼다
   if (p.windup > 0) {
     const k = p.windup;
     toward(
       k,
       [
-        [-0.14, -1.0],
-        [-0.14, 1.0],
+        [0.04, -0.96],
+        [0.04, 0.96],
       ],
       [
-        [0.12, -1.02],
-        [0.12, 1.02],
+        [-0.26, -0.85],
+        [-0.26, 0.85],
       ],
-      [-0.55, 0.55],
+      [-2.45, 2.45],
     );
     clawK = lerp(clawK, 1.18, k);
     spread = lerp(spread, 0.5, k);
@@ -292,12 +299,12 @@ function monsterRig(p: MonsterPose): MonsterRig {
     toward(
       k,
       [
-        [0.48, -0.58],
-        [0.48, 0.58],
+        [0.55, -0.58],
+        [0.55, 0.58],
       ],
       [
-        [0.98, 0.2],
-        [0.98, -0.2],
+        [0.9, 0.2],
+        [0.9, -0.2],
       ],
       [0.75, -0.75],
     );
@@ -315,8 +322,8 @@ function monsterRig(p: MonsterPose): MonsterRig {
         [0.3, 0.74],
       ],
       [
-        [0.7, -0.4],
-        [0.7, 0.4],
+        [0.66, -0.4],
+        [0.66, 0.4],
       ],
       [0.12, -0.12],
     );
@@ -353,26 +360,26 @@ function monsterRig(p: MonsterPose): MonsterRig {
     tipRx = lerp(tipRx, 1.14, k);
     tipRy = lerp(tipRy, 1.1, k);
   }
-  // 기절: 축 처짐 — 고개가 앞으로 떨어지고 팔이 늘어지며 자락이 가라앉는다
+  // 기절: 축 처짐 — 고개가 앞으로 떨어지고, 팔이 늘어져 발톱이 몸 옆 뒤로 흐르며 자락이 가라앉는다
   if (p.stun > 0) {
     const k = p.stun;
     toward(
       k,
       [
-        [0.18, -0.88],
-        [0.18, 0.88],
+        [0.02, -0.9],
+        [0.02, 0.9],
       ],
       [
-        [0.42, -0.84],
-        [0.42, 0.84],
+        [0.14, -0.88],
+        [0.14, 0.88],
       ],
-      [-0.7, 0.62],
+      [-2.2, 2.35],
     );
     clawK = lerp(clawK, 0.86, k);
     spread = lerp(spread, 0.24, k);
     headX += 0.12 * k;
-    headK = lerp(headK, 0.92, k);
-    tipRx = lerp(tipRx, 0.98, k);
+    headK = lerp(headK, 0.88, k);
+    tipRx = lerp(tipRx, 0.94, k);
     tipRy = lerp(tipRy, 0.96, k);
     valRx = lerp(valRx, 0.9, k);
     wave *= 1 - 0.7 * k;
@@ -398,7 +405,6 @@ function monsterRig(p: MonsterPose): MonsterRig {
     valRy,
     wave,
     sway: 0.08 * s,
-    slash: p.strike,
   };
 }
 
@@ -417,24 +423,22 @@ function cloakPath(m: Mat, r: MonsterRig, cloak: number): string {
     const ry = (tip ? r.tipRy : r.valRy) + w * 0.6;
     pts.push([Math.cos(a + da) * rx, Math.sin(a + da) * ry]);
   }
-  // 앞쪽 어깨 (오른쪽 → 앞 → 왼쪽): 두건 아래로 숨는 둥근 어깨
-  const shoulderR: Pt[] = [
-    [-0.36, 0.96],
-    [0.02, 0.98],
-    [0.3, 0.72],
-    [0.36, 0.3],
-  ];
-  const shoulderL: Pt[] = [
-    [0.36, -0.3],
-    [0.3, -0.72],
-    [0.02, -0.98],
-    [-0.36, -0.96],
-  ];
+  // 앞쪽 어깨 (오른쪽 → 앞 → 왼쪽): 두건 아래로 숨는 어깨, 옆으로 가시 하나씩 (앞 반쪽도 둥글지 않게)
+  // 가시 끝에서 곡선을 끊어 모서리를 뾰족하게 남긴다
+  const spike: Pt = [-0.1, 1.1];
   const first = pts[0] ?? [0, 0];
   return path(m)
-    .curve([[0.38, 0], ...shoulderL, first])
+    .curve([
+      [0.38, 0],
+      [0.36, -0.3],
+      [0.3, -0.72],
+      [0.06, -0.95],
+      [spike[0], -spike[1]],
+    ])
+    .curve([[spike[0], -spike[1]], [-0.2, -0.95], [-0.36, -0.96], first], 1, false)
     .curve(pts, 0.2, false)
-    .curve(shoulderR, 1, false)
+    .curve([[-0.36, 0.96], [-0.2, 0.95], spike], 1, false)
+    .curve([spike, [0.06, 0.95], [0.3, 0.72], [0.36, 0.3]], 1, false)
     .Z().d;
 }
 
@@ -446,20 +450,8 @@ function top(p: MonsterPose, o: ArtOptions): Drawing {
   const B = r.body;
   const U = r.upper;
 
-  // ── 층 1: 긴 팔과 뼈 발톱 (망토 아래에서 앞으로 뻗어 나옴 — 망토 외곽선이 어깨를 덮는다) ──
-  if (r.slash > 0.05) {
-    // 발톱 자국: 엇갈린 두 호 (네온 분홍, 타격 순간만)
-    for (const side of [-1, 1]) {
-      const d = path(U).curve([
-        [0.7, side * 1.0],
-        [1.02, side * 0.46],
-        [1.2, -side * 0.12],
-        [1.24, -side * 0.66],
-      ]).d;
-      sk.line(d, solid(ink(C.eyeGlow)), 0.11, 'round', 0.5 * r.slash);
-      sk.line(d, solid(ink(C.eye)), 0.04, 'round', 0.9 * r.slash);
-    }
-  }
+  // ── 층 1: 긴 팔과 뼈 발톱 (망토 아래에서 앞으로 뻗어 나옴 — 망토 외곽선이 어깨를 덮는다).
+  // 타격의 발톱 자국은 게임의 베기 호 효과가 그리므로 그림에 넣지 않는다 ──
   for (const i of [0, 1] as const) {
     const side = i === 0 ? -1 : 1;
     const sh: Pt = [SHOULDER[0], SHOULDER[1] * side];
@@ -467,7 +459,7 @@ function top(p: MonsterPose, o: ArtOptions): Drawing {
     const h = r.hands[i];
     const arm = path(U).capsule(sh[0], sh[1], e[0], e[1], 0.36, 0.3).d;
     sk.part(arm, dome(U, C.sleeve, ink, 0, 0, 1.25), ink(OUTLINE));
-    const fore = path(U).capsule(e[0], e[1], h[0], h[1], 0.3, 0.24).d;
+    const fore = path(U).capsule(e[0], e[1], h[0], h[1], 0.3, 0.2).d;
     sk.part(fore, dome(U, C.sleeve, ink, 0, 0, 1.25), ink(OUTLINE));
     clawHand(sk, U, h[0], h[1], r.clawAng[i], side, r.spread * side, r.clawK, ink, 0.14, shade(C.hood, 0.45));
   }
@@ -519,7 +511,7 @@ function top(p: MonsterPose, o: ArtOptions): Drawing {
     ],
     0.55,
   ).d;
-  sk.part(hood, dome(H, C.hood, ink, -0.04, 0, 0.78), ink(OUTLINE), undefined, 0.3);
+  sk.part(hood, dome(H, C.hood, ink, -0.04, 0, 0.78, 0.08), ink(OUTLINE), undefined, 0.3);
   // 두건 앞 테 (밝은 가장자리)
   sk.line(
     path(H).curve([
@@ -530,22 +522,23 @@ function top(p: MonsterPose, o: ArtOptions): Drawing {
       [0.24, 0.44],
     ]).d,
     solid(ink(tint(C.hood, 0.35))),
-    0.05,
+    0.035,
     'round',
-    0.8,
+    0.45,
   );
-  // 뿔 둘: 두건 옆에서 바깥으로 솟았다가 뒤로 휜다 (위에서 보면 뒤로 젖힌 V — 앞을 가리키는 화살 실루엣)
+  // 뿔 둘: 두건 뒤 모서리가 갈라져 뒤 · 바깥으로 솟은 짧고 굵은 뿔 (위에서 보면 두건이 뒤로 갈라진 붉은 V).
+  // 뼈 색은 끝에만 — 뒤쪽에 밝은 점이 생기면 앞 발톱(바라보는 방향 단서)과 헷갈린다
   for (const side of [-1, 1]) {
     const bx = -0.2;
     const by = 0.36 * side;
     const a = (Math.PI - 1.0) * side;
-    const len = 0.7;
+    const len = 0.45;
     sk.part(
-      hook(H, bx, by, a, len, 0.27, 0.3 * side),
-      lin(H, bx, by, bx - 0.62, by + 0.5 * side, [
-        [0, ink(shade(C.hood, 0.2))],
-        [0.55, ink(shade(C.hood, 0.5))],
-        [0.8, ink(C.boneShade)],
+      hook(H, bx, by, a, len, 0.36, 0.3 * side),
+      lin(H, bx, by, bx + Math.cos(a) * len, by + Math.sin(a) * len, [
+        [0, ink(shade(C.hood, 0.1))],
+        [0.88, ink(shade(C.hood, 0.3))],
+        [0.9, ink(C.boneShade)],
         [1, ink(C.bone)],
       ]),
       ink(OUTLINE),
@@ -555,7 +548,7 @@ function top(p: MonsterPose, o: ArtOptions): Drawing {
   }
   // 눈 · 입 (얼굴이 위를 볼수록 눈은 뒤, 입은 앞에)
   const fx = r.faceX;
-  const eyeX = fx + 0.07 - 0.17 * r.mouth;
+  const eyeX = fx + 0.13 - 0.23 * r.mouth;
   if (r.mouth > 0.05) {
     const mx = fx + 0.1 * r.mouth;
     const mr = 0.13 * r.mouth + 0.02;
@@ -586,9 +579,9 @@ function top(p: MonsterPose, o: ArtOptions): Drawing {
 /** 정면 팔 하나: 어깨(망토 아래) → 팔꿈치 → 해진 소맷부리 → 뼈 손 + 벌린 갈고리 발톱 셋 */
 function frontArm(sk: Sketch, M: Mat, side: number, sh: Pt, el: Pt, wr: Pt, clawDir: number, ink: Ink): void {
   const C = MONSTER_COLOR;
-  const sleeve = shade(C.hood, 0.4);
+  const sleeve = shade(C.hood, 0.55);
   const sleevePaint = lin(M, el[0] - side * 0.12, el[1] - 0.1, el[0] + side * 0.12, el[1] + 0.3, [
-    [0, ink(tint(sleeve, 0.2))],
+    [0, ink(tint(sleeve, 0.1))],
     [0.6, ink(sleeve)],
     [1, ink(shade(sleeve, 0.35))],
   ]);
@@ -602,8 +595,8 @@ function frontArm(sk: Sketch, M: Mat, side: number, sh: Pt, el: Pt, wr: Pt, claw
   const ny = dx / l;
   const ux = dx / l;
   const uy = dy / l;
-  const w0 = 0.075;
-  const w1 = 0.15;
+  const w0 = 0.065;
+  const w1 = 0.115;
   const cuff: Pt[] = [];
   for (let i = 0; i <= 4; i += 1) {
     const k = i / 4;
@@ -619,7 +612,7 @@ function frontArm(sk: Sketch, M: Mat, side: number, sh: Pt, el: Pt, wr: Pt, claw
   // 벌린 갈고리 발톱 셋
   for (const i of [-1, 0, 1]) {
     const a = clawDir + i * 0.42;
-    const len = i === 0 ? 0.36 : 0.29;
+    const len = i === 0 ? 0.42 : 0.34;
     const bx = wr[0] + Math.cos(a) * 0.06;
     const by = wr[1] + Math.sin(a) * 0.06;
     sk.part(
@@ -632,7 +625,7 @@ function frontArm(sk: Sketch, M: Mat, side: number, sh: Pt, el: Pt, wr: Pt, claw
   }
   // 뼈 손 (어두운 손등)
   sk.part(
-    path(M).ellipse(wr[0] + ux * 0.04, wr[1] + uy * 0.04, 0.09, 0.075, Math.atan2(uy, ux)).d,
+    path(M).ellipse(wr[0] + ux * 0.04, wr[1] + uy * 0.04, 0.07, 0.06, Math.atan2(uy, ux)).d,
     solid(ink(C.hand)),
     ink(OUTLINE),
   );
@@ -647,23 +640,24 @@ function front(p: FrontPose, o: ArtOptions): Drawing {
   const by = frontBreath(p.t) * 1.6;
   const t = p.t;
   const ls = lenScale(M);
-  const hy = -0.36 + by;
+  // 수그린 자세: 머리를 어깨 사이로 낮춘다
+  const hy = -0.3 + by;
 
   // ── 층 1: 망토 (뒤, 땅까지 늘어진 톱니 자락) ──
   const hem: Pt[] = [];
   const n = 9;
   for (let i = 0; i <= n; i += 1) {
-    const x = lerp(-0.84, 0.84, i / n);
+    const x = lerp(-0.72, 0.72, i / n);
     const tip = i % 2 === 0;
     const wv = Math.sin(t * 1.7 + i * 1.1) * 0.018;
-    hem.push([x + wv, (tip ? 0.94 : 0.76) - Math.abs(x) * 0.05 + wv]);
+    hem.push([x + wv, (tip ? 0.86 : 0.7) - Math.abs(x) * 0.05 + wv]);
   }
   const cloak = path(M)
     .curve([
       [0, -0.14 + by],
       [0.44, -0.08 + by],
       [0.64, 0.2],
-      [0.84, 0.92],
+      [0.72, 0.84],
     ])
     .curve([...hem].reverse(), 0.15, false)
     .curve(
@@ -733,8 +727,8 @@ function front(p: FrontPose, o: ArtOptions): Drawing {
         M,
         side,
         [side * 0.42, 0.04 + by],
-        [side * 0.76, 0.24 + sway],
-        [side * 0.76, 0.54 + sway],
+        [side * 0.86, 0.3 + sway],
+        [side * 0.68, 0.5 + sway],
         Math.PI / 2 - side * 0.4,
         ink,
       );
@@ -746,8 +740,8 @@ function front(p: FrontPose, o: ArtOptions): Drawing {
   const mantle: Pt[] = [
     [0, -0.2 + by],
     [0.36, -0.16 + by],
-    [0.56, -0.02 + by],
-    [0.62, 0.14 + by],
+    [0.6, -0.12 + by],
+    [0.66, 0.06 + by],
     [0.48, 0.12 + by],
     [0.42, 0.27 + by],
     [0.28, 0.17 + by],

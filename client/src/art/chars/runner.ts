@@ -4,7 +4,18 @@
 // » 무늬를 밝은 파랑(네온 아님)으로 넣어 앞쪽을 가리킨다.
 // 색은 역할색 파랑(#3B82F6)과 그 짙은/밝은 변형, 어두운 남회색 바지 · 신발, 밝은 회색 밑창.
 import { OUTLINE, ROLE } from '../palette';
-import { Sketch, linear, path, radial, shade, solid, tint, type Drawing, type Paint } from './kit';
+import {
+  Sketch,
+  linear,
+  path,
+  radial,
+  rotateAbout,
+  shade,
+  solid,
+  tint,
+  type Drawing,
+  type Paint,
+} from './kit';
 import {
   FRONT,
   MAT,
@@ -13,7 +24,6 @@ import {
   frontBreath,
   frontClothPaint,
   frontEyes,
-  frontLegs,
   frontTorsoPath,
   inkFor,
   topArm,
@@ -85,6 +95,9 @@ function topSneaker(sk: Sketch, x: number, y: number, ink: Ink, len = 0.3): void
   );
 }
 
+/** 서기 · 걷기 손 옆 위치 배율 */
+const HAND_TUCK = 0.85;
+
 function top(p: SurvivorPose, o: ArtOptions): Drawing {
   const ink = inkFor(p.tone);
   const sk = new Sketch(o.w);
@@ -98,7 +111,9 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
   if (p.mode === 'free') {
     for (const side of [0, 1] as const) {
       const sign = side === 0 ? -1 : 1;
-      const [hx0, hy0] = r.hands[side];
+      // 서기 · 걷기: 손을 어깨 테 안으로 조금 당긴다 (몸 옆 혹을 줄이고 공통 생존자 손 자리와 갈리게)
+      const hx0 = r.hands[side][0];
+      const hy0 = r.hands[side][1] * HAND_TUCK;
       const sprint: [number, number] = [
         (-0.32 * r.halfD) / TOP.halfD + sign * 0.45 * s,
         sign * 0.8 * r.halfW,
@@ -120,29 +135,31 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
   // 어깨는 후드보다 한 단 짙게: 위에서 보면 밝은 물방울 후드가 어깨 위에 떠 보인다
   const body = shade(C.hoodie, 0.06);
   sk.part(topTorsoPath(r), domePaint(body, ink, r.halfW * 1.12), ink(OUTLINE));
-  // 3) 팔 (소매 + 어두운 장갑)
-  topArm(sk, r, 0, body, C.glove, ink, 0.3);
-  topArm(sk, r, 1, body, C.glove, ink, 0.3);
+  // 3) 팔 (소매 + 장갑). 위 그림의 장갑은 짙은 파랑: 남회색이면 몸 옆에 바닥색 혹이 붙어 작은 크기에서 뾰족한 점이 된다
+  const topGlove = shade(C.hoodie, 0.35);
+  topArm(sk, r, 0, body, topGlove, ink, 0.3);
+  topArm(sk, r, 1, body, topGlove, ink, 0.3);
   // 4) 물방울 후드: 어깨 위에 드리운 그늘(칠만) 위에 얹어 작은 크기에서도 머리 · 꼬리가 몸통과 갈린다
   const hit = p.hit;
-  const R = r.headR * 1.1;
+  const R = r.headR * 1.14;
   // 질주: 머리를 앞으로 내민다
-  const hx = r.head[0] + 0.04 + 0.26 * a - 0.06 * hit;
+  const hx = r.head[0] + 0.08 + 0.24 * a - 0.06 * hit;
   const hy = r.head[1];
   const captive = p.mode === 'captive' ? 1 : 0;
-  // 꼬리 끝 (몸 중심 기준): 서기 −1.02, 질주 −1.1 (뒤 한도 1.1). 걷기에 옆으로 흔들리고(질주 때 더 크게),
+  // 꼬리 끝 (몸 중심 기준): 서기 −1.06, 질주 −1.1 (뒤 한도 1.1). 걷기에 옆으로 흔들리고(질주 때 더 크게),
   // 수감 때 움츠러든다. 피격 때는 몸 쪽으로 눌려 짧고 뭉툭해진다(옆으로 꺾으면 몸을 돌린 것처럼 읽힌다)
-  const tx = -1.02 - 0.08 * a + 0.16 * captive + 0.14 * hit + r.ox;
+  const tx = -1.06 - 0.04 * a + 0.16 * captive + 0.14 * hit + r.ox;
   const ty = hy + 0.13 * (1 + 0.5 * a) * Math.sin(p.walk + 0.9) * p.stride + 0.08 * hit;
   // 꼬리 폭: 서기 때 통통한 물방울, 질주 때 가늘고 긴 혜성 줄기
   const tailBulge = 0.3 - 0.2 * a + 0.08 * hit;
-  sk.fill(
-    dropPath(hx, hy, R + 0.03, tx - 0.02, ty, tailBulge),
-    solid(ink(shade(C.deep, 0.4))),
-    0.45,
+  sk.fill(dropPath(hx, hy, R + 0.03, tx - 0.02, ty, tailBulge), solid(ink(shade(C.deep, 0.4))), 0.45);
+  sk.part(
+    dropPath(hx, hy, R, tx, ty, tailBulge),
+    hoodPaint(ink, hx - 0.06, hy, hx - tx + 0.05),
+    ink(OUTLINE),
   );
-  sk.part(dropPath(hx, hy, R, tx, ty, tailBulge), hoodPaint(ink, hx - 0.06, hy, hx - tx + 0.05), ink(OUTLINE));
-  // 후드 등의 » 갈매기 무늬 (옛 문양, 앞을 가리킨다): 꼬리 위에 두 개, 꼬리 방향을 따라 눕는다
+  // 후드 등의 » 갈매기 무늬 (옛 문양, 앞을 가리킨다): 꼬리 위에 하나, 꼬리 방향을 따라 눕는다.
+  // 두 개면 휴대폰 크기에서 밝은 점 하나로 뭉개진다
   const ang = Math.atan2(hy - ty, hx - tx);
   const along = (k: number, side: number): [number, number] => {
     const x = tx + (hx - tx) * k;
@@ -150,13 +167,13 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
     return [x - Math.sin(ang) * side, y + Math.cos(ang) * side];
   };
   const chev = path();
-  for (const k of [0.44, 0.58]) {
+  for (const k of [0.5]) {
     const [ax, ay] = along(k - 0.08, -0.17);
     const [bx, by] = along(k, 0);
     const [cx, cy] = along(k - 0.08, 0.17);
     chev.M(ax, ay).L(bx, by).L(cx, cy);
   }
-  sk.line(chev.d, solid(ink(tint(C.hoodie, 0.3))), 0.06);
+  sk.line(chev.d, solid(ink(tint(C.hoodie, 0.3))), 0.085);
   // 앞 얼굴 그늘 (후드 안) + 네온 테두리. 질주 때 네온이 밝아진다
   sk.fill(
     path()
@@ -179,6 +196,8 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
 function scaleDrawing(dr: Drawing, k: number, tx: number, ty: number): Drawing {
   const pt = (x: number, y: number): [number, number] => [x * k + tx, y * k + ty];
   const mapD = (d: string): string => {
+    // 숫자를 x, y 짝으로만 바꾸므로 M/L/C/Z(+Q) 경로만 안전하다. A · H · V가 들어오면 조용히 깨지지 않게 멈춘다
+    if (/[^MLQCZ0-9.,\se-]/.test(d)) throw new Error('scaleDrawing: M/L/Q/C/Z 경로만 지원');
     let i = 0;
     return d.replace(/-?\d*\.?\d+(?:e-?\d+)?/g, (v) => {
       const n = Number(v);
@@ -255,42 +274,82 @@ function frontBentArm(
 /** 정면 다리 벌림 (가볍게 선 자세) */
 const LEG_SPREAD = 0.05;
 
+/** 정면 운동화 (어두운 갑피 + 밝은 밑창 + 뒤꿈치 → 앞코로 쓸어 올린 파랑 줄). tilt = 앞코를 아래로 기울인 각(까치발) */
+function frontSneaker(sk: Sketch, ink: Ink, x: number, s: -1 | 1, tilt: number, lift: number): void {
+  const fx = x + s * 0.03;
+  const fy = FRONT.footY - lift;
+  const len = 0.18;
+  const m = rotateAbout(s * tilt, fx, fy);
+  sk.part(
+    path(m).ellipse(fx, fy, len, 0.085).d,
+    linear(0, fy - 0.08, 0, fy + 0.08, [
+      [0, ink(tint(C.shoe, 0.15))],
+      [1, ink(shade(C.shoe, 0.2))],
+    ]),
+    ink(OUTLINE),
+  );
+  sk.fill(path(m).roundRect(fx - len * 0.95, fy + 0.025, len * 1.9, 0.055, 0.025).d, solid(ink(C.sole)));
+  sk.line(
+    path(m).curve([
+      [fx - s * 0.13, fy + 0.01],
+      [fx, fy - 0.01],
+      [fx + s * 0.1, fy - 0.05],
+    ]).d,
+    solid(ink(C.hoodie)),
+    0.03,
+  );
+}
+
+/**
+ * 정면 다리 (어두운 조거 바지 + 큰 운동화). 화면 왼쪽 다리는 곧게 디디고, 오른쪽 다리는 무릎을 굽혀 뒤꿈치를 든
+ * 까치발: 막 뛰어나가려는 가벼운 자세
+ */
+function frontRunnerLegs(sk: Sketch, ink: Ink): void {
+  const legPaint = (x: number): Paint =>
+    linear(x - 0.1, 0, x + 0.1, 0, [
+      [0, ink(tint(C.pants, 0.1))],
+      [1, ink(shade(C.pants, 0.3))],
+    ]);
+  for (const s of [-1, 1] as const) {
+    const hipX = s * FRONT.legX * 0.9;
+    const hipY = FRONT.hipY - 0.04;
+    const x = s * (FRONT.legX + LEG_SPREAD);
+    const tiptoe = s === 1;
+    const lift = tiptoe ? 0.06 : 0;
+    const ankleY = FRONT.ankleY - lift;
+    // 무릎 (까치발 다리만 바깥으로 굽힌다)
+    const knee: [number, number] = tiptoe
+      ? [x + 0.05, (hipY + ankleY) / 2 - 0.01]
+      : [(hipX + x) / 2, (hipY + ankleY) / 2];
+    if (tiptoe) {
+      sk.part(path().capsule(hipX, hipY, knee[0], knee[1], 0.19, 0.175).d, legPaint(x), ink(OUTLINE));
+      sk.part(path().capsule(knee[0], knee[1], x, ankleY, 0.175, 0.16).d, legPaint(x), ink(OUTLINE));
+    } else {
+      sk.part(path().capsule(hipX, hipY, x, ankleY, 0.19, 0.16).d, legPaint(x), ink(OUTLINE));
+    }
+    // 바지 옆줄 (파랑)
+    sk.line(
+      path().curve([
+        [hipX + s * 0.08, FRONT.hipY + 0.02],
+        [knee[0] + s * 0.08, knee[1]],
+        [x + s * 0.075, ankleY - 0.04],
+      ]).d,
+      solid(ink(C.hoodie)),
+      0.025,
+    );
+    // 발목 고무단
+    sk.fill(path().roundRect(x - 0.085, ankleY - 0.05, 0.17, 0.05, 0.02).d, solid(ink(shade(C.pants, 0.3))));
+    frontSneaker(sk, ink, x, s, tiptoe ? 0.21 : 0, lift);
+  }
+}
+
 function frontBody(p: FrontPose, o: ArtOptions): Drawing {
   const ink = inkFor(p.tone);
   const sk = new Sketch(o.w);
   const by = frontBreath(p.t);
-  const sway = Math.sin(p.t * 2.4) * 0.04;
+  const sway = Math.sin(p.t * 2.4) * 0.06;
   // 1) 다리 (어두운 조거 바지) + 큰 운동화
-  if (!p.bust) {
-    frontLegs(sk, C.pants, C.shoe, C.sole, ink, LEG_SPREAD, 0.18);
-    for (const s of [-1, 1]) {
-      const x = s * (FRONT.legX + LEG_SPREAD);
-      // 바지 옆줄 (파랑)
-      sk.line(
-        path()
-          .M(s * FRONT.legX * 0.9 + s * 0.08, FRONT.hipY + 0.02)
-          .L(x + s * 0.075, FRONT.ankleY - 0.04).d,
-        solid(ink(C.hoodie)),
-        0.025,
-      );
-      // 발목 고무단
-      sk.fill(
-        path().roundRect(x - 0.085, FRONT.ankleY - 0.05, 0.17, 0.05, 0.02).d,
-        solid(ink(shade(C.pants, 0.3))),
-      );
-      // 운동화 파랑 줄 (뒤꿈치 → 앞코로 쓸어 올림)
-      const fx = x + s * 0.03;
-      sk.line(
-        path().curve([
-          [fx - s * 0.13, FRONT.footY + 0.01],
-          [fx, FRONT.footY - 0.01],
-          [fx + s * 0.1, FRONT.footY - 0.05],
-        ]).d,
-        solid(ink(C.hoodie)),
-        0.03,
-      );
-    }
-  }
+  if (!p.bust) frontRunnerLegs(sk, ink);
   // 2) 몸통 (후드티) + 밑단 · 캥거루 주머니
   sk.part(frontTorsoPath(by), frontClothPaint(C.hoodie, ink), ink(OUTLINE));
   sk.fill(
@@ -319,9 +378,9 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
     .L(0.0, 0.18 + by).d;
   sk.line(chev, solid(ink(C.neon), 0.3), 0.075);
   sk.line(chev, solid(ink(tint(C.neon, 0.35))), 0.032);
-  // 3) 팔 (달리기 준비: 팔꿈치를 뒤로, 주먹을 허리 앞에)
-  frontBentArm(sk, ink, -1, [-0.42, 0.27 + by], [-0.3, 0.36 + by], by);
-  frontBentArm(sk, ink, 1, [0.43, 0.24 + by], [0.33, 0.06 + by], by);
+  // 3) 팔 (달리기 팔치기: 한 팔은 팔꿈치를 뒤로 빼 주먹을 허리 뒤에, 한 팔은 주먹을 가슴 앞 안쪽에)
+  frontBentArm(sk, ink, -1, [-0.46, 0.2 + by], [-0.38, 0.4 + by], by);
+  frontBentArm(sk, ink, 1, [0.4, 0.3 + by], [0.2, 0.12 + by], by);
   // 4) 후드: 둥근 머리 덮개 + 바람에 날리는 물방울 끝 (옛 물방울 모티프)
   const hy = FRONT.headY + by;
   const hoodR = FRONT.headR * 1.16;
