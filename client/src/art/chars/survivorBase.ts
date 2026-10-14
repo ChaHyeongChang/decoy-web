@@ -83,8 +83,9 @@ export const TOP = {
   footX: 0.58,
   footY: 0.34,
   handX: 0.18,
-  handY: 0.93,
-  handSwing: 0.34,
+  /** 손 옆 자리 · 걸음 흔들림: 손 끝이 옆 1.05r · 뒤 1.0r 안에 들게 (크기 기준, measure.ts SIZE_RULE) */
+  handY: 0.79,
+  handSwing: 0.3,
   handR: 0.19,
   twist: 0.16,
 } as const;

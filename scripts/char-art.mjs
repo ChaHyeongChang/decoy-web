@@ -5,6 +5,7 @@
 //   node scripts/char-art.mjs small [--out=<폴더>]                                             작은 크기 판단 보드 (휴대폰 '높음' 조건 8방향)
 //   node scripts/char-art.mjs lineup [--out=<폴더>]                                            다섯 캐릭터 한 장
 //   node scripts/char-art.mjs metrics [--out=<폴더>]                                           규칙 측정 (IoU · 범위 · 몸 가운데 색) → metrics.json
+//   node scripts/char-art.mjs sizes [runner|guard|scout|common|monster ...]                    크기 기준 점검 (브라우저 없이, 넘으면 종료 코드 1)
 //   node scripts/char-art.mjs sheets [--out=artifacts/characters/sheets]                       캐릭터별 큰 그림 시트 + 다섯 나란히
 //   node scripts/char-art.mjs gifs [장면 id ...] [--out=artifacts/characters/anim] [--fps=25]   동작 GIF (ffmpeg 필요: palettegen · paletteuse)
 //   node scripts/char-art.mjs list                                                             GIF 장면 목록
@@ -27,6 +28,28 @@ const cmd = positional[0] ?? 'preview';
 const defaultOut =
   { sheets: 'artifacts/characters/sheets', gifs: 'artifacts/characters/anim' }[cmd] ??
   'artifacts/characters/_preview';
+if (cmd === 'sizes') {
+  // 크기 점검은 Node에서 바로 돈다 (그림 명령의 경로만 잰다)
+  const r = await build({
+    entryPoints: ['scripts/char-art/sizes.ts'],
+    bundle: true,
+    format: 'esm',
+    platform: 'node',
+    target: 'es2022',
+    write: false,
+    logLevel: 'warning',
+  });
+  const dir = mkdtempSync(join(tmpdir(), 'char-sizes-'));
+  try {
+    const file = join(dir, 'sizes.mjs');
+    writeFileSync(file, r.outputFiles[0].text);
+    const mod = await import(file);
+    if (!mod.run(positional.slice(1))) process.exitCode = 1;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  process.exit();
+}
 const out = resolve(opt('out', defaultOut));
 mkdirSync(out, { recursive: true });
 

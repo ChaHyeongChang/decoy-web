@@ -95,11 +95,11 @@ export async function previewBoard(id: CharId): Promise<string> {
   ctx.fillRect(1000, 326, 880, 330);
   newFront(ctx, id, {}, 1150, 486, 290, 4);
   newFront(ctx, id, { bust: true }, 1400, 486, 160, 3);
-  newFront(ctx, id, { bust: true }, 1545, 486, 64, 2);
-  newFront(ctx, id, { bust: true }, 1610, 486, 32, 1.4);
+  newFront(ctx, id, { bust: true }, 1545, 486, 96, 2.4);
+  newFront(ctx, id, { bust: true }, 1640, 486, 64, 2);
   newFront(ctx, id, { t: 0.65 }, 1770, 486, 150, 2.5);
   text(ctx, '전신 290', 1120, 648, 12, '#94a3b8');
-  text(ctx, '상반신 160 · 64 · 32', 1360, 648, 12, '#94a3b8');
+  text(ctx, '상반신 160 · 96 · 64 (로비 카드 · 결과)', 1360, 648, 12, '#94a3b8');
   text(ctx, '숨쉬기 0.65초', 1730, 648, 12, '#94a3b8');
   // C. 게임 화면 조건 — 지금 vs 새 (8방향)
   text(
@@ -426,7 +426,7 @@ export function metrics(): unknown {
   out.rules = {
     iou: '역할끼리(러너 · 가드 · 스카우트) ≤ 0.8, 공통과 각 역할 ≤ 0.85 — sil · fill 모두, 세 크기 · 두 방향',
     extents:
-      '생존자 앞 ≤ 1.55 (모든 자세), 옆 ≤ 1.12. 괴물: 서기 · 걷기 ≤ 1.2, 준비 · 타격 ≤ 1.45, 돌진 ≤ 1.4 (가장 먼 점은 참고값)',
+      '크기 기준은 node scripts/char-art.mjs sizes (생존자 앞 ±60° ≤ 1.55 · 옆 ≤ 1.05 · 뒤 ≤ 1.0, 괴물 ≤ 1.12 · 돌진 ≤ 1.35). 여기 값은 화소로 잰 참고값',
     centerDisc: '역할: meanDeltaE ≤ 15, within15 ≥ 0.85. 공통: achromaticBright ≥ 0.9, minDeltaEToRoles ≥ 40',
     cover: '사람 판단 항목 (기준 없음): 휴대폰 크기에서 지금 그림보다 크게 작아 보이지 않는가',
   };

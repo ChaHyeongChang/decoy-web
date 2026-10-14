@@ -687,43 +687,6 @@ export function injury(ctx: Ctx, x: number, y: number, face: number, rPx: number
   ctx.restore();
 }
 
-/** 괴물 화면 능력 노출: 역할색 링 (1.34r) + 머리 위 배지 (새 스타일: 역할 상반신 아이콘) */
-export function revealMark(
-  ctx: Ctx,
-  x: number,
-  y: number,
-  rPx: number,
-  role: 'runner' | 'guard' | 'scout',
-): void {
-  const color = ROLE[role];
-  ctx.save();
-  ctx.lineWidth = Math.max(2.5, 0.22 * rPx) + 2.4;
-  ctx.strokeStyle = 'rgba(5,8,12,0.9)';
-  ctx.beginPath();
-  ctx.arc(x, y, rPx * 1.34, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.lineWidth = Math.max(2.5, 0.22 * rPx);
-  ctx.strokeStyle = rgba(color, 1);
-  ctx.stroke();
-  const bx = x;
-  const by = y - rPx * 2.35;
-  const br = rPx * 0.86 * 0.95;
-  ctx.fillStyle = 'rgba(11,22,34,0.92)';
-  ctx.beginPath();
-  ctx.arc(bx, by, br, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.lineWidth = Math.max(1.5, rPx * 0.1);
-  ctx.strokeStyle = rgba(color, 1);
-  ctx.stroke();
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(bx, by, br * 0.92, 0, Math.PI * 2);
-  ctx.clip();
-  newFront(ctx, role, { bust: true }, bx, by + br * 0.05, br * 2.05, Math.max(1, rPx * 0.06));
-  ctx.restore();
-  ctx.restore();
-}
-
 /** 지금 그림의 능력 노출 표시: 역할색 링 + 머리 위 문양 (아틀라스 'ring-reveal-*' · 'glyph-*', 문양 거리 2.35r) */
 export function oldRevealMark(
   ctx: Ctx,

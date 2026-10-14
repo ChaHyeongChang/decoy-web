@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { COMMON_ART, MONSTER_ART, SURVIVOR_ART } from '../../client/src/art/chars/index';
 import { path, toSvg, transformDrawing, type Drawing, type Paint } from '../../client/src/art/chars/kit';
+import { drawingPoints, monsterOver, samplePath, survivorOver } from '../../client/src/art/chars/measure';
 import {
   FRONT_REST,
   HIDDEN_REST,
@@ -20,42 +21,6 @@ import { ROLE } from '../../client/src/art/palette';
 const W = 0.19;
 const ROLES = ['runner', 'guard', 'scout'] as const;
 
-/** d 문자열의 곡선 위 점들 (M · L · C · Z, 3차 곡선은 24조각) */
-function samplePath(d: string): [number, number][] {
-  const out: [number, number][] = [];
-  const tokens = d.match(/[MLCZ]|-?\d*\.?\d+(?:e[-+]?\d+)?|NaN|-?Infinity/g) ?? [];
-  let i = 0;
-  let cur: [number, number] = [0, 0];
-  let start: [number, number] = [0, 0];
-  const num = (): number => Number(tokens[i++]);
-  while (i < tokens.length) {
-    const t = tokens[i++];
-    if (t === 'M' || t === 'L') {
-      cur = [num(), num()];
-      if (t === 'M') start = cur;
-      out.push(cur);
-    } else if (t === 'C') {
-      const p1: [number, number] = [num(), num()];
-      const p2: [number, number] = [num(), num()];
-      const p3: [number, number] = [num(), num()];
-      for (let k = 1; k <= 24; k += 1) {
-        const u = k / 24;
-        const a = (1 - u) ** 3;
-        const b = 3 * (1 - u) ** 2 * u;
-        const c = 3 * (1 - u) * u * u;
-        const e = u ** 3;
-        out.push([
-          a * cur[0] + b * p1[0] + c * p2[0] + e * p3[0],
-          a * cur[1] + b * p1[1] + c * p2[1] + e * p3[1],
-        ]);
-      }
-      cur = p3;
-    } else if (t === 'Z') cur = start;
-    else throw new Error(`모르는 경로 토큰: ${t}`);
-  }
-  return out;
-}
-
 /** 그림이 차지하는 반쪽 크기 (max |x| · |y|, 선 두께 제외) */
 function halfExtent(dr: Drawing): number {
   let m = 0;
@@ -63,9 +28,7 @@ function halfExtent(dr: Drawing): number {
   return m;
 }
 
-function points(dr: Drawing): [number, number][] {
-  return dr.ops.flatMap((op) => samplePath(op.d));
-}
+const points = drawingPoints;
 
 function allFinite(dr: Drawing): boolean {
   return dr.ops.every((op) => samplePath(op.d).every(([x, y]) => Number.isFinite(x) && Number.isFinite(y)));
@@ -122,6 +85,31 @@ function hiddenGrid(): HiddenPose[] {
       for (const captive of [false, true]) out.push({ ...HIDDEN_REST, walk, stride, captive });
   return out;
 }
+
+// 크기 기준 (사용자 결정: 기존 시각 명세를 지킨다, client/src/art/chars/measure.ts SIZE_RULE)
+describe('새 캐릭터 그림: 크기 기준 (판정보다 커 보이지 않게)', () => {
+  it('역할 생존자 셋: 모든 자세에서 앞 ±60° 1.55r · 옆 1.05r · 뒤 1.0r 안', () => {
+    for (const id of ROLES)
+      for (const p of survivorGrid()) {
+        const over = survivorOver(SURVIVOR_ART[id].top(p, { w: W }));
+        expect(over, `${id} ${JSON.stringify(p)}`).toBeNull();
+      }
+  });
+
+  it('공통 생존자: 모든 자세에서 같은 기준 안', () => {
+    for (const p of hiddenGrid()) {
+      const over = survivorOver(COMMON_ART.top(p, { w: W }));
+      expect(over, JSON.stringify(p)).toBeNull();
+    }
+  });
+
+  it('괴물: 모든 자세 1.12r 안 (발톱 · 팔 · 자락 모두), 돌진만 1.35r', () => {
+    for (const p of monsterGrid()) {
+      const over = monsterOver(MONSTER_ART.top(p, { w: W }), p.dash > 0);
+      expect(over, JSON.stringify(p)).toBeNull();
+    }
+  });
+});
 
 describe('새 캐릭터 그림: 범위 · 유한값', () => {
   it('역할 생존자 셋: 모든 자세에서 경로가 유한값이고 topExtent 안에 든다', () => {

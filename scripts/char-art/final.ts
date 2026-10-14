@@ -31,7 +31,6 @@ import {
   prisonCell,
   radiusPx,
   rescueRing,
-  revealMark,
   shockwave,
   slashArc,
   sparks,
@@ -585,7 +584,7 @@ function commonStatusScene(): Scene {
   return {
     id: 'common-status',
     label: '공통 생존자 · 보호 · 능력 노출',
-    note: `보호(구조 직후 ${RULE.protect}초): 흰색 50% + 거품 깜빡임 ${MS(ANIM.protectBlinkMs)} · 능력 노출 ${RULE.reveal}초: 역할색 테두리 + 머리 위 역할 얼굴 (지금은 문양)`,
+    note: `보호(구조 직후 ${RULE.protect}초): 흰색 50% + 거품 깜빡임 ${MS(ANIM.protectBlinkMs)} · 능력 노출 ${RULE.reveal}초: 역할색 테두리 + 머리 위 역할 문양 (작은 표시라 지금 문양 그대로)`,
     dur: 2.6,
     w: 560,
     h: 340,
@@ -599,8 +598,8 @@ function commonStatusScene(): Scene {
       bubble(ctx, 280, 220, r, blinkOn);
       text(ctx, '보호 중', 280, 318, 13, '#94a3b8', 700, 'center');
       const rev = t >= 0.5 && t < 0.5 + RULE.reveal;
-      if (rev) revealMark(ctx, 450, 220, r, 'guard');
       newTop(ctx, 'common', {}, 450, 220, r, -Math.PI / 2, { sx: s, sy: s });
+      if (rev) oldRevealMark(ctx, 450, 220, r, 'guard');
       text(
         ctx,
         rev ? '능력 노출 (예: 가드)' : '능력 노출 전',
@@ -1078,14 +1077,13 @@ export function sheet(id: CharId): string {
   ctx.fillStyle = glow;
   ctx.fillRect(36, 430, 600, 340);
   newFront(ctx, id, {}, 336, 470, 560, 5);
-  // 상반신 아이콘 크기들 + 회색(남이 고른 카드)
+  // 상반신 (로비 역할 카드 · 결과 화면 크기) + 회색(남이 고른 카드). 작은 아이콘 자리는 지금 문양을 쓴다 (사용자 결정)
   ctx.fillStyle = '#0f1b27';
   ctx.fillRect(36, 790, 600, 350);
-  text(ctx, '상반신 아이콘 (160 · 64 · 40 · 24px) · 회색', 56, 826, 17, '#94a3b8', 700);
+  text(ctx, '상반신 (로비 역할 카드 · 결과 화면: 160 · 96 · 64px) · 회색', 56, 826, 17, '#94a3b8', 700);
   newFront(ctx, id, { bust: true }, 146, 960, 160, 3);
-  newFront(ctx, id, { bust: true }, 290, 960, 64, 2);
-  newFront(ctx, id, { bust: true }, 366, 960, 40, 1.5);
-  newFront(ctx, id, { bust: true }, 420, 960, 24, 1.1);
+  newFront(ctx, id, { bust: true }, 300, 960, 96, 2.4);
+  newFront(ctx, id, { bust: true }, 400, 960, 64, 2);
   newFront(ctx, id, { bust: true, tone: 'gray' }, 540, 950, 110, 2.5);
   text(ctx, '회색 변형 (제안: 남이 고른 카드)', 540, 1080, 13, '#94a3b8', 500, 'center');
   // 위에서 본 큰 그림
@@ -1138,12 +1136,12 @@ export function sheet(id: CharId): string {
     zoomCopy(ctx, c, 660, yy, row.w, row.h, 660 + row.w + 24, yy, z);
     y = yy + Math.max(row.h, row.h * z) + 10;
   }
-  // 공통 생존자: 능력 노출 표시 (지금 문양 → 제안 얼굴 아이콘)을 휴대폰 실제 크기로
+  // 공통 생존자: 능력 노출 표시를 휴대폰 실제 크기로 (작은 표시라 지금 문양을 그대로 쓴다 — 사용자 결정)
   if (id === 'common') {
     y += 14;
     text(
       ctx,
-      "능력 노출 1초 표시 — 휴대폰 '높음' 실제 크기 (왼쪽 셋 지금 문양 · 오른쪽 셋 제안: 역할 얼굴)",
+      "능력 노출 1초 표시 — 휴대폰 '높음' 실제 크기, 지금 문양 그대로 (왼쪽 셋 지금 그림 · 오른쪽 셋 새 그림)",
       660,
       y,
       15,
@@ -1166,8 +1164,8 @@ export function sheet(id: CharId): string {
         oldTop(cc, 'common', x, by, r, -Math.PI / 2);
         oldRevealMark(cc, x, by, r, role);
         const nx = cell * (i + 3.5) * k;
-        revealMark(cc, nx, by, r, role);
         newTop(cc, 'common', {}, nx, by, r, -Math.PI / 2);
+        oldRevealMark(cc, nx, by, r, role);
       });
     });
     const z = Math.min(3, (W - 36 - 660 - w - 24) / w);
