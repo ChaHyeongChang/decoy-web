@@ -1069,7 +1069,7 @@ export function sheet(id: CharId): string {
   // 정면 큰 그림 (로비 카드 · 결과 화면용)
   ctx.fillStyle = '#0f1b27';
   ctx.fillRect(36, 130, 600, 640);
-  text(ctx, '정면 (로비 카드 · 결과 · 아이콘)', 56, 166, 17, '#94a3b8', 700);
+  text(ctx, '정면 (로비 역할 카드 · 결과 화면)', 56, 166, 17, '#94a3b8', 700);
   const glow = ctx.createRadialGradient(336, 700, 0, 336, 700, 260);
   const col = TEXT_COLOR[id];
   glow.addColorStop(0, `${col}55`);

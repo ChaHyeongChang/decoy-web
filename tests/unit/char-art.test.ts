@@ -43,6 +43,9 @@ function colors(p: Paint): number[] {
 }
 
 /** 채도 대신 쓰는 색 폭 (최대 채널 − 최소 채널, 0~1): 아주 어두운 외곽선에서도 흔들리지 않는다 */
+/** 공통 생존자 무채색 한도 (색 폭, 0~1) */
+const GRAY_CHROMA = 20 / 255;
+
 function chroma(c: number): number {
   const ch = [(c >> 16) & 255, (c >> 8) & 255, c & 255];
   return (Math.max(...ch) - Math.min(...ch)) / 255;
@@ -180,17 +183,17 @@ describe('새 캐릭터 그림: 범위 · 유한값', () => {
 });
 
 describe('새 캐릭터 그림: 괴물 화면 공통 생존자 (VISUAL_SPEC 0장 ③)', () => {
-  it('칠하는 색은 무채색 계열뿐 (색 폭 0.08 이하: 옛 숨은 생존자와 같은 차가운 회색까지) — 역할색 · 괴물 빨강이 없다', () => {
+  it('칠하는 색은 무채색 계열뿐 (색 폭 20/255 이하: 옛 숨은 생존자와 같은 차가운 회색까지) — 역할색 · 괴물 빨강이 없다', () => {
     const roleColors = new Set<number>([ROLE.runner, ROLE.guard, ROLE.scout, ROLE.monster]);
     for (const p of hiddenGrid())
       for (const tone of ['normal', 'gray', 'flash'] as const)
         for (const pa of paints(COMMON_ART.top({ ...p, tone }, { w: W })))
           for (const c of colors(pa)) {
-            expect(chroma(c), c.toString(16)).toBeLessThanOrEqual(0.08);
+            expect(chroma(c), c.toString(16)).toBeLessThanOrEqual(GRAY_CHROMA);
             expect(roleColors.has(c)).toBe(false);
           }
     for (const pa of paints(COMMON_ART.front(FRONT_REST, { w: 0.04 })))
-      for (const c of colors(pa)) expect(chroma(c), c.toString(16)).toBeLessThanOrEqual(0.08);
+      for (const c of colors(pa)) expect(chroma(c), c.toString(16)).toBeLessThanOrEqual(GRAY_CHROMA);
   });
 
   it('자세 타입에 역할 · 능력 · 피격 · 구조 값이 없다 (타입 검사)', () => {

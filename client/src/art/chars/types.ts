@@ -62,7 +62,7 @@ export interface MonsterPose {
   strike: number;
   /** 돌진 0~1 (앞으로 몸을 낮추고 늘어남) */
   dash: number;
-  /** 포효 0~1 (고개를 들고 팔을 벌림) */
+  /** 포효 0~1 (고개를 젖히고 팔을 머리 양옆으로 들어 올림 — 위에서 보면 몸 가까이) */
   roar: number;
   /** 기절 0~1 (처짐) */
   stun: number;
@@ -83,7 +83,7 @@ export const MONSTER_REST: MonsterPose = {
   tone: 'normal',
 };
 
-/** 정면 그림 자세 (로비 카드 · 결과 · 아이콘). t = 장식 시각 (초, 숨쉬기 · 망토), bust = 머리 · 어깨만 (작은 아이콘) */
+/** 정면 그림 자세 (로비 역할 카드 · 결과 화면). t = 장식 시각 (초, 숨쉬기 · 망토), bust = 머리 · 어깨만 (상반신, 64~160px) */
 export interface FrontPose {
   t: number;
   bust: boolean;

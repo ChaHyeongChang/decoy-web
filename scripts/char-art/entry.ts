@@ -90,7 +90,7 @@ export async function previewBoard(id: CharId): Promise<string> {
     newTop(ctx, id, i % 2 ? { walk: Math.PI / 2, stride: 1 } : {}, x + 57, 383, 30, rot);
   });
   // B. 정면
-  text(ctx, '정면 그림 (로비 카드 · 결과 · 아이콘)', 1000, 316, 16, '#94a3b8');
+  text(ctx, '정면 그림 (로비 역할 카드 · 결과 화면)', 1000, 316, 16, '#94a3b8');
   ctx.fillStyle = '#0f1b27';
   ctx.fillRect(1000, 326, 880, 330);
   newFront(ctx, id, {}, 1150, 486, 290, 4);
