@@ -634,7 +634,7 @@ function frontArm(sk: Sketch, M: Mat, side: number, sh: Pt, el: Pt, wr: Pt, claw
 
 const BUST_K = 1.2;
 const BUST_DY = 0.43;
-const BUST_EL: Pt = [0.7, 0.1];
+const BUST_EL: Pt = [0.66, 0.1];
 const BUST_WR: Pt = [0.58, -0.3];
 const BUST_CLAW = 0.16;
 
