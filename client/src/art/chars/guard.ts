@@ -1,5 +1,5 @@
 // 가드 새 캐릭터 (캐릭터 리디자인): 볏 달린 보라 헬멧 + 큰 어깨 갑옷 + 몸 앞을 가리는 큰 방패. 단단하고 든든한 인상.
-// 위에서 보면 몸 앞에 떠 있는 두꺼운 호(옛 초승달 방패)가 실루엣의 핵심이다 — 둥근 헬멧 · 넓은 어깨 판 + 앞쪽 초승달.
+// 위에서 보면 판정 원을 꽉 채운 둥근 몸(헬멧 · 어깨 판 · 몸 뒤를 감싸는 큰 등판) + 몸 앞에 바짝 붙어 뜬 두꺼운 호(옛 초승달 방패)가 실루엣의 핵심이다.
 // 방패는 층을 나눠(sk.layer) 굵은 외곽선이 몸 위에 그어지게 해서 작은 크기에서도 몸과 갈린다.
 // 네온 포인트는 방패 테두리의 밝은 보라 선(위 · 정면)과 정면 방패 문장(십자)뿐이다. 헬멧 챙 선은 네온보다 어둡게 둔다.
 // 색은 역할색 보라(#A855F7)와 그 짙은/밝은 변형, 어두운 남회색 바지 · 장갑 · 장화 · 방패 테.
@@ -18,6 +18,7 @@ import {
   translate,
   type Drawing,
   type Mat,
+  type Paint,
 } from './kit';
 import {
   FRONT,
@@ -108,6 +109,16 @@ function topShield(sk: Sketch, s: ShieldShape, ink: Ink, glow: number): void {
   sk.line(rim, solid(ink(tint(C.neon, 0.35 + 0.45 * glow))), 0.045);
 }
 
+/** 갑옷 돔 음영: 공통 domePaint보다 가장자리를 덜 어둡게 (작은 크기에서 몸 덩어리가 밝게 꽉 차 보이게) */
+function armorDome(base: number, ink: Ink, reach: number, cx = 0, cy = 0): Paint {
+  return radial(cx, cy, reach, [
+    [0, ink(tint(base, 0.14))],
+    [0.5, ink(base)],
+    [0.88, ink(shade(base, 0.16))],
+    [1, ink(shade(base, 0.28))],
+  ]);
+}
+
 /** 능력 동작 → 방패 앞뒤 이동: 0.5 = 뒤로 당겨 힘을 모음, 1 = 앞으로 쭉 */
 function shoveOffset(a: number): number {
   if (a <= 0.5) return -0.2 * (a / 0.5);
@@ -139,27 +150,36 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
   // 어느 때든 방패는 앞쪽에 있다 → 바라보는 방향 단서가 뒤집히지 않는다
   const shield: ShieldShape =
     p.mode === 'reach'
-      ? { cx: r.ox, cy: 0, ro: 1.3, ri: 0.98, half: 0.55, rot: -0.4 + r.twist * 0.5 }
+      ? { cx: r.ox, cy: 0, ro: 1.3, ri: 0.84, half: 0.55, rot: -0.4 + r.twist * 0.5 }
       : captive
         ? { cx: r.ox, cy: 0, ro: 1.1, ri: 0.76, half: 0.7, rot: 0 }
         : {
             cx: r.ox - 0.05 * p.hit + push,
             cy: 0.03 * s,
-            ro: 1.42,
-            ri: 0.96,
+            ro: 1.36,
+            ri: 0.8,
             half: 0.7,
             rot: 0.05 * s + 0.08 * p.hit + coil,
           };
-  // 2) 등 갑옷 판 (몸통 뒤로 비죽 나온 두꺼운 판 — 위에서 '단단한 체격'이 보이게)
-  const back = path(tw).with(translate(r.ox, 0));
+  // 2) 등 갑옷 판: 몸 뒤 · 옆을 둥글게 감싸는 큰 판 — 위에서 판정 원을 꽉 채운 '단단한 체격'.
+  // 젖힐 때는 반만 밀린다 (뒤로 판정보다 커 보이지 않게). 수감 중엔 어깨와 함께 움츠리고, 걸음에 조금 흔들린다
+  const bx0 = r.ox * 0.4;
+  const by0 = -0.03 * s;
+  const back = path(tw).with(translate(bx0, by0));
   sk.part(
-    back.ellipse(-0.36, 0, 0.44, 0.62).d,
-    domePaint(shade(C.armor, 0.18), ink, 0.7, -0.36 + r.ox, 0),
+    back.ellipse(-0.3, 0, 0.72, 0.86 * (r.halfW / HALF_W)).d,
+    armorDome(shade(C.armor, 0.1), ink, 0.95, -0.3 + bx0, by0),
     ink(OUTLINE),
+    undefined,
+    0.3,
   );
-  sk.line(path(tw).with(translate(r.ox, 0)).M(-0.76, 0).L(-0.3, 0).d, solid(ink(shade(C.armor, 0.4))), 0.04);
+  sk.line(
+    path(tw).with(translate(bx0, by0)).M(-0.9, 0).L(-0.42, 0).d,
+    solid(ink(shade(C.armor, 0.32))),
+    0.05,
+  );
   // 3) 몸통 (보라 갑옷)
-  sk.part(topTorsoPath(r), domePaint(shade(C.armor, 0.12), ink, r.halfW * 1.1), ink(OUTLINE));
+  sk.part(topTorsoPath(r), armorDome(shade(C.armor, 0.1), ink, r.halfW * 1.1), ink(OUTLINE), undefined, 0.3);
   // 4) 팔: 왼손(위쪽)은 방패 손잡이, 오른손은 걸음에 흔들리다 능력 중엔 방패를 같이 민다
   const gripAt = (ang: number): [number, number] => {
     const g = shield.ri - 0.17;
@@ -189,14 +209,20 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
     const pd = path(tw)
       .with(translate(r.ox, 0))
       .ellipse(sx - 0.14, sy * 0.97, 0.4, 0.26).d;
-    sk.part(pd, domePaint(shade(C.armor, 0.1), ink, 0.44, sx - 0.16 + r.ox, sy * 0.92), ink(OUTLINE));
+    sk.part(
+      pd,
+      armorDome(shade(C.armor, 0.08), ink, 0.44, sx - 0.16 + r.ox, sy * 0.92),
+      ink(OUTLINE),
+      undefined,
+      0.3,
+    );
     const sgn = side === 0 ? -1 : 1;
     sk.line(
       path(tw)
         .with(translate(r.ox, 0))
         .arc(sx - 0.14, sy * 0.97, 0.27, (sgn * Math.PI) / 2 - 1.1, (sgn * Math.PI) / 2 + 1.1, true, 0.15).d,
-      solid(ink(shade(C.armor, 0.35))),
-      0.05,
+      solid(ink(shade(C.armor, 0.28))),
+      0.04,
     );
   }
   // 6) 헬멧: 보라 돔 + 가운데 볏 + 앞 챙

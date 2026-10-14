@@ -14,6 +14,7 @@ import {
   solid,
   tint,
   transformDrawing,
+  translate,
   type Drawing,
   type Paint,
 } from './kit';
@@ -21,16 +22,14 @@ import {
   FRONT,
   MAT,
   TOP,
-  domePaint,
   frontBreath,
   frontClothPaint,
   frontEyes,
   frontTorsoPath,
   inkFor,
-  topArm,
   topRig,
-  topTorsoPath,
   type Ink,
+  type TopRig,
 } from './survivorBase';
 import type { ArtOptions, FrontPose, SurvivorArt, SurvivorPose } from './types';
 
@@ -54,10 +53,23 @@ const C = RUNNER_COLOR;
 /** 후드 칠 (머리 중심에서 꼬리 끝까지 닿는 위 조명, 회전과 무관) */
 function hoodPaint(ink: Ink, cx: number, cy: number, reach: number): Paint {
   return radial(cx, cy, reach, [
-    [0, ink(tint(C.hoodie, 0.16))],
-    [0.38, ink(C.hoodie)],
-    [0.78, ink(shade(C.hoodie, 0.16))],
-    [1, ink(shade(C.hoodie, 0.32))],
+    [0, ink(tint(C.hoodie, 0.18))],
+    [0.45, ink(C.hoodie)],
+    [0.82, ink(shade(C.hoodie, 0.1))],
+    [1, ink(shade(C.hoodie, 0.22))],
+  ]);
+}
+
+/**
+ * 위 그림 몸통 · 소매 칠: 공통 돔 음영보다 가장자리를 덜 어둡게 (실제 크기에서 몸 테두리가 외곽선과 붙어 어두운 띠로
+ * 읽히지 않게 — 판정 원을 밝은 몸이 채운다)
+ */
+function brightDome(base: number, ink: Ink, reach: number): Paint {
+  return radial(0, 0, reach, [
+    [0, ink(tint(base, 0.12))],
+    [0.5, ink(base)],
+    [0.85, ink(shade(base, 0.1))],
+    [1, ink(shade(base, 0.2))],
   ]);
 }
 
@@ -99,16 +111,58 @@ function topSneaker(sk: Sketch, x: number, y: number, ink: Ink, len = 0.3): void
 /** 서기 · 걷기 손 옆 위치 배율 */
 const HAND_TUCK = 0.85;
 
+/**
+ * 위 그림 몸통: 공통 topTorsoPath와 같은 앞쪽, 등 양 모서리를 조금 둥글게 채운다 (후드 꼬리 양옆 판정 원 빈 곳 —
+ * 실제 크기에서 몸 덩어리가 판정 원을 채우게. 등 가운데는 꼬리가 덮는다). 더 채우면 공통 생존자와 실루엣이 겹친다
+ */
+function runnerTorsoPath(r: TopRig): string {
+  const w = r.halfW;
+  const d = r.halfD;
+  const pts: [number, number][] = [
+    [d + 0.06, 0],
+    [d * 0.86, -w * 0.62],
+    [d * 0.3, -w * 0.98],
+    [-d * 0.53, -w * 0.95],
+    [-d * 0.96, -w * 0.54],
+    [-d * 1.0, 0],
+    [-d * 0.96, w * 0.54],
+    [-d * 0.53, w * 0.95],
+    [d * 0.3, w * 0.98],
+    [d * 0.86, w * 0.62],
+  ];
+  return path(rotateAbout(r.twist, 0, 0))
+    .with(translate(r.ox, 0))
+    .smooth(pts, 1).d;
+}
+
+/** 위 그림 팔 (어깨 → 손 캡슐 + 손): 공통 topArm과 같은 자리, 칠만 밝은 돔 */
+function topSleeve(sk: Sketch, r: TopRig, side: 0 | 1, sleeve: number, glove: number, ink: Ink): void {
+  const [sx, sy] = r.shoulders[side];
+  const [hx, hy] = r.hands[side];
+  const m = rotateAbout(r.twist, 0, 0);
+  const arm = path(m).with(translate(r.ox, 0)).capsule(sx, sy, hx, hy, 0.32, 0.28).d;
+  sk.part(arm, brightDome(sleeve, ink, 1.1), ink(OUTLINE));
+  const hand = path(m).with(translate(r.ox, 0)).circle(hx, hy, TOP.handR).d;
+  sk.part(hand, solid(ink(glove)), ink(OUTLINE));
+}
+
 function top(p: SurvivorPose, o: ArtOptions): Drawing {
   const ink = inkFor(p.tone);
   const sk = new Sketch(o.w);
   const a = p.action;
-  // 날렵한 몸: 어깨 · 몸통이 공통 체형보다 조금 좁고 얇다 (물방울 후드가 덩어리의 주인공). 질주 때 더 움츠린다
-  const r = topRig(p, TOP.halfW * (0.96 - 0.06 * a), TOP.halfD * 0.9);
+  // 몸통: 어깨는 공통 체형보다 조금 좁고(옆이 넓은 공통 생존자와 실루엣이 갈리게) 앞뒤는 조금 두껍다(등 양쪽 판정 원
+  // 빈 곳을 채운다). 질주 때 어깨를 움츠린다
+  const r = topRig(p, TOP.halfW * (0.92 - 0.05 * a), TOP.halfD * 1.12);
   const s = r.s;
   // 질주: 보폭이 커지고, 팔은 뒤로 접혀 크게 흔든다
   const footK = 1 + 0.35 * a;
   const feet = r.feet.map(([fx, fy]): [number, number] => [fx * footK + 0.06 * a, fy]);
+  // 물방울 후드 자리: 앞으로 나와 판정 원 앞쪽을 덮는 큰 머리 (실제 크기에서 몸 덩어리의 주인공 — 옆보다 앞뒤로 길어
+  // 공통 생존자의 옆으로 넓은 원과 갈린다). 질주 때 머리를 앞으로 더 내민다
+  const hit = p.hit;
+  const R = r.headR * 1.28;
+  const hx = r.head[0] + 0.26 + 0.16 * a - 0.06 * hit;
+  const hy = r.head[1];
   if (p.mode === 'free') {
     for (const side of [0, 1] as const) {
       const sign = side === 0 ? -1 : 1;
@@ -124,7 +178,7 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
   }
   // 구조 중: 두 손이 후드 앞으로 나와 자물쇠를 만진다 (공통 손 자리는 큰 후드에 가려진다)
   if (p.mode === 'reach') {
-    const reachX = r.head[0] + r.headR + 0.14;
+    const reachX = hx + R + 0.06;
     r.hands = [
       [reachX, -0.3],
       [reachX, 0.3],
@@ -135,25 +189,20 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
   // 2) 몸통 (후드티)
   // 어깨는 후드보다 한 단 짙게: 위에서 보면 밝은 물방울 후드가 어깨 위에 떠 보인다
   const body = shade(C.hoodie, 0.06);
-  sk.part(topTorsoPath(r), domePaint(body, ink, r.halfW * 1.12), ink(OUTLINE));
+  sk.part(runnerTorsoPath(r), brightDome(body, ink, r.halfW * 1.15), ink(OUTLINE));
   // 3) 팔 (소매 + 장갑). 위 그림의 장갑은 짙은 파랑: 남회색이면 몸 옆에 바닥색 혹이 붙어 작은 크기에서 뾰족한 점이 된다
-  const topGlove = shade(C.hoodie, 0.35);
-  topArm(sk, r, 0, body, topGlove, ink, 0.3);
-  topArm(sk, r, 1, body, topGlove, ink, 0.3);
+  const topGlove = shade(C.hoodie, 0.3);
+  topSleeve(sk, r, 0, body, topGlove, ink);
+  topSleeve(sk, r, 1, body, topGlove, ink);
   // 4) 물방울 후드: 어깨 위에 드리운 그늘(칠만) 위에 얹어 작은 크기에서도 머리 · 꼬리가 몸통과 갈린다
-  const hit = p.hit;
-  const R = r.headR * 1.14;
-  // 질주: 머리를 앞으로 내민다
-  const hx = r.head[0] + 0.08 + 0.24 * a - 0.06 * hit;
-  const hy = r.head[1];
   const captive = p.mode === 'captive' ? 1 : 0;
   // 꼬리 끝 (몸 중심 기준): 서기 −1.06, 질주 −1.1 (뒤 한도 1.1). 걷기에 옆으로 흔들리고(질주 때 더 크게),
   // 수감 때 움츠러든다. 피격 때는 몸 쪽으로 눌려 짧고 뭉툭해진다(옆으로 꺾으면 몸을 돌린 것처럼 읽힌다)
   const tx = -1.06 - 0.04 * a + 0.16 * captive + 0.14 * hit + r.ox;
   const ty = hy + 0.13 * (1 + 0.5 * a) * Math.sin(p.walk + 0.9) * p.stride + 0.08 * hit;
   // 꼬리 폭: 서기 때 통통한 물방울, 질주 때 가늘고 긴 혜성 줄기
-  const tailBulge = 0.3 - 0.2 * a + 0.08 * hit;
-  sk.fill(dropPath(hx, hy, R + 0.03, tx - 0.02, ty, tailBulge), solid(ink(shade(C.deep, 0.4))), 0.45);
+  const tailBulge = 0.33 - 0.2 * a + 0.08 * hit;
+  sk.fill(dropPath(hx, hy, R + 0.03, tx - 0.02, ty, tailBulge), solid(ink(shade(C.deep, 0.4))), 0.35);
   sk.part(
     dropPath(hx, hy, R, tx, ty, tailBulge),
     hoodPaint(ink, hx - 0.06, hy, hx - tx + 0.05),
@@ -440,4 +489,4 @@ function front(p: FrontPose, o: ArtOptions): Drawing {
   return transformDrawing(frontBody(p, { w: o.w / k }), k, -0.08, 0.42);
 }
 
-export const RUNNER_ART: SurvivorArt = { id: 'runner', top, front, topExtent: 1.15 };
+export const RUNNER_ART: SurvivorArt = { id: 'runner', top, front, topExtent: 1.47 };
