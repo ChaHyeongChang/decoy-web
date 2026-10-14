@@ -90,7 +90,7 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
   const sk = new Sketch(o.w);
   const a = p.action;
   // 날렵한 몸: 어깨 · 몸통이 공통 체형보다 조금 좁고 얇다 (물방울 후드가 덩어리의 주인공). 질주 때 더 움츠린다
-  const r = topRig(p, TOP.halfW * (0.94 - 0.06 * a), TOP.halfD * 0.88);
+  const r = topRig(p, TOP.halfW * (0.96 - 0.06 * a), TOP.halfD * 0.9);
   const s = r.s;
   // 질주: 보폭이 커지고, 팔은 뒤로 접혀 크게 흔든다
   const footK = 1 + 0.35 * a;
@@ -118,27 +118,30 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
   for (const [fx, fy] of feet) topSneaker(sk, fx + r.ox, fy, ink);
   // 2) 몸통 (후드티)
   // 어깨는 후드보다 한 단 짙게: 위에서 보면 밝은 물방울 후드가 어깨 위에 떠 보인다
-  const body = shade(C.hoodie, 0.14);
+  const body = shade(C.hoodie, 0.06);
   sk.part(topTorsoPath(r), domePaint(body, ink, r.halfW * 1.12), ink(OUTLINE));
   // 3) 팔 (소매 + 어두운 장갑)
   topArm(sk, r, 0, body, C.glove, ink, 0.3);
   topArm(sk, r, 1, body, C.glove, ink, 0.3);
   // 4) 물방울 후드: 어깨 위에 드리운 그늘(칠만) 위에 얹어 작은 크기에서도 머리 · 꼬리가 몸통과 갈린다
   const hit = p.hit;
-  const R = r.headR * 1.03;
+  const R = r.headR * 1.1;
   // 질주: 머리를 앞으로 내민다
-  const hx = r.head[0] + 0.26 * a - 0.06 * hit;
+  const hx = r.head[0] + 0.04 + 0.26 * a - 0.06 * hit;
   const hy = r.head[1];
   const captive = p.mode === 'captive' ? 1 : 0;
-  // 꼬리 끝 (몸 중심 기준): 서기 −1.02, 질주 −1.1 (뒤 한도 1.1). 걷기에 옆으로 흔들리고, 피격 · 수감 때 움츠러든다
-  const tx = -1.02 - 0.08 * a + 0.16 * captive + 0.08 * hit + r.ox;
-  const ty = hy + 0.13 * Math.sin(p.walk + 0.9) * p.stride + 0.22 * hit;
+  // 꼬리 끝 (몸 중심 기준): 서기 −1.02, 질주 −1.1 (뒤 한도 1.1). 걷기에 옆으로 흔들리고(질주 때 더 크게),
+  // 수감 때 움츠러든다. 피격 때는 몸 쪽으로 눌려 짧고 뭉툭해진다(옆으로 꺾으면 몸을 돌린 것처럼 읽힌다)
+  const tx = -1.02 - 0.08 * a + 0.16 * captive + 0.14 * hit + r.ox;
+  const ty = hy + 0.13 * (1 + 0.5 * a) * Math.sin(p.walk + 0.9) * p.stride + 0.08 * hit;
+  // 꼬리 폭: 서기 때 통통한 물방울, 질주 때 가늘고 긴 혜성 줄기
+  const tailBulge = 0.3 - 0.2 * a + 0.08 * hit;
   sk.fill(
-    dropPath(hx - 0.03, hy + 0.04, R + 0.07, tx - 0.02, ty + 0.03, 0.16),
+    dropPath(hx, hy, R + 0.03, tx - 0.02, ty, tailBulge),
     solid(ink(shade(C.deep, 0.4))),
-    0.7,
+    0.45,
   );
-  sk.part(dropPath(hx, hy, R, tx, ty, 0.16), hoodPaint(ink, hx - 0.06, hy, hx - tx + 0.05), ink(OUTLINE));
+  sk.part(dropPath(hx, hy, R, tx, ty, tailBulge), hoodPaint(ink, hx - 0.06, hy, hx - tx + 0.05), ink(OUTLINE));
   // 후드 등의 » 갈매기 무늬 (옛 문양, 앞을 가리킨다): 꼬리 위에 두 개, 꼬리 방향을 따라 눕는다
   const ang = Math.atan2(hy - ty, hx - tx);
   const along = (k: number, side: number): [number, number] => {
@@ -162,7 +165,13 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
       .Z().d,
     solid(ink(C.deep)),
   );
-  sk.line(path().arc(hx, hy, R * 0.9, -0.95, 0.95).d, solid(ink(C.neon)), 0.07, 'round', 0.6 + 0.4 * a);
+  sk.line(
+    path().arc(hx, hy, R * 0.84, -1.15, 1.15).d,
+    solid(ink(tint(C.neon, 0.25))),
+    0.11,
+    'round',
+    0.9 + 0.1 * a,
+  );
   return sk.drawing();
 }
 
