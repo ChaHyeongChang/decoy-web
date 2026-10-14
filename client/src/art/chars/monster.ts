@@ -1,11 +1,14 @@
 // 괴물 새 캐릭터 (캐릭터 리디자인 2차 시안): 붉은 두건을 깊게 쓴 구부정한 사냥꾼. 옛 그림의 정체성(붉은 두건 · 톱니 자락 망토 ·
 // 어둠 속 빛나는 눈 · 앞 발톱)을 잇는다. 위협감은 뿔 · 이빨 대신 눈빛과 그림자로 낸다(사용자 결정 2): 깊은 두건 속 거의 검은
 // 얼굴 공간에 가늘게 빛나는 두 눈, 아래로 갈수록 짙어지는 망토, 어깨 · 두건 가장자리의 붉은 림 라이트. 발톱은 작게 줄였다.
-// 위에서 보면 둥근 생존자와 달리 옆(어깨 가시) · 뒤(톱니 자락)가 뾰족하고, 앞은 두건 챙 아래 그늘진 얼굴 속 빛나는 두 눈과
-// 양옆 앞으로 내민 흰 발톱 손 둘이 바라보는 방향을 알린다 (위 그림에도 뿔이 없다).
+// 위에서 보면 지금 게임 괴물의 원칙(VISUAL_SPEC 4.3)대로 앞은 매끈한 둥근 두건 · 어깨가 가장 넓고 뒤 자락은 톱니 5갈래라
+// 실루엣만으로 앞뒤가 갈린다. 두건은 위에서 본 물방울(둥근 머리가 앞, 끝은 등 위로 흘러 망토로 이어짐)이고, 앞쪽 머리 폭을
+// 덮는 짙은 얼굴 그늘 속 빛나는 실눈 둘과, 어깨 앞 짙은 소매 끝에서 앞으로 뻗어 끝을 안으로 굽힌 흰 발톱 둘(끝은 두건 앞 끝
+// 안)이 바라보는 방향을 알린다 (위 그림에도 뿔 · 이빨 · 어깨 가시 · 등뼈 돌기가 없다).
 // 크기: 모든 자세가 판정 반지름 1.12배 안, 돌진만 1.35배 안 (measure.ts SIZE_RULE, 사용자 결정 4 — 발톱 · 팔 · 자락 모두).
-// 색: 두건 = 괴물 역할색 원색(몸 가운데), 망토 = 짙은 진홍(두건과 명암 차를 크게), 얼굴 = 아주 어두운 #1A0B0E (두건 속은 더 어둡게),
-// 눈 = 흰 분홍 + 분홍 빛, 발톱 = 뼈 색. 네온 포인트는 눈 빛 · 림 라이트 · 등뼈 마디 사이와 망토 틈의 희미한 불씨뿐이다.
+// 색: 두건 = 괴물 역할색 원색, 망토 = 정면은 짙은 진홍(두건과 명암 차를 크게) · 위 그림은 가장 높은 어깨 · 굽은 등이 역할색
+// (몸 가운데)이고 뒤 자락 끝으로 갈수록 짙어진다, 얼굴 = 아주 어두운 #1A0B0E (두건 속은 더 어둡게), 눈 = 흰 분홍 + 분홍 빛,
+// 발톱 = 뼈 색. 네온 포인트는 눈 빛 · 림 라이트 · 망토 틈의 희미한 불씨뿐이다.
 // 청록 · 초록 · 파랑은 쓰지 않는다.
 //
 // 위에서 본 그림: 단위 = 몸 반지름 1(판정 반지름 0.35타일), +x = 바라보는 방향. 빛은 위에서 (돔 음영, 회전과 무관).
@@ -47,14 +50,13 @@ export const MONSTER_COLOR = {
   hood: ROLE.monster,
   cloak: shade(ROLE.monster, 0.34),
   cloakDeep: 0x5a1219,
-  sleeve: shade(ROLE.monster, 0.2),
-  /** 등뼈 돌기 밑동 (어두운 뼈) */
-  spine: 0x4a141a,
+  /** 위 그림 소매 (역할색 망토와 갈리는 짙은 진홍) */
+  sleeve: shade(ROLE.monster, 0.52),
   bone: 0xf1e6e8,
   boneShade: 0xb59ea3,
   hand: 0x2a0e12,
   face: 0x1a0b0e,
-  /** 정면 두건 속 가장 깊은 그늘 (얼굴색보다 어둡게) */
+  /** 정면 · 위 그림 두건 속 가장 깊은 그늘 (얼굴색보다 어둡게) */
   void: 0x070203,
   eye: 0xfff1f2,
   eyeGlow: 0xfb7185,
@@ -106,9 +108,18 @@ function bloom(sk: Sketch, m: Mat, x: number, y: number, r: number, color: numbe
 
 /**
  * 갈고리 (발톱): 밑동 (bx, by)에서 ang 방향으로 len만큼, bend만큼 옆으로 휘며 끝이 뾰족해진다.
- * bend > 0이면 진행 방향 기준 왼쪽 법선 (−sin, cos) 쪽으로 휜다
+ * bend > 0이면 진행 방향 기준 왼쪽 법선 (−sin, cos) 쪽으로 휜다. taper = 굵기가 끝으로 줄어드는 지수 (작을수록 끝까지 굵다)
  */
-function hook(m: Mat, bx: number, by: number, ang: number, len: number, w: number, bend: number): string {
+function hook(
+  m: Mat,
+  bx: number,
+  by: number,
+  ang: number,
+  len: number,
+  w: number,
+  bend: number,
+  taper = 0.8,
+): string {
   const ux = Math.cos(ang);
   const uy = Math.sin(ang);
   const vx = -uy;
@@ -123,7 +134,7 @@ function hook(m: Mat, bx: number, by: number, ang: number, len: number, w: numbe
     const dx = ux * len + vx * bend * len * 2 * t;
     const dy = uy * len + vy * bend * len * 2 * t;
     const l = Math.hypot(dx, dy) || 1;
-    const hw = (w / 2) * (1 - t) ** 0.8;
+    const hw = (w / 2) * (1 - t) ** taper;
     left.push([px - (dy / l) * hw, py + (dx / l) * hw]);
     if (i < n) right.unshift([px + (dy / l) * hw, py - (dx / l) * hw]);
   }
@@ -146,20 +157,26 @@ function bonePaint(m: Mat, bx: number, by: number, ang: number, len: number, ink
 }
 
 /**
- * 위 그림 발톱 길이 (가운데 · 양옆) · 굵기 · 끝 굽음 · 손 반지름 — 몸 원 1.12배 안 (1차 시안 0.5 · 0.42 · 0.42).
- * 곧고 짧은 손가락 셋을 벌려 '앞으로 할퀴는 손'으로 읽히게 한다 (굵게 모은 초승달 쐐기는 머리 옆 뿔 · 귀처럼 읽혀 뺐다)
+ * 위 그림 발톱 길이 · 굵기 (가운데 · 양옆) · 끝 굽음 · 밑동이 손끝에서 나오는 거리 — 몸 원 1.12배 안 (1차 시안 0.5 · 0.42 · 0.42).
+ * 손은 어깨 앞 바깥(두건과 떨어진 자리)에 두고 손가락 셋을 앞으로 뻗어 끝을 안쪽(얼굴 쪽)으로 굽힌다: 뿔 · 귀는 머리에서
+ * 바깥 · 위로 휘고, 이 갈고리는 어깨에서 나와 안으로 오므린다. 서 있을 때 끝은 두건 앞 끝보다 나가지 않는다.
+ * 가운데 발톱을 조금 길고 굵게 두어 작은 크기에서 앞을 가리키는 흰 갈퀴로 남는다. 셋을 비슷한 굵기로 두어 큰 그림에서는
+ * 손가락 셋으로 읽힌다 (가운데 하나만 크면 머리 옆에 휜 흰 초승달이 서 뿔처럼 보인다)
  */
-const CLAW_LEN = 0.28;
-const CLAW_SIDE_LEN = 0.24;
-const CLAW_W = 0.2;
-const CLAW_BEND = 0.08;
-const PALM_R = 0.12;
+const CLAW_LEN = 0.45;
+const CLAW_SIDE_LEN = 0.36;
+const CLAW_W = 0.19;
+const CLAW_SIDE_W = 0.16;
+const CLAW_BEND = 0.2;
+const CLAW_ROOT = 0.06;
+/** 발톱 굵기가 끝으로 줄어드는 지수: 끝 가까이까지 굵게 두어 작은 크기에서 굵은 외곽선에 먹히지 않고 흰 갈퀴로 남는다 */
+const CLAW_TAPER = 0.55;
 
 /**
- * 위 그림 발톱 셋 + 손. ang = 가운데 발톱 방향, spread = 발톱 사이 각, k = 크기(들어 올리면 카메라에 가까워 커짐).
- * 갈고리는 끝만 몸 가운데 쪽으로 살짝 굽는다 (휜 초승달이 아니라 곧은 손가락). 손 = 발톱 밑동을 덮는 소매 색 주먹
+ * 위 그림 발톱 셋. (hx, hy) = 손 (소매 끝), ang = 가운데 발톱 방향, spread = 발톱 사이 각, k = 크기(들어 올리면 카메라에 가까워 커짐).
+ * 갈고리는 끝이 몸 가운데 쪽으로 굽는다. 따로 떨어진 둥근 주먹은 없다 — 발톱 밑동은 짙은 소매 끝(손)에 붙어 팔로 읽힌다
  */
-function clawHand(
+function claws(
   sk: Sketch,
   m: Mat,
   hx: number,
@@ -168,90 +185,68 @@ function clawHand(
   spread: number,
   k: number,
   ink: Ink,
-  palm: number,
-  alpha?: number,
 ): void {
-  for (const i of [-1, 0, 1]) {
+  // 양옆 손가락을 먼저, 가운데 발톱을 위에 그린다
+  for (const i of [-1, 1, 0]) {
     const a = ang + i * spread;
     const len = (i === 0 ? CLAW_LEN : CLAW_SIDE_LEN) * k;
-    const bx = hx + Math.cos(a) * PALM_R * 0.6;
-    const by = hy + Math.sin(a) * PALM_R * 0.6;
+    const w = (i === 0 ? CLAW_W : CLAW_SIDE_W) * k;
+    const bx = hx + Math.cos(a) * CLAW_ROOT;
+    const by = hy + Math.sin(a) * CLAW_ROOT;
     // 왼쪽 법선이 몸 가운데(원점)를 보면 그쪽으로 굽는다
     const inward = -Math.sin(a) * -bx + Math.cos(a) * -by >= 0 ? 1 : -1;
     sk.part(
-      hook(m, bx, by, a, len, CLAW_W * k, CLAW_BEND * inward),
+      hook(m, bx, by, a, len, w, CLAW_BEND * inward, CLAW_TAPER),
       bonePaint(m, bx, by, a, len, ink, false),
       ink(OUTLINE),
-      alpha,
+      undefined,
       0.2,
     );
   }
-  sk.part(
-    path(m).circle(hx, hy, PALM_R * k).d,
-    rad(m, hx - 0.04, hy - 0.04, PALM_R * k * 1.3, [
-      [0, ink(tint(palm, 0.15))],
-      [1, ink(shade(palm, 0.3))],
-    ]),
-    ink(OUTLINE),
-    alpha,
-  );
 }
 
 /**
- * 위 그림 빛나는 눈 하나: 가늘게 치켜 올라간 칼날 눈 (정면 눈과 같은 말투). tilt만큼 기울여 바깥 끝이 뒤(두건 쪽)로 간다 —
- * 두 눈이 앞을 향한 V. 빛 번짐은 눈 둘레에만 작게 (얼굴 그늘이 분홍으로 뜨지 않게). eyes: blink = 가는 선, stun = ×
+ * 위 그림 빛나는 눈 하나: 짙은 얼굴 그늘 속에 떠 있는 빛 (흰 분홍 실눈 + 분홍 테 + 분홍 번짐). 가늘고 긴 타원을 tilt만큼 기울여
+ * 앞을 향한 V로 둔다 (바깥 끝이 뒤로 — 노려보는 눈. 둥근 큰 눈은 귀여워 보인다). 번짐은 눈 둘레에만 두어 그늘이 짙게 남는다 —
+ * 작은 크기에서 짙은 바탕 위 밝은 점 한 쌍. eyes: blink = 가는 선, stun = 빛이 꺼진 흐린 실눈 (눈꼬리가 앞으로 처진다. ×표는
+ * 우스꽝스러워 쓰지 않는다)
  */
-function glowEye(
+function topEye(
   sk: Sketch,
   m: Mat,
   x: number,
   y: number,
-  len: number,
+  tilt: number,
   eyes: MonsterPose['eyes'],
   ink: Ink,
   glow: number,
-  tilt: number,
 ): void {
   const C = MONSTER_COLOR;
   const ls = lenScale(m);
-  // 긴 축 방향 (y축을 tilt만큼 돌림) · 짧은 축 방향
-  const ax = -Math.sin(tilt);
-  const ay = Math.cos(tilt);
-  const bx = ay;
-  const by = -ax;
-  // 빛: 넓고 옅은 번짐 + 좁고 밝은 심 (작은 크기에서 밝은 점으로 남는다)
-  bloom(sk, m, x, y, len * 1.6, ink(C.eyeGlow), 0.5 * glow);
-  bloom(sk, m, x, y, len * 0.9, ink(tint(C.eyeGlow, 0.6)), Math.min(1, 0.95 * glow));
   if (eyes === 'stun') {
-    const d = len * 0.6;
-    sk.line(
-      path(m)
-        .M(x - d, y - d)
-        .L(x + d, y + d)
-        .M(x - d, y + d)
-        .L(x + d, y - d).d,
-      solid(ink(C.eye)),
-      len * 0.32 * ls,
-    );
-  } else if (eyes === 'blink') {
-    sk.line(
-      path(m)
-        .M(x - ax * len * 0.8, y - ay * len * 0.8)
-        .L(x + ax * len * 0.8, y + ay * len * 0.8).d,
-      solid(ink(C.eye)),
-      len * 0.18 * ls,
-    );
-  } else {
-    // 가는 칼날 (양 끝 뾰족한 아몬드) + 그 둘레로 번지는 분홍 빛 (작은 크기에서 밝은 점으로 남는 몫)
-    const almond = (l: number, w: number): string =>
-      path(m)
-        .M(x - ax * l, y - ay * l)
-        .Q(x + bx * w, y + by * w, x + ax * l, y + ay * l)
-        .Q(x - bx * w, y - by * w, x - ax * l, y - ay * l)
-        .Z().d;
-    sk.fill(almond(len * 1.25, len * 1.1), solid(ink(tint(C.eyeGlow, 0.45))), 0.7 * Math.min(1, glow));
-    sk.fill(almond(len, len * 0.62), solid(ink(C.eye)));
+    bloom(sk, m, x, y, 0.1, ink(C.eyeGlow), Math.min(1, 0.5 * glow));
+    sk.fill(path(m).ellipse(x, y, 0.02, 0.06, -tilt * 1.2).d, solid(ink(mix(C.eyeGlow, C.face, 0.35)), 0.85));
+    return;
   }
+  bloom(sk, m, x, y, 0.13, ink(C.eyeGlow), Math.min(1, 0.6 * glow));
+  // 눈 둘레 빛 (실눈과 같은 기울기의 밝은 분홍 테): 작은 크기에서 실눈이 화소 하나로 사라지지 않고 밝은 점으로 남는다.
+  // 감은 눈은 테를 가늘게
+  const halo = eyes === 'blink' ? 0.03 : 0.055;
+  sk.fill(
+    path(m).ellipse(x, y, halo, 0.15, tilt).d,
+    solid(ink(tint(C.eyeGlow, 0.15)), Math.min(1, 0.75 * glow)),
+  );
+  if (eyes === 'blink') {
+    const dx = Math.sin(tilt) * 0.065;
+    const dy = Math.cos(tilt) * 0.065;
+    sk.line(
+      path(m)
+        .M(x + dx, y - dy)
+        .L(x - dx, y + dy).d,
+      solid(ink(C.eye)),
+      0.024 * ls,
+    );
+  } else sk.fill(path(m).ellipse(x, y, 0.034, 0.125, tilt).d, solid(ink(C.eye)));
 }
 
 // ───────────────────────── 위에서 본 그림 ─────────────────────────
@@ -262,30 +257,24 @@ interface MonsterRig {
   body: Mat;
   /** 윗몸 변환 (팔: 걷기 어깨 흔들림 · 공격 준비 비틀림 · 타격 튕김) */
   upper: Mat;
-  /** 목 변환 (두건 · 얼굴 · 등뼈: 비틀림을 조금만 따라 눈은 앞을 본다) */
+  /** 목 변환 (두건 · 얼굴: 비틀림을 조금만 따라 눈은 앞을 본다) */
   neck: Mat;
-  /** 두건 중심 · 크기 배율 */
-  head: Pt;
+  /** 두건 밑동(목) x · 크기 배율 */
+  headX: number;
   headK: number;
-  /** 얼굴 (두건 앞 어두운 구멍) 중심 x · 반지름 (두건 좌표) */
-  faceX: number;
-  faceRx: number;
-  faceRy: number;
+  /** 얼굴 그늘 (두건 앞, 두건 좌표): 챙(뒤 끝) 가운데 x · 양 끝이 두건 옆 테두리에 닿는 x */
+  brim: number;
+  faceSide: number;
   /** 입 벌림 (포효) */
   mouth: number;
   /** 눈빛 세기 (공격 준비 때 타오른다) */
   glow: number;
-  /** 팔: 어깨 · 팔꿈치 · 손 · 발톱 방향 (0 = 왼쪽 y < 0, 1 = 오른쪽) */
+  /** 팔: 팔꿈치 · 손 · 발톱 방향 (0 = 왼쪽 y < 0, 1 = 오른쪽) */
   elbows: [Pt, Pt];
   hands: [Pt, Pt];
   clawAng: [number, number];
   clawK: number;
   spread: number;
-  /**
-   * 팔 층 (0 = 망토 아래, 1 = 망토 위 · 두건 아래: 든 팔 · 처진 팔은 위에서 보면 망토보다 카메라 쪽).
-   * 사이 값은 망토 위 팔을 그만큼 비치게 겹쳐 굽기 프레임 사이에서 팔이 갑자기 생기지 않게 한다
-   */
-  armsOver: number;
   /** 자락: 끝 · 골 반지름 (앞뒤 x, 옆 y), 물결 세기, 흔들림 각 */
   tipRx: number;
   tipRy: number;
@@ -295,36 +284,33 @@ interface MonsterRig {
   sway: number;
 }
 
-const SHOULDER: Pt = [0.0, 0.62];
-
 function monsterRig(p: MonsterPose): MonsterRig {
   const s = Math.sin(p.walk) * p.stride;
-  // 기본 (서기 + 걷기): 어깨 앞, 머리에서 떨어진 양옆으로 내민 손이 발톱을 앞으로 편다 (머리 옆에 붙으면 뿔 · 귀처럼
-  // 읽힌다). 걸을 때 팔은 엇갈려 흔들린다
+  // 기본 (서기 + 걷기): 어깨 위 짙은 소매(팔꿈치 → 손)가 앞으로 뻗고, 두건과 떨어진 어깨 앞 손(|y| 0.72)에서 발톱이 앞으로
+  // 뻗어 끝을 안쪽으로 굽힌다 (끝은 두건 앞 끝 안). 걸을 때 팔은 엇갈려 흔들린다
   let el: [Pt, Pt] = [
-    [0.14 + 0.04 * s, -0.78],
-    [0.14 - 0.04 * s, 0.78],
+    [-0.06 + 0.03 * s, -0.78],
+    [-0.06 - 0.03 * s, 0.78],
   ];
   let ha: [Pt, Pt] = [
-    [0.46 + 0.04 * s, -0.57],
-    [0.46 - 0.04 * s, 0.57],
+    [0.32 + 0.04 * s, -0.72],
+    [0.32 - 0.04 * s, 0.72],
   ];
-  let ang: [number, number] = [-0.04, 0.04];
+  let ang: [number, number] = [0.32, -0.32];
   let clawK = 1;
-  let spread = 0.32;
-  let headX = 0.04 + 0.03 * Math.abs(s);
+  let spread = 0.26;
+  let headX = 0.02 * Math.abs(s);
   let headK = 1;
-  let faceX = 0.55;
-  let faceRx = 0.2;
-  let faceRy = 0.33;
-  let glow = 0.85;
+  let brim = 0.47;
+  let faceSide = 0.6;
+  let glow = 0.9;
   // 비틀림 (윗몸 회전, 라디안): 몸 중심을 도는 회전이라 크기 기준에 영향이 없다
   let twist = 0;
-  // 자락: 끝 1.07 + 물결 0.035 ≤ 1.12. 골은 얕게(0.92) 해 판정 원 가장자리까지 밝은 망토가 채운다 (작은 화면 덩어리)
+  // 자락: 끝 1.07 + 물결 0.035 ≤ 1.12. 골을 파 뒤 실루엣이 톱니로 갈린다 (앞은 매끈한 두건 · 어깨)
   let tipRx = 1.07;
   let tipRy = 1.05;
-  let valRx = 0.92;
-  let valRy = 0.94;
+  let valRx = 0.84;
+  let valRy = 0.84;
   let wave = 0.035;
   let body: Mat = translate(0, 0);
 
@@ -335,29 +321,29 @@ function monsterRig(p: MonsterPose): MonsterRig {
   };
 
   // 공격 준비: 팔꿈치를 옆으로 들고 발톱을 어깨 뒤로 당긴다 (몸 가까이, 망토 위). 윗몸을 한쪽으로 비틀어 힘을 모으고
-  // 눈빛이 타오른다 (발톱이 뒤로 가도 앞 단서는 눈이 맡는다), 자락이 조금 부푼다
+  // 눈빛이 타오른다 (발톱이 뒤로 가도 앞 단서는 얼굴 그늘 · 눈이 맡는다), 자락이 조금 부푼다
   if (p.windup > 0) {
     const k = p.windup;
     toward(
       k,
       [
-        [0.2, -0.84],
-        [0.2, 0.84],
+        [0.2, -0.82],
+        [0.2, 0.82],
       ],
       [
-        [-0.12, -0.76],
-        [-0.12, 0.76],
+        [-0.06, -0.68],
+        [-0.06, 0.68],
       ],
-      [-2.55, 2.55],
+      // 발톱은 몸 안쪽으로 돌려 뒤로 젖힌다 (바깥으로 돌면 사이 프레임에서 옆으로 뻗어 1.12를 넘는다)
+      [-2.55 + 2 * Math.PI, 2.55 - 2 * Math.PI],
     );
-    clawK = lerp(clawK, 1.05, k);
-    spread = lerp(spread, 0.34, k);
+    clawK = lerp(clawK, 1.02, k);
+    spread = lerp(spread, 0.3, k);
     headX -= 0.06 * k;
     twist -= 0.35 * k;
     glow = lerp(glow, 1.25, k);
-    tipRx = lerp(tipRx, 1.07, k);
     tipRy = lerp(tipRy, 1.06, k);
-    valRy = lerp(valRy, 0.9, k);
+    valRy = lerp(valRy, 0.88, k);
   }
   // 타격: 두 발톱을 앞으로 휘둘러 얼굴 앞에서 엇갈린다 (X자, 앞 1.12 안). 윗몸은 준비와 반대쪽으로 튕기고,
   // 머리는 물려 X가 얼굴과 떨어져 보이게
@@ -366,54 +352,57 @@ function monsterRig(p: MonsterPose): MonsterRig {
     toward(
       k,
       [
-        [0.42, -0.58],
-        [0.42, 0.58],
+        [0.36, -0.5],
+        [0.36, 0.5],
       ],
       [
-        [0.66, -0.24],
-        [0.66, 0.24],
+        [0.7, -0.3],
+        [0.7, 0.3],
       ],
       [0.78, -0.78],
     );
     clawK = lerp(clawK, 1.12, k);
-    spread = lerp(spread, 0.24, k);
-    headX -= 0.12 * k;
+    spread = lerp(spread, 0.2, k);
+    headX -= 0.16 * k;
     twist += 0.25 * k;
   }
-  // 돌진: 몸을 낮추고 앞으로 늘어남, 발톱은 앞으로 모으고 자락이 뒤로 길게 흐른다 (1.35 안).
+  // 돌진: 몸을 낮추고 앞으로 늘어남, 발톱은 두건 양옆에서 앞으로 모으고 자락이 뒤로 길게 흐른다 (1.35 안).
   // 기절은 돌진을 끊는다 (시뮬레이션과 같게: 둘이 겹친 자세 값이 와도 늘어나지 않는다)
   if (p.dash > 0) {
     const k = p.dash * (1 - p.stun);
     toward(
       k,
       [
-        [0.3, -0.64],
-        [0.3, 0.64],
+        [0.24, -0.7],
+        [0.24, 0.7],
       ],
       [
-        [0.62, -0.34],
-        [0.62, 0.34],
+        [0.5, -0.56],
+        [0.5, 0.56],
       ],
-      [-0.06, 0.06],
+      [0.25, -0.25],
     );
-    spread = lerp(spread, 0.24, k);
-    headX += 0.08 * k;
+    // 공격 준비 · 타격과 겹쳐도 돌진 자세가 이긴다 (발톱 크기 · 비틀림을 되돌려 늘어난 몸에서 1.35 안)
+    clawK = lerp(clawK, 1, k);
+    twist *= 1 - k;
+    spread = lerp(spread, 0.2, k);
+    headX += 0.06 * k;
     tipRx = lerp(tipRx, 1.2, k);
     tipRy = lerp(tipRy, 0.92, k);
-    valRx = lerp(valRx, 0.96, k);
-    valRy = lerp(valRy, 0.8, k);
+    valRx = lerp(valRx, 0.92, k);
+    valRy = lerp(valRy, 0.74, k);
     wave *= 1 - 0.5 * k;
     body = mul(translate(0.07 * k, 0), scale(1 + 0.08 * k, 1 - 0.12 * k));
   }
-  // 포효: 고개를 젖혀 얼굴이 위를 본다 (위에서 얼굴 · 빛나는 목구멍이 크게 보임). 팔은 벌리지 않고 머리 양옆으로 들어
-  // 올린다 — 위로 세운 발톱은 위에서 보면 짧게 줄어 보인다
+  // 포효: 고개를 젖혀 얼굴이 위를 본다 (챙이 뒤로 물러나 얼굴 그늘 · 빛나는 목구멍이 크게 보임). 팔은 벌리지 않고 머리
+  // 양옆으로 들어 올린다 — 위로 세운 발톱은 위에서 보면 짧게 줄어 보인다
   if (p.roar > 0) {
     const k = p.roar;
     toward(
       k,
       [
-        [0.0, -0.84],
-        [0.0, 0.84],
+        [0.0, -0.82],
+        [0.0, 0.82],
       ],
       [
         [0.16, -0.64],
@@ -421,14 +410,12 @@ function monsterRig(p: MonsterPose): MonsterRig {
       ],
       [-1.2, 1.2],
     );
-    clawK = lerp(clawK, 0.8, k);
-    spread = lerp(spread, 0.4, k);
+    clawK = lerp(clawK, 0.66, k);
+    spread = lerp(spread, 0.36, k);
     headX -= 0.1 * k;
     headK = lerp(headK, 1.1, k);
-    faceX = lerp(faceX, 0.36, k);
-    faceRx = lerp(faceRx, 0.24, k);
-    faceRy = lerp(faceRy, 0.3, k);
-    tipRx = lerp(tipRx, 1.07, k);
+    brim = lerp(brim, 0.34, k);
+    faceSide = lerp(faceSide, 0.44, k);
     tipRy = lerp(tipRy, 1.06, k);
   }
   // 기절: 축 처짐 — 고개가 앞으로 떨어지고, 팔이 몸 옆에 늘어져 발톱이 뒤로 흐르며 자락이 가라앉는다. 눈빛이 꺼진다
@@ -437,23 +424,24 @@ function monsterRig(p: MonsterPose): MonsterRig {
     toward(
       k,
       [
-        [0.06, -0.84],
-        [0.06, 0.84],
+        [0.06, -0.82],
+        [0.06, 0.82],
       ],
       [
-        [-0.1, -0.84],
-        [-0.1, 0.84],
+        [-0.1, -0.78],
+        [-0.1, 0.78],
       ],
-      [-2.5, 2.5],
+      // 공격 준비와 같이 몸 안쪽으로 돌아 뒤로 늘어진다
+      [-2.5 + 2 * Math.PI, 2.5 - 2 * Math.PI],
     );
     clawK = lerp(clawK, 0.8, k);
     spread = lerp(spread, 0.22, k);
-    headX += 0.12 * k;
-    headK = lerp(headK, 0.88, k);
+    headX += 0.1 * k;
+    headK = lerp(headK, 0.9, k);
     glow = lerp(glow, 0.45, k);
     tipRx = lerp(tipRx, 1.0, k);
     tipRy = lerp(tipRy, 1.0, k);
-    valRx = lerp(valRx, 0.86, k);
+    valRx = lerp(valRx, 0.8, k);
     wave *= 1 - 0.7 * k;
     body = mul(body, rotateAbout(0.12 * k, 0, 0));
   }
@@ -464,11 +452,10 @@ function monsterRig(p: MonsterPose): MonsterRig {
     body,
     upper: mul(body, rotateAbout(swing + twist, 0, 0)),
     neck: mul(body, rotateAbout(swing + twist * 0.3, 0, 0)),
-    head: [headX, 0],
+    headX,
     headK,
-    faceX,
-    faceRx,
-    faceRy,
+    brim,
+    faceSide,
     mouth: p.roar,
     glow,
     elbows: el,
@@ -476,7 +463,6 @@ function monsterRig(p: MonsterPose): MonsterRig {
     clawAng: ang,
     clawK,
     spread,
-    armsOver: Math.min(1, Math.max(0, (Math.max(p.windup, p.roar, p.stun) - 0.15) / 0.3)),
     tipRx,
     tipRy,
     valRx,
@@ -486,70 +472,155 @@ function monsterRig(p: MonsterPose): MonsterRig {
   };
 }
 
-/** 망토: 어깨는 둥글고, 뒤 자락은 톱니 (끝 5개). 물결 위상 cloak */
-function cloakPath(m: Mat, r: MonsterRig, cloak: number): string {
+/** 자락이 시작하는 각 (어깨 뒤, 라디안). 끝 5개 · 골 4개가 뒤 ±65° 안에 놓이고 그 앞 어깨 옆은 매끈하다 */
+const TAIL_A0 = Math.PI * 0.64;
+/** 자락 끝이 뒤 가운데 쪽으로 쏠리는 비율 (0 = 방사): 끝이 뒤로 흘러 펼친 부채 · 꽃잎이 아니라 뒤로 끌리는 천으로 읽힌다 */
+const TAIL_SWEEP = 0.16;
+/** 자락 양 끝 골 반지름 (어깨 곡선이 첫 끝으로 넘어가는 자리) */
+const TAIL_END_R = 0.95;
+/**
+ * 망토 앞섶 · 어깨 (y < 0 쪽, 앞 가운데 → 어깨). 두건 아래 가슴에서 둥근 어깨 앞을 지나 어깨가 가장 넓다(|y| 1.03).
+ * 가시 없이 매끈하게 — 앞쪽 반의 실루엣은 두건 앞 테두리, 어깨 곡선과 그 사이로 앞으로 뻗은 발톱뿐이다
+ */
+const CLOAK_FRONT: readonly Pt[] = [
+  [0.6, 0],
+  [0.6, -0.3],
+  [0.5, -0.58],
+  [0.3, -0.84],
+  [0.06, -1.0],
+  [-0.14, -1.03],
+];
+
+/**
+ * 뒤 자락 점 (위쪽 어깨 뒤 → 뒤 → 아래쪽 어깨 뒤, 홀수 번째가 끝). 끝은 가운데로 갈수록 조금 길고(바깥 0.95배) 뒤 가운데 쪽으로
+ * 쏠린다(TAIL_SWEEP). 물결 위상 cloak
+ */
+function tailPoints(r: MonsterRig, cloak: number): Pt[] {
   const pts: Pt[] = [];
-  const a0 = Math.PI * 0.58;
   const n = 10;
   for (let i = 0; i <= n; i += 1) {
     const t = i / n;
-    const a = -a0 - t * (2 * Math.PI - 2 * a0) + r.sway;
+    const a0 = -TAIL_A0 - t * (2 * Math.PI - 2 * TAIL_A0);
+    if (i === 0 || i === n) {
+      const a = a0 + r.sway;
+      pts.push([Math.cos(a) * TAIL_END_R, Math.sin(a) * TAIL_END_R]);
+      continue;
+    }
     const tip = i % 2 === 1;
+    const a = (tip ? a0 - TAIL_SWEEP * (a0 + Math.PI) : a0) + r.sway;
     const w = tip ? Math.sin(cloak + i * 0.95) * r.wave : 0;
     const da = tip ? Math.cos(cloak + i * 0.95) * r.wave * 0.8 : 0;
-    const rx = (tip ? r.tipRx : r.valRx) + w;
-    const ry = (tip ? r.tipRy : r.valRy) + w * 0.6;
+    const len = tip ? 1 - 0.0125 * Math.abs(i - n / 2) : 1;
+    const rx = (tip ? r.tipRx * len : r.valRx) + w;
+    const ry = (tip ? r.tipRy * len : r.valRy) + w * 0.6;
     pts.push([Math.cos(a + da) * rx, Math.sin(a + da) * ry]);
   }
-  // 앞쪽 가슴 · 어깨: 두건 아래로 숨는 가슴(두 팔 사이를 채워 판정 원 앞이 비어 보이지 않게), 옆으로 어깨 가시 하나씩
-  // (앞 반쪽도 둥글지 않게). 가시 끝에서 곡선을 끊어 모서리를 뾰족하게 남긴다
-  const spike: Pt = [-0.12, 1.08];
-  const first = pts[0] ?? [0, 0];
+  return pts;
+}
+
+/** 망토: 앞은 매끈한 앞섶 · 둥근 어깨, 뒤 자락은 톱니 (끝 5개) */
+function cloakPath(m: Mat, tail: readonly Pt[]): string {
+  const first = tail[0] ?? [0, 0];
+  const last = tail[tail.length - 1] ?? [0, 0];
+  const mirror = CLOAK_FRONT.map(([x, y]): Pt => [x, -y]).reverse();
   return path(m)
-    .curve([
-      [0.46, 0],
-      [0.44, -0.26],
-      [0.38, -0.5],
-      [0.3, -0.74],
-      [0.08, -0.96],
-      [spike[0], -spike[1]],
-    ])
-    .curve([[spike[0], -spike[1]], [-0.24, -0.98], [-0.36, -1.0], first], 1, false)
-    .curve(pts, 0.2, false)
-    .curve([[-0.36, 1.0], [-0.24, 0.98], spike], 1, false)
-    .curve([spike, [0.08, 0.96], [0.3, 0.74], [0.38, 0.5], [0.44, 0.26]], 1, false)
+    .curve([...CLOAK_FRONT, first])
+    .curve(tail, 0.2, false)
+    .curve([last, ...mirror.slice(0, -1)], 1, false)
     .Z().d;
 }
 
 /**
- * 위 그림 팔 둘 (어깨 → 팔꿈치 → 손 + 발톱). over = 망토 위에 든 팔 (카메라에 가까워 밝은 소매로 망토와 갈린다),
- * alpha = 그 비침 (층이 바뀌는 사이 값). what: sleeves = 소매만, hands = 손 · 발톱만, all = 모두
+ * 위 그림 팔 둘 (팔꿈치 → 손 소매 + 발톱), 망토 위. 소매는 짙은 진홍이라 역할색 망토와 색으로 갈려 팔로 읽힌다 (안쪽 선 없이,
+ * 망토 밖으로 나온 곳에만 바깥 외곽선이 생긴다)
  */
-function topArms(
-  sk: Sketch,
-  r: MonsterRig,
-  ink: Ink,
-  over: boolean,
-  what: 'sleeves' | 'hands' | 'all',
-  alpha?: number,
-): void {
+function topArms(sk: Sketch, r: MonsterRig, ink: Ink): void {
   const C = MONSTER_COLOR;
   const U = r.upper;
-  const sleeve = over ? shade(C.hood, 0.06) : C.sleeve;
+  const paint = dome(U, C.sleeve, ink, 0, 0, 1.6);
   for (const i of [0, 1] as const) {
     const side = i === 0 ? -1 : 1;
-    const sh: Pt = [SHOULDER[0], SHOULDER[1] * side];
     const e = r.elbows[i];
     const h = r.hands[i];
-    if (what !== 'hands') {
-      const arm = path(U).capsule(sh[0], sh[1], e[0], e[1], 0.32, 0.28).d;
-      sk.part(arm, dome(U, sleeve, ink, 0, 0, 1.2), ink(OUTLINE), alpha);
-      const fore = path(U).capsule(e[0], e[1], h[0], h[1], 0.28, 0.2).d;
-      sk.part(fore, dome(U, sleeve, ink, 0, 0, 1.2), ink(OUTLINE), alpha);
-    }
-    if (what !== 'sleeves')
-      clawHand(sk, U, h[0], h[1], r.clawAng[i], r.spread * side, r.clawK, ink, sleeve, alpha);
+    // 팔꿈치 → 손: 손 쪽으로 가늘어지는 소매 하나 (어깨 쪽 윗팔은 망토 속). 끝(손)에 발톱이 붙는다
+    sk.part(path(U).capsule(e[0], e[1], h[0], h[1], 0.24, 0.16).d, paint, ink(OUTLINE), undefined, 0);
+    claws(sk, U, h[0], h[1], r.clawAng[i], r.spread * side, r.clawK, ink);
   }
+}
+
+/**
+ * 위 그림 두건 (두건 좌표: 원점 = 목, +x 앞, y ≥ 0 반쪽 — 앞 끝 → 뒤 끝). 위에서 본 물방울: 둥근 머리가 몸 앞쪽에 있고,
+ * 정면 그림의 뾰족한 두건 끝이 등 위로 넘어가 뒤로 가늘게 흐른다 (폭 ±0.44, 앞 끝 0.9, 뒤 끝 −0.1)
+ */
+const HOOD_HALF: readonly Pt[] = [
+  [0.9, 0],
+  [0.87, 0.2],
+  [0.78, 0.34],
+  [0.63, 0.42],
+  [0.44, 0.44],
+  [0.26, 0.39],
+  [0.1, 0.28],
+  [-0.03, 0.13],
+  [-0.1, 0],
+];
+
+/**
+ * 두건 그늘 원 (두건 좌표 중심 x · 반지름): 둥근 머리 옆 테두리 밖 0.07까지 번지고, 뒤로 흐르는 끝은 덮지 않는다 (뒤에 짙은
+ * 호가 생기면 작은 크기에서 몸 가운데 둘째 짙은 무늬가 되어 앞 얼굴 그늘과 다툰다). 앞은 두건 앞 끝 조금 밖까지
+ */
+const HOOD_AO: Pt = [0.43, 0.51];
+
+/** 두건 외곽 (앞 끝 → y > 0 쪽 → 뒤 끝 → y < 0 쪽, 닫힌 매끈한 곡선). 뒤 끝은 좁고 둥글게 (뾰족하게 꺾으면 둥근 옆과 함께 하트 · 방패로 읽힌다) */
+function hoodPath(m: Mat): string {
+  const lower = HOOD_HALF.slice(1, -1)
+    .map(([x, y]): Pt => [x, -y])
+    .reverse();
+  return path(m).smooth([...HOOD_HALF, ...lower], 0.8).d;
+}
+
+/** 얼굴 그늘 앞 테가 두건 앞 외곽에서 들어온 비율 (두건 안감 테 두께) · 그늘 앞 끝 x */
+const FACE_INSET = 0.95;
+const FACE_FRONT = 0.45 + ((HOOD_HALF[0]?.[0] ?? 0.9) - 0.45) * FACE_INSET;
+
+/** 두건 앞 외곽 (y ≥ 0 반쪽, 앞 끝 → x = side까지. 끝점은 외곽선 위를 이어 끊김 없이 움직인다) */
+function hoodFront(side: number): Pt[] {
+  const out: Pt[] = [];
+  for (let i = 0; i < HOOD_HALF.length; i += 1) {
+    const a = HOOD_HALF[i] ?? [0, 0];
+    const b = HOOD_HALF[i + 1] ?? a;
+    out.push(a);
+    if (b[0] < side) {
+      out.push(lerpPt(a, b, (a[0] - side) / (a[0] - b[0] || 1)));
+      break;
+    }
+  }
+  return out;
+}
+
+/**
+ * 얼굴 그늘: 두건 앞쪽 머리 폭 전체를 덮는 깊은 그늘 (앞 = 두건 안감 테 안쪽, 뒤 = 위 빛을 받는 챙 끝). 머리 폭을 다 덮어
+ * 양 끝이 두건 옆 테두리에 닿으므로 두건 속에 떠 있는 눈동자 · 입 모양으로 읽히지 않는다. part: all = 닫힌 그늘, brim = 챙 끝 선만
+ */
+function faceShape(m: Mat, r: MonsterRig, part: 'all' | 'brim'): string {
+  const b = r.brim;
+  // 앞 테: 두건 앞 외곽을 안감 두께만큼 안으로 (점 (0.45, 0) 쪽 FACE_INSET배). 챙이 뒤로 물러나면(포효) 옆 끝도 같이 물러난다
+  const rim = hoodFront(r.faceSide).map(([x, y]): Pt => [0.45 + (x - 0.45) * FACE_INSET, y * FACE_INSET]);
+  const end = rim[rim.length - 1] ?? [b, 0];
+  const brimLine: Pt[] = [
+    end,
+    [lerp(b, end[0], 0.45), end[1] * 0.62],
+    [b, 0],
+    [lerp(b, end[0], 0.45), -end[1] * 0.62],
+    [end[0], -end[1]],
+  ];
+  if (part === 'brim') return path(m).curve(brimLine).d;
+  const front = rim
+    .slice(1, -1)
+    .reverse()
+    .map(([x, y]): Pt => [x, -y]);
+  return path(m)
+    .curve([...brimLine, ...front, ...rim.slice(0, -1)], 0.9)
+    .Z().d;
 }
 
 function top(p: MonsterPose, o: ArtOptions): Drawing {
@@ -559,131 +630,100 @@ function top(p: MonsterPose, o: ArtOptions): Drawing {
   const r = monsterRig(p);
   const B = r.body;
   const N = r.neck;
+  const H = mul(N, mul(translate(r.headX, 0), scale(r.headK)));
 
-  // ── 층 1: 앞으로 내민 팔 소매 (망토 아래에서 나옴 — 망토 외곽선이 어깨를 덮는다).
-  // 타격의 발톱 자국은 게임의 베기 호 효과가 그리므로 그림에 넣지 않는다 ──
-  if (r.armsOver < 1) {
-    topArms(sk, r, ink, false, 'sleeves');
-    sk.layer();
-  }
-  // ── 층 2: 망토 · 등뼈 · (든 팔) · 두건 · 얼굴. 든 팔은 망토와 같은 층이라 망토 밖으로 나온 곳에만 굵은 외곽선이 생긴다 ──
-  sk.part(cloakPath(B, r, p.cloak), dome(B, C.cloak, ink, 0, 0, 1.1), ink(OUTLINE));
-  // 등뼈: 어두운 둥근 마디 셋 사이로 희미한 불씨 (화살촉 꼴이면 뒤를 가리켜 보이고, 뒤쪽이 밝으면 앞 단서와 헷갈린다)
-  sk.line(path(N).M(-0.5, 0).L(-0.88, 0).d, solid(ink(C.eyeGlow)), 0.05, 'round', 0.4);
-  for (const [x, k] of [
-    [-0.6, 1],
-    [-0.74, 0.85],
-    [-0.86, 0.7],
-  ] as const) {
-    sk.part(
-      path(N).circle(x, 0, 0.065 * k).d,
-      rad(N, x - 0.02, -0.02, 0.08 * k, [
-        [0, ink(mix(C.spine, C.boneShade, 0.55))],
-        [1, ink(C.spine)],
-      ]),
-      ink(OUTLINE),
-      undefined,
-      0.3,
-    );
-  }
-  // 손 · 발톱은 망토 위에 그린다: 굵은 망토 외곽선에 손이 묻히면 흰 발톱 끝만 남아 머리 옆 귀 · 뿔처럼 읽힌다
-  if (r.armsOver < 1) topArms(sk, r, ink, false, 'hands');
-  if (r.armsOver > 0) topArms(sk, r, ink, true, 'all', r.armsOver < 1 ? r.armsOver : undefined);
-  const [hx, hy] = r.head;
-  const H = mul(N, mul(translate(hx, hy), scale(r.headK)));
-  // 얼굴 (두건 속 어두운 얼굴) — 두건보다 먼저 그려 두건 챙이 뒤쪽을 덮는다. 챙 그늘 쪽(뒤)이 가장 어둡다
-  const face = path(H).ellipse(r.faceX, 0, r.faceRx, r.faceRy).d;
+  // 한 층: 망토 · 팔 · 발톱 · 두건 · 얼굴. 같은 층이라 망토 밖으로 나온 곳에만 굵은 외곽선이 생긴다.
+  // 타격의 발톱 자국은 게임의 베기 호 효과가 그리므로 그림에 넣지 않는다
+  // 망토: 가장 높은 곳(굽은 등 · 어깨 위)이 역할색으로 밝고, 뒤 자락 끝으로 갈수록 짙어진다 (몸 가운데 = 역할색)
+  const tail = tailPoints(r, p.cloak);
   sk.part(
-    face,
-    lin(H, r.faceX - r.faceRx, 0, r.faceX + r.faceRx, 0, [
-      [0, ink(C.void)],
-      [0.55, ink(C.void)],
-      [1, ink(C.face)],
+    cloakPath(B, tail),
+    rad(B, 0.15, 0, 1.45, [
+      [0, ink(tint(C.hood, 0.06))],
+      [0.34, ink(C.hood)],
+      [0.55, ink(shade(C.hood, 0.3))],
+      [0.78, ink(shade(C.hood, 0.56))],
+      [1, ink(shade(C.hood, 0.66))],
     ]),
     ink(OUTLINE),
+    undefined,
+    0.3,
   );
-  // 얼굴 앞 테: 두건 안감(짙은 진홍)이 얼굴을 감싸 어두운 얼굴이 외곽선과 갈린다 (눈이 머리 밖에 떠 보이지 않게)
-  sk.line(
-    path(H).arc(r.faceX, 0, r.faceRx - 0.018, -1.25, 1.25, true, r.faceRy - 0.018).d,
-    solid(ink(C.cloakDeep)),
-    0.035,
-    'round',
-    0.9,
+  // 자락 주름: 골마다 자락 끝 쪽에서만 뒤로 흐르는 짙은 주름 (등 가운데까지 이어 모으면 펼친 부채 · 가리비처럼 읽힌다.
+  // 둥근 마디 줄은 단추처럼 읽혀 쓰지 않는다)
+  for (let i = 2; i < tail.length - 1; i += 2) {
+    const [vx, vy] = tail[i] ?? [0, 0];
+    const sx = vx * 0.55;
+    const sy = vy * 0.62;
+    sk.line(
+      path(B)
+        .M(sx, sy)
+        .L(vx * 0.97, vy * 0.97).d,
+      lin(B, sx, sy, vx, vy, [
+        [0, ink(C.cloakDeep), 0],
+        [0.45, ink(C.cloakDeep), 0.65],
+        [1, ink(shade(C.cloakDeep, 0.4)), 1],
+      ]),
+      0.05,
+    );
+  }
+  // 두건: 둘레에 닫힌 짙은 선 대신 둥근 머리 양옆에서 어깨에 드리운 부드러운 원형 그늘로 갈라 망토에서 솟은 머리로 읽히게
+  // 하고, 뒤로 흐르는 끝은 그늘 없이 망토로 이어진다 (뒤 끝에 날카로운 그늘 선을 두르면 작은 크기에서 뒤를 가리키는 V로 읽힌다)
+  const hood = hoodPath(H);
+  sk.fill(
+    path(H).circle(HOOD_AO[0], 0, HOOD_AO[1]).d,
+    rad(H, HOOD_AO[0], 0, HOOD_AO[1], [
+      [0, ink(C.cloakDeep), 0.55],
+      [0.76, ink(C.cloakDeep), 0.5],
+      [1, ink(C.cloakDeep), 0],
+    ]),
   );
-  // 두건: 앞으로 내민 머리를 덮은 깊은 두건 (몸 가운데를 덮는 역할색). 챙이 앞으로 둥글게 튀어나와 그 앞으로 그늘진 얼굴이
-  // 초승달만큼 보인다 (머리를 앞으로 숙여 위에서도 얼굴 아래쪽이 보임). 뒤는 둥글게 (뿔 없음)
-  const hf = 0.62 - 0.3 * r.mouth;
-  const hood = path(H).smooth(
-    [
-      [hf, 0],
-      [hf - 0.03, 0.16],
-      [hf - 0.1, 0.3],
-      [0.36, 0.45],
-      [0.1, 0.52],
-      [-0.28, 0.48],
-      [-0.54, 0],
-      [-0.28, -0.48],
-      [0.1, -0.52],
-      [0.36, -0.45],
-      [hf - 0.1, -0.3],
-      [hf - 0.03, -0.16],
-    ],
-    0.55,
-  ).d;
-  sk.part(hood, dome(H, C.hood, ink, -0.06, 0, 0.78, 0.04), ink(OUTLINE), undefined, 0.3);
-  // 챙 끝 (두건 천의 두께: 짙은 진홍 안감)
-  sk.line(
-    path(H).curve([
-      [hf - 0.1, -0.28],
-      [hf - 0.035, -0.15],
-      [hf - 0.012, 0],
-      [hf - 0.035, 0.15],
-      [hf - 0.1, 0.28],
-    ]).d,
-    solid(ink(C.cloakDeep)),
-    0.035,
-    'round',
-    0.85,
+  // 팔 · 발톱은 망토 · 두건 그늘 위에 그린다 (위에서 보면 앞으로 내민 팔이 어깨 망토보다 카메라 쪽. 망토 아래에 두면 굵은
+  // 망토 외곽선에 소매가 묻혀 흰 발톱만 떠 보이고, 그늘 아래에 두면 발톱 끝이 흐려진다)
+  topArms(sk, r, ink);
+  // 위 빛을 받는 정수리(앞쪽 둥근 머리)가 가장 밝고 가장자리로 갈수록 조금 짙어진다 (둥근 머리)
+  sk.part(
+    hood,
+    rad(H, 0.42, 0, 0.56, [
+      [0, ink(tint(C.hood, 0.16))],
+      [0.55, ink(tint(C.hood, 0.04))],
+      [1, ink(shade(C.hood, 0.1))],
+    ]),
+    ink(OUTLINE),
+    undefined,
+    0,
   );
-  // 두건 등 테 (위 빛을 받는 밝은 주름)
-  sk.line(
-    path(H).curve([
-      [0.24, -0.4],
-      [hf - 0.06, -0.27],
-    ]).d,
-    solid(ink(tint(C.hood, 0.3))),
-    0.03,
-    'round',
-    0.4,
+  // 얼굴 그늘: 두건 앞쪽 머리 폭을 덮는 짙은 그늘 (챙 바로 밑은 더 깊은 그늘, 나머지는 얼굴색 #1A0B0E — VISUAL_SPEC 4.3)
+  sk.fill(
+    faceShape(H, r, 'all'),
+    lin(H, r.brim, 0, FACE_FRONT, 0, [
+      [0, ink(C.void)],
+      [0.35, ink(C.face)],
+      [1, ink(C.face)],
+    ]),
   );
-  sk.line(
-    path(H).curve([
-      [0.24, 0.4],
-      [hf - 0.06, 0.27],
-    ]).d,
-    solid(ink(tint(C.hood, 0.3))),
-    0.03,
-    'round',
-    0.4,
-  );
-  // 입 (포효: 이빨 없이 빛나는 목구멍 — 빛 번짐 → 어둠 → 가운데 붉은 빛)
+  // 챙 끝 (위 빛을 받는 천의 두께)
+  sk.line(faceShape(H, r, 'brim'), solid(ink(tint(C.hood, 0.2))), 0.03, 'round', 0.45);
+  // 입 (포효: 이빨 없이 옆으로 길게 벌린 빛나는 목구멍 — 둥근 O는 놀란 얼굴로 읽혀 쓰지 않는다). 눈보다 앞(턱 쪽)
   if (r.mouth > 0.05) {
-    const mx = r.faceX + 0.15 * r.mouth;
-    const mr = 0.08 * r.mouth + 0.02;
-    bloom(sk, H, mx, 0, mr * 2.6, ink(C.eyeGlow), 0.95 * r.mouth);
-    sk.fill(path(H).ellipse(mx, 0, mr * 0.7, mr * 1.6).d, solid(ink(C.void)));
+    const mx = FACE_FRONT - 0.13;
+    const mw = 0.04 * r.mouth + 0.01;
+    const mh = 0.16 * r.mouth + 0.03;
+    bloom(sk, H, mx, 0, mh * 1.15, ink(C.eyeGlow), 0.55 * r.mouth);
+    const maw = path(H).ellipse(mx, 0, mw, mh).d;
+    sk.fill(maw, solid(ink(C.void)));
     sk.fill(
-      path(H).ellipse(mx, 0, mr * 0.7, mr * 1.6).d,
-      rad(H, mx, 0, mr * 1.1, [
+      maw,
+      rad(H, mx, 0, mh, [
         [0, ink(tint(C.eyeGlow, 0.6)), 0.95],
-        [0.5, ink(C.eyeGlow), 0.6],
+        [0.45, ink(C.eyeGlow), 0.7],
         [1, ink(C.eyeGlow), 0],
       ]),
     );
   }
-  // 눈 (얼굴이 위를 볼수록 눈은 뒤로): 챙 그늘 속에서 앞을 향한 V
-  const eyeX = r.faceX + 0.115 - 0.1 * r.mouth;
-  for (const side of [-1, 1]) glowEye(sk, H, eyeX, side * 0.125, 0.1, p.eyes, ink, r.glow, side * 0.5);
+  // 눈: 그늘 안쪽 가운데에 모은 앞을 향한 V (그늘 양 끝에서 떨어뜨린다. 얼굴이 위를 볼수록 챙 쪽으로 물러난다)
+  const eyeX = r.brim + lerp(0.13, 0.1, r.mouth);
+  for (const side of [-1, 1]) topEye(sk, H, eyeX, side * 0.13, side * 0.75, p.eyes, ink, r.glow);
   return sk.drawing();
 }
 
@@ -1065,6 +1105,6 @@ export const MONSTER_ART: MonsterArt = {
   id: 'monster',
   top: (p, o) => top(cleanMonsterPose(p), o),
   front: (p, o) => front(cleanFrontPose(p), o),
-  // 가장 먼 반쪽 크기: 돌진 자락 1.245 (다른 동작과 겹쳐도 그 안 — 기절은 돌진을 끊는다) + 여유 (1차 시안 1.5)
+  // 가장 먼 반쪽 크기: 돌진 자락 1.245 (발톱도 그 안. 다른 동작과 겹쳐도 그 안 — 기절은 돌진을 끊는다) + 여유 (1차 시안 1.5)
   topExtent: 1.28,
 };
