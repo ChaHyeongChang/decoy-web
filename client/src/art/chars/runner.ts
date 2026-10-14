@@ -1,19 +1,21 @@
 // 러너 새 캐릭터 (캐릭터 리디자인): 깊게 눌러쓴 파랑 후드티 + 큰 운동화. 가볍고 빠른 인상.
-// 위에서 보면 어깨 판과 앞으로 나온 둥근 후드 머리가 한 볼록 덩어리로 이어진다(목 잘록함 · 평행한 옆선 · 몸 옆 둥근 혹 없이
-// 어깨에서 얼굴까지 계속 좁아지는 달걀꼴). 후드 앞 구멍 안에 살색 얼굴과 눈 둘이 보이고, 얼굴은 짙은 안감 테와 네온 챙
-// 선이 사방에서 둘러싼다('후드 속 얼굴' — 살색이 머리 끝 전체를 덮지 않는다). '얼굴 쪽 = 앞'이 바라보는 방향 단서다.
-// 후드 끝은 등 위로 늘어진 천처럼 뒤로 흐른다: 끝이 둥글고 가늘며 한쪽으로 휘고 걸음마다 출렁여 뒤를 가리키는 화살촉으로
-// 읽히지 않는다(뒤 1.0r 안이라 실루엣 밖으로는 거의 나오지 않는다).
+// 위에서 보면 바라보는 방향과 직각으로 넓은 어깨(몸통 + 양옆 팔) 앞으로 둥근 후드 머리가 나와 있다 — 위에서 본 사람처럼
+// '넓은 몸 + 앞으로 나온 머리'라 실루엣만으로 '머리 쪽 = 앞'이 읽힌다(옛 그림의 앞 돌출과 같은 언어). 후드는 뒤가 어깨 위로
+// 길게 얹힌 달걀꼴이라 목 위의 공이 아니라 어깨에 걸친 후드로 보이고, 등은 판정 원보다 납작하고 뒤로 갈수록 좁다. 바로 위에서
+// 내려다보므로 얼굴은 후드 챙 밑 그늘에 숨는다: 앞 끝은 짙은 남색 구멍 초승달, 그 뒤에 밝은 네온 챙 띠(살색 · 눈은 그리지
+// 않는다 — 작은 크기에서 '밝은 테 + 짙은 앞 끝'이 흑백에서도 앞을 가리킨다). 후드 끝은 머리 뒤에서 오른쪽 어깨뼈 위로 흐르는
+// 가늘어지는 끈이다(몸판 안이라 실루엣을 뒤로 뾰족하게 만들지 않는다. 걸음마다 S자로 출렁이고 질주 때 곧게 뒤로 편다).
+// 서 있을 때도 걸음 직전 자세(오른손 앞 · 왼손 뒤)라 좌우 대칭이 아니다. 팔은 걸음에 맞춰 앞뒤로 흔들고(앞으로 간 주먹이 머리
+// 옆으로, 뒤로 간 팔은 팔꿈치가 어깨 뒤로), 질주 때 몸을 숙여 머리가 더 나오고 팔을 크게 흔든다.
 // 정면 그림(로비 역할 카드 · 결과 화면)은 3/4 시점: 몸 · 얼굴이 화면 오른쪽(달리는 쪽)을 비스듬히 보고, 후드 끝은 왼쪽 뒤로
 // 흐른다. 네온 포인트는 후드 테두리의 밝은 파랑 선(위 · 정면)과 가슴의 » 갈매기 무늬 · 후드 끈(정면)뿐이다.
-// 색은 역할색 파랑(#3B82F6)과 그 짙은/밝은 변형, 어두운 남회색 바지 · 신발, 밝은 회색 밑창, 얼굴 피부색.
+// 색은 역할색 파랑(#3B82F6)과 그 짙은/밝은 변형, 어두운 남회색 바지 · 신발, 밝은 회색 밑창, 얼굴 피부색(정면).
 import { OUTLINE, ROLE } from '../palette';
 import {
   IDENTITY,
   Sketch,
   apply,
   linear,
-  mul,
   path,
   radial,
   rotateAbout,
@@ -21,10 +23,10 @@ import {
   solid,
   tint,
   transformDrawing,
-  translate,
   type Drawing,
   type Mat,
   type Paint,
+  type Path,
 } from './kit';
 import {
   FRONT,
@@ -66,42 +68,59 @@ const C = RUNNER_COLOR;
 type Pt = [number, number];
 
 /**
- * 위 그림 후드 (몸 반지름 배수): 머리 앞뒤 반지름 = 공통 머리 × k, 옆 반지름 = 앞뒤 × ky (조금 앞뒤로 긴 둥근 머리),
- * 머리 중심을 앞으로 내미는 정도 dx, 머리 앞 끝 한도 front(그늘 몫까지 앞 1.55r 안).
- * 꼬리(후드 끝 천): 끝 x(서기, 몸 중심 기준 — 둥근 끝까지 뒤 1.0r 안), 뿌리 · 끝 반폭, 가늘어지는 빠르기(뿌리가 머리 뒤에
- * 매끈하게 이어지는 물방울꼴), 한쪽으로 휜 정도
+ * 위 그림 몸판 (후드티 몸통 · 등): 등 둘레 기준 반지름(뒤 1.0r 안), 어깨 반폭, 가장 넓은 어깨 x, 가슴 선 x, 등 둘레 배율
+ * (각 0.62π · 0.74π · 0.86π · π — 등을 판정 원보다 납작하게, 뒤로 갈수록 좁게 해 바라보는 방향과 직각으로 넓은 어깨로
+ * 읽힌다. 둥근 등껍질이 아니라 어깨가 넓고 허리 쪽이 좁은 달리는 몸. 둥근 가드와 실루엣이 덜 겹친다)
  */
-const HOOD = {
-  k: 1.2,
-  ky: 0.85,
-  dx: 0.69,
-  front: 1.48,
-  tipX: -0.88,
-  rootW: 0.6,
-  tipW: 0.055,
-  taper: 1.6,
-  curl: 0.22,
+const PLATE = {
+  back: 0.995,
+  w: 0.92,
+  shoulderX: -0.05,
+  chest: 0.42,
+  rim: [0.97, 0.88, 0.76, 0.72],
 } as const;
-
-/** 위 그림 어깨 (몸 실루엣 뒤쪽의 둥근 판): 중심 x · 앞뒤 반지름 (옆 반지름 = 어깨 반폭). 등 끝 −0.93 */
-const BACK = { cx: -0.07, rx: 0.86 } as const;
 
 /**
- * 위 그림 얼굴 (후드 앞 구멍, 머리 반지름 배수 · 머리 중심 기준): 살색 얼굴 타원의 중심 x · 앞뒤 · 옆 반지름, 그 둘레 짙은
- * 안감 테 두께(얼굴을 사방에서 둘러싸 '후드 속 얼굴'로 읽힌다), 앞머리 술 깊이, 눈 자리(x · 옆) · 크기
+ * 위 그림 후드 머리 (어깨선 앞으로 나온 둥근 머리 — '머리 쪽 = 앞'): 반지름, 중심 x(서기), 질주 때 더 내미는 거리,
+ * 앞 끝 한도(앞 ±60° 1.55r 안), 뒤쪽 x 반지름 배수(후드 천이 머리 뒤로 부풀어 어깨 위에 얹힌다 — 앞은 반원, 뒤는 긴 반타원)
  */
-const FACE = {
-  cx: 0.42,
-  rx: 0.33,
-  ry: 0.52,
-  rim: 0.1,
-  bang: 0.1,
-  eyeX: 0.45,
-  eyeY: 0.21,
-  eye: 0.065,
+const HEAD = { r: 0.58, x: 0.92, sprint: 0.06, front: 1.53, back: 1.22 } as const;
+
+/**
+ * 후드 끝 천 (머리 뒤에서 어깨 · 등 위로 흐르는 끈, 몸판 안): 끝 자리(서기, 몸 중심 기준 — 오른쪽 어깨뼈 위), 뿌리 · 끝
+ * 반폭, 가늘어지는 빠르기(클수록 뿌리 가까이에서 좁아진다)
+ */
+const TAIL = { tipX: -0.6, tipY: 0.42, rootW: 0.22, tipW: 0.06, taper: 1.3 } as const;
+
+/**
+ * 위 그림 후드 앞 (머리 반지름 배수): 바로 위에서 보면 얼굴은 후드 챙 밑 그늘에 숨는다. 앞 끝 짙은 구멍(챙 밑 그늘) 초승달의
+ * 반각(라디안) · 가운데 두께, 그 뒤 챙 고무단(밝은 네온 띠)의 가운데 두께. 휴대폰 크기(몸 반지름 약 7px)에서 짙은 초승달
+ * 가운데가 2화소쯤 된다(0.5 × 0.58r ≈ 0.29r)
+ */
+const HOOD_FRONT = { half: 1.45, open: 0.5, brim: 0.36 } as const;
+
+/**
+ * 위 그림 팔 (몸 반지름 배수): 어깨 관절 자리(x · |y|), 서 있을 때 손(소매 끝) x, 앞 · 뒤 흔들림 폭, 손 옆 자리(|y|) · 앞으로
+ * 간 손이 안으로 드는 정도, 뒤로 간 손 · 주먹이 닿는 몸 중심 거리 한도(주먹 끝까지 뒤 1.0r 안), 주먹 반지름, 서 있을 때의
+ * 흔들림(걸음 직전 자세: 오른손 앞 · 왼손 뒤 — 좌우 대칭이 아니라 달리려는 사람으로 읽힌다), 뒤로 흔든 팔의 어깨 관절이 앞으로
+ * 오는 거리(소매가 어깨 뒤로 길게 뻗어 팔꿈치로 읽힌다 — 혹처럼 짧은 덩어리가 아니다).
+ * 팔은 몸통 옆에 붙어 어깨 너비를 이루고, 앞으로 흔든 팔은 머리 옆까지 나온다
+ */
+const ARM = {
+  jointX: -0.22,
+  jointY: 0.79,
+  x: 0.12,
+  fore: 0.48,
+  aft: 0.5,
+  y: 0.8,
+  tuck: 0.12,
+  reach: 0.8,
+  fist: 0.17,
+  ready: 0.8,
+  lift: 0.2,
 } as const;
 
-/** 후드 칠 (머리 중심에서 꼬리 끝까지 닿는 위 조명, 회전과 무관) */
+/** 위 그림 후드 머리 칠 (머리 위에서 받는 빛) */
 function hoodPaint(ink: Ink, cx: number, cy: number, reach: number): Paint {
   return radial(cx, cy, reach, [
     [0, ink(tint(C.hoodie, 0.14))],
@@ -220,12 +239,13 @@ function hoodPath(
 }
 
 /**
- * 위 그림 얼굴: 후드 앞 구멍(짙은 안감)이 살색 얼굴을 사방에서 둘러싼다 — 살색이 머리 끝 전체를 덮지 않고 짙은 테 안에 든
- * '후드 속 얼굴'로 읽힌다. 휴대폰 크기(몸 반지름 약 7px)에서 '앞 끝에 짙은 테로 둘러싼 밝은 살색'이 바라보는 방향 단서다.
- * 얼굴 뒤쪽은 앞머리 술 둘이 부드러운 물결로 내려오고, 구멍 테두리(후드 챙)에 네온 선. bow = 고개 숙임 (질주 · 수감: 위에서
- * 얼굴이 조금 덜 보인다), glow = 네온 밝기 (질주)
+ * 위 그림 후드 앞 (얼굴 자리): 바로 위에서 보면 얼굴은 후드 챙 밑 그늘에 숨는다 — 후드 앞 끝은 짙은 남색 구멍(챙 밑
+ * 그늘) 초승달로 끝나고, 그 뒤 챙 테두리에 밝은 네온 고무단이 둘린다. 살색 · 눈은 그리지 않아 실루엣의 앞 끝은 늘
+ * 어둡다. 휴대폰 크기(몸 반지름 약 7px)에서는 '밝은 테 + 짙은 앞 끝'이 흑백에서도 바라보는 방향 단서다 (가드 방패 호 ·
+ * 공통 생존자 가리개처럼 명도 대비로 앞을 표시). bow = 고개 숙임(질주 · 수감: 정수리가 앞으로 와 구멍이 얇아진다),
+ * glow = 네온 밝기(질주)
  */
-function topFace(
+function topHoodFront(
   sk: Sketch,
   ink: Ink,
   hx: number,
@@ -235,112 +255,123 @@ function topFace(
   glow: number,
   m: Mat,
 ): void {
-  const k = 1 - 0.12 * bow;
-  // 숙이면 얼굴이 앞쪽으로 좁아진다 (앞 끝은 그대로)
-  const rx = R * FACE.rx * k;
-  const cx = hx + R * (FACE.cx + FACE.rx * (1 - k));
-  const ry = R * FACE.ry;
-  const rim = R * FACE.rim;
-  // 1) 구멍 (후드 안감 · 챙 그늘: 짙은 남색 — 머리카락보다 후드 그늘로 읽힌다)
-  const hole = path(m).ellipse(cx, hy, rx + rim, ry + rim).d;
-  sk.fill(hole, solid(ink(shade(C.deep, 0.5))));
-  // 2) 살색 얼굴. 빛은 위에서: 가장자리 쪽이 조금 어둡다
+  const F = HOOD_FRONT;
+  const t = R * F.open * (1 - 0.3 * bow);
+  // 챙 곡선 (머리 앞 끝에서 d 뒤): 머리 원 앞쪽 반각 half의 두 점을 잇는 반타원. d가 작으면 앞으로 볼록, 커서 x 반지름이
+  // 0 아래로 가면 뒤로 볼록해진다 (두 곡선 사이 띠는 양 끝이 머리 원에서 0으로 가늘어져 외곽선 밖으로 나가지 않는다)
+  const cx = hx + R * Math.cos(F.half);
+  const ry = R * Math.sin(F.half);
+  const rxAt = (d: number): number => R * (1 - Math.cos(F.half)) - d;
+  const brimEdge = (p: Path, d: number, fwd: boolean, move: boolean): Path =>
+    fwd
+      ? p.arc(cx, hy, rxAt(d), Math.PI / 2, -Math.PI / 2, move, ry)
+      : p.arc(cx, hy, rxAt(d), -Math.PI / 2, Math.PI / 2, move, ry);
+  // 1) 짙은 구멍 (챙 밑 그늘: 머리 원 앞 호 + 챙 앞 곡선). 가운데 앞(그늘 속 얼굴 자리)이 조금 덜 어둡고 양옆 구석이 가장
+  //    어둡다 — 살색은 쓰지 않는다(앞 끝이 살색이면 작은 크기에서 어색한 모양으로 읽힐 수 있다)
+  const [ox, oy] = apply(m, hx + R - t * 0.5, hy);
   sk.fill(
-    path(m).ellipse(cx, hy, rx, ry).d,
-    radial(cx + rx * 0.15, hy, Math.max(rx, ry) * 1.05, [
-      [0, ink(tint(MAT.skin, 0.12))],
-      [0.6, ink(MAT.skin)],
-      [1, ink(MAT.skinShade)],
+    brimEdge(path(m).arc(hx, hy, R, -F.half, F.half), t, true, false).Z().d,
+    radial(ox, oy, R * 0.9, [
+      [0, ink(shade(C.deep, 0.1))],
+      [1, ink(shade(C.deep, 0.55))],
     ]),
   );
-  // 3) 앞머리: 얼굴 뒤 가장자리(뒤 호)에서 술 둘이 앞으로 부드럽게 내려온 물결 (안감과 같은 짙은 남색이라 챙 그늘과 한
-  //    덩어리 — 머리카락보다 후드 챙 그늘로 읽힌다)
-  const side = Math.PI * 0.42;
-  const sy = ry * Math.sin(side);
-  const wave: Pt[] = [];
-  for (let i = 0; i <= 12; i += 1) {
-    const t = i / 12;
-    const y = -sy + 2 * sy * t;
-    const back = cx - rx * Math.sqrt(Math.max(0, 1 - (y / ry) ** 2));
-    const dip = R * FACE.bang * (0.75 + 0.25 * Math.sin(2 * Math.PI * t) ** 2) * Math.sin(Math.PI * t) ** 0.7;
-    wave.push([back + dip, hy + y]);
-  }
-  sk.fill(
-    path(m)
-      .arc(cx, hy, rx, Math.PI - side, Math.PI + side, true, ry)
-      .curve(wave, 1, false)
-      .Z().d,
-    solid(ink(shade(C.deep, 0.5))),
-  );
-  // 4) 눈 둘
-  for (const s of [-1, 1])
-    sk.fill(
-      path(m).ellipse(hx + R * FACE.eyeX, hy + s * R * FACE.eyeY, R * FACE.eye * 0.8, R * FACE.eye).d,
-      solid(ink(MAT.eye)),
-    );
-  // 5) 후드 챙 네온 선 (구멍 테두리). 질주 때 밝아진다
-  sk.line(hole, solid(ink(tint(C.neon, 0.25))), 0.06, 'round', 0.85 + 0.15 * glow);
+  // 2) 챙 고무단 (네온 띠 + 가운데 밝은 결, 뒤 가장자리에 가는 짙은 선). 띠는 선이 아니라 칠이라 양 끝이 머리 원 안에서
+  //    가늘어진다. 질주 때 밝아진다
+  const w = R * F.brim;
+  const band = (d0: number, d1: number): string =>
+    brimEdge(brimEdge(path(m), d0, true, true), d1, false, false).Z().d;
+  sk.fill(band(t, t + w), solid(ink(tint(C.neon, 0.1))), 0.9 + 0.1 * glow);
+  sk.fill(band(t + w * 0.25, t + w * 0.6), solid(ink(tint(C.neon, 0.55))), 0.8 + 0.2 * glow);
+  sk.line(brimEdge(path(m), t + w, true, true).d, solid(ink(shade(C.hoodie, 0.3))), 0.025);
 }
 
 // ───────────────────────── 위 그림 ─────────────────────────
 
-/** 타원 위 점 n개 (변환 m) */
-function ovalPts(cx: number, cy: number, rx: number, ry: number, m: Mat, n = 48): Pt[] {
-  return Array.from({ length: n }, (_, i) => {
-    const t = (i / n) * Math.PI * 2;
-    return apply(m, cx + rx * Math.cos(t), cy + ry * Math.sin(t));
-  });
+/**
+ * 몸판 윤곽 점 (위쪽 반을 그려 아래로 접는다): 머리 밑 → 머리 옆에 붙는 목(neck, 머리 원 위 점) → 바라보는 방향과 직각으로
+ * 곧게 뻗은 가슴 · 어깨 선(x = chest, 머리와 어깨 사이 오목한 홈은 거의 직각 — 비스듬히 처진 병 어깨가 아니다) → 둥근 어깨
+ * 모서리 → 가장 넓은 어깨(sx, w) → 둥근 등(각 0.62π · 0.74π · 0.86π · π에서 몸 중심 거리 back × rim).
+ * k = 크기 배율 (수감 · 피격 때 움츠림)
+ */
+function platePts(
+  back: number,
+  w: number,
+  sx: number,
+  chest: number,
+  neck: Pt,
+  rim: readonly number[],
+  k: number,
+): Pt[] {
+  const arc = [0.62, 0.74, 0.86].map((t, i): Pt => [
+    back * (rim[i] ?? 1) * Math.cos(Math.PI * t),
+    back * (rim[i] ?? 1) * Math.sin(Math.PI * t),
+  ]);
+  const half: Pt[] = [
+    [neck[0] + 0.1, 0],
+    neck,
+    [chest, neck[1] + 0.06],
+    [chest - 0.02, w * 0.72],
+    [chest - 0.14, w * 0.93],
+    [sx, w],
+    ...arc,
+    [-back * (rim[3] ?? 1), 0],
+  ];
+  const all = [
+    ...half,
+    ...half
+      .slice(1, -1)
+      .reverse()
+      .map(([x, y]): Pt => [x, -y]),
+  ];
+  return all.map(([x, y]): Pt => [x * k, y * k]);
 }
 
-/** 점들의 볼록 껍질 (단조 사슬, 한 바퀴 순서) */
-function convexHull(pts: readonly Pt[]): Pt[] {
-  const p = [...pts].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-  const cross = (o: Pt, a: Pt, b: Pt): number =>
-    (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
-  const half = (list: readonly Pt[]): Pt[] => {
-    const out: Pt[] = [];
-    for (const q of list) {
-      while (out.length >= 2 && cross(out[out.length - 2] ?? q, out[out.length - 1] ?? q, q) <= 0) out.pop();
-      out.push(q);
-    }
-    return out.slice(0, -1);
-  };
-  return [...half(p), ...half([...p].reverse())];
-}
-
-/** 닫힌 다각형을 둘레 길이로 고르게 n점 다시 뽑기 (긴 접선 변도 점이 고르게 놓여 매끄러운 곡선이 넘치지 않는다) */
-function resample(poly: readonly Pt[], n: number): Pt[] {
-  const m = poly.length;
-  const at = (i: number): Pt => poly[i % m] ?? [0, 0];
-  const lens = poly.map((a, i) => Math.hypot(at(i + 1)[0] - a[0], at(i + 1)[1] - a[1]));
-  const total = lens.reduce((s, v) => s + v, 0);
-  const out: Pt[] = [];
-  let seg = 0;
-  let acc = 0;
-  for (let k = 0; k < n; k += 1) {
-    const want = (k / n) * total;
-    while (seg < m - 1 && acc + (lens[seg] ?? 0) < want) {
-      acc += lens[seg] ?? 0;
-      seg += 1;
-    }
-    const l = lens[seg] || 1;
-    const u = Math.min(1, Math.max(0, (want - acc) / l));
-    const a = at(seg);
-    const b = at(seg + 1);
-    out.push([a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u]);
-  }
-  return out;
-}
-
-/** 위 그림 팔 (어깨 → 손 캡슐 + 손): 공통 topArm과 같은 자리, 칠만 밝은 돔 */
-function topSleeve(sk: Sketch, r: TopRig, side: 0 | 1, sleeve: number, glove: number, ink: Ink): void {
-  const [sx, sy] = r.shoulders[side];
+/**
+ * 위 그림 팔 하나 (몸판 위에 얹어 가는 안쪽 선으로만 갈린다): 어깨 관절 → 손(소매 끝) 캡슐 + 소매 끝 밑의 주먹. 흔들지
+ * 않으면 몸통 옆에 붙은 팔 윗부분(어깨 너비를 이룬다), 흔들면 앞뒤로 늘어나 팔치기가 보인다. v = 주먹이 드러나는 정도
+ * (0 = 작아져 소매 끝에 숨는다 — 내린 손은 위에서 보이지 않는다), back = 뒤로 흔든 정도(0~1). 주먹 중심은 뒤쪽이면 몸
+ * 중심 reach 안으로 당긴다
+ */
+function topArm(
+  sk: Sketch,
+  r: TopRig,
+  side: 0 | 1,
+  v: number,
+  back: number,
+  sleeve: number,
+  glove: number,
+  ink: Ink,
+  T: Mat,
+): void {
+  const sign = side === 0 ? -1 : 1;
+  // 뒤로 흔든 팔(back > 0)은 어깨 관절이 앞으로 와 소매가 어깨 뒤로 길게 뻗는다 (팔꿈치가 등 옆으로 나온 팔치기)
+  const jx = ARM.jointX + ARM.lift * back;
+  const jy = sign * ARM.jointY * (r.halfW / PLATE.w);
   const [hx, hy] = r.hands[side];
-  const m = rotateAbout(r.twist, 0, 0);
-  const arm = path(m).with(translate(r.ox, 0)).capsule(sx, sy, hx, hy, 0.32, 0.28).d;
-  sk.part(arm, brightDome(sleeve, ink, 1.1), ink(OUTLINE));
-  const hand = path(m).with(translate(r.ox, 0)).circle(hx, hy, TOP.handR).d;
-  sk.part(hand, solid(ink(glove)), ink(OUTLINE));
+  const d = Math.hypot(hx - jx, hy - jy) || 1;
+  const off = 0.03 + 0.07 * v;
+  let fx = hx + ((hx - jx) / d) * off;
+  let fy = hy + ((hy - jy) / d) * off;
+  const fd = Math.hypot(fx, fy);
+  if (fx < 0 && fd > ARM.reach) {
+    fx = (fx * ARM.reach) / fd;
+    fy = (fy * ARM.reach) / fd;
+  }
+  sk.part(path(T).circle(fx, fy, ARM.fist * (0.6 + 0.4 * v)).d, solid(ink(glove)), ink(OUTLINE), 1, 0.3);
+  // 소매 칠: 팔 가운데가 밝은 둥근 덩어리 (몸판과 같은 색이라도 팔로 읽힌다)
+  const [mx, my] = apply(T, (jx + hx) / 2, (jy + hy) / 2);
+  sk.part(
+    path(T).capsule(jx, jy, hx, hy, 0.34, 0.27).d,
+    radial(mx, my, Math.max(0.3, d * 0.6), [
+      [0, ink(tint(sleeve, 0.14))],
+      [0.6, ink(sleeve)],
+      [1, ink(shade(sleeve, 0.14))],
+    ]),
+    ink(OUTLINE),
+    1,
+    0.3,
+  );
 }
 
 function top(p: SurvivorPose, o: ArtOptions): Drawing {
@@ -350,91 +381,99 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
   const a = p.mode === 'free' ? p.action : 0;
   const hit = p.hit;
   const captive = p.mode === 'captive' ? 1 : 0;
-  // 어깨: 공통 체형보다 조금 좁다(옆으로 넓은 공통 생존자와 실루엣이 갈리게). 질주 때 어깨를 움츠린다
-  const r = topRig(p, TOP.halfW * (0.85 - 0.06 * a));
-  const s = r.s;
-  // 후드 머리: 어깨 앞으로 나온 둥근 머리. 질주 때 고개를 숙이고(조금 작아지고 앞으로) 수감 때 움츠러든다.
-  // 피격 때 고개가 뒤로 밀리며 옆으로 꺾인다(몸 중심 기준 회전 — 거리는 그대로라 크기 기준에 걸리지 않는다).
-  // 앞 끝은 늘 front 안 (수감 · 구조 중 자세가 머리를 앞으로 내밀어도)
-  const R = r.headR * HOOD.k * (1 - 0.05 * a) * (1 - 0.08 * captive);
-  const hx = Math.min(HOOD.front - R, r.head[0] + HOOD.dx + 0.05 * a - 0.04 * hit);
-  const hy = r.head[1];
-  const H = rotateAbout(0.22 * hit, 0, 0);
-  // 머리 · 얼굴 · 꼬리는 원으로 그려 옆(y)만 ky배로 줄이고(조금 앞뒤로 긴 머리) 피격 회전을 곱한다
-  const E: Mat = mul(H, [1, 0, 0, HOOD.ky, 0, hy * (1 - HOOD.ky)]);
+  const reach = p.mode === 'reach' ? 1 : 0;
+  const r = topRig(p, PLATE.w);
+  // 서 있을 때(걸음 0)의 흔들림: 걸음 직전 자세(ready), 질주면 끝까지 (+ = 오른손 앞 · 왼손 뒤). 걸을수록 걸음 흔들림으로 넘어간다
+  const bias = p.mode === 'free' ? (1 - p.stride) * (ARM.ready + (1 - ARM.ready) * a) : 0;
+  // 몸판 · 팔: 걸음 비틀림 + 걸음 직전 자세의 반만큼 (앞으로 든 손 쪽 어깨가 조금 앞으로). 피격 젖힘으로는 옮기지 않는다(어깨
+  // 옆 · 팔 끝이 뒤 1.0r에 거의 닿아 옮기면 넘는다 — 피격은 젖히는 머리와 움츠린 몸판이 보인다). 머리는 비틀지 않는다(달릴 때
+  // 고개는 앞을 본다)
+  const P = rotateAbout(r.twist - 0.5 * TOP.twist * bias, 0, 0);
+  // 후드 머리: 어깨선 앞으로 나온 둥근 머리. 질주 때 몸을 숙여 더 앞으로, 구조 중 자물쇠 쪽으로 조금, 수감 때 움츠러들고,
+  // 피격 때 뒤로 밀리며 옆으로 꺾인다(몸 중심 기준 회전 — 거리는 그대로라 크기 기준에 걸리지 않는다). 앞 끝은 늘 front 안
+  const R = HEAD.r * (1 - 0.04 * a) * (1 - 0.06 * captive);
+  const hx = Math.min(HEAD.front - R, HEAD.x + HEAD.sprint * a + 0.02 * reach - 0.22 * captive - 0.16 * hit);
+  const hy = 0;
+  const E = rotateAbout(0.22 * hit, 0, 0);
+  // 주먹이 드러나는 정도 (팔마다): 앞으로 흔든 만큼, 구조 · 수감 중에는 다 드러난다
+  const fist: [number, number] = p.mode === 'free' ? [0, 0] : [1, 1];
+  // 뒤로 흔든 정도 (팔마다, 0~1)
+  const aft: [number, number] = [0, 0];
   if (p.mode === 'free') {
+    // 팔치기: 흔들림 sw (+ = 오른손 앞 · 왼손 뒤, 공통 뼈대처럼 같은 쪽 발과 엇갈린다). 질주는 크게 흔들고, 서 있어도
+    // (걸음 0) 오른손 앞 · 왼손 뒤로 든다(bias). 피격 때 줄어든다
+    const sw = (r.s + bias) * (1 + 0.3 * a) * (1 - 0.6 * hit);
     for (const side of [0, 1] as const) {
       const sign = side === 0 ? -1 : 1;
-      // 서기 · 걷기: 손은 몸판 안에 묻힌다 (몸 옆에 둥근 혹이 생기지 않는다). 걸을 때 앞으로 흔든 손만 머리 옆으로 살짝
-      // 나와 걸음이 보인다 (앞 ±60° · 옆 1.05r 안)
-      const fw = Math.max(0, sign * s);
-      const walkHand: Pt = [0.1 + 0.34 * sign * s, sign * (0.58 + 0.14 * fw)];
-      // 질주: 팔을 접어 앞뒤로 엇갈리게 든다 (걸음 위상과 상관없이 왼손 앞 · 오른손 뒤, 걸음에 따라 조금 흔든다).
-      // 앞으로 든 주먹은 머리 옆으로 나오고(몸통 비틀림을 빼 옆 1.05r 안), 뒤로 간 손은 피격 젖힘까지 뒤 1.0r 안
-      const sprint: Pt =
-        side === 0 ? [0.44 - 0.07 * s, -0.95 * r.halfW] : [-0.26 - 0.08 * s - r.ox, 0.84 * r.halfW];
-      r.hands[side] = [
-        walkHand[0] + (sprint[0] - walkHand[0]) * a,
-        walkHand[1] + (sprint[1] - walkHand[1]) * a,
+      const f = sign * sw;
+      fist[side] = Math.min(1, Math.max(0, f) * 1.5);
+      aft[side] = Math.min(1, Math.max(0, -f));
+      const hand: Pt = [
+        ARM.x + (f > 0 ? ARM.fore : ARM.aft) * f,
+        sign * (ARM.y - ARM.tuck * Math.max(0, f) - 0.04 * Math.max(0, -f)),
       ];
+      // 뒤로 간 손은 몸 중심에서 reach 안으로 당긴다 (주먹 끝 · 소매 끝이 뒤 1.0r 안)
+      const d = Math.hypot(hand[0], hand[1]);
+      r.hands[side] =
+        hand[0] < 0 && d > ARM.reach ? [(hand[0] * ARM.reach) / d, (hand[1] * ARM.reach) / d] : hand;
     }
   }
-  // 구조 중: 두 손이 얼굴 양옆으로 나와 자물쇠를 만진다 (손 끝은 앞 ±60° 안 · 1.55r 안)
-  if (p.mode === 'reach') {
-    const reachX = hx + R * 0.55;
-    const reachY = R * HOOD.ky + 0.02;
+  // 구조 중: 두 손이 머리 양옆으로 나와 자물쇠를 만진다 (손 끝은 앞 ±60° 안 · 1.55r 안)
+  if (p.mode === 'reach')
     r.hands = [
-      [reachX, -reachY],
-      [reachX, reachY],
+      [hx + R * 0.25, -(R + 0.12)],
+      [hx + R * 0.25, R + 0.12],
     ];
-  }
-  // 발은 그리지 않는다: 위에서 보면 몸판(어깨 · 후드 밑자락)에 모두 가려진다
-  // 1) 팔 (소매 + 장갑): 몸판 밑에 깔아 몸 밖으로 나온 부분(앞으로 든 손 · 구조 중 손)만 보인다.
-  //    위 그림의 장갑은 짙은 파랑: 남회색이면 몸 옆에 바닥색 혹이 붙어 작은 크기에서 뾰족한 점이 된다.
-  //    어깨 · 소매는 후드보다 한 단 짙게: 밝은 후드 머리가 어깨 위에 떠 보여 '머리 + 어깨'로 읽힌다(흑백에서도 앞이 밝다)
-  const body = shade(C.hoodie, 0.14);
-  const topGlove = shade(C.hoodie, 0.3);
-  topSleeve(sk, r, 0, body, topGlove, ink);
-  topSleeve(sk, r, 1, body, topGlove, ink);
-  // 2) 몸판 (후드티 어깨 + 후드 밑자락): 어깨 판과 후드 머리를 한 볼록 껍질로 잇는다 — 목 잘록함 · 평행한 옆선 없이
-  //    어깨에서 얼굴까지 계속 좁아지는 둥근 달걀꼴. 피격 젖힘(ox, 음수)만큼 등을 줄여 젖혀도 뒤 1.0r 안에 든다
-  const T = mul(rotateAbout(r.twist, 0, 0), translate(r.ox, 0));
-  const hull = convexHull([
-    ...ovalPts(BACK.cx, 0, BACK.rx + r.ox, r.halfW, T),
-    ...ovalPts(hx, hy, R * 0.97, R * 0.97, E),
-  ]);
-  sk.part(path().smooth(resample(hull, 40), 1).d, brightDome(body, ink, r.halfW * 1.15), ink(OUTLINE));
-  // 3) 후드: 둥근 머리 + 등 위로 흐르는 천 끝. 끝 x는 서기 −0.88, 피격 때 몸 쪽으로 눌려 짧아지고 수감 때 움츠러든다.
-  //    서 있을 때도 한쪽으로 살짝 휘고, 걸음마다 출렁인다(뿌리 → 끝으로 갈수록 크고 늦게). 질주 때 곧고 가늘게 편다
-  const tipX = HOOD.tipX + 0.16 * hit + 0.14 * captive;
-  const wave = p.stride * (1 - 0.75 * a);
-  const curl = HOOD.curl * (1 - a);
-  const ph = p.walk + 0.9;
-  const lat = (k: number, amp: number): number =>
-    hy + curl * Math.sin(Math.PI * 0.8 * k) + amp * wave * Math.sin(ph - 2.2 * k);
-  const root: Pt = [hx - 0.3 * R, hy];
-  const sp: Spine = {
-    a: root,
-    b: [root[0] + (tipX - root[0]) / 3, lat(1 / 3, 0.04)],
-    c: [root[0] + ((tipX - root[0]) * 2) / 3, lat(2 / 3, 0.08)],
-    d: [tipX, lat(1, 0.11)],
-  };
-  const w0 = HOOD.rootW * (1 - 0.25 * a);
-  const w1 = HOOD.tipW * (1 - 0.2 * a) + 0.03 * hit;
-  // 어깨 위에 드리운 그늘(칠만) 위에 얹어 작은 크기에서도 후드가 어깨와 갈린다
-  sk.fill(
-    hoodPath(hx, hy, R + 0.025, sp, w0 + 0.025, w1 + 0.025, E, HOOD.taper),
-    solid(ink(shade(C.deep, 0.4))),
-    0.15,
-  );
+  const body = shade(C.hoodie, 0.06);
+  // 위 그림의 주먹은 짙은 파랑 (남회색이면 작은 크기에서 몸 옆에 바닥색 혹이 붙는다)
+  const topGlove = shade(C.hoodie, 0.32);
+  // 1) 몸판 (후드티 몸통 · 등). 앞 가운데는 짧은 목으로 머리 밑에 이어진다. 수감 · 피격 때 조금 움츠린다
+  const pk = 1 - 0.08 * captive - 0.04 * hit;
+  // 목: 머리 원 뒤쪽 옆(±125°)에 붙는다
+  const neck: Pt = [(hx - 0.57 * R) / pk, (0.82 * R) / pk];
   sk.part(
-    hoodPath(hx, hy, R, sp, w0, w1, E, HOOD.taper),
-    hoodPaint(ink, hx - 0.06, hy, hx - tipX + 0.05),
+    path(P).smooth(platePts(PLATE.back, r.halfW, PLATE.shoulderX, PLATE.chest, neck, PLATE.rim, pk), 1).d,
+    brightDome(body, ink, 1.1),
     ink(OUTLINE),
     1,
     0.2,
   );
-  // 천 끝 등줄 (머리 뒤에서 끝으로 흐르는 밝은 접힌 등: 위에서 빛을 받아 천이 바람에 날리는 결로 읽힌다)
+  // 2) 팔 (몸판 위): 서 있을 때 걸음 직전 자세, 걸으면 팔치기. 앞으로 간 손 · 구조 · 수감 때 주먹이 드러난다
+  for (const side of [0, 1] as const) topArm(sk, r, side, fist[side], aft[side], body, topGlove, ink, P);
+  // 3) 후드 끝 천: 머리 뒤에서 어깨 · 등 위로 흐르는 가늘어지는 끈. 가운데가 아니라 한쪽(오른쪽)으로 휘고 걸음마다
+  //    출렁인다(뿌리 → 끝으로 갈수록 크고 늦게 — S자). 질주 때 곧게 뒤로 편다. 끝은 둥글고 몸판 안이라 실루엣은
+  //    뒤로 뾰족해지지 않는다. 피격 때 몸 쪽으로 눌리고 수감 때 움츠러든다
+  const tipX = TAIL.tipX - 0.08 * a + 0.1 * hit + 0.1 * captive;
+  const tipY = TAIL.tipY * (1 - 0.55 * a);
+  const wave = p.stride * (1 - 0.7 * a);
+  const ph = p.walk + 0.9;
+  const sway = (k: number, amp: number): number => amp * wave * Math.sin(ph - 2.2 * k);
+  const root: Pt = [hx - 0.35 * R, hy + 0.06];
+  const sp: Spine = {
+    a: root,
+    b: [root[0] + (tipX - root[0]) * 0.3, root[1] + (tipY - root[1]) * 0.62 + sway(1 / 3, 0.04)],
+    c: [root[0] + (tipX - root[0]) * 0.66, tipY * 1.08 + sway(2 / 3, 0.09)],
+    d: [tipX, tipY + sway(1, 0.13)],
+  };
+  const w0 = TAIL.rootW * (1 - 0.2 * a);
+  const w1 = TAIL.tipW * (1 - 0.2 * a);
+  // 끈은 외곽선 없이 칠 · 가는 테두리만: 작은 크기에서 몸판을 둘로 가르는 검은 선이 생기지 않는다(판 하나로 읽힌다).
+  // hoodPath의 원은 여기서 끈 뿌리의 둥근 끝(반지름 = 뿌리 반폭)이고, 뿌리는 머리 밑에 숨긴다
+  const tail = (grow: number, dx: number): string =>
+    hoodPath(root[0] + dx, root[1], w0 + grow, sp, w0 + grow, w1 + grow, E, TAIL.taper);
+  sk.fill(tail(0.03, -0.04), solid(ink(shade(C.deep, 0.4))), 0.18);
+  // 칠 좌표도 경로와 같이 E로 옮긴다 (피격 때 칠이 끈에서 어긋나지 않게)
+  const [l0x, l0y] = apply(E, root[0], 0);
+  const [l1x, l1y] = apply(E, tipX, 0);
+  sk.fill(
+    tail(0, 0),
+    linear(l0x, l0y, l1x, l1y, [
+      [0, ink(tint(C.hoodie, 0.1))],
+      [1, ink(C.hoodie)],
+    ]),
+  );
+  sk.line(tail(0, 0), solid(ink(shade(C.hoodie, 0.3))), 0.025);
+  // 천 끝 등줄 (끈 가운데 밝은 접힌 결: 위에서 빛을 받아 바람에 날리는 천으로 읽힌다)
   sk.line(
     path(E).curve(
       [0.3, 0.5, 0.7, 0.88].map((t): Pt => {
@@ -442,11 +481,33 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
         return [q.x, q.y];
       }),
     ).d,
-    solid(ink(tint(C.hoodie, 0.15))),
-    0.045,
+    solid(ink(tint(C.hoodie, 0.28))),
+    0.035,
   );
-  // 4) 얼굴 (후드 앞 구멍). 질주 · 수감 때 고개를 숙여 얼굴이 조금 덜 보이고, 질주 때 네온이 밝아진다
-  topFace(sk, ink, hx, hy, R, Math.max(a, captive), a, E);
+  // 4) 후드 머리: 어깨 위에 드리운 그늘(칠만) 위에 얹는다. 후드는 어깨보다 한 단 밝다(흑백에서도 머리가 어깨보다 밝다).
+  //    윤곽은 앞이 반원, 뒤가 어깨 위로 길게 얹힌 반타원 (머리가 목 위의 공이 아니라 어깨에 걸친 후드로 읽힌다)
+  const hood = (dx: number, grow: number): string =>
+    path(E)
+      .arc(hx + dx, hy, R + grow, -Math.PI / 2, Math.PI / 2)
+      .arc(hx + dx, hy, (R + grow) * HEAD.back, Math.PI / 2, Math.PI * 1.5, false, R + grow)
+      .Z().d;
+  sk.fill(hood(-0.04, 0.03), solid(ink(shade(C.deep, 0.4))), 0.12);
+  // 칠 중심도 경로와 같이 E로 옮긴다 (피격 때 하이라이트가 머리에서 어긋나지 않게)
+  // (빛 중심은 앞뒤로 긴 후드 가운데 쪽으로 조금 뒤: 어깨 위에 얹힌 뒤쪽이 너무 어두워지지 않게 — 몸 가운데 역할색)
+  const [gx, gy] = apply(E, hx - R * 0.25, hy - R * 0.1);
+  sk.part(hood(0, 0), hoodPaint(ink, gx, gy, R * 1.45), ink(OUTLINE), 1, 0.3);
+  // 정수리 솔기 (후드 가운데 접힌 선: 챙에서 어깨 위에 얹힌 후드 뒤 끝 가까이까지)
+  sk.line(
+    path(E).curve([
+      [hx + R * 0.2, hy],
+      [hx - R * 0.45, hy + 0.01],
+      [hx - R * 1.1, hy + 0.04],
+    ]).d,
+    solid(ink(shade(C.hoodie, 0.16))),
+    0.03,
+  );
+  // 5) 후드 앞 (짙은 구멍 + 챙). 질주 · 수감 때 고개를 숙여 구멍이 얇아지고, 질주 때 네온이 밝아진다
+  topHoodFront(sk, ink, hx, hy, R, Math.max(a, captive), a, E);
   return sk.drawing();
 }
 
