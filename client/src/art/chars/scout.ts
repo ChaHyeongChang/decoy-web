@@ -1,29 +1,512 @@
-// scout 새 캐릭터 (캐릭터 리디자인) — 자리 잡기용 임시 그림. 실제 디자인으로 바꾼다.
-import { OUTLINE, ROLE } from '../palette';
-import { Sketch, path, solid, type Drawing } from './kit';
-import { domePaint, frontClothPaint, frontTorsoPath, inkFor, topArm, topRig, topShoe, topTorsoPath } from './survivorBase';
+// 스카우트 새 캐릭터 (캐릭터 리디자인): 초록 야전 재킷 + 쌍안 렌즈 고글 + 접이식 망원경 + 안테나 달린 작은 배낭.
+// 멀리 보는 정찰병이라는 인상. 위에서 보면 둥근 초록 모자 앞으로 튀어나온 고글 렌즈 통 둘(옛 렌즈 모티프)과,
+// 몸 오른쪽에서 앞으로 길게 뻗은 망원경 막대(비대칭)가 실루엣의 핵심이다. 망원경은 층을 나눠(sk.layer) 굵은 외곽선이
+// 몸 위에 그어지게 해서, 눈에 댄 자세에서도 머리와 갈린다.
+// 네온 포인트는 고글 렌즈 빛 · 망원경 대물렌즈 빛 · 안테나 끝 점뿐이다(밝은 초록, 글자용 역할색).
+// 색은 역할색 초록(#22C55E)과 그 짙은/밝은 변형, 어두운 남회색 배낭 · 바지 · 장화 · 고글 테, 연한 회청색 망원경 통.
+import { OUTLINE, ROLE, ROLE_TEXT } from '../palette';
+import {
+  Sketch,
+  apply,
+  linear,
+  mix,
+  mul,
+  path,
+  radial,
+  rotate,
+  rotateAbout,
+  shade,
+  solid,
+  tint,
+  translate,
+  type Drawing,
+  type Mat,
+  type Paint,
+} from './kit';
+import {
+  FRONT,
+  MAT,
+  domePaint,
+  frontArm,
+  frontBreath,
+  frontClothPaint,
+  frontLegs,
+  frontTorsoPath,
+  inkFor,
+  topRig,
+  topShoe,
+  topTorsoPath,
+  type Ink,
+} from './survivorBase';
 import type { ArtOptions, FrontPose, SurvivorArt, SurvivorPose } from './types';
 
-const BASE = ROLE.scout;
+/** 스카우트 색 */
+export const SCOUT_COLOR = {
+  jacket: ROLE.scout,
+  /** 짙은 초록 (그늘 · 배낭 덮개 · 목깃) */
+  deep: 0x14532d,
+  /** 네온 (밝은 초록, 글자용 역할색) */
+  neon: ROLE_TEXT.scout,
+  /** 망원경 통 (연한 회청색 금속, 초록 기운) */
+  steel: mix(0x94a3b8, ROLE.scout, 0.12),
+  /** 고글 테 · 망원경 접안부 (어두운 금속) */
+  gunmetal: 0x2b3646,
+  /** 배낭 (짙은 초록 — 작은 크기에서 등 덩어리가 끊기지 않게, 재킷보다 두 단 어둡게) */
+  pack: shade(ROLE.scout, 0.45),
+  strap: 0x1b2430,
+  pants: 0x253041,
+  boot: 0x2b3646,
+  sole: 0x0f151d,
+  /** 장갑 (짙은 초록 — 위 그림에서 검은 공처럼 보이지 않게) */
+  glove: shade(ROLE.scout, 0.58),
+  hair: 0x1b2430,
+} as const;
+
+const C = SCOUT_COLOR;
+
+const clamp01 = (t: number): number => Math.max(0, Math.min(1, t));
+const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
+/** 부드러운 0 → 1 */
+const ease = (t: number): number => {
+  const u = clamp01(t);
+  return u * u * (3 - 2 * u);
+};
+
+/** 망원경 자세: 접안부 끝 (ex, ey), 방향 ang, 늘임 k (0 = 접힘, 1 = 다 늘임) */
+interface Scope {
+  ex: number;
+  ey: number;
+  ang: number;
+  k: number;
+}
+
+const lerpScope = (a: Scope, b: Scope, t: number): Scope => ({
+  ex: lerp(a.ex, b.ex, t),
+  ey: lerp(a.ey, b.ey, t),
+  ang: lerp(a.ang, b.ang, t),
+  k: lerp(a.k, b.k, t),
+});
+
+/** 망원경 전체 길이 (몸 반지름 배수) */
+const scopeLen = (k: number): number => 0.66 + 0.3 * k;
+
+/** 원통 칠: 통의 폭 방향(a → b)으로 가운데가 밝은 금속 띠 */
+function tubePaint(ink: Ink, base: number, ax: number, ay: number, bx: number, by: number): Paint {
+  return linear(ax, ay, bx, by, [
+    [0, ink(shade(base, 0.3))],
+    [0.38, ink(tint(base, 0.28))],
+    [0.62, ink(base)],
+    [1, ink(shade(base, 0.38))],
+  ]);
+}
+
+/**
+ * 망원경 (위 · 정면 공통): 접안부(어두운 금속) → 가운데 통(회청색) → 대물 통(초록, 굵음) + 대물렌즈 빛.
+ * m = 망원경 좌표(원점 = 접안부 끝, +x = 대물 쪽), 폭 배수 wk, 렌즈 빛 face = 대물렌즈 면 (0 = 옆에서 본 선, 1 = 정면 원)
+ */
+function drawScope(sk: Sketch, ink: Ink, m: Mat, k: number, wk = 1, face = 0): void {
+  const L = scopeLen(k);
+  const segs: readonly (readonly [number, number, number, number])[] = [
+    [0, Math.max(0.22, L - 0.46), 0.09 * wk, C.gunmetal],
+    [L - 0.56, L - 0.2, 0.112 * wk, C.steel],
+    [L - 0.32, L, 0.15 * wk, shade(C.jacket, 0.06)],
+  ];
+  for (const [x0, x1, hw, col] of segs) {
+    const [ax, ay] = apply(m, 0, -hw);
+    const [bx, by] = apply(m, 0, hw);
+    sk.part(
+      path(m).roundRect(x0, -hw, x1 - x0, hw * 2, 0.035 * wk).d,
+      tubePaint(ink, col, ax, ay, bx, by),
+      ink(OUTLINE),
+    );
+  }
+  // 대물 통의 어두운 띠 두 줄 (늘이는 마디 · 렌즈 후드)
+  const hw = 0.15 * wk;
+  sk.fill(path(m).roundRect(L - 0.32, -hw, 0.06, hw * 2, 0.02).d, solid(ink(C.deep)));
+  sk.fill(path(m).roundRect(L - 0.085, -hw, 0.045, hw * 2, 0.015).d, solid(ink(C.deep)));
+  // 대물렌즈 빛 (네온): 은은한 빛 + 밝은 선
+  if (face <= 0) {
+    const d = path(m)
+      .M(L - 0.005, -hw * 0.72)
+      .L(L - 0.005, hw * 0.72).d;
+    sk.line(d, solid(ink(C.neon), 0.35), 0.12 * wk);
+    sk.line(d, solid(ink(tint(C.neon, 0.45))), 0.045 * wk);
+  } else {
+    const d = path(m).ellipse(L - 0.01, 0, 0.05 * wk + 0.06 * face * wk, hw * 0.82).d;
+    sk.fill(d, solid(ink(C.neon), 0.4));
+    sk.fill(
+      path(m).ellipse(L - 0.01, 0, (0.03 + 0.04 * face) * wk, hw * 0.6).d,
+      solid(ink(tint(C.neon, 0.45))),
+    );
+  }
+}
+
+/** 위에서 본 팔: 어깨 → 손 소매 (손은 따로) */
+function topSleeve(
+  sk: Sketch,
+  ink: Ink,
+  sh: readonly [number, number],
+  hand: readonly [number, number],
+  width = 0.3,
+): void {
+  sk.part(
+    path().capsule(sh[0], sh[1], hand[0], hand[1], width, width * 0.86).d,
+    domePaint(C.jacket, ink, 1.35),
+    ink(OUTLINE),
+    undefined,
+    0.3,
+  );
+}
+
+function topHand(sk: Sketch, ink: Ink, hand: readonly [number, number], rad = 0.17): void {
+  sk.part(
+    path().circle(hand[0], hand[1], rad).d,
+    radial(hand[0] - 0.04, hand[1] - 0.04, rad * 1.3, [
+      [0, ink(tint(C.glove, 0.25))],
+      [1, ink(C.glove)],
+    ]),
+    ink(OUTLINE),
+  );
+}
 
 function top(p: SurvivorPose, o: ArtOptions): Drawing {
   const ink = inkFor(p.tone);
   const sk = new Sketch(o.w);
   const r = topRig(p);
-  for (const [fx, fy] of r.feet) topShoe(sk, fx + r.ox, fy, 0x253041, 0x0f151d, ink);
-  sk.part(topTorsoPath(r), domePaint(BASE, ink), ink(OUTLINE));
-  topArm(sk, r, 0, BASE, 0x2b3646, ink);
-  topArm(sk, r, 1, BASE, 0x2b3646, ink);
-  sk.part(path().circle(r.head[0], r.head[1], r.headR).d, domePaint(BASE, ink, 0.6), ink(OUTLINE));
+  const free = p.mode === 'free';
+  const a = free ? p.action : 0;
+  // 능력: 0 → 0.5 망원경을 들어 올림, 0.5 → 1 눈에 대고 쭉 늘임
+  const up = ease(a / 0.5);
+  const ext = ease((a - 0.5) / 0.5);
+  const hit = p.hit;
+  const s = r.s;
+  // 겨눌 때 오른어깨를 조금 앞으로 (몸통을 왼쪽으로 비튼다)
+  r.twist -= 0.14 * ext;
+  const m = rotateAbout(r.twist, 0, 0);
+  const W = (x: number, y: number): [number, number] => apply(m, x + r.ox, y);
+  const shoulders = r.shoulders.map(([x, y]) => W(x, y));
+  // 겨눌 때 머리를 조금 내밀고, 피격 때는 뒤 · 옆으로 조금 밀린다
+  const hx = r.head[0] + 0.03 * ext - 0.06 * hit;
+  const hy = r.head[1] + 0.05 * hit;
+  const R = r.headR;
+
+  // 망원경 자세와 두 손 (몸 기준 좌표)
+  let scope: Scope;
+  let hands: [[number, number], [number, number]];
+  if (free) {
+    // 들고 걷기: 오른손이 망원경 끝을 쥐고 앞을 겨눈다 (팔 흔들림은 조금 작게)
+    const rest: Scope = { ex: 0.18 + 0.2 * s, ey: 0.86, ang: -0.08 + 0.08 * s, k: 0.8 };
+    const raised: Scope = { ex: 0.3, ey: 0.7, ang: -0.6, k: 0.8 };
+    const aimed: Scope = { ex: hx + 0.48, ey: 0.24, ang: 0, k: 1 };
+    scope = a <= 0.5 ? lerpScope(rest, raised, up) : lerpScope(raised, aimed, ext);
+    // 피격: 망원경이 뒤로 밀리며 안쪽으로 꺾인다 (옆으로 커 보이지 않게)
+    scope.ex += r.ox * 1.3 - 0.1 * hit;
+    scope.ey -= 0.04 * hit;
+    scope.ang -= 0.3 * hit;
+    const sm = mul(translate(scope.ex, scope.ey), rotate(scope.ang));
+    const right = apply(sm, lerp(0.07, 0.12, a), lerp(0, 0.16, ext));
+    const leftRest = W(r.hands[0][0], r.hands[0][1]);
+    const left: [number, number] = [leftRest[0] + 0.16 * ext + 0.06 * up, leftRest[1] + 0.08 * ext];
+    hands = [left, right];
+  } else {
+    // 수감 · 구조 중: 망원경은 접어서 배낭 오른쪽에 꽂아 둔다
+    const [sx, sy] = W(-0.36, 0.44);
+    scope = { ex: sx, ey: sy, ang: Math.PI - 0.55 + r.twist, k: 0 };
+    hands = [W(r.hands[0][0], r.hands[0][1]), W(r.hands[1][0], r.hands[1][1])];
+  }
+
+  // 1) 장화
+  for (const [fx, fy] of r.feet) topShoe(sk, fx + r.ox, fy, C.boot, C.sole, ink, 0.26);
+  // 2) 몸통 (야전 재킷)
+  sk.part(topTorsoPath(r), domePaint(C.jacket, ink, 1.25), ink(OUTLINE));
+  // 3) 배낭 (등 뒤, 어두운 남회색 + 짙은 초록 덮개) + 안테나
+  const pm = mul(m, translate(r.ox, 0));
+  sk.part(
+    path(pm).roundRect(-0.9, -0.43, 0.5, 0.86, 0.15).d,
+    domePaint(C.pack, ink, 1.4),
+    ink(OUTLINE),
+    undefined,
+    0.3,
+  );
+  sk.line(path(pm).M(-0.72, -0.33).L(-0.72, 0.33).d, solid(ink(shade(C.pack, 0.4))), 0.05);
+  const sway = 0.05 * Math.sin(p.walk * 2) * p.stride - 0.06 * hit;
+  const [ax0, ay0] = apply(pm, -0.78, -0.3);
+  const [ax1, ay1] = apply(pm, -1.0, -0.6 + sway);
+  sk.line(path().M(ax0, ay0).L(ax1, ay1).d, solid(ink(C.gunmetal)), 0.06);
+  sk.fill(path().circle(ax1, ay1, 0.11).d, solid(ink(C.neon), 0.3));
+  sk.fill(path().circle(ax1, ay1, 0.055).d, solid(ink(tint(C.neon, 0.4))));
+  if (!free) drawScope(sk, ink, mul(translate(scope.ex, scope.ey), rotate(scope.ang)), scope.k, 0.9);
+  // 4) 소매 (머리 밑). 수감 중에는 손도 머리 밑 (가슴 앞에 모은 손)
+  topSleeve(sk, ink, shoulders[0] as [number, number], hands[0]);
+  topSleeve(sk, ink, shoulders[1] as [number, number], hands[1]);
+  // 왼손 (보통 · 수감)은 머리 밑 층, 망원경을 쥔 오른손 · 구조 중 두 손은 위 층
+  if (p.mode !== 'reach') topHand(sk, ink, hands[0]);
+  if (p.mode === 'captive') topHand(sk, ink, hands[1]);
+  // 5) 머리: 둥근 초록 모자 + 뒤로 감은 고글 끈 + 앞으로 튀어나온 쌍안 렌즈 통
+  sk.part(path().circle(hx, hy, R).d, domePaint(C.jacket, ink, R * 1.3, hx - 0.06, hy), ink(OUTLINE));
+  // 모자 꼭지 솔기 (앞뒤로 지나는 짙은 선 — 가운데 원판을 덮지 않게 뒤쪽만)
+  sk.line(
+    path()
+      .M(hx - R * 0.92, hy)
+      .L(hx - R * 0.78, hy).d,
+    solid(ink(shade(C.jacket, 0.3))),
+    0.05,
+  );
+  sk.line(path().arc(hx, hy, R * 0.9, 1.05, Math.PI * 2 - 1.05).d, solid(ink(shade(C.jacket, 0.6))), 0.075);
+  // 쌍안 고글: 이마 앞의 넓은 테 + 앞으로 튀어나온 짧은 렌즈 통 둘 (모두 밝은 회청색 금속) + 렌즈 빛
+  const gx0 = hx + 0.38;
+  const gx1 = hx + 0.78;
+  for (const side of [-1, 1]) {
+    const gy = hy + side * 0.21;
+    sk.part(
+      path().capsule(gx0 + 0.1, gy, gx1 - 0.1, gy, 0.26, 0.26).d,
+      tubePaint(ink, C.steel, gx1, gy - 0.13, gx1, gy + 0.13),
+      ink(OUTLINE),
+    );
+    sk.fill(path().roundRect(gx1 - 0.13, gy - 0.13, 0.05, 0.26, 0.02).d, solid(ink(C.gunmetal)), 0.8);
+  }
+  sk.part(
+    path().roundRect(gx0, hy - 0.42, 0.26, 0.84, 0.12).d,
+    tubePaint(ink, C.steel, gx0, hy, gx0 + 0.26, hy),
+    ink(OUTLINE),
+  );
+  for (const side of [-1, 1]) {
+    const gy = hy + side * 0.21;
+    // 렌즈 면 (네온, 옆에서 본 테)
+    sk.fill(path().ellipse(gx1 - 0.02, gy, 0.055, 0.1).d, solid(ink(C.neon), 0.5));
+    sk.fill(path().ellipse(gx1 - 0.015, gy, 0.03, 0.07).d, solid(ink(tint(C.neon, 0.5))));
+  }
+  // 6) 망원경 · 손 (층을 나눠 굵은 외곽선이 머리 위에 그어지게)
+  sk.layer();
+  if (free) drawScope(sk, ink, mul(translate(scope.ex, scope.ey), rotate(scope.ang)), scope.k, 1.12);
+  if (free) topHand(sk, ink, hands[1], 0.15);
+  if (p.mode === 'reach') for (const h of hands) topHand(sk, ink, h);
+  return sk.drawing();
+}
+
+/** 그림 전체를 고르게 키워 옮긴다 (상반신 아이콘: 머리 · 고글 · 망원경을 상자에 꽉 채우게). x' = k x + tx */
+function scaleDrawing(dr: Drawing, k: number, tx: number, ty: number): Drawing {
+  const pt = (x: number, y: number): [number, number] => [x * k + tx, y * k + ty];
+  const mapD = (d: string): string => {
+    let i = 0;
+    return d.replace(/-?\d*\.?\d+(?:e-?\d+)?/g, (v) => {
+      const n = Number(v);
+      const out = i % 2 === 0 ? n * k + tx : n * k + ty;
+      i += 1;
+      return String(Math.round(out * 1000) / 1000);
+    });
+  };
+  const mapPaint = (pa: Paint): Paint => {
+    if (pa.kind === 'solid') return pa;
+    if (pa.kind === 'linear') {
+      const [x0, y0] = pt(pa.x0, pa.y0);
+      const [x1, y1] = pt(pa.x1, pa.y1);
+      return { ...pa, x0, y0, x1, y1 };
+    }
+    const [cx, cy] = pt(pa.cx, pa.cy);
+    const f =
+      pa.fx === undefined || pa.fy === undefined ? {} : (([fx, fy]) => ({ fx, fy }))(pt(pa.fx, pa.fy));
+    return { ...pa, cx, cy, r: pa.r * k, ...f };
+  };
+  return {
+    ops: dr.ops.map((op) => ({
+      ...op,
+      d: mapD(op.d),
+      ...(op.fill ? { fill: mapPaint(op.fill) } : {}),
+      ...(op.stroke
+        ? { stroke: { ...op.stroke, paint: mapPaint(op.stroke.paint), width: op.stroke.width * k } }
+        : {}),
+    })),
+  };
+}
+
+function frontBody(p: FrontPose, o: ArtOptions): Drawing {
+  const ink = inkFor(p.tone);
+  const sk = new Sketch(o.w);
+  const by = frontBreath(p.t);
+  const sway = Math.sin(p.t * 2.2) * 0.035;
+  const hy = FRONT.headY + by;
+  // 1) 안테나 (배낭에서 솟아 머리 왼쪽 위로) — 맨 뒤
+  const tip: [number, number] = [-0.56 + sway, -0.86 + by];
+  sk.part(
+    path().capsule(-0.3, 0.02 + by, tip[0], tip[1], 0.045, 0.03).d,
+    solid(ink(C.gunmetal)),
+    ink(OUTLINE),
+  );
+  // 2) 배낭 (어깨 뒤로 양옆이 보인다)
+  sk.part(
+    path().roundRect(-0.38, -0.04 + by, 0.76, 0.42, 0.1).d,
+    linear(-0.38, 0, 0.38, 0, [
+      [0, ink(tint(C.pack, 0.12))],
+      [1, ink(shade(C.pack, 0.3))],
+    ]),
+    ink(OUTLINE),
+  );
+  // 3) 다리 (어두운 카고 바지 + 장화)
+  if (!p.bust) {
+    frontLegs(sk, C.pants, C.boot, C.sole, ink, 0.03, 0.16);
+    for (const s of [-1, 1]) {
+      const x = s * (FRONT.legX + 0.03);
+      // 허벅지 주머니
+      sk.fill(
+        path().roundRect(x - 0.06 + s * 0.02, FRONT.hipY + 0.08, 0.11, 0.12, 0.02).d,
+        solid(ink(shade(C.pants, 0.3))),
+      );
+      // 장화 목 (짙은 초록 띠)
+      sk.fill(path().roundRect(x - 0.09, FRONT.ankleY - 0.07, 0.18, 0.05, 0.02).d, solid(ink(C.deep)));
+    }
+  }
+  // 4) 왼팔 (화면 왼쪽): 손을 허리께에 편히
+  frontArm(sk, -1, C.jacket, C.glove, ink, [-0.45, 0.35 + by], by);
+  // 5) 몸통 (야전 재킷) + 지퍼 · 가슴 주머니 · 배낭 멜빵 · 허리띠
+  sk.part(frontTorsoPath(by), frontClothPaint(C.jacket, ink), ink(OUTLINE));
+  sk.line(
+    path()
+      .M(0, FRONT.neckY + 0.06 + by)
+      .L(0, FRONT.hipY - 0.04).d,
+    solid(ink(shade(C.jacket, 0.4))),
+    0.022,
+  );
+  for (const s of [-1, 1]) {
+    // 멜빵 (어깨에서 배로)
+    sk.line(
+      path()
+        .M(s * 0.17, FRONT.shoulderY - 0.01 + by)
+        .Q(s * 0.19, 0.18 + by, s * 0.15, 0.32).d,
+      solid(ink(C.strap)),
+      0.06,
+    );
+    // 가슴 주머니 덮개
+    sk.fill(
+      path().roundRect(s * 0.09 - 0.045 + s * 0.04, 0.12 + by, 0.09, 0.07, 0.02).d,
+      solid(ink(shade(C.jacket, 0.22))),
+    );
+  }
+  sk.fill(path().roundRect(-0.25, FRONT.hipY - 0.1, 0.5, 0.06, 0.02).d, solid(ink(C.strap)));
+  sk.fill(path().roundRect(-0.04, FRONT.hipY - 0.105, 0.08, 0.07, 0.015).d, solid(ink(C.steel)));
+  // 목깃 (짙은 초록 높은 깃)
+  sk.part(
+    path()
+      .M(-0.18, FRONT.neckY + 0.02 + by)
+      .Q(0, FRONT.neckY + 0.13 + by, 0.18, FRONT.neckY + 0.02 + by)
+      .L(0.15, FRONT.neckY + 0.1 + by)
+      .Q(0, FRONT.neckY + 0.18 + by, -0.15, FRONT.neckY + 0.1 + by)
+      .Z().d,
+    solid(ink(C.deep)),
+    ink(OUTLINE),
+    1,
+    0.3,
+  );
+  // 6) 머리: 얼굴 + 둥근 초록 모자 + 쌍안 렌즈 고글
+  sk.part(
+    path().circle(0, hy, FRONT.headR).d,
+    radial(-0.1, hy - 0.12, FRONT.headR * 1.25, [
+      [0, ink(tint(MAT.skin, 0.12))],
+      [0.7, ink(MAT.skin)],
+      [1, ink(MAT.skinShade)],
+    ]),
+    ink(OUTLINE),
+  );
+  // 옆머리 (모자 밑으로 삐져나온 뾰족한 머리칼, 귀 앞)
+  for (const s of [-1, 1])
+    sk.fill(
+      path()
+        .M(s * 0.37, hy - 0.08)
+        .L(s * 0.33, hy + 0.17)
+        .L(s * 0.29, hy + 0.08)
+        .L(s * 0.27, hy + 0.13)
+        .L(s * 0.25, hy - 0.04)
+        .Z().d,
+      solid(ink(C.hair)),
+    );
+  // 모자 (둥근 정찰 모자, 이마를 덮는다)
+  const capR = FRONT.headR * 1.07;
+  sk.part(
+    path()
+      .arc(0, hy + 0.01, capR, Math.PI + 0.12, Math.PI * 2 - 0.12)
+      .Q(0.2, hy - 0.04, 0, hy - 0.045)
+      .Q(-0.2, hy - 0.04, -capR * Math.cos(0.12), hy + 0.01 - capR * Math.sin(0.12))
+      .Z().d,
+    radial(-0.12, hy - 0.26, 0.5, [
+      [0, ink(tint(C.jacket, 0.22))],
+      [0.5, ink(C.jacket)],
+      [1, ink(shade(C.jacket, 0.3))],
+    ]),
+    ink(OUTLINE),
+  );
+  // 모자 솔기 · 꼭지 단추
+  sk.line(
+    path()
+      .M(0, hy - 0.38)
+      .Q(0.02, hy - 0.2, 0, hy - 0.06).d,
+    solid(ink(shade(C.jacket, 0.28))),
+    0.018,
+  );
+  sk.fill(path().circle(0, hy - 0.39, 0.035).d, solid(ink(C.deep)));
+  // 모자 앞 렌즈 휘장 (옛 렌즈 모티프: 짙은 원 + 밝은 초록 테)
+  sk.fill(path().circle(0, hy - 0.2, 0.065).d, solid(ink(C.deep)));
+  sk.line(path().circle(0, hy - 0.2, 0.065).d, solid(ink(tint(C.jacket, 0.35))), 0.022);
+  sk.fill(path().circle(-0.018, hy - 0.218, 0.017).d, solid(ink(0xffffff), 0.8));
+  // 고글 끈 (머리 옆으로)
+  const gy = hy + 0.05;
+  sk.fill(path().roundRect(-0.38, gy - 0.045, 0.76, 0.09, 0.03).d, solid(ink(C.strap)));
+  // 렌즈 (큰 둥근 렌즈 둘: 어두운 금속 테 + 초록 렌즈 빛 + 렌즈 속 눈동자 + 반짝임)
+  const glint = 0.75 + 0.25 * Math.sin(p.t * 1.7);
+  for (const s of [-1, 1]) {
+    const gx = s * 0.155;
+    sk.part(
+      path().circle(gx, gy, 0.155).d,
+      radial(gx - 0.05, gy - 0.05, 0.2, [
+        [0, ink(tint(C.gunmetal, 0.35))],
+        [1, ink(shade(C.gunmetal, 0.2))],
+      ]),
+      ink(OUTLINE),
+      1,
+      0.3,
+    );
+    sk.fill(
+      path().circle(gx, gy, 0.112).d,
+      radial(gx, gy, 0.12, [
+        [0, ink(tint(C.neon, 0.5))],
+        [0.55, ink(C.neon)],
+        [1, ink(C.deep)],
+      ]),
+    );
+    sk.fill(path().ellipse(gx + s * 0.012, gy + 0.01, 0.034, 0.045).d, solid(ink(MAT.eye)));
+    sk.fill(path().circle(gx - 0.045, gy - 0.045, 0.026).d, solid(ink(0xffffff), 0.9 * glint));
+  }
+  // 코걸이 (렌즈 사이)
+  sk.fill(path().roundRect(-0.03, gy - 0.03, 0.06, 0.05, 0.02).d, solid(ink(C.gunmetal)));
+  // 볼 · 입 (호기심 많은 웃음)
+  for (const s of [-1, 1])
+    sk.fill(path().ellipse(s * 0.23, hy + 0.255, 0.05, 0.028).d, solid(ink(MAT.skinShade)), 0.35);
+  sk.fill(
+    path()
+      .M(-0.07, hy + 0.225)
+      .Q(0.0, hy + 0.3, 0.08, hy + 0.215)
+      .Q(0.0, hy + 0.25, -0.07, hy + 0.225)
+      .Z().d,
+    solid(ink(0x5b2a22)),
+  );
+  // 7) 오른팔 + 망원경 (층을 나눠 굵은 외곽선): 오른손에 늘인 망원경을 비스듬히 든다
+  sk.layer();
+  const hand: [number, number] = p.bust ? [0.36, 0.18 + by] : [0.44, 0.16 + by];
+  frontArm(sk, 1, C.jacket, C.glove, ink, hand, by);
+  const ang = -1.05 + sway * 0.4;
+  const sm = mul(translate(hand[0] - Math.cos(ang) * 0.18, hand[1] - Math.sin(ang) * 0.18), rotate(ang));
+  drawScope(sk, ink, sm, p.bust ? 0.55 : 1, 0.7, 0.8);
+  sk.part(path().circle(hand[0], hand[1], 0.085).d, solid(ink(C.glove)), ink(OUTLINE));
+  // 안테나 끝 (네온 점)
+  sk.fill(path().circle(tip[0], tip[1], 0.06).d, solid(ink(C.neon), 0.35));
+  sk.fill(path().circle(tip[0], tip[1], 0.032).d, solid(ink(tint(C.neon, 0.45))));
   return sk.drawing();
 }
 
 function front(p: FrontPose, o: ArtOptions): Drawing {
-  const ink = inkFor(p.tone);
-  const sk = new Sketch(o.w);
-  sk.part(frontTorsoPath(0), frontClothPaint(BASE, ink), ink(OUTLINE));
-  sk.part(path().circle(0, -0.4, 0.37).d, solid(ink(BASE)), ink(OUTLINE));
-  return sk.drawing();
+  if (!p.bust) return frontBody(p, o);
+  // 상반신: 머리 · 고글 · 망원경 · 어깨가 상자를 채우게 1.5배 (외곽선 굵기는 그대로)
+  const k = 1.5;
+  return scaleDrawing(frontBody(p, { w: o.w / k }), k, -0.04, 0.42);
 }
 
-export const SCOUT_ART: SurvivorArt = { id: 'scout', top, front, topExtent: 1.1 };
+export const SCOUT_ART: SurvivorArt = { id: 'scout', top, front, topExtent: 1.56 };
