@@ -41,8 +41,8 @@ export const GUARD_COLOR = {
 
 const C = GUARD_COLOR;
 
-/** 가드 어깨 반폭 (공통 체형보다 조금 넓다) */
-const HALF_W = TOP.halfW * 1.0;
+/** 가드 어깨 반폭: 공통 체형 그대로 (넓은 어깨는 어깨 판이 말한다 — 옆으로 커 보이지 않게) */
+const HALF_W = TOP.halfW;
 
 /** 위에서 본 방패 모양 (몸 기준): 호 중심 (cx, cy), 바깥 · 안 반지름, 반각, 방향 */
 interface ShieldShape {
