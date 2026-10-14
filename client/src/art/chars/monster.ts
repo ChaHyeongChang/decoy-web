@@ -615,8 +615,9 @@ function frontArm(sk: Sketch, M: Mat, side: number, sh: Pt, el: Pt, wr: Pt, claw
     const len = i === 0 ? 0.42 : 0.34;
     const bx = wr[0] + Math.cos(a) * 0.06;
     const by = wr[1] + Math.sin(a) * 0.06;
+    // 갈고리는 몸 안쪽으로 휜다 (좌우 거울 대칭 — 아래로 늘어뜨리든 위로 들든)
     sk.part(
-      hook(M, bx, by, a, len, 0.1, 0.38 * side * Math.sign(Math.cos(clawDir) || 1)),
+      hook(M, bx, by, a, len, 0.1, 0.38 * side * Math.sign(Math.sin(clawDir) || 1)),
       bonePaint(M, bx, by, a, len, ink),
       ink(OUTLINE),
       undefined,
@@ -631,12 +632,19 @@ function frontArm(sk: Sketch, M: Mat, side: number, sh: Pt, el: Pt, wr: Pt, claw
   );
 }
 
+const BUST_K = 1.2;
+const BUST_DY = 0.43;
+const BUST_EL: Pt = [0.7, 0.1];
+const BUST_WR: Pt = [0.58, -0.3];
+const BUST_CLAW = 0.16;
+
 function front(p: FrontPose, o: ArtOptions): Drawing {
   const ink = inkFor(p.tone);
   const C = MONSTER_COLOR;
   const sk = new Sketch(o.w);
-  // 상반신은 머리 · 어깨 · 든 발톱이 상자를 채우게 키운다
-  const M: Mat = p.bust ? mul(translate(0, 0.4), scale(1.34)) : translate(0, 0.03);
+  // 상반신은 머리 · 어깨 · 두건 양옆으로 든 발톱이 상자를 채우게 키운다.
+  // 전신은 뿔 끝 · 발톱 끝 · 자락이 외곽선까지 ±1 상자 안에 들게 조금 줄인다
+  const M: Mat = p.bust ? mul(translate(0, BUST_DY), scale(BUST_K)) : scale(0.95);
   const by = frontBreath(p.t) * 1.6;
   const t = p.t;
   const ls = lenScale(M);
@@ -711,14 +719,15 @@ function front(p: FrontPose, o: ArtOptions): Drawing {
   for (const side of [-1, 1]) {
     const sway = Math.sin(t * 1.3 + side) * 0.012;
     if (p.bust)
+      // 두 손을 두건 양옆으로 올려 발톱을 위로 세운다 (작은 아이콘에서 뿔 두건 + 두 발톱이 대칭으로 다 보이게)
       frontArm(
         sk,
         M,
         side,
         [side * 0.4, 0.06 + by],
-        [side * 0.7, 0.28],
-        [side * 0.62, 0.0 + by],
-        -Math.PI / 2 + side * 0.5,
+        [side * BUST_EL[0], BUST_EL[1]],
+        [side * BUST_WR[0], BUST_WR[1] + by],
+        -Math.PI / 2 + side * BUST_CLAW,
         ink,
       );
     else

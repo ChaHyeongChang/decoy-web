@@ -1,12 +1,14 @@
 // 공통 생존자 (괴물 화면, 캐릭터 리디자인): 세 역할을 대신하는 하나의 그림. 역할 단서가 없다 — 후드 끝(러너) ·
 // 방패 · 넓은 어깨(가드) · 고글 · 망원경(스카우트)이 없고, 몸 크기 · 비율은 공통 체형 그대로다.
-// 흰 방호복 + 둥근 방호 두건 + 연회색 얼굴 가리개(무채색). 이름 없는 '미끼'라는 인상.
+// 흰 방호복 + 둥근 방호 두건 + 얼굴 가리개(무채색). 이름 없는 '미끼'라는 인상. 위 그림은 부푼 방호복으로 판정 원을 채우고,
+// 앞쪽 짙은 회색 가리개 초승달이 바라보는 방향을 보인다(옛 공통 실루엣의 앞 노치와 같은 정보).
 // 색은 흰색(#F8FAFC) · 무채색 회색뿐이다 (VISUAL_SPEC 0장 ③ 흰색 위장).
 import { HIDDEN_SURVIVOR, OUTLINE } from '../palette';
-import { Sketch, linear, path, radial, rotateAbout, solid, translate, type Drawing } from './kit';
+import { Sketch, linear, path, radial, rotateAbout, solid, transformDrawing, translate, type Drawing } from './kit';
 import {
   FRONT,
   MAT,
+  TOP,
   domePaint,
   frontArm,
   frontBreath,
@@ -29,33 +31,62 @@ export const COMMON_COLOR = {
   boot: 0x8b939c,
   sole: 0x5b636c,
   visor: 0x9aa3ad,
+  /** 위 그림 가리개 (짙은 무채색: 실제 크기에서 바라보는 방향이 읽히게) */
+  visorTop: 0x5b636c,
   visorDark: 0x3a4048,
   seam: 0xaeb5bd,
 } as const;
+
+/** 위 그림 치수 (몸 반지름 배수): 부푼 방호복 깊이 · 앞 볼록 · 머리 앞으로 · 가리개 초승달(머리 반지름 배수 · 반각 라디안) */
+export const COMMON_TOP = {
+  halfD: 0.8,
+  bulge: 0.1,
+  headDx: 0.06,
+  visor: { inner: 0.5, outer: 0.88, half: 1.0 },
+} as const;
+
+/** 정면 상반신 아이콘 배율 · 이동 (다른 넷처럼 머리 · 어깨가 상자를 채우게) */
+const BUST = { k: 1.5, tx: 0, ty: 0.38 } as const;
 
 function top(p: SurvivorPose, o: ArtOptions): Drawing {
   const ink = inkFor(p.tone);
   const C = COMMON_COLOR;
   const sk = new Sketch(o.w);
-  const r = topRig(p);
+  // 부푼 방호복: 몸통 깊이를 키워 판정 원을 대부분 채운다(옛 흰 원처럼 '판정보다 작아 보이지' 않게)
+  const r = topRig(p, TOP.halfW, COMMON_TOP.halfD);
   // 1) 신발
   for (const [fx, fy] of r.feet) topShoe(sk, fx + r.ox, fy, C.boot, C.sole, ink);
   // 2) 몸통 (흰 방호복)
-  sk.part(topTorsoPath(r), domePaint(C.suit, ink, 1.0), ink(OUTLINE));
+  sk.part(topTorsoPath(r, COMMON_TOP.bulge), domePaint(C.suit, ink, 1.0), ink(OUTLINE));
   // 등 이음선 (방호복 지퍼 · 솔기: 무채색 가는 선)
   const m = rotateAbout(r.twist, 0, 0);
-  sk.line(path(m).with(translate(r.ox, 0)).M(-0.36, 0).L(-0.12, 0).d, solid(ink(C.seam)), 0.06);
+  sk.line(path(m).with(translate(r.ox, 0)).M(-0.5, 0).L(-0.2, 0).d, solid(ink(C.seam)), 0.06);
   // 3) 팔
   topArm(sk, r, 0, C.suit, C.glove, ink);
   topArm(sk, r, 1, C.suit, C.glove, ink);
-  // 4) 머리: 둥근 방호 두건 + 앞쪽 연회색 가리개 (얼굴이 보이지 않음)
-  const [hx, hy] = r.head;
-  sk.part(path().circle(hx, hy, r.headR).d, domePaint(C.suit, ink, r.headR * 1.25, hx - 0.05, hy), ink(OUTLINE));
-  sk.fill(path().arc(hx, hy, r.headR * 0.86, -0.95, 0.95).arc(hx, hy, r.headR * 0.55, 0.8, -0.8, false).Z().d, solid(ink(C.visor)), 0.85);
+  // 4) 머리: 둥근 방호 두건 + 앞쪽 짙은 무채색 가리개 초승달 — 괴물에게 바라보는 방향을 보여 준다(옛 그림의 앞 노치와 같은 정보,
+  //    역할 단서가 아님). 얼굴은 보이지 않는다
+  const hx = r.head[0] + COMMON_TOP.headDx;
+  const hy = r.head[1];
+  const R = r.headR;
+  const V = COMMON_TOP.visor;
+  sk.part(path().circle(hx, hy, R).d, domePaint(C.suit, ink, R * 1.25, hx - 0.05, hy), ink(OUTLINE));
+  sk.fill(
+    path()
+      .arc(hx, hy, R * V.outer, -V.half, V.half)
+      .arc(hx, hy, R * V.inner, V.half - 0.15, -V.half + 0.15, false)
+      .Z().d,
+    solid(ink(C.visorTop)),
+  );
   return sk.drawing();
 }
 
 function front(p: FrontPose, o: ArtOptions): Drawing {
+  if (p.bust) return transformDrawing(frontBody(p, { w: o.w / BUST.k }), BUST.k, BUST.tx, BUST.ty);
+  return frontBody(p, o);
+}
+
+function frontBody(p: FrontPose, o: ArtOptions): Drawing {
   const ink = inkFor(p.tone);
   const C = COMMON_COLOR;
   const sk = new Sketch(o.w);
@@ -93,4 +124,4 @@ function front(p: FrontPose, o: ArtOptions): Drawing {
   return sk.drawing();
 }
 
-export const COMMON_ART: SurvivorArt = { id: 'common', top, front, topExtent: 1.1 };
+export const COMMON_ART: SurvivorArt = { id: 'common', top, front, topExtent: 1.17 };

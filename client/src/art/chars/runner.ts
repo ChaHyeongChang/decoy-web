@@ -13,6 +13,7 @@ import {
   shade,
   solid,
   tint,
+  transformDrawing,
   type Drawing,
   type Paint,
 } from './kit';
@@ -190,44 +191,6 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
     0.9 + 0.1 * a,
   );
   return sk.drawing();
-}
-
-/** 그림 전체를 고르게 키워 옮긴다 (상반신 아이콘: 머리 · 어깨를 상자에 꽉 채우게). x' = k x + tx */
-function scaleDrawing(dr: Drawing, k: number, tx: number, ty: number): Drawing {
-  const pt = (x: number, y: number): [number, number] => [x * k + tx, y * k + ty];
-  const mapD = (d: string): string => {
-    // 숫자를 x, y 짝으로만 바꾸므로 M/L/C/Z(+Q) 경로만 안전하다. A · H · V가 들어오면 조용히 깨지지 않게 멈춘다
-    if (/[^MLQCZ0-9.,\se-]/.test(d)) throw new Error('scaleDrawing: M/L/Q/C/Z 경로만 지원');
-    let i = 0;
-    return d.replace(/-?\d*\.?\d+(?:e-?\d+)?/g, (v) => {
-      const n = Number(v);
-      const out = i % 2 === 0 ? n * k + tx : n * k + ty;
-      i += 1;
-      return String(Math.round(out * 1000) / 1000);
-    });
-  };
-  const mapPaint = (pa: Paint): Paint => {
-    if (pa.kind === 'solid') return pa;
-    if (pa.kind === 'linear') {
-      const [x0, y0] = pt(pa.x0, pa.y0);
-      const [x1, y1] = pt(pa.x1, pa.y1);
-      return { ...pa, x0, y0, x1, y1 };
-    }
-    const [cx, cy] = pt(pa.cx, pa.cy);
-    const f =
-      pa.fx === undefined || pa.fy === undefined ? {} : (([fx, fy]) => ({ fx, fy }))(pt(pa.fx, pa.fy));
-    return { ...pa, cx, cy, r: pa.r * k, ...f };
-  };
-  return {
-    ops: dr.ops.map((op) => ({
-      ...op,
-      d: mapD(op.d),
-      ...(op.fill ? { fill: mapPaint(op.fill) } : {}),
-      ...(op.stroke
-        ? { stroke: { ...op.stroke, paint: mapPaint(op.stroke.paint), width: op.stroke.width * k } }
-        : {}),
-    })),
-  };
 }
 
 /** 정면 팔 (어깨 → 팔꿈치 → 주먹, 두 마디 캡슐): 달리기 준비 자세 */
@@ -474,7 +437,7 @@ function front(p: FrontPose, o: ArtOptions): Drawing {
   if (!p.bust) return frontBody(p, o);
   // 상반신: 머리 · 후드 끝 · 어깨 · 가슴 무늬가 상자를 채우게 1.5배 (외곽선 굵기는 그대로)
   const k = 1.5;
-  return scaleDrawing(frontBody(p, { w: o.w / k }), k, -0.08, 0.42);
+  return transformDrawing(frontBody(p, { w: o.w / k }), k, -0.08, 0.42);
 }
 
 export const RUNNER_ART: SurvivorArt = { id: 'runner', top, front, topExtent: 1.15 };

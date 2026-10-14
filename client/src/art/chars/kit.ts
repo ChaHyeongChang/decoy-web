@@ -394,6 +394,43 @@ export class Sketch {
   }
 }
 
+/**
+ * 그림 전체를 배율 k · 이동 (tx, ty)로 옮긴다 (정면 상반신 아이콘처럼 상자를 채우게 키울 때). 경로 숫자를 x, y 짝으로 바꾸므로
+ * 이 파일의 Path가 내는 M · L · C · Z 경로만 받는다(A · H · V는 짝이 맞지 않아 멈춘다). 칠 좌표 · 선 두께도 같이 옮긴다
+ */
+export function transformDrawing(dr: Drawing, k: number, tx: number, ty: number): Drawing {
+  const pt = (x: number, y: number): [number, number] => [x * k + tx, y * k + ty];
+  const mapD = (d: string): string => {
+    if (/[^MLCZ0-9.\s-]/.test(d)) throw new Error('transformDrawing: M · L · C · Z 경로만 옮길 수 있다');
+    let i = 0;
+    return d.replace(/-?\d*\.?\d+(?:e-?\d+)?/g, (v) => {
+      const n = Number(v);
+      const out = i % 2 === 0 ? n * k + tx : n * k + ty;
+      i += 1;
+      return String(round(out, 3));
+    });
+  };
+  const mapPaint = (pa: Paint): Paint => {
+    if (pa.kind === 'solid') return pa;
+    if (pa.kind === 'linear') {
+      const [x0, y0] = pt(pa.x0, pa.y0);
+      const [x1, y1] = pt(pa.x1, pa.y1);
+      return { ...pa, x0, y0, x1, y1 };
+    }
+    const [cx, cy] = pt(pa.cx, pa.cy);
+    const f = pa.fx === undefined || pa.fy === undefined ? {} : (([fx, fy]) => ({ fx, fy }))(pt(pa.fx, pa.fy));
+    return { ...pa, cx, cy, r: pa.r * k, ...f };
+  };
+  return {
+    ops: dr.ops.map((op) => ({
+      ...op,
+      d: mapD(op.d),
+      ...(op.fill ? { fill: mapPaint(op.fill) } : {}),
+      ...(op.stroke ? { stroke: { ...op.stroke, paint: mapPaint(op.stroke.paint), width: op.stroke.width * k } } : {}),
+    })),
+  };
+}
+
 // ───────────────────────── SVG ─────────────────────────
 
 export interface SvgOptions {

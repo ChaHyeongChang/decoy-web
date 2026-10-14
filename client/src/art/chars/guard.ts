@@ -4,7 +4,7 @@
 // 네온 포인트는 방패 테두리의 밝은 보라 선(위 · 정면)과 정면 방패 문장(십자)뿐이다. 헬멧 챙 선은 네온보다 어둡게 둔다.
 // 색은 역할색 보라(#A855F7)와 그 짙은/밝은 변형, 어두운 남회색 바지 · 장갑 · 장화 · 방패 테.
 import { OUTLINE, ROLE, ROLE_TEXT } from '../palette';
-import { Sketch, linear, mix, path, radial, rotateAbout, shade, solid, tint, translate, type Drawing, type Mat, type Paint } from './kit';
+import { Sketch, linear, mix, path, radial, rotateAbout, shade, solid, tint, transformDrawing, translate, type Drawing, type Mat } from './kit';
 import {
   FRONT,
   MAT,
@@ -205,38 +205,6 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
   return sk.drawing();
 }
 
-/** 그림 전체를 고르게 키워 옮긴다 (상반신 아이콘). x' = k x + tx */
-function scaleDrawing(dr: Drawing, k: number, tx: number, ty: number): Drawing {
-  const pt = (x: number, y: number): [number, number] => [x * k + tx, y * k + ty];
-  const mapD = (d: string): string => {
-    let i = 0;
-    return d.replace(/-?\d*\.?\d+(?:e-?\d+)?/g, (v) => {
-      const out = i % 2 === 0 ? Number(v) * k + tx : Number(v) * k + ty;
-      i += 1;
-      return String(Math.round(out * 1000) / 1000);
-    });
-  };
-  const mapPaint = (pa: Paint): Paint => {
-    if (pa.kind === 'solid') return pa;
-    if (pa.kind === 'linear') {
-      const [x0, y0] = pt(pa.x0, pa.y0);
-      const [x1, y1] = pt(pa.x1, pa.y1);
-      return { ...pa, x0, y0, x1, y1 };
-    }
-    const [cx, cy] = pt(pa.cx, pa.cy);
-    const f = pa.fx === undefined || pa.fy === undefined ? {} : (([fx, fy]) => ({ fx, fy }))(pt(pa.fx, pa.fy));
-    return { ...pa, cx, cy, r: pa.r * k, ...f };
-  };
-  return {
-    ops: dr.ops.map((op) => ({
-      ...op,
-      d: mapD(op.d),
-      ...(op.fill ? { fill: mapPaint(op.fill) } : {}),
-      ...(op.stroke ? { stroke: { ...op.stroke, paint: mapPaint(op.stroke.paint), width: op.stroke.width * k } } : {}),
-    })),
-  };
-}
-
 /** 정면 방패 (위 평평 · 아래 뾰족한 옛 방패 문양): 중심 x, 위 y, 반폭, 높이 */
 function frontShieldPath(cx: number, y0: number, hw: number, h: number): string {
   const yb = y0 + h * 0.5;
@@ -391,7 +359,7 @@ function front(p: FrontPose, o: ArtOptions): Drawing {
   if (!p.bust) return frontBody(p, o);
   // 상반신: 헬멧 · 어깨 · 방패 윗부분(문장)이 상자를 채우게 1.45배 (외곽선 굵기는 그대로)
   const k = 1.45;
-  return scaleDrawing(frontBody(p, { w: o.w / k }), k, -0.05, 0.36);
+  return transformDrawing(frontBody(p, { w: o.w / k }), k, -0.05, 0.36);
 }
 
 export const GUARD_ART: SurvivorArt = { id: 'guard', top, front, topExtent: 1.58 };

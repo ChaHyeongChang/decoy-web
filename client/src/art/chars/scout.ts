@@ -548,11 +548,13 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
   );
   // 7) 오른팔 + 망원경 (층을 나눠 굵은 외곽선): 오른손에 늘인 망원경을 비스듬히 든다
   sk.layer();
-  const hand: [number, number] = p.bust ? [0.36, 0.18 + by] : [0.44, 0.16 + by];
+  // 대물 끝(외곽선 포함)이 아이콘 상자 안에 들게: 전신은 x ≤ 0.97, 상반신은 1.5배로 키운 뒤 x ≤ 0.95.
+  // 상반신은 망원경을 더 세우고 짧게 접어 쥔 손 위로 올린다 (작은 아이콘에서 렌즈가 잘리지 않게)
+  const hand: [number, number] = p.bust ? [0.2, 0.36 + by] : [0.42, 0.16 + by];
   frontArm(sk, 1, C.coat, C.glove, ink, hand, by);
-  const ang = -0.8 + sway * 0.4;
+  const ang = (p.bust ? -0.86 : -0.95) + sway * 0.4;
   const sm = mul(translate(hand[0] - Math.cos(ang) * 0.24, hand[1] - Math.sin(ang) * 0.24), rotate(ang));
-  drawScope(sk, ink, sm, p.bust ? 0.55 : 1, 0.7, 'front');
+  drawScope(sk, ink, sm, p.bust ? 0.45 : 1, 0.7, 'front');
   sk.part(path().circle(hand[0], hand[1], 0.085).d, solid(ink(C.glove)), ink(OUTLINE));
   // 안테나 끝 (네온 점)
   sk.fill(path().circle(tip[0], tip[1], 0.06).d, solid(ink(C.neon), 0.35));
