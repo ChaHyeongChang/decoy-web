@@ -5,7 +5,19 @@
 // 위에서 본 그림: 단위 = 몸 반지름 1, +x = 바라보는 방향. 빛은 위에서 (돔 음영, 회전과 무관) — 왼쪽 위 반사광은 굽기 쪽의
 // 돌지 않는 'gloss' 그림이 따로 맡는다. 정면 그림: 상자 [−1, 1]², 빛은 왼쪽 위.
 import { OUTLINE } from '../palette';
-import { linear, mix, path, radial, rotateAbout, shade, solid, tint, translate, type Paint, type Sketch } from './kit';
+import {
+  linear,
+  mix,
+  path,
+  radial,
+  rotateAbout,
+  shade,
+  solid,
+  tint,
+  translate,
+  type Paint,
+  type Sketch,
+} from './kit';
 import type { SurvivorPose, Tone } from './types';
 
 /** 사망 회색 (VISUAL_SPEC 4.2, 옛 그림과 같은 값) */
@@ -131,11 +143,25 @@ export function topRig(p: SurvivorPose, halfW: number = TOP.halfW, halfD: number
 }
 
 /** 위에서 본 신발 하나 (앞이 둥근 타원). sole = 밑창 색(앞코), upper = 위 */
-export function topShoe(sk: Sketch, x: number, y: number, upper: number, sole: number, ink: Ink, len = 0.25): void {
+export function topShoe(
+  sk: Sketch,
+  x: number,
+  y: number,
+  upper: number,
+  sole: number,
+  ink: Ink,
+  len = 0.25,
+): void {
   const d = path().ellipse(x, y, len, 0.135).d;
   sk.part(d, solid(ink(upper)), ink(OUTLINE));
   // 앞코 (밑창이 보이는 앞쪽 테)
-  sk.fill(path().arc(x, y, len - 0.03, -1.0, 1.0).Z().d, solid(ink(sole)), 0.9);
+  sk.fill(
+    path()
+      .arc(x, y, len - 0.03, -1.0, 1.0)
+      .Z().d,
+    solid(ink(sole)),
+    0.9,
+  );
 }
 
 /** 위에서 본 몸통 (어깨 판): 바라보는 쪽이 조금 볼록한 둥근 판. rig 비틀림 · 젖힘 반영 */
@@ -182,7 +208,9 @@ export function topArm(
   const [sx, sy] = r.shoulders[side];
   const [hx, hy] = r.hands[side];
   const m = rotateAbout(r.twist, 0, 0);
-  const arm = path(m).with(translate(r.ox, 0)).capsule(sx, sy, hx, hy, width, width * 0.86).d;
+  const arm = path(m)
+    .with(translate(r.ox, 0))
+    .capsule(sx, sy, hx, hy, width, width * 0.86).d;
   sk.part(arm, domePaint(sleeve, ink, 1.05), ink(OUTLINE));
   const hand = path(m).with(translate(r.ox, 0)).circle(hx, hy, TOP.handR).d;
   sk.part(hand, solid(ink(glove)), ink(OUTLINE));
@@ -222,9 +250,23 @@ export function frontLegs(
   for (const s of [-1, 1]) {
     const x = s * (FRONT.legX + spread);
     const leg = path().capsule(s * FRONT.legX * 0.9, FRONT.hipY - 0.04, x, FRONT.ankleY, 0.19, 0.16).d;
-    sk.part(leg, linear(x - 0.1, 0, x + 0.1, 0, [[0, ink(tint(pants, 0.1))], [1, ink(shade(pants, 0.3))]]), ink(OUTLINE));
+    sk.part(
+      leg,
+      linear(x - 0.1, 0, x + 0.1, 0, [
+        [0, ink(tint(pants, 0.1))],
+        [1, ink(shade(pants, 0.3))],
+      ]),
+      ink(OUTLINE),
+    );
     const shoeD = path().ellipse(x + s * 0.03, FRONT.footY, shoeLen, 0.085).d;
-    sk.part(shoeD, linear(0, FRONT.footY - 0.08, 0, FRONT.footY + 0.08, [[0, ink(tint(shoe, 0.15))], [1, ink(shade(shoe, 0.2))]]), ink(OUTLINE));
+    sk.part(
+      shoeD,
+      linear(0, FRONT.footY - 0.08, 0, FRONT.footY + 0.08, [
+        [0, ink(tint(shoe, 0.15))],
+        [1, ink(shade(shoe, 0.2))],
+      ]),
+      ink(OUTLINE),
+    );
     sk.fill(
       path().roundRect(x + s * 0.03 - shoeLen * 0.95, FRONT.footY + 0.025, shoeLen * 1.9, 0.055, 0.025).d,
       solid(ink(sole)),
@@ -268,12 +310,23 @@ export function frontArm(
   const sx = side * (FRONT.shoulderX - 0.03);
   const sy = FRONT.shoulderY + 0.06 + by;
   const d = path().capsule(sx, sy, hand[0], hand[1], width, width * 0.85).d;
-  sk.part(d, linear(sx - 0.1, 0, sx + 0.1, 0, [[0, ink(tint(sleeve, 0.12))], [1, ink(shade(sleeve, 0.28))]]), ink(OUTLINE));
+  sk.part(
+    d,
+    linear(sx - 0.1, 0, sx + 0.1, 0, [
+      [0, ink(tint(sleeve, 0.12))],
+      [1, ink(shade(sleeve, 0.28))],
+    ]),
+    ink(OUTLINE),
+  );
   sk.part(path().circle(hand[0], hand[1], 0.085).d, solid(ink(glove)), ink(OUTLINE));
 }
 
 /** 정면 몸통 (어깨 → 엉덩이, 아래가 조금 좁은 사다리꼴 곡선) */
-export function frontTorsoPath(by = 0, shoulderX: number = FRONT.shoulderX, hipX: number = FRONT.hipX): string {
+export function frontTorsoPath(
+  by = 0,
+  shoulderX: number = FRONT.shoulderX,
+  hipX: number = FRONT.hipX,
+): string {
   const top = FRONT.shoulderY + by;
   return path().smooth(
     [

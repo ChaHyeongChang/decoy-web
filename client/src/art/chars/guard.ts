@@ -4,7 +4,21 @@
 // 네온 포인트는 방패 테두리의 밝은 보라 선(위 · 정면)과 정면 방패 문장(십자)뿐이다. 헬멧 챙 선은 네온보다 어둡게 둔다.
 // 색은 역할색 보라(#A855F7)와 그 짙은/밝은 변형, 어두운 남회색 바지 · 장갑 · 장화 · 방패 테.
 import { OUTLINE, ROLE, ROLE_TEXT } from '../palette';
-import { Sketch, linear, mix, path, radial, rotateAbout, shade, solid, tint, transformDrawing, translate, type Drawing, type Mat } from './kit';
+import {
+  Sketch,
+  linear,
+  mix,
+  path,
+  radial,
+  rotateAbout,
+  shade,
+  solid,
+  tint,
+  transformDrawing,
+  translate,
+  type Drawing,
+  type Mat,
+} from './kit';
 import {
   FRONT,
   MAT,
@@ -138,7 +152,11 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
           };
   // 2) 등 갑옷 판 (몸통 뒤로 비죽 나온 두꺼운 판 — 위에서 '단단한 체격'이 보이게)
   const back = path(tw).with(translate(r.ox, 0));
-  sk.part(back.ellipse(-0.36, 0, 0.44, 0.62).d, domePaint(shade(C.armor, 0.18), ink, 0.7, -0.36 + r.ox, 0), ink(OUTLINE));
+  sk.part(
+    back.ellipse(-0.36, 0, 0.44, 0.62).d,
+    domePaint(shade(C.armor, 0.18), ink, 0.7, -0.36 + r.ox, 0),
+    ink(OUTLINE),
+  );
   sk.line(path(tw).with(translate(r.ox, 0)).M(-0.76, 0).L(-0.3, 0).d, solid(ink(shade(C.armor, 0.4))), 0.04);
   // 3) 몸통 (보라 갑옷)
   sk.part(topTorsoPath(r), domePaint(shade(C.armor, 0.12), ink, r.halfW * 1.1), ink(OUTLINE));
@@ -168,13 +186,15 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
   // 5) 큰 어깨 갑옷 (두 겹 판, 헬멧보다 한 단 어둡게 — 헬멧이 가장 밝은 중심)
   for (const side of [0, 1] as const) {
     const [sx, sy] = r.shoulders[side];
-    const pd = path(tw).with(translate(r.ox, 0)).ellipse(sx - 0.14, sy * 0.97, 0.4, 0.26).d;
+    const pd = path(tw)
+      .with(translate(r.ox, 0))
+      .ellipse(sx - 0.14, sy * 0.97, 0.4, 0.26).d;
     sk.part(pd, domePaint(shade(C.armor, 0.1), ink, 0.44, sx - 0.16 + r.ox, sy * 0.92), ink(OUTLINE));
     const sgn = side === 0 ? -1 : 1;
     sk.line(
       path(tw)
         .with(translate(r.ox, 0))
-        .arc(sx - 0.14, sy * 0.97, 0.27, sgn * Math.PI / 2 - 1.1, sgn * Math.PI / 2 + 1.1, true, 0.15).d,
+        .arc(sx - 0.14, sy * 0.97, 0.27, (sgn * Math.PI) / 2 - 1.1, (sgn * Math.PI) / 2 + 1.1, true, 0.15).d,
       solid(ink(shade(C.armor, 0.35))),
       0.05,
     );
@@ -231,7 +251,13 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
     frontLegs(sk, C.pants, C.boot, C.sole, ink, LEG_SPREAD, 0.17);
     for (const s of [-1, 1]) {
       const x = s * (FRONT.legX + LEG_SPREAD);
-      sk.part(path().roundRect(x - 0.085, 0.62, 0.17, 0.12, 0.05).d, frontClothPaint(C.armor, ink), ink(OUTLINE), 1, 0.3);
+      sk.part(
+        path().roundRect(x - 0.085, 0.62, 0.17, 0.12, 0.05).d,
+        frontClothPaint(C.armor, ink),
+        ink(OUTLINE),
+        1,
+        0.3,
+      );
     }
   }
   // 방패 자리 (몸 가운데 쪽으로, 몸통의 약 65%를 가린다)
@@ -247,7 +273,13 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
   sk.fill(path().roundRect(-0.27, FRONT.hipY - 0.1, 0.54, 0.07, 0.02).d, solid(ink(C.steel)));
   sk.fill(path().roundRect(-0.05, FRONT.hipY - 0.105, 0.1, 0.08, 0.02).d, solid(ink(shade(C.armor, 0.2))));
   // 가슴판 갈래 (가운데 이음)
-  sk.line(path().M(0, FRONT.neckY + 0.06 + by).L(0, FRONT.hipY - 0.12).d, solid(ink(shade(C.armor, 0.3))), 0.025);
+  sk.line(
+    path()
+      .M(0, FRONT.neckY + 0.06 + by)
+      .L(0, FRONT.hipY - 0.12).d,
+    solid(ink(shade(C.armor, 0.3))),
+    0.025,
+  );
   // 4) 어깨 갑옷 (두 겹 둥근 판)
   for (const s of [-1, 1]) {
     const px = s * (SX - 0.02);
@@ -257,8 +289,23 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
       [0.6, ink(C.armor)],
       [1, ink(shade(C.armor, 0.35))],
     ]);
-    sk.part(path().M(px - 0.18, py + 0.07).Q(px - 0.17, py - 0.15, px, py - 0.15).Q(px + 0.17, py - 0.15, px + 0.18, py + 0.07).Q(px, py + 0.03, px - 0.18, py + 0.07).Z().d, pad, ink(OUTLINE));
-    sk.line(path().M(px - 0.15, py + 0.0).Q(px, py - 0.06, px + 0.15, py + 0.0).d, solid(ink(shade(C.armor, 0.35))), 0.02);
+    sk.part(
+      path()
+        .M(px - 0.18, py + 0.07)
+        .Q(px - 0.17, py - 0.15, px, py - 0.15)
+        .Q(px + 0.17, py - 0.15, px + 0.18, py + 0.07)
+        .Q(px, py + 0.03, px - 0.18, py + 0.07)
+        .Z().d,
+      pad,
+      ink(OUTLINE),
+    );
+    sk.line(
+      path()
+        .M(px - 0.15, py + 0.0)
+        .Q(px, py - 0.06, px + 0.15, py + 0.0).d,
+      solid(ink(shade(C.armor, 0.35))),
+      0.02,
+    );
   }
   // 5) 머리 + 헬멧
   const hy = FRONT.headY + by;
@@ -277,9 +324,21 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
   for (const s of [-1, 1]) {
     sk.fill(path().ellipse(s * 0.12, hy + 0.1, 0.042, 0.055).d, solid(ink(MAT.eye)));
     sk.fill(path().circle(s * 0.12 - 0.012, hy + 0.08, 0.015).d, solid(ink(0xffffff), 0.9));
-    sk.line(path().M(s * 0.2, hy + 0.0).L(s * 0.06, hy + 0.035).d, solid(ink(MAT.eye)), 0.035);
+    sk.line(
+      path()
+        .M(s * 0.2, hy + 0.0)
+        .L(s * 0.06, hy + 0.035).d,
+      solid(ink(MAT.eye)),
+      0.035,
+    );
   }
-  sk.line(path().M(-0.05, hy + 0.21).L(0.05, hy + 0.21).d, solid(ink(MAT.skinShade)), 0.022);
+  sk.line(
+    path()
+      .M(-0.05, hy + 0.21)
+      .L(0.05, hy + 0.21).d,
+    solid(ink(MAT.skinShade)),
+    0.022,
+  );
   // 헬멧 (돔 + 볼 가리개). 얼굴 위쪽 · 옆을 덮는다
   const helm = path()
     .M(-hr * 1.08, hy + 0.2)
@@ -303,11 +362,19 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
     ink(OUTLINE),
   );
   // 챙 (어두운 띠 + 보라 선)
-  const brim = path().M(-hr * 0.98, hy - 0.04).Q(0, hy - 0.13, hr * 0.98, hy - 0.04).d;
+  const brim = path()
+    .M(-hr * 0.98, hy - 0.04)
+    .Q(0, hy - 0.13, hr * 0.98, hy - 0.04).d;
   sk.line(brim, solid(ink(C.deep)), 0.06);
   sk.line(brim, solid(ink(tint(C.armor, 0.25))), 0.016);
   // 챙 위 가로 홈 (시설 경비대 헬멧 느낌)
-  sk.line(path().M(-hr * 0.8, hy - 0.13).Q(0, hy - 0.21, hr * 0.8, hy - 0.13).d, solid(ink(C.deep)), 0.03);
+  sk.line(
+    path()
+      .M(-hr * 0.8, hy - 0.13)
+      .Q(0, hy - 0.21, hr * 0.8, hy - 0.13).d,
+    solid(ink(C.deep)),
+    0.03,
+  );
   // 볏 (가운데 솟은 판, 실루엣에 보인다)
   sk.part(
     path()
@@ -349,9 +416,24 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
   sk.line(cross, solid(ink(C.deep)), 0.11);
   sk.line(cross, solid(ink(C.neon), 0.45), 0.075);
   sk.line(cross, solid(ink(tint(C.neon, 0.5))), 0.03);
-  sk.part(path().circle(cx, ey, 0.055).d, radial(cx - 0.015, ey - 0.02, 0.07, [[0, ink(tint(C.neon, 0.6))], [1, ink(C.armor)]]), ink(OUTLINE), 1, 0.3);
+  sk.part(
+    path().circle(cx, ey, 0.055).d,
+    radial(cx - 0.015, ey - 0.02, 0.07, [
+      [0, ink(tint(C.neon, 0.6))],
+      [1, ink(C.armor)],
+    ]),
+    ink(OUTLINE),
+    1,
+    0.3,
+  );
   // 방패 위 반사 (왼쪽 위 빛)
-  sk.line(path().M(cx - hw + 0.1, y0 + 0.12).L(cx - hw + 0.1, y0 + 0.36).d, solid(ink(0xffffff), 0.35), 0.025);
+  sk.line(
+    path()
+      .M(cx - hw + 0.1, y0 + 0.12)
+      .L(cx - hw + 0.1, y0 + 0.36).d,
+    solid(ink(0xffffff), 0.35),
+    0.025,
+  );
   return sk.drawing();
 }
 

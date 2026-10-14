@@ -4,7 +4,17 @@
 // 앞쪽 짙은 회색 가리개 초승달이 바라보는 방향을 보인다(옛 공통 실루엣의 앞 노치와 같은 정보).
 // 색은 흰색(#F8FAFC) · 무채색 회색뿐이다 (VISUAL_SPEC 0장 ③ 흰색 위장).
 import { HIDDEN_SURVIVOR, OUTLINE } from '../palette';
-import { Sketch, linear, path, radial, rotateAbout, solid, transformDrawing, translate, type Drawing } from './kit';
+import {
+  Sketch,
+  linear,
+  path,
+  radial,
+  rotateAbout,
+  solid,
+  transformDrawing,
+  translate,
+  type Drawing,
+} from './kit';
 import {
   FRONT,
   MAT,
@@ -97,7 +107,13 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
   frontArm(sk, 1, C.suit, C.glove, ink, [FRONT.handX, FRONT.handY + by], by);
   // 몸통 (방호복) + 지퍼 · 허리띠
   sk.part(frontTorsoPath(by), frontClothPaint(C.suit, ink), ink(OUTLINE));
-  sk.line(path().M(0, FRONT.neckY + 0.04 + by).L(0, FRONT.hipY - 0.02).d, solid(ink(C.seam)), 0.025);
+  sk.line(
+    path()
+      .M(0, FRONT.neckY + 0.04 + by)
+      .L(0, FRONT.hipY - 0.02).d,
+    solid(ink(C.seam)),
+    0.025,
+  );
   sk.fill(path().roundRect(-0.25, FRONT.hipY - 0.12, 0.5, 0.06, 0.02).d, solid(ink(C.rim)));
   // 머리: 둥근 두건 (얼굴을 덮는 가리개)
   const hy = FRONT.headY + by;
@@ -120,7 +136,13 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
     ]),
     ink(OUTLINE),
   );
-  sk.line(path().M(-0.17, hy - 0.04).L(-0.06, hy - 0.08).d, solid(ink(0xffffff), 0.75), 0.035);
+  sk.line(
+    path()
+      .M(-0.17, hy - 0.04)
+      .L(-0.06, hy - 0.08).d,
+    solid(ink(0xffffff), 0.75),
+    0.035,
+  );
   return sk.drawing();
 }
 

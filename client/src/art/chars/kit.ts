@@ -59,7 +59,14 @@ export function linear(x0: number, y0: number, x1: number, y1: number, stops: re
   return { kind: 'linear', x0, y0, x1, y1, stops };
 }
 
-export function radial(cx: number, cy: number, r: number, stops: readonly Stop[], fx?: number, fy?: number): Paint {
+export function radial(
+  cx: number,
+  cy: number,
+  r: number,
+  stops: readonly Stop[],
+  fx?: number,
+  fy?: number,
+): Paint {
   return fx === undefined || fy === undefined
     ? { kind: 'radial', cx, cy, r, stops }
     : { kind: 'radial', cx, cy, r, stops, fx, fy };
@@ -220,7 +227,14 @@ export class Path {
       const c = at(i + 1);
       const d = at(i + 2);
       const t = tension / 6;
-      this.C(b[0] + (c[0] - a[0]) * t, b[1] + (c[1] - a[1]) * t, c[0] - (d[0] - b[0]) * t, c[1] - (d[1] - b[1]) * t, c[0], c[1]);
+      this.C(
+        b[0] + (c[0] - a[0]) * t,
+        b[1] + (c[1] - a[1]) * t,
+        c[0] - (d[0] - b[0]) * t,
+        c[1] - (d[1] - b[1]) * t,
+        c[0],
+        c[1],
+      );
     }
     return this.Z();
   }
@@ -239,7 +253,14 @@ export class Path {
       const c = at(i + 1);
       const d = at(i + 2);
       const t = tension / 6;
-      this.C(b[0] + (c[0] - a[0]) * t, b[1] + (c[1] - a[1]) * t, c[0] - (d[0] - b[0]) * t, c[1] - (d[1] - b[1]) * t, c[0], c[1]);
+      this.C(
+        b[0] + (c[0] - a[0]) * t,
+        b[1] + (c[1] - a[1]) * t,
+        c[0] - (d[0] - b[0]) * t,
+        c[1] - (d[1] - b[1]) * t,
+        c[0],
+        c[1],
+      );
     }
     return this;
   }
@@ -361,7 +382,11 @@ export class Sketch {
     this.outline.push({ d, stroke: { paint: solid(outline), width: this.w * 2, join: 'round' }, ...a });
     this.body.push({ d, fill: paint, ...a });
     if (inner > 0)
-      this.body.push({ d, stroke: { paint: solid(outline, 0.6), width: this.w * inner, join: 'round' }, ...a });
+      this.body.push({
+        d,
+        stroke: { paint: solid(outline, 0.6), width: this.w * inner, join: 'round' },
+        ...a,
+      });
     return this;
   }
 
@@ -418,7 +443,8 @@ export function transformDrawing(dr: Drawing, k: number, tx: number, ty: number)
       return { ...pa, x0, y0, x1, y1 };
     }
     const [cx, cy] = pt(pa.cx, pa.cy);
-    const f = pa.fx === undefined || pa.fy === undefined ? {} : (([fx, fy]) => ({ fx, fy }))(pt(pa.fx, pa.fy));
+    const f =
+      pa.fx === undefined || pa.fy === undefined ? {} : (([fx, fy]) => ({ fx, fy }))(pt(pa.fx, pa.fy));
     return { ...pa, cx, cy, r: pa.r * k, ...f };
   };
   return {
@@ -426,7 +452,9 @@ export function transformDrawing(dr: Drawing, k: number, tx: number, ty: number)
       ...op,
       d: mapD(op.d),
       ...(op.fill ? { fill: mapPaint(op.fill) } : {}),
-      ...(op.stroke ? { stroke: { ...op.stroke, paint: mapPaint(op.stroke.paint), width: op.stroke.width * k } } : {}),
+      ...(op.stroke
+        ? { stroke: { ...op.stroke, paint: mapPaint(op.stroke.paint), width: op.stroke.width * k } }
+        : {}),
     })),
   };
 }
@@ -451,7 +479,10 @@ function svgPaint(p: Paint, defs: string[], idBase: string, n: { v: number }): s
   if (p.kind === 'solid') return rgba(p.color, p.alpha ?? 1);
   const id = `${idBase}${(n.v += 1)}`;
   const stops = p.stops
-    .map(([o, c, a]) => `<stop offset="${round(o, 4)}" stop-color="${hex(c)}"${a === undefined || a >= 1 ? '' : ` stop-opacity="${round(a, 3)}"`}/>`)
+    .map(
+      ([o, c, a]) =>
+        `<stop offset="${round(o, 4)}" stop-color="${hex(c)}"${a === undefined || a >= 1 ? '' : ` stop-opacity="${round(a, 3)}"`}/>`,
+    )
     .join('');
   if (p.kind === 'linear')
     defs.push(
@@ -485,7 +516,8 @@ export function toSvg(drawing: Drawing, o: SvgOptions): string {
   }
   const [vx, vy, vw, vh] = o.viewBox;
   const size =
-    (o.width !== undefined ? ` width="${o.width}"` : '') + (o.height !== undefined ? ` height="${o.height}"` : '');
+    (o.width !== undefined ? ` width="${o.width}"` : '') +
+    (o.height !== undefined ? ` height="${o.height}"` : '');
   const a11y = o.title ? ` role="img" aria-label="${o.title}"` : ' aria-hidden="true"';
   const g = o.transform ? `<g transform="matrix(${o.transform.map((v) => round(v, 5)).join(' ')})">` : '<g>';
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${round(vx, 4)} ${round(vy, 4)} ${round(vw, 4)} ${round(vh, 4)}"${size}${a11y}><defs>${defs.join('')}</defs>${g}${body.join('')}</g></svg>`;
@@ -511,7 +543,14 @@ export interface CanvasSink {
   lineJoin: CanvasLineJoin;
   lineCap: CanvasLineCap;
   createLinearGradient(x0: number, y0: number, x1: number, y1: number): CanvasGradientSink;
-  createRadialGradient(x0: number, y0: number, r0: number, x1: number, y1: number, r1: number): CanvasGradientSink;
+  createRadialGradient(
+    x0: number,
+    y0: number,
+    r0: number,
+    x1: number,
+    y1: number,
+    r1: number,
+  ): CanvasGradientSink;
   fill(path: Path2D, rule?: CanvasFillRule): void;
   stroke(path: Path2D): void;
 }

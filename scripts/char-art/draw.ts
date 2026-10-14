@@ -99,7 +99,16 @@ export function text(
 }
 
 /** 게임 바닥 비슷한 강판 (빛 속): 1타일 = tilePx */
-export function floor(ctx: Ctx, x: number, y: number, w: number, h: number, tilePx: number, ox = 0, oy = 0): void {
+export function floor(
+  ctx: Ctx,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  tilePx: number,
+  ox = 0,
+  oy = 0,
+): void {
   ctx.save();
   ctx.beginPath();
   ctx.rect(x, y, w, h);
@@ -107,8 +116,8 @@ export function floor(ctx: Ctx, x: number, y: number, w: number, h: number, tile
   ctx.fillStyle = FLOOR;
   ctx.fillRect(x, y, w, h);
   if (tilePx >= 6) {
-    const sx = x - ((((ox % tilePx) + tilePx) % tilePx) || 0);
-    const sy = y - ((((oy % tilePx) + tilePx) % tilePx) || 0);
+    const sx = x - (((ox % tilePx) + tilePx) % tilePx || 0);
+    const sy = y - (((oy % tilePx) + tilePx) % tilePx || 0);
     for (let ty = sy; ty < y + h; ty += tilePx)
       for (let tx = sx; tx < x + w; tx += tilePx) {
         ctx.fillStyle = FLOOR_HI;
@@ -123,7 +132,14 @@ export function floor(ctx: Ctx, x: number, y: number, w: number, h: number, tile
 
 /** 시야 밝기 원 (빛 속 바닥 느낌: 가운데 밝고 바깥 어둡게) */
 export function vignette(ctx: Ctx, w: number, h: number): void {
-  const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.25, w / 2, h / 2, Math.max(w, h) * 0.75);
+  const g = ctx.createRadialGradient(
+    w / 2,
+    h / 2,
+    Math.min(w, h) * 0.25,
+    w / 2,
+    h / 2,
+    Math.max(w, h) * 0.75,
+  );
   g.addColorStop(0, 'rgba(5,8,12,0)');
   g.addColorStop(1, 'rgba(5,8,12,0.55)');
   ctx.fillStyle = g;
@@ -131,7 +147,14 @@ export function vignette(ctx: Ctx, w: number, h: number): void {
 }
 
 /** 접지 그림자 (옛 그림과 같은 모양: 2.15r · 1.82r, 가운데 알파 0.82) */
-export function shadow(ctx: Ctx, x: number, y: number, rPx: number, kind: 'survivor' | 'monster', alpha = 1): void {
+export function shadow(
+  ctx: Ctx,
+  x: number,
+  y: number,
+  rPx: number,
+  kind: 'survivor' | 'monster',
+  alpha = 1,
+): void {
   const reach = (kind === 'monster' ? 1.82 : 2.15) * rPx;
   const g = ctx.createRadialGradient(x, y + 0.1 * rPx, 0, x, y + 0.1 * rPx, reach);
   const a = 0.82 * alpha;
@@ -146,7 +169,17 @@ export function shadow(ctx: Ctx, x: number, y: number, rPx: number, kind: 'survi
 }
 
 /** 그림 한 장 (알파 < 1이면 임시 캔버스에 그려 한 번에 섞는다 — 겹친 부품이 비치지 않게) */
-export function paint(ctx: Ctx, d: Drawing, x: number, y: number, k: number, rot = 0, alpha = 1, sx = 1, sy = 1): void {
+export function paint(
+  ctx: Ctx,
+  d: Drawing,
+  x: number,
+  y: number,
+  k: number,
+  rot = 0,
+  alpha = 1,
+  sx = 1,
+  sy = 1,
+): void {
   if (alpha <= 0.001) return;
   ctx.save();
   ctx.translate(x, y);
@@ -188,7 +221,15 @@ export function newTop(
 }
 
 /** 새 그림: 정면 (상자 [−1, 1]² → 한 변 size px) */
-export function newFront(ctx: Ctx, id: CharId, pose: Partial<FrontPose>, x: number, y: number, size: number, wPx = 3): void {
+export function newFront(
+  ctx: Ctx,
+  id: CharId,
+  pose: Partial<FrontPose>,
+  x: number,
+  y: number,
+  size: number,
+  wPx = 3,
+): void {
   const k = size / 2;
   const w = wPx / k;
   const p = { ...FRONT_REST, ...pose };
@@ -204,7 +245,16 @@ function old(): AtlasBuild {
   return oldAtlas;
 }
 
-function oldFrame(ctx: Ctx, name: string, x: number, y: number, kWorld: number, rot: number, sx = 1, sy = 1): void {
+function oldFrame(
+  ctx: Ctx,
+  name: string,
+  x: number,
+  y: number,
+  kWorld: number,
+  rot: number,
+  sx = 1,
+  sy = 1,
+): void {
   const a = old();
   const f = a.frames.get(name);
   if (!f) throw new Error(`옛 프레임 없음: ${name}`);
@@ -217,12 +267,20 @@ function oldFrame(ctx: Ctx, name: string, x: number, y: number, kWorld: number, 
   ctx.restore();
 }
 
-export function oldSurvivor(ctx: Ctx, role: 'runner' | 'guard' | 'scout' | 'hidden', x: number, y: number, rPx: number, rot: number): void {
+export function oldSurvivor(
+  ctx: Ctx,
+  role: 'runner' | 'guard' | 'scout' | 'hidden',
+  x: number,
+  y: number,
+  rPx: number,
+  rot: number,
+): void {
   const kWorld = rPx / (R_TILES.survivor * TILE);
   oldFrame(ctx, 'shadow-survivor', x, y, kWorld, 0);
   const c = Math.cos(rot);
   const s = Math.sin(rot);
-  for (const fy of [-0.5, 0.5]) oldFrame(ctx, `foot-${role}`, x - fy * s * rPx, y + fy * c * rPx, kWorld, rot);
+  for (const fy of [-0.5, 0.5])
+    oldFrame(ctx, `foot-${role}`, x - fy * s * rPx, y + fy * c * rPx, kWorld, rot);
   oldFrame(ctx, `survivor-${role}`, x, y, kWorld, rot);
   oldFrame(ctx, 'gloss', x, y, kWorld, 0);
 }
@@ -235,7 +293,16 @@ export function oldMonster(ctx: Ctx, x: number, y: number, rPx: number, rot: num
   const s = Math.sin(rot);
   for (const side of [1, -1]) {
     const ly = 0.44 * side;
-    oldFrame(ctx, 'claw', x + (0.64 * c - ly * s) * rPx, y + (0.64 * s + ly * c) * rPx, kWorld, rot + side * 0.38, 1, side);
+    oldFrame(
+      ctx,
+      'claw',
+      x + (0.64 * c - ly * s) * rPx,
+      y + (0.64 * s + ly * c) * rPx,
+      kWorld,
+      rot + side * 0.38,
+      1,
+      side,
+    );
   }
   oldFrame(ctx, 'eyes-open', x + 0.6 * c * rPx, y + 0.6 * s * rPx, kWorld, rot);
 }
@@ -247,7 +314,17 @@ export function oldTop(ctx: Ctx, id: CharId, x: number, y: number, rPx: number, 
 
 // ───────────────────────── 확대 · 흑백 ─────────────────────────
 
-export function zoomCopy(ctx: Ctx, src: HTMLCanvasElement, sx: number, sy: number, sw: number, sh: number, dx: number, dy: number, k: number): void {
+export function zoomCopy(
+  ctx: Ctx,
+  src: HTMLCanvasElement,
+  sx: number,
+  sy: number,
+  sw: number,
+  sh: number,
+  dx: number,
+  dy: number,
+  k: number,
+): void {
   ctx.save();
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(src, sx, sy, sw, sh, dx, dy, sw * k, sh * k);
@@ -309,7 +386,13 @@ export function sparks(ctx: Ctx, x: number, y: number, rPx: number, tS: number, 
     const c = k < 0.5 ? 0xfff7ed : 0xf59e0b;
     ctx.fillStyle = rgba(c, 1 - k);
     ctx.beginPath();
-    ctx.arc(x + Math.cos(ang) * d, y + Math.sin(ang) * d, Math.max(1.5, rPx * 0.09 * (1 - k * 0.5)), 0, Math.PI * 2);
+    ctx.arc(
+      x + Math.cos(ang) * d,
+      y + Math.sin(ang) * d,
+      Math.max(1.5, rPx * 0.09 * (1 - k * 0.5)),
+      0,
+      Math.PI * 2,
+    );
     ctx.fill();
   }
 }
@@ -329,7 +412,16 @@ export function dissolve(ctx: Ctx, x: number, y: number, rPx: number, tS: number
 }
 
 /** 충격파 고리 (밀치기 0.35초 · 기절 0.3초 · 포효 0.6초) */
-export function shockwave(ctx: Ctx, x: number, y: number, r0: number, r1: number, t01: number, color: number, alpha = 0.75): void {
+export function shockwave(
+  ctx: Ctx,
+  x: number,
+  y: number,
+  r0: number,
+  r1: number,
+  t01: number,
+  color: number,
+  alpha = 0.75,
+): void {
   if (t01 < 0 || t01 > 1) return;
   const r = r0 + (r1 - r0) * (1 - (1 - t01) ** 2);
   ctx.save();
@@ -445,7 +537,10 @@ export function speedLines(ctx: Ctx, x: number, y: number, face: number, rPx: nu
 export function injury(ctx: Ctx, x: number, y: number, face: number, rPx: number): void {
   const c = Math.cos(face);
   const s = Math.sin(face);
-  const at = (lx: number, ly: number): [number, number] => [x + (lx * c - ly * s) * rPx, y + (lx * s + ly * c) * rPx];
+  const at = (lx: number, ly: number): [number, number] => [
+    x + (lx * c - ly * s) * rPx,
+    y + (lx * s + ly * c) * rPx,
+  ];
   ctx.save();
   ctx.lineCap = 'round';
   for (let i = -1; i <= 1; i += 1) {
@@ -465,7 +560,13 @@ export function injury(ctx: Ctx, x: number, y: number, face: number, rPx: number
 }
 
 /** 괴물 화면 능력 노출: 역할색 링 (1.34r) + 머리 위 배지 (새 스타일: 역할 상반신 아이콘) */
-export function revealMark(ctx: Ctx, x: number, y: number, rPx: number, role: 'runner' | 'guard' | 'scout'): void {
+export function revealMark(
+  ctx: Ctx,
+  x: number,
+  y: number,
+  rPx: number,
+  role: 'runner' | 'guard' | 'scout',
+): void {
   const color = ROLE[role];
   ctx.save();
   ctx.lineWidth = Math.max(2.5, 0.22 * rPx) + 2.4;
@@ -538,7 +639,14 @@ export function trackMark(ctx: Ctx, x: number, y: number, s: number, tS: number)
 }
 
 /** 괴물 공격 준비 범위 (흰 부채꼴 90° · 반지름 = attack.range, 채움이 0 → 100% 차오름) */
-export function attackFan(ctx: Ctx, x: number, y: number, dir: number, rangePx: number, fill01: number): void {
+export function attackFan(
+  ctx: Ctx,
+  x: number,
+  y: number,
+  dir: number,
+  rangePx: number,
+  fill01: number,
+): void {
   const half = Math.PI / 4;
   ctx.save();
   ctx.translate(x, y);
@@ -560,7 +668,15 @@ export function attackFan(ctx: Ctx, x: number, y: number, dir: number, rangePx: 
 }
 
 /** 감옥 철창 칸 (붉은 철창 + 바닥 격자). (x, y) = 왼쪽 위, 크기 w × h px */
-export function prisonCell(ctx: Ctx, x: number, y: number, w: number, h: number, tilePx: number, doorOpen = 0): void {
+export function prisonCell(
+  ctx: Ctx,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  tilePx: number,
+  doorOpen = 0,
+): void {
   ctx.save();
   ctx.fillStyle = '#0d141b';
   ctx.fillRect(x, y, w, h);

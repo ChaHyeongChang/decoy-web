@@ -41,7 +41,16 @@ import {
 const TAU = Math.PI * 2;
 const STRIDE_TILES = 1.1;
 const SPEED = { survivor: 5, monster: 5.5, sprint: 5 * 1.45 } as const;
-const RULE = { windup: 0.4, strike: 0.12, dash: 0.25, dashTiles: 4, stun: 1.5, rescue: 3, reveal: 1, attackRange: 1.2 } as const;
+const RULE = {
+  windup: 0.4,
+  strike: 0.12,
+  dash: 0.25,
+  dashTiles: 4,
+  stun: 1.5,
+  rescue: 3,
+  reveal: 1,
+  attackRange: 1.2,
+} as const;
 
 function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
@@ -88,13 +97,21 @@ function onTrack(tr: Track, s0: number): { x: number; y: number; face: number } 
   s -= top;
   if (s < arc) {
     const a = -Math.PI / 2 + s / tr.rad;
-    return { x: tr.cx + (tr.half + Math.cos(a) * tr.rad) * T, y: tr.cy + Math.sin(a) * tr.rad * T, face: a + Math.PI / 2 };
+    return {
+      x: tr.cx + (tr.half + Math.cos(a) * tr.rad) * T,
+      y: tr.cy + Math.sin(a) * tr.rad * T,
+      face: a + Math.PI / 2,
+    };
   }
   s -= arc;
   if (s < top) return { x: tr.cx + (tr.half - s) * T, y: tr.cy + tr.rad * T, face: Math.PI };
   s -= top;
   const a = Math.PI / 2 + s / tr.rad;
-  return { x: tr.cx + (-tr.half + Math.cos(a) * tr.rad) * T, y: tr.cy + Math.sin(a) * tr.rad * T, face: a + Math.PI / 2 };
+  return {
+    x: tr.cx + (-tr.half + Math.cos(a) * tr.rad) * T,
+    y: tr.cy + Math.sin(a) * tr.rad * T,
+    face: a + Math.PI / 2,
+  };
 }
 
 function drawTrack(ctx: Ctx, tr: Track): void {
@@ -149,7 +166,9 @@ function idleScene(id: CharId): Scene {
   return {
     id: `${id}-idle`,
     label: `${NAMES[id]} · 대기`,
-    note: isM ? '망토 자락 물결 1.9초 · 눈 깜빡임 3.4초 · 숨쉬기' : '숨쉬기 2.6초 (위 그림 · 정면 그림 같은 주기)',
+    note: isM
+      ? '망토 자락 물결 1.9초 · 눈 깜빡임 3.4초 · 숨쉬기'
+      : '숨쉬기 2.6초 (위 그림 · 정면 그림 같은 주기)',
     dur,
     w: 560,
     h: 340,
@@ -188,7 +207,9 @@ function walkScene(id: CharId): Scene {
       const p = onTrack(tr, d);
       const walk = (TAU * d) / STRIDE_TILES;
       const r = R_TILES[kindOf(id)] * tile;
-      const pose = isM ? { walk, stride: 1, cloak: cloakPhase(t, true), eyes: blink(t) } : { walk, stride: 1 };
+      const pose = isM
+        ? { walk, stride: 1, cloak: cloakPhase(t, true), eyes: blink(t) }
+        : { walk, stride: 1 };
       // 게임과 같이 생존자는 걸음에 맞춰 몸을 ±4° 기울인다 (괴물은 기울이지 않음)
       newTop(ctx, id, pose, p.x, p.y, r, p.face + (isM ? 0 : ((4 * Math.PI) / 180) * Math.sin(walk)));
       header(ctx, 560, this.label, this.note, TEXT_COLOR[id]);
@@ -217,11 +238,22 @@ function sprintScene(): Scene {
       const d = sprinting ? L + (t - tWalk) * SPEED.sprint : t * SPEED.survivor;
       const p = onTrack(tr, d);
       const walk = (TAU * d) / STRIDE_TILES;
-      const action = sprinting ? ramp(t, tWalk, tWalk + 0.15) * (1 - ramp(t, tWalk + tSprint - 0.12, tWalk + tSprint)) : 0;
+      const action = sprinting
+        ? ramp(t, tWalk, tWalk + 0.15) * (1 - ramp(t, tWalk + tSprint - 0.12, tWalk + tSprint))
+        : 0;
       const r = R_TILES.survivor * tile;
       if (sprinting) speedLines(ctx, p.x, p.y, p.face, r, t);
       newTop(ctx, 'runner', { walk, stride: 1, action }, p.x, p.y, r, p.face);
-      text(ctx, sprinting ? '질주 중' : '걷기', 280, 340, 15, sprinting ? '#60a5fa' : '#94a3b8', 700, 'center');
+      text(
+        ctx,
+        sprinting ? '질주 중' : '걷기',
+        280,
+        340,
+        15,
+        sprinting ? '#60a5fa' : '#94a3b8',
+        700,
+        'center',
+      );
       header(ctx, 560, this.label, this.note, TEXT_COLOR.runner);
     },
   };
@@ -242,10 +274,24 @@ function shoveScene(): Scene {
     h: 340,
     draw(ctx, t) {
       stage(ctx, 560, 340, tile);
-      const action = t < 0.4 ? 0 : t < 0.55 ? 0.5 * ramp(t, 0.4, 0.55) : t < 0.66 ? 0.5 + 0.5 * ramp(t, 0.55, 0.66) : 1 - ramp(t, 0.95, 1.3);
+      const action =
+        t < 0.4
+          ? 0
+          : t < 0.55
+            ? 0.5 * ramp(t, 0.4, 0.55)
+            : t < 0.66
+              ? 0.5 + 0.5 * ramp(t, 0.55, 0.66)
+              : 1 - ramp(t, 0.95, 1.3);
       const hit = 0.66;
-      const stunK = t >= hit && t < hit + RULE.stun ? ramp(t, hit, hit + 0.12) * (1 - ramp(t, hit + RULE.stun - 0.25, hit + RULE.stun)) : 0;
-      const mPose: Partial<MonsterPose> = { stun: stunK, eyes: stunK > 0.5 ? 'stun' : blink(t), cloak: cloakPhase(t, false) };
+      const stunK =
+        t >= hit && t < hit + RULE.stun
+          ? ramp(t, hit, hit + 0.12) * (1 - ramp(t, hit + RULE.stun - 0.25, hit + RULE.stun))
+          : 0;
+      const mPose: Partial<MonsterPose> = {
+        stun: stunK,
+        eyes: stunK > 0.5 ? 'stun' : blink(t),
+        cloak: cloakPhase(t, false),
+      };
       newTop(ctx, 'monster', mPose, mx, gy, R_TILES.monster * tile, Math.PI);
       if (t >= hit && t < hit + RULE.stun) stunStars(ctx, mx, gy, R_TILES.monster * tile, t);
       shockwave(ctx, gx + 0.55 * tile, gy, 8, 0.9 * tile, (t - hit + 0.02) / 0.35, 0xe9d5ff, 0.75);
@@ -296,8 +342,12 @@ function hitScene(role: SurvivorRole): Scene {
     draw(ctx, t) {
       stage(ctx, 560, 340, tile);
       const windup = ramp(t, 0.2, tHit) * (1 - ramp(t, tHit, tHit + 0.05));
-      const strike = t >= tHit && t < tHit + 0.35 ? clamp01((t - tHit) / RULE.strike) * (1 - ramp(t, tHit + 0.15, tHit + 0.35)) : 0;
-      if (t >= 0.2 && t < tHit) attackFan(ctx, mx, sy, Math.PI, RULE.attackRange * tile, (t - 0.2) / RULE.windup);
+      const strike =
+        t >= tHit && t < tHit + 0.35
+          ? clamp01((t - tHit) / RULE.strike) * (1 - ramp(t, tHit + 0.15, tHit + 0.35))
+          : 0;
+      if (t >= 0.2 && t < tHit)
+        attackFan(ctx, mx, sy, Math.PI, RULE.attackRange * tile, (t - 0.2) / RULE.windup);
       const dt = t - tHit;
       const hit = dt >= 0 ? Math.max(0, 1 - dt / 0.3) : 0;
       const squash = dt >= 0 && dt < 0.12 ? Math.sin((Math.PI * dt) / 0.12) : 0;
@@ -306,9 +356,22 @@ function hitScene(role: SurvivorRole): Scene {
       if (dt >= 0) injury(ctx, sx, sy, 0, r);
       newTop(ctx, role, { hit }, sx, sy, r, 0, { sx: 1 + squash * 0.16, sy: 1 - squash * 0.16 });
       if (flash > 0)
-        newTop(ctx, role, { hit, tone: 'flash' }, sx, sy, r, 0, { shadow: false, alpha: 0.9 * flash, sx: 1 + squash * 0.16, sy: 1 - squash * 0.16 });
+        newTop(ctx, role, { hit, tone: 'flash' }, sx, sy, r, 0, {
+          shadow: false,
+          alpha: 0.9 * flash,
+          sx: 1 + squash * 0.16,
+          sy: 1 - squash * 0.16,
+        });
       sparks(ctx, sx, sy, r, dt, 3);
-      newTop(ctx, 'monster', { windup, strike, cloak: cloakPhase(t, false), eyes: 'open' }, mx, sy, R_TILES.monster * tile, Math.PI);
+      newTop(
+        ctx,
+        'monster',
+        { windup, strike, cloak: cloakPhase(t, false), eyes: 'open' },
+        mx,
+        sy,
+        R_TILES.monster * tile,
+        Math.PI,
+      );
       if (dt >= 0) slashArc(ctx, mx, sy, Math.PI, RULE.attackRange * tile, dt / RULE.strike);
       header(ctx, 560, this.label, this.note, TEXT_COLOR[role]);
     },
@@ -334,8 +397,12 @@ function imprisonScene(role: SurvivorRole): Scene {
       stage(ctx, 560, 340, tile);
       prisonCell(ctx, cell.x, cell.y, cell.w, cell.h, tile);
       const windup = ramp(t, 0.2, tHit) * (1 - ramp(t, tHit, tHit + 0.05));
-      const strike = t >= tHit && t < tHit + 0.35 ? clamp01((t - tHit) / RULE.strike) * (1 - ramp(t, tHit + 0.15, tHit + 0.35)) : 0;
-      if (t >= 0.2 && t < tHit) attackFan(ctx, mx, sy, Math.PI, RULE.attackRange * tile, (t - 0.2) / RULE.windup);
+      const strike =
+        t >= tHit && t < tHit + 0.35
+          ? clamp01((t - tHit) / RULE.strike) * (1 - ramp(t, tHit + 0.15, tHit + 0.35))
+          : 0;
+      if (t >= 0.2 && t < tHit)
+        attackFan(ctx, mx, sy, Math.PI, RULE.attackRange * tile, (t - 0.2) / RULE.windup);
       const r = R_TILES.survivor * tile;
       const dt = t - tHit;
       if (dt < 0) {
@@ -347,9 +414,21 @@ function imprisonScene(role: SurvivorRole): Scene {
       if (appear > 0) {
         const cx = cell.x + cell.w / 2;
         const cy = cell.y + cell.h / 2;
-        newTop(ctx, role, { mode: 'captive' }, cx, cy, r, Math.PI / 2, { alpha: appear, sx: breath(t), sy: breath(t) });
+        newTop(ctx, role, { mode: 'captive' }, cx, cy, r, Math.PI / 2, {
+          alpha: appear,
+          sx: breath(t),
+          sy: breath(t),
+        });
       }
-      newTop(ctx, 'monster', { windup, strike, cloak: cloakPhase(t, false) }, mx, sy, R_TILES.monster * tile, Math.PI);
+      newTop(
+        ctx,
+        'monster',
+        { windup, strike, cloak: cloakPhase(t, false) },
+        mx,
+        sy,
+        R_TILES.monster * tile,
+        Math.PI,
+      );
       if (dt >= 0) slashArc(ctx, mx, sy, Math.PI, RULE.attackRange * tile, dt / RULE.strike);
       header(ctx, 560, this.label, this.note, TEXT_COLOR[role]);
     },
@@ -382,7 +461,11 @@ function rescueScene(role: SurvivorRole): Scene {
       const r = R_TILES.survivor * tile;
       const working = t >= t0 && t < t1;
       if (working) rescueRing(ctx, rx, ry, tile, (t - t0) / RULE.rescue);
-      if (t < t1) newTop(ctx, mate, { mode: 'captive' }, doorX, cell.y + cell.h * 0.45, r, Math.PI / 2, { sx: breath(t), sy: breath(t) });
+      if (t < t1)
+        newTop(ctx, mate, { mode: 'captive' }, doorX, cell.y + cell.h * 0.45, r, Math.PI / 2, {
+          sx: breath(t),
+          sy: breath(t),
+        });
       else {
         const k = ramp(t, t1, t1 + 0.15);
         const px = rx + 0.75 * tile;
@@ -416,7 +499,15 @@ function commonWalkScene(): Scene {
       for (let i = 0; i < 3; i += 1) {
         const d = t * SPEED.survivor + (L * i) / 3;
         const p = onTrack(tr, d);
-        newTop(ctx, 'common', { walk: (TAU * d) / STRIDE_TILES, stride: 1 }, p.x, p.y, R_TILES.survivor * tile, p.face);
+        newTop(
+          ctx,
+          'common',
+          { walk: (TAU * d) / STRIDE_TILES, stride: 1 },
+          p.x,
+          p.y,
+          R_TILES.survivor * tile,
+          p.face,
+        );
       }
       header(ctx, 560, this.label, this.note, TEXT_COLOR.common);
     },
@@ -445,7 +536,16 @@ function commonStatusScene(): Scene {
       const rev = t >= 0.5 && t < 0.5 + RULE.reveal;
       if (rev) revealMark(ctx, 450, 220, r, 'guard');
       newTop(ctx, 'common', {}, 450, 220, r, -Math.PI / 2, { sx: s, sy: s });
-      text(ctx, rev ? '능력 노출 (예: 가드)' : '능력 노출 전', 450, 318, 13, rev ? '#c084fc' : '#94a3b8', 700, 'center');
+      text(
+        ctx,
+        rev ? '능력 노출 (예: 가드)' : '능력 노출 전',
+        450,
+        318,
+        13,
+        rev ? '#c084fc' : '#94a3b8',
+        700,
+        'center',
+      );
       header(ctx, 560, this.label, this.note, TEXT_COLOR.common);
     },
   };
@@ -469,13 +569,31 @@ function attackScene(slow: number): Scene {
     draw(ctx, t) {
       stage(ctx, 560, 340, tile);
       const u = (t - t0) / slow;
-      const windup = u < 0 ? 0 : u < RULE.windup ? ramp(u, 0, RULE.windup) : 1 - ramp(u, RULE.windup, RULE.windup + 0.06);
+      const windup =
+        u < 0 ? 0 : u < RULE.windup ? ramp(u, 0, RULE.windup) : 1 - ramp(u, RULE.windup, RULE.windup + 0.06);
       const su = u - RULE.windup;
       const strike = su >= 0 && su < 0.5 ? clamp01(su / RULE.strike) * (1 - ramp(su, 0.2, 0.45)) : 0;
       if (u >= 0 && u < RULE.windup) attackFan(ctx, mx, my, 0, RULE.attackRange * tile, u / RULE.windup);
-      newTop(ctx, 'monster', { windup, strike, cloak: cloakPhase(t / slow, false), eyes: 'open' }, mx, my, R_TILES.monster * tile, 0);
+      newTop(
+        ctx,
+        'monster',
+        { windup, strike, cloak: cloakPhase(t / slow, false), eyes: 'open' },
+        mx,
+        my,
+        R_TILES.monster * tile,
+        0,
+      );
       if (su >= 0) slashArc(ctx, mx, my, 0, RULE.attackRange * tile, su / RULE.strike);
-      text(ctx, u < 0 ? '대기' : u < RULE.windup ? '공격 준비' : su < 0.25 ? '타격' : '회복', mx, 320, 15, '#f87171', 700, 'center');
+      text(
+        ctx,
+        u < 0 ? '대기' : u < RULE.windup ? '공격 준비' : su < 0.25 ? '타격' : '회복',
+        mx,
+        320,
+        15,
+        '#f87171',
+        700,
+        'center',
+      );
       header(ctx, 560, this.label, this.note, TEXT_COLOR.monster);
     },
   };
@@ -493,7 +611,8 @@ function windupScene(): Scene {
     draw(ctx, t) {
       stage(ctx, 560, 340, tile);
       const windup = ramp(t, 0.2, 0.6) * (1 - ramp(t, 1.0, 1.15));
-      if (t >= 0.2 && t < 1.0) attackFan(ctx, 220, 205, 0, RULE.attackRange * tile, Math.min(1, (t - 0.2) / RULE.windup));
+      if (t >= 0.2 && t < 1.0)
+        attackFan(ctx, 220, 205, 0, RULE.attackRange * tile, Math.min(1, (t - 0.2) / RULE.windup));
       newTop(ctx, 'monster', { windup, cloak: cloakPhase(t, false) }, 220, 205, R_TILES.monster * tile, 0);
       header(ctx, 560, this.label, this.note, TEXT_COLOR.monster);
     },
@@ -541,7 +660,8 @@ function dashScene(slow: number): Scene {
           ctx.lineTo(q.gx, y);
           ctx.stroke();
         }
-        for (const gh of ghosts) newTop(ctx, 'monster', { dash: 1 }, gh.gx, y, r, 0, { shadow: false, alpha: gh.a });
+        for (const gh of ghosts)
+          newTop(ctx, 'monster', { dash: 1 }, gh.gx, y, r, 0, { shadow: false, alpha: gh.a });
       }
       newTop(ctx, 'monster', { dash: dashPose, cloak: cloakPhase(t / slow, true) }, x, y, r, 0);
       header(ctx, 560, this.label, this.note, TEXT_COLOR.monster);
@@ -580,7 +700,15 @@ function roarScene(): Scene {
         ctx.stroke();
         ctx.restore();
       }
-      newTop(ctx, 'monster', { roar, cloak: cloakPhase(t, false) }, mx, my, R_TILES.monster * tile, -Math.PI / 2);
+      newTop(
+        ctx,
+        'monster',
+        { roar, cloak: cloakPhase(t, false) },
+        mx,
+        my,
+        R_TILES.monster * tile,
+        -Math.PI / 2,
+      );
       header(ctx, 560, this.label, this.note, TEXT_COLOR.monster);
     },
   };
@@ -603,7 +731,15 @@ function stunScene(): Scene {
       const on = t >= t0 && t < t0 + RULE.stun;
       const stun = ramp(t, t0, t0 + 0.12) * (1 - ramp(t, t0 + RULE.stun - 0.2, t0 + RULE.stun + 0.1));
       shockwave(ctx, mx, my, 6, 0.6 * tile, (t - t0) / 0.3, 0xfde68a, 0.7);
-      newTop(ctx, 'monster', { stun, eyes: on ? 'stun' : blink(t), cloak: cloakPhase(t, false) }, mx, my, R_TILES.monster * tile, 0.35);
+      newTop(
+        ctx,
+        'monster',
+        { stun, eyes: on ? 'stun' : blink(t), cloak: cloakPhase(t, false) },
+        mx,
+        my,
+        R_TILES.monster * tile,
+        0.35,
+      );
       if (on) stunStars(ctx, mx, my, R_TILES.monster * tile, t);
       header(ctx, 560, this.label, this.note, TEXT_COLOR.monster);
     },
@@ -688,7 +824,13 @@ export function sceneFrames(id: string, fps: number, from = 0, count?: number): 
 }
 
 /** 모아 보기: 한 캐릭터의 장면 여럿을 격자로 (각 칸은 제 길이로 되풀이) */
-export function overviewFrames(prefix: string, fps: number, from: number, count: number, cols = 3): { w: number; h: number; frames: string[] } {
+export function overviewFrames(
+  prefix: string,
+  fps: number,
+  from: number,
+  count: number,
+  cols = 3,
+): { w: number; h: number; frames: string[] } {
   const list = scenes().filter((s) => s.id.startsWith(`${prefix}-`) && !s.id.endsWith('-slow'));
   const cw = 420;
   const ch = 255;
@@ -709,7 +851,13 @@ export function overviewFrames(prefix: string, fps: number, from: number, count:
       const x = (k % cols) * cw;
       const y = Math.floor(k / cols) * ch;
       const sc = Math.min((cw - 6) / cell.s.w, (ch - 6) / cell.s.h);
-      ctx.drawImage(cell.c, x + (cw - cell.s.w * sc) / 2, y + (ch - cell.s.h * sc) / 2, cell.s.w * sc, cell.s.h * sc);
+      ctx.drawImage(
+        cell.c,
+        x + (cw - cell.s.w * sc) / 2,
+        y + (ch - cell.s.h * sc) / 2,
+        cell.s.w * sc,
+        cell.s.h * sc,
+      );
     });
     out.push(c.toDataURL('image/png'));
   }
@@ -727,7 +875,9 @@ const SURVIVOR_POSES: { label: string; pose: Partial<SurvivorPose> }[] = [
   { label: '구조 중', pose: { mode: 'reach' } },
   { label: '사망', pose: { tone: 'gray' } },
 ];
-const COMMON_POSES = SURVIVOR_POSES.filter((p) => p.label === '서기' || p.label === '걷기' || p.label === '수감' || p.label === '구조 중');
+const COMMON_POSES = SURVIVOR_POSES.filter(
+  (p) => p.label === '서기' || p.label === '걷기' || p.label === '수감' || p.label === '구조 중',
+);
 const MONSTER_POSES: { label: string; pose: Partial<MonsterPose> }[] = [
   { label: '서기', pose: {} },
   { label: '걷기', pose: { walk: Math.PI / 2, stride: 1, cloak: 1.2 } },
@@ -801,7 +951,15 @@ export function sheet(id: CharId): string {
     text(ctx, p.label, x + 82, y + 180, 14, '#e2e8f0', 700, 'center');
   });
   // 실제 크기: 지금 vs 새 (세 방향씩, 오른쪽에 최근접 확대)
-  text(ctx, '게임 속 실제 크기 (기기 화소 그대로) · 왼쪽 셋 = 지금 그림, 오른쪽 셋 = 새 그림 → 오른쪽은 최근접 확대', 660, 826, 15, '#94a3b8', 700);
+  text(
+    ctx,
+    '게임 속 실제 크기 (기기 화소 그대로) · 왼쪽 셋 = 지금 그림, 오른쪽 셋 = 새 그림 → 오른쪽은 최근접 확대',
+    660,
+    826,
+    15,
+    '#94a3b8',
+    700,
+  );
   let y = 846;
   const devs = [DEVICES.phone3, DEVICES.phone2, DEVICES.pc768];
   const dirs = [-Math.PI / 2, 0.35, Math.PI * 0.8];
@@ -846,7 +1004,9 @@ export function lineup(): string {
   const y0 = 880;
   text(ctx, '휴대폰 실제 크기 (배율 3, 기기 화소 그대로 → 3배 확대 · 흑백)', 36, y0 - 10, 17, '#94a3b8', 700);
   floor(ctx, 36, y0, lw, 64, tile);
-  ids.forEach((id, i) => newTop(ctx, id, {}, 36 + 32 + i * 64, y0 + 32, radiusPx(kindOf(id), dev), -Math.PI / 2 + i * 0.6));
+  ids.forEach((id, i) =>
+    newTop(ctx, id, {}, 36 + 32 + i * 64, y0 + 32, radiusPx(kindOf(id), dev), -Math.PI / 2 + i * 0.6),
+  );
   zoomCopy(ctx, c, 36, y0, lw, 64, 36 + lw + 24, y0, 3);
   zoomCopy(ctx, c, 36, y0, lw, 64, 36 + lw + 24 + lw * 3 + 24, y0, 1.6);
   grayscale(ctx, 36 + lw + 24 + lw * 3 + 24, y0, Math.ceil(lw * 1.6), Math.ceil(64 * 1.6));

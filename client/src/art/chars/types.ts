@@ -25,7 +25,14 @@ export interface SurvivorPose {
   tone: Tone;
 }
 
-export const SURVIVOR_REST: SurvivorPose = { walk: 0, stride: 0, action: 0, hit: 0, mode: 'free', tone: 'normal' };
+export const SURVIVOR_REST: SurvivorPose = {
+  walk: 0,
+  stride: 0,
+  action: 0,
+  hit: 0,
+  mode: 'free',
+  tone: 'normal',
+};
 
 /** 괴물 자세 (위에서 본 그림) */
 export interface MonsterPose {

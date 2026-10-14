@@ -121,7 +121,17 @@ function shadow(ctx: Ctx, x: number, y: number, rPx: number, kind: 'survivor' | 
   ctx.fill();
 }
 
-function paint(ctx: Ctx, d: Drawing, x: number, y: number, k: number, rot = 0, alpha = 1, sx = 1, sy = 1): void {
+function paint(
+  ctx: Ctx,
+  d: Drawing,
+  x: number,
+  y: number,
+  k: number,
+  rot = 0,
+  alpha = 1,
+  sx = 1,
+  sy = 1,
+): void {
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(rot);
@@ -160,7 +170,15 @@ export function newTop(
 }
 
 /** 새 그림: 정면 (상자 [−1, 1]² → 한 변 size px) */
-export function newFront(ctx: Ctx, id: CharId, pose: Partial<FrontPose>, x: number, y: number, size: number, wPx = 3): void {
+export function newFront(
+  ctx: Ctx,
+  id: CharId,
+  pose: Partial<FrontPose>,
+  x: number,
+  y: number,
+  size: number,
+  wPx = 3,
+): void {
   const k = size / 2;
   const w = wPx / k;
   const p = { ...FRONT_REST, ...pose };
@@ -171,8 +189,15 @@ export function newFront(ctx: Ctx, id: CharId, pose: Partial<FrontPose>, x: numb
 export function frontSvg(id: CharId, pose: Partial<FrontPose>, size: number, wPx = 3): string {
   const k = size / 2;
   const p = { ...FRONT_REST, ...pose };
-  const d = id === 'monster' ? MONSTER_ART.front(p, { w: wPx / k }) : SURVIVOR_ART[id].front(p, { w: wPx / k });
-  return toSvg(d, { viewBox: [-1.05, -1.05, 2.1, 2.1], width: size, height: size, idPrefix: `${id}f` });
+  const d =
+    id === 'monster' ? MONSTER_ART.front(p, { w: wPx / k }) : SURVIVOR_ART[id].front(p, { w: wPx / k });
+  // 같은 문서에 여러 그림이 들어가도 그라디언트 id가 겹치지 않게 (상반신 · 크기 · 톤을 앞붙이에)
+  return toSvg(d, {
+    viewBox: [-1.05, -1.05, 2.1, 2.1],
+    width: size,
+    height: size,
+    idPrefix: `${id}${p.bust ? 'b' : 'f'}${p.tone[0] ?? 'n'}${Math.round(size)}x`,
+  });
 }
 
 // ───────────────────────── 지금 그림 (옛 아틀라스) ─────────────────────────
@@ -184,7 +209,16 @@ function old(): AtlasBuild {
   return oldAtlas;
 }
 
-function oldFrame(ctx: Ctx, name: string, x: number, y: number, kWorld: number, rot: number, sx = 1, sy = 1): void {
+function oldFrame(
+  ctx: Ctx,
+  name: string,
+  x: number,
+  y: number,
+  kWorld: number,
+  rot: number,
+  sx = 1,
+  sy = 1,
+): void {
   const a = old();
   const f = a.frames.get(name);
   if (!f) throw new Error(`옛 프레임 없음: ${name}`);
@@ -198,18 +232,34 @@ function oldFrame(ctx: Ctx, name: string, x: number, y: number, kWorld: number, 
 }
 
 /** 옛 그림 생존자 (그림자 · 발 · 몸 · 윤기, 서 있는 자세). role = 'hidden'이면 괴물 화면 공통 */
-export function oldSurvivor(ctx: Ctx, role: 'runner' | 'guard' | 'scout' | 'hidden', x: number, y: number, rPx: number, rot: number): void {
+export function oldSurvivor(
+  ctx: Ctx,
+  role: 'runner' | 'guard' | 'scout' | 'hidden',
+  x: number,
+  y: number,
+  rPx: number,
+  rot: number,
+): void {
   const kWorld = rPx / (R_TILES.survivor * TILE);
   oldFrame(ctx, 'shadow-survivor', x, y, kWorld, 0);
   const c = Math.cos(rot);
   const s = Math.sin(rot);
-  for (const fy of [-0.5, 0.5]) oldFrame(ctx, `foot-${role}`, x - fy * s * rPx, y + fy * c * rPx, kWorld, rot);
+  for (const fy of [-0.5, 0.5])
+    oldFrame(ctx, `foot-${role}`, x - fy * s * rPx, y + fy * c * rPx, kWorld, rot);
   oldFrame(ctx, `survivor-${role}`, x, y, kWorld, rot);
   oldFrame(ctx, 'gloss', x, y, kWorld, 0);
 }
 
 /** 옛 그림 괴물 (그림자 · 망토 · 발톱 2 · 눈) */
-export function oldMonster(ctx: Ctx, x: number, y: number, rPx: number, rot: number, frame = 'monster-idle-0', raise = 0): void {
+export function oldMonster(
+  ctx: Ctx,
+  x: number,
+  y: number,
+  rPx: number,
+  rot: number,
+  frame = 'monster-idle-0',
+  raise = 0,
+): void {
   const kWorld = rPx / (R_TILES.monster * TILE);
   oldFrame(ctx, 'shadow-monster', x, y, kWorld, 0);
   oldFrame(ctx, frame, x, y, kWorld, rot);
@@ -218,7 +268,16 @@ export function oldMonster(ctx: Ctx, x: number, y: number, rPx: number, rot: num
   const lx = 0.64 + 0.14 * raise;
   for (const side of [1, -1]) {
     const ly = (0.44 + 0.06 * raise) * side;
-    oldFrame(ctx, 'claw', x + (lx * c - ly * s) * rPx, y + (lx * s + ly * c) * rPx, kWorld, rot + side * (0.38 + 0.3 * raise), 1, side);
+    oldFrame(
+      ctx,
+      'claw',
+      x + (lx * c - ly * s) * rPx,
+      y + (lx * s + ly * c) * rPx,
+      kWorld,
+      rot + side * (0.38 + 0.3 * raise),
+      1,
+      side,
+    );
   }
   oldFrame(ctx, 'eyes-open', x + 0.6 * c * rPx, y + 0.6 * s * rPx, kWorld, rot);
 }
@@ -231,8 +290,17 @@ async function svgImage(svg: string): Promise<HTMLImageElement> {
   return img;
 }
 
-export async function oldLobbyFigure(ctx: Ctx, role: 'runner' | 'guard' | 'scout' | 'monster', x: number, y: number, size: number): Promise<void> {
-  const svg = roleFigureSvg(role, true).replace('<svg ', `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" `);
+export async function oldLobbyFigure(
+  ctx: Ctx,
+  role: 'runner' | 'guard' | 'scout' | 'monster',
+  x: number,
+  y: number,
+  size: number,
+): Promise<void> {
+  const svg = roleFigureSvg(role, true).replace(
+    '<svg ',
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" `,
+  );
   const img = await svgImage(svg);
   ctx.drawImage(img, x - size / 2, y - size / 2, size, size);
 }
@@ -240,7 +308,17 @@ export async function oldLobbyFigure(ctx: Ctx, role: 'runner' | 'guard' | 'scout
 // ───────────────────────── 확대 · 흑백 ─────────────────────────
 
 /** 캔버스 영역을 최근접 확대해 붙인다 */
-function zoomCopy(ctx: Ctx, src: HTMLCanvasElement, sx: number, sy: number, sw: number, sh: number, dx: number, dy: number, k: number): void {
+function zoomCopy(
+  ctx: Ctx,
+  src: HTMLCanvasElement,
+  sx: number,
+  sy: number,
+  sw: number,
+  sh: number,
+  dx: number,
+  dy: number,
+  k: number,
+): void {
   ctx.save();
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(src, sx, sy, sw, sh, dx, dy, sw * k, sh * k);
@@ -293,7 +371,13 @@ const ROLE_COLOR: Record<CharId, number> = {
   monster: ROLE.monster,
 };
 
-const NAMES: Record<CharId, string> = { runner: '러너', guard: '가드', scout: '스카우트', common: '공통 생존자', monster: '괴물' };
+const NAMES: Record<CharId, string> = {
+  runner: '러너',
+  guard: '가드',
+  scout: '스카우트',
+  common: '공통 생존자',
+  monster: '괴물',
+};
 
 function hexCss(c: number): string {
   return `#${c.toString(16).padStart(6, '0')}`;
@@ -312,7 +396,8 @@ function actualRow(
   const w = cell * n;
   const h = cell;
   floor(ctx, x0, y0, w, h, (r / R_TILES.survivor) * 1);
-  for (let i = 0; i < n; i += 1) draw(x0 + cell * (i + 0.5), y0 + h / 2, r, (i * Math.PI * 2) / n - Math.PI / 2);
+  for (let i = 0; i < n; i += 1)
+    draw(x0 + cell * (i + 0.5), y0 + h / 2, r, (i * Math.PI * 2) / n - Math.PI / 2);
   return { x: x0, y: y0, w, h };
 }
 
@@ -340,7 +425,15 @@ export async function previewBoard(id: CharId): Promise<string> {
   for (let i = 0; i < 8; i += 1) {
     const x = 24 + i * 120;
     floor(ctx, x, 326, 114, 114, 40);
-    newTop(ctx, id, i % 2 ? { walk: Math.PI / 2, stride: 1 } : {}, x + 57, 383, 30, (i * Math.PI) / 4 - Math.PI / 2);
+    newTop(
+      ctx,
+      id,
+      i % 2 ? { walk: Math.PI / 2, stride: 1 } : {},
+      x + 57,
+      383,
+      30,
+      (i * Math.PI) / 4 - Math.PI / 2,
+    );
   }
   // B. 정면
   text(ctx, '정면 그림 (로비 카드 · 결과 · 아이콘)', 1000, 316, 16, '#94a3b8');
@@ -355,7 +448,14 @@ export async function previewBoard(id: CharId): Promise<string> {
   text(ctx, '상반신 160 · 64 · 32', 1360, 648, 12, '#94a3b8');
   text(ctx, '숨쉬기 0.65초', 1730, 648, 12, '#94a3b8');
   // C. 실제 크기 — 지금 vs 새
-  text(ctx, '게임 속 실제 크기 (기기 px 그대로) — 위 줄: 지금 그림, 아래 줄: 새 그림. 오른쪽은 3배 최근접 확대', 24, 690, 16, '#94a3b8');
+  text(
+    ctx,
+    '게임 속 실제 크기 (기기 px 그대로) — 위 줄: 지금 그림, 아래 줄: 새 그림. 오른쪽은 3배 최근접 확대',
+    24,
+    690,
+    16,
+    '#94a3b8',
+  );
   const oldDraw = (x: number, y: number, r: number, rot: number): void => {
     if (id === 'monster') oldMonster(ctx, x, y, r, rot);
     else oldSurvivor(ctx, id === 'common' ? 'hidden' : id, x, y, r, rot);
@@ -376,7 +476,14 @@ export async function previewBoard(id: CharId): Promise<string> {
   // D. 다섯 캐릭터 나란히 (휴대폰 실제 크기 + 흑백 + 부채꼴)
   const lx = 24;
   const ly = y + 10;
-  text(ctx, '다섯 캐릭터 나란히 (휴대폰 배율 3 실제 크기 → 3배 확대 · 흑백 · 부채꼴 노랑 0.20 / 빨강 0.28 위)', lx, ly, 16, '#94a3b8');
+  text(
+    ctx,
+    '다섯 캐릭터 나란히 (휴대폰 배율 3 실제 크기 → 3배 확대 · 흑백 · 부채꼴 노랑 0.20 / 빨강 0.28 위)',
+    lx,
+    ly,
+    16,
+    '#94a3b8',
+  );
   const ids: CharId[] = ['runner', 'guard', 'scout', 'common', 'monster'];
   const dev = DEVICES.phone3;
   if (dev) {
@@ -396,7 +503,15 @@ export async function previewBoard(id: CharId): Promise<string> {
       }
       ids.forEach((cid, i) => {
         const r = radiusPx(cid === 'monster' ? 'monster' : 'survivor', dev);
-        newTop(ctx, cid, row.walk ? { walk: Math.PI / 2, stride: 1 } : {}, lx + 30 + i * 60, row.y + 30, r, row.walk ? (i * Math.PI) / 3 : -Math.PI / 2);
+        newTop(
+          ctx,
+          cid,
+          row.walk ? { walk: Math.PI / 2, stride: 1 } : {},
+          lx + 30 + i * 60,
+          row.y + 30,
+          r,
+          row.walk ? (i * Math.PI) / 3 : -Math.PI / 2,
+        );
       });
     }
     zoomCopy(ctx, c, lx, ly + 14, lineW, 188, lx + lineW + 20, ly + 14, 3);
@@ -421,7 +536,16 @@ export async function lineupBoard(): Promise<string> {
     const x = 40 + i * 370;
     ctx.fillStyle = '#0f1b27';
     ctx.fillRect(x, 30, 340, 760);
-    text(ctx, NAMES[id], x + 170, 70, 24, hexCss(id === 'common' ? 0xe2e8f0 : ROLE_TEXT[id === 'monster' ? 'monster' : id]), 700, 'center');
+    text(
+      ctx,
+      NAMES[id],
+      x + 170,
+      70,
+      24,
+      hexCss(id === 'common' ? 0xe2e8f0 : ROLE_TEXT[id === 'monster' ? 'monster' : id]),
+      700,
+      'center',
+    );
     newFront(ctx, id, {}, x + 170, 260, 300, 4);
     floor(ctx, x + 20, 430, 300, 300, 100);
     newTop(ctx, id, {}, x + 170, 580, id === 'monster' ? 84 : 84, -Math.PI / 2);
@@ -453,7 +577,12 @@ function deltaE(a: [number, number, number], c: number): number {
 }
 
 /** 한 자세를 투명 캔버스에 그린 화소 (그림자 없음, 정사각형 한 변 size, 가운데 = 몸 중심) */
-function renderPose(id: CharId, pose: Partial<SurvivorPose> & Partial<MonsterPose>, rPx: number, size: number): ImageData {
+function renderPose(
+  id: CharId,
+  pose: Partial<SurvivorPose> & Partial<MonsterPose>,
+  rPx: number,
+  size: number,
+): ImageData {
   const { ctx } = canvas(size, size);
   newTop(ctx, id, pose, size / 2, size / 2, rPx, 0, { shadow: false });
   return ctx.getImageData(0, 0, size, size);
@@ -504,7 +633,10 @@ function extents(img: ImageData, rPx: number, wPx: number): { front: number; bac
   return { front: k(front), back: k(back), side: k(side) };
 }
 
-const METRIC_POSES: Record<'survivor' | 'monster', { label: string; pose: Partial<SurvivorPose> & Partial<MonsterPose> }[]> = {
+const METRIC_POSES: Record<
+  'survivor' | 'monster',
+  { label: string; pose: Partial<SurvivorPose> & Partial<MonsterPose> }[]
+> = {
   survivor: SURVIVOR_POSES.filter((p) => p.pose.tone !== 'flash'),
   monster: MONSTER_POSES.filter((p) => p.pose.tone !== 'flash'),
 };
@@ -564,19 +696,65 @@ export function metrics(): unknown {
         sumL = [sumL[0]! + L[0], sumL[1]! + L[1], sumL[2]! + L[2]];
         if (id === 'common') {
           if (Math.hypot(L[1], L[2]) < 8 && L[0] > 70) achroBright += 1;
-          for (const rc of [ROLE.runner, ROLE.guard, ROLE.scout, ROLE.monster]) minRoleDE = Math.min(minRoleDE, deltaE(L, rc));
+          for (const rc of [ROLE.runner, ROLE.guard, ROLE.scout, ROLE.monster])
+            minRoleDE = Math.min(minRoleDE, deltaE(L, rc));
         } else if (deltaE(L, ROLE_COLOR[id]) <= 15) near += 1;
       }
     const mean: [number, number, number] = [sumL[0]! / n, sumL[1]! / n, sumL[2]! / n];
     disc[id] =
       id === 'common'
-        ? { achromaticBright: Math.round((achroBright / n) * 1000) / 1000, minDeltaEToRoles: Math.round(minRoleDE * 10) / 10 }
-        : { meanDeltaE: Math.round(deltaE(mean, ROLE_COLOR[id]) * 10) / 10, within15: Math.round((near / n) * 1000) / 1000 };
+        ? {
+            achromaticBright: Math.round((achroBright / n) * 1000) / 1000,
+            minDeltaEToRoles: Math.round(minRoleDE * 10) / 10,
+          }
+        : {
+            meanDeltaE: Math.round(deltaE(mean, ROLE_COLOR[id]) * 10) / 10,
+            within15: Math.round((near / n) * 1000) / 1000,
+          };
   }
   out.centerDisc = disc;
+  // 4) 덩어리: 판정 원 안을 밝은 몸(최대 채널 > 70)이 덮는 비율 — 지금 그림 vs 새 그림 (반지름 6.7 · 11 · 30px, 서 있는 자세)
+  const cover: Record<string, Record<string, { old: number; new: number }>> = {};
+  for (const r of [6.7, 11, 30]) {
+    const row: Record<string, { old: number; new: number }> = {};
+    for (const id of ids) {
+      const rr = r * (id === 'monster' ? R_TILES.monster / R_TILES.survivor : 1);
+      const size = Math.ceil(rr * 5);
+      const measure = (draw: (ctx: Ctx) => void): number => {
+        const { ctx } = canvas(size, size);
+        draw(ctx);
+        const img = ctx.getImageData(0, 0, size, size);
+        let inC = 0;
+        let hit = 0;
+        for (let y = 0; y < size; y += 1)
+          for (let x = 0; x < size; x += 1) {
+            if (Math.hypot(x + 0.5 - size / 2, y + 0.5 - size / 2) > rr) continue;
+            inC += 1;
+            const k = (y * size + x) * 4;
+            if (
+              (img.data[k + 3] ?? 0) >= 128 &&
+              Math.max(img.data[k] ?? 0, img.data[k + 1] ?? 0, img.data[k + 2] ?? 0) > 70
+            )
+              hit += 1;
+          }
+        return Math.round((hit / inC) * 1000) / 1000;
+      };
+      row[id] = {
+        old: measure((ctx) =>
+          id === 'monster'
+            ? oldMonster(ctx, size / 2, size / 2, rr, 0)
+            : oldSurvivor(ctx, id === 'common' ? 'hidden' : id, size / 2, size / 2, rr, 0),
+        ),
+        new: measure((ctx) => newTop(ctx, id, {}, size / 2, size / 2, rr, 0, { shadow: false })),
+      };
+    }
+    cover[`r${r}`] = row;
+  }
+  out.cover = cover;
   out.rules = {
     iou: '역할끼리(러너 · 가드 · 스카우트) fill IoU ≤ 0.8, 공통과 각 역할 ≤ 0.85 (옛 기준)',
-    extents: '생존자 front ≤ 1.55 (모든 자세), 옆 · 뒤 ≤ ~1.1. 괴물: 서기 · 걷기 ≤ 1.2, 준비 · 타격 ≤ 1.45, 돌진 ≤ 1.4',
+    extents:
+      '생존자 front ≤ 1.55 (모든 자세), 옆 · 뒤 ≤ ~1.1. 괴물: 서기 · 걷기 ≤ 1.2, 준비 · 타격 ≤ 1.45, 돌진 ≤ 1.4',
     centerDisc: '역할: meanDeltaE ≤ 15, within15 ≥ 0.85. 공통: achromaticBright ≥ 0.9, minDeltaEToRoles ≥ 40',
   };
   return out;

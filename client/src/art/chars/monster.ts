@@ -632,6 +632,10 @@ function frontArm(sk: Sketch, M: Mat, side: number, sh: Pt, el: Pt, wr: Pt, claw
   );
 }
 
+/**
+ * 상반신 배치: 배율 · 아래로 내림 · 팔꿈치 · 손목 · 발톱 벌림(수직에서 바깥으로).
+ * 발톱 끝 · 소매가 외곽선까지 |x| ≤ 0.95 안에 들어 작은 아이콘에서도 두 발톱이 대칭으로 다 보인다
+ */
 const BUST_K = 1.2;
 const BUST_DY = 0.43;
 const BUST_EL: Pt = [0.66, 0.1];

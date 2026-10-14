@@ -23,7 +23,9 @@ const opt = (name, def) => {
 };
 const positional = args.filter((s) => !s.startsWith('--'));
 const cmd = positional[0] ?? 'preview';
-const defaultOut = { sheets: 'artifacts/characters/sheets', gifs: 'artifacts/characters/anim' }[cmd] ?? 'artifacts/characters/_preview';
+const defaultOut =
+  { sheets: 'artifacts/characters/sheets', gifs: 'artifacts/characters/anim' }[cmd] ??
+  'artifacts/characters/_preview';
 const out = resolve(opt('out', defaultOut));
 mkdirSync(out, { recursive: true });
 
@@ -73,10 +75,27 @@ try {
     const file = join(out, 'metrics.json');
     writeFileSync(file, JSON.stringify(m, null, 2));
     for (const [size, row] of Object.entries(m.iou))
-      console.log(`IoU ${size}: ` + Object.entries(row).map(([k, v]) => `${k} ${v.sil}/${v.fill}`).join(' · '));
+      console.log(
+        `IoU ${size}: ` +
+          Object.entries(row)
+            .map(([k, v]) => `${k} ${v.sil}/${v.fill}`)
+            .join(' · '),
+      );
     for (const [id, row] of Object.entries(m.extents))
-      console.log(`범위 ${id}: ` + Object.entries(row).map(([k, v]) => `${k} 앞${v.front} 뒤${v.back} 옆${v.side}`).join(' · '));
+      console.log(
+        `범위 ${id}: ` +
+          Object.entries(row)
+            .map(([k, v]) => `${k} 앞${v.front} 뒤${v.back} 옆${v.side}`)
+            .join(' · '),
+      );
     console.log('몸 가운데: ' + JSON.stringify(m.centerDisc));
+    for (const [r, row] of Object.entries(m.cover))
+      console.log(
+        `덩어리 ${r}: ` +
+          Object.entries(row)
+            .map(([k, v]) => `${k} 지금 ${v.old} → 새 ${v.new}`)
+            .join(' · '),
+      );
     console.log('기준: ' + JSON.stringify(m.rules));
   } else if (cmd === 'list') {
     for (const s of await page.evaluate(() => window.CHAR_FINAL.sceneList()))
@@ -89,18 +108,32 @@ try {
     const fps = Number(opt('fps', '25'));
     const all = await page.evaluate(() => window.CHAR_FINAL.sceneList());
     const want = positional.slice(1);
-    const pick = want.length ? all.filter((s) => want.includes(s.id) || want.includes(s.id.split('-')[0])) : all;
+    const pick = want.length
+      ? all.filter((s) => want.includes(s.id) || want.includes(s.id.split('-')[0]))
+      : all;
     const encode = async (name, frames, rate) => {
       const dir = mkdtempSync(join(tmpdir(), 'char-gif-'));
       try {
         frames.forEach((url, i) =>
-          writeFileSync(join(dir, `${String(i).padStart(4, '0')}.png`), Buffer.from(url.split(',')[1], 'base64')),
+          writeFileSync(
+            join(dir, `${String(i).padStart(4, '0')}.png`),
+            Buffer.from(url.split(',')[1], 'base64'),
+          ),
         );
         const file = join(out, name);
         execFileSync('ffmpeg', [
-          '-v', 'error', '-y', '-framerate', String(rate), '-i', join(dir, '%04d.png'),
-          '-vf', 'split[a][b];[a]palettegen=max_colors=255:stats_mode=full[p];[b][p]paletteuse=dither=none:diff_mode=rectangle',
-          '-loop', '0', file,
+          '-v',
+          'error',
+          '-y',
+          '-framerate',
+          String(rate),
+          '-i',
+          join(dir, '%04d.png'),
+          '-vf',
+          'split[a][b];[a]palettegen=max_colors=255:stats_mode=full[p];[b][p]paletteuse=dither=none:diff_mode=rectangle',
+          '-loop',
+          '0',
+          file,
         ]);
         console.log(`저장: ${file} (${frames.length}프레임, ${Math.round(statSync(file).size / 1024)}KiB)`);
       } finally {
@@ -112,7 +145,10 @@ try {
       const n = Math.round(s.dur * fps);
       for (let from = 0; from < n; from += 20)
         frames.push(
-          ...(await page.evaluate(([id, f, a, c]) => window.CHAR_FINAL.sceneFrames(id, f, a / f, c), [s.id, fps, from, Math.min(20, n - from)])),
+          ...(await page.evaluate(
+            ([id, f, a, c]) => window.CHAR_FINAL.sceneFrames(id, f, a / f, c),
+            [s.id, fps, from, Math.min(20, n - from)],
+          )),
         );
       await encode(`${s.id}.gif`, frames, fps);
     }
@@ -121,7 +157,9 @@ try {
       const ofps = 20;
       for (const prefix of ['runner', 'guard', 'scout', 'common', 'monster']) {
         // 가장 긴 장면 한 번 길이 (짧은 칸은 그사이 되풀이)
-        const longest = Math.max(...all.filter((s) => s.id.startsWith(`${prefix}-`) && !s.id.endsWith('-slow')).map((s) => s.dur));
+        const longest = Math.max(
+          ...all.filter((s) => s.id.startsWith(`${prefix}-`) && !s.id.endsWith('-slow')).map((s) => s.dur),
+        );
         const n = Math.ceil(longest * ofps);
         const frames = [];
         for (let from = 0; from < n; from += 10) {

@@ -35,18 +35,29 @@ function frameArt(name: string): { d: Drawing; unit: 's' | 'm' } | null | undefi
     const tone: Tone = surv[2] === 'flash' ? 'flash' : surv[2] === 'gray' ? 'gray' : 'normal';
     return { d: SURVIVOR_ART[id].top({ ...SURVIVOR_REST, tone }, { w: ws }), unit: 's' };
   }
-  if (/^foot-/.test(name) || name === 'gloss' || name === 'claw' || /^eyes-/.test(name) || name === 'eye-glow') return null;
+  if (
+    /^foot-/.test(name) ||
+    name === 'gloss' ||
+    name === 'claw' ||
+    /^eyes-/.test(name) ||
+    name === 'eye-glow'
+  )
+    return null;
   const cloak = /^monster-(idle|move)-(\d+)$/.exec(name);
   if (cloak) {
     const i = Number(cloak[2]);
     const move = cloak[1] === 'move';
     const phase = (i / 8) * Math.PI * 2;
     return {
-      d: MONSTER_ART.top({ ...MONSTER_REST, cloak: phase, walk: move ? phase : 0, stride: move ? 1 : 0 }, { w: wm }),
+      d: MONSTER_ART.top(
+        { ...MONSTER_REST, cloak: phase, walk: move ? phase : 0, stride: move ? 1 : 0 },
+        { w: wm },
+      ),
       unit: 'm',
     };
   }
-  if (name === 'monster-dash') return { d: MONSTER_ART.top({ ...MONSTER_REST, dash: 1 }, { w: wm }), unit: 'm' };
+  if (name === 'monster-dash')
+    return { d: MONSTER_ART.top({ ...MONSTER_REST, dash: 1 }, { w: wm }), unit: 'm' };
   if (name === 'monster-stun')
     return { d: MONSTER_ART.top({ ...MONSTER_REST, stun: 1, eyes: 'stun' }, { w: wm }), unit: 'm' };
   return undefined;
@@ -58,18 +69,31 @@ export function patchAtlas(): { patched: number; cleared: number; size: string }
   const build = bakeAtlas({ zoom, survivorR: R.s, monsterR: R.m });
   const refFrame = build.frames.get('survivor-runner');
   if (!refFrame) throw new Error('기준 칸 없음');
-  const ref = build.canvas.getContext('2d')?.getImageData(refFrame.x, refFrame.y, refFrame.w, refFrame.h);
+  // 화소 비교는 '자주 읽기'로 만든 작은 작업 캔버스에 옮겨 그려서 읽는다 (게임 · 굽기 캔버스를 직접 읽지 않아 읽기 경고가 없다)
+  const probe = document.createElement('canvas');
+  probe.width = refFrame.w;
+  probe.height = refFrame.h;
+  const pctx = probe.getContext('2d', { willReadFrequently: true });
+  if (!pctx) throw new Error('2d');
+  const grab = (src: HTMLCanvasElement): Uint8ClampedArray => {
+    pctx.clearRect(0, 0, refFrame.w, refFrame.h);
+    pctx.drawImage(src, refFrame.x, refFrame.y, refFrame.w, refFrame.h, 0, 0, refFrame.w, refFrame.h);
+    return pctx.getImageData(0, 0, refFrame.w, refFrame.h).data;
+  };
+  const ref = grab(build.canvas);
   const cands = (window.__charCanvases ?? [])
     .map((r) => r.deref())
-    .filter((c): c is HTMLCanvasElement => !!c && c.width === build.canvas.width && c.height === build.canvas.height);
+    .filter(
+      (c): c is HTMLCanvasElement =>
+        !!c && c !== build.canvas && c.width === build.canvas.width && c.height === build.canvas.height,
+    );
   // 같은 크기 캔버스 중 기준 칸 화소가 가장 비슷한 것
   let target: HTMLCanvasElement | null = null;
   let best = Infinity;
   for (const c of cands) {
-    const px = c.getContext('2d')?.getImageData(refFrame.x, refFrame.y, refFrame.w, refFrame.h);
-    if (!px || !ref) continue;
+    const px = grab(c);
     let diff = 0;
-    for (let i = 0; i < px.data.length; i += 16) diff += Math.abs((px.data[i] ?? 0) - (ref.data[i] ?? 0));
+    for (let i = 0; i < px.length; i += 16) diff += Math.abs((px[i] ?? 0) - (ref[i] ?? 0));
     if (diff < best) {
       best = diff;
       target = c;
@@ -112,7 +136,10 @@ export function newRoleFigureSvg(role: Role): string {
   const id = role === 'monster' ? 'monster' : role;
   const size = role === 'monster' ? 150 : 138;
   const k = size / 2;
-  const d = id === 'monster' ? MONSTER_ART.front(FRONT_REST, { w: 2.6 / k }) : SURVIVOR_ART[id].front(FRONT_REST, { w: 2.6 / k });
+  const d =
+    id === 'monster'
+      ? MONSTER_ART.front(FRONT_REST, { w: 2.6 / k })
+      : SURVIVOR_ART[id].front(FRONT_REST, { w: 2.6 / k });
   const inner = toSvg(d, { viewBox: [-1, -1, 2, 2], idPrefix: `nf${uid}x` })
     .replace(/^<svg[^>]*>/, '')
     .replace(/<\/svg>$/, '');
