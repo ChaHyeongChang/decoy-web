@@ -8,14 +8,18 @@ artifacts/*
 !artifacts/store/
 # 렌더링 최적화 전 · 후 수치와 스크린샷 (사용자 요청)
 !artifacts/perf/
+# 캐릭터 리디자인 시안 · 비교 그림 · 동작 GIF (사용자 요청, 2026-10-14). 미리보기 작업 그림(_preview)은 커밋하지 않는다
+!artifacts/characters/
+artifacts/characters/_preview/
 test-results/
 playwright-report/
 tests/e2e/.results/
 tests/store/.results/
 tests/perf/.results/
+tests/char-art/.results/
 *.log
 .DS_Store
-# private 저장소지만 키 · 인증 파일이 실수로 들어가지 않게
+# 공개 저장소: 키 · 인증 파일이 실수로 들어가지 않게
 *.pem
 *.key
 *.p12
