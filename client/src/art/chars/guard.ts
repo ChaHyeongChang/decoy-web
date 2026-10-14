@@ -36,7 +36,8 @@ export const GUARD_COLOR = {
   pants: 0x253041,
   boot: 0x1b2430,
   sole: 0x0f151d,
-  glove: 0x2b3646,
+  /** 장갑: 방패 테(steel)와 갈리게 한 단 밝게 */
+  glove: tint(0x2b3646, 0.12),
 } as const;
 
 const C = GUARD_COLOR;
@@ -79,18 +80,18 @@ function topShield(sk: Sketch, s: ShieldShape, ink: Ink, glow: number): void {
     radial(s.cx, s.cy, s.ro, [
       [0, ink(C.deep)],
       [(s.ri - 0.02) / s.ro, ink(shade(C.armor, 0.3))],
-      [(s.ri + s.ro) / 2 / s.ro, ink(mix(tint(C.armor, 0.12), C.neon, 0.5 * glow))],
-      [1, ink(mix(C.armor, C.neon, 0.3 * glow))],
+      [(s.ri + s.ro) / 2 / s.ro, ink(mix(tint(C.armor, 0.12), C.neon, 0.6 * glow))],
+      [1, ink(mix(C.armor, C.neon, 0.7 * glow))],
     ]),
     ink(OUTLINE),
   );
   // 안쪽 그늘 띠 (방패 뒷면이 보이는 쪽)
-  sk.fill(bandPath(s, s.ri + 0.09, s.ri), solid(ink(shade(C.deep, 0.2))), 0.85);
+  sk.fill(bandPath(s, s.ri + 0.04, s.ri), solid(ink(shade(C.deep, 0.2))), 0.85);
   // 바깥 네온 선 (방패 테 · 바깥 끝을 넘지 않게 안쪽에)
   const m = rotateAbout(s.rot, s.cx, s.cy);
-  const rim = path(m).arc(s.cx, s.cy, s.ro - 0.075, -s.half * 0.92, s.half * 0.92).d;
-  sk.line(rim, solid(ink(C.neon), 0.3 + 0.3 * glow), 0.1 + 0.04 * glow);
-  sk.line(rim, solid(ink(tint(C.neon, 0.35 + 0.3 * glow))), 0.045);
+  const rim = path(m).arc(s.cx, s.cy, s.ro - 0.075 - 0.05 * glow, -s.half * 0.92, s.half * 0.92).d;
+  sk.line(rim, solid(ink(C.neon), 0.3 + 0.5 * glow), 0.1 + 0.12 * glow);
+  sk.line(rim, solid(ink(tint(C.neon, 0.35 + 0.45 * glow))), 0.045);
 }
 
 /** 능력 동작 → 방패 앞뒤 이동: 0.5 = 뒤로 당겨 힘을 모음, 1 = 앞으로 쭉 */
@@ -105,68 +106,80 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
   const sk = new Sketch(o.w);
   const a = p.action;
   const free = p.mode === 'free';
-  const r = topRig(p, p.mode === 'captive' ? HALF_W * 0.94 : HALF_W);
+  const captive = p.mode === 'captive';
+  const r = topRig(p, captive ? HALF_W * 0.94 : HALF_W);
   const s = r.s;
   const push = free ? shoveOffset(a) : 0;
-  // 힘을 모을 때 방패를 조금 비스듬히 (왼쪽 어깨를 앞으로), 내지르면 다시 정면
-  const coil = free ? -0.12 * Math.sin(Math.PI * Math.min(1, a / 0.75)) : 0;
-  // 몸 기울임: 당길 때 머리가 뒤로, 내지를 때 앞으로
-  r.head = [r.head[0] + push * 0.45, r.head[1]];
+  // 힘을 모을 때 방패를 조금 비스듬히 + 몸통을 비튼다 (왼쪽 어깨를 앞으로), 내지르면 다시 정면
+  const load = free ? Math.sin(Math.PI * Math.min(1, a / 0.75)) : 0;
+  const coil = -0.08 * load;
+  r.twist += -0.18 * load;
+  // 몸 기울임: 당길 때 머리가 뒤로, 내지를 때 앞으로 (몸이 방패 쪽으로 쏠린다)
+  r.head = [r.head[0] + push * 0.9, r.head[1]];
   const tw = rotateAbout(r.twist, 0, 0);
   // 1) 장화 (무게를 실은 앞뒤 버팀 자세: 능력 중엔 왼발 앞 · 오른발 뒤)
   const brace = free ? Math.min(1, a * 2) : 0;
   const feet = r.feet.map(([fx, fy], i): [number, number] => [fx + (i === 0 ? 0.22 : -0.26) * brace, fy]);
   for (const [fx, fy] of feet) topShoe(sk, fx + r.ox, fy, C.boot, C.sole, ink, 0.28);
-  // 방패 자리: 보통 = 몸 앞, 수감 · 구조 = 등에 멘다
-  const slung = !free;
-  const shield: ShieldShape = slung
-    ? { cx: r.ox, cy: 0, ro: 1.04, ri: 0.76, half: 0.92, rot: Math.PI + r.twist * 0.5 }
-    : {
-        cx: r.ox - 0.05 * p.hit + push,
-        cy: 0.03 * s,
-        ro: 1.42,
-        ri: 1.08,
-        half: 0.76,
-        rot: 0.05 * s + 0.12 * p.hit + coil,
-      };
-  if (slung) topShield(sk, shield, ink, 0);
-  // 2) 몸통 (보라 갑옷)
+  // 방패 자리: 보통 = 몸 앞 두꺼운 호, 구조 = 앞에 둔 채 왼쪽으로 비킴(오른손이 자물쇠로), 수감 = 앞에 끌어안은 작은 호.
+  // 어느 때든 방패는 앞쪽에 있다 → 바라보는 방향 단서가 뒤집히지 않는다
+  const shield: ShieldShape =
+    p.mode === 'reach'
+      ? { cx: r.ox, cy: 0, ro: 1.3, ri: 0.98, half: 0.55, rot: -0.45 + r.twist * 0.5 }
+      : captive
+        ? { cx: r.ox, cy: 0, ro: 1.1, ri: 0.82, half: 0.7, rot: 0 }
+        : {
+            cx: r.ox - 0.05 * p.hit + push,
+            cy: 0.03 * s,
+            ro: 1.42,
+            ri: 0.96,
+            half: 0.7,
+            rot: 0.05 * s + 0.08 * p.hit + coil,
+          };
+  // 2) 등 갑옷 판 (몸통 뒤로 비죽 나온 두꺼운 판 — 위에서 '단단한 체격'이 보이게)
+  const back = path(tw).with(translate(r.ox, 0));
+  sk.part(back.ellipse(-0.36, 0, 0.44, 0.62).d, domePaint(shade(C.armor, 0.18), ink, 0.7, -0.36 + r.ox, 0), ink(OUTLINE));
+  sk.line(path(tw).with(translate(r.ox, 0)).M(-0.76, 0).L(-0.3, 0).d, solid(ink(shade(C.armor, 0.4))), 0.04);
+  // 3) 몸통 (보라 갑옷)
   sk.part(topTorsoPath(r), domePaint(shade(C.armor, 0.12), ink, r.halfW * 1.1), ink(OUTLINE));
-  // 3) 팔: 왼손(위쪽)은 방패 손잡이, 오른손은 걸음에 흔들리다 능력 중엔 방패를 같이 민다
+  // 4) 팔: 왼손(위쪽)은 방패 손잡이, 오른손은 걸음에 흔들리다 능력 중엔 방패를 같이 민다
+  const gripAt = (ang: number): [number, number] => {
+    const g = shield.ri - 0.17;
+    return [shield.cx + Math.cos(ang + shield.rot) * g, shield.cy + Math.sin(ang + shield.rot) * g];
+  };
   if (free) {
-    const grip = shield.ri - 0.17;
-    const gx = shield.cx + Math.cos(-0.36 + shield.rot) * grip;
-    const gy = shield.cy + Math.sin(-0.36 + shield.rot) * grip;
-    r.hands[0] = [gx, gy];
-    const bx = shield.cx + Math.cos(0.36 + shield.rot) * grip;
-    const by = shield.cy + Math.sin(0.36 + shield.rot) * grip;
+    r.hands[0] = gripAt(-0.36);
+    const [bx, by] = gripAt(0.36);
     // 빈 손은 몸 쪽으로 조금 붙인다 (넓은 어깨 판 때문에 옆으로 커 보이지 않게)
     const [hx, hy] = [r.hands[1][0], r.hands[1][1] * 0.93];
     r.hands[1] = [hx + (bx - hx) * brace, hy + (by - hy) * brace];
   } else if (p.mode === 'reach') {
-    // 구조 중: 방패를 등에 메고 두 손을 헬멧 앞으로 쭉 뻗는다 (공통 손 자리는 큰 헬멧에 가려진다)
+    // 구조 중: 왼손은 방패 손잡이, 오른손만 헬멧 앞으로 쭉 뻗어 자물쇠를 만진다
+    r.hands = [gripAt(0), [r.head[0] + r.headR + 0.2, 0.3]];
+  } else {
+    // 수감: 방패를 끌어안고 두 손을 그 안쪽에 모은다 (헬멧 밖으로 보이게)
     r.hands = [
-      [r.head[0] + r.headR + 0.2, -0.32],
-      [r.head[0] + r.headR + 0.2, 0.32],
+      [0.72, -0.22],
+      [0.72, 0.22],
     ];
   }
   topArm(sk, r, 0, C.armor, C.glove, ink, 0.3);
   topArm(sk, r, 1, C.armor, C.glove, ink, 0.3);
-  // 4) 큰 어깨 갑옷 (두 겹 판)
+  // 5) 큰 어깨 갑옷 (두 겹 판, 헬멧보다 한 단 어둡게 — 헬멧이 가장 밝은 중심)
   for (const side of [0, 1] as const) {
     const [sx, sy] = r.shoulders[side];
-    const pd = path(tw).with(translate(r.ox, 0)).ellipse(sx - 0.06, sy * 0.97, 0.4, 0.26).d;
-    sk.part(pd, domePaint(C.armor, ink, 0.44, sx - 0.08 + r.ox, sy * 0.92), ink(OUTLINE));
+    const pd = path(tw).with(translate(r.ox, 0)).ellipse(sx - 0.14, sy * 0.97, 0.4, 0.26).d;
+    sk.part(pd, domePaint(shade(C.armor, 0.1), ink, 0.44, sx - 0.16 + r.ox, sy * 0.92), ink(OUTLINE));
     const sgn = side === 0 ? -1 : 1;
     sk.line(
       path(tw)
         .with(translate(r.ox, 0))
-        .arc(sx - 0.06, sy * 0.97, 0.27, sgn * Math.PI / 2 - 1.1, sgn * Math.PI / 2 + 1.1, true, 0.15).d,
+        .arc(sx - 0.14, sy * 0.97, 0.27, sgn * Math.PI / 2 - 1.1, sgn * Math.PI / 2 + 1.1, true, 0.15).d,
       solid(ink(shade(C.armor, 0.35))),
       0.05,
     );
   }
-  // 5) 헬멧: 보라 돔 + 가운데 볏 + 앞 챙
+  // 6) 헬멧: 보라 돔 + 가운데 볏 + 앞 챙
   const [hx, hy] = r.head;
   const R = r.headR * 1.02;
   sk.part(path().circle(hx, hy, R).d, domePaint(C.armor, ink, R * 1.2, hx - 0.04, hy), ink(OUTLINE));
@@ -179,19 +192,16 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
     solid(ink(C.deep)),
   );
   // 볏 (뒤 → 앞 가운데 솟은 판, 앞이 뾰족): 빛 받는 위쪽 반은 밝게, 아래쪽 반은 그늘 (역할색에 가까운 두 단)
-  const crestHalf = (side: -1 | 1): string =>
+  const crestHalf = (side: -1 | 1, w: number): string =>
     path()
       .M(hx - R * 0.95, hy)
-      .Q(hx - R * 0.25, hy + side * 0.1, hx + R * 0.62, hy)
+      .Q(hx - R * 0.2, hy + side * w, hx + R * 0.75, hy)
       .Z().d;
-  sk.fill(crestHalf(-1), solid(ink(tint(C.armor, 0.2))));
-  sk.fill(crestHalf(1), solid(ink(shade(C.armor, 0.16))));
-  sk.line(path().M(hx - R * 0.9, hy).L(hx + R * 0.55, hy).d, solid(ink(shade(C.armor, 0.4))), 0.018);
-  // 6) 방패 (몸 앞, 따로 층): 외곽선이 팔 · 몸 위에 굵게
-  if (!slung) {
-    sk.layer();
-    topShield(sk, shield, ink, free ? Math.max(0, (a - 0.5) / 0.5) : 0);
-  }
+  sk.fill(crestHalf(-1, 0.14), solid(ink(tint(C.armor, 0.2))));
+  sk.fill(crestHalf(1, 0.1), solid(ink(shade(C.armor, 0.16))));
+  // 7) 방패 (몸 앞, 따로 층): 외곽선이 팔 · 몸 위에 굵게
+  sk.layer();
+  topShield(sk, shield, ink, free ? Math.max(0, (a - 0.5) / 0.5) : 0);
   return sk.drawing();
 }
 
