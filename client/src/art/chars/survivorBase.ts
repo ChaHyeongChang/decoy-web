@@ -1,6 +1,6 @@
 // 생존자 공통 체형 (캐릭터 리디자인): 위에서 본 몸 · 정면 몸의 뼈대와 부품. 역할 그림(runner · guard · scout)과
-// 괴물 화면 공통 생존자(common)가 같은 체형 위에 옷 · 소품을 얹는다 → 네 그림의 몸 크기 · 비율이 같다
-// (역할마다 '커 보이는' 차이가 없게, VISUAL_SPEC 4.1 앞 돌출 1.55r 한도 그대로).
+// 괴물 화면 공통 생존자(common)가 같은 뼈대(머리 · 어깨 · 손발 자리) 위에 옷 · 소품을 얹는다. 몸통 폭 · 깊이는 역할 인상에
+// 맞춰 조금씩 다르다(러너 가늘고 길게, 공통 생존자 부푼 방호복) — 앞 돌출은 모두 1.55r 이내(VISUAL_SPEC 4.1).
 //
 // 위에서 본 그림: 단위 = 몸 반지름 1, +x = 바라보는 방향. 빛은 위에서 (돔 음영, 회전과 무관) — 왼쪽 위 반사광은 굽기 쪽의
 // 돌지 않는 'gloss' 그림이 따로 맡는다. 정면 그림: 상자 [−1, 1]², 빛은 왼쪽 위.
@@ -40,20 +40,10 @@ export function inkFor(tone: Tone): Ink {
   return (c) => c;
 }
 
-/** 칠을 톤에 맞춘다 */
-export function inked(p: Paint, ink: Ink): Paint {
-  if (p.kind === 'solid') return { ...p, color: ink(p.color) };
-  return { ...p, stops: p.stops.map(([o, c, a]) => [o, ink(c), a] as const) };
-}
-
-/** 피부 · 머리 · 신발 같은 공통 재질 색 */
+/** 피부 · 눈 같은 공통 재질 색 */
 export const MAT = {
   skin: 0xd9a27e,
   skinShade: 0xa8725a,
-  boot: 0x253041,
-  bootSole: 0x0f151d,
-  glove: 0x2b3646,
-  strap: 0x1b2430,
   /** 정면 눈 (어두운 점) */
   eye: 0x101820,
 } as const;
@@ -82,7 +72,8 @@ export interface TopRig {
 
 /**
  * 공통 치수 (몸 반지름 배수). 위에서 본 덩어리(머리 + 어깨 판 + 손)가 판정 원(반지름 1)을 대부분 채우게 잡았다 —
- * 실제 크기(휴대폰 몸 반지름 7~11 기기 px)에서 옛 그림(판정 원을 꽉 채운 몸)보다 작아 보이지 않게, 판정보다 커 보이지도 않게
+ * 실제 크기(휴대폰 '높음' 품질에서 몸 반지름 약 6.7~7.3 px로 그려 화면 배율만큼 늘림)에서 옛 그림(판정 원을 꽉 채운 몸)보다
+ * 작아 보이지 않게, 판정보다 커 보이지도 않게
  */
 export const TOP = {
   halfW: 0.95,
@@ -98,7 +89,7 @@ export const TOP = {
   twist: 0.16,
 } as const;
 
-/** 자세 → 몸 배치. halfW · halfD를 역할이 조금 바꿀 수 있다(가드는 어깨가 넓다) */
+/** 자세 → 몸 배치. halfW · halfD를 역할이 조금 바꿀 수 있다(러너 가늘게, 공통 생존자 깊게) */
 export function topRig(p: SurvivorPose, halfW: number = TOP.halfW, halfD: number = TOP.halfD): TopRig {
   const s = Math.sin(p.walk) * p.stride;
   const ox = -0.12 * p.hit;
@@ -152,12 +143,13 @@ export function topShoe(
   ink: Ink,
   len = 0.25,
 ): void {
-  const d = path().ellipse(x, y, len, 0.135).d;
+  const ry = 0.135;
+  const d = path().ellipse(x, y, len, ry).d;
   sk.part(d, solid(ink(upper)), ink(OUTLINE));
-  // 앞코 (밑창이 보이는 앞쪽 테)
+  // 앞코 (밑창이 보이는 앞쪽 테): 신발 타원 안쪽의 같은 비율 타원호 — 신발 밖으로 삐져나오지 않게
   sk.fill(
     path()
-      .arc(x, y, len - 0.03, -1.0, 1.0)
+      .arc(x, y, len - 0.03, -1.0, 1.0, true, ry - 0.02)
       .Z().d,
     solid(ink(sole)),
     0.9,

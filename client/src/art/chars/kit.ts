@@ -1,6 +1,7 @@
 // 새 캐릭터 그림 도구 (캐릭터 리디자인). 캐릭터는 "그림 명령 목록"(Drawing)으로 그린다: 명령마다 SVG 경로 문자열 + 채움 ·
 // 선. 같은 목록에서 SVG 문자열(로비 · 결과 DOM, 시안 그림)과 Canvas2D 그림(텍스처 아틀라스 굽기)을 만든다.
-// 순수 모듈: DOM · Phaser를 import하지 않는다 (Canvas는 최소 인터페이스 CanvasSink로 받는다).
+// 순수 모듈: DOM · Phaser를 import하지 않는다 (Canvas는 최소 인터페이스 CanvasSink로 받는다). 단 Canvas 그리기(drawToCanvas)는
+// 브라우저 전역 Path2D가 있어야 한다 — 경로 · SVG 만들기는 Node(단위 테스트)에서도 돈다.
 //
 // 좌표 단위: 위에서 본 게임 그림은 몸 반지름 1(판정 반지름), 원점 = 몸 중심, +x = 바라보는 방향, +y = 화면 아래.
 // 정면 그림은 상자 [−1, 1]² (+y 아래). 외곽선 두께도 같은 단위로 받는다(굽는 쪽이 월드 px → 단위로 바꿔 넘긴다).
@@ -24,9 +25,6 @@ export type Paint =
       readonly cx: number;
       readonly cy: number;
       readonly r: number;
-      /** 초점 (없으면 중심) */
-      readonly fx?: number;
-      readonly fy?: number;
       readonly stops: readonly Stop[];
     };
 
@@ -59,17 +57,8 @@ export function linear(x0: number, y0: number, x1: number, y1: number, stops: re
   return { kind: 'linear', x0, y0, x1, y1, stops };
 }
 
-export function radial(
-  cx: number,
-  cy: number,
-  r: number,
-  stops: readonly Stop[],
-  fx?: number,
-  fy?: number,
-): Paint {
-  return fx === undefined || fy === undefined
-    ? { kind: 'radial', cx, cy, r, stops }
-    : { kind: 'radial', cx, cy, r, stops, fx, fy };
+export function radial(cx: number, cy: number, r: number, stops: readonly Stop[]): Paint {
+  return { kind: 'radial', cx, cy, r, stops };
 }
 
 // ───────────────────────── 색 ─────────────────────────
@@ -148,17 +137,18 @@ const K_ARC = 0.5522847498;
 
 /**
  * 경로 빌더: 점은 모두 지금 변환(m)으로 옮겨 d 문자열에 쓴다. 원 · 타원 · 호는 3차 베지어로 펴서
- * 비균등 변환에서도 모양이 맞다
+ * 비균등 변환에서도 모양이 맞다. 지금 점 · 하위 경로 시작점은 옮긴 뒤 좌표로 기억한다(중간에 변환이 바뀌어도 Q · Z가 맞다)
  */
 export class Path {
   private parts: string[] = [];
-  private cx = 0;
-  private cy = 0;
+  /** 지금 점 (옮긴 뒤 좌표) */
+  private cur: [number, number] = [0, 0];
+  /** 하위 경로 시작점 (옮긴 뒤 좌표, Z가 여기로 돌아간다) */
+  private start: [number, number] = [0, 0];
 
   constructor(private m: Mat = IDENTITY) {}
 
-  private p(x: number, y: number): string {
-    const [X, Y] = apply(this.m, x, y);
+  private static fmt([X, Y]: readonly [number, number]): string {
     return `${round(X, 3)} ${round(Y, 3)}`;
   }
 
@@ -168,43 +158,43 @@ export class Path {
     return this;
   }
 
-  setMatrix(m: Mat): this {
-    this.m = m;
-    return this;
-  }
-
   M(x: number, y: number): this {
-    this.parts.push(`M${this.p(x, y)}`);
-    this.cx = x;
-    this.cy = y;
+    const P = apply(this.m, x, y);
+    this.parts.push(`M${Path.fmt(P)}`);
+    this.cur = P;
+    this.start = P;
     return this;
   }
 
   L(x: number, y: number): this {
-    this.parts.push(`L${this.p(x, y)}`);
-    this.cx = x;
-    this.cy = y;
+    const P = apply(this.m, x, y);
+    this.parts.push(`L${Path.fmt(P)}`);
+    this.cur = P;
     return this;
   }
 
   Q(x1: number, y1: number, x: number, y: number): this {
-    // 2차를 3차로 올려 쓴다 (변환 뒤에도 같은 곡선)
-    const c1x = this.cx + ((x1 - this.cx) * 2) / 3;
-    const c1y = this.cy + ((y1 - this.cy) * 2) / 3;
-    const c2x = x + ((x1 - x) * 2) / 3;
-    const c2y = y + ((y1 - y) * 2) / 3;
-    return this.C(c1x, c1y, c2x, c2y, x, y);
+    // 2차를 3차로 올려 쓴다. 아핀 변환은 이 관계를 보존하므로 옮긴 뒤 좌표에서 계산한다
+    const [qx, qy] = apply(this.m, x1, y1);
+    const P = apply(this.m, x, y);
+    const [cx, cy] = this.cur;
+    const c1: [number, number] = [cx + ((qx - cx) * 2) / 3, cy + ((qy - cy) * 2) / 3];
+    const c2: [number, number] = [P[0] + ((qx - P[0]) * 2) / 3, P[1] + ((qy - P[1]) * 2) / 3];
+    this.parts.push(`C${Path.fmt(c1)} ${Path.fmt(c2)} ${Path.fmt(P)}`);
+    this.cur = P;
+    return this;
   }
 
   C(x1: number, y1: number, x2: number, y2: number, x: number, y: number): this {
-    this.parts.push(`C${this.p(x1, y1)} ${this.p(x2, y2)} ${this.p(x, y)}`);
-    this.cx = x;
-    this.cy = y;
+    const P = apply(this.m, x, y);
+    this.parts.push(`C${Path.fmt(apply(this.m, x1, y1))} ${Path.fmt(apply(this.m, x2, y2))} ${Path.fmt(P)}`);
+    this.cur = P;
     return this;
   }
 
   Z(): this {
     this.parts.push('Z');
+    this.cur = this.start;
     return this;
   }
 
@@ -390,12 +380,6 @@ export class Sketch {
     return this;
   }
 
-  /** 외곽선 패스에만 (실루엣을 넓히는 그림자 · 테) */
-  silhouette(d: string, outline: number, width = this.w * 2): this {
-    this.outline.push({ d, fill: solid(outline), stroke: { paint: solid(outline), width, join: 'round' } });
-    return this;
-  }
-
   /** 선만 (칠 패스) */
   line(d: string, paint: Paint, width: number, cap: 'butt' | 'round' = 'round', alpha?: number): this {
     this.body.push({
@@ -420,17 +404,21 @@ export class Sketch {
 }
 
 /**
- * 그림 전체를 배율 k · 이동 (tx, ty)로 옮긴다 (정면 상반신 아이콘처럼 상자를 채우게 키울 때). 경로 숫자를 x, y 짝으로 바꾸므로
- * 이 파일의 Path가 내는 M · L · C · Z 경로만 받는다(A · H · V는 짝이 맞지 않아 멈춘다). 칠 좌표 · 선 두께도 같이 옮긴다
+ * 그림 전체를 배율 k · 이동 (tx, ty)로 옮긴다 (정면 상반신 아이콘처럼 상자를 채우게 키울 때). ky를 따로 주면 세로 배율
+ * (−k = 위아래 뒤집기). 경로 숫자를 x, y 짝으로 바꾸므로 이 파일의 Path가 내는 M · L · C · Z 경로만 받는다(A · H · V는 짝이
+ * 맞지 않아 멈춘다). 칠 좌표 · 선 두께도 같이 옮긴다 (두께 · 원형 그라디언트 반지름은 배율 크기 √|k·ky|)
  */
-export function transformDrawing(dr: Drawing, k: number, tx: number, ty: number): Drawing {
-  const pt = (x: number, y: number): [number, number] => [x * k + tx, y * k + ty];
+export function transformDrawing(dr: Drawing, k: number, tx: number, ty: number, ky = k): Drawing {
+  const pt = (x: number, y: number): [number, number] => [x * k + tx, y * ky + ty];
+  const len = Math.sqrt(Math.abs(k * ky));
   const mapD = (d: string): string => {
+    if (/NaN|Infinity/.test(d))
+      throw new Error('transformDrawing: 경로에 NaN · Infinity가 있다 (자세 값을 확인)');
     if (/[^MLCZ0-9.\s-]/.test(d)) throw new Error('transformDrawing: M · L · C · Z 경로만 옮길 수 있다');
     let i = 0;
-    return d.replace(/-?\d*\.?\d+(?:e-?\d+)?/g, (v) => {
+    return d.replace(/-?\d*\.?\d+/g, (v) => {
       const n = Number(v);
-      const out = i % 2 === 0 ? n * k + tx : n * k + ty;
+      const out = i % 2 === 0 ? n * k + tx : n * ky + ty;
       i += 1;
       return String(round(out, 3));
     });
@@ -443,9 +431,7 @@ export function transformDrawing(dr: Drawing, k: number, tx: number, ty: number)
       return { ...pa, x0, y0, x1, y1 };
     }
     const [cx, cy] = pt(pa.cx, pa.cy);
-    const f =
-      pa.fx === undefined || pa.fy === undefined ? {} : (([fx, fy]) => ({ fx, fy }))(pt(pa.fx, pa.fy));
-    return { ...pa, cx, cy, r: pa.r * k, ...f };
+    return { ...pa, cx, cy, r: pa.r * len };
   };
   return {
     ops: dr.ops.map((op) => ({
@@ -453,7 +439,7 @@ export function transformDrawing(dr: Drawing, k: number, tx: number, ty: number)
       d: mapD(op.d),
       ...(op.fill ? { fill: mapPaint(op.fill) } : {}),
       ...(op.stroke
-        ? { stroke: { ...op.stroke, paint: mapPaint(op.stroke.paint), width: op.stroke.width * k } }
+        ? { stroke: { ...op.stroke, paint: mapPaint(op.stroke.paint), width: op.stroke.width * len } }
         : {}),
     })),
   };
@@ -467,7 +453,7 @@ export interface SvgOptions {
   /** 화면 크기 (px, 없으면 viewBox 비율 100%) */
   width?: number;
   height?: number;
-  /** 그라디언트 id 앞붙이 (한 문서에 여러 그림이 있어도 겹치지 않게) */
+  /** 그라디언트 id 앞붙이 (없으면 모듈 카운터로 그림마다 다른 값: 한 문서에 여러 그림이 있어도 겹치지 않게) */
   idPrefix?: string;
   /** 바깥 변환 (예: 회전) */
   transform?: Mat;
@@ -477,7 +463,8 @@ export interface SvgOptions {
 
 function svgPaint(p: Paint, defs: string[], idBase: string, n: { v: number }): string {
   if (p.kind === 'solid') return rgba(p.color, p.alpha ?? 1);
-  const id = `${idBase}${(n.v += 1)}`;
+  // 앞붙이와 번호 사이에 구분자 ('a1' + 1과 'a' + 11이 같은 id가 되지 않게)
+  const id = `${idBase}-${(n.v += 1)}`;
   const stops = p.stops
     .map(
       ([o, c, a]) =>
@@ -490,16 +477,23 @@ function svgPaint(p: Paint, defs: string[], idBase: string, n: { v: number }): s
     );
   else
     defs.push(
-      `<radialGradient id="${id}" gradientUnits="userSpaceOnUse" cx="${round(p.cx, 4)}" cy="${round(p.cy, 4)}" r="${round(p.r, 4)}"${p.fx === undefined ? '' : ` fx="${round(p.fx, 4)}" fy="${round(p.fy ?? p.cy, 4)}"`}>${stops}</radialGradient>`,
+      `<radialGradient id="${id}" gradientUnits="userSpaceOnUse" cx="${round(p.cx, 4)}" cy="${round(p.cy, 4)}" r="${round(p.r, 4)}">${stops}</radialGradient>`,
     );
   return `url(#${id})`;
+}
+
+/** 앞붙이를 주지 않은 SVG의 그라디언트 id 번호 (그림마다 다르게) */
+let svgSerial = 0;
+
+function escapeAttr(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 /** 그림 → SVG 문자열 (외부 참조 · 스크립트 없음) */
 export function toSvg(drawing: Drawing, o: SvgOptions): string {
   const defs: string[] = [];
   const body: string[] = [];
-  const idBase = o.idPrefix ?? 'g';
+  const idBase = o.idPrefix ?? `dc${(svgSerial += 1)}`;
   const n = { v: 0 };
   for (const op of drawing.ops) {
     const attrs: string[] = [`d="${op.d}"`];
@@ -518,14 +512,14 @@ export function toSvg(drawing: Drawing, o: SvgOptions): string {
   const size =
     (o.width !== undefined ? ` width="${o.width}"` : '') +
     (o.height !== undefined ? ` height="${o.height}"` : '');
-  const a11y = o.title ? ` role="img" aria-label="${o.title}"` : ' aria-hidden="true"';
+  const a11y = o.title ? ` role="img" aria-label="${escapeAttr(o.title)}"` : ' aria-hidden="true"';
   const g = o.transform ? `<g transform="matrix(${o.transform.map((v) => round(v, 5)).join(' ')})">` : '<g>';
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${round(vx, 4)} ${round(vy, 4)} ${round(vw, 4)} ${round(vh, 4)}"${size}${a11y}><defs>${defs.join('')}</defs>${g}${body.join('')}</g></svg>`;
 }
 
 // ───────────────────────── Canvas2D ─────────────────────────
 
-/** Canvas2D 중 쓰는 부분 (DOM 타입에 묶이지 않게) */
+/** Canvas2D 중 쓰는 부분 (CanvasRenderingContext2D를 그대로 넣을 수 있다) */
 export interface CanvasGradientSink {
   addColorStop(offset: number, color: string): void;
 }
@@ -555,8 +549,13 @@ export interface CanvasSink {
   stroke(path: Path2D): void;
 }
 
-/** Path2D 만들기 (브라우저: new Path2D(d)). 같은 d는 다시 해석하지 않게 캐시 */
+/** Path2D 만들기 (브라우저: new Path2D(d)). 같은 d는 다시 해석하지 않게 캐시 (굽기가 끝나면 clearPathCache로 비운다) */
 const path2dCache = new Map<string, Path2D>();
+
+/** Path2D 캐시 비우기 (굽기 한 번이 끝났을 때) */
+export function clearPathCache(): void {
+  path2dCache.clear();
+}
 
 function path2d(d: string): Path2D {
   let p = path2dCache.get(d);
@@ -573,14 +572,15 @@ function canvasPaint(ctx: CanvasSink, p: Paint): unknown {
   const g =
     p.kind === 'linear'
       ? ctx.createLinearGradient(p.x0, p.y0, p.x1, p.y1)
-      : ctx.createRadialGradient(p.fx ?? p.cx, p.fy ?? p.cy, 0, p.cx, p.cy, p.r);
+      : ctx.createRadialGradient(p.cx, p.cy, 0, p.cx, p.cy, p.r);
   for (const [o, c, a] of p.stops) g.addColorStop(Math.max(0, Math.min(1, o)), rgba(c, a ?? 1));
   return g;
 }
 
 /**
  * 그림을 Canvas에 그린다: 지금 원점에 단위 1 = k px. 부르는 쪽이 translate · rotate를 먼저 걸어 둔다.
- * 굽기(아틀라스) · 시안 그림이 쓴다. 매 프레임 그리기에는 쓰지 않는다 (구운 텍스처만 찍는다)
+ * 굽기(아틀라스) · 시안 그림이 쓴다. 매 프레임 그리기에는 쓰지 않는다 (구운 텍스처만 찍는다).
+ * 한 명령 안에서는 SVG와 같이 칠 → 선 순서다
  */
 export function drawToCanvas(ctx: CanvasSink, drawing: Drawing, k: number): void {
   ctx.save();
@@ -588,16 +588,16 @@ export function drawToCanvas(ctx: CanvasSink, drawing: Drawing, k: number): void
   for (const op of drawing.ops) {
     const p = path2d(op.d);
     ctx.globalAlpha = op.alpha ?? 1;
+    if (op.fill) {
+      ctx.fillStyle = canvasPaint(ctx, op.fill);
+      ctx.fill(p, op.rule ?? 'nonzero');
+    }
     if (op.stroke) {
       ctx.lineWidth = op.stroke.width;
       ctx.lineJoin = op.stroke.join ?? 'round';
       ctx.lineCap = op.stroke.cap ?? 'round';
       ctx.strokeStyle = canvasPaint(ctx, op.stroke.paint);
       ctx.stroke(p);
-    }
-    if (op.fill) {
-      ctx.fillStyle = canvasPaint(ctx, op.fill);
-      ctx.fill(p, op.rule ?? 'nonzero');
     }
   }
   ctx.restore();

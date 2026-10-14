@@ -31,7 +31,14 @@ import {
   type Ink,
   type TopRig,
 } from './survivorBase';
-import type { ArtOptions, FrontPose, SurvivorArt, SurvivorPose } from './types';
+import {
+  cleanFrontPose,
+  cleanSurvivorPose,
+  type ArtOptions,
+  type FrontPose,
+  type SurvivorArt,
+  type SurvivorPose,
+} from './types';
 
 /** 러너 색 */
 export const RUNNER_COLOR = {
@@ -49,6 +56,9 @@ export const RUNNER_COLOR = {
 } as const;
 
 const C = RUNNER_COLOR;
+
+/** 위 그림 얼굴 구멍: 바깥 호 반지름(후드 반지름 배수) · 반각(라디안) · 앞 가운데 그늘 두께(몸 반지름 배수) · 그늘 색 */
+const FACE = { outer: 0.97, half: 1.0, depth: 0.5, shadow: shade(RUNNER_COLOR.deep, 0.4) } as const;
 
 /** 후드 칠 (머리 중심에서 꼬리 끝까지 닿는 위 조명, 회전과 무관) */
 function hoodPaint(ink: Ink, cx: number, cy: number, reach: number): Paint {
@@ -74,8 +84,8 @@ function brightDome(base: number, ink: Ink, reach: number): Paint {
 }
 
 /**
- * 위에서 본 물방울 후드: 중심 (hx, hy) 반지름 R의 둥근 머리 + 꼬리 끝 (tx, ty). 꼬리 양옆은 조금 볼록한 곡선
- * (작은 크기에서도 꼬리 면적이 남게)
+ * 위에서 본 물방울 후드: 중심 (hx, hy) 반지름 R의 둥근 머리 + 꼬리 끝 (tx, ty). bulge = 꼬리 양옆이 바깥으로 볼록한 정도
+ * (0 = 곧은 혜성 줄기, 클수록 통통한 물방울). 음수는 0으로 둔다(조절점이 축을 넘으면 두 변이 꼬인다)
  */
 function dropPath(hx: number, hy: number, R: number, tx: number, ty: number, bulge = 0.08): string {
   const dx = tx - hx;
@@ -87,11 +97,12 @@ function dropPath(hx: number, hy: number, R: number, tx: number, ty: number, bul
   const a1 = beta - phi + Math.PI * 2;
   const p0: [number, number] = [hx + Math.cos(a0) * R, hy + Math.sin(a0) * R];
   const p1: [number, number] = [hx + Math.cos(a1) * R, hy + Math.sin(a1) * R];
-  // 옆 곡선 조절점: 접점 → 꼬리 중간에서 바깥으로 밀어 낸다
+  // 옆 곡선 조절점: 접점 → 꼬리 중간에서 바깥으로 밀어 낸다. n은 꼬리 축의 왼쪽 법선이고 p0은 +n 쪽, p1은 −n 쪽 접점이다
   const nx = -Math.sin(beta);
   const ny = Math.cos(beta);
-  const c1: [number, number] = [(p1[0] + tx) / 2 + nx * bulge, (p1[1] + ty) / 2 + ny * bulge];
-  const c0: [number, number] = [(p0[0] + tx) / 2 - nx * bulge, (p0[1] + ty) / 2 - ny * bulge];
+  const b = Math.max(0, bulge);
+  const c1: [number, number] = [(p1[0] + tx) / 2 - nx * b, (p1[1] + ty) / 2 - ny * b];
+  const c0: [number, number] = [(p0[0] + tx) / 2 + nx * b, (p0[1] + ty) / 2 + ny * b];
   return path().arc(hx, hy, R, a0, a1).Q(c1[0], c1[1], tx, ty).Q(c0[0], c0[1], p0[0], p0[1]).Z().d;
 }
 
@@ -149,7 +160,8 @@ function topSleeve(sk: Sketch, r: TopRig, side: 0 | 1, sleeve: number, glove: nu
 function top(p: SurvivorPose, o: ArtOptions): Drawing {
   const ink = inkFor(p.tone);
   const sk = new Sketch(o.w);
-  const a = p.action;
+  // 질주 자세는 보통(free)일 때만: 구조 중 · 수감 중에는 질주 효과가 남아 있어도 제자리 자세다
+  const a = p.mode === 'free' ? p.action : 0;
   // 몸통: 어깨는 공통 체형보다 조금 좁고(옆이 넓은 공통 생존자와 실루엣이 갈리게) 앞뒤는 조금 두껍다(등 양쪽 판정 원
   // 빈 곳을 채운다). 질주 때 어깨를 움츠린다
   const r = topRig(p, TOP.halfW * (0.92 - 0.05 * a), TOP.halfD * 1.12);
@@ -200,8 +212,8 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
   // 수감 때 움츠러든다. 피격 때는 몸 쪽으로 눌려 짧고 뭉툭해진다(옆으로 꺾으면 몸을 돌린 것처럼 읽힌다)
   const tx = -1.06 - 0.04 * a + 0.16 * captive + 0.14 * hit + r.ox;
   const ty = hy + 0.13 * (1 + 0.5 * a) * Math.sin(p.walk + 0.9) * p.stride + 0.08 * hit;
-  // 꼬리 폭: 서기 때 통통한 물방울, 질주 때 가늘고 긴 혜성 줄기
-  const tailBulge = 0.33 - 0.2 * a + 0.08 * hit;
+  // 꼬리 폭: 서기 때 통통한 물방울, 질주 때 곧고 가는 혜성 줄기, 피격 때 짧고 뭉툭하게
+  const tailBulge = 0.03 - 0.03 * a + 0.05 * hit;
   sk.fill(dropPath(hx, hy, R + 0.03, tx - 0.02, ty, tailBulge), solid(ink(shade(C.deep, 0.4))), 0.35);
   sk.part(
     dropPath(hx, hy, R, tx, ty, tailBulge),
@@ -216,26 +228,31 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
     const y = ty + (hy - ty) * k;
     return [x - Math.sin(ang) * side, y + Math.cos(ang) * side];
   };
-  const chev = path();
-  for (const k of [0.5]) {
-    const [ax, ay] = along(k - 0.08, -0.17);
-    const [bx, by] = along(k, 0);
-    const [cx, cy] = along(k - 0.08, 0.17);
-    chev.M(ax, ay).L(bx, by).L(cx, cy);
-  }
-  sk.line(chev.d, solid(ink(tint(C.hoodie, 0.3))), 0.085);
-  // 앞 얼굴 그늘 (후드 안) + 네온 테두리. 질주 때 네온이 밝아진다
+  const [ax, ay] = along(0.42, -0.17);
+  const [bx, by] = along(0.5, 0);
+  const [cx, cy] = along(0.42, 0.17);
+  sk.line(path().M(ax, ay).L(bx, by).L(cx, cy).d, solid(ink(tint(C.hoodie, 0.3))), 0.085);
+  // 앞 얼굴 구멍: 후드 앞 가장자리를 크게 파낸 짙은 그늘(머리카락 · 얼굴 그림자). 휴대폰 크기(몸 반지름 약 7px)에서
+  // 바라보는 방향을 보이는 단서다 — 밝은 파랑 후드 앞쪽이 짙게 끊긴다. 네온 테는 그늘을 덮지 않고 후드 천과 그늘의
+  // 경계(후드 챙)를 따라 가늘게 긋는다. 질주 때 네온이 밝아진다
+  const fo = R * FACE.outer;
+  const fb = fo * Math.cos(FACE.half);
+  const fs = fo * Math.sin(FACE.half);
+  // 경계 곡선이 앞 가운데에서 그늘 두께 FACE.depth를 지나게 하는 2차 조절점 (Q는 t = 0.5에서 조절점 · 끝점 중간을 지난다)
+  const qx = hx + 2 * (fo - FACE.depth) - fb;
   sk.fill(
     path()
-      .arc(hx, hy, R * 0.9, -0.95, 0.95)
-      .arc(hx + 0.06, hy, R * 0.52, 0.82, -0.82, false)
+      .arc(hx, hy, fo, -FACE.half, FACE.half)
+      .Q(qx, hy, hx + fb, hy - fs)
       .Z().d,
-    solid(ink(C.deep)),
+    solid(ink(FACE.shadow)),
   );
   sk.line(
-    path().arc(hx, hy, R * 0.84, -1.15, 1.15).d,
+    path()
+      .M(hx + fb, hy - fs)
+      .Q(qx, hy, hx + fb, hy + fs).d,
     solid(ink(tint(C.neon, 0.25))),
-    0.11,
+    0.1,
     'round',
     0.9 + 0.1 * a,
   );
@@ -489,4 +506,9 @@ function front(p: FrontPose, o: ArtOptions): Drawing {
   return transformDrawing(frontBody(p, { w: o.w / k }), k, -0.08, 0.42);
 }
 
-export const RUNNER_ART: SurvivorArt = { id: 'runner', top, front, topExtent: 1.47 };
+export const RUNNER_ART: SurvivorArt = {
+  id: 'runner',
+  top: (p, o) => top(cleanSurvivorPose(p), o),
+  front: (p, o) => front(cleanFrontPose(p), o),
+  topExtent: 1.47,
+};

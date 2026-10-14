@@ -37,7 +37,14 @@ import {
   topTorsoPath,
   type Ink,
 } from './survivorBase';
-import type { ArtOptions, FrontPose, SurvivorArt, SurvivorPose } from './types';
+import {
+  cleanFrontPose,
+  cleanSurvivorPose,
+  type ArtOptions,
+  type FrontPose,
+  type SurvivorArt,
+  type SurvivorPose,
+} from './types';
 
 /** 가드 색 */
 export const GUARD_COLOR = {
@@ -470,4 +477,9 @@ function front(p: FrontPose, o: ArtOptions): Drawing {
   return transformDrawing(frontBody(p, { w: o.w / k }), k, -0.05, 0.36);
 }
 
-export const GUARD_ART: SurvivorArt = { id: 'guard', top, front, topExtent: 1.58 };
+export const GUARD_ART: SurvivorArt = {
+  id: 'guard',
+  top: (p, o) => top(cleanSurvivorPose(p), o),
+  front: (p, o) => front(cleanFrontPose(p), o),
+  topExtent: 1.58,
+};

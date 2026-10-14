@@ -27,7 +27,14 @@ import {
   type Stop,
 } from './kit';
 import { frontBreath, inkFor, type Ink } from './survivorBase';
-import type { ArtOptions, FrontPose, MonsterArt, MonsterPose } from './types';
+import {
+  cleanFrontPose,
+  cleanMonsterPose,
+  type ArtOptions,
+  type FrontPose,
+  type MonsterArt,
+  type MonsterPose,
+} from './types';
 
 type Pt = readonly [number, number];
 
@@ -385,9 +392,11 @@ function monsterRig(p: MonsterPose): MonsterRig {
     wave *= 1 - 0.7 * k;
     body = mul(body, rotateAbout(0.12 * k, 0, 0));
   }
+  // 걷기 상체 흔들림: 공격 준비 · 포효로 팔을 옆으로 벌렸을 때는 줄인다 (흔들림이 벌린 발톱 끝을 옆으로 더 밀어내지 않게)
+  const calm = 1 - Math.max(p.windup, p.roar);
   return {
     body,
-    upper: mul(body, rotateAbout(-0.1 * s, 0, 0)),
+    upper: mul(body, rotateAbout(-0.1 * s * calm, 0, 0)),
     head: [headX, 0],
     headK,
     faceX: faceX + headX - 0.04,
@@ -917,4 +926,9 @@ function front(p: FrontPose, o: ArtOptions): Drawing {
   return sk.drawing();
 }
 
-export const MONSTER_ART: MonsterArt = { id: 'monster', top, front, topExtent: 1.45 };
+export const MONSTER_ART: MonsterArt = {
+  id: 'monster',
+  top: (p, o) => top(cleanMonsterPose(p), o),
+  front: (p, o) => front(cleanFrontPose(p), o),
+  topExtent: 1.5,
+};

@@ -5,15 +5,23 @@
 //  - newRoleFigureSvg(role): 로비 역할 카드용 새 정면 그림 SVG (무대 빛 + 정면 캐릭터)
 // tests/char-art/compare.spec.ts가 esbuild로 묶어 addScriptTag로 넣는다. 아틀라스 캔버스는 addInitScript로 모아 둔
 // window.__charCanvases(만든 canvas의 WeakRef 목록)에서 크기 · 화소로 찾는다.
-import { bakeAtlas } from '../../client/src/art/atlas';
-import { drawToCanvas, toSvg, type CanvasSink, type Drawing } from '../../client/src/art/chars/kit';
-import { MONSTER_ART, SURVIVOR_ART } from '../../client/src/art/chars/index';
-import { FRONT_REST, MONSTER_REST, SURVIVOR_REST, type Tone } from '../../client/src/art/chars/types';
-import { ROLE } from '../../client/src/art/palette';
+import { TILE_PX as TILE } from '@decoy/shared';
+import { ANIM } from '../../client/src/art/anim';
+import { ART, bakeAtlas } from '../../client/src/art/atlas';
+import { drawToCanvas, toSvg, type Drawing } from '../../client/src/art/chars/kit';
+import { COMMON_ART, MONSTER_ART, SURVIVOR_ART } from '../../client/src/art/chars/index';
+import {
+  FRONT_REST,
+  HIDDEN_REST,
+  MONSTER_REST,
+  SURVIVOR_REST,
+  type Tone,
+} from '../../client/src/art/chars/types';
+import { ROLE, hexCss } from '../../client/src/art/palette';
+import { R_TILES } from './draw';
 
-const TILE = 32;
-const R = { s: 0.3, m: 0.35 } as const;
-const OUTLINE_WORLD = 1.8;
+const R = { s: R_TILES.survivor, m: R_TILES.monster } as const;
+const OUTLINE_WORLD = ART.outlineWorldPx;
 
 type Role = 'runner' | 'guard' | 'scout' | 'monster';
 
@@ -31,8 +39,9 @@ function frameArt(name: string): { d: Drawing; unit: 's' | 'm' } | null | undefi
   const wm = OUTLINE_WORLD / (R.m * TILE);
   const surv = /^survivor-(runner|guard|scout|hidden)(?:-(flash|gray))?$/.exec(name);
   if (surv) {
-    const id = surv[1] === 'hidden' ? 'common' : (surv[1] as 'runner' | 'guard' | 'scout');
     const tone: Tone = surv[2] === 'flash' ? 'flash' : surv[2] === 'gray' ? 'gray' : 'normal';
+    if (surv[1] === 'hidden') return { d: COMMON_ART.top({ ...HIDDEN_REST, tone }, { w: ws }), unit: 's' };
+    const id = surv[1] as 'runner' | 'guard' | 'scout';
     return { d: SURVIVOR_ART[id].top({ ...SURVIVOR_REST, tone }, { w: ws }), unit: 's' };
   }
   if (
@@ -47,7 +56,7 @@ function frameArt(name: string): { d: Drawing; unit: 's' | 'm' } | null | undefi
   if (cloak) {
     const i = Number(cloak[2]);
     const move = cloak[1] === 'move';
-    const phase = (i / 8) * Math.PI * 2;
+    const phase = (i / ANIM.cloakFrames) * Math.PI * 2;
     return {
       d: MONSTER_ART.top(
         { ...MONSTER_REST, cloak: phase, walk: move ? phase : 0, stride: move ? 1 : 0 },
@@ -116,7 +125,7 @@ export function patchAtlas(): { patched: number; cleared: number; size: string }
     ctx.clearRect(f.x, f.y, f.w, f.h);
     if (art) {
       ctx.translate(f.x + f.w / 2, f.y + f.h / 2);
-      drawToCanvas(ctx as unknown as CanvasSink, art.d, unitPx[art.unit]);
+      drawToCanvas(ctx, art.d, unitPx[art.unit]);
       patched += 1;
     } else cleared += 1;
     ctx.restore();
@@ -124,22 +133,27 @@ export function patchAtlas(): { patched: number; cleared: number; size: string }
   return { patched, cleared, size: `${target.width}x${target.height}` };
 }
 
-function hexCss(c: number): string {
-  return `#${c.toString(16).padStart(6, '0')}`;
-}
-
 let uid = 0;
-/** 로비 역할 카드 새 그림: viewBox −80..80, 발밑 무대 빛 + 정면 캐릭터 (옛 roleFigureSvg와 같은 상자) */
+/**
+ * 로비 역할 카드 새 그림: viewBox −80..80, 발밑 무대 빛 + 정면 캐릭터 (옛 roleFigureSvg와 같은 상자).
+ * 위 · 오른쪽 위('내 역할' 배지)에 여백을 두게 상자의 약 80%로 그리고 조금 내린다 (휴대폰 카드에서 뿔 · 후드 끝이 잘리지 않게)
+ */
+const FIGURE: Record<Role, { size: number; dx: number; dy: number }> = {
+  runner: { size: 120, dx: -8, dy: 8 },
+  guard: { size: 120, dx: 0, dy: 8 },
+  scout: { size: 120, dx: 0, dy: 8 },
+  monster: { size: 128, dx: 0, dy: 6 },
+};
+
 export function newRoleFigureSvg(role: Role): string {
   uid += 1;
   const base = ROLE[role];
-  const id = role === 'monster' ? 'monster' : role;
-  const size = role === 'monster' ? 150 : 138;
+  const { size, dx, dy } = FIGURE[role];
   const k = size / 2;
   const d =
-    id === 'monster'
+    role === 'monster'
       ? MONSTER_ART.front(FRONT_REST, { w: 2.6 / k })
-      : SURVIVOR_ART[id].front(FRONT_REST, { w: 2.6 / k });
+      : SURVIVOR_ART[role].front(FRONT_REST, { w: 2.6 / k });
   const inner = toSvg(d, { viewBox: [-1, -1, 2, 2], idPrefix: `nf${uid}x` })
     .replace(/^<svg[^>]*>/, '')
     .replace(/<\/svg>$/, '');
@@ -149,7 +163,7 @@ export function newRoleFigureSvg(role: Role): string {
     `<stop offset="0" stop-color="${c}" stop-opacity=".5"/><stop offset=".5" stop-color="${c}" stop-opacity=".12"/><stop offset="1" stop-color="${c}" stop-opacity="0"/></radialGradient></defs>` +
     `<ellipse cx="0" cy="62" rx="76" ry="22" fill="url(#np${uid})"/>` +
     `<ellipse cx="0" cy="66" rx="${k * 0.62}" ry="${k * 0.12}" fill="#000" opacity=".45"/>` +
-    `<g transform="translate(0 ${role === 'monster' ? -6 : -4}) scale(${k})">${inner}</g></svg>`
+    `<g transform="translate(${dx} ${dy}) scale(${k})">${inner}</g></svg>`
   );
 }
 

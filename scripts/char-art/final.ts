@@ -1,16 +1,23 @@
 // 캐릭터 리디자인 1단계 산출물 (브라우저 쪽): 캐릭터별 큰 그림 시트 · 다섯 나란히 · 애니메이션 장면(GIF 프레임).
 // scripts/char-art.mjs의 sheets · gifs 명령이 esbuild로 묶어 Chromium에서 부른다. 게임 코드는 바꾸지 않는다.
-// 애니메이션 시간은 규칙 값(balance.json: 공격 준비 0.4초 · 돌진 0.25초 · 4타일 · 기절 1.5초 · 구조 3초 · 능력 노출 1초 ·
-// 생존자 5타일/초 · 괴물 5.5타일/초 · 질주 ×1.45)과 장식 값(VISUAL_SPEC 6장: 숨쉬기 2.6초 · 걸음 1.1타일 · 피격 번쩍 80ms ·
-// 찌그러짐 120ms · 흩어짐 · 나타남 300ms · 베기 120ms · 망토 1.9 / 0.75초 · 깜빡임 3.4초 · 보호 깜빡임 150ms)을 따른다.
+// 애니메이션 시간은 규칙 값(config/balance.json: 공격 준비 · 돌진 시간 · 거리 · 기절 · 구조 · 능력 노출 · 이동 빠르기 · 질주 배율)과
+// 장식 값(client/src/art/anim.ts ANIM: 숨쉬기 · 걸음 · 피격 번쩍 · 찌그러짐 · 흩어짐 · 나타남 · 베기 · 망토 · 깜빡임 · 보호 깜빡임)을
+// 원본에서 그대로 읽는다 — 수치가 바뀌면 다시 만든 GIF도 따라간다.
+import { ANIM } from '../../client/src/art/anim';
 import type { CharId, MonsterPose, SurvivorPose } from '../../client/src/art/chars/types';
 import {
+  BALANCE,
   BG,
   DEVICES,
+  FONT,
   NAMES,
   R_TILES,
   TEXT_COLOR,
   attackFan,
+  backingRadiusPx,
+  deviceRow,
+  onDevice,
+  oldRevealMark,
   bubble,
   canvas,
   dissolve,
@@ -39,18 +46,32 @@ import {
 } from './draw';
 
 const TAU = Math.PI * 2;
-const STRIDE_TILES = 1.1;
-const SPEED = { survivor: 5, monster: 5.5, sprint: 5 * 1.45 } as const;
-const RULE = {
-  windup: 0.4,
-  strike: 0.12,
-  dash: 0.25,
-  dashTiles: 4,
-  stun: 1.5,
-  rescue: 3,
-  reveal: 1,
-  attackRange: 1.2,
+const STRIDE_TILES = ANIM.strideTiles;
+const B = BALANCE;
+const SPEED = {
+  survivor: B.survivor.moveSpeed,
+  monster: B.monster.moveSpeed,
+  sprint: B.survivor.moveSpeed * B.roles.runner.sprintMultiplier,
 } as const;
+const RULE = {
+  windup: B.monster.attack.windup,
+  strike: ANIM.slashMs / 1000,
+  dash: B.monster.dash.duration,
+  dashTiles: B.monster.dash.distance,
+  stun: B.roles.guard.stunDuration,
+  rescue: B.prison.rescueTime,
+  protect: B.survivor.rescueProtection,
+  reveal: B.survivor.abilityRevealDuration,
+  attackRange: B.monster.attack.range,
+  attackArc: B.monster.attack.arc,
+  sprintMul: B.roles.runner.sprintMultiplier,
+  sprintS: B.roles.runner.sprintDuration,
+  shoveRange: B.roles.guard.shoveRange,
+  trackS: B.roles.scout.trackDuration,
+  roarRadius: B.monster.roar.radius,
+  roarReveal: B.monster.roar.revealDuration,
+} as const;
+const MS = (v: number): string => `${Math.round(v)}ms`;
 
 function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
@@ -61,14 +82,15 @@ function ramp(t: number, a: number, b: number): number {
   return k * k * (3 - 2 * k);
 }
 function breath(t: number, seed = 0): number {
-  return 1 + 0.016 * Math.sin((TAU * t) / 2.6 + seed);
+  return 1 + ANIM.breathAmp * Math.sin((TAU * t) / ANIM.breathPeriodS + seed);
 }
 function blink(t: number): 'open' | 'blink' {
-  const p = (((t + 0.7) % 3.4) + 3.4) % 3.4;
-  return p < 0.13 ? 'blink' : 'open';
+  const P = ANIM.blinkPeriodS;
+  const p = (((t + 0.7) % P) + P) % P;
+  return p < ANIM.blinkMs / 1000 ? 'blink' : 'open';
 }
 function cloakPhase(t: number, moving: boolean): number {
-  return (TAU * t) / (moving ? 0.75 : 1.9);
+  return (TAU * t) / (moving ? ANIM.cloakWalkPeriodS : ANIM.cloakIdlePeriodS);
 }
 
 // ───────────────────────── 걷기 길 (경기장 모양 고리) ─────────────────────────
@@ -145,11 +167,33 @@ export interface Scene {
 
 type SurvivorRole = 'runner' | 'guard' | 'scout';
 
-function header(ctx: Ctx, w: number, title: string, note: string, color: string): void {
+/** 설명 줄을 폭 maxW에 맞춰 나눈다 (' · '와 빈칸에서 끊는다) */
+function wrapNote(ctx: Ctx, note: string, maxW: number, size: number): string[] {
+  ctx.save();
+  ctx.font = `500 ${size}px ${FONT}`;
+  const words = note.split(/(?<= )/);
+  const lines: string[] = [];
+  let cur = '';
+  for (const w of words) {
+    if (cur && ctx.measureText(cur + w).width > maxW) {
+      lines.push(cur.trimEnd());
+      cur = w.trimStart();
+    } else cur += w;
+  }
+  if (cur) lines.push(cur.trimEnd());
+  ctx.restore();
+  return lines;
+}
+
+/** 장면 머리글: 제목 + 설명 (넘치면 두 줄 이상). 돌려준 값 = 머리글 높이 */
+function header(ctx: Ctx, w: number, title: string, note: string, color: string): number {
+  const lines = wrapNote(ctx, note, w - 28, 12.5);
+  const h = 32 + lines.length * 17;
   ctx.fillStyle = 'rgba(11,22,34,0.82)';
-  ctx.fillRect(0, 0, w, 50);
+  ctx.fillRect(0, 0, w, h);
   text(ctx, title, 14, 22, 17, color, 700);
-  text(ctx, note, 14, 42, 12.5, '#94a3b8', 500);
+  lines.forEach((ln, i) => text(ctx, ln, 14, 42 + i * 17, 12.5, '#94a3b8', 500));
+  return h;
 }
 
 function stage(ctx: Ctx, w: number, h: number, tile: number): void {
@@ -162,13 +206,13 @@ function stage(ctx: Ctx, w: number, h: number, tile: number): void {
 /** 서기 (생존자 · 괴물): 위에서 본 그림 숨쉬기 + 정면 숨쉬기 */
 function idleScene(id: CharId): Scene {
   const isM = id === 'monster';
-  const dur = isM ? 3.8 : 2.6;
+  const dur = isM ? ANIM.cloakIdlePeriodS * 2 : ANIM.breathPeriodS;
   return {
     id: `${id}-idle`,
     label: `${NAMES[id]} · 대기`,
     note: isM
-      ? '망토 자락 물결 1.9초 · 눈 깜빡임 3.4초 · 숨쉬기'
-      : '숨쉬기 2.6초 (위 그림 · 정면 그림 같은 주기)',
+      ? `망토 자락 물결 ${ANIM.cloakIdlePeriodS}초 · 눈 깜빡임 ${ANIM.blinkPeriodS}초 · 숨쉬기`
+      : `숨쉬기 ${ANIM.breathPeriodS}초 (위 그림 · 정면 그림 같은 주기)`,
     dur,
     w: 560,
     h: 340,
@@ -177,7 +221,8 @@ function idleScene(id: CharId): Scene {
       ctx.fillStyle = '#0f1b27';
       ctx.fillRect(300, 0, 260, 340);
       const r = isM ? 62 : 58;
-      const s = breath(t, 0) * (isM ? 1 + 0.012 * Math.sin(2.4 * t) - 0.016 * Math.sin((TAU * t) / 2.6) : 1);
+      // 괴물은 망토 물결 두 주기 안에서 숨쉬기도 이음매 없이 돌게 (주기 = 장면 길이)
+      const s = isM ? 1 + 0.012 * Math.sin((TAU * t) / dur) : breath(t, 0);
       const pose = isM ? { cloak: cloakPhase(t, false), eyes: blink(t) } : {};
       newTop(ctx, id, pose, 150, 200, r, -Math.PI / 2, { sx: s, sy: s });
       newFront(ctx, id, { t }, 430, 196, 250, 3.2);
@@ -196,7 +241,7 @@ function walkScene(id: CharId): Scene {
   return {
     id: `${id}-walk`,
     label: `${NAMES[id]} · 걷기 (모든 방향)`,
-    note: `실제 빠르기 ${v}타일/초 · 걸음 한 주기 ${STRIDE_TILES}타일 · 바라보는 방향으로 몸이 돈다`,
+    note: `실제 빠르기 ${v}타일/초 · 걸음 한 주기 ${STRIDE_TILES}타일 · 바라보는 방향으로 몸이 돈다${isM ? '' : ` · 걸음에 몸이 ±${ANIM.leanDeg}° 기운다`}`,
     dur,
     w: 560,
     h: 360,
@@ -210,8 +255,16 @@ function walkScene(id: CharId): Scene {
       const pose = isM
         ? { walk, stride: 1, cloak: cloakPhase(t, true), eyes: blink(t) }
         : { walk, stride: 1 };
-      // 게임과 같이 생존자는 걸음에 맞춰 몸을 ±4° 기울인다 (괴물은 기울이지 않음)
-      newTop(ctx, id, pose, p.x, p.y, r, p.face + (isM ? 0 : ((4 * Math.PI) / 180) * Math.sin(walk)));
+      // 게임과 같이 생존자는 걸음에 맞춰 몸을 기울인다 (괴물은 기울이지 않음)
+      newTop(
+        ctx,
+        id,
+        pose,
+        p.x,
+        p.y,
+        r,
+        p.face + (isM ? 0 : ((ANIM.leanDeg * Math.PI) / 180) * Math.sin(walk)),
+      );
       header(ctx, 560, this.label, this.note, TEXT_COLOR[id]);
     },
   };
@@ -227,7 +280,7 @@ function sprintScene(): Scene {
   return {
     id: 'runner-ability',
     label: '러너 · 질주 (능력)',
-    note: '3초 동안 ×1.45 빠르게: 앞으로 숙이고 팔을 접고 후드 끝이 뒤로 날린다 (속도선은 생존자 화면만)',
+    note: `${RULE.sprintS}초 동안 ×${RULE.sprintMul} 빠르게: 앞으로 숙이고 팔을 접고 후드 끝이 곧은 줄기로 뒤로 날린다 (속도선은 생존자 화면만)`,
     dur: tWalk + tSprint,
     w: 560,
     h: 360,
@@ -244,17 +297,18 @@ function sprintScene(): Scene {
       const r = R_TILES.survivor * tile;
       if (sprinting) speedLines(ctx, p.x, p.y, p.face, r, t);
       newTop(ctx, 'runner', { walk, stride: 1, action }, p.x, p.y, r, p.face);
+      const hh = header(ctx, 560, this.label, this.note, TEXT_COLOR.runner);
+      // 상태 이름표: 걷는 길 안쪽 가운데 (캐릭터가 지나가지 않는 자리)
       text(
         ctx,
         sprinting ? '질주 중' : '걷기',
         280,
-        340,
+        Math.max(hh + 20, 212),
         15,
         sprinting ? '#60a5fa' : '#94a3b8',
         700,
         'center',
       );
-      header(ctx, 560, this.label, this.note, TEXT_COLOR.runner);
     },
   };
 }
@@ -268,7 +322,7 @@ function shoveScene(): Scene {
   return {
     id: 'guard-ability',
     label: '가드 · 밀치기 (능력)',
-    note: '방패를 당겨 힘을 모았다가 앞으로 내지른다 → 2타일 안 괴물 기절 1.5초',
+    note: `방패를 당겨 힘을 모았다가 앞으로 내지른다 → ${RULE.shoveRange}타일 안 괴물 기절 ${RULE.stun}초`,
     dur: 2.8,
     w: 560,
     h: 340,
@@ -310,7 +364,7 @@ function trackScene(): Scene {
   return {
     id: 'scout-ability',
     label: '스카우트 · 탐지 (능력)',
-    note: '망원경을 눈에 대고 늘인다 → 4초 동안 괴물 위치를 팀 전원 화면에 (초록 표시)',
+    note: `망원경을 눈에 대고 늘인다 → ${RULE.trackS}초 동안 괴물 위치를 팀 전원 화면에 (초록 표시)`,
     dur: 3.2,
     w: 560,
     h: 340,
@@ -335,7 +389,7 @@ function hitScene(role: SurvivorRole): Scene {
   return {
     id: `${role}-hit`,
     label: `${NAMES[role]} · 피격`,
-    note: '흰 번쩍 80ms · 찌그러짐 120ms · 뒤로 젖힘 · 불꽃 0.2초 → 부상(체력 1)은 몸 뒤 붉은 긁힘',
+    note: `흰 번쩍 ${MS(ANIM.hitFlashMs)} · 찌그러짐 ${MS(ANIM.squashMs)} · 뒤로 젖힘 · 불꽃 0.2초 → 부상(체력 1)은 몸 뒤쪽 위에 붉은 긁힘 세 줄`,
     dur: 2.0,
     w: 560,
     h: 340,
@@ -350,17 +404,21 @@ function hitScene(role: SurvivorRole): Scene {
         attackFan(ctx, mx, sy, Math.PI, RULE.attackRange * tile, (t - 0.2) / RULE.windup);
       const dt = t - tHit;
       const hit = dt >= 0 ? Math.max(0, 1 - dt / 0.3) : 0;
-      const squash = dt >= 0 && dt < 0.12 ? Math.sin((Math.PI * dt) / 0.12) : 0;
-      const flash = dt >= 0 && dt < 0.08 ? 1 - dt / 0.08 : 0;
+      const sq = ANIM.squashMs / 1000;
+      const fl = ANIM.hitFlashMs / 1000;
+      const squash = dt >= 0 && dt < sq ? Math.sin((Math.PI * dt) / sq) : 0;
+      const flash = dt >= 0 && dt < fl ? 1 - dt / fl : 0;
       const r = R_TILES.survivor * tile;
+      const k = ANIM.squashAmt;
+      newTop(ctx, role, { hit }, sx, sy, r, 0, { sx: 1 + squash * k, sy: 1 - squash * k });
+      // 부상 표시는 몸 다음에 그리는 부착 표시 (VISUAL_SPEC 4.2: 몸 뒤쪽 붉은 긁힘 세 줄)
       if (dt >= 0) injury(ctx, sx, sy, 0, r);
-      newTop(ctx, role, { hit }, sx, sy, r, 0, { sx: 1 + squash * 0.16, sy: 1 - squash * 0.16 });
       if (flash > 0)
         newTop(ctx, role, { hit, tone: 'flash' }, sx, sy, r, 0, {
           shadow: false,
           alpha: 0.9 * flash,
-          sx: 1 + squash * 0.16,
-          sy: 1 - squash * 0.16,
+          sx: 1 + squash * k,
+          sy: 1 - squash * k,
         });
       sparks(ctx, sx, sy, r, dt, 3);
       newTop(
@@ -389,7 +447,7 @@ function imprisonScene(role: SurvivorRole): Scene {
   return {
     id: `${role}-imprison`,
     label: `${NAMES[role]} · 수감`,
-    note: '두 번째 피격: 붉게 흩어짐 0.3초 → 감옥 안에서 0.3초 나타남, 움츠린 수감 자세',
+    note: `두 번째 피격: 붉게 흩어짐 ${ANIM.imprisonDissolveMs / 1000}초 → 감옥 안에서 ${ANIM.imprisonAppearMs / 1000}초 나타남, 움츠린 수감 자세`,
     dur: 3.0,
     w: 560,
     h: 340,
@@ -406,11 +464,11 @@ function imprisonScene(role: SurvivorRole): Scene {
       const r = R_TILES.survivor * tile;
       const dt = t - tHit;
       if (dt < 0) {
-        injury(ctx, sx, sy, 0, r);
         newTop(ctx, role, {}, sx, sy, r, 0);
-      } else if (dt < 0.08) newTop(ctx, role, { hit: 1, tone: 'flash' }, sx, sy, r, 0);
+        injury(ctx, sx, sy, 0, r);
+      } else if (dt < ANIM.hitFlashMs / 1000) newTop(ctx, role, { hit: 1, tone: 'flash' }, sx, sy, r, 0);
       dissolve(ctx, sx, sy, r, dt - 0.06);
-      const appear = ramp(t, tHit + 0.36, tHit + 0.66);
+      const appear = ramp(t, tHit + 0.36, tHit + 0.36 + ANIM.imprisonAppearMs / 1000);
       if (appear > 0) {
         const cx = cell.x + cell.w / 2;
         const cy = cell.y + cell.h / 2;
@@ -437,6 +495,13 @@ function imprisonScene(role: SurvivorRole): Scene {
 
 const RESCUED: Record<SurvivorRole, SurvivorRole> = { runner: 'guard', guard: 'scout', scout: 'runner' };
 
+/** 구조 자세 설명 (역할마다 손이 다르다) */
+const RESCUE_HANDS: Record<SurvivorRole, string> = {
+  runner: '후드 앞으로 두 손을 뻗어 자물쇠를',
+  guard: '방패를 왼쪽으로 비키고 오른손만 뻗어 자물쇠를',
+  scout: '망원경을 배낭 옆에 꽂고 고글 양옆으로 두 손을 뻗어 자물쇠를',
+};
+
 /** 구조: 문 앞에서 두 손을 뻗어 3초 → 갇힌 팀원이 풀려나 보호(반투명 + 거품 깜빡임) */
 function rescueScene(role: SurvivorRole): Scene {
   const tile = 120;
@@ -451,7 +516,7 @@ function rescueScene(role: SurvivorRole): Scene {
   return {
     id: `${role}-rescue`,
     label: `${NAMES[role]} · 구조`,
-    note: `문 앞에서 두 손으로 자물쇠를 3초 → 갇힌 팀원(${NAMES[mate]})이 풀려나 4초 보호 (반투명 + 거품 깜빡임)`,
+    note: `문 앞에서 ${RESCUE_HANDS[role]} ${RULE.rescue}초 → 갇힌 팀원(${NAMES[mate]})이 풀려나 ${RULE.protect}초 보호 (반투명 + 거품 깜빡임)`,
     dur: t1 + 1.6,
     w: 560,
     h: 360,
@@ -470,7 +535,7 @@ function rescueScene(role: SurvivorRole): Scene {
         const k = ramp(t, t1, t1 + 0.15);
         const px = rx + 0.75 * tile;
         const py = ry - 0.1 * tile;
-        const blinkOn = Math.floor(((t - t1) * 1000) / 150) % 2 === 0;
+        const blinkOn = Math.floor(((t - t1) * 1000) / ANIM.protectBlinkMs) % 2 === 0;
         newTop(ctx, mate, {}, px, py, r, -Math.PI / 2 + 0.4, { alpha: 0.5 * k });
         bubble(ctx, px, py, r, blinkOn);
       }
@@ -520,7 +585,7 @@ function commonStatusScene(): Scene {
   return {
     id: 'common-status',
     label: '공통 생존자 · 보호 · 능력 노출',
-    note: '보호(구조 직후 4초): 흰색 50% + 거품 깜빡임 150ms · 능력 노출 1초: 역할색 테두리 + 머리 위 역할 아이콘',
+    note: `보호(구조 직후 ${RULE.protect}초): 흰색 50% + 거품 깜빡임 ${MS(ANIM.protectBlinkMs)} · 능력 노출 ${RULE.reveal}초: 역할색 테두리 + 머리 위 역할 얼굴 (지금은 문양)`,
     dur: 2.6,
     w: 560,
     h: 340,
@@ -529,7 +594,7 @@ function commonStatusScene(): Scene {
       const s = breath(t, 0);
       newTop(ctx, 'common', {}, 110, 220, r, -Math.PI / 2, { sx: s, sy: s });
       text(ctx, '보통', 110, 318, 13, '#94a3b8', 700, 'center');
-      const blinkOn = Math.floor((t * 1000) / 150) % 2 === 0;
+      const blinkOn = Math.floor((t * 1000) / ANIM.protectBlinkMs) % 2 === 0;
       newTop(ctx, 'common', {}, 280, 220, r, -Math.PI / 2, { alpha: 0.5, sx: s, sy: s });
       bubble(ctx, 280, 220, r, blinkOn);
       text(ctx, '보호 중', 280, 318, 13, '#94a3b8', 700, 'center');
@@ -551,6 +616,61 @@ function commonStatusScene(): Scene {
   };
 }
 
+/**
+ * 공통 생존자 수감 (괴물 화면): 괴물 공격 → 흰 번쩍(괴물 화면도 같은 프레임) → 타격 부채꼴 안에서 흩어짐 → 감옥 안 공통 그림이
+ * 움츠린 자세로 나타남. 괴물 화면은 불꽃 · 부상을 그리지 않는다 (VISUAL_SPEC 0장 ③)
+ */
+function commonImprisonScene(): Scene {
+  const tile = 130;
+  const sx = 150;
+  const sy = 215;
+  const mx = sx + 1.05 * tile;
+  const cell = { x: 380, y: 112, w: 160, h: 160 };
+  const tHit = 0.2 + RULE.windup;
+  return {
+    id: 'common-imprison',
+    label: '공통 생존자 · 수감 (괴물 화면)',
+    note: `괴물의 두 번째 타격: 흰 번쩍 → 흩어짐 ${ANIM.imprisonDissolveMs / 1000}초 → 감옥 안 공통 그림이 움츠린 자세로 · 불꽃 · 부상 표시 없음`,
+    dur: 3.0,
+    w: 560,
+    h: 340,
+    draw(ctx, t) {
+      stage(ctx, 560, 340, tile);
+      prisonCell(ctx, cell.x, cell.y, cell.w, cell.h, tile);
+      const windup = ramp(t, 0.2, tHit) * (1 - ramp(t, tHit, tHit + 0.05));
+      const strike =
+        t >= tHit && t < tHit + 0.35
+          ? clamp01((t - tHit) / RULE.strike) * (1 - ramp(t, tHit + 0.15, tHit + 0.35))
+          : 0;
+      if (t >= 0.2 && t < tHit)
+        attackFan(ctx, mx, sy, Math.PI, RULE.attackRange * tile, (t - 0.2) / RULE.windup);
+      const r = R_TILES.survivor * tile;
+      const dt = t - tHit;
+      if (dt < 0) newTop(ctx, 'common', {}, sx, sy, r, 0);
+      else if (dt < ANIM.hitFlashMs / 1000) newTop(ctx, 'common', { tone: 'flash' }, sx, sy, r, 0);
+      dissolve(ctx, sx, sy, r, dt - 0.06);
+      const appear = ramp(t, tHit + 0.36, tHit + 0.36 + ANIM.imprisonAppearMs / 1000);
+      if (appear > 0)
+        newTop(ctx, 'common', { mode: 'captive' }, cell.x + cell.w / 2, cell.y + cell.h / 2, r, Math.PI / 2, {
+          alpha: appear,
+          sx: breath(t),
+          sy: breath(t),
+        });
+      newTop(
+        ctx,
+        'monster',
+        { windup, strike, cloak: cloakPhase(t, false) },
+        mx,
+        sy,
+        R_TILES.monster * tile,
+        Math.PI,
+      );
+      if (dt >= 0) slashArc(ctx, mx, sy, Math.PI, RULE.attackRange * tile, dt / RULE.strike);
+      header(ctx, 560, this.label, this.note, TEXT_COLOR.common);
+    },
+  };
+}
+
 // ───────────────────────── 괴물 ─────────────────────────
 
 function attackScene(slow: number): Scene {
@@ -562,7 +682,7 @@ function attackScene(slow: number): Scene {
   return {
     id: slow > 1 ? 'monster-attack-slow' : 'monster-attack',
     label: slow > 1 ? `괴물 · 공격 준비 → 공격 (${slow}배 느리게)` : '괴물 · 공격 준비 → 공격',
-    note: '준비 0.4초: 발톱을 뒤로 젖혀 들고 범위가 0 → 100% 차오름 → 타격 0.12초: 두 발톱을 앞으로 휘두름 (전방 90° · 1.2타일)',
+    note: `준비 ${RULE.windup}초: 발톱을 뒤로 젖혀 들고 범위가 0 → 100% 차오름 → 타격 ${RULE.strike}초: 두 발톱을 앞으로 휘두름 (전방 ${RULE.attackArc}° · ${RULE.attackRange}타일)`,
     dur: t0 + span + 0.35,
     w: 560,
     h: 340,
@@ -604,7 +724,7 @@ function windupScene(): Scene {
   return {
     id: 'monster-windup',
     label: '괴물 · 공격 준비',
-    note: '0.4초 동안 팔을 뒤로 젖혀 발톱을 높이 들고 망토가 부푼다 (범위 표시는 판정값 그대로, 이동 가능)',
+    note: `${RULE.windup}초 동안 팔을 뒤로 젖혀 발톱을 높이 들고 망토가 부푼다 (범위 표시는 판정값 그대로, 걸으면서도 준비)`,
     dur: 1.3,
     w: 560,
     h: 340,
@@ -628,7 +748,7 @@ function dashScene(slow: number): Scene {
   return {
     id: slow > 1 ? 'monster-dash-slow' : 'monster-dash',
     label: slow > 1 ? `괴물 · 돌진 (${slow}배 느리게)` : '괴물 · 돌진',
-    note: '0.25초에 4타일: 몸을 낮추고 앞으로 늘어나며 망토가 뒤로 흐름 + 잔상(33ms마다) + 붉은 줄',
+    note: `${RULE.dash}초에 ${RULE.dashTiles}타일: 몸을 낮추고 앞으로 늘어나며 망토가 뒤로 흐름 + 잔상(33ms마다) + 붉은 줄 · 오른쪽 위는 몸 확대`,
     dur: t0 + dashS + 0.9,
     w: 560,
     h: 340,
@@ -664,7 +784,22 @@ function dashScene(slow: number): Scene {
           newTop(ctx, 'monster', { dash: 1 }, gh.gx, y, r, 0, { shadow: false, alpha: gh.a });
       }
       newTop(ctx, 'monster', { dash: dashPose, cloak: cloakPhase(t / slow, true) }, x, y, r, 0);
-      header(ctx, 560, this.label, this.note, TEXT_COLOR.monster);
+      const hh = header(ctx, 560, this.label, this.note, TEXT_COLOR.monster);
+      // 몸 확대 (같은 자세를 반지름 54px로): 4타일이 들어가게 타일을 줄여 몸이 작으므로 자세를 따로 보인다
+      const ix = 380;
+      const iy = hh + 8;
+      ctx.fillStyle = 'rgba(15,27,39,0.92)';
+      ctx.fillRect(ix, iy, 172, 128);
+      ctx.strokeStyle = 'rgba(148,163,184,0.35)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(ix + 0.5, iy + 0.5, 171, 127);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(ix, iy, 172, 128);
+      ctx.clip();
+      newTop(ctx, 'monster', { dash: dashPose, cloak: cloakPhase(t / slow, true) }, ix + 86, iy + 66, 40, 0);
+      ctx.restore();
+      text(ctx, '몸 확대', ix + 8, iy + 18, 12, '#94a3b8', 700);
     },
   };
 }
@@ -676,7 +811,7 @@ function roarScene(): Scene {
   return {
     id: 'monster-roar',
     label: '괴물 · 포효',
-    note: '고개를 젖히고 빛나는 이빨을 드러내며 팔을 벌린다 · 충격파 0.6초 (반경 10타일 생존자 위치를 괴물에게 1.5초)',
+    note: `고개를 젖히고 빛나는 이빨을 드러내며 팔을 벌린다 · 충격파 0.6초 (반경 ${RULE.roarRadius}타일 생존자 위치를 괴물에게 ${RULE.roarReveal}초)`,
     dur: 2.3,
     w: 560,
     h: 340,
@@ -722,7 +857,7 @@ function stunScene(): Scene {
   return {
     id: 'monster-stun',
     label: '괴물 · 기절',
-    note: '가드 밀치기에 맞으면 1.5초: 축 처지고 팔이 늘어지며 눈이 × · 머리 위 별 셋',
+    note: `가드 밀치기에 맞으면 ${RULE.stun}초: 축 처지고 팔이 늘어지며 눈이 × · 머리 위 별 셋`,
     dur: t0 + RULE.stun + 0.55,
     w: 560,
     h: 340,
@@ -746,44 +881,59 @@ function stunScene(): Scene {
   };
 }
 
-/** 실제 크기 걷기: 다섯 캐릭터가 휴대폰 실제 화소 크기(배율 3)로 걷는 것을 최근접 2배 확대 */
+/**
+ * 실제 크기 걷기: 다섯 캐릭터가 휴대폰 '높음' 조건(배율 2로 그려 화면 배율 3으로 늘림)으로 걷는 것을 기기 화소 zoom배 최근접
+ * 확대. 위 줄 = 지금 그림, 아래 줄 = 새 그림 (같은 시각 · 같은 자리)
+ */
 function actualWalkScene(dev: Device, zoom: number): Scene {
   const ids: CharId[] = ['runner', 'guard', 'scout', 'common', 'monster'];
   const rS = radiusPx('survivor', dev);
   const tile = rS / R_TILES.survivor;
-  const cellW = Math.ceil(tile * 3.6);
-  const cellH = Math.ceil(tile * 2.6);
-  // 괴물 길은 빠르기 비율(5.5 / 5)만큼 크게: 다섯이 같은 시간에 한 바퀴를 돈다
-  const tr = (i: number): Track => {
-    const k = ids[i] === 'monster' ? SPEED.monster / SPEED.survivor : 1;
-    return { cx: cellW * (i + 0.5), cy: cellH / 2, half: 0.75 * k, rad: 0.8 * k, tile };
+  // 칸 폭: 괴물 길 바깥 + 괴물 몸 + 여백이 들어가게 (괴물 길 반폭 (0.75 + 0.8) × 1.1타일 + 몸 0.5타일)
+  const cellW = Math.ceil(tile * 4.6);
+  const cellH = Math.ceil(tile * 2.9);
+  // 괴물 길은 빠르기 비율만큼 크게: 다섯이 같은 시간에 한 바퀴를 돈다
+  const tr = (i: number, k: number): Track => {
+    const m = ids[i] === 'monster' ? SPEED.monster / SPEED.survivor : 1;
+    return { cx: cellW * (i + 0.5) * k, cy: (cellH / 2) * k, half: 0.75 * m, rad: 0.8 * m, tile: tile * k };
   };
-  const L = trackLen(tr(0));
+  const L = trackLen(tr(0, 1));
   const W = cellW * 5;
+  const top = 74;
+  const rowH = cellH * zoom;
   return {
     id: 'actual-size-walk',
-    label: `다섯 캐릭터 실제 크기로 걷기 — ${dev.name} (기기 화소 ${zoom}배 최근접 확대)`,
-    note: '생존자 5타일/초 · 괴물 5.5타일/초 · 왼쪽부터 러너 · 가드 · 스카우트 · 공통 생존자(괴물 화면) · 괴물',
+    label: `다섯 캐릭터 실제 크기로 걷기 — ${dev.name}, 품질 '높음' (기기 화소 ${zoom}배 최근접 확대)`,
+    note: `위 줄 지금 그림 · 아래 줄 새 그림 · 생존자 ${SPEED.survivor}타일/초 · 괴물 ${SPEED.monster}타일/초 · 왼쪽부터 러너 · 가드 · 스카우트 · 공통 생존자(괴물 화면) · 괴물`,
     dur: L / SPEED.survivor,
     w: W * zoom,
-    h: cellH * zoom + 56,
+    h: top + rowH * 2 + 8,
     draw(ctx, t) {
-      const small = canvas(W, cellH);
-      floor(small.ctx, 0, 0, W, cellH, tile);
-      ids.forEach((id, i) => {
-        const v = id === 'monster' ? SPEED.monster : SPEED.survivor;
-        const d = t * v;
-        const p = onTrack(tr(i), d);
-        const walk = (TAU * d) / STRIDE_TILES;
-        const r = radiusPx(kindOf(id), dev);
-        const pose = id === 'monster' ? { walk, stride: 1, cloak: cloakPhase(t, true) } : { walk, stride: 1 };
-        newTop(small.ctx, id, pose, p.x, p.y, r, p.face);
-      });
       ctx.fillStyle = BG;
       ctx.fillRect(0, 0, this.w, this.h);
-      zoomCopy(ctx, small.c, 0, 0, W, cellH, 0, 56, zoom);
-      text(ctx, this.label, 12, 22, 16, '#e2e8f0', 700);
-      text(ctx, this.note, 12, 44, 12.5, '#94a3b8', 500);
+      const small = canvas(W, cellH * 2 + 4);
+      small.ctx.fillStyle = BG;
+      small.ctx.fillRect(0, 0, W, cellH * 2 + 4);
+      for (const [row, old] of [
+        [0, true],
+        [1, false],
+      ] as const)
+        onDevice(small.ctx, 0, row * (cellH + 4), W, cellH, dev, (c, k) => {
+          floor(c, 0, 0, W * k, cellH * k, tile * k);
+          ids.forEach((id, i) => {
+            const v = id === 'monster' ? SPEED.monster : SPEED.survivor;
+            const d = t * v;
+            const p = onTrack(tr(i, k), d);
+            const walk = (TAU * d) / STRIDE_TILES;
+            const r = backingRadiusPx(kindOf(id), dev);
+            const pose =
+              id === 'monster' ? { walk, stride: 1, cloak: cloakPhase(t, true) } : { walk, stride: 1 };
+            if (old) oldTop(c, id, p.x, p.y, r, p.face, { pose });
+            else newTop(c, id, pose, p.x, p.y, r, p.face);
+          });
+        });
+      zoomCopy(ctx, small.c, 0, 0, W, cellH * 2 + 4, 0, top, zoom);
+      header(ctx, this.w, this.label, this.note, '#e2e8f0');
     },
   };
 }
@@ -795,7 +945,7 @@ export function scenes(): Scene[] {
     out.push(role === 'runner' ? sprintScene() : role === 'guard' ? shoveScene() : trackScene());
     out.push(hitScene(role), imprisonScene(role), rescueScene(role));
   }
-  out.push(idleScene('common'), commonWalkScene(), commonStatusScene());
+  out.push(idleScene('common'), commonWalkScene(), commonImprisonScene(), commonStatusScene());
   out.push(idleScene('monster'), walkScene('monster'), windupScene(), attackScene(1), attackScene(4));
   out.push(dashScene(1), dashScene(4), roarScene(), stunScene());
   out.push(actualWalkScene(DEVICES.phone3, 2));
@@ -806,24 +956,36 @@ export function sceneList(): { id: string; label: string; dur: number; w: number
   return scenes().map((s) => ({ id: s.id, label: s.label, dur: s.dur, w: s.w, h: s.h }));
 }
 
-/** 장면 프레임들 (PNG data URL). t = from + i / fps */
+/** 장면 한 번의 프레임 수 */
+export function frameCount(id: string, fps: number): number {
+  const s = scenes().find((x) => x.id === id);
+  if (!s) throw new Error(`장면 없음: ${id}`);
+  return Math.max(1, Math.round(s.dur * fps));
+}
+
+/**
+ * 장면 프레임들 (PNG data URL), 프레임 번호 from부터 count장. 장면 길이를 프레임 수 n으로 똑같이 나눠 찍는다
+ * (t = i × dur / n): 되풀이 장면이 GIF 끝에서 처음으로 이음매 없이 이어진다 (빠르기는 1% 안에서 맞춰진다)
+ */
 export function sceneFrames(id: string, fps: number, from = 0, count?: number): string[] {
   const s = scenes().find((x) => x.id === id);
   if (!s) throw new Error(`장면 없음: ${id}`);
-  const n = count ?? Math.round(s.dur * fps);
+  const n = frameCount(id, fps);
   const { c, ctx } = canvas(s.w, s.h);
   const out: string[] = [];
-  for (let i = 0; i < n; i += 1) {
-    const t = from + i / fps;
+  for (let i = from; i < from + (count ?? n); i += 1) {
     ctx.save();
-    s.draw(ctx, ((t % s.dur) + s.dur) % s.dur);
+    s.draw(ctx, ((i % n) * s.dur) / n);
     ctx.restore();
     out.push(c.toDataURL('image/png'));
   }
   return out;
 }
 
-/** 모아 보기: 한 캐릭터의 장면 여럿을 격자로 (각 칸은 제 길이로 되풀이) */
+/**
+ * 모아 보기: 한 캐릭터의 장면 여럿을 격자로. 모든 칸이 같이 시작해 한 번 돌고, 짧은 칸은 마지막 자세로 기다린다
+ * (GIF가 처음으로 돌아갈 때 모든 칸이 함께 처음으로 — 동작 중간에서 튀지 않게)
+ */
 export function overviewFrames(
   prefix: string,
   fps: number,
@@ -846,7 +1008,7 @@ export function overviewFrames(
     ctx.fillRect(0, 0, W, H);
     cells.forEach((cell, k) => {
       cell.ctx.save();
-      cell.s.draw(cell.ctx, ((t % cell.s.dur) + cell.s.dur) % cell.s.dur);
+      cell.s.draw(cell.ctx, Math.min(t, cell.s.dur - 1 / fps));
       cell.ctx.restore();
       const x = (k % cols) * cw;
       const y = Math.floor(k / cols) * ch;
@@ -875,8 +1037,9 @@ const SURVIVOR_POSES: { label: string; pose: Partial<SurvivorPose> }[] = [
   { label: '구조 중', pose: { mode: 'reach' } },
   { label: '사망', pose: { tone: 'gray' } },
 ];
+/** 공통 생존자: 괴물 화면이 받는 값(걷기 · 수감 상태 · 사망)으로 정할 수 있는 자세만 — 능력 · 피격 젖힘 · 구조 중 자세는 없다 */
 const COMMON_POSES = SURVIVOR_POSES.filter(
-  (p) => p.label === '서기' || p.label === '걷기' || p.label === '수감' || p.label === '구조 중',
+  (p) => p.label === '서기' || p.label === '걷기' || p.label === '수감' || p.label === '사망',
 );
 const MONSTER_POSES: { label: string; pose: Partial<MonsterPose> }[] = [
   { label: '서기', pose: {} },
@@ -898,7 +1061,7 @@ const CONCEPT: Record<CharId, string> = {
 
 export function sheet(id: CharId): string {
   const W = 1800;
-  const H = 1240;
+  const H = 1500;
   const { c, ctx } = canvas(W, H);
   ctx.fillStyle = BG;
   ctx.fillRect(0, 0, W, H);
@@ -924,7 +1087,7 @@ export function sheet(id: CharId): string {
   newFront(ctx, id, { bust: true }, 366, 960, 40, 1.5);
   newFront(ctx, id, { bust: true }, 420, 960, 24, 1.1);
   newFront(ctx, id, { bust: true, tone: 'gray' }, 540, 950, 110, 2.5);
-  text(ctx, '회색 (남이 고른 카드)', 540, 1080, 13, '#94a3b8', 500, 'center');
+  text(ctx, '회색 변형 (제안: 남이 고른 카드)', 540, 1080, 13, '#94a3b8', 500, 'center');
   // 위에서 본 큰 그림
   const tile = 300;
   floor(ctx, 660, 130, 560, 640, tile / 2);
@@ -950,10 +1113,10 @@ export function sheet(id: CharId): string {
     newTop(ctx, id, p.pose, x + 82, y + 90, id === 'monster' ? 44 : 42, -Math.PI / 2);
     text(ctx, p.label, x + 82, y + 180, 14, '#e2e8f0', 700, 'center');
   });
-  // 실제 크기: 지금 vs 새 (세 방향씩, 오른쪽에 최근접 확대)
+  // 실제 크기: 지금 vs 새 (세 방향씩, 게임 화면 조건 그대로, 오른쪽에 최근접 확대)
   text(
     ctx,
-    '게임 속 실제 크기 (기기 화소 그대로) · 왼쪽 셋 = 지금 그림, 오른쪽 셋 = 새 그림 → 오른쪽은 최근접 확대',
+    "게임 화면 조건 (휴대폰은 품질 '높음': 배율 2로 그려 화면 배율로 늘림) · 왼쪽 셋 지금 그림, 오른쪽 셋 새 그림",
     660,
     826,
     15,
@@ -961,22 +1124,61 @@ export function sheet(id: CharId): string {
     700,
   );
   let y = 846;
-  const devs = [DEVICES.phone3, DEVICES.phone2, DEVICES.pc768];
   const dirs = [-Math.PI / 2, 0.35, Math.PI * 0.8];
-  for (const dev of devs) {
-    const r = radiusPx(kindOf(id), dev);
-    const cell = Math.ceil(r * 4.4);
-    const stripW = cell * 6;
-    const z = Math.min(3, (W - 36 - 660 - stripW - 24) / stripW);
-    text(ctx, `${dev.name} · 반지름 ${r.toFixed(1)}px`, 660, y + 12, 12.5, '#cbd5e1', 500);
+  for (const dev of [DEVICES.phone3, DEVICES.phone2, DEVICES.pc768]) {
+    const r = backingRadiusPx(kindOf(id), dev);
+    const scaleNote = dev.dpr !== dev.backing ? ` → 화면에서 ${dev.dpr / dev.backing}배` : '';
+    text(ctx, `${dev.name} · 그리는 반지름 ${r.toFixed(1)}px${scaleNote}`, 660, y + 12, 12.5, '#cbd5e1', 500);
     const yy = y + 20;
-    floor(ctx, 660, yy, stripW, cell, r / R_TILES[kindOf(id)]);
-    dirs.forEach((a, i) => oldTop(ctx, id, 660 + cell * (i + 0.5), yy + cell / 2, r, a));
-    dirs.forEach((a, i) => newTop(ctx, id, {}, 660 + cell * (i + 3.5), yy + cell / 2, r, a));
-    zoomCopy(ctx, c, 660, yy, stripW, cell, 660 + stripW + 24, yy, z);
-    y = yy + Math.max(cell, cell * z) + 10;
+    const row = deviceRow(ctx, 660, yy, dev, [
+      ...dirs.map((rot) => ({ id, rot, old: true })),
+      ...dirs.map((rot) => ({ id, rot })),
+    ]);
+    const z = Math.min(3, (W - 36 - 660 - row.w - 24) / row.w);
+    zoomCopy(ctx, c, 660, yy, row.w, row.h, 660 + row.w + 24, yy, z);
+    y = yy + Math.max(row.h, row.h * z) + 10;
   }
-  return c.toDataURL('image/png');
+  // 공통 생존자: 능력 노출 표시 (지금 문양 → 제안 얼굴 아이콘)을 휴대폰 실제 크기로
+  if (id === 'common') {
+    y += 14;
+    text(
+      ctx,
+      "능력 노출 1초 표시 — 휴대폰 '높음' 실제 크기 (왼쪽 셋 지금 문양 · 오른쪽 셋 제안: 역할 얼굴)",
+      660,
+      y,
+      15,
+      '#94a3b8',
+      700,
+    );
+    const dev = DEVICES.phone3;
+    const rS = radiusPx('survivor', dev);
+    const cell = Math.ceil(rS * 4.6);
+    const w = cell * 6;
+    const h = Math.ceil(rS * 6);
+    const roles = ['runner', 'guard', 'scout'] as const;
+    const yy = y + 12;
+    onDevice(ctx, 660, yy, w, h, dev, (cc, k) => {
+      floor(cc, 0, 0, w * k, h * k, (rS / R_TILES.survivor) * k);
+      const r = backingRadiusPx('survivor', dev);
+      roles.forEach((role, i) => {
+        const x = cell * (i + 0.5) * k;
+        const by = h * 0.62 * k;
+        oldTop(cc, 'common', x, by, r, -Math.PI / 2);
+        oldRevealMark(cc, x, by, r, role);
+        const nx = cell * (i + 3.5) * k;
+        revealMark(cc, nx, by, r, role);
+        newTop(cc, 'common', {}, nx, by, r, -Math.PI / 2);
+      });
+    });
+    const z = Math.min(3, (W - 36 - 660 - w - 24) / w);
+    zoomCopy(ctx, c, 660, yy, w, h, 660 + w + 24, yy, z);
+    y = yy + Math.max(h, h * z) + 10;
+  }
+  // 내용 높이에 맞춰 자른다 (아래가 잘리지 않게)
+  const outH = Math.max(1160, Math.ceil(y + 24));
+  const out = canvas(W, outH);
+  out.ctx.drawImage(c, 0, 0, W, outH, 0, 0, W, outH);
+  return out.c.toDataURL('image/png');
 }
 
 export function lineup(): string {
@@ -996,20 +1198,38 @@ export function lineup(): string {
     floor(ctx, x + 25, 520, 300, 300, 120);
     newTop(ctx, id, {}, x + 175, 670, R_TILES[kindOf(id)] * 380, -Math.PI / 2);
   });
-  // 실제 크기 한 줄 + 흑백
+  // 실제 크기: 다섯 나란히 같은 방향 (위 줄 지금 · 아래 줄 새), 게임 화면 조건 그대로 → 3배 확대 · 흑백
   const dev = DEVICES.phone3;
-  const rS = radiusPx('survivor', dev);
-  const tile = rS / R_TILES.survivor;
-  const lw = 5 * 64;
   const y0 = 880;
-  text(ctx, '휴대폰 실제 크기 (배율 3, 기기 화소 그대로 → 3배 확대 · 흑백)', 36, y0 - 10, 17, '#94a3b8', 700);
-  floor(ctx, 36, y0, lw, 64, tile);
-  ids.forEach((id, i) =>
-    newTop(ctx, id, {}, 36 + 32 + i * 64, y0 + 32, radiusPx(kindOf(id), dev), -Math.PI / 2 + i * 0.6),
+  text(
+    ctx,
+    `${dev.name} · 품질 '높음' 실제 크기 (배율 2로 그려 1.5배로 늘림) — 위 지금 · 아래 새, 모두 위쪽을 봄 → 3배 최근접 · 흑백 2배`,
+    36,
+    y0 - 10,
+    16,
+    '#94a3b8',
+    700,
   );
-  zoomCopy(ctx, c, 36, y0, lw, 64, 36 + lw + 24, y0, 3);
-  zoomCopy(ctx, c, 36, y0, lw, 64, 36 + lw + 24 + lw * 3 + 24, y0, 1.6);
-  grayscale(ctx, 36 + lw + 24 + lw * 3 + 24, y0, Math.ceil(lw * 1.6), Math.ceil(64 * 1.6));
+  const a = deviceRow(
+    ctx,
+    36,
+    y0,
+    dev,
+    ids.map((id) => ({ id, rot: -Math.PI / 2, old: true })),
+  );
+  deviceRow(
+    ctx,
+    36,
+    y0 + a.h,
+    dev,
+    ids.map((id) => ({ id, rot: -Math.PI / 2 })),
+  );
+  const zx = 36 + a.w + 24;
+  zoomCopy(ctx, c, 36, y0, a.w, a.h * 2, zx, y0, 3);
+  const gx = zx + a.w * 3 + 24;
+  zoomCopy(ctx, c, 36, y0, a.w, a.h * 2, gx, y0, 2);
+  grayscale(ctx, gx, y0, Math.ceil(a.w * 2), Math.ceil(a.h * 4));
+  text(ctx, '흑백 (2배 최근접)', gx, y0 + a.h * 4 + 18, 13, '#94a3b8', 500);
   return c.toDataURL('image/png');
 }
 

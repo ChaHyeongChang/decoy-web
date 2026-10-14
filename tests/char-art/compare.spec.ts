@@ -13,6 +13,8 @@ import { watchConsole } from '../e2e/helpers';
 import { MultiTouch } from '../e2e/touch';
 
 const OUT = 'artifacts/characters/compare';
+/** 촬영 점검 기록 (아틀라스 교체 수 · 콘솔 문제): 커밋하지 않는 폴더 */
+const LOG = 'tests/char-art/.results';
 const PHONE: BrowserContextOptions = {
   viewport: { width: 800, height: 360 },
   screen: { width: 800, height: 360 },
@@ -30,6 +32,7 @@ let fontB64 = '';
 
 test.beforeAll(async () => {
   mkdirSync(OUT, { recursive: true });
+  mkdirSync(LOG, { recursive: true });
   const r = await build({
     entryPoints: ['scripts/char-art/inject.ts'],
     bundle: true,
@@ -45,7 +48,9 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(() => {
-  writeFileSync(join(OUT, 'problems.json'), `${JSON.stringify(problems, null, 2)}\n`);
+  writeFileSync(join(LOG, 'problems.json'), `${JSON.stringify(problems, null, 2)}\n`);
+  // 콘솔 에러 · 경고를 남긴 채 끝내지 않는다 (CLAUDE.md)
+  expect(problems).toEqual([]);
 });
 
 interface Tab {
@@ -209,18 +214,23 @@ async function inject(page: Page): Promise<void> {
   await page.addScriptTag({ content: injectCode });
 }
 
-/** 장면을 세운 채 지금 그림 → 새 그림을 찍는다 */
+/** HUD · 거점 깜빡임 주기 (ms): 장식 시계를 멈춰도 이 깜빡임은 실제 시각(1초에 한 번 꺼짐)을 따른다 */
+const BLINK_PERIOD_MS = 1000;
+
+/** 장면을 세운 채 지금 그림 → 새 그림을 찍는다. 두 장의 간격을 깜빡임 주기의 정수배로 맞춰 같은 위상에서 찍는다 */
 async function beforeAfter(tab: Tab): Promise<{ before: Buffer; after: Buffer; patch: unknown }> {
   const { page } = tab;
   await page.evaluate((ms) => window.__DECOY__?.freezeClock(ms), CLOCK_MS);
   tab.freeze(true);
   await page.waitForTimeout(500);
+  const t0 = await page.evaluate(() => performance.now());
   const before = await page.screenshot();
   await inject(page);
   const patch = await page.evaluate(() =>
     (window as unknown as { CHAR_INJECT: { patchAtlas(): unknown } }).CHAR_INJECT.patchAtlas(),
   );
-  await page.waitForTimeout(250);
+  const t1 = await page.evaluate(() => performance.now());
+  await page.waitForTimeout(BLINK_PERIOD_MS * 2 - ((t1 - t0) % BLINK_PERIOD_MS));
   const after = await page.screenshot();
   tab.freeze(false);
   return { before, after, patch };
@@ -357,7 +367,7 @@ test('생존자 화면 (러너): 거점 A에서 팀원 둘 · 괴물에게 발�
       'row',
     ),
   );
-  writeFileSync(join(OUT, 'ingame-survivor-patch.json'), JSON.stringify(shot.patch));
+  writeFileSync(join(LOG, 'ingame-survivor-patch.json'), JSON.stringify(shot.patch));
   await tab.close();
 });
 
@@ -438,7 +448,7 @@ test('괴물 화면: 추적 시야 안의 흰 생존자 셋', async ({ browser }
       'row',
     ),
   );
-  writeFileSync(join(OUT, 'ingame-monster-patch.json'), JSON.stringify(shot.patch));
+  writeFileSync(join(LOG, 'ingame-monster-patch.json'), JSON.stringify(shot.patch));
   await tab.close();
 });
 

@@ -1,11 +1,15 @@
 // 캐릭터 리디자인 시안 그림의 공통 그리기 도우미 (브라우저 쪽, scripts/char-art/*에서 쓴다). 게임 코드는 바꾸지 않는다.
 // 새 캐릭터(client/src/art/chars) · 옛 캐릭터(art/atlas.ts bakeAtlas)를 그리고, 게임 연출(베기 호 · 불꽃 · 흩어짐 · 충격파 ·
 // 기절 별 · 보호 거품 · 구조 링 · 속도선 · 노출 링 · 탐지 표시 · 공격 범위 · 감옥 철창)을 VISUAL_SPEC 값으로 흉내 낸다.
-import { bakeAtlas, type AtlasBuild } from '../../client/src/art/atlas';
-import { drawToCanvas, type CanvasSink, type Drawing } from '../../client/src/art/chars/kit';
-import { MONSTER_ART, SURVIVOR_ART } from '../../client/src/art/chars/index';
+import { MAP_H, TILE_PX, validateBalance } from '@decoy/shared';
+import balanceJson from '../../config/balance.json';
+import { ANIM } from '../../client/src/art/anim';
+import { ART, bakeAtlas, type AtlasBuild } from '../../client/src/art/atlas';
+import { drawToCanvas, type Drawing } from '../../client/src/art/chars/kit';
+import { COMMON_ART, MONSTER_ART, SURVIVOR_ART } from '../../client/src/art/chars/index';
 import {
   FRONT_REST,
+  HIDDEN_REST,
   MONSTER_REST,
   SURVIVOR_REST,
   type CharId,
@@ -13,20 +17,26 @@ import {
   type MonsterPose,
   type SurvivorPose,
 } from '../../client/src/art/chars/types';
-import { CONE, ROLE } from '../../client/src/art/palette';
+import { CONE, ROLE, ROLE_TEXT, hexCss } from '../../client/src/art/palette';
+import { MAP_SCALE as layoutMapScale } from '../../client/src/ui/layout';
 
 export type Ctx = CanvasRenderingContext2D;
 
-export const TILE = 32;
-export const MAP_SCALE = 952 / 1024;
+/** 규칙 수치 (config/balance.json 원본 그대로) */
+export const BALANCE = validateBalance(balanceJson);
+export const TILE = TILE_PX;
+export const MAP_SCALE = layoutMapScale;
+/** 맵 높이 (논리 px): 터치 넓은 배치는 이 높이가 화면 높이를 채운다 */
+const MAP_DRAW_H = MAP_H * TILE_PX * MAP_SCALE;
 /** 판정 반지름 (타일, balance.json) */
-export const R_TILES = { survivor: 0.3, monster: 0.35 } as const;
+export const R_TILES = { survivor: BALANCE.survivor.radius, monster: BALANCE.monster.radius } as const;
 export const FONT = "'Noto Sans KR', sans-serif";
 export const BG = '#0b1622';
 const FLOOR = '#17212b';
 const FLOOR_HI = '#1f2b38';
 const SEAM = '#0e151c';
-const OUTLINE_WORLD = 1.8;
+/** 외곽선 두께 (월드 px, 옛 그림과 같은 값) */
+export const OUTLINE_WORLD = ART.outlineWorldPx;
 
 export const NAMES: Record<CharId, string> = {
   runner: '러너',
@@ -36,11 +46,11 @@ export const NAMES: Record<CharId, string> = {
   monster: '괴물',
 };
 export const TEXT_COLOR: Record<CharId, string> = {
-  runner: '#60a5fa',
-  guard: '#c084fc',
-  scout: '#4ade80',
+  runner: hexCss(ROLE_TEXT.runner),
+  guard: hexCss(ROLE_TEXT.guard),
+  scout: hexCss(ROLE_TEXT.scout),
   common: '#e2e8f0',
-  monster: '#f87171',
+  monster: hexCss(ROLE_TEXT.monster),
 };
 
 export function kindOf(id: CharId): 'survivor' | 'monster' {
@@ -56,18 +66,28 @@ export interface Device {
   name: string;
   cssPerLogical: number;
   dpr: number;
+  backing: number;
 }
 
+/**
+ * 기기 (터치 넓은 배치는 맵 높이가 화면 높이를 채운다). dpr = 화면 배율, backing = 실제로 그리는 배율:
+ * 품질 '높음'은 배율을 2로 묶어(client/src/gfx/presets.ts dprCap) 그린 뒤 화면 배율로 늘린다
+ */
 export const DEVICES = {
-  phone3: { name: '휴대폰 가로 390pt · 배율 3', cssPerLogical: 390 / 952, dpr: 3 },
-  phone2: { name: '보급형 휴대폰 360pt · 배율 2', cssPerLogical: 360 / 952, dpr: 2 },
-  pc1080: { name: 'PC 1920×1080 · 배율 1', cssPerLogical: 1, dpr: 1 },
-  pc768: { name: '노트북 1366×768 · 배율 1', cssPerLogical: 768 / 1080, dpr: 1 },
+  phone3: { name: '휴대폰 가로 390pt · 배율 3', cssPerLogical: 390 / MAP_DRAW_H, dpr: 3, backing: 2 },
+  phone2: { name: '보급형 휴대폰 360pt · 배율 2', cssPerLogical: 360 / MAP_DRAW_H, dpr: 2, backing: 2 },
+  pc1080: { name: 'PC 1920×1080 · 배율 1', cssPerLogical: 1, dpr: 1, backing: 1 },
+  pc768: { name: '노트북 1366×768 · 배율 1', cssPerLogical: 768 / 1080, dpr: 1, backing: 1 },
 } as const satisfies Record<string, Device>;
 
-/** 판정 반지름 (기기 px) */
+/** 판정 반지름 (기기 px, 화면 배율 그대로 선명하게 그렸을 때) */
 export function radiusPx(kind: 'survivor' | 'monster', d: Device): number {
   return R_TILES[kind] * TILE * MAP_SCALE * d.cssPerLogical * d.dpr;
+}
+
+/** 판정 반지름 (실제로 그리는 px: 품질 '높음'의 배율 상한 적용) */
+export function backingRadiusPx(kind: 'survivor' | 'monster', d: Device): number {
+  return R_TILES[kind] * TILE * MAP_SCALE * d.cssPerLogical * d.backing;
 }
 
 export function canvas(w: number, h: number): { c: HTMLCanvasElement; ctx: Ctx } {
@@ -189,10 +209,10 @@ export function paint(
     const r = Math.ceil(k * 2.4);
     const tmp = canvas(r * 2, r * 2);
     tmp.ctx.translate(r, r);
-    drawToCanvas(tmp.ctx as unknown as CanvasSink, d, k);
+    drawToCanvas(tmp.ctx, d, k);
     ctx.globalAlpha = alpha;
     ctx.drawImage(tmp.c, -r, -r);
-  } else drawToCanvas(ctx as unknown as CanvasSink, d, k);
+  } else drawToCanvas(ctx, d, k);
   ctx.restore();
 }
 
@@ -200,9 +220,20 @@ export type AnyPose = Partial<SurvivorPose> & Partial<MonsterPose>;
 
 export function topDrawing(id: CharId, pose: AnyPose): Drawing {
   const w = wUnits(id);
-  return id === 'monster'
-    ? MONSTER_ART.top({ ...MONSTER_REST, ...pose }, { w })
-    : SURVIVOR_ART[id].top({ ...SURVIVOR_REST, ...pose }, { w });
+  if (id === 'monster') return MONSTER_ART.top({ ...MONSTER_REST, ...pose }, { w });
+  if (id === 'common')
+    // 공통 생존자는 괴물 화면이 받는 값(걷기 · 수감 · 톤)만 쓴다: 능력 · 피격 · 구조 값은 건네지 않는다
+    return COMMON_ART.top(
+      {
+        ...HIDDEN_REST,
+        walk: pose.walk ?? 0,
+        stride: pose.stride ?? 0,
+        captive: pose.mode === 'captive',
+        tone: pose.tone ?? 'normal',
+      },
+      { w },
+    );
+  return SURVIVOR_ART[id].top({ ...SURVIVOR_REST, ...pose }, { w });
 }
 
 /** 새 그림: 위에서 본 캐릭터 (그림자 포함). rPx = 판정 반지름 (px). scale = 숨쉬기 · 찌그러짐 (x, y 따로) */
@@ -233,7 +264,12 @@ export function newFront(
   const k = size / 2;
   const w = wPx / k;
   const p = { ...FRONT_REST, ...pose };
-  const d = id === 'monster' ? MONSTER_ART.front(p, { w }) : SURVIVOR_ART[id].front(p, { w });
+  const d =
+    id === 'monster'
+      ? MONSTER_ART.front(p, { w })
+      : id === 'common'
+        ? COMMON_ART.front(p, { w })
+        : SURVIVOR_ART[id].front(p, { w });
   paint(ctx, d, x, y, k);
 }
 
@@ -274,21 +310,40 @@ export function oldSurvivor(
   y: number,
   rPx: number,
   rot: number,
+  withShadow = true,
+  walk = 0,
+  stride = 0,
 ): void {
   const kWorld = rPx / (R_TILES.survivor * TILE);
-  oldFrame(ctx, 'shadow-survivor', x, y, kWorld, 0);
+  if (withShadow) oldFrame(ctx, 'shadow-survivor', x, y, kWorld, 0);
   const c = Math.cos(rot);
   const s = Math.sin(rot);
-  for (const fy of [-0.5, 0.5])
-    oldFrame(ctx, `foot-${role}`, x - fy * s * rPx, y + fy * c * rPx, kWorld, rot);
+  // 지금 게임의 걷기 자세(art/anim.ts walkPose): 두 발이 앞뒤로 엇갈린다 (몸 반지름 배수)
+  const reach = ANIM.footReach * Math.sin(walk) * stride;
+  for (const [fx, fy] of [
+    [reach, -ANIM.footSide],
+    [-reach, ANIM.footSide],
+  ] as const)
+    oldFrame(ctx, `foot-${role}`, x + (fx * c - fy * s) * rPx, y + (fx * s + fy * c) * rPx, kWorld, rot);
   oldFrame(ctx, `survivor-${role}`, x, y, kWorld, rot);
   oldFrame(ctx, 'gloss', x, y, kWorld, 0);
 }
 
-export function oldMonster(ctx: Ctx, x: number, y: number, rPx: number, rot: number): void {
+export function oldMonster(
+  ctx: Ctx,
+  x: number,
+  y: number,
+  rPx: number,
+  rot: number,
+  withShadow = true,
+  cloak = 0,
+  moving = false,
+): void {
   const kWorld = rPx / (R_TILES.monster * TILE);
-  oldFrame(ctx, 'shadow-monster', x, y, kWorld, 0);
-  oldFrame(ctx, 'monster-idle-0', x, y, kWorld, rot);
+  if (withShadow) oldFrame(ctx, 'shadow-monster', x, y, kWorld, 0);
+  const n = ANIM.cloakFrames;
+  const frame = ((Math.floor((cloak / (Math.PI * 2)) * n) % n) + n) % n;
+  oldFrame(ctx, `monster-${moving ? 'move' : 'idle'}-${frame}`, x, y, kWorld, rot);
   const c = Math.cos(rot);
   const s = Math.sin(rot);
   for (const side of [1, -1]) {
@@ -307,9 +362,19 @@ export function oldMonster(ctx: Ctx, x: number, y: number, rPx: number, rot: num
   oldFrame(ctx, 'eyes-open', x + 0.6 * c * rPx, y + 0.6 * s * rPx, kWorld, rot);
 }
 
-export function oldTop(ctx: Ctx, id: CharId, x: number, y: number, rPx: number, rot: number): void {
-  if (id === 'monster') oldMonster(ctx, x, y, rPx, rot);
-  else oldSurvivor(ctx, id === 'common' ? 'hidden' : id, x, y, rPx, rot);
+export function oldTop(
+  ctx: Ctx,
+  id: CharId,
+  x: number,
+  y: number,
+  rPx: number,
+  rot: number,
+  opts: { shadow?: boolean; pose?: AnyPose } = {},
+): void {
+  const sh = opts.shadow !== false;
+  const p = opts.pose ?? {};
+  if (id === 'monster') oldMonster(ctx, x, y, rPx, rot, sh, p.cloak ?? 0, (p.stride ?? 0) > 0);
+  else oldSurvivor(ctx, id === 'common' ? 'hidden' : id, x, y, rPx, rot, sh, p.walk ?? 0, p.stride ?? 0);
 }
 
 // ───────────────────────── 확대 · 흑백 ─────────────────────────
@@ -331,8 +396,71 @@ export function zoomCopy(
   ctx.restore();
 }
 
+/**
+ * 게임 화면 조건으로 그려 붙이기: 품질 '높음'은 화면 배율(dpr)보다 낮은 배율(backing)로 그린 뒤 합성기가 부드럽게
+ * 늘린다. 그래서 작은 캔버스(그리는 px)에 그리고 기기 px 크기로 부드럽게 늘려 (x, y)에 붙인다.
+ * draw(c, k): k = 그리는 px / 기기 px. 부르는 쪽은 기기 px 좌표 · 크기에 k를 곱해 그린다
+ */
+export function onDevice(
+  ctx: Ctx,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  d: Device,
+  draw: (c: Ctx, k: number) => void,
+): void {
+  const k = d.backing / d.dpr;
+  const src = canvas(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
+  draw(src.ctx, k);
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(src.c, 0, 0, src.c.width, src.c.height, x, y, w, h);
+  ctx.restore();
+}
+
+/**
+ * 게임 화면 조건 한 줄: 기기 d의 '높음' 품질처럼 그리는 배율로 그려 화면 배율로 늘린다. 칸마다 바닥 위 캐릭터 하나.
+ * rots = 칸마다 바라보는 방향, pose = 칸마다 자세. 돌려준 값 = 그린 영역 (기기 px)
+ */
+export function deviceRow(
+  ctx: Ctx,
+  x0: number,
+  y0: number,
+  d: Device,
+  cells: { id: CharId; rot: number; pose?: AnyPose; old?: boolean; tint?: [number, number] }[],
+): { x: number; y: number; w: number; h: number } {
+  const rS = radiusPx('survivor', d);
+  const cell = Math.ceil(rS * 4.6);
+  const w = cell * cells.length;
+  const h = cell;
+  onDevice(ctx, x0, y0, w, h, d, (c, k) => {
+    floor(c, 0, 0, w * k, h * k, (rS / R_TILES.survivor) * k);
+    cells.forEach((it, i) => {
+      if (it.tint) {
+        const [color, a] = it.tint;
+        c.fillStyle = `rgba(${(color >> 16) & 255},${(color >> 8) & 255},${color & 255},${a})`;
+        c.fillRect(cell * i * k, 0, cell * k, h * k);
+      }
+      const r = backingRadiusPx(kindOf(it.id), d);
+      const x = cell * (i + 0.5) * k;
+      const y = (h / 2) * k;
+      if (it.old) oldTop(c, it.id, x, y, r, it.rot, { pose: it.pose ?? {} });
+      else newTop(c, it.id, it.pose ?? {}, x, y, r, it.rot);
+    });
+  });
+  return { x: x0, y: y0, w, h };
+}
+
+/** 영역을 흑백으로 (작업 캔버스에 옮겨 읽는다: 큰 그림 캔버스를 여러 번 읽지 않게) */
 export function grayscale(ctx: Ctx, x: number, y: number, w: number, h: number): void {
-  const img = ctx.getImageData(x, y, w, h);
+  const tmp = document.createElement('canvas');
+  tmp.width = Math.max(1, Math.round(w));
+  tmp.height = Math.max(1, Math.round(h));
+  const t = tmp.getContext('2d', { willReadFrequently: true });
+  if (!t) throw new Error('2d');
+  t.drawImage(ctx.canvas, x, y, tmp.width, tmp.height, 0, 0, tmp.width, tmp.height);
+  const img = t.getImageData(0, 0, tmp.width, tmp.height);
   const d = img.data;
   for (let i = 0; i < d.length; i += 4) {
     const v = 0.2126 * (d[i] ?? 0) + 0.7152 * (d[i + 1] ?? 0) + 0.0722 * (d[i + 2] ?? 0);
@@ -594,6 +722,19 @@ export function revealMark(
   newFront(ctx, role, { bust: true }, bx, by + br * 0.05, br * 2.05, Math.max(1, rPx * 0.06));
   ctx.restore();
   ctx.restore();
+}
+
+/** 지금 그림의 능력 노출 표시: 역할색 링 + 머리 위 문양 (아틀라스 'ring-reveal-*' · 'glyph-*', 문양 거리 2.35r) */
+export function oldRevealMark(
+  ctx: Ctx,
+  x: number,
+  y: number,
+  rPx: number,
+  role: 'runner' | 'guard' | 'scout',
+): void {
+  const kWorld = rPx / (R_TILES.survivor * TILE);
+  oldFrame(ctx, `ring-reveal-${role}`, x, y, kWorld, 0);
+  oldFrame(ctx, `glyph-${role}`, x, y - 2.35 * rPx, kWorld, 0);
 }
 
 /** 스카우트 탐지 표시: 초록 마름모 + 조준선 + 펄스 (VISUAL_SPEC) */

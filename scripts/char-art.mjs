@@ -2,6 +2,7 @@
 //
 // 사용법
 //   node scripts/char-art.mjs preview <runner|guard|scout|common|monster ...> [--out=<폴더>]   디자인 미리보기 보드
+//   node scripts/char-art.mjs small [--out=<폴더>]                                             작은 크기 판단 보드 (휴대폰 '높음' 조건 8방향)
 //   node scripts/char-art.mjs lineup [--out=<폴더>]                                            다섯 캐릭터 한 장
 //   node scripts/char-art.mjs metrics [--out=<폴더>]                                           규칙 측정 (IoU · 범위 · 몸 가운데 색) → metrics.json
 //   node scripts/char-art.mjs sheets [--out=artifacts/characters/sheets]                       캐릭터별 큰 그림 시트 + 다섯 나란히
@@ -43,13 +44,16 @@ const bundled = await build({
 const code = bundled.outputFiles[0].text;
 const font = readFileSync('client/public/fonts/noto-sans-kr-ui.woff2').toString('base64');
 
-const browser = await chromium.launch({ args: ['--disable-gpu', '--disable-accelerated-2d-canvas'] });
+// Phaser를 묶으면 불러올 때 WebGL을 한 번 확인한다: 소프트웨어 WebGL을 명시해 Chromium 폐기 경고가 나지 않게
+const browser = await chromium.launch({
+  args: ['--disable-gpu', '--disable-accelerated-2d-canvas', '--enable-unsafe-swiftshader'],
+});
 try {
   const page = await browser.newPage({ viewport: { width: 400, height: 300 } });
   const problems = [];
   page.on('pageerror', (e) => problems.push(String(e)));
   page.on('console', (m) => {
-    if (m.type() === 'error') problems.push(m.text());
+    if (m.type() === 'error' || m.type() === 'warning') problems.push(`${m.type()}: ${m.text()}`);
   });
   await page.setContent('<!doctype html><html><body style="background:#0b1622"></body></html>');
   await page.addScriptTag({ content: code });
@@ -68,6 +72,8 @@ try {
       const url = await page.evaluate((cid) => window.CHAR_ART.previewBoard(cid), id);
       await save(`preview-${id}.png`, url);
     }
+  } else if (cmd === 'small') {
+    await save('small.png', await page.evaluate(() => window.CHAR_ART.smallBoard()));
   } else if (cmd === 'lineup') {
     await save('lineup.png', await page.evaluate(() => window.CHAR_ART.lineupBoard()));
   } else if (cmd === 'metrics') {
@@ -85,7 +91,7 @@ try {
       console.log(
         `범위 ${id}: ` +
           Object.entries(row)
-            .map(([k, v]) => `${k} 앞${v.front} 뒤${v.back} 옆${v.side}`)
+            .map(([k, v]) => `${k} 앞${v.front} 뒤${v.back} 옆${v.side} 먼점${v.radial}`)
             .join(' · '),
       );
     console.log('몸 가운데: ' + JSON.stringify(m.centerDisc));
@@ -146,13 +152,13 @@ try {
       for (let from = 0; from < n; from += 20)
         frames.push(
           ...(await page.evaluate(
-            ([id, f, a, c]) => window.CHAR_FINAL.sceneFrames(id, f, a / f, c),
+            ([id, f, a, c]) => window.CHAR_FINAL.sceneFrames(id, f, a, c),
             [s.id, fps, from, Math.min(20, n - from)],
           )),
         );
       await encode(`${s.id}.gif`, frames, fps);
     }
-    // 캐릭터별 모아 보기 (각 칸은 제 길이로 되풀이)
+    // 캐릭터별 모아 보기 (모든 칸이 같이 시작해 한 번 돌고, 짧은 칸은 마지막 자세로 기다린다)
     if (!want.length || want.includes('overview')) {
       const ofps = 20;
       for (const prefix of ['runner', 'guard', 'scout', 'common', 'monster']) {
