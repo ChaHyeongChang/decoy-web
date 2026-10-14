@@ -318,7 +318,7 @@ function actualRow(
 
 export async function previewBoard(id: CharId): Promise<string> {
   const W = 1900;
-  const H = 2060;
+  const H = 2420;
   const { c, ctx } = canvas(W, H);
   ctx.fillStyle = BG;
   ctx.fillRect(0, 0, W, H);
