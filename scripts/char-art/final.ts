@@ -681,7 +681,7 @@ function attackScene(slow: number): Scene {
   return {
     id: slow > 1 ? 'monster-attack-slow' : 'monster-attack',
     label: slow > 1 ? `괴물 · 공격 준비 → 공격 (${slow}배 느리게)` : '괴물 · 공격 준비 → 공격',
-    note: `준비 ${RULE.windup}초: 발톱을 뒤로 젖혀 들고 범위가 0 → 100% 차오름 → 타격 ${RULE.strike}초: 두 발톱을 앞으로 휘두름 (전방 ${RULE.attackArc}° · ${RULE.attackRange}타일)`,
+    note: `준비 ${RULE.windup}초: 발톱을 앞 · 바깥으로 벌려 들고 범위가 0 → 100% 차오름 → 타격 ${RULE.strike}초: 한 팔로 얼굴 앞을 가로질러 벰 (전방 ${RULE.attackArc}° · ${RULE.attackRange}타일)`,
     dur: t0 + span + 0.35,
     w: 560,
     h: 340,
@@ -723,7 +723,7 @@ function windupScene(): Scene {
   return {
     id: 'monster-windup',
     label: '괴물 · 공격 준비',
-    note: `${RULE.windup}초 동안 팔을 뒤로 젖혀 발톱을 높이 들고 망토가 부푼다 (범위 표시는 판정값 그대로, 걸으면서도 준비)`,
+    note: `${RULE.windup}초 동안 몸을 비틀며 발톱을 앞 · 바깥으로 벌려 들고 망토가 부푼다 (발톱은 늘 몸 앞쪽 — 방향이 뒤집혀 읽히지 않게, 걸으면서도 준비)`,
     dur: 1.3,
     w: 560,
     h: 340,
@@ -810,7 +810,7 @@ function roarScene(): Scene {
   return {
     id: 'monster-roar',
     label: '괴물 · 포효',
-    note: `고개를 젖히고 빛나는 이빨을 드러내며 팔을 벌린다 · 충격파 0.6초 (반경 ${RULE.roarRadius}타일 생존자 위치를 괴물에게 ${RULE.roarReveal}초)`,
+    note: `고개를 젖혀 빛나는 목구멍을 드러내고 팔을 머리 양옆으로 든다 · 충격파 0.6초 (반경 ${RULE.roarRadius}타일 생존자 위치를 괴물에게 ${RULE.roarReveal}초)`,
     dur: 2.3,
     w: 560,
     h: 340,
@@ -856,7 +856,7 @@ function stunScene(): Scene {
   return {
     id: 'monster-stun',
     label: '괴물 · 기절',
-    note: `가드 밀치기에 맞으면 ${RULE.stun}초: 축 처지고 팔이 늘어지며 눈이 × · 머리 위 별 셋`,
+    note: `가드 밀치기에 맞으면 ${RULE.stun}초: 축 처지고 팔이 앞 · 안쪽으로 늘어지며 발톱이 흐려지고 눈이 × · 머리 위 별 셋`,
     dur: t0 + RULE.stun + 0.55,
     w: 560,
     h: 340,

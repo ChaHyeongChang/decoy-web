@@ -96,7 +96,7 @@ try {
       await save(`preview-${id}.png`, url);
     }
   } else if (cmd === 'small') {
-    await save('small.png', await page.evaluate(() => window.CHAR_ART.smallBoard()));
+    await save('small-size.png', await page.evaluate(() => window.CHAR_ART.smallBoard()));
   } else if (cmd === 'lineup') {
     await save('lineup.png', await page.evaluate(() => window.CHAR_ART.lineupBoard()));
   } else if (cmd === 'metrics') {
