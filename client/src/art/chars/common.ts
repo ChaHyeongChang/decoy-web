@@ -6,6 +6,7 @@
 import { HIDDEN_SURVIVOR, OUTLINE } from '../palette';
 import {
   Sketch,
+  mix,
   linear,
   path,
   radial,
@@ -14,12 +15,12 @@ import {
   transformDrawing,
   translate,
   type Drawing,
+  type Paint,
 } from './kit';
 import {
   FRONT,
   MAT,
   TOP,
-  domePaint,
   frontArm,
   frontBreath,
   frontClothPaint,
@@ -30,6 +31,7 @@ import {
   topRig,
   topShoe,
   topTorsoPath,
+  type Ink,
 } from './survivorBase';
 import type { ArtOptions, FrontPose, SurvivorArt, SurvivorPose } from './types';
 
@@ -37,8 +39,8 @@ import type { ArtOptions, FrontPose, SurvivorArt, SurvivorPose } from './types';
 export const COMMON_COLOR = {
   suit: HIDDEN_SURVIVOR,
   rim: 0xc5cad1,
-  glove: 0x8b939c,
-  boot: 0x8b939c,
+  glove: 0xa3abb4,
+  boot: 0xa3abb4,
   sole: 0x5b636c,
   visor: 0x9aa3ad,
   /** 위 그림 가리개 (짙은 무채색: 실제 크기에서 바라보는 방향이 읽히게) */
@@ -49,7 +51,7 @@ export const COMMON_COLOR = {
 
 /** 위 그림 치수 (몸 반지름 배수): 부푼 방호복 깊이 · 앞 볼록 · 머리 앞으로 · 가리개 초승달(머리 반지름 배수 · 반각 라디안) */
 export const COMMON_TOP = {
-  halfD: 0.8,
+  halfD: 0.86,
   bulge: 0.1,
   headDx: 0.06,
   visor: { inner: 0.5, outer: 0.88, half: 1.0 },
@@ -57,6 +59,20 @@ export const COMMON_TOP = {
 
 /** 정면 상반신 아이콘 배율 · 이동 (다른 넷처럼 머리 · 어깨가 상자를 채우게) */
 const BUST = { k: 1.5, tx: 0, ty: 0.38 } as const;
+
+/**
+ * 방호복 돔 음영: 옛 숨은 생존자처럼 가장자리까지 밝은 흰색(#F8FAFC → 테 #C5CAD1). 공통 domePaint는 가장자리를 짙게 칠해
+ * 괴물 화면에서 흰 생존자가 회색빛으로 작아 보였다
+ */
+function suitDome(ink: Ink, reach: number, cx = 0, cy = 0): Paint {
+  const C = COMMON_COLOR;
+  return radial(cx, cy, reach, [
+    [0, ink(0xffffff)],
+    [0.5, ink(C.suit)],
+    [0.88, ink(mix(C.suit, C.rim, 0.55))],
+    [1, ink(C.rim)],
+  ]);
+}
 
 function top(p: SurvivorPose, o: ArtOptions): Drawing {
   const ink = inkFor(p.tone);
@@ -67,7 +83,7 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
   // 1) 신발
   for (const [fx, fy] of r.feet) topShoe(sk, fx + r.ox, fy, C.boot, C.sole, ink);
   // 2) 몸통 (흰 방호복)
-  sk.part(topTorsoPath(r, COMMON_TOP.bulge), domePaint(C.suit, ink, 1.0), ink(OUTLINE));
+  sk.part(topTorsoPath(r, COMMON_TOP.bulge), suitDome(ink, 1.05), ink(OUTLINE));
   // 등 이음선 (방호복 지퍼 · 솔기: 무채색 가는 선)
   const m = rotateAbout(r.twist, 0, 0);
   sk.line(path(m).with(translate(r.ox, 0)).M(-0.5, 0).L(-0.2, 0).d, solid(ink(C.seam)), 0.06);
@@ -80,7 +96,7 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
   const hy = r.head[1];
   const R = r.headR;
   const V = COMMON_TOP.visor;
-  sk.part(path().circle(hx, hy, R).d, domePaint(C.suit, ink, R * 1.25, hx - 0.05, hy), ink(OUTLINE));
+  sk.part(path().circle(hx, hy, R).d, suitDome(ink, R * 1.25, hx - 0.05, hy), ink(OUTLINE));
   sk.fill(
     path()
       .arc(hx, hy, R * V.outer, -V.half, V.half)

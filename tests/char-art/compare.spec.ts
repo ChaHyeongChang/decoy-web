@@ -166,12 +166,17 @@ async function placeSelf(
   y: number,
   face: number,
 ): Promise<void> {
-  await send(page, { kind: 'teleport', target: you, x, y, face });
+  // 조준을 돌리려고 끈 이동 스틱 입력이 서버 큐에 남아 있으면 순간이동 뒤에도 조금 밀린다: 자리를 확인하며 다시 보낸다
   await expect
-    .poll(async () => {
-      const me = (await players(page, code)).find((p) => p.id === you);
-      return me !== undefined && Math.hypot(me.x - x, me.y - y) < 0.05;
-    })
+    .poll(
+      async () => {
+        const me = (await players(page, code)).find((p) => p.id === you);
+        if (me !== undefined && Math.hypot(me.x - x, me.y - y) < 0.05) return true;
+        await send(page, { kind: 'teleport', target: you, x, y, face });
+        return false;
+      },
+      { intervals: [100, 200, 300, 500] },
+    )
     .toBe(true);
 }
 
