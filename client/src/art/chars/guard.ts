@@ -125,9 +125,9 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
   // 어느 때든 방패는 앞쪽에 있다 → 바라보는 방향 단서가 뒤집히지 않는다
   const shield: ShieldShape =
     p.mode === 'reach'
-      ? { cx: r.ox, cy: 0, ro: 1.3, ri: 0.98, half: 0.55, rot: -0.45 + r.twist * 0.5 }
+      ? { cx: r.ox, cy: 0, ro: 1.3, ri: 0.98, half: 0.55, rot: -0.4 + r.twist * 0.5 }
       : captive
-        ? { cx: r.ox, cy: 0, ro: 1.1, ri: 0.82, half: 0.7, rot: 0 }
+        ? { cx: r.ox, cy: 0, ro: 1.1, ri: 0.76, half: 0.7, rot: 0 }
         : {
             cx: r.ox - 0.05 * p.hit + push,
             cy: 0.03 * s,
@@ -159,8 +159,8 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
   } else {
     // 수감: 방패를 끌어안고 두 손을 그 안쪽에 모은다 (헬멧 밖으로 보이게)
     r.hands = [
-      [0.72, -0.22],
-      [0.72, 0.22],
+      [0.56, -0.46],
+      [0.56, 0.46],
     ];
   }
   topArm(sk, r, 0, C.armor, C.glove, ink, 0.3);
@@ -197,8 +197,8 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
       .M(hx - R * 0.95, hy)
       .Q(hx - R * 0.2, hy + side * w, hx + R * 0.75, hy)
       .Z().d;
-  sk.fill(crestHalf(-1, 0.14), solid(ink(tint(C.armor, 0.2))));
-  sk.fill(crestHalf(1, 0.1), solid(ink(shade(C.armor, 0.16))));
+  sk.fill(crestHalf(-1, 0.2), solid(ink(tint(C.armor, 0.2))));
+  sk.fill(crestHalf(1, 0.12), solid(ink(shade(C.armor, 0.16))));
   // 7) 방패 (몸 앞, 따로 층): 외곽선이 팔 · 몸 위에 굵게
   sk.layer();
   topShield(sk, shield, ink, free ? Math.max(0, (a - 0.5) / 0.5) : 0);
@@ -263,11 +263,16 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
     frontLegs(sk, C.pants, C.boot, C.sole, ink, LEG_SPREAD, 0.17);
     for (const s of [-1, 1]) {
       const x = s * (FRONT.legX + LEG_SPREAD);
-      sk.part(path().roundRect(x - 0.085, 0.58, 0.17, 0.12, 0.05).d, frontClothPaint(C.armor, ink), ink(OUTLINE), 1, 0.3);
+      sk.part(path().roundRect(x - 0.085, 0.62, 0.17, 0.12, 0.05).d, frontClothPaint(C.armor, ink), ink(OUTLINE), 1, 0.3);
     }
   }
-  // 2) 팔 (화면 왼쪽 = 빈 손 주먹, 화면 오른쪽 = 방패 뒤로 숨는 팔)
-  frontArm(sk, 1, C.armor, C.glove, ink, [0.36, 0.3 + by], by, 0.19);
+  // 방패 자리 (몸 가운데 쪽으로, 몸통의 약 65%를 가린다)
+  const cx = 0.11;
+  const y0 = 0.0 + by + sb;
+  const hw = 0.39;
+  const h = 0.84;
+  // 2) 팔 (화면 왼쪽 = 빈 주먹, 화면 오른쪽 = 방패 손잡이를 쥔 팔 — 주먹이 방패 가장자리 밖으로 반쯤 보인다)
+  frontArm(sk, 1, C.armor, C.glove, ink, [cx + hw + 0.05, y0 + 0.32], by, 0.19);
   frontArm(sk, -1, C.armor, C.glove, ink, [-0.47, 0.38 + by], by, 0.19);
   // 3) 몸통 (보라 갑옷 조끼) + 허리띠
   sk.part(frontTorsoPath(by, SX, 0.28), frontClothPaint(C.armor, ink), ink(OUTLINE));
@@ -333,12 +338,14 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
   const brim = path().M(-hr * 0.98, hy - 0.04).Q(0, hy - 0.13, hr * 0.98, hy - 0.04).d;
   sk.line(brim, solid(ink(C.deep)), 0.06);
   sk.line(brim, solid(ink(tint(C.armor, 0.25))), 0.016);
+  // 챙 위 가로 홈 (시설 경비대 헬멧 느낌)
+  sk.line(path().M(-hr * 0.8, hy - 0.13).Q(0, hy - 0.21, hr * 0.8, hy - 0.13).d, solid(ink(C.deep)), 0.03);
   // 볏 (가운데 솟은 판, 실루엣에 보인다)
   sk.part(
     path()
-      .M(-0.06, hy - hr * 0.86)
-      .Q(-0.05, hy - hr * 1.25, 0.04, hy - hr * 1.3)
-      .Q(0.07, hy - hr * 1.05, 0.06, hy - hr * 0.86)
+      .M(-0.07, hy - hr * 0.88)
+      .Q(-0.06, hy - hr * 1.1, 0.03, hy - hr * 1.12)
+      .Q(0.08, hy - hr * 1.02, 0.07, hy - hr * 0.88)
       .Z().d,
     linear(-0.06, 0, 0.06, 0, [
       [0, ink(tint(C.armor, 0.35))],
@@ -348,10 +355,6 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
   );
   // 6) 큰 방패 (따로 층: 몸 앞에 떠 있다)
   sk.layer();
-  const cx = 0.17;
-  const y0 = 0.0 + by + sb;
-  const hw = 0.36;
-  const h = 0.84;
   const sh = frontShieldPath(cx, y0, hw, h);
   sk.part(
     sh,
@@ -381,8 +384,6 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
   sk.part(path().circle(cx, ey, 0.055).d, radial(cx - 0.015, ey - 0.02, 0.07, [[0, ink(tint(C.neon, 0.6))], [1, ink(C.armor)]]), ink(OUTLINE), 1, 0.3);
   // 방패 위 반사 (왼쪽 위 빛)
   sk.line(path().M(cx - hw + 0.1, y0 + 0.12).L(cx - hw + 0.1, y0 + 0.36).d, solid(ink(0xffffff), 0.35), 0.025);
-  // 방패를 쥔 손 (방패 오른쪽 가장자리 위로 손가락)
-  sk.part(path().ellipse(cx + hw - 0.005, y0 + 0.3, 0.05, 0.07).d, solid(ink(C.glove)), ink(OUTLINE), 1, 0.3);
   return sk.drawing();
 }
 
