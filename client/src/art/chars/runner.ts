@@ -74,7 +74,8 @@ type Pt = [number, number];
  */
 const PLATE = {
   back: 0.995,
-  w: 0.92,
+  // 어깨 반폭: 가볍고 빠른 인상이 나게 좁게 (사용자 결정 — 2차 시안의 0.92에서 줄임)
+  w: 0.86,
   shoulderX: -0.05,
   chest: 0.42,
   rim: [0.97, 0.88, 0.76, 0.72],
@@ -108,17 +109,20 @@ const HOOD_FRONT = { half: 1.45, open: 0.5, brim: 0.36 } as const;
  */
 const ARM = {
   jointX: -0.22,
-  jointY: 0.79,
+  jointY: 0.74,
   x: 0.12,
   fore: 0.48,
   aft: 0.5,
-  y: 0.8,
+  y: 0.75,
   tuck: 0.12,
   reach: 0.8,
   fist: 0.17,
   ready: 0.8,
   lift: 0.2,
 } as const;
+
+/** 위 그림 소매 굵기 (어깨 쪽 · 소매 끝): 가늘게 해 가볍고 빠른 인상 (2차 시안 0.34 · 0.27에서 줄임) */
+const SLEEVE = { root: 0.28, end: 0.22 } as const;
 
 /** 위 그림 후드 머리 칠 (머리 위에서 받는 빛) */
 function hoodPaint(ink: Ink, cx: number, cy: number, reach: number): Paint {
@@ -362,7 +366,7 @@ function topArm(
   // 소매 칠: 팔 가운데가 밝은 둥근 덩어리 (몸판과 같은 색이라도 팔로 읽힌다)
   const [mx, my] = apply(T, (jx + hx) / 2, (jy + hy) / 2);
   sk.part(
-    path(T).capsule(jx, jy, hx, hy, 0.34, 0.27).d,
+    path(T).capsule(jx, jy, hx, hy, SLEEVE.root, SLEEVE.end).d,
     radial(mx, my, Math.max(0.3, d * 0.6), [
       [0, ink(tint(sleeve, 0.14))],
       [0.6, ink(sleeve)],
