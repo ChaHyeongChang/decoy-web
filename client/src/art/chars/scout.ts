@@ -6,7 +6,10 @@
 // 크기 기준(measure.ts SIZE_RULE: 앞 ±60° 1.55r · 옆 1.05r · 뒤 1.0r)은 모든 자세에서 지킨다.
 // 어두운 칠(끈 · 장갑 · 배낭)은 역할색의 중간 변형으로 밝혀 작은 크기(휴대폰 몸 반지름 6.7px)에서도 판정 원을 밝은 몸이 채운다.
 // 망원경은 들어 올려 눈에 댈 때만 층을 나눠(sk.layer) 굵은 외곽선이 머리 위에 그어지게 한다.
-// 네온 포인트는 고글 렌즈 빛 · 망원경 대물렌즈(위 = 빛 선, 정면 = 유리 테) · 안테나 끝 점뿐이다(밝은 초록, 글자용 역할색).
+// 위 그림의 네온 포인트는 고글 렌즈 빛 · 망원경 대물렌즈 빛 선 · 안테나 끝 점뿐이다(밝은 초록, 글자용 역할색). 정면 그림은
+// 고글 렌즈 빛만 초록으로 두고, 시설과 같은 청록 네온(survivorBase frontNeon: #22D3EE 번짐 + #67E8F9 심)을 고글 렌즈 테 ·
+// 망원경 대물렌즈 테와 대물 통 띠 · 목깃 파이핑 · 가슴 멜빵 클립 등 · 안테나 끝 LED에 가늘게 넣는다 — 어두운 시설 · 청록 네온
+// 분위기에 맞추되 옷 · 모자는 역할색 초록이 주인공. 위 그림(게임 화면)에는 청록을 넣지 않는다(게임 화면에서 청록은 시설 · 목표 뜻).
 // 색은 역할색 초록(#22C55E)과 그 짙은/밝은 변형, 어두운 남회색 바지 · 장화 · 끈, 초록 기운 도는 밝은 회색 금속(고글 · 망원경).
 import { OUTLINE, ROLE, ROLE_TEXT } from '../palette';
 import {
@@ -38,11 +41,13 @@ import {
   frontClothPaint,
   frontHead,
   frontLegs,
+  frontNeon,
   frontTorsoPath,
   inkFor,
   TOP,
   topRig,
   topShoe,
+  type FrontNeon,
   type TopRig,
   type Ink,
 } from './survivorBase';
@@ -60,7 +65,10 @@ export const SCOUT_COLOR = {
   jacket: ROLE.scout,
   /** 짙은 초록 (그늘 · 배낭 덮개 · 목깃) */
   deep: 0x14532d,
-  /** 네온 (밝은 초록, 글자용 역할색) */
+  /**
+   * 초록 네온 (위 그림 렌즈 빛 · 대물렌즈 · 안테나 끝, 정면 고글 렌즈 빛 — 밝은 초록, 글자용 역할색).
+   * 정면 그림의 다른 네온은 청록(frontNeon)
+   */
   neon: ROLE_TEXT.scout,
   /** 정면 재킷 (역할색보다 한 단 낮게 — 원색 모자가 먼저 보이게) */
   coat: shade(ROLE.scout, 0.15),
@@ -127,7 +135,8 @@ function tubePaint(ink: Ink, base: number, ax: number, ay: number, bx: number, b
  * 망원경 (위 · 정면 공통). m = 망원경 좌표(원점 = 접안부 끝, +x = 대물 쪽), 폭 배수 wk.
  * 위 그림(view 'top'): 접안부와 가운데 통을 같은 밝은 금속으로 칠해 끊기지 않는 밝은 막대 하나로 읽히게 하고,
  * 짙은 띠는 넣지 않는다. 대물렌즈는 옆에서 본 네온 선(glow = false면 없음 — 접어서 꽂아 둘 때).
- * 정면 그림(view 'front'): 눈컵 · 접안부 · 가운데 통 · 대물 통의 단 차이와 마디 고리, 대물렌즈는 빛이 아니라 유리.
+ * 정면 그림(view 'front'): 눈컵 · 접안부 · 가운데 통 · 대물 통의 단 차이와 마디 고리, 대물렌즈는 빛이 아니라 유리(청록 네온
+ * 테), 대물 통에 청록 네온 띠 하나 (neon = 정면 네온 그리개, 위 그림은 넘기지 않는다).
  */
 function drawScope(
   sk: Sketch,
@@ -137,6 +146,7 @@ function drawScope(
   wk: number,
   view: 'top' | 'front',
   glow = true,
+  neon: FrontNeon | null = null,
 ): void {
   const L = scopeLen(k);
   const top = view === 'top';
@@ -179,10 +189,18 @@ function drawScope(
     [L - 0.32, 0.16 * wk],
   ] as const)
     sk.fill(path(m).roundRect(x, -w - 0.006, 0.03, (w + 0.006) * 2, 0.01).d, solid(ink(tint(C.steel, 0.2))));
-  // 대물렌즈 (유리): 짙은 원판 + 가는 네온 테 + 왼쪽 위 작은 반짝임
+  // 대물 통 띠 (청록 네온 고리)
+  neon?.line(
+    path(m)
+      .M(L - 0.2, -hw * 0.92)
+      .L(L - 0.2, hw * 0.92).d,
+    0.011,
+    0.7,
+  );
+  // 대물렌즈 (유리): 짙은 원판 + 가는 청록 네온 테 + 왼쪽 위 작은 반짝임
   const lens = path(m).ellipse(L - 0.005, 0, 0.055 * wk, hw * 0.86).d;
   sk.fill(lens, solid(ink(C.deep)));
-  sk.line(lens, solid(ink(C.neon)), 0.02);
+  neon?.line(lens, 0.014, 0.85);
   sk.fill(path(m).ellipse(L - 0.005, -hw * 0.36, 0.022 * wk, hw * 0.3).d, solid(ink(0xffffff), 0.8));
 }
 
@@ -457,6 +475,7 @@ const FRONT_SCOPE = 0.82;
 function frontBody(p: FrontPose, o: ArtOptions): Drawing {
   const ink = inkFor(p.tone);
   const sk = new Sketch(o.w);
+  const neon = frontNeon(sk, p.tone);
   const by = frontBreath(p.t);
   const sway = Math.sin(p.t * 2.2) * 0.035;
   const hy = FRONT.headY + by;
@@ -517,6 +536,8 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
       solid(ink(shade(C.coat, 0.22))),
     );
   }
+  // 가슴 멜빵 클립 등 (청록 발광 점, 화면 오른쪽 멜빵 하나 — 반대쪽은 망원경 쥔 팔에 가린다)
+  neon.dot(0.183, 0.15 + by, 0.016, 0.75);
   sk.fill(path().roundRect(-0.25, FRONT.hipY - 0.1, 0.5, 0.06, 0.02).d, solid(ink(C.strap)));
   sk.fill(path().roundRect(-0.04, FRONT.hipY - 0.105, 0.08, 0.07, 0.015).d, solid(ink(C.steel)));
   // 목깃 (짙은 초록 높은 깃)
@@ -531,6 +552,14 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
     ink(OUTLINE),
     1,
     0.3,
+  );
+  // 목깃 파이핑 (청록 네온, 깃 아래 테 바로 안쪽)
+  neon.line(
+    path()
+      .M(0.145, FRONT.neckY + 0.075 + by)
+      .Q(0, FRONT.neckY + 0.155 + by, -0.145, FRONT.neckY + 0.075 + by).d,
+    0.011,
+    0.6,
   );
   // 6) 머리: 얼굴 + 둥근 초록 모자 + 쌍안 렌즈 고글
   frontHead(sk, ink, by);
@@ -628,6 +657,8 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
       ]),
     );
     sk.fill(path().ellipse(gx + s * 0.012, gy + 0.01, 0.04, 0.055).d, solid(ink(MAT.eye)));
+    // 렌즈 테 (청록 네온 고리: 금속 테와 초록 렌즈 사이)
+    neon.line(path().circle(gx, gy, 0.121).d, 0.011, 0.7);
     sk.fill(path().circle(gx - 0.045, gy - 0.045, 0.026).d, solid(ink(0xffffff), 0.9 * glint));
   }
   // 코걸이 (렌즈 사이)
@@ -660,11 +691,10 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
       mul(rotate(ang), scale(FRONT_SCOPE, FRONT_SCOPE)),
     ),
   );
-  drawScope(sk, ink, sm, 0, 0.66, 'front');
+  drawScope(sk, ink, sm, 0, 0.66, 'front', true, neon);
   sk.part(path().circle(-hand[0], hand[1], 0.085).d, solid(ink(C.glove)), ink(OUTLINE));
-  // 안테나 끝 (네온 점)
-  sk.fill(path().circle(tip[0], tip[1], 0.06).d, solid(ink(C.neon), 0.35));
-  sk.fill(path().circle(tip[0], tip[1], 0.032).d, solid(ink(tint(C.neon, 0.45))));
+  // 안테나 끝 (청록 LED: 번짐 반지름 0.06 — 상반신에서도 상자 오른쪽 안)
+  neon.dot(tip[0], tip[1], 0.03, 1, 0.06);
   return sk.drawing();
 }
 

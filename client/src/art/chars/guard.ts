@@ -3,9 +3,12 @@
 // 방패)가 실루엣의 핵심이다. 크기 기준(measure.ts SIZE_RULE): 방패는 앞 ±60° 안(1.55r까지), 어깨 판 · 등판은 옆 1.05r · 뒤 1.0r 안.
 // 방패는 층을 나눠(sk.layer) 굵은 외곽선이 몸 위에 그어지게 해서 작은 크기에서도 몸과 갈린다. 두 손은(보통 · 능력) 방패 안쪽 손잡이를
 // 쥐고 방패와 같은 층에 그려, 헬멧과 방패 사이 틈에 주먹이 보인다(방패가 몸에서 떠 보이지 않게).
-// 네온 포인트는 방패 테두리의 밝은 보라 선(위 · 정면)과 정면 방패 문장(십자)뿐이다. 헬멧 챙 선은 네온보다 어둡게 둔다.
+// 위 그림의 네온 포인트는 방패 테두리의 밝은 보라 선(글자용 역할색)뿐이다. 정면 그림은 방패 문장(십자)만 밝은 보라 네온으로 두고,
+// 시설과 같은 청록 네온(survivorBase frontNeon: #22D3EE 번짐 + #67E8F9 심)을 방패 안선 · 헬멧 챙 바이저 선 · 어깨 판 아래 테 ·
+// 문장 가운데 징(발광)에 가늘게 넣는다 — 어두운 시설 · 청록 네온 분위기에 맞추되 갑옷 · 문장은 역할색 보라가 주인공. 위 그림(게임
+// 화면)에는 청록을 넣지 않는다(게임 화면에서 청록은 시설 · 목표 뜻).
 // 색은 역할색 보라(#A855F7)와 그 짙은/밝은 변형, 어두운 남회색 바지 · 장갑 · 장화 · 방패 테.
-import { OUTLINE, ROLE, ROLE_TEXT } from '../palette';
+import { NEON, NEON_DIM, NEON_TEXT, OUTLINE, ROLE, ROLE_TEXT } from '../palette';
 import { SIZE_RULE } from './measure';
 import {
   Sketch,
@@ -33,6 +36,7 @@ import {
   frontBreath,
   frontClothPaint,
   frontLegs,
+  frontNeon,
   frontTorsoPath,
   inkFor,
   topRig,
@@ -54,7 +58,7 @@ export const GUARD_COLOR = {
   armor: ROLE.guard,
   /** 짙은 보라 (갑옷 그늘 · 방패 안쪽) */
   deep: 0x581c87,
-  /** 네온 테두리 (밝은 보라, 글자용 역할색) */
+  /** 보라 네온 (위 그림 방패 테 · 정면 방패 문장 — 밝은 보라, 글자용 역할색). 정면의 다른 네온은 청록(frontNeon) */
   neon: ROLE_TEXT.guard,
   /** 방패 테 · 장갑 · 끈 (어두운 남회색 금속) */
   steel: 0x2b3646,
@@ -418,6 +422,7 @@ const LEG_SPREAD = 0.08;
 function frontBody(p: FrontPose, o: ArtOptions): Drawing {
   const ink = inkFor(p.tone);
   const sk = new Sketch(o.w);
+  const neon = frontNeon(sk, p.tone);
   const by = frontBreath(p.t);
   const sb = Math.sin(p.t * 1.6) * 0.008;
   const SX = 0.36;
@@ -481,6 +486,14 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
       solid(ink(shade(C.armor, 0.35))),
       0.02,
     );
+    // 어깨 판 아래 테 (청록 네온 솔기)
+    neon.line(
+      path()
+        .M(px - 0.14, py + 0.05)
+        .Q(px, py + 0.015, px + 0.14, py + 0.05).d,
+      0.011,
+      0.55,
+    );
   }
   // 5) 머리 + 헬멧
   const hy = FRONT.headY + by;
@@ -536,12 +549,12 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
     ]),
     ink(OUTLINE),
   );
-  // 챙 (어두운 띠 + 보라 선)
+  // 챙 (어두운 띠 + 청록 네온 바이저 선)
   const brim = path()
     .M(-hr * 0.98, hy - 0.04)
     .Q(0, hy - 0.13, hr * 0.98, hy - 0.04).d;
   sk.line(brim, solid(ink(C.deep)), 0.06);
-  sk.line(brim, solid(ink(tint(C.armor, 0.25))), 0.016);
+  neon.line(brim, 0.014, 0.75);
   // 챙 위 가로 홈 (시설 경비대 헬멧 느낌)
   sk.line(
     path()
@@ -576,12 +589,11 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
     ]),
     ink(OUTLINE),
   );
-  // 테 (어두운 금속) + 네온 안선
+  // 테 (어두운 금속) + 청록 네온 안선
   sk.line(sh, solid(ink(C.steel)), 0.07);
   const inner = frontShieldPath(cx, y0 + 0.055, hw - 0.055, h - 0.11);
-  sk.line(inner, solid(ink(C.neon), 0.35), 0.045);
-  sk.line(inner, solid(ink(tint(C.neon, 0.4))), 0.014);
-  // 문장: 십자 (네온) + 가운데 둥근 징
+  neon.line(inner, 0.013, 0.7);
+  // 문장: 십자 (밝은 보라 네온 — 역할색 문장) + 가운데 둥근 징 (청록 발광)
   const ey = y0 + h * 0.4;
   const cross = path()
     .M(cx, y0 + 0.13)
@@ -594,8 +606,9 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
   sk.part(
     path().circle(cx, ey, 0.055).d,
     radial(cx - 0.015, ey - 0.02, 0.07, [
-      [0, ink(tint(C.neon, 0.6))],
-      [1, ink(C.armor)],
+      [0, ink(NEON_TEXT)],
+      [0.55, ink(NEON)],
+      [1, ink(NEON_DIM)],
     ]),
     ink(OUTLINE),
     1,

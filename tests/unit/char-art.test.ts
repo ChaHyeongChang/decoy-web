@@ -2,6 +2,7 @@
 // 지킨다. 경로는 Node에서 d 문자열을 읽어 곡선을 샘플해 잰다(Canvas · Path2D 없이).
 //  - 모든 자세에서 경로 숫자가 유한값이고, 그림이 topExtent(굽기 프레임 반쪽 크기) 안에 든다
 //  - 괴물 화면 공통 생존자는 무채색뿐이고, 자세 타입에 역할 · 능력 · 피격 · 구조 값이 없다 (VISUAL_SPEC 0장 ③)
+//  - 청록 네온은 생존자 셋의 정면 그림에만, 시설 네온 세 값으로 (VISUAL_SPEC 1.2 예외). 게임 화면 위 그림 · 괴물 · 공통 생존자에는 없다
 //  - 그라디언트 정지점 순서, SVG id 충돌 없음, 경로 빌더 · 그림 옮기기의 수식
 import { describe, expect, it } from 'vitest';
 import { COMMON_ART, MONSTER_ART, SURVIVOR_ART } from '../../client/src/art/chars/index';
@@ -16,7 +17,7 @@ import {
   type MonsterPose,
   type SurvivorPose,
 } from '../../client/src/art/chars/types';
-import { ROLE } from '../../client/src/art/palette';
+import { NEON, NEON_DIM, NEON_TEXT, ROLE } from '../../client/src/art/palette';
 
 const W = 0.19;
 const ROLES = ['runner', 'guard', 'scout'] as const;
@@ -210,6 +211,58 @@ describe('새 캐릭터 그림: 괴물 화면 공통 생존자 (VISUAL_SPEC 0장
     const a = COMMON_ART.top({ ...HIDDEN_REST, walk: 1.2, stride: 1 }, { w: W });
     const b = COMMON_ART.top({ ...HIDDEN_REST, walk: 1.2, stride: 1 }, { w: W });
     expect(a).toEqual(b);
+  });
+});
+
+/** 청록 계열인가 (색상 170~200°, 색 폭 0.25 넘음) — 게임 화면에서 시설 · 목표 뜻 */
+function cyanish(c: number): boolean {
+  const r = ((c >> 16) & 255) / 255;
+  const g = ((c >> 8) & 255) / 255;
+  const b = (c & 255) / 255;
+  const mx = Math.max(r, g, b);
+  const mn = Math.min(r, g, b);
+  if (mx - mn <= 0.25) return false;
+  const d = mx - mn;
+  const h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  const deg = (h * 60 + 360) % 360;
+  return deg >= 170 && deg <= 200;
+}
+
+/** 정면 그림에 쓸 수 있는 청록 (VISUAL_SPEC 1.2 예외: 시설 네온 · 꺼진 네온 · UI 청록 글자색) */
+const FRONT_CYANS = new Set<number>([NEON, NEON_DIM, NEON_TEXT]);
+
+describe('새 캐릭터 그림: 청록 네온은 정면 그림에만 (VISUAL_SPEC 1.2 예외)', () => {
+  it('위에서 본 그림(게임 화면)에는 청록이 없다 — 역할 셋 · 모든 자세 · 톤, 괴물 · 공통 생존자', () => {
+    for (const role of ROLES)
+      for (const p of survivorGrid())
+        for (const tone of ['normal', 'gray', 'flash'] as const)
+          for (const pa of paints(SURVIVOR_ART[role].top({ ...p, tone }, { w: W })))
+            for (const c of colors(pa)) expect(cyanish(c), `${role} #${c.toString(16)}`).toBe(false);
+    for (const p of monsterGrid())
+      for (const pa of paints(MONSTER_ART.top(p, { w: W })))
+        for (const c of colors(pa)) expect(cyanish(c), `monster #${c.toString(16)}`).toBe(false);
+    for (const p of hiddenGrid())
+      for (const pa of paints(COMMON_ART.top(p, { w: W })))
+        for (const c of colors(pa)) expect(cyanish(c), `common #${c.toString(16)}`).toBe(false);
+  });
+
+  it('정면 그림: 생존자 셋에는 청록 네온이 있고 그 색은 시설 네온 세 값뿐, 괴물 · 공통 생존자에는 없다', () => {
+    for (const role of ROLES)
+      for (const bust of [false, true]) {
+        const cy = paints(SURVIVOR_ART[role].front({ ...FRONT_REST, bust }, { w: 0.04 }))
+          .flatMap(colors)
+          .filter(cyanish);
+        expect(cy.length, `${role} 청록 있음`).toBeGreaterThan(0);
+        for (const c of cy) expect(FRONT_CYANS.has(c), `${role} #${c.toString(16)}`).toBe(true);
+      }
+    for (const pa of paints(MONSTER_ART.front(FRONT_REST, { w: 0.04 })))
+      for (const c of colors(pa)) expect(cyanish(c), `monster #${c.toString(16)}`).toBe(false);
+  });
+
+  it('정면 그림 사망 회색 톤에는 청록이 남지 않는다 (네온도 꺼진다)', () => {
+    for (const role of ROLES)
+      for (const pa of paints(SURVIVOR_ART[role].front({ ...FRONT_REST, tone: 'gray' }, { w: 0.04 })))
+        for (const c of colors(pa)) expect(cyanish(c), `${role} #${c.toString(16)}`).toBe(false);
   });
 });
 

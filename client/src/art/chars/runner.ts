@@ -8,7 +8,10 @@
 // 서 있을 때도 걸음 직전 자세(오른손 앞 · 왼손 뒤)라 좌우 대칭이 아니다. 팔은 걸음에 맞춰 앞뒤로 흔들고(앞으로 간 주먹이 머리
 // 옆으로, 뒤로 간 팔은 팔꿈치가 어깨 뒤로), 질주 때 몸을 숙여 머리가 더 나오고 팔을 크게 흔든다.
 // 정면 그림(로비 역할 카드 · 결과 화면)은 3/4 시점: 몸 · 얼굴이 화면 오른쪽(달리는 쪽)을 비스듬히 보고, 후드 끝은 왼쪽 뒤로
-// 흐른다. 네온 포인트는 후드 테두리의 밝은 파랑 선(위 · 정면)과 가슴의 » 갈매기 무늬 · 후드 끈(정면)뿐이다.
+// 흐른다. 위 그림의 네온 포인트는 후드 챙의 밝은 파랑 띠(글자용 역할색)뿐이다. 정면 그림은 시설과 같은 청록 네온(survivorBase
+// frontNeon: #22D3EE 번짐 + #67E8F9 심)을 후드 테두리 · 후드 끈과 빛나는 끈 끝 · 가슴 » 갈매기 무늬 · 운동화 밑창 줄에 가늘게
+// 넣는다 — 어두운 시설 · 청록 네온 분위기에 맞추되 몸은 역할색 파랑이 주인공. 위 그림(게임 화면)에는 청록을 넣지 않는다(게임
+// 화면에서 청록은 시설 · 목표 뜻).
 // 색은 역할색 파랑(#3B82F6)과 그 짙은/밝은 변형, 어두운 남회색 바지 · 신발, 밝은 회색 밑창, 얼굴 피부색(정면).
 import { OUTLINE, ROLE } from '../palette';
 import {
@@ -34,8 +37,10 @@ import {
   TOP,
   frontBreath,
   frontClothPaint,
+  frontNeon,
   inkFor,
   topRig,
+  type FrontNeon,
   type Ink,
   type TopRig,
 } from './survivorBase';
@@ -53,7 +58,7 @@ export const RUNNER_COLOR = {
   hoodie: ROLE.runner,
   /** 후드 안 그늘 · 짙은 파랑 */
   deep: 0x1e3a8a,
-  /** 네온 테두리 (밝은 파랑, 글자용 역할색) */
+  /** 위 그림 후드 챙 띠 (밝은 파랑, 글자용 역할색). 정면 그림 네온은 청록(frontNeon) */
   neon: 0x60a5fa,
   pants: 0x253041,
   shoe: 0x2b3646,
@@ -584,7 +589,15 @@ function bentArm(sk: Sketch, ink: Ink, sh: Pt, elbow: Pt, hand: Pt, far: boolean
  * 3/4 운동화 (옆에서 본 긴 신발, 앞코 = 오른쪽): 밝은 밑창(외곽선 있는 부품)을 먼저 깔고 어두운 갑피를 얹는다 — 밑창이
  * 외곽선 안의 밝은 띠로 보인다. 뒤꿈치 → 앞코로 쓸어 올린 파랑 줄. tilt = 앞코를 내린 각
  */
-function sideSneaker(sk: Sketch, ink: Ink, x: number, y: number, tilt: number, far: boolean): void {
+function sideSneaker(
+  sk: Sketch,
+  ink: Ink,
+  neon: FrontNeon,
+  x: number,
+  y: number,
+  tilt: number,
+  far: boolean,
+): void {
   const len = 0.17;
   const m = rotateAbout(tilt, x, y);
   const upper = far ? shade(C.shoe, 0.15) : C.shoe;
@@ -605,6 +618,16 @@ function sideSneaker(sk: Sketch, ink: Ink, x: number, y: number, tilt: number, f
     ]).d,
     solid(ink(C.hoodie)),
     0.028,
+  );
+  // 밑창 줄 (청록 네온): 갑피와 밝은 밑창 사이 이음매를 따라 뒤꿈치 → 앞코
+  neon.line(
+    path(m).curve([
+      [x - len * 0.8, y + 0.035],
+      [x, y + 0.066],
+      [x + len * 0.8, y + 0.035],
+    ]).d,
+    0.013,
+    far ? 0.45 : 0.85,
   );
 }
 
@@ -634,19 +657,19 @@ function leg(sk: Sketch, ink: Ink, hip: Pt, knee: Pt, ankle: Pt, far: boolean): 
  * 3/4 다리 (달리기 한가운데, 체공 순간): 먼 다리는 뒤로 차고 나가며 앞코로 땅을 밀고, 가까운 다리는 무릎을 앞(오른쪽)으로
  * 높이 들어 발이 땅에서 떠 있다(앞코를 살짝 든다) — 그림만 봐도 오른쪽으로 달린다
  */
-function frontRunnerLegs(sk: Sketch, ink: Ink): void {
+function frontRunnerLegs(sk: Sketch, ink: Ink, neon: FrontNeon): void {
   const hipY = FRONT.hipY - 0.05;
   leg(sk, ink, [0.1, hipY], [-0.02, 0.66], [-0.27, 0.8], true);
-  sideSneaker(sk, ink, -0.24, 0.82, 0.6, true);
+  sideSneaker(sk, ink, neon, -0.24, 0.82, 0.6, true);
   leg(sk, ink, [-0.04, hipY], [0.3, 0.5], [0.27, 0.68], false);
-  sideSneaker(sk, ink, 0.34, 0.73, -0.12, false);
+  sideSneaker(sk, ink, neon, 0.34, 0.73, -0.12, false);
 }
 
 /**
  * 3/4 얼굴 (후드 구멍 안): 얼굴이 달리는 쪽(오른쪽)을 비스듬히 본다. 가까운 왼쪽 볼은 둥글고 넓게, 먼 오른쪽은 납작하게
  * 줄고 코가 윤곽 밖으로 살짝 나온다. 가운데 선(눈 · 입 자리)이 오른쪽으로 치우치고, 먼 쪽 눈은 좁고 얼굴 가장자리 가까이
  */
-function frontFace(sk: Sketch, ink: Ink, hcx: number, hy: number, sway: number): void {
+function frontFace(sk: Sketch, ink: Ink, neon: FrontNeon, hcx: number, hy: number, sway: number): void {
   const fy = hy + 0.06;
   // 후드 구멍: 달리는 쪽(오른쪽)으로 치우친다 (머리 뒤쪽 = 왼쪽 후드 천이 넓고, 먼 쪽 테는 얇다)
   const ox = hcx + 0.11;
@@ -724,36 +747,37 @@ function frontFace(sk: Sketch, ink: Ink, hcx: number, hy: number, sway: number):
     solid(ink(MAT.skinShade)),
     0.02,
   );
-  // 후드 테두리 (두꺼운 고무단 + 네온 선)
+  // 후드 테두리 (두꺼운 고무단 + 청록 네온 선)
   const rim = path().ellipse(ox, fy, 0.27, 0.3).d;
   sk.line(rim, solid(ink(shade(C.hoodie, 0.1))), 0.07);
-  sk.line(rim, solid(ink(C.neon), 0.35), 0.05);
-  sk.line(rim, solid(ink(tint(C.neon, 0.3))), 0.016);
-  // 후드 끈 (목에서 늘어진 두 줄, 달리는 바람에 뒤로 날린다 + 밝은 끈 끝)
+  neon.line(rim, 0.016, 0.8);
+  // 후드 끈 (목에서 늘어진 두 줄, 달리는 바람에 뒤로 날린다 — 청록 네온 끈 + 빛나는 끈 끝)
   for (const s of [-1, 1]) {
     const x0 = cl + s * 0.06;
     const x1 = x0 - 0.05 + sway * 0.4;
-    sk.line(
+    neon.line(
       path()
         .M(x0, fy + 0.29)
         .Q(x0 - 0.01, fy + 0.34, x1, fy + 0.39).d,
-      solid(ink(tint(C.neon, 0.5))),
-      0.018,
+      0.014,
+      0.6,
     );
     sk.fill(path().roundRect(x1 - 0.015, fy + 0.38, 0.03, 0.05, 0.012).d, solid(ink(C.sole)));
+    neon.dot(x1, fy + 0.405, 0.012, 0.8);
   }
 }
 
 function frontBody(p: FrontPose, o: ArtOptions): Drawing {
   const ink = inkFor(p.tone);
   const sk = new Sketch(o.w);
+  const neon = frontNeon(sk, p.tone);
   const by = frontBreath(p.t);
   const sway = Math.sin(p.t * 2.4) * 0.05;
   const mid = QUARTER.mid;
   // 1) 먼 팔 (앞으로 치는 팔, 몸 뒤): 어깨 → 아래 앞 팔꿈치 → 가슴 앞 주먹. 먼 어깨는 몸 안쪽(3/4 원근으로 좁다)
   bentArm(sk, ink, apply(LEAN, 0.17, FRONT.shoulderY + 0.08 + by), [0.4, 0.3 + by], [0.5, 0.12 + by], true);
   // 2) 다리 (어두운 조거 바지) + 큰 운동화
-  if (!p.bust) frontRunnerLegs(sk, ink);
+  if (!p.bust) frontRunnerLegs(sk, ink, neon);
   // 3) 몸통 (후드티) + 밑단 · 캥거루 주머니 · 옆 솔기(3/4 부피)
   sk.part(torsoPath(by), frontClothPaint(C.hoodie, ink), ink(OUTLINE));
   sk.fill(
@@ -786,7 +810,7 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
     solid(ink(shade(C.hoodie, 0.22))),
     0.018,
   );
-  // 가슴 » 갈매기 무늬 (네온: 넓은 은은한 빛 + 밝은 선)
+  // 가슴 » 갈매기 무늬 (청록 네온: 넓은 은은한 빛 + 밝은 선)
   const chev = path(LEAN)
     .M(mid - 0.11, 0.11 + by)
     .L(mid - 0.04, 0.17 + by)
@@ -794,8 +818,7 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
     .M(mid - 0.02, 0.11 + by)
     .L(mid + 0.05, 0.17 + by)
     .L(mid - 0.02, 0.23 + by).d;
-  sk.line(chev, solid(ink(C.neon), 0.3), 0.075);
-  sk.line(chev, solid(ink(tint(C.neon, 0.35))), 0.032);
+  neon.line(chev, 0.026, 0.9);
   // 4) 가까운 팔 (뒤로 젖힌 팔, 몸 앞): 어깨 → 뒤로 뺀 팔꿈치 → 허리 뒤 주먹. 가까운 어깨는 바깥쪽(넓게 보인다)
   bentArm(
     sk,
@@ -837,7 +860,7 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
     0.018,
   );
   // 6) 얼굴 (3/4)
-  frontFace(sk, ink, hcx, hy, sway);
+  frontFace(sk, ink, neon, hcx, hy, sway);
   return sk.drawing();
 }
 

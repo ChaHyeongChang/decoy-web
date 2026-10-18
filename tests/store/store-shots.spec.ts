@@ -1,8 +1,10 @@
 // 스토어 그림 촬영 (M15, docs/MOBILE_PLAN.md M15 3번 · docs/STORE_LISTING.md 3장). npm run shots:store
 //  - 휴대폰 가로 스크린샷 5장: 640×360 휴대폰(터치 · 기기 배율 3 → 1920×1080 PNG), 품질 높음 · WebGL, 터치 조작 UI가 보이게
-//      phone-1-lobby (로비 첫 화면) · phone-2-monster (괴물 화면) · phone-3-survivor (생존자: 점령 중 발각) ·
-//      phone-4-rescue (감옥 구조) · phone-5-result (결과)
-//  - 그래픽 이미지 feature-graphic.png 1024×500: 괴물 화면(PC, 배율 2)의 가운데를 잘라 왼쪽에 로고 + DECOY를 얹는다
+//      phone-1-lobby (로비 방 화면: 역할 카드 넷) · phone-2-monster (괴물 화면) · phone-3-survivor (생존자: 점령 중 발각) ·
+//      phone-4-rescue (감옥 구조) · phone-5-result (결과: 생존자 승리)
+//  - 그래픽 이미지 feature-graphic.png 1024×500: 생존자 화면(PC, 배율 2)의 가운데를 잘라 왼쪽에 로고 + DECOY,
+//    오른쪽에 같은 게임의 로비 역할 카드 정면 캐릭터 넷(그 화면의 SVG 그대로)을 얹는다
+//  - 캐릭터 스타일은 '새 캐릭터'(?chars=new, 캐릭터 리디자인 — 사용자 요청: 새 캐릭터가 잘 보이게). 게임 기본값은 '기존'이다
 //  - artifacts/store/manifest.json: 장면 · 크기 · 찍는 순간의 터치 대상 · 그래픽 상태 · 콘솔 문제 (tests/unit/store-images.test.ts가 읽는다)
 //  - 모든 그림은 알파 없는 24비트 RGB PNG(색 형식 2)로 저장한다: 플레이 그래픽 이미지 · 스크린샷 조건 (canvas는 RGBA로 내보낸다)
 // 장면은 사람 탭 하나 + 서버 봇 셋(테스트 훅으로 자리 · 멈춤)으로 만든다. 판정은 서버가 하고, 화면은 실제 게임 그대로다
@@ -25,7 +27,7 @@ const PHONE: BrowserContextOptions = {
 };
 /** 그래픽 이미지 원본: PC 1600×900 배율 2에서 가운데 1024×500(CSS px)을 잘라 2:1로 줄인다 */
 const WIDE: BrowserContextOptions = { viewport: { width: 1600, height: 900 }, deviceScaleFactor: 2 };
-const QUERY = 'debug=hook&renderer=webgl&quality=high';
+const QUERY = 'debug=hook&renderer=webgl&quality=high&chars=new';
 /** 장식 시계 고정 (ms): 망토 · 빛 위상이 늘 같게 */
 const CLOCK_MS = 12_000;
 
@@ -38,6 +40,8 @@ interface Shot {
   touchTargets: string[];
   renderer: string | null;
   quality: string | null;
+  /** 캐릭터 스타일 (새 캐릭터로 찍는다) */
+  charStyle: string | null;
 }
 const shots: Shot[] = [];
 const problems: string[] = [];
@@ -81,8 +85,8 @@ async function press(page: Page, testId: string): Promise<void> {
   else await el.click();
 }
 
-/** 봇 셋과 방을 만들어 role로 시작한다 (방장 = 나) */
-async function soloMatch(page: Page, role: Role): Promise<{ code: string; you: string }> {
+/** 방을 만들고 role을 고른다 (방장 = 나, 시작 전 방 화면) */
+async function openRoom(page: Page, role: Role): Promise<string> {
   await page.goto(`/?${QUERY}&bots=1`);
   await expect(page.getByTestId('server-status')).toHaveAttribute('data-state', 'connected');
   await press(page, 'create-room');
@@ -90,6 +94,29 @@ async function soloMatch(page: Page, role: Role): Promise<{ code: string; you: s
   const code = (await page.getByTestId('room-code').textContent()) ?? '';
   await press(page, `role-${role}`);
   await expect(page.getByTestId(`role-${role}`)).toHaveClass(/mine/);
+  return code;
+}
+
+/** 방 화면 역할 카드의 그림 SVG (역할 → outerHTML, 그 화면에 그려진 그대로) */
+async function roleFigures(page: Page): Promise<Record<Role, string>> {
+  const out = await page.evaluate(() => {
+    const r: Record<string, string> = {};
+    for (const role of ['monster', 'runner', 'guard', 'scout'])
+      r[role] = document.querySelector(`[data-testid="role-${role}"] .rc-figure svg`)?.outerHTML ?? '';
+    return r;
+  });
+  for (const [role, svg] of Object.entries(out)) if (!svg) throw new Error(`역할 카드 그림 없음: ${role}`);
+  return out as Record<Role, string>;
+}
+
+/** 봇 셋과 방을 만들어 role로 시작한다 (방장 = 나). inRoom = 시작 전 방 화면에서 할 일 */
+async function soloMatch(
+  page: Page,
+  role: Role,
+  inRoom?: (page: Page) => Promise<void>,
+): Promise<{ code: string; you: string }> {
+  const code = await openRoom(page, role);
+  if (inRoom) await inRoom(page);
   await press(page, 'ready-button');
   await press(page, 'start-button');
   await page.waitForFunction(() => (window.__DECOY__?.snapCount ?? 0) >= 3, null, { timeout: 30_000 });
@@ -177,6 +204,7 @@ async function save(page: Page, file: string, scene: string, buf?: Buffer): Prom
       touchTargets: (d?.getTouchTargets() ?? []).map((t) => t.id),
       renderer: d?.renderer ?? null,
       quality: d?.gfx.quality ?? null,
+      charStyle: d?.gfx.charStyle ?? null,
     };
   });
   // 알파 없는 RGB로 (이미 RGB면 그대로, 투명한 화소가 있으면 멈춘다)
@@ -219,13 +247,11 @@ test.afterAll(() => {
   );
 });
 
-test('로비 첫 화면 (빠른 매칭 · 봇과 연습)', async ({ browser }) => {
+test('로비 방 화면: 새 캐릭터 역할 카드 넷 (내 역할 러너)', async ({ browser }) => {
   const tab = await openTab(browser, PHONE, '로비');
   const { page } = tab;
-  await page.goto(`/?${QUERY}`);
-  await expect(page.getByTestId('server-status')).toHaveAttribute('data-state', 'connected');
-  await expect(page.getByTestId('quick-match')).toBeEnabled();
-  await page.getByTestId('name-input').fill('');
+  await openRoom(page, 'runner');
+  await expect(page.locator('.rc-figure svg')).toHaveCount(4);
   await page.waitForTimeout(800);
   await save(page, 'phone-1-lobby.png', 'lobby');
   await tab.close();
@@ -357,44 +383,40 @@ test('감옥 구조 장면 → 결과 화면', async ({ browser }) => {
   await page.evaluate((ms) => window.__DECOY__?.freezeClock(ms), CLOCK_MS);
   await save(page, 'phone-4-rescue.png', 'rescue');
   await page.keyboard.up('KeyE');
-  // 결과: 시간 초과로 끝낸다 (탈출 0명 → 괴물 승리). 판 길이는 실제 판처럼 (시험 전용 elapsed)
-  await send(page, { kind: 'setTime', timeLeft: 0.1, elapsed: 534 });
+  // 결과: 생존자 셋 모두 탈출로 끝낸다 (생존자 승리 · 완전 탈출 — 결과 화면에 정면 캐릭터 셋).
+  // 판 길이는 실제 판처럼 (시험 전용 elapsed)
+  await send(page, { kind: 'setTime', timeLeft: 66.4, elapsed: 534 });
+  for (const id of [runner.id, scout.id, you])
+    await send(page, { kind: 'setSurvivor', target: id, status: 'escaped' });
   await expect(page.getByTestId('result')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('.emblem.survivors svg')).toHaveCount(3);
   await page.waitForTimeout(800);
   await save(page, 'phone-5-result.png', 'result');
   await tab.close();
 });
 
-test('그래픽 이미지 1024×500: 괴물 화면 가운데 + 로고 + DECOY', async ({ browser }) => {
+test('그래픽 이미지 1024×500: 생존자 화면 + 새 캐릭터 정면 넷 + 로고 + DECOY', async ({ browser }) => {
   const tab = await openTab(browser, WIDE, '그래픽');
   const { page } = tab;
-  const { code, you } = await soloMatch(page, 'monster');
-  // 거점 B 방 입구(맵 가운데 높이 — 카메라가 위아래로 막히지 않아 HUD가 잘라 낸 그림에 들어오지 않는다)에서
-  // 괴물이 동쪽 방 안의 생존자 둘을 본다. 스카우트는 멀리
-  await placeBots(page, code, [
-    ['guard', 38.7, 15.4, 2.8],
-    ['runner', 39.5, 17.1, -2.9],
-    ['scout', 8, 16, 0],
-  ]);
-  await page.waitForFunction(() => (window.__DECOY__?.getLastSnapshot()?.you.move.frozen ?? 1) <= 0, null, {
-    timeout: 20_000,
+  let figs: Record<Role, string> | null = null;
+  const { code, you } = await soloMatch(page, 'runner', async (p) => {
+    figs = await roleFigures(p);
   });
+  if (!figs) throw new Error('역할 카드 그림을 읽지 못함');
+  // 거점 B 방 입구(맵 가운데 높이 — 카메라가 위아래로 막히지 않아 HUD가 잘라 낸 그림에 들어오지 않는다).
+  // 러너가 동쪽을 보고, 가드 · 스카우트가 곁에, 괴물이 방 안에서 다가온다
+  await placeBots(page, code, [
+    ['guard', 36.3, 15.1, 0.5],
+    ['scout', 34.1, 17.3, -0.3],
+    ['monster', 39.4, 16.6, Math.PI],
+  ]);
   const ME = { x: 35, y: 16.2 };
   await placeSelf(page, code, you, ME.x, ME.y, 0);
-  // 카메라가 새 자리로 따라온 뒤 마우스로 동쪽을 조준하고, 서버 조준이 동쪽이 될 때까지
   await page.waitForTimeout(1000);
   const aim = await page.evaluate(() => window.__DECOY__?.tileToClient(41, 16.2) ?? null);
   if (!aim) throw new Error('tileToClient 없음');
   await page.mouse.move(aim.x, aim.y);
-  await expect
-    .poll(async () => {
-      const r = await page.request.get(`/test/state?room=${code}`);
-      const t = (await r.json()) as { monster: { aim: number } | null };
-      return Math.abs(t.monster?.aim ?? 9);
-    })
-    .toBeLessThan(0.08);
-  // 생존자 둘이 시야에 들어와 부채꼴이 빨개진다
-  await page.waitForFunction(() => (window.__DECOY__?.getLastSnapshot()?.survivors.length ?? 0) >= 2, null, {
+  await page.waitForFunction(() => (window.__DECOY__?.getLastSnapshot()?.monster ?? null) !== null, null, {
     timeout: 20_000,
   });
   await page.waitForFunction(() => (window.__DECOY__?.getBanners() ?? []).length === 0, null, {
@@ -402,7 +424,7 @@ test('그래픽 이미지 1024×500: 괴물 화면 가운데 + 로고 + DECOY', 
   });
   await send(page, { kind: 'setTime', timeLeft: 431.4 });
   await steady(page);
-  // 내 캐릭터(화면 가운데)를 왼쪽 40%쯤에 두고 오른쪽으로 부채꼴이 뻗게 자른다
+  // 내 캐릭터(화면 가운데)를 왼쪽 30%쯤에 두고 자른다 (오른쪽에 정면 캐릭터를 얹는다)
   const me = await page.evaluate(([x, y]) => window.__DECOY__?.tileToClient(x!, y!) ?? null, [ME.x, ME.y]);
   if (!me) throw new Error('tileToClient 없음');
   const crop = { w: 1024, h: 500 };
@@ -410,35 +432,56 @@ test('그래픽 이미지 1024×500: 괴물 화면 가운데 + 로고 + DECOY', 
   const cy = Math.max(0, Math.min(WIDE.viewport!.height - crop.h, Math.round(me.y - crop.h * 0.5)));
   const shot = await page.screenshot({ clip: { x: cx, y: cy, width: crop.w, height: crop.h } });
   const logo = readFileSync('client/public/logo.svg', 'utf8');
-  // 합성: 2048×1000 잘라 낸 그림을 1024×500으로 줄이고 왼쪽을 어둡게 해 로고 · 글자를 얹는다 (브라우저 canvas, 새 의존성 없음)
+  // 합성: 2048×1000 잘라 낸 그림을 1024×500으로 줄이고 왼쪽을 어둡게 해 로고 · 글자를 얹고, 오른쪽에 정면 캐릭터 넷
+  // (괴물은 뒤 · 크게, 생존자 셋은 앞)을 얹는다 (브라우저 canvas, 새 의존성 없음)
   const composer = await browser.newContext({ viewport: { width: 1024, height: 500 }, deviceScaleFactor: 1 });
   const cp = await composer.newPage();
   await cp.setContent('<!doctype html><meta charset="utf-8"><body style="margin:0"></body>');
   const fontFile = readFileSync('client/public/fonts/noto-sans-kr-ui.woff2').toString('base64');
   const b64 = await cp.evaluate(
-    async ({ src, svg, font }) => {
+    async ({ src, svg, font, figures }) => {
       const face = new FontFace('UI', `url(data:font/woff2;base64,${font})`, { weight: '100 900' });
       await face.load();
       document.fonts.add(face);
-      const img = new Image();
-      img.src = `data:image/png;base64,${src}`;
-      await img.decode();
-      const lg = new Image();
-      lg.src = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
-      await lg.decode();
+      const load = async (url: string): Promise<HTMLImageElement> => {
+        const im = new Image();
+        im.src = url;
+        await im.decode();
+        return im;
+      };
+      const svgUrl = (text: string): string =>
+        `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(text)))}`;
+      // 역할 카드 SVG는 viewBox만 있어 크기를 정해 그린다
+      const sized = (text: string, px: number): string =>
+        text.replace(/^<svg /, `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" `);
+      const img = await load(`data:image/png;base64,${src}`);
+      const lg = await load(svgUrl(svg));
       const c = document.createElement('canvas');
       c.width = 1024;
       c.height = 500;
       const g = c.getContext('2d')!;
       g.imageSmoothingQuality = 'high';
       g.drawImage(img, 0, 0, 1024, 500);
-      // 왼쪽 어둡게 (바탕색 #0B1622로)
-      const fade = g.createLinearGradient(0, 0, 560, 0);
+      // 왼쪽 어둡게 (바탕색 #0B1622로), 오른쪽 캐릭터 뒤도 조금 어둡게
+      const fade = g.createLinearGradient(0, 0, 1024, 0);
       fade.addColorStop(0, 'rgba(11, 22, 34, 0.94)');
-      fade.addColorStop(0.55, 'rgba(11, 22, 34, 0.7)');
-      fade.addColorStop(1, 'rgba(11, 22, 34, 0)');
+      fade.addColorStop(0.36, 'rgba(11, 22, 34, 0.66)');
+      fade.addColorStop(0.5, 'rgba(11, 22, 34, 0.18)');
+      fade.addColorStop(0.62, 'rgba(11, 22, 34, 0.36)');
+      fade.addColorStop(1, 'rgba(11, 22, 34, 0.62)');
       g.fillStyle = fade;
       g.fillRect(0, 0, 1024, 500);
+      // 정면 캐릭터: 괴물(뒤, 크게) → 생존자 셋(앞)
+      const place: [string, number, number, number][] = [
+        ['monster', 838, 228, 330],
+        ['scout', 600, 296, 236],
+        ['guard', 718, 304, 246],
+        ['runner', 842, 310, 236],
+      ];
+      for (const [role, x, y, size] of place) {
+        const fig = await load(svgUrl(sized(figures[role] ?? '', size)));
+        g.drawImage(fig, x - size / 2, y - size / 2, size, size);
+      }
       // 로고 (지름 190) + 글자
       g.drawImage(lg, 54, 70, 190, 190);
       g.shadowColor = 'rgba(34, 211, 238, 0.6)';
@@ -461,7 +504,7 @@ test('그래픽 이미지 1024×500: 괴물 화면 가운데 + 로고 + DECOY', 
       g.putImageData(d, 0, 0);
       return c.toDataURL('image/png').slice('data:image/png;base64,'.length);
     },
-    { src: shot.toString('base64'), svg: logo, font: fontFile },
+    { src: shot.toString('base64'), svg: logo, font: fontFile, figures: figs as Record<string, string> },
   );
   await composer.close();
   await save(page, 'feature-graphic.png', 'feature', Buffer.from(b64, 'base64'));

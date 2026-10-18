@@ -31,6 +31,8 @@ export const CONE = { idle: 0xeab308, seen: 0xef4444 } as const;
 /** 시설 네온 (청록: 시설 · 목표) */
 export const NEON = 0x22d3ee;
 export const NEON_DIM = 0x0e7490;
+/** 밝은 청록 (style.css --neon-text와 같은 값). 글자 · 정면 캐릭터 그림 네온 선의 밝은 심 */
+export const NEON_TEXT = 0x67e8f9;
 /** 경고 (주황 전용)와 그 위 글자 (8.49:1) */
 export const WARN = 0xf59e0b;
 export const WARN_TEXT = 0x0b1622;

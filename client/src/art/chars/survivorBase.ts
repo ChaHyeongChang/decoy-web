@@ -4,7 +4,9 @@
 //
 // 위에서 본 그림: 단위 = 몸 반지름 1, +x = 바라보는 방향. 빛은 위에서 (돔 음영, 회전과 무관) — 왼쪽 위 반사광은 굽기 쪽의
 // 돌지 않는 'gloss' 그림이 따로 맡는다. 정면 그림: 상자 [−1, 1]², 빛은 왼쪽 위.
-import { OUTLINE } from '../palette';
+// 정면 그림(로비 역할 카드 · 결과 화면 · 조작 안내)에만 청록 네온(frontNeon)을 옷 · 장비에 은은하게 넣는다 — 어두운 시설 ·
+// 청록 네온이라는 게임 분위기와 로고에 맞춘다. 위에서 본 그림(게임 화면)에는 넣지 않는다: 게임 화면에서 청록은 시설 · 목표 뜻이다.
+import { NEON, NEON_DIM, NEON_TEXT, OUTLINE } from '../palette';
 import {
   linear,
   mix,
@@ -345,4 +347,57 @@ export function frontClothPaint(base: number, ink: Ink): Paint {
     [0.55, ink(base)],
     [1, ink(shade(base, 0.32))],
   ]);
+}
+
+// ───────────────────────── 정면 청록 네온 ─────────────────────────
+
+/**
+ * 정면 그림 청록 네온 그리개. 색은 시설 네온과 같은 값만 쓴다: 번짐 NEON(#22D3EE), 밝은 심 NEON_TEXT(#67E8F9, style.css
+ * --neon-text), 꺼진 선 NEON_DIM(#0E7490). 발광은 SVG 필터 · blur 없이 그림 명령만으로 만든다(같은 그림이 SVG와 Canvas에서
+ * 똑같이 나오게): 선 = 넓고 옅은 같은 색 선 위에 밝은 가는 선, 점 = 가장자리가 투명한 원형 그라디언트 번짐 위에 밝은 심.
+ * 역할색이 주인공이라 선은 가늘고(카드 160px에서 약 1px) 번짐은 옅다. 톤: 보통 = 켜짐, 사망 회색 = 꺼짐(번짐 없이 어두운 선만,
+ * ink가 회색으로 바꾼다), 피격 번쩍 = 그리지 않는다(흰 실루엣 밖으로 번짐이 새지 않게)
+ */
+export interface FrontNeon {
+  /** 네온 선 (d = 경로, width = 밝은 심 두께, k = 세기 0~1: 번짐 · 심의 진하기) */
+  line(d: string, width: number, k?: number): void;
+  /** 발광 점 (LED · 렌즈 빛 · 버클): 심 반지름 r, 번짐 반지름 halo (없으면 r × 2.8) */
+  dot(x: number, y: number, r: number, k?: number, halo?: number): void;
+}
+
+/** 번짐 배율 (선 두께 · 점 반지름 대비) */
+const NEON_SPREAD = { line: 3.2, dot: 2.8 } as const;
+
+export function frontNeon(sk: Sketch, tone: Tone): FrontNeon {
+  const ink = inkFor(tone);
+  if (tone === 'flash') return { line: () => undefined, dot: () => undefined };
+  if (tone === 'gray')
+    return {
+      line: (d, width) => sk.line(d, solid(ink(NEON_DIM)), width),
+      dot: (x, y, r) => sk.fill(path().circle(x, y, r).d, solid(ink(NEON_DIM))),
+    };
+  return {
+    line: (d, width, k = 1) => {
+      sk.line(d, solid(NEON, 0.2 * k), width * NEON_SPREAD.line);
+      sk.line(d, solid(NEON_TEXT, Math.min(1, 0.55 + 0.45 * k)), width);
+    },
+    dot: (x, y, r, k = 1, halo = r * NEON_SPREAD.dot) => {
+      const R = Math.max(r, halo);
+      sk.fill(
+        path().circle(x, y, R).d,
+        radial(x, y, R, [
+          [0, NEON, 0.6 * k],
+          [0.4, NEON, 0.2 * k],
+          [1, NEON, 0],
+        ]),
+      );
+      sk.fill(
+        path().circle(x, y, r).d,
+        radial(x, y, r, [
+          [0, NEON_TEXT],
+          [1, NEON],
+        ]),
+      );
+    },
+  };
 }
