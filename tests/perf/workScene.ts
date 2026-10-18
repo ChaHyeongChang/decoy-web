@@ -13,6 +13,8 @@ export interface WorkScene {
   role: 'runner' | 'monster';
   /** ?scale (백버퍼 배율). GPU가 없는 컨테이너 · CI에서 SwiftShader 래스터가 1200프레임을 막지 않게 줄인다(셈은 이 배율 기준) */
   scale?: number;
+  /** ?chars (캐릭터 스타일, 캐릭터 리디자인 2단계). 없으면 기본(기존) */
+  chars?: 'new';
 }
 
 export const WORK_SCENES: WorkScene[] = [
@@ -23,6 +25,17 @@ export const WORK_SCENES: WorkScene[] = [
   { name: 'webgl-high-monster', project: 'webgl', quality: 'high', role: 'monster' },
   // 일의 양 예산 게이트용 WebGL 장면 (tests/e2e/perf-budget.webgl.spec.ts): 백버퍼 1/4 — 원래 크기는 CI 러너에서 4분을 넘겼다
   { name: 'webgl-high-runner-s25', project: 'webgl', quality: 'high', role: 'runner', scale: 0.25 },
+  // 새 캐릭터 스타일 (캐릭터 리디자인 2단계): 같은 조작 · 같은 시드. 예산은 기존 스타일 기준값을 그대로 건다(새 스타일도 그 안)
+  { name: 'canvas-high-runner-new', project: 'canvas', quality: 'high', role: 'runner', chars: 'new' },
+  { name: 'canvas-high-monster-new', project: 'canvas', quality: 'high', role: 'monster', chars: 'new' },
+  {
+    name: 'webgl-high-runner-s25-new',
+    project: 'webgl',
+    quality: 'high',
+    role: 'runner',
+    scale: 0.25,
+    chars: 'new',
+  },
 ];
 
 const HZ = 120;
@@ -111,7 +124,8 @@ export async function measureWork(browser: Browser, sc: WorkScene): Promise<Work
     await page.routeWebSocket(/\/ws$/, (ws) => ws.close({ code: 1011, reason: 'blocked' }));
     const renderer = sc.project === 'canvas' ? '&renderer=canvas' : '';
     const scale = sc.scale !== undefined ? `&scale=${sc.scale}` : '';
-    await page.goto(`/?debug=hook&quality=${sc.quality}${renderer}${scale}`);
+    const chars = sc.chars ? `&chars=${sc.chars}` : '';
+    await page.goto(`/?debug=hook&quality=${sc.quality}${renderer}${scale}${chars}`);
     await page.getByTestId('practice').waitFor({ state: 'visible' });
     await page.waitForFunction(() => window.__DECOY__?.fonts.ready === true, null, { timeout: 30_000 });
     await context.setOffline(true);
