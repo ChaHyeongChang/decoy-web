@@ -10,7 +10,7 @@
 //
 // 캐릭터 스타일(캐릭터 리디자인 2단계): 리그는 만들 때의 아틀라스 스타일을 들고 있다. 새 스타일은 자세마다 구운 몸 그림
 // (art/charFrames.ts 이름 표) 하나 + 그림자만 보인다 — 발 · 윤기 · 발톱 · 눈 · 눈빛 이미지는 새 그림 안에 있어 알파 0이다.
-// 새 스타일 괴물 화면 생존자도 hiddenFrameNew(걷기 위상 · 걷기 세기 · 수감 여부)만으로 프레임을 고른다.
+// 새 스타일 괴물 화면 생존자도 hiddenFrameNew(걷기 위상 · 걷기 세기)만으로 프레임을 고른다(수감 여부도 쓰지 않는다).
 import Phaser from 'phaser';
 import { TILE_PX, type RoleId } from '@decoy/shared';
 import {
@@ -272,8 +272,8 @@ function placeSurvivor(
  * 괴물 화면의 생존자 (흰색 위장). 역할 · 체력 · 능력 인자가 없다: 그림 키 'survivor-hidden', 발 'foot-hidden',
  * 공통 그림자, 같은 숨쉬기 · 걷기 곡선. reveal은 서버가 능력 노출 창(1초) 동안 보낸 역할 → 역할색 테두리 + 머리 위 문양.
  * others = 이 화면에 그린 다른 캐릭터 몸 원 (노출 문양이 그 몸과 겹치지 않는 자리를 고른다).
- * captive = 수감 상태 (괴물도 받는 status): 새 스타일만 수감 자세 프레임을 고른다(art/charFrames.ts hiddenFrameNew).
- * reveal은 테두리 · 문양에만 쓰고 프레임을 고르는 데 쓰지 않는다
+ * 새 스타일 프레임은 걷기 위상 · 걷기 세기로만 고른다(art/charFrames.ts hiddenFrameNew — 수감 자세도 쓰지 않는다: 기존 스타일과
+ * 같은 정보량). reveal은 테두리 · 문양에만 쓰고 프레임을 고르는 데 쓰지 않는다
  */
 export function drawHiddenSurvivor(
   rig: SurvivorRig,
@@ -287,7 +287,6 @@ export function drawHiddenSurvivor(
   clockMs: number,
   bodyR: number,
   others: readonly BodyDisk[] = [],
-  captive = false,
 ): void {
   const p = hiddenSurvivorPose(
     x,
@@ -301,7 +300,7 @@ export function drawHiddenSurvivor(
     PROTECTED_ALPHA,
     hiddenScratch,
   );
-  const body = rig.style === 'new' ? hiddenFrameNew(walkPhase, stepping, captive) : p.sprite;
+  const body = rig.style === 'new' ? hiddenFrameNew(walkPhase, stepping) : p.sprite;
   placeSurvivor(rig, body, p.foot, p.x, p.y, p.rotation, p.scale, p.feet, p.alpha, bodyR, 0);
   put(rig.flash, HIDDEN_FLASH, x * T, y * T, p.rotation, p.scale / rig.tpw, p.scale / rig.tpw, 0);
   attachments(rig, x, y, p.scale, p.alpha, protectedFlag, p.blinkOutline, p.reveal, bodyR, others);

@@ -168,6 +168,8 @@ describe('괴물 화면 생존자 (흰색 위장)', () => {
       draw(rig, 1, 2, 0, 0, 0, false, null, 0, 0.3, 2);
       // @ts-expect-error reveal 자리에 역할이 아닌 값(능력 상태 등)을 넣을 수 없다
       draw(rig, 1, 2, 0, 0, 0, false, { abilityActive: 3 }, 0, 0.3);
+      // @ts-expect-error 다른 몸 원 뒤에 상태 값(수감 · 구조 여부 등)을 넘길 자리가 없다 (캐릭터 리디자인: 새 스타일도 같다)
+      draw(rig, 1, 2, 0, 0, 0, false, null, 0, 0.3, [], true);
     };
     expect(typeof typeOnly).toBe('function');
     // 순수 함수도 역할 인자가 없다: 9개 (x, y, face, walkPhase, stepping, protected, reveal, clock, protectedAlpha)

@@ -1711,7 +1711,6 @@ export class WorldRenderer {
           animMs,
           sR,
           others,
-          s.status === 'imprisoned',
         );
         if (s.role) {
           info.push({

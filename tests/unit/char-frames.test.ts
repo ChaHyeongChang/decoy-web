@@ -5,7 +5,6 @@
 //  - 모든 프레임 그림이 굽기 상자 안 · 크기 기준 안
 import { describe, expect, it } from 'vitest';
 import {
-  CAPTIVE_WALK_FRAMES,
   CLOAK_FRAMES,
   EMPTY_ALIASES,
   HIDDEN_FRAME_NAMES,
@@ -99,51 +98,45 @@ function paintColors(dr: Drawing): number[] {
 }
 
 describe('새 캐릭터 프레임: 괴물 화면 공통 생존자 (VISUAL_SPEC 0장 ③)', () => {
-  it('프레임 고르기는 걷기 위상 · 걷기 세기 · 수감 여부 3개만 받는다 (타입 검사)', () => {
+  it('프레임 고르기는 걷기 위상 · 걷기 세기 2개만 받는다 — 역할 · 체력 · 능력 · 구조 · 수감 자리가 없다 (타입 검사)', () => {
     // 실행하지 않는 함수: tsc -p tests가 @ts-expect-error 줄에 타입 에러가 있는지(= 인자 자리가 없는지) 확인한다
     const typeOnly = (): void => {
-      hiddenFrameNew(0, 1, false);
+      hiddenFrameNew(0, 1);
       // @ts-expect-error 역할을 넘길 자리가 없다
-      hiddenFrameNew(0, 1, false, 'runner');
-      // @ts-expect-error 수감 자리에 역할 · 체력을 넣을 수 없다
-      hiddenFrameNew(0, 1, 'guard');
+      hiddenFrameNew(0, 1, 'runner');
+      // @ts-expect-error 수감 여부를 넘길 자리가 없다 (기존 스타일처럼 수감자와 자유 생존자를 같게 그린다)
+      hiddenFrameNew(0, 1, true);
       // @ts-expect-error 능력 상태(객체)를 넣을 수 없다
-      hiddenFrameNew(0, 1, false, { abilityActive: 3 });
+      hiddenFrameNew(0, 1, { abilityActive: 3 });
     };
     expect(typeof typeOnly).toBe('function');
-    expect(hiddenFrameNew.length).toBe(3);
+    expect(hiddenFrameNew.length).toBe(2);
   });
 
-  it('같은 걷기 · 수감 값이면 누구든 같은 프레임 이름이고, 이름은 공통 생존자 표 안에 있다', () => {
-    const names = new Set<string>([
-      HIDDEN_FRAME_NAMES.rest,
-      HIDDEN_FRAME_NAMES.captive,
-      ...HIDDEN_FRAME_NAMES.walk,
-      ...HIDDEN_FRAME_NAMES.captiveWalk,
-    ]);
+  it('같은 걷기 값이면 누구든 같은 프레임 이름이고, 이름은 공통 생존자 쉬기 · 걷기 표 안에 있다', () => {
+    const names = new Set<string>([HIDDEN_FRAME_NAMES.rest, ...HIDDEN_FRAME_NAMES.walk]);
     const rng = new Rng(11);
     for (let k = 0; k < 2000; k += 1) {
       const phase = rng.next() * 40 - 20;
       const stepping = rng.next() * 1.4 - 0.2;
-      const captive = rng.next() < 0.3;
-      const a = hiddenFrameNew(phase, stepping, captive);
-      expect(hiddenFrameNew(phase, stepping, captive)).toBe(a);
+      const a = hiddenFrameNew(phase, stepping);
+      expect(hiddenFrameNew(phase, stepping)).toBe(a);
       expect(names.has(a), a).toBe(true);
-      expect(a.startsWith('survivor-hidden')).toBe(true);
     }
     // 멈춰 있으면 옛 이름 그대로 (정지 상태 E2E가 두 스타일에서 같은 키를 본다)
-    expect(hiddenFrameNew(1.3, 0, false)).toBe('survivor-hidden');
+    expect(hiddenFrameNew(1.3, 0)).toBe('survivor-hidden');
   });
 
   it("'survivor-hidden*' 프레임은 공통 생존자 그림뿐이고 무채색이다 (역할색 · 괴물 빨강 없음)", () => {
     const hidden = specs.filter((s) => s.name.startsWith('survivor-hidden'));
-    expect(hidden.length).toBe(2 + WALK_FRAMES + 1 + CAPTIVE_WALK_FRAMES);
+    // 쉬기 · 걷기 · 흰 실루엣뿐 (수감 자세 없음)
+    expect(hidden.length).toBe(2 + WALK_FRAMES);
     for (const s of hidden) {
       const d = s.draw(W);
       for (const c of paintColors(d))
         expect(chroma(c), `${s.name} #${c.toString(16)}`).toBeLessThanOrEqual(20 / 255);
     }
-    // 쉬는 자세 · 수감 자세는 COMMON_ART 그림 그대로
+    // 쉬는 자세 · 걷기 자세는 COMMON_ART 그림 그대로
     const same = (name: string, pose: Partial<typeof HIDDEN_REST>): void =>
       expect(toSvg(byName.get(name)!.draw(W), { viewBox: [-2, -2, 4, 4], idPrefix: 'a' })).toBe(
         toSvg(COMMON_ART.top({ ...HIDDEN_REST, ...pose }, { w: W }), {
@@ -152,7 +145,7 @@ describe('새 캐릭터 프레임: 괴물 화면 공통 생존자 (VISUAL_SPEC 0
         }),
       );
     same(HIDDEN_FRAME_NAMES.rest, {});
-    same(HIDDEN_FRAME_NAMES.captive, { captive: true });
+    same(HIDDEN_FRAME_NAMES.walk[2] ?? '', { walk: Math.PI / 2, stride: 1 });
   });
 });
 

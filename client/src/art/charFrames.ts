@@ -7,8 +7,10 @@
 // 새 그림은 신발 · 팔 · 발톱 · 눈 · 눈빛을 몸 그림 안에 담는다: 옛 리그의 발 · 윤기 · 발톱 · 눈 · 눈빛 이미지는 새 스타일에서
 // 빈 칸(EMPTY_ALIASES)을 가리키고 알파 0으로 둔다 — 캐릭터마다 이미지 2장(그림자 + 몸)만 그린다.
 //
-// 괴물 화면의 생존자(흰색 위장, VISUAL_SPEC 0장 ③): hiddenFrameNew는 걷기 위상 · 걷기 세기 · 수감 여부(괴물도 받는 status)만
-// 받는다 — 역할 · 체력 · 능력 · 구조 인자가 없다. 그림은 COMMON_ART(HiddenPose)뿐이다.
+// 괴물 화면의 생존자(흰색 위장, VISUAL_SPEC 0장 ③): hiddenFrameNew는 걷기 위상 · 걷기 세기만 받는다 — 역할 · 체력 · 능력 ·
+// 구조 · 수감 인자가 없다. 그림은 COMMON_ART(HiddenPose)의 쉬기 · 걷기뿐이다. 수감 자세도 쓰지 않는다: 기존 스타일은 수감자와
+// 자유 생존자를 같은 흰 몸으로 그리므로(감옥 문은 수감자만 막아 자유 생존자도 감옥 안에 설 수 있다), 새 스타일만 수감 자세를
+// 그리면 괴물이 고른 그림 설정에 따라 읽을 수 있는 판 정보가 달라진다(검토 반영).
 import { COMMON_ART, MONSTER_ART, SURVIVOR_ART } from './chars/index';
 import type { Drawing } from './chars/kit';
 import {
@@ -158,8 +160,6 @@ export const ROLE_FRAME_NAMES: Readonly<Record<RoleCharId, RoleFrameNames>> = {
 export const HIDDEN_FRAME_NAMES = {
   rest: 'survivor-hidden',
   walk: series('survivor-hidden', 'w', WALK_FRAMES),
-  captive: 'survivor-hidden~c',
-  captiveWalk: series('survivor-hidden', 'cw', CAPTIVE_WALK_FRAMES),
   flash: 'survivor-hidden-flash',
 } as const;
 
@@ -184,15 +184,12 @@ export function phaseIndex(phase: number, n: number): number {
 }
 
 /**
- * 괴물 화면 생존자의 프레임 (흰색 위장). 역할 · 체력 · 능력 · 구조 인자를 받지 않는다 — 걷기 위상 · 걷기 세기 · 수감 여부(status)뿐.
- * 같은 값이면 누구든 같은 이름이다
+ * 괴물 화면 생존자의 프레임 (흰색 위장). 역할 · 체력 · 능력 · 구조 · 수감 인자를 받지 않는다 — 걷기 위상 · 걷기 세기뿐.
+ * 같은 값이면 누구든 같은 이름이고, 멈춰 있으면 기존 스타일과 같은 'survivor-hidden'이다
  */
-export function hiddenFrameNew(walkPhase: number, stepping: number, captive: boolean): string {
+export function hiddenFrameNew(walkPhase: number, stepping: number): string {
   const N = HIDDEN_FRAME_NAMES;
-  const moving = stepping > STEP_MIN;
-  if (captive)
-    return moving ? (N.captiveWalk[phaseIndex(walkPhase, CAPTIVE_WALK_FRAMES)] ?? N.captive) : N.captive;
-  return moving ? (N.walk[phaseIndex(walkPhase, WALK_FRAMES)] ?? N.rest) : N.rest;
+  return stepping > STEP_MIN ? (N.walk[phaseIndex(walkPhase, WALK_FRAMES)] ?? N.rest) : N.rest;
 }
 
 /** 생존자 화면 팀원 · 나의 자세 입력 (그리는 쪽이 아는 값) */
@@ -309,10 +306,6 @@ export function newStyleFrameSpecs(): CharFrameSpec[] {
   const H = HIDDEN_FRAME_NAMES;
   out.push(hiddenSpec(H.rest, {}));
   H.walk.forEach((n, i) => out.push(hiddenSpec(n, { walk: phaseAt(i, WALK_FRAMES), stride: 1 })));
-  out.push(hiddenSpec(H.captive, { captive: true }));
-  H.captiveWalk.forEach((n, i) =>
-    out.push(hiddenSpec(n, { captive: true, walk: phaseAt(i, CAPTIVE_WALK_FRAMES), stride: 1 })),
-  );
   out.push(hiddenSpec(H.flash, { tone: 'flash' }));
   const M = MONSTER_FRAME_NAMES;
   M.idle.forEach((n, i) => out.push(monsterSpec(n, { cloak: phaseAt(i, CLOAK_FRAMES) })));
