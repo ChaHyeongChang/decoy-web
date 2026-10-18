@@ -6,8 +6,13 @@ import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { expect, test } from '@playwright/test';
 
-/** M10 시작 전(7d79dee) 같은 방법으로 잰 값 (바이트). Vite 표시로는 348.45kB. 이 값을 넘지 않는다(휴대폰 첫 접속) */
+/** M10 시작 전(7d79dee) 같은 방법으로 잰 값 (바이트). Vite 표시로는 348.45kB */
 const BEFORE_M10 = 346_679;
+/**
+ * 늘 지키는 상한 (휴대폰 첫 접속): M10 전 값 + 캐릭터 리디자인 그림 코드 몫 8KiB (DECISIONS 8절 '번들 예산').
+ * 새 캐릭터 그림(art/chars, gzip 약 21.6KB)은 줄일 수 없는 그림 명령이라 상한을 그만큼만 올렸다
+ */
+const CAP = BEFORE_M10 + 8 * 1024;
 /**
  * 마일스톤마다의 예산: 직전 마일스톤 병합 값에서 이번 마일스톤이 더 쓸 수 있는 양 (DECISIONS M11 "번들 예산").
  * M10c는 Phaser 사용자 빌드 직후 243,281B에서 +25KiB였다. 다음 마일스톤에서 기준을 그 병합 값으로 옮긴다
@@ -17,19 +22,25 @@ const BEFORE_M10 = 346_679;
 // 프레임 제한 설정 화면 · 프레임 독립성 (DECISIONS 7절 '번들 예산') — PR #18 병합 306,806B에서 +9.5KiB
 // 렌더링 최적화 2(PR #20): 할당을 없앤 재사용 그릇 · 풀, 안개 주기 캐시 · 평평한 재생, 배지 아틀라스, 부채 채우기 · 먼지 칸 캐시,
 // HUD 게이트 · 글자 크기 재기 · 숫자 글자 묶음 (DECISIONS 7절 '번들 예산 (렌더링 최적화 2)')
-const MILESTONE = { name: '렌더링 최적화 2', base: 316_491, baseName: 'PR #19 병합', budget: 7_168 };
+// 캐릭터 리디자인(PR #21): 새 캐릭터 그림 명령(art/chars · charFrames, gzip 약 21.6KB) · 스타일 설정 · 아틀라스 자세 프레임 ·
+// 정면 그림 UI (DECISIONS 8절 '번들 예산')
+const MILESTONE = { name: '캐릭터 리디자인', base: 322_735, baseName: 'PR #20 병합', budget: 28 * 1024 };
 
-test('JS 번들 gzip: 마일스톤 예산 이하, 리마스터 전보다 작다', { tag: '@core' }, () => {
-  const dir = join(process.cwd(), 'client/dist/assets');
-  let total = 0;
-  for (const f of readdirSync(dir))
-    if (f.endsWith('.js')) total += gzipSync(readFileSync(join(dir, f))).length;
-  const kib = (n: number): string => `${n >= 0 ? '+' : ''}${(n / 1024).toFixed(1)}KiB`;
-  const M = MILESTONE;
-  console.log(
-    `[번들] JS gzip ${total}B (${M.baseName} ${M.base}B ${kib(total - M.base)} / ${M.name} 예산 +${M.budget / 1024}KiB, M10 전 ${BEFORE_M10}B ${kib(total - BEFORE_M10)})`,
-  );
-  expect(total).toBeGreaterThan(M.base / 2);
-  expect(total - M.base).toBeLessThanOrEqual(M.budget);
-  expect(total).toBeLessThan(BEFORE_M10);
-});
+test(
+  'JS 번들 gzip: 마일스톤 예산 이하, 상한(리마스터 전 + 캐릭터 그림 몫 8KiB) 아래',
+  { tag: '@core' },
+  () => {
+    const dir = join(process.cwd(), 'client/dist/assets');
+    let total = 0;
+    for (const f of readdirSync(dir))
+      if (f.endsWith('.js')) total += gzipSync(readFileSync(join(dir, f))).length;
+    const kib = (n: number): string => `${n >= 0 ? '+' : ''}${(n / 1024).toFixed(1)}KiB`;
+    const M = MILESTONE;
+    console.log(
+      `[번들] JS gzip ${total}B (${M.baseName} ${M.base}B ${kib(total - M.base)} / ${M.name} 예산 +${M.budget / 1024}KiB, M10 전 ${BEFORE_M10}B ${kib(total - BEFORE_M10)}, 상한 ${CAP}B)`,
+    );
+    expect(total).toBeGreaterThan(M.base / 2);
+    expect(total - M.base).toBeLessThanOrEqual(M.budget);
+    expect(total).toBeLessThan(CAP);
+  },
+);
