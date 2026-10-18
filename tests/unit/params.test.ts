@@ -1,4 +1,4 @@
-// 주소 매개변수: ?scale 재정의(빈 값 → 0.25배 버그 수정) · ?quality (M10a) · ?fpsLimit (렌더링 최적화)
+// 주소 매개변수: ?scale 재정의(빈 값 → 0.25배 버그 수정) · ?quality (M10a) · ?fpsLimit (렌더링 최적화) · ?chars (캐릭터 리디자인)
 // app.ts가 로비 → 로고 PNG를 import하므로 Vite 자산 타입이 필요하다 (vitest는 Vite로 불러온다)
 /// <reference types="vite/client" />
 import { describe, expect, it } from 'vitest';
@@ -55,6 +55,16 @@ describe('readParams', () => {
     expect(readParams('').fpsLimit).toBeNull();
     // 이름은 대소문자를 가린다 (다른 매개변수와 같다)
     expect(readParams('?fpslimit=60').fpsLimit).toBeNull();
+  });
+
+  it('?chars=new|classic (앞뒤 공백 · 대소문자 무시), 그 밖에는 null', () => {
+    expect(readParams('?chars=new').chars).toBe('new');
+    expect(readParams('?chars=classic').chars).toBe('classic');
+    expect(readParams('?chars=NEW').chars).toBe('new');
+    expect(readParams('?chars=%20classic%20').chars).toBe('classic');
+    for (const bad of ['', 'old', '1', 'true', 'news', 'null'])
+      expect(readParams(`?chars=${bad}`).chars, bad).toBeNull();
+    expect(readParams('').chars).toBeNull();
   });
 
   it('측정 표시는 ?debug=1 오버레이: 따로 ?fps 매개변수는 없다', () => {

@@ -55,6 +55,7 @@ import {
   type TravelPiece,
 } from '../art/anim';
 import { MOTE_R, cloakFrameName, ensureAtlas, type AtlasBuild } from '../art/atlas';
+import { NEW_POSE_MS, monsterFrameNew } from '../art/charFrames';
 import { starSlot } from '../art/shapes';
 import {
   DashTrail,
@@ -69,6 +70,7 @@ import {
 } from '../art/fx';
 import { CONE, DANGER, NEON, ROLE, WARN } from '../art/palette';
 import { effectivePreset, type QualityPreset, type RendererKind } from '../gfx/presets';
+import { currentCharStyle } from '../gfx/charStyle';
 import { gfxNow, gfxState, onGfxChange } from '../gfx/state';
 import { MAP_PX_H, MAP_PX_W, MAP_SCALE, MAP_X, MAP_Y } from '../ui/layout';
 import {
@@ -400,6 +402,9 @@ export class WorldRenderer {
     clockMs: 0,
     fade: 1,
     gray: false,
+    action: 0,
+    captive: false,
+    reach: false,
   };
   private readonly monPose: MonsterPose = {
     x: 0,
@@ -430,6 +435,13 @@ export class WorldRenderer {
   private hits: { x: number; y: number; you: boolean; t0: number }[] = [];
   /** 생존자 화면: 팀원 질주 끝 시각 (performance.now, 규칙 시간 sprintDuration) */
   private sprintUntil = 0;
+  /** 새 스타일 자세: 가드 밀치기 · 스카우트 탐지 · 괴물 타격 · 포효 이벤트를 받은 시각 (ms) */
+  private shoveAt = -1e9;
+  private scanAt = -1e9;
+  private strikeAt = -1e9;
+  private roarAt = -1e9;
+  /** 이번 프레임 시각 (monsterPose가 읽는다) */
+  private poseNowMs = 0;
   /**
    * 괴물 화면: 포효 충격파 시작(포효 핑을 받은 시각) · 자리 · 한 번이라도 그렸는가. 처음 그리는 프레임이 이미 끝난 뒤면
    * (프레임이 0.6초보다 느린 기기) 그 프레임부터 시작해 최소 한 번은 보인다
@@ -597,6 +609,7 @@ export class WorldRenderer {
         return;
       case 'attackHit':
         if (isMonster) this.lastStrike = { x: ev.x, y: ev.y, dir: ev.dir, hits: ev.hits, at: nowMs };
+        this.strikeAt = nowMs;
         if (balance)
           this.fxs.slash(
             ev.x,
@@ -613,6 +626,9 @@ export class WorldRenderer {
         if (!balance || ev.x === null || ev.y === null) return;
         if (ev.role === 'runner' && !isMonster && !ev.you)
           this.sprintUntil = nowMs + balance.roles.runner.sprintDuration * 1000;
+        // 새 스타일 팀원 자세 (생존자 화면만. 괴물 화면 생존자 프레임은 능력과 무관하다)
+        if (!isMonster && ev.role === 'guard') this.shoveAt = nowMs;
+        if (!isMonster && ev.role === 'scout') this.scanAt = nowMs;
         if (ev.role === 'guard') {
           // 괴물 화면은 가드가 보일 때만 이 이벤트를 받는다 (안 보이면 기절 충격만 몸 중심에서)
           this.fxs.ring('shockwave', ev.x, ev.y, balance.roles.guard.shoveRange, tS, null, isMonster);
@@ -632,6 +648,11 @@ export class WorldRenderer {
         // 시작은 받은 시각 (프레임 수와 무관). 프레임이 느린 기기에서도 충격파 · 범위가 최소 한 번은 보인다(draw)
         if (isMonster && this.lastMe)
           this.roarWave = { t0: nowMs, x: this.lastMe.x, y: this.lastMe.y, drawn: false };
+        if (isMonster) this.roarAt = nowMs;
+        return;
+      case 'roar':
+        // 생존자 화면: 괴물이 포효했다 (보일 때 새 스타일 포효 자세)
+        if (!isMonster) this.roarAt = nowMs;
         return;
       default:
         return;
@@ -673,12 +694,13 @@ export class WorldRenderer {
     this.fogClock.reset();
   }
 
-  /** 그림 텍스처 (zoom · 반지름이 바뀌면 다시 굽고 그림 묶음을 새로 만든다) */
+  /** 그림 텍스처 (zoom · 반지름 · 캐릭터 스타일이 바뀌면 다시 굽고 그림 묶음을 새로 만든다) */
   private ensureArt(balance: Balance): AtlasBuild {
     const a = ensureAtlas(this.scene.textures, {
       zoom: gfxState.zoom,
       survivorR: balance.survivor.radius,
       monsterR: balance.monster.radius,
+      style: currentCharStyle(),
     });
     if (a.key !== this.atlasKey) {
       this.resetRigs();
@@ -705,7 +727,13 @@ export class WorldRenderer {
   private survivorRig(id: string): SurvivorRig {
     let r = this.survivorRigs.get(id);
     if (!r) {
-      r = new SurvivorRig(this.scene, this.atlasKey, this.layers, this.atlas?.texPerWorld ?? 1);
+      r = new SurvivorRig(
+        this.scene,
+        this.atlasKey,
+        this.layers,
+        this.atlas?.texPerWorld ?? 1,
+        this.atlas?.params.style ?? 'classic',
+      );
       this.survivorRigs.set(id, r);
     }
     r.used = true;
@@ -715,7 +743,13 @@ export class WorldRenderer {
   private monsterRig(id: string): MonsterRig {
     let r = this.monsterRigs.get(id);
     if (!r) {
-      r = new MonsterRig(this.scene, this.atlasKey, this.layers, this.atlas?.texPerWorld ?? 1);
+      r = new MonsterRig(
+        this.scene,
+        this.atlasKey,
+        this.layers,
+        this.atlas?.texPerWorld ?? 1,
+        this.atlas?.params.style ?? 'classic',
+      );
       this.monsterRigs.set(id, r);
     }
     r.used = true;
@@ -1562,7 +1596,22 @@ export class WorldRenderer {
     p.clockMs = clockMs;
     p.fade = fade;
     p.gray = gray;
+    // 새 스타일 자세 입력은 부르는 쪽이 이어서 쓴다 (기본: 능력 · 수감 · 구조 없음)
+    p.action = 0;
+    p.captive = false;
+    p.reach = false;
     return p;
+  }
+
+  /** 새 스타일 팀원 능력 동작 0~1 (러너 질주 중 · 가드 밀치기 · 스카우트 탐지 직후). 생존자 화면에서만 부른다 */
+  private teamAction(role: RoleId, self: boolean, abilityActive: number, nowMs: number): number {
+    if (role === 'runner') return (self ? abilityActive > 0 : nowMs < this.sprintUntil) ? 1 : 0;
+    const at = role === 'guard' ? this.shoveAt : this.scanAt;
+    const t = nowMs - at;
+    const dur = role === 'guard' ? NEW_POSE_MS.shove : NEW_POSE_MS.scan;
+    if (t < 0 || t >= dur) return 0;
+    // 가드: 앞 30%는 밀기 시작(0.5), 그 뒤는 끝까지 민 자세(1)
+    return role === 'guard' && t < dur * 0.3 ? 0.5 : 1;
   }
 
   private drawCharacters(
@@ -1584,6 +1633,7 @@ export class WorldRenderer {
     let stunAny = false;
     let stunOpp = false;
     const realMs = v.nowMs;
+    this.poseNowMs = realMs;
     // 입자의 태어난 시각 = 바뀐 순간: 이 기기 시각 t(ms) → 장식 시계(초) (clockMs − (realMs − t)) / 1000
     // 지난 피격 정리 (제자리에서, 같은 순서)
     const hits = this.hits;
@@ -1661,6 +1711,7 @@ export class WorldRenderer {
           animMs,
           sR,
           others,
+          s.status === 'imprisoned',
         );
         if (s.role) {
           info.push({
@@ -1681,25 +1732,25 @@ export class WorldRenderer {
       } else {
         const role = s.role ?? 'runner';
         const appear = fade?.kind === 'appear' ? 1 - fadeOut(realMs - fade.t0, ANIM.imprisonAppearMs) : 1;
-        drawTeamSurvivor(
-          rig,
-          this.teamPoseOf(
-            role,
-            s.x,
-            s.y,
-            s.face,
-            this.phaseOf(g),
-            g.stepping,
-            s.protected,
-            false,
-            this.hitFor(s.x, s.y, false, realMs),
-            seedOf(id),
-            animMs,
-            appear,
-            false,
-          ),
-          sR,
+        const tp = this.teamPoseOf(
+          role,
+          s.x,
+          s.y,
+          s.face,
+          this.phaseOf(g),
+          g.stepping,
+          s.protected,
+          false,
+          this.hitFor(s.x, s.y, false, realMs),
+          seedOf(id),
+          animMs,
+          appear,
+          false,
         );
+        tp.action = this.teamAction(role, false, 0, v.nowMs);
+        tp.captive = s.status === 'imprisoned';
+        tp.reach = s.rescue !== null && s.rescue > 0;
+        drawTeamSurvivor(rig, tp, sR);
         if (s.hp !== null && s.hp < balance.survivor.maxHp && s.status === 'free')
           drawInjury(this.attachG, s.x, s.y, s.face, sR);
         if (role === 'runner' && v.nowMs < this.sprintUntil && g.stepping > 0.3)
@@ -1834,25 +1885,26 @@ export class WorldRenderer {
           const rig = this.survivorRig(v.selfId);
           const prot = (snap.you.surv?.protectLeft ?? 0) > 0;
           const appear = fade?.kind === 'appear' ? 1 - fadeOut(realMs - fade.t0, ANIM.imprisonAppearMs) : 1;
-          drawTeamSurvivor(
-            rig,
-            this.teamPoseOf(
-              role,
-              v.me.x,
-              v.me.y,
-              v.me.face,
-              this.phaseOf(g),
-              g.stepping,
-              prot,
-              true,
-              this.hitFor(v.me.x, v.me.y, true, realMs),
-              seedOf(v.selfId),
-              animMs,
-              appear,
-              false,
-            ),
-            sR,
+          const tp = this.teamPoseOf(
+            role,
+            v.me.x,
+            v.me.y,
+            v.me.face,
+            this.phaseOf(g),
+            g.stepping,
+            prot,
+            true,
+            this.hitFor(v.me.x, v.me.y, true, realMs),
+            seedOf(v.selfId),
+            animMs,
+            appear,
+            false,
           );
+          const mine = snap.you.surv;
+          tp.action = this.teamAction(role, true, mine?.abilityActive ?? 0, v.nowMs);
+          tp.captive = st === 'imprisoned';
+          tp.reach = (mine?.rescue ?? 0) > 0;
+          drawTeamSurvivor(rig, tp, sR);
           const s = snap.you.surv;
           if (s && s.hp < balance.survivor.maxHp && s.status === 'free')
             drawInjury(this.attachG, v.me.x, v.me.y, v.me.face, sR);
@@ -1954,11 +2006,23 @@ export class WorldRenderer {
     const frames = frameCount(ANIM.cloakFrames, half);
     const moving = g.stepping > 0.3;
     const i = cloakFrame(tS, moving, frames) * (ANIM.cloakFrames / frames);
-    const frame = stunned
-      ? 'monster-stun'
-      : dashing
-        ? 'monster-dash'
-        : cloakName(moving ? 'move' : 'idle', i);
+    const isNew = this.atlas?.params.style === 'new';
+    const now = this.poseNowMs;
+    const frame = isNew
+      ? monsterFrameNew({
+          stunned,
+          dashing,
+          windup: raise > 0,
+          strike: now - this.strikeAt >= 0 && now - this.strikeAt < NEW_POSE_MS.strike,
+          roar: now - this.roarAt >= 0 && now - this.roarAt < NEW_POSE_MS.roar,
+          moving,
+          cloak: i,
+        })
+      : stunned
+        ? 'monster-stun'
+        : dashing
+          ? 'monster-dash'
+          : cloakName(moving ? 'move' : 'idle', i);
     const blink = eyeBlink(tS, 0.7);
     // 그릇 하나를 다시 쓴다 (drawMonsterRig가 바로 읽는다)
     const p = this.monPose;
@@ -1967,7 +2031,8 @@ export class WorldRenderer {
     p.aim = aim;
     p.frame = frame;
     p.raise = stunned ? 0 : raise;
-    p.stretch = dashing ? dashStretch(0, 1) * 0.6 : 0;
+    // 새 스타일 돌진 그림은 이미 늘어난 자세라 더 늘이지 않는다 (크기 기준 1.35r, art/chars/measure.ts)
+    p.stretch = dashing && !isNew ? dashStretch(0, 1) * 0.6 : 0;
     p.eyes = stunned ? 'stun' : blink ? 'blink' : 'open';
     p.glow = this.preset.tier !== 'low';
     p.scale = 1 + 0.012 * Math.sin(tS * 2.4);
