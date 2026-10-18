@@ -1,10 +1,17 @@
 // 첫 판 조작 안내 오버레이(5초, 아무 키나 누르면 닫힘, 입력을 막지 않음)와 Tab 점수판 (M10c: 깎은 모서리 패널 + 키캡).
 // Tab 점수판이 열리면 조작 안내는 닫힌다(GameScene, 겹침 버그). 점수판의 괴물 쪽은 익명 규칙 그대로(생존자 N · 상태 · 수감만).
 // M12 터치: 점수판(점수판 버튼으로 켜고 끔)은 그림 HUD.s배 · 글자 CSS 12px 이상, 조작 안내는 터치 문구(controlsText 'touch'),
-// 아래에 닫기 안내(화면을 누르면 닫힘). 낮은 화면에서 다 들어가지 않으면 조작 안내 줄을 빼고 상태 표만 보인다
-import type { AnonStatus, Balance, MatchInfo, Snapshot } from '@decoy/shared';
+// 아래에 닫기 안내(화면을 누르면 닫힘). 낮은 화면에서 다 들어가지 않으면 조작 안내 줄을 빼고 상태 표만 보인다.
+// 캐릭터 리디자인 2단계: 캐릭터 스타일이 새 캐릭터면 첫 판 조작 안내의 역할 문양 자리에 내 역할 정면 그림(상반신)을 둔다
+import Phaser from 'phaser';
+import type { AnonStatus, Balance, MatchInfo, Role, Snapshot } from '@decoy/shared';
 import { CONTROLS, HUD_TEXT, ROLE_CARDS, controlsText } from '../data/storyText';
-import { UI } from '../art/palette';
+import { MONSTER_ART, SURVIVOR_ART } from '../art/chars/index';
+import { clearPathCache, drawToCanvas, type Drawing } from '../art/chars/kit';
+import { FRONT_REST } from '../art/chars/types';
+import { ROLE, UI } from '../art/palette';
+import { currentCharStyle } from '../gfx/charStyle';
+import { createCanvasTexture, makeCanvas, nextFogKey, removeCanvasTexture, rgba } from '../render/fogPaint';
 import { ABILITY_ICON, ACCENT, FR, HC, STATUS_LOOK, parseControl, teamCards } from './hudArt';
 import { fontGeneration } from './fonts';
 import { Slice, Spr, fitText, setText, type HudKit } from './hudKit';
@@ -189,11 +196,137 @@ class Panel {
   }
 }
 
+/** 첫 판 조작 안내 정면 그림 (새 캐릭터 스타일): 크기 · 머리줄 위 여백 (논리 px). 기존 스타일은 문양 32px · 머리줄 40 · 위 22 */
+const FIGURE = { size: 64, top: 16, gap: 14 } as const;
+/** 정면 그림 외곽선 (그림 단위: 반쪽 크기 = 1). 64px에서 약 1.5px */
+const FIGURE_OUTLINE = 0.046;
+/** 정면 그림 원판 바탕 (역할 문양 배지와 같은 어두운 남색) */
+const FIGURE_DISC = 0x0b1622;
+
+/** 내 역할 정면 그림 (상반신). 괴물이면 괴물, 생존자면 자기 역할 — 남의 역할은 그리지 않는다 */
+function figureDrawing(role: Role): Drawing {
+  const pose = { ...FRONT_REST, bust: true };
+  const o = { w: FIGURE_OUTLINE };
+  return role === 'monster' ? MONSTER_ART.front(pose, o) : SURVIVOR_ART[role].front(pose, o);
+}
+
+/**
+ * 정면 그림 원판 캔버스 (px × px 기기 픽셀): 어두운 원판 + 아래에서 비치는 역할색 빛 + 원 안으로 자른 상반신 + 역할색 테두리.
+ * 문양 배지(원판 + 역할색 테두리)와 같은 언어다
+ */
+function paintFigure(role: Role, px: number, dev: number): HTMLCanvasElement {
+  const { canvas, ctx } = makeCanvas(px, px);
+  const r = px / 2;
+  const ring = Math.max(1, Math.round(2 * dev));
+  const inner = r - ring;
+  const col = ROLE[role];
+  ctx.beginPath();
+  ctx.arc(r, r, r - ring / 2, 0, Math.PI * 2);
+  ctx.fillStyle = rgba(FIGURE_DISC, 1);
+  ctx.fill();
+  const glow = ctx.createRadialGradient(r, px * 0.95, 0, r, px * 0.95, px * 0.75);
+  glow.addColorStop(0, rgba(col, 0.42));
+  glow.addColorStop(1, rgba(col, 0));
+  ctx.fillStyle = glow;
+  ctx.fill();
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(r, r, inner, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.translate(r, r + inner * 0.06);
+  drawToCanvas(ctx, figureDrawing(role), inner);
+  ctx.restore();
+  ctx.beginPath();
+  ctx.arc(r, r, r - ring / 2, 0, Math.PI * 2);
+  ctx.lineWidth = ring;
+  ctx.strokeStyle = rgba(col, 1);
+  ctx.stroke();
+  // 굽기 한 번이 끝났다: 해석해 둔 경로를 비운다 (판 동안 다시 쓰지 않는다)
+  clearPathCache();
+  return canvas;
+}
+
+/**
+ * 첫 판 조작 안내의 내 역할 정면 그림 (새 캐릭터 스타일): 보일 때 작은 캔버스에 기기 픽셀 1:1로 한 번 그려 텍스처로 올리고
+ * (텍스처 바이트 집계에 든다), 닫히면 · 장면이 끝나면 지운다. 기기 배율이 바뀌면 다시 그린다(1텍셀 = 기기 1px로 선명하게)
+ */
+class HelpFigure {
+  private img: Phaser.GameObjects.Image | null = null;
+  private key = '';
+  private dev = 0;
+  private x = 0;
+  private y = 0;
+
+  constructor(
+    private readonly kit: HudKit,
+    private readonly role: Role,
+  ) {
+    kit.scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.dispose());
+  }
+
+  /** 보이는데 기기 배율이 바뀌었다 (다시 그려야 한다) */
+  get stale(): boolean {
+    return this.img !== null && this.dev !== this.kit.dev;
+  }
+
+  /** 왼쪽 위 자리 (논리 px) */
+  place(x: number, y: number): void {
+    this.x = x;
+    this.y = y;
+    this.position();
+  }
+
+  show(on: boolean): void {
+    if (!on) this.dispose();
+    else if (!this.img || this.stale) this.paint();
+  }
+
+  private paint(): void {
+    const dev = this.kit.dev;
+    const scene = this.kit.scene;
+    const key = nextFogKey('help-figure');
+    createCanvasTexture(
+      scene.textures,
+      key,
+      paintFigure(this.role, Math.max(8, Math.round(FIGURE.size * dev)), dev),
+    );
+    if (this.img) this.img.setTexture(key);
+    else
+      this.img = scene.add
+        .image(0, 0, key)
+        .setOrigin(0, 0)
+        .setDepth(DEPTH + 1)
+        .setName('helpFigure');
+    if (this.key) removeCanvasTexture(scene.textures, this.key);
+    this.key = key;
+    this.dev = dev;
+    this.img.setScale(1 / dev).setVisible(true);
+    this.position();
+  }
+
+  /** 기준점을 기기 픽셀 격자에 맞춘다 (Spr와 같다) */
+  private position(): void {
+    if (!this.img) return;
+    const z = this.dev;
+    this.img.setPosition(Math.round(this.x * z) / z, Math.round(this.y * z) / z);
+  }
+
+  private dispose(): void {
+    this.img?.destroy();
+    this.img = null;
+    if (this.key) removeCanvasTexture(this.kit.scene.textures, this.key);
+    this.key = '';
+  }
+}
+
 export class TutorialOverlay {
   private readonly panel: Panel;
   private readonly parts: Part[] = [];
   private readonly controls: ControlsBlock;
+  /** 기존 스타일: 역할 문양 (새 캐릭터 스타일이면 숨기고 figure를 쓴다) */
   private readonly glyph: Spr;
+  /** 새 캐릭터 스타일: 내 역할 정면 그림 (기존 스타일이면 null) */
+  private readonly figure: HelpFigure | null;
   private readonly name: CrispText;
   private readonly ability: CrispText;
   private readonly close: CrispText;
@@ -220,6 +353,8 @@ export class TutorialOverlay {
       team === 'monster' ? FR.icon('attack', HC.red, 18) : FR.icon('point', 0x22d3ee, 18),
     );
     kit.tag = prev;
+    // 판 동안 바뀌지 않는다 (판 시작 때 스타일)
+    this.figure = currentCharStyle() === 'new' ? new HelpFigure(kit, info.role) : null;
     this.layout();
     this.parts.push(this.glyph, this.name, this.ability, this.close);
     this.apply(false);
@@ -229,18 +364,30 @@ export class TutorialOverlay {
   private layout(): void {
     this.gen = fontGeneration();
     this.controls.relayoutIfStale();
-    const { glyph, name, ability, close, info } = this;
-    const headW = 44 + Math.ceil(name.width) + 16 + Math.ceil(ability.width);
+    const { glyph, figure, name, ability, close, info } = this;
+    // 머리줄: 기존 = 문양 32px(글자는 44px 오른쪽), 새 캐릭터 = 정면 그림 64px(글자는 그림 가운데 높이)
+    const top = figure ? FIGURE.top : 22;
+    const headH = figure ? FIGURE.size : 40;
+    const textX = figure ? FIGURE.size + FIGURE.gap : 44;
+    const headW = textX + Math.ceil(name.width) + 16 + Math.ceil(ability.width);
     const w = Math.max(headW, this.controls.width, close.width) + PAD * 2;
-    const h = 22 + 40 + 18 + this.controls.height + 22 + 24 + 22;
+    const h = top + headH + 18 + this.controls.height + 22 + 24 + 22;
     const x = Math.round(VIEW_W / 2 - w / 2);
     const y = Math.round(HUD.tutorialY - h / 2);
     this.panel.plate.set('ov', x, y, w, h);
-    glyph.set(FR.glyph(info.role === 'monster' ? 'monster' : info.role, 32), x + PAD + 16, y + 22 + 18);
-    name.setPosition(x + PAD + 44, y + 24);
-    ability.setPosition(x + PAD + 44 + Math.ceil(name.width) + 16, y + 29);
-    this.panel.rule(0, x + PAD - 8, y + 22 + 40 + 6, w - PAD * 2 + 16);
-    this.controls.place(x + PAD, y + 22 + 40 + 18);
+    if (figure) {
+      glyph.set('', 0, 0);
+      figure.place(x + PAD, y + top);
+      const ny = Math.round(y + top + headH / 2 - name.height / 2);
+      name.setPosition(x + PAD + textX, ny);
+      ability.setPosition(x + PAD + textX + Math.ceil(name.width) + 16, ny + 5);
+    } else {
+      glyph.set(FR.glyph(info.role === 'monster' ? 'monster' : info.role, 32), x + PAD + 16, y + 22 + 18);
+      name.setPosition(x + PAD + 44, y + 24);
+      ability.setPosition(x + PAD + 44 + Math.ceil(name.width) + 16, y + 29);
+    }
+    this.panel.rule(0, x + PAD - 8, y + top + headH + 6, w - PAD * 2 + 16);
+    this.controls.place(x + PAD, y + top + headH + 18);
     this.panel.rule(1, x + PAD - 8, y + h - 22 - 24 - 10, w - PAD * 2 + 16);
     close.setPosition(x + PAD, y + h - 22 - 20);
   }
@@ -250,6 +397,8 @@ export class TutorialOverlay {
     this.panel.show(on);
     this.controls.show(on);
     for (const p of this.parts) showPart(p, on);
+    // 정면 그림은 보일 때 그리고 닫히면 텍스처까지 지운다
+    this.figure?.show(on);
   }
 
   show(nowMs: number, seconds: number): void {
@@ -262,6 +411,7 @@ export class TutorialOverlay {
     if (!this.on) return;
     if (close || nowMs >= this.until) this.apply(false);
     else if (this.gen !== fontGeneration()) this.layout();
+    else if (this.figure?.stale) this.figure.show(true);
   }
 
   get visible(): boolean {

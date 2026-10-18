@@ -826,7 +826,8 @@ test('진동: 활성화 전 0번, 피격 1번 · 오래된 피격 0번, 발각 �
   expect((await vib()).map((v) => v.pattern)).toEqual([[70], [35, 80, 35]]);
   // 설정에서 끄기 → 0번, 다시 켜기 → 울림
   await press(page.getByTestId('settings-button'));
-  // 설정 판 내용: 진동 · 프레임 제한(렌더링 최적화, 자동 · 60 · 120 — 고르는 시험은 frame-limit.spec) · 안내 다시 보기 순서
+  // 설정 판 내용: 진동 · 프레임 제한(렌더링 최적화, 자동 · 60 · 120 — 고르는 시험은 frame-limit.spec) · 캐릭터 스타일(기존 ·
+  // 새 캐릭터 — 고르는 시험은 char-style-touch.spec) · 안내 다시 보기 순서
   const settingsOrder = await page
     .getByTestId('settings-panel')
     .locator('[data-testid]')
@@ -839,6 +840,9 @@ test('진동: 활성화 전 0번, 피격 1번 · 오래된 피격 0번, 발각 �
     'frame-limit-60',
     'frame-limit-120',
     'frame-limit-hint',
+    'char-style-row',
+    'char-style-classic',
+    'char-style-new',
     'tutorial-replay',
   ]);
   await expect(page.getByTestId('frame-limit-auto')).toHaveAttribute('aria-pressed', 'true');

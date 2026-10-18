@@ -27,8 +27,26 @@ import {
   saveQualityChoice,
   type QualityChoice,
 } from '../gfx/quality';
+import {
+  CHAR_STYLES,
+  currentCharStyle,
+  onCharStyleChange,
+  parseCharStyle,
+  setCharStyle,
+  type CharStyle,
+} from '../gfx/charStyle';
 import { SettingsMenu, TouchTutorialCard } from './lifecycleUi';
-import { blueprintSvg, glyphSvg, h, icon, keycap, logoImg, roleFigureSvg, roleVars, svgSpan } from './uiArt';
+import {
+  blueprintSvg,
+  characterFigureSvg,
+  glyphSvg,
+  h,
+  icon,
+  keycap,
+  logoImg,
+  roleVars,
+  svgSpan,
+} from './uiArt';
 
 export interface LobbyActions {
   create(name: string): void;
@@ -89,6 +107,24 @@ const FRAME_LIMIT_OPTIONS: readonly { value: FrameLimit; label: string }[] = [
   { value: '60', label: UI_TEXT.frameLimit60 },
   { value: '120', label: UI_TEXT.frameLimit120 },
 ];
+
+/** 캐릭터 스타일 선택지 (캐릭터 리디자인 2단계): 기존 · 새 캐릭터 */
+const CHAR_STYLE_LABELS: Record<CharStyle, string> = {
+  classic: UI_TEXT.charStyleClassic,
+  new: UI_TEXT.charStyleNew,
+};
+
+/** 정면 그림(새 캐릭터)에 붙는 클래스: 정면 그림만 크기 · 자리를 따로 맞춘다 (style.css — 기존 화면은 그대로) */
+const FRONT_FIGURE_CLASS = 'front';
+
+/**
+ * 역할 그림 상자 (방 역할 카드 rc-figure · 연습 역할 고르기 pr-figure): 캐릭터 스타일을 따른다.
+ * 기존 = 위에서 본 실루엣, 새 캐릭터 = 정면 그림 + 'front' 클래스. 그림 하나 = svg 하나
+ */
+function roleFigure(cls: string, role: Role): HTMLSpanElement {
+  const front = currentCharStyle() === 'new';
+  return svgSpan(front ? `${cls} ${FRONT_FIGURE_CLASS}` : cls, characterFigureSvg(role));
+}
 
 /**
  * 능력 줄 (M12 입력 방식별): 키보드 "Space 질주 — 3초간 …" · "좌클릭 공격 · 우클릭 시야 전환 · …" → 아이콘 · 키캡 · 이름 · 설명,
@@ -209,6 +245,31 @@ export class LobbyUI {
       if (menu.useful) this.settings = menu;
     }
     host.appendChild(this.root);
+    // 캐릭터 스타일이 바뀌면 (첫 화면 선택 상자 · 휴대폰 설정 판 · 디버그 훅) 보이는 역할 그림을 맞춘다.
+    // LobbyUI는 앱과 수명이 같다(app.ts가 한 번 만든다): 구독을 풀 때가 없다
+    onCharStyleChange(() => this.charStyleChanged());
+  }
+
+  /**
+   * 캐릭터 스타일이 바뀌었다: 방 화면 · 빠른 매칭 대기 화면은 다시 그리고(역할 카드), 연습 역할 고르기는 그림만 바꾼다.
+   * 첫 화면은 다시 그리지 않는다(입력한 이름 · 방 코드가 지워진다) — 선택 상자 값만 맞춘다. 숨어 있으면(판 중) 다음에 그릴 때 따른다
+   */
+  private charStyleChanged(): void {
+    if (this.root.style.display === 'none') return;
+    if (this.lastLobby && this.atRoom) {
+      // 빠른 매칭 남은 시간 글자는 다음 tick(0.25초)까지 비므로 그대로 옮겨 둔다
+      const countdown = this.quickCountdown?.textContent ?? '';
+      this.renderRoom(this.lastLobby);
+      if (this.quickCountdown && countdown !== '' && this.quickCountdown.textContent === '')
+        this.quickCountdown.textContent = countdown;
+      return;
+    }
+    for (const role of ROLE_ORDER)
+      this.content
+        .querySelector(`[data-testid="practice-role-${role}"] > .pr-figure`)
+        ?.replaceWith(roleFigure('pr-figure', role));
+    const select = this.content.querySelector<HTMLSelectElement>('[data-testid="char-style-select"]');
+    if (select) select.value = currentCharStyle();
   }
 
   /** 첫 화면이 보이는 중인가 */
@@ -368,7 +429,7 @@ export class LobbyUI {
       const b = h(
         'button',
         { class: 'practice-role cut', 'data-testid': `practice-role-${role}`, style: roleVars(role) },
-        svgSpan('pr-figure', roleFigureSvg(role)),
+        roleFigure('pr-figure', role),
         h(
           'span',
           { class: 'rc-head' },
@@ -526,12 +587,14 @@ export class LobbyUI {
   /**
    * 그래픽: 자동 / 높음 / 중간 / 낮음. 고르면 저장하고 바로 적용한다 (gfx/quality.ts, main.ts).
    * 저장하지 못해도 이번 접속에는 고른 값이 적용되고, 저장되지 않는다는 안내를 짧게 띄운다.
-   * 같은 줄 오른쪽: PC는 프레임 제한 선택 상자, 터치는 설정 단추(프레임 제한은 설정 판 안)
+   * 같은 줄 오른쪽: PC는 프레임 제한 선택 상자, 터치는 설정 단추(프레임 제한 · 캐릭터 스타일은 설정 판 안).
+   * PC는 그 아래 줄에 캐릭터 스타일 선택 상자
    */
   private qualityRow(): HTMLElement[] {
-    // 저장 실패 안내는 품질 · 프레임 제한이 함께 쓴다 (저장소가 막히면 둘 다 못 쓴다)
+    // 저장 실패 안내는 품질 · 프레임 제한 · 캐릭터 스타일이 함께 쓴다 (저장소가 막히면 셋 다 못 쓴다)
     let qualityUnsaved = false;
     let frameUnsaved = false;
+    let styleUnsaved = false;
     const select = h('select', { 'data-testid': 'quality-select' });
     const current: QualityChoice = this.qualityChoice ?? loadSavedQuality() ?? 'auto';
     for (const o of QUALITY_OPTIONS) {
@@ -546,7 +609,7 @@ export class LobbyUI {
     );
     note.hidden = true;
     const syncNote = (): void => {
-      note.hidden = !(qualityUnsaved || frameUnsaved);
+      note.hidden = !(qualityUnsaved || frameUnsaved || styleUnsaved);
     };
     select.addEventListener('change', () => {
       const choice = parseQualityChoice(select.value);
@@ -565,12 +628,43 @@ export class LobbyUI {
     );
     // 터치 모드: 그래픽 줄 오른쪽에 설정 단추 (진동 · 프레임 제한 · 터치 안내 다시 보기)
     if (this.settings) return [h('div', { class: 'row' }, row, this.settings.button()), note];
-    // PC: 그래픽 줄 오른쪽에 프레임 제한 (좁으면 다음 줄로)
+    // PC: 그래픽 줄 오른쪽에 프레임 제한 (좁으면 다음 줄로), 그 아래 줄에 캐릭터 스타일
     const frame = this.frameLimitField((saved) => {
       frameUnsaved = !saved;
       syncNote();
     });
-    return [h('div', { class: 'row gfx-row' }, row, frame), note];
+    const style = this.charStyleField((saved) => {
+      styleUnsaved = !saved;
+      syncNote();
+    });
+    return [h('div', { class: 'row gfx-row' }, row, frame), h('div', { class: 'row' }, style), note];
+  }
+
+  /**
+   * 캐릭터 스타일 선택 상자 (PC 첫 화면, 그래픽 줄 아래): 기존 / 새 캐릭터. 고르면 바로 적용하고 저장한다(기존이면 저장값을 지움,
+   * gfx/charStyle.ts). 저장하지 못해도 이번 접속에는 적용되고, 그래픽 줄과 같은 '저장되지 않아요' 안내를 띄운다(onSaved).
+   * 그림만 바꾼다 — 서버로 보내지 않는다
+   */
+  private charStyleField(onSaved: (saved: boolean) => void): HTMLElement {
+    const select = h('select', { 'data-testid': 'char-style-select' });
+    const current = currentCharStyle();
+    for (const value of CHAR_STYLES) {
+      const opt = h('option', { value }, CHAR_STYLE_LABELS[value]);
+      if (value === current) opt.selected = true;
+      select.appendChild(opt);
+    }
+    select.addEventListener('change', () => {
+      const style = parseCharStyle(select.value);
+      if (!style) return;
+      onSaved(setCharStyle(style));
+    });
+    return h(
+      'label',
+      { class: 'field field-select field-chars' },
+      icon('eye', 18),
+      h('span', { class: 'field-label' }, UI_TEXT.charStyle),
+      select,
+    );
   }
 
   /** 지금 프레임 제한: 이번 접속에서 고른 값 > 저장값 > 자동 */
@@ -759,7 +853,7 @@ export class LobbyUI {
     const owner = lobby.players.find((p) => p.role === role);
     const mine = owner !== undefined && owner.id === this.you;
     const taken = owner !== undefined && !mine;
-    const figure = svgSpan('rc-figure', roleFigureSvg(role));
+    const figure = roleFigure('rc-figure', role);
     if (mine) {
       figure.removeAttribute('aria-hidden');
       figure.append(h('span', { class: 'rc-tag' }, icon('check', 15), UI_TEXT.myRole));

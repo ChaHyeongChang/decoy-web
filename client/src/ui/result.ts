@@ -4,7 +4,8 @@
 import type { MatchResult, PlayerRecord, Role, SurvivorStatus } from '@decoy/shared';
 import type { IconId } from '../art/icons';
 import { HUD_TEXT, ROLE_CARDS, UI_TEXT, formatText } from '../data/storyText';
-import { glyphSvg, h, icon, logoImg, roleFigureSvg, roleVars, svgSpan } from './uiArt';
+import { currentCharStyle, onCharStyleChange } from '../gfx/charStyle';
+import { characterFigureSvg, frontFigureSvg, glyphSvg, h, icon, logoImg, roleVars, svgSpan } from './uiArt';
 
 const STATUS: Record<SurvivorStatus, { text: string; icon: IconId }> = {
   free: { text: UI_TEXT.resultFree, icon: 'heart' },
@@ -45,6 +46,31 @@ const DOORS: Record<NonNullable<MatchResult['grade']>, { n: number; text: string
 
 const nil = (): HTMLElement => h('span', { class: 'nil' }, '—');
 
+/**
+ * 팀 문장 (캐릭터 스타일을 따른다): 생존자 승리 = 셋의 그림(겹쳐 놓아 무대 빛은 뺀다), 괴물 승리 = 기존이면 괴물 문양 ·
+ * 새 캐릭터면 괴물 정면 그림, 무효 = 끊김 아이콘. 새 캐릭터면 'front' 클래스(정면 그림 크기 · 겹침은 style.css).
+ * 그림 하나 = svg 하나
+ */
+function emblemFor(winner: MatchResult['winner']): HTMLElement {
+  const front = currentCharStyle() === 'new';
+  const cls = (team: string): string => (front ? `emblem ${team} front` : `emblem ${team}`);
+  if (winner === 'survivors')
+    return h(
+      'div',
+      { class: cls('survivors') },
+      ...(['runner', 'guard', 'scout'] as const).map((role) =>
+        svgSpan('fig', characterFigureSvg(role, false)),
+      ),
+    );
+  if (winner === 'monster')
+    return h(
+      'div',
+      { class: cls('monster') },
+      svgSpan('fig', front ? frontFigureSvg('monster', false) : glyphSvg('monster')),
+    );
+  return h('div', { class: 'emblem void' }, icon('disconnected', 64));
+}
+
 /** 누르면 꺼지는 버튼 (HTMLButtonElement의 필요한 부분만) */
 export type OneShotButton = EventTarget & { disabled: boolean };
 
@@ -65,6 +91,8 @@ export function oneShotButtons(pairs: readonly (readonly [OneShotButton, () => v
 
 export class ResultUI {
   private readonly root: HTMLDivElement;
+  /** 지금 보이는 팀 문장과 승리 팀 (캐릭터 스타일이 바뀌면 이것만 다시 그린다 — 버튼은 그대로) */
+  private emblem: { el: HTMLElement; winner: MatchResult['winner'] } | null = null;
 
   constructor(
     host: HTMLElement,
@@ -75,6 +103,14 @@ export class ResultUI {
     this.root = h('div', { class: 'result', 'data-testid': 'result' });
     this.root.style.display = 'none';
     host.appendChild(this.root);
+    // 결과 화면이 떠 있는 동안 캐릭터 스타일이 바뀌면(디버그 훅) 팀 문장만 바꾼다. ResultUI는 앱과 수명이 같다
+    onCharStyleChange(() => {
+      const e = this.emblem;
+      if (!e || this.root.style.display === 'none') return;
+      const next = emblemFor(e.winner);
+      e.el.replaceWith(next);
+      this.emblem = { el: next, winner: e.winner };
+    });
   }
 
   hide(): void {
@@ -104,18 +140,8 @@ export class ResultUI {
         : r.winner === 'monster'
           ? UI_TEXT.winMonster
           : UI_TEXT.winVoid;
-    const emblem =
-      r.winner === 'survivors'
-        ? h(
-            'div',
-            { class: 'emblem survivors' },
-            ...(['runner', 'guard', 'scout'] as const).map((role) =>
-              svgSpan('fig', roleFigureSvg(role, false)),
-            ),
-          )
-        : r.winner === 'monster'
-          ? h('div', { class: 'emblem monster' }, svgSpan('fig', glyphSvg('monster')))
-          : h('div', { class: 'emblem void' }, icon('disconnected', 64));
+    const emblem = emblemFor(r.winner);
+    this.emblem = { el: emblem, winner: r.winner };
     const title = h(
       'div',
       { class: 'result-title' },
