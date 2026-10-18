@@ -9,9 +9,9 @@
 // 옆으로, 뒤로 간 팔은 팔꿈치가 어깨 뒤로), 질주 때 몸을 숙여 머리가 더 나오고 팔을 크게 흔든다.
 // 정면 그림(로비 역할 카드 · 결과 화면)은 3/4 시점: 몸 · 얼굴이 화면 오른쪽(달리는 쪽)을 비스듬히 보고, 후드 끝은 왼쪽 뒤로
 // 흐른다. 위 그림의 네온 포인트는 후드 챙의 밝은 파랑 띠(글자용 역할색)뿐이다. 정면 그림은 시설과 같은 청록 네온(survivorBase
-// frontNeon: #22D3EE 번짐 + #67E8F9 심)을 후드 테두리 · 후드 끈과 빛나는 끈 끝 · 가슴 » 갈매기 무늬 · 운동화 밑창 줄에 가늘게
-// 넣는다 — 어두운 시설 · 청록 네온 분위기에 맞추되 몸은 역할색 파랑이 주인공. 위 그림(게임 화면)에는 청록을 넣지 않는다(게임
-// 화면에서 청록은 시설 · 목표 뜻).
+// frontNeon: #22D3EE 번짐 + #67E8F9 심)을 후드 테두리 · 후드 끈과 빛나는 끈 끝 · 가슴 » 갈매기 무늬 · 소매 끝 띠 · 바지 옆줄 ·
+// 운동화 밑창 줄에 넣는다 — 어두운 시설 · 청록 네온 분위기에 맞추되 몸(후드티)은 역할색 파랑이 주인공(네온은 테 · 띠 · 줄에만).
+// 위 그림(게임 화면)에는 청록을 넣지 않는다(게임 화면에서 청록은 시설 · 목표 뜻).
 // 색은 역할색 파랑(#3B82F6)과 그 짙은/밝은 변형, 어두운 남회색 바지 · 신발, 밝은 회색 밑창, 얼굴 피부색(정면).
 import { OUTLINE, ROLE } from '../palette';
 import {
@@ -553,8 +553,10 @@ function torsoPath(by: number): string {
   ).d;
 }
 
-/** 정면 팔 (어깨 → 팔꿈치 → 주먹, 두 마디 캡슐). far = 먼 쪽 팔 (몸 뒤, 한 단 어둡게) */
-function bentArm(sk: Sketch, ink: Ink, sh: Pt, elbow: Pt, hand: Pt, far: boolean): void {
+/**
+ * 정면 팔 (어깨 → 팔꿈치 → 주먹, 두 마디 캡슐) + 소매 끝 청록 네온 띠. far = 먼 쪽 팔 (몸 뒤, 한 단 어둡게 · 네온도 약하게)
+ */
+function bentArm(sk: Sketch, ink: Ink, neon: FrontNeon, sh: Pt, elbow: Pt, hand: Pt, far: boolean): void {
   const base = far ? shade(C.hoodie, 0.14) : C.hoodie;
   const sleeve = linear(sh[0] - 0.12, 0, sh[0] + 0.12, 0, [
     [0, ink(tint(base, 0.14))],
@@ -567,6 +569,16 @@ function bentArm(sk: Sketch, ink: Ink, sh: Pt, elbow: Pt, hand: Pt, far: boolean
   const cx = hand[0] - Math.cos(ang) * 0.07;
   const cy = hand[1] - Math.sin(ang) * 0.07;
   sk.fill(path().ellipse(cx, cy, 0.035, 0.075, ang).d, solid(ink(shade(base, 0.35))));
+  // 소매 끝 띠 (청록 네온: 고무단을 가로지르는 짧은 고리 — 손목을 감싸게 손 쪽으로 조금 휜다)
+  const nx = -Math.sin(ang) * 0.062;
+  const ny = Math.cos(ang) * 0.062;
+  neon.line(
+    path()
+      .M(cx - nx, cy - ny)
+      .Q(cx + Math.cos(ang) * 0.025, cy + Math.sin(ang) * 0.025, cx + nx, cy + ny).d,
+    0.02,
+    far ? 0.6 : 0.95,
+  );
   // 주먹 (손가락 없는 어두운 장갑) + 손등 파랑 줄
   sk.part(
     path().circle(hand[0], hand[1], 0.075).d,
@@ -626,13 +638,16 @@ function sideSneaker(
       [x, y + 0.066],
       [x + len * 0.8, y + 0.035],
     ]).d,
-    0.013,
-    far ? 0.45 : 0.85,
+    0.019,
+    far ? 0.55 : 1,
   );
 }
 
-/** 3/4 다리 하나 (엉덩이 → 무릎 → 발목, 어두운 조거 바지 + 화면 쪽 파랑 옆줄 + 발목 고무단). far = 먼 쪽 (한 단 어둡게) */
-function leg(sk: Sketch, ink: Ink, hip: Pt, knee: Pt, ankle: Pt, far: boolean): void {
+/**
+ * 3/4 다리 하나 (엉덩이 → 무릎 → 발목, 어두운 조거 바지 + 화면 쪽 청록 네온 옆줄 + 발목 고무단). far = 먼 쪽 (한 단 어둡게 ·
+ * 네온도 약하게)
+ */
+function leg(sk: Sketch, ink: Ink, neon: FrontNeon, hip: Pt, knee: Pt, ankle: Pt, far: boolean): void {
   const base = far ? shade(C.pants, 0.2) : C.pants;
   const paint = linear(knee[0] - 0.12, 0, knee[0] + 0.12, 0, [
     [0, ink(tint(base, 0.1))],
@@ -640,14 +655,15 @@ function leg(sk: Sketch, ink: Ink, hip: Pt, knee: Pt, ankle: Pt, far: boolean): 
   ]);
   sk.part(path().capsule(hip[0], hip[1], knee[0], knee[1], 0.19, 0.175).d, paint, ink(OUTLINE));
   sk.part(path().capsule(knee[0], knee[1], ankle[0], ankle[1], 0.175, 0.15).d, paint, ink(OUTLINE));
-  sk.line(
+  // 옆줄 (청록 네온 파이핑: 어두운 바지 위라 작은 카드에서도 선으로 남는다)
+  neon.line(
     path().curve([
       [hip[0] - 0.07, hip[1] + 0.05],
       [knee[0] - 0.075, knee[1]],
       [ankle[0] - 0.06, ankle[1] - 0.04],
     ]).d,
-    solid(ink(far ? shade(C.hoodie, 0.2) : C.hoodie)),
-    0.025,
+    0.019,
+    far ? 0.55 : 0.95,
   );
   const shin = Math.atan2(ankle[1] - knee[1], ankle[0] - knee[0]);
   sk.fill(path().ellipse(ankle[0], ankle[1], 0.03, 0.085, shin).d, solid(ink(shade(C.pants, 0.3))));
@@ -659,9 +675,9 @@ function leg(sk: Sketch, ink: Ink, hip: Pt, knee: Pt, ankle: Pt, far: boolean): 
  */
 function frontRunnerLegs(sk: Sketch, ink: Ink, neon: FrontNeon): void {
   const hipY = FRONT.hipY - 0.05;
-  leg(sk, ink, [0.1, hipY], [-0.02, 0.66], [-0.27, 0.8], true);
+  leg(sk, ink, neon, [0.1, hipY], [-0.02, 0.66], [-0.27, 0.8], true);
   sideSneaker(sk, ink, neon, -0.24, 0.82, 0.6, true);
-  leg(sk, ink, [-0.04, hipY], [0.3, 0.5], [0.27, 0.68], false);
+  leg(sk, ink, neon, [-0.04, hipY], [0.3, 0.5], [0.27, 0.68], false);
   sideSneaker(sk, ink, neon, 0.34, 0.73, -0.12, false);
 }
 
@@ -747,10 +763,10 @@ function frontFace(sk: Sketch, ink: Ink, neon: FrontNeon, hcx: number, hy: numbe
     solid(ink(MAT.skinShade)),
     0.02,
   );
-  // 후드 테두리 (두꺼운 고무단 + 청록 네온 선)
+  // 후드 테두리 (두꺼운 고무단 + 청록 네온 선). 네온은 고무단 바깥쪽 반에 둬 번짐이 얼굴(살색)보다 후드 천 쪽으로 퍼진다
   const rim = path().ellipse(ox, fy, 0.27, 0.3).d;
   sk.line(rim, solid(ink(shade(C.hoodie, 0.1))), 0.07);
-  neon.line(rim, 0.016, 0.8);
+  neon.line(path().ellipse(ox, fy, 0.283, 0.313).d, 0.024, 0.95);
   // 후드 끈 (목에서 늘어진 두 줄, 달리는 바람에 뒤로 날린다 — 청록 네온 끈 + 빛나는 끈 끝)
   for (const s of [-1, 1]) {
     const x0 = cl + s * 0.06;
@@ -759,11 +775,11 @@ function frontFace(sk: Sketch, ink: Ink, neon: FrontNeon, hcx: number, hy: numbe
       path()
         .M(x0, fy + 0.29)
         .Q(x0 - 0.01, fy + 0.34, x1, fy + 0.39).d,
-      0.014,
-      0.6,
+      0.016,
+      0.75,
     );
     sk.fill(path().roundRect(x1 - 0.015, fy + 0.38, 0.03, 0.05, 0.012).d, solid(ink(C.sole)));
-    neon.dot(x1, fy + 0.405, 0.012, 0.8);
+    neon.dot(x1, fy + 0.405, 0.016, 1);
   }
 }
 
@@ -775,7 +791,15 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
   const sway = Math.sin(p.t * 2.4) * 0.05;
   const mid = QUARTER.mid;
   // 1) 먼 팔 (앞으로 치는 팔, 몸 뒤): 어깨 → 아래 앞 팔꿈치 → 가슴 앞 주먹. 먼 어깨는 몸 안쪽(3/4 원근으로 좁다)
-  bentArm(sk, ink, apply(LEAN, 0.17, FRONT.shoulderY + 0.08 + by), [0.4, 0.3 + by], [0.5, 0.12 + by], true);
+  bentArm(
+    sk,
+    ink,
+    neon,
+    apply(LEAN, 0.17, FRONT.shoulderY + 0.08 + by),
+    [0.4, 0.3 + by],
+    [0.5, 0.12 + by],
+    true,
+  );
   // 2) 다리 (어두운 조거 바지) + 큰 운동화
   if (!p.bust) frontRunnerLegs(sk, ink, neon);
   // 3) 몸통 (후드티) + 밑단 · 캥거루 주머니 · 옆 솔기(3/4 부피)
@@ -818,11 +842,12 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
     .M(mid - 0.02, 0.11 + by)
     .L(mid + 0.05, 0.17 + by)
     .L(mid - 0.02, 0.23 + by).d;
-  neon.line(chev, 0.026, 0.9);
+  neon.line(chev, 0.03, 1);
   // 4) 가까운 팔 (뒤로 젖힌 팔, 몸 앞): 어깨 → 뒤로 뺀 팔꿈치 → 허리 뒤 주먹. 가까운 어깨는 바깥쪽(넓게 보인다)
   bentArm(
     sk,
     ink,
+    neon,
     apply(LEAN, -0.28, FRONT.shoulderY + 0.08 + by),
     [-0.43, 0.23 + by],
     [-0.34, 0.42 + by],

@@ -8,8 +8,9 @@
 // 망원경은 들어 올려 눈에 댈 때만 층을 나눠(sk.layer) 굵은 외곽선이 머리 위에 그어지게 한다.
 // 위 그림의 네온 포인트는 고글 렌즈 빛 · 망원경 대물렌즈 빛 선 · 안테나 끝 점뿐이다(밝은 초록, 글자용 역할색). 정면 그림은
 // 고글 렌즈 빛만 초록으로 두고, 시설과 같은 청록 네온(survivorBase frontNeon: #22D3EE 번짐 + #67E8F9 심)을 고글 렌즈 테 ·
-// 망원경 대물렌즈 테와 대물 통 띠 · 목깃 파이핑 · 가슴 멜빵 클립 등 · 안테나 끝 LED에 가늘게 넣는다 — 어두운 시설 · 청록 네온
-// 분위기에 맞추되 옷 · 모자는 역할색 초록이 주인공. 위 그림(게임 화면)에는 청록을 넣지 않는다(게임 화면에서 청록은 시설 · 목표 뜻).
+// 목깃 파이핑 · 멜빵 파이핑과 클립 등 · 망원경 대물렌즈 테와 대물 통 띠 · 안테나 끝 LED · 무릎 띠에 넣는다 — 어두운 시설 · 청록
+// 네온 분위기에 맞추되 옷 · 모자 · 렌즈 빛은 역할색 초록이 주인공(네온은 테 · 띠 · 끈 · LED에만). 위 그림(게임 화면)에는 청록을
+// 넣지 않는다(게임 화면에서 청록은 시설 · 목표 뜻).
 // 색은 역할색 초록(#22C55E)과 그 짙은/밝은 변형, 어두운 남회색 바지 · 장화 · 끈, 초록 기운 도는 밝은 회색 금속(고글 · 망원경).
 import { OUTLINE, ROLE, ROLE_TEXT } from '../palette';
 import {
@@ -194,13 +195,13 @@ function drawScope(
     path(m)
       .M(L - 0.2, -hw * 0.92)
       .L(L - 0.2, hw * 0.92).d,
-    0.011,
-    0.7,
+    0.018,
+    1,
   );
   // 대물렌즈 (유리): 짙은 원판 + 가는 청록 네온 테 + 왼쪽 위 작은 반짝임
   const lens = path(m).ellipse(L - 0.005, 0, 0.055 * wk, hw * 0.86).d;
   sk.fill(lens, solid(ink(C.deep)));
-  neon?.line(lens, 0.014, 0.85);
+  neon?.line(lens, 0.02, 1);
   sk.fill(path(m).ellipse(L - 0.005, -hw * 0.36, 0.022 * wk, hw * 0.3).d, solid(ink(0xffffff), 0.8));
 }
 
@@ -509,6 +510,17 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
       // 장화 목 (짙은 초록 띠)
       sk.fill(path().roundRect(x - 0.09, FRONT.ankleY - 0.07, 0.18, 0.05, 0.02).d, solid(ink(C.deep)));
     }
+    // 무릎 띠 (청록 네온: 허벅지 주머니 아래, 다리를 감싸게 아래로 조금 휜다 — 다리 반폭 안)
+    for (const s of [-1, 1]) {
+      const kx = s * 0.146;
+      neon.line(
+        path()
+          .M(kx - 0.064, 0.66)
+          .Q(kx, 0.69, kx + 0.064, 0.66).d,
+        0.019,
+        0.9,
+      );
+    }
   }
   // 4) 왼팔 (화면 오른쪽): 손을 허리께에 편히
   frontArm(sk, 1, C.coat, C.glove, ink, [0.45, 0.35 + by], by);
@@ -536,8 +548,20 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
       solid(ink(shade(C.coat, 0.22))),
     );
   }
-  // 가슴 멜빵 클립 등 (청록 발광 점, 화면 오른쪽 멜빵 하나 — 반대쪽은 망원경 쥔 팔에 가린다)
-  neon.dot(0.183, 0.15 + by, 0.016, 0.75);
+  // 멜빵 파이핑 (청록 네온: 어두운 멜빵 가운데 줄 — 가슴 주머니 덮개 아래로 지나간다) + 클립 등 (발광 점, 가슴 주머니 바로 아래
+  // 멜빵 위). 전신(로비 역할 카드 · 결과 화면)은 양쪽 — 화면 왼쪽 팔은 망원경을 바깥으로 들어 멜빵이 보인다(이 높이에서 팔
+  // 외곽선과 0.03 넘게 떨어짐). 상반신(조작 안내)은 화면 왼쪽 팔이 몸 앞으로 내려와 그쪽 멜빵을 가리므로 화면 오른쪽 하나만
+  // (가린 쪽 번짐이 팔 가장자리로 새지 않게)
+  for (const s of p.bust ? [1] : [-1, 1]) {
+    neon.line(
+      path()
+        .M(s * 0.172, FRONT.shoulderY + 0.03 + by)
+        .Q(s * 0.188, 0.18 + by, s * 0.152, 0.31).d,
+      0.014,
+      0.75,
+    );
+    neon.dot(s * 0.171, 0.22 + by, 0.02, 1);
+  }
   sk.fill(path().roundRect(-0.25, FRONT.hipY - 0.1, 0.5, 0.06, 0.02).d, solid(ink(C.strap)));
   sk.fill(path().roundRect(-0.04, FRONT.hipY - 0.105, 0.08, 0.07, 0.015).d, solid(ink(C.steel)));
   // 목깃 (짙은 초록 높은 깃)
@@ -558,8 +582,8 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
     path()
       .M(0.145, FRONT.neckY + 0.075 + by)
       .Q(0, FRONT.neckY + 0.155 + by, -0.145, FRONT.neckY + 0.075 + by).d,
-    0.011,
-    0.6,
+    0.017,
+    0.95,
   );
   // 6) 머리: 얼굴 + 둥근 초록 모자 + 쌍안 렌즈 고글
   frontHead(sk, ink, by);
@@ -657,8 +681,8 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
       ]),
     );
     sk.fill(path().ellipse(gx + s * 0.012, gy + 0.01, 0.04, 0.055).d, solid(ink(MAT.eye)));
-    // 렌즈 테 (청록 네온 고리: 금속 테와 초록 렌즈 사이)
-    neon.line(path().circle(gx, gy, 0.121).d, 0.011, 0.7);
+    // 렌즈 테 (청록 네온 고리: 금속 테 가운데 — 안쪽 초록 렌즈 빛은 그대로 보인다)
+    neon.line(path().circle(gx, gy, 0.13).d, 0.02, 1);
     sk.fill(path().circle(gx - 0.045, gy - 0.045, 0.026).d, solid(ink(0xffffff), 0.9 * glint));
   }
   // 코걸이 (렌즈 사이)
@@ -693,8 +717,8 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
   );
   drawScope(sk, ink, sm, 0, 0.66, 'front', true, neon);
   sk.part(path().circle(-hand[0], hand[1], 0.085).d, solid(ink(C.glove)), ink(OUTLINE));
-  // 안테나 끝 (청록 LED: 번짐 반지름 0.06 — 상반신에서도 상자 오른쪽 안)
-  neon.dot(tip[0], tip[1], 0.03, 1, 0.06);
+  // 안테나 끝 (청록 LED: 번짐 반지름 0.06 — 상반신에서도 상자 오른쪽 · 위 안)
+  neon.dot(tip[0], tip[1], 0.034, 1, 0.06);
   return sk.drawing();
 }
 

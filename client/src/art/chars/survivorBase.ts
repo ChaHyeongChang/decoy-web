@@ -354,19 +354,29 @@ export function frontClothPaint(base: number, ink: Ink): Paint {
 /**
  * 정면 그림 청록 네온 그리개. 색은 시설 네온과 같은 값만 쓴다: 번짐 NEON(#22D3EE), 밝은 심 NEON_TEXT(#67E8F9, style.css
  * --neon-text), 꺼진 선 NEON_DIM(#0E7490). 발광은 SVG 필터 · blur 없이 그림 명령만으로 만든다(같은 그림이 SVG와 Canvas에서
- * 똑같이 나오게): 선 = 넓고 옅은 같은 색 선 위에 밝은 가는 선, 점 = 가장자리가 투명한 원형 그라디언트 번짐 위에 밝은 심.
- * 역할색이 주인공이라 선은 가늘고(카드 160px에서 약 1px) 번짐은 옅다. 톤: 보통 = 켜짐, 사망 회색 = 꺼짐(번짐 없이 어두운 선만,
- * ink가 회색으로 바꾼다), 피격 번쩍 = 그리지 않는다(흰 실루엣 밖으로 번짐이 새지 않게)
+ * 똑같이 나오게): 선 = 넓고 옅은 바깥 번짐 + 좁고 진한 안 번짐(같은 색 선 두 겹) 위에 밝은 심, 점 = 가장자리가 투명한 원형
+ * 그라디언트 번짐 위에 밝은 심. 어두운 시설 · 청록 네온 분위기가 한눈에 읽히게 심은 카드 160px에서 약 1.2~1.8px, 안 번짐은
+ * 그 2.6배(70px 카드에서도 청록 선 · 점으로 남는다), 바깥 번짐은 6배로 옅게 퍼진다. 역할색이 주인공이라 네온은 옷 · 장비의
+ * 테 · 솔기 · 띠 · LED에만 둔다(면을 칠하지 않는다). 톤: 보통 = 켜짐, 사망 회색 = 꺼짐(번짐 없이 어두운 선만, ink가 회색으로
+ * 바꾼다), 피격 번쩍 = 그리지 않는다(흰 실루엣 밖으로 번짐이 새지 않게)
  */
 export interface FrontNeon {
   /** 네온 선 (d = 경로, width = 밝은 심 두께, k = 세기 0~1: 번짐 · 심의 진하기) */
   line(d: string, width: number, k?: number): void;
-  /** 발광 점 (LED · 렌즈 빛 · 버클): 심 반지름 r, 번짐 반지름 halo (없으면 r × 2.8) */
+  /** 발광 점 (LED · 렌즈 빛 · 버클): 심 반지름 r, 번짐 반지름 halo (없으면 r × 3.4) */
   dot(x: number, y: number, r: number, k?: number, halo?: number): void;
 }
 
-/** 번짐 배율 (선 두께 · 점 반지름 대비) */
-const NEON_SPREAD = { line: 3.2, dot: 2.8 } as const;
+/**
+ * 번짐 (선 두께 · 점 반지름 대비 배율, 진하기). 선: 바깥 번짐(넓고 옅게) · 안 번짐(좁고 진하게) · 심 진하기 바탕값.
+ * 점: 번짐 반지름 배율, 번짐 가운데 · 중간(0.35 지점) 진하기
+ */
+const NEON_GLOW = {
+  outer: { spread: 6, alpha: 0.16 },
+  inner: { spread: 2.6, alpha: 0.42 },
+  core: 0.7,
+  dot: { spread: 3.4, center: 0.9, mid: 0.4 },
+} as const;
 
 export function frontNeon(sk: Sketch, tone: Tone): FrontNeon {
   const ink = inkFor(tone);
@@ -376,18 +386,20 @@ export function frontNeon(sk: Sketch, tone: Tone): FrontNeon {
       line: (d, width) => sk.line(d, solid(ink(NEON_DIM)), width),
       dot: (x, y, r) => sk.fill(path().circle(x, y, r).d, solid(ink(NEON_DIM))),
     };
+  const G = NEON_GLOW;
   return {
     line: (d, width, k = 1) => {
-      sk.line(d, solid(NEON, 0.2 * k), width * NEON_SPREAD.line);
-      sk.line(d, solid(NEON_TEXT, Math.min(1, 0.55 + 0.45 * k)), width);
+      sk.line(d, solid(NEON, G.outer.alpha * k), width * G.outer.spread);
+      sk.line(d, solid(NEON, G.inner.alpha * k), width * G.inner.spread);
+      sk.line(d, solid(NEON_TEXT, Math.min(1, G.core + (1 - G.core) * k)), width);
     },
-    dot: (x, y, r, k = 1, halo = r * NEON_SPREAD.dot) => {
+    dot: (x, y, r, k = 1, halo = r * G.dot.spread) => {
       const R = Math.max(r, halo);
       sk.fill(
         path().circle(x, y, R).d,
         radial(x, y, R, [
-          [0, NEON, 0.6 * k],
-          [0.4, NEON, 0.2 * k],
+          [0, NEON, G.dot.center * k],
+          [0.35, NEON, G.dot.mid * k],
           [1, NEON, 0],
         ]),
       );
