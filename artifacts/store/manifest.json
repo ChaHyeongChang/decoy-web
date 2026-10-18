@@ -1,32 +1,34 @@
 {
-  "createdAt": "2026-10-10T15:10:47.893Z",
+  "createdAt": "2026-10-18T22:40:02.466Z",
   "shots": [
     {
       "file": "feature-graphic.png",
       "scene": "feature",
       "width": 1024,
       "height": 500,
-      "bytes": 224046,
+      "bytes": 342964,
       "touchTargets": [],
       "renderer": "webgl",
-      "quality": "high"
+      "quality": "high",
+      "charStyle": "new"
     },
     {
       "file": "phone-1-lobby.png",
       "scene": "lobby",
       "width": 1920,
       "height": 1080,
-      "bytes": 619080,
+      "bytes": 770810,
       "touchTargets": [],
       "renderer": "webgl",
-      "quality": "high"
+      "quality": "high",
+      "charStyle": "new"
     },
     {
       "file": "phone-2-monster.png",
       "scene": "monster",
       "width": 1920,
       "height": 1080,
-      "bytes": 622944,
+      "bytes": 623500,
       "touchTargets": [
         "move-zone",
         "aim-stick",
@@ -36,14 +38,15 @@
         "scoreboard"
       ],
       "renderer": "webgl",
-      "quality": "high"
+      "quality": "high",
+      "charStyle": "new"
     },
     {
       "file": "phone-3-survivor.png",
       "scene": "survivor",
       "width": 1920,
       "height": 1080,
-      "bytes": 644579,
+      "bytes": 637196,
       "touchTargets": [
         "move-zone",
         "ability",
@@ -51,14 +54,15 @@
         "scoreboard"
       ],
       "renderer": "webgl",
-      "quality": "high"
+      "quality": "high",
+      "charStyle": "new"
     },
     {
       "file": "phone-4-rescue.png",
       "scene": "rescue",
       "width": 1920,
       "height": 1080,
-      "bytes": 631531,
+      "bytes": 630341,
       "touchTargets": [
         "move-zone",
         "ability",
@@ -66,17 +70,19 @@
         "scoreboard"
       ],
       "renderer": "webgl",
-      "quality": "high"
+      "quality": "high",
+      "charStyle": "new"
     },
     {
       "file": "phone-5-result.png",
       "scene": "result",
       "width": 1920,
       "height": 1080,
-      "bytes": 233222,
+      "bytes": 244336,
       "touchTargets": [],
       "renderer": "webgl",
-      "quality": "high"
+      "quality": "high",
+      "charStyle": "new"
     }
   ],
   "problems": []

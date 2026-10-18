@@ -1755,6 +1755,18 @@ select {
     background: linear-gradient(180deg, rgba(11, 22, 34, 0), rgba(11, 22, 34, 0.94) 22%);
   }
 }
+/* 좁은 휴대폰 가로(폭 720 이하 · 높이 500 이하): 연습 역할 버튼 넷이 한 줄이라 칸이 약 70px — 문양 + 이름을 한 줄에 두면
+   '스카우트'가 잘린다(스토어 촬영 640×360에서 발견). 문양을 이름 위로 올린다(네 버튼 모두 같은 높이) */
+@media (max-height: 500px) and (max-width: 720px) {
+  .practice-role .rc-head {
+    flex-direction: column;
+    gap: 0;
+  }
+  .practice-role .glyph {
+    width: 20px;
+    height: 20px;
+  }
+}
 /* 낮은 가로 화면 (휴대폰): 첫 화면은 작은 로고를 패널 옆에, 방 화면은 촘촘하게 */
 @media (max-height: 500px) {
   .practice-roles {

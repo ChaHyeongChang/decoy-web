@@ -25,6 +25,8 @@ interface Shot {
   touchTargets: string[];
   renderer: string | null;
   quality: string | null;
+  /** 캐릭터 스타일 (아이콘 기록에는 없다) */
+  charStyle?: string | null;
 }
 const manifest = JSON.parse(readFileSync(join(DIR, 'manifest.json'), 'utf8')) as {
   shots: Shot[];
@@ -116,6 +118,9 @@ describe('스토어 그림 (artifacts/store)', () => {
       expect.arrayContaining(['aim-stick', 'dash', 'roar']),
     );
     expect(by.get('phone-4-rescue.png')?.touchTargets).toContain('rescue');
+    // 캐릭터 리디자인: 스토어 그림은 새 캐릭터 스타일로 찍는다 (그래픽 이미지 · 휴대폰 5장)
+    for (const f of [...phones, 'feature-graphic.png'])
+      expect(by.get(f)?.charStyle, `${f} 캐릭터 스타일`).toBe('new');
     // 기록과 파일이 맞다 (다시 찍고 기록만 옛것이 아니게)
     for (const s of manifest.shots) expect(files, s.file).toContain(s.file);
     // 크기 · 바이트도 지금 파일과 같다 (파일만 다시 저장하고 기록은 옛 값으로 두지 않게, 검토 반영)

@@ -1,6 +1,6 @@
 // 스토어 그림 촬영 (M15, docs/MOBILE_PLAN.md M15 3번 · docs/STORE_LISTING.md 3장). npm run shots:store
 //  - 휴대폰 가로 스크린샷 5장: 640×360 휴대폰(터치 · 기기 배율 3 → 1920×1080 PNG), 품질 높음 · WebGL, 터치 조작 UI가 보이게
-//      phone-1-lobby (로비 방 화면: 역할 카드 넷) · phone-2-monster (괴물 화면) · phone-3-survivor (생존자: 점령 중 발각) ·
+//      phone-1-lobby (로비: 봇과 연습 역할 고르기 — 정면 캐릭터 넷) · phone-2-monster (괴물 화면) · phone-3-survivor (생존자: 점령 중 발각) ·
 //      phone-4-rescue (감옥 구조) · phone-5-result (결과: 생존자 승리)
 //  - 그래픽 이미지 feature-graphic.png 1024×500: 생존자 화면(PC, 배율 2)의 가운데를 잘라 왼쪽에 로고 + DECOY,
 //    오른쪽에 같은 게임의 로비 역할 카드 정면 캐릭터 넷(그 화면의 SVG 그대로)을 얹는다
@@ -102,7 +102,7 @@ async function roleFigures(page: Page): Promise<Record<Role, string>> {
   const out = await page.evaluate(() => {
     const r: Record<string, string> = {};
     for (const role of ['monster', 'runner', 'guard', 'scout'])
-      r[role] = document.querySelector(`[data-testid="role-${role}"] .rc-figure svg`)?.outerHTML ?? '';
+      r[role] = document.querySelector(`[data-testid="role-${role}"] .rc-figure > svg`)?.outerHTML ?? '';
     return r;
   });
   for (const [role, svg] of Object.entries(out)) if (!svg) throw new Error(`역할 카드 그림 없음: ${role}`);
@@ -247,11 +247,14 @@ test.afterAll(() => {
   );
 });
 
-test('로비 방 화면: 새 캐릭터 역할 카드 넷 (내 역할 러너)', async ({ browser }) => {
+test('로비 봇과 연습 역할 고르기: 새 캐릭터 정면 넷', async ({ browser }) => {
   const tab = await openTab(browser, PHONE, '로비');
   const { page } = tab;
-  await openRoom(page, 'runner');
-  await expect(page.locator('.rc-figure svg')).toHaveCount(4);
+  // 방 화면은 초대 링크에 서버 주소(촬영 서버 localhost)가 찍히므로, 주소가 없는 연습 역할 고르기를 찍는다
+  await page.goto(`/?${QUERY}`);
+  await expect(page.getByTestId('server-status')).toHaveAttribute('data-state', 'connected');
+  await press(page, 'practice');
+  await expect(page.locator('.pr-figure > svg')).toHaveCount(4);
   await page.waitForTimeout(800);
   await save(page, 'phone-1-lobby.png', 'lobby');
   await tab.close();
