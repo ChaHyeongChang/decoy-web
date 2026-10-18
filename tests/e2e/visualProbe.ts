@@ -42,6 +42,11 @@ export interface BodyStat {
    */
   widths: number[];
   /**
+   * 바깥 실루엣 폭 (px): 같은 네 축을 바깥(1.8r)에서 안으로 와서 처음 가운데 밝기의 절반을 넘는 곳까지. 몸 안쪽의 가는 선 ·
+   * 무늬(새 캐릭터 그림)에 흔들리지 않는다
+   */
+  outerWidths: number[];
+  /**
    * 접지 그림자 폭 (px): 앞 노치와 다른 캐릭터 쪽을 뺀 방향들의 정규화한 어둡기 평균이 절반이 되는 반지름 × 2 (못 재면 null)
    */
   shadowW: number | null;
@@ -468,6 +473,16 @@ export async function captureSweep(
           const widths = [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4].map(
             (da) => edge(b.face + da) + edge(b.face + da + Math.PI),
           );
+          const outerEdge = (a: number): number => {
+            const far = 1.8 * R;
+            const at = (t: number): number =>
+              lumBi(cx + Math.cos(a) * (far - t), cy + Math.sin(a) * (far - t));
+            const c = crossing(at, 0, far - 0.3 * R, lc * 0.5, 1);
+            return c === null ? 0.3 * R : far - c;
+          };
+          const outerWidths = [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4].map(
+            (da) => outerEdge(b.face + da) + outerEdge(b.face + da + Math.PI),
+          );
           // 접지 그림자: 앞 노치(±50°)와 다른 캐릭터(그 프레임 getDrawn) 쪽을 뺀 여러 방향의 몸 밖 밝기 단면을, 방향마다
           // 배경(2.5r~2.9r 중앙값)과 안쪽(1.25r)으로 정규화한 어둡기로 평균해 절반이 되는 반지름 × 2 (바닥 무늬 · 빛 차이를 줄인다)
           const others = frame.drawn
@@ -532,6 +547,7 @@ export async function captureSweep(
             annulusRoleHits,
             bodyMarkHits,
             widths,
+            outerWidths,
             shadowW,
           };
         });
