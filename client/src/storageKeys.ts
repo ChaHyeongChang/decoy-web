@@ -30,6 +30,12 @@ export const STORAGE_KEYS = {
     what: '프레임 제한 선택 (자동이면 저장하지 않음)',
     keep: '사용자가 바꾸거나 브라우저 데이터를 지울 때까지',
   },
+  charStyle: {
+    key: 'decoy:charStyle',
+    area: 'local',
+    what: '캐릭터 스타일 선택 (기존이면 저장하지 않음)',
+    keep: '사용자가 바꾸거나 브라우저 데이터를 지울 때까지',
+  },
   name: {
     key: 'decoy:name',
     area: 'local',

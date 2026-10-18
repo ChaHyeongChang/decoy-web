@@ -112,6 +112,8 @@ export interface GfxDebugInfo {
   targetHz: number;
   /** 판 중 자동으로 되돌려 올린 횟수 (품질 단계 · 목표 FPS) */
   upgrades: number;
+  /** 캐릭터 스타일 (캐릭터 리디자인 2단계): 기존 도형 · 새 캐릭터. 그림만 바꾼다 */
+  charStyle: 'classic' | 'new';
 }
 
 /** 프레임 측정 (렌더링 최적화, ?debug=1 오버레이 · 적응형 품질 · E2E). 최근 렌더 프레임들의 요약 */
@@ -232,6 +234,8 @@ export interface DecoyDebug {
   getAnimState(): AnimDebug | null;
   /** 프레임 제한을 바꾼다 (로비 선택과 같은 경로, 저장하지 않음) */
   setFrameLimit(limit: 'auto' | '60' | '120'): void;
+  /** 캐릭터 스타일을 바꾼다 (설정과 같은 경로, 저장하지 않음). 판 중이면 다음 프레임에 그림을 다시 굽는다 */
+  setCharStyle(style: 'classic' | 'new'): void;
   /** 선명도 검사: HUD에 글자를 그린다 (논리 좌표 x, y, 글자 크기 px) */
   probeText(text: string, x: number, y: number, px: number): void;
   /** 활성 장면의 모든 Phaser 글자 해상도 · 격자 어긋남 · 다시 그린 횟수 */

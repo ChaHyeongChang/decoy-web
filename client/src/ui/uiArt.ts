@@ -2,7 +2,11 @@
 // 맵 설계도 배경. 모양은 게임과 같은 원본(art/shapes.ts · art/icons.ts)에서 만든다 — 그림이 하나다.
 // 외부 이미지 없음(로고만 client/public/logo.svg).
 import { CAPTURE_POINTS, EXITS, MAP_H, MAP_ROWS, MAP_W, PRISON_RECT, type Role } from '@decoy/shared';
+import { COMMON_ART, MONSTER_ART, SURVIVOR_ART } from '../art/chars/index';
+import { toSvg, type Drawing } from '../art/chars/kit';
+import { FRONT_REST } from '../art/chars/types';
 import { iconSvg, type IconId } from '../art/icons';
+import { currentCharStyle } from '../gfx/charStyle';
 import { OUTLINE, ROLE, ROLE_TEXT, hexCss } from '../art/palette';
 import {
   CLAW_ANCHOR,
@@ -171,6 +175,69 @@ export function roleFigureSvg(role: Role, stage = true): string {
     `<ellipse cx="3" cy="${cy + 7}" rx="${1.12 * k}" ry="${1.05 * k}" fill="#000" opacity=".45"/>` +
     `${body}</svg>`
   );
+}
+
+// ───────────────────────── 새 캐릭터 정면 그림 (캐릭터 리디자인 2단계) ─────────────────────────
+
+/** 정면 그림 상자 (viewBox −80..80 안 크기 · 옮김). 위 · 오른쪽 위('내 역할' 배지)에 여백을 둔다 (2차 시안과 같은 값) */
+const FRONT_FIGURE: Record<Role | 'common', { size: number; dx: number; dy: number }> = {
+  runner: { size: 120, dx: -8, dy: 8 },
+  guard: { size: 120, dx: 0, dy: 8 },
+  scout: { size: 120, dx: 0, dy: 8 },
+  common: { size: 120, dx: 0, dy: 8 },
+  monster: { size: 128, dx: 0, dy: 6 },
+};
+/** 정면 그림 외곽선 (viewBox 단위). 카드 150px에서 약 2.4px, 70px에서 약 1.1px */
+const FRONT_OUTLINE = 2.6;
+
+/** 정면 그림 명령 (역할마다 한 번 만든다). SVG 문자열은 캐시하지 않는다: 그라디언트 id가 화면끼리 겹치지 않게 넣을 때마다 만든다 */
+const frontCache = new Map<Role | 'common', Drawing>();
+
+function frontDrawing(id: Role | 'common'): Drawing {
+  let d = frontCache.get(id);
+  if (!d) {
+    const w = FRONT_OUTLINE / (FRONT_FIGURE[id].size / 2);
+    d =
+      id === 'monster'
+        ? MONSTER_ART.front(FRONT_REST, { w })
+        : id === 'common'
+          ? COMMON_ART.front(FRONT_REST, { w })
+          : SURVIVOR_ART[id].front(FRONT_REST, { w });
+    frontCache.set(id, d);
+  }
+  return d;
+}
+
+/**
+ * 새 캐릭터 정면 그림 (로비 역할 카드 · 연습 역할 고르기 · 결과 화면 · 조작 안내): viewBox −80..80, 발밑 무대 빛 + 그림자 +
+ * 정면 캐릭터. stage = false면 무대 빛을 뺀다(결과 화면 팀 문장처럼 여럿을 겹칠 때). svg 하나로 돌려준다
+ */
+export function frontFigureSvg(id: Role | 'common', stage = true): string {
+  const n = ++uid;
+  const { size, dx, dy } = FRONT_FIGURE[id];
+  const k = size / 2;
+  const inner = toSvg(frontDrawing(id), { viewBox: [-1, -1, 2, 2], idPrefix: `ff${n}x` })
+    .replace(/^<svg[^>]*>/, '')
+    .replace(/<\/svg>$/, '');
+  const c = hexCss(id === 'common' ? 0xe2e8f0 : ROLE[id]);
+  const light = stage
+    ? `<defs><radialGradient id="fp${n}" cx="0" cy="62" r="70" gradientUnits="userSpaceOnUse">` +
+      `<stop offset="0" stop-color="${c}" stop-opacity=".5"/><stop offset=".5" stop-color="${c}" stop-opacity=".12"/><stop offset="1" stop-color="${c}" stop-opacity="0"/></radialGradient></defs>` +
+      `<ellipse cx="0" cy="62" rx="76" ry="22" fill="url(#fp${n})"/>`
+    : '';
+  return (
+    `<svg viewBox="-80 -80 160 160" aria-hidden="true">${light}` +
+    `<ellipse cx="0" cy="66" rx="${k * 0.62}" ry="${k * 0.12}" fill="#000" opacity=".45"/>` +
+    `<g transform="translate(${dx} ${dy}) scale(${k})">${inner}</g></svg>`
+  );
+}
+
+/**
+ * 역할 그림: 캐릭터 스타일 설정을 따른다 (기존 = 위에서 본 실루엣 roleFigureSvg, 새 캐릭터 = 정면 그림 frontFigureSvg).
+ * 로비 역할 카드 · 연습 역할 고르기 · 결과 화면이 쓴다
+ */
+export function characterFigureSvg(role: Role, stage = true): string {
+  return currentCharStyle() === 'new' ? frontFigureSvg(role, stage) : roleFigureSvg(role, stage);
 }
 
 /** 역할 문양 배지 (게임 머리 위 · HUD와 같은 모양): 어두운 원판 + 역할색 테두리 + 역할색 문양 */

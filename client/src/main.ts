@@ -4,6 +4,7 @@ import { App, readParams } from './app';
 import { sfx } from './audio';
 import { installDebug } from './debug';
 import { canOfferFullscreen, device, enterFullscreen, initDevice, onDeviceChange } from './device';
+import { initCharStyle, onCharStyleChange } from './gfx/charStyle';
 import { Pacer, loadFrameLimit, pacingHooks, patchTimeStep, targetHzFor } from './gfx/framePacing';
 import { sessionFrameStats } from './gfx/frameStats';
 import type { QualityPreset, QualityTier, RendererKind } from './gfx/presets';
@@ -54,6 +55,8 @@ initDevice(params.touch);
 const uiRoot = document.getElementById('ui-root') ?? document.body;
 const gameRoot = document.getElementById('game-root') ?? document.body;
 const app = new App(params, uiRoot);
+// 캐릭터 스타일: ?chars(시험 · 촬영용)는 이번 접속에만, 아니면 저장값 · 기존 (gfx/charStyle.ts)
+initCharStyle(params.chars);
 
 // 프레임 페이싱 상태 (아래 '프레임 페이싱'에서 Phaser 루프에 끼운다). 품질을 정할 때 시작 목표 FPS를 읽으므로 먼저 만든다.
 // ?fpsLimit(시험용)는 이번 접속에만, 아니면 로비에서 고른 저장값
@@ -555,6 +558,8 @@ function schedulePrebake(): void {
   }, 50);
 }
 onGfxChange(schedulePrebake);
+// 캐릭터 스타일을 바꾸면 그 스타일 그림을 로비에서 미리 굽는다 (판 중이면 판 장면이 다음 프레임에 굽는다)
+onCharStyleChange(schedulePrebake);
 
 // UI 폰트를 부팅 때부터 받는다. Phaser 글자는 만들 때의 글꼴로 굳으므로, 다 받으면 이미 있는 글자를 다시 그린다
 const relayoutScenes = (): void => {

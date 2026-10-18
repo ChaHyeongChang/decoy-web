@@ -5,6 +5,7 @@ import type { DecoyDebug, HudLayout, TouchTarget } from '@decoy/shared';
 import type { App } from './app';
 import { sfx } from './audio';
 import { device } from './device';
+import { setCharStyle } from './gfx/charStyle';
 import { pacingHooks } from './gfx/framePacing';
 import { frameStatsInfo, installDrawCounter, sessionFrameStats } from './gfx/frameStats';
 import { freezeGfxClock, gfxState, probeSlot, setFpsOverride } from './gfx/state';
@@ -92,6 +93,7 @@ export function installDebug(app: App, overlay: boolean): void {
     getFrameStats: () => frameStatsInfo(),
     getAnimState: () => gameScene(app)?.animDebug ?? null,
     setFrameLimit: (limit) => pacingHooks.setLimit?.(limit),
+    setCharStyle: (style) => void setCharStyle(style, false),
     probeText: (text, x, y, px) => probeSlot.draw?.(text, x, y, px),
     textAudit: () => auditTexts(app.game?.scene.getScenes(true) ?? []),
     get fonts() {
