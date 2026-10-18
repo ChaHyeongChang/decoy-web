@@ -82,6 +82,26 @@ describe('캐릭터 스타일 설정', () => {
     expect(charStyleSource()).toBe('choice');
   });
 
+  it('주소 ?chars가 저장값보다 먼저이고, 주소 값은 저장하지 않는다', () => {
+    const st = memory({ [KEY]: 'new' });
+    initCharStyle('classic', st);
+    expect(currentCharStyle()).toBe('classic');
+    expect(charStyleSource()).toBe('url');
+    expect(st.data.get(KEY)).toBe('new');
+    resetCharStyleForTest();
+    const empty = memory();
+    initCharStyle('new', empty);
+    expect(currentCharStyle()).toBe('new');
+    expect(empty.data.has(KEY)).toBe(false);
+  });
+
+  it('주소 값이 없으면 저장값을 쓴다 (저장 new → 새 캐릭터)', () => {
+    initCharStyle(null, memory({ [KEY]: 'new' }));
+    expect(currentCharStyle()).toBe('new');
+    expect(charStyleSource()).toBe('saved');
+    expect(gfxState.charStyle).toBe('new');
+  });
+
   it('바뀔 때만 알리고, 해제하면 더 부르지 않는다', () => {
     const seen: string[] = [];
     const off = onCharStyleChange((s) => seen.push(s));

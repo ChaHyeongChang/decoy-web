@@ -35,10 +35,11 @@ function resolve(storage?: StorageLike | null): CharStyle {
   return saved ?? DEFAULT_CHAR_STYLE;
 }
 
-/** 주소 ?chars로 준 값 (진입점이 한 번 부른다). 저장하지 않는다 */
-export function initCharStyle(url: CharStyle | null): void {
+/** 주소 ?chars로 준 값 (진입점이 한 번 부른다). 저장하지 않는다 (storage = 시험용 저장소, 없으면 브라우저 저장소) */
+export function initCharStyle(url: CharStyle | null, storage?: StorageLike | null): void {
   urlStyle = url;
-  gfxState.charStyle = resolve();
+  if (saved === undefined) saved = parseCharStyle(readKey('charStyle', '', storage));
+  gfxState.charStyle = resolve(storage);
 }
 
 /** 지금 스타일 */

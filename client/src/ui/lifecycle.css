@@ -375,6 +375,11 @@
   width: 100%;
   font-size: 15px;
 }
+/* 한 열(묶음 상자가 display: contents): 판 직속 저장 실패 안내가 설정 줄 다음, 안내 다시 보기 앞에 오게 */
+.life-replay,
+.life-done {
+  order: 1;
+}
 .life-done {
   display: flex;
   align-items: center;
@@ -445,6 +450,10 @@
   .life-two > .life-col + .life-col {
     padding-left: 14px;
     border-left: 1px solid var(--edge);
+  }
+  /* 저장 실패 안내: 두 열 아래 한 줄 전체 */
+  .life-two > .quality-note {
+    grid-column: 1 / -1;
   }
   /* 칸이 좁으면(아주 좁은 가로 화면) 이름 아래로 단추를 내린다 */
   .life-two .life-row {

@@ -4,7 +4,9 @@
 // 해상도: 화면에서 1텍셀 ≈ 기기 1px (zoom × MAP_SCALE × TILE_PX × 크기). zoom이 바뀌면(onGfxChange) 다시 굽는다.
 // 입체감: 가장자리 어두운 외곽선(OUTLINE), 몸은 위에서 비춘 돔 음영(가운데 원판은 역할색 그대로 — 생존자 화면
 // 역할색 유지), 회전하지 않는 반사광(spec), 부드러운 바닥 그림자 + 접지 그림자(바깥 링 대비 3:1).
-// 괴물 화면의 생존자 그림은 'survivor-hidden' 하나 · 'foot-hidden' 하나 · 공통 그림자뿐이다(역할 · 체력과 무관).
+// 괴물 화면의 생존자 그림은 기존 스타일에서 'survivor-hidden' 하나 · 'foot-hidden' 하나 · 공통 그림자뿐이다(역할 · 체력과 무관).
+// 새 스타일은 공통 생존자의 쉬기 · 걷기 8장 · 흰 번쩍('survivor-hidden', '~w0..7', '-flash')이고 걷기 위상 · 세기만으로 고른다
+// (charFrames.ts hiddenFrameNew). 'foot-hidden'은 빈 칸 별칭이다.
 import Phaser from 'phaser';
 import { TILE_PX } from '@decoy/shared';
 import { currentCharStyle, type CharStyle } from '../gfx/charStyle';
@@ -12,7 +14,7 @@ import { gfxState } from '../gfx/state';
 import { createCanvasTexture, removeCanvasTexture } from '../render/fogPaint';
 import { MAP_SCALE } from '../ui/layout';
 import { cloakPoseFor, ANIM } from './anim';
-import { EMPTY_ALIASES, SHARED_FRAMES, newStyleFrameSpecs, type FrameBox } from './charFrames';
+import { DrawingMemo, EMPTY_ALIASES, SHARED_FRAMES, newStyleFrameSpecs, type FrameBox } from './charFrames';
 import { clearPathCache, drawToCanvas } from './chars/kit';
 import { HIDDEN_SURVIVOR, OUTLINE, ROLE } from './palette';
 import {
@@ -532,6 +534,14 @@ export function cloakFrameName(kind: 'idle' | 'move', i: number): string {
  * 새 스타일 프레임: 옛 그림 중 공용 프레임 + 새 캐릭터 그림(자세마다 한 칸) + 빈 칸 하나.
  * 새 그림의 외곽선 두께는 옛 그림과 같은 월드 px(ART.outlineWorldPx)를 그 단위의 그림 단위로 바꾼 값이다
  */
+/** 새 스타일 그림 명령 기억 (판 중 배율이 바뀌어 다시 구울 때 래스터만). 기존 스타일을 구우면 비운다 */
+const drawMemo = new DrawingMemo();
+
+/** 시험 · 디버그: 그림 명령을 새로 만든 횟수와 기억한 개수 */
+export function drawMemoStats(): { made: number; size: number } {
+  return { made: drawMemo.made, size: drawMemo.size };
+}
+
 function newFrameDefs(survivorR: number, monsterR: number): FrameDef[] {
   const defs = classicFrameDefs().filter((d) => SHARED_FRAMES.includes(d.name));
   const ws = ART.outlineWorldPx / (survivorR * TILE_PX);
@@ -543,7 +553,7 @@ function newFrameDefs(survivorR: number, monsterR: number): FrameDef[] {
       ext: 0,
       unit: spec.unit,
       box: spec.box,
-      draw: (c, k) => drawToCanvas(c, spec.draw(ow), k),
+      draw: (c, k) => drawToCanvas(c, drawMemo.get(spec, ow), k),
     });
   }
   defs.push({ name: EMPTY_FRAME, ext: 0, unit: 's', draw: () => undefined });
@@ -729,7 +739,9 @@ export function bakeAtlas(params: AtlasParams): AtlasBuild {
     c.d.draw(ctx, unitPx[c.d.unit], w);
     ctx.restore();
   }
+  // Path2D는 굽기 한 번 안에서만 다시 쓴다(경로 글자가 커서 들고 있지 않는다). 그림 명령은 다음 굽기를 위해 둔다
   if (isNew) clearPathCache();
+  else drawMemo.clear();
   return { canvas, frames, params, ms: performance.now() - t0, texPerWorld: tpw };
 }
 
@@ -777,6 +789,8 @@ export function ensureAtlas(textures: TextureHost, params: AtlasParams): { key: 
   current = { key, build };
   gfxState.features.atlasBakeMs = Math.round(build.ms * 10) / 10;
   gfxState.features.atlasBytes = build.canvas.width * build.canvas.height * 4;
+  // 지금 올린(그리는) 아틀라스의 캐릭터 스타일 (시험: 스타일을 바꾼 뒤 실제로 다시 구웠는지)
+  gfxState.features.atlasStyle = build.params.style ?? 'classic';
   return current;
 }
 

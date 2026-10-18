@@ -55,7 +55,7 @@ import {
   type TravelPiece,
 } from '../art/anim';
 import { MOTE_R, cloakFrameName, ensureAtlas, type AtlasBuild } from '../art/atlas';
-import { NEW_POSE_MS, monsterFrameNew } from '../art/charFrames';
+import { NEW_POSE_MS, monsterFrameNew, type MonsterFrameInput } from '../art/charFrames';
 import { starSlot } from '../art/shapes';
 import {
   DashTrail,
@@ -432,7 +432,8 @@ export class WorldRenderer {
   private lastStatus = new Map<string, { status: SurvivorStatus; x: number; y: number; face: number }>();
   private fades = new Map<string, Fade>();
   /** 생존자 화면: 최근 피격 (이벤트 좌표) */
-  private hits: { x: number; y: number; you: boolean; t0: number }[] = [];
+  /** 생존자 화면 피격 (id = 맞은 팀원: 받은 뒤 첫 프레임에 이벤트 자리에서 가장 가까운 한 명. undefined = 아직 안 정함) */
+  private hits: { x: number; y: number; you: boolean; t0: number; id?: string | null }[] = [];
   /** 생존자 화면: 팀원 질주 끝 시각 (performance.now, 규칙 시간 sprintDuration) */
   private sprintUntil = 0;
   /** 새 스타일 자세: 가드 밀치기 · 스카우트 탐지 · 괴물 타격 · 포효 이벤트를 받은 시각 (ms) */
@@ -459,6 +460,16 @@ export class WorldRenderer {
   private shoveSeen = false;
   /** 공격 준비 채움 시작 (performance.now) */
   private windupStart: number | null = null;
+  /** 새 스타일 괴물 프레임 고르기 입력 (그릇 하나를 다시 쓴다) */
+  private readonly monFrameIn: MonsterFrameInput = {
+    stunned: false,
+    dashing: false,
+    windup: false,
+    strike: false,
+    roar: false,
+    moving: false,
+    cloak: 0,
+  };
   /** 괴물 화면: 이미 windup만큼 그린 준비의 서버 값 꼬리 (서버 준비가 끝날 때까지 다시 그리지 않는다) */
   private windupTail = false;
   /**
@@ -1684,6 +1695,10 @@ export class WorldRenderer {
       this.pushDisk(v.selfId, v.me.x, v.me.y, isMonster ? mR : sR);
     let starsDrawn = false;
 
+    // 피격은 이벤트 자리(0.8타일 이내)에서 가장 가까운 팀원 한 명에게만 붙인다 (붙어 선 다른 팀원은 젖히지 않는다)
+    if (!isMonster)
+      for (const h of this.hits) if (!h.you && h.id === undefined) h.id = this.nearestTeammate(v, h.x, h.y);
+
     // 다른 생존자
     for (const [id, s] of v.survivors) {
       this.transition(id, s.status, s.x, s.y, s.face, clockMs, realMs, isMonster, sR, v, false);
@@ -1740,7 +1755,7 @@ export class WorldRenderer {
           g.stepping,
           s.protected,
           false,
-          this.hitFor(s.x, s.y, false, realMs),
+          this.hitFor(id, false, realMs),
           seedOf(id),
           animMs,
           appear,
@@ -1818,7 +1833,10 @@ export class WorldRenderer {
       if (isMonster) {
         const rig = this.monsterRig(v.selfId);
         const g = this.gait(v, v.selfId, v.me.x, v.me.y, frameMs, null);
-        const raise = this.windupStart !== null ? 1 : 0;
+        // 새 스타일: 예측한 준비 표시가 다 찬 뒤에도 서버가 아직 준비 중(왕복 지연만큼 늦게 끝남)이면 준비 자세를 잇는다.
+        // 서버 준비가 0이 되는 스냅샷이 타격(attackHit)을 싣고 와서 타격 자세로 빈틈 없이 넘어간다 (기존 스타일 · 범위 표시는 그대로)
+        const hold = this.atlas?.params.style === 'new' && (snap.you.mon?.windup ?? 0) > 0;
+        const raise = this.windupStart !== null || hold ? 1 : 0;
         const pose = this.monsterPose(
           v.me.x,
           v.me.y,
@@ -1893,7 +1911,7 @@ export class WorldRenderer {
             g.stepping,
             prot,
             true,
-            this.hitFor(v.me.x, v.me.y, true, realMs),
+            this.hitFor(v.selfId, true, realMs),
             seedOf(v.selfId),
             animMs,
             appear,
@@ -1957,14 +1975,29 @@ export class WorldRenderer {
     this.stunOpp = stunOpp;
   }
 
-  /** 최근 피격이 이 자리(이벤트 좌표 0.8타일 이내)에 있었으면 지난 시간 (ms) */
-  private hitFor(x: number, y: number, self: boolean, realMs: number): number | null {
+  /** 이 생존자가 최근에 맞았으면 지난 시간 (ms). 나는 you 피격, 팀원은 그 피격에 정한 한 명(nearestTeammate) */
+  private hitFor(id: string, self: boolean, realMs: number): number | null {
     for (let i = this.hits.length - 1; i >= 0; i -= 1) {
       const h = this.hits[i];
       if (!h) continue;
-      if (h.you === self && (self || Math.hypot(h.x - x, h.y - y) < 0.8)) return realMs - h.t0;
+      if (self ? h.you : !h.you && h.id === id) return realMs - h.t0;
     }
     return null;
+  }
+
+  /** 피격 자리에서 0.8타일 이내의 가장 가까운 팀원 (없으면 null) */
+  private nearestTeammate(v: FrameView, x: number, y: number): string | null {
+    let best: string | null = null;
+    let bestD = 0.8;
+    for (const [id, s] of v.survivors) {
+      if (s.status === 'dead' || s.status === 'escaped') continue;
+      const d = Math.hypot(s.x - x, s.y - y);
+      if (d < bestD) {
+        bestD = d;
+        best = id;
+      }
+    }
+    return best;
   }
 
   /** 탈출 (빛 속으로 0.4초 페이드) · 사망 (회색 → 페이드). 정보가 아니라 drawn에 넣지 않는다 */
@@ -1991,6 +2024,26 @@ export class WorldRenderer {
       );
   }
 
+  /** 새 스타일 괴물 프레임 입력 (그릇에 값만 쓴다) */
+  private monsterFrameInput(
+    stunned: boolean,
+    dashing: boolean,
+    windup: boolean,
+    moving: boolean,
+    cloak: number,
+    now: number,
+  ): MonsterFrameInput {
+    const f = this.monFrameIn;
+    f.stunned = stunned;
+    f.dashing = dashing;
+    f.windup = windup;
+    f.strike = now - this.strikeAt >= 0 && now - this.strikeAt < NEW_POSE_MS.strike;
+    f.roar = now - this.roarAt >= 0 && now - this.roarAt < NEW_POSE_MS.roar;
+    f.moving = moving;
+    f.cloak = cloak;
+    return f;
+  }
+
   private monsterPose(
     x: number,
     y: number,
@@ -2008,15 +2061,7 @@ export class WorldRenderer {
     const isNew = this.atlas?.params.style === 'new';
     const now = this.poseNowMs;
     const frame = isNew
-      ? monsterFrameNew({
-          stunned,
-          dashing,
-          windup: raise > 0,
-          strike: now - this.strikeAt >= 0 && now - this.strikeAt < NEW_POSE_MS.strike,
-          roar: now - this.roarAt >= 0 && now - this.roarAt < NEW_POSE_MS.roar,
-          moving,
-          cloak: i,
-        })
+      ? monsterFrameNew(this.monsterFrameInput(stunned, dashing, raise > 0, moving, i, now))
       : stunned
         ? 'monster-stun'
         : dashing

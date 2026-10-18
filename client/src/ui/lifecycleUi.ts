@@ -482,8 +482,9 @@ export class SettingsMenu {
         ),
       );
     }
-    // 저장 실패 안내는 진동 · 프레임 제한 · 캐릭터 스타일 줄 아래 하나 (저장소가 막히면 셋 다 못 쓴다)
-    if (hooks.haptics || hooks.frameLimit || this.styleSegs.length > 0) more.push(this.note);
+    // 저장 실패 안내는 진동 · 프레임 제한 · 캐릭터 스타일 줄 아래 하나 (저장소가 막히면 셋 다 못 쓴다). 판 직속으로 두고
+    // 한 열이면 설정 줄 다음 · 안내 다시 보기 앞(CSS order), 두 열이면 두 열 아래 한 줄 전체(어느 열의 줄이 실패해도 같은 자리)
+    const note = hooks.haptics || hooks.frameLimit || this.styleSegs.length > 0 ? [this.note] : [];
     if (hooks.tutorial) {
       const replay = h(
         'button',
@@ -500,7 +501,11 @@ export class SettingsMenu {
     // 묶음 상자는 보통 화면에서 display: contents(한 열 그대로), 낮은 가로 화면에서 두 열 (둘 다 있을 때만)
     const cols = [rows, more].filter((c) => c.length > 0).map((c) => h('div', { class: 'life-col' }, ...c));
     this.panel.classList.toggle('life-two', cols.length === 2);
-    this.panel.append(h('h2', { id: title, class: 'life-settings-title' }, APP_TEXT.settings), ...cols);
+    this.panel.append(
+      h('h2', { id: title, class: 'life-settings-title' }, APP_TEXT.settings),
+      ...cols,
+      ...note,
+    );
     this.panel.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         this.close();

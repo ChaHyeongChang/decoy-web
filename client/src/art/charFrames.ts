@@ -70,6 +70,34 @@ export interface CharFrameSpec {
   draw(w: number): Drawing;
 }
 
+/**
+ * 그림 명령 기억 (이름 → Drawing). 외곽선 두께 w는 반지름만의 함수라 배율(zoom)과 무관하다: 판 중에 배율이 바뀌어
+ * (자동 품질 하향 · 되돌림, 창 크기 · DPR · 회전) 다시 구울 때 그림 명령을 다시 만들지 않고 래스터만 한다.
+ * 이름마다 하나만 들고, w가 다르면(반지름이 바뀌면) 그 자리를 바꾼다 — 많아야 프레임 수만큼이다
+ */
+export class DrawingMemo {
+  private readonly map = new Map<string, { w: number; d: Drawing }>();
+  /** 새로 만든 횟수 (시험 · 디버그) */
+  made = 0;
+
+  get(spec: CharFrameSpec, w: number): Drawing {
+    const hit = this.map.get(spec.name);
+    if (hit && hit.w === w) return hit.d;
+    const d = spec.draw(w);
+    this.made += 1;
+    this.map.set(spec.name, { w, d });
+    return d;
+  }
+
+  get size(): number {
+    return this.map.size;
+  }
+
+  clear(): void {
+    this.map.clear();
+  }
+}
+
 /** 새 스타일에서도 옛 그림 그대로 굽는 프레임 (그림자 · 나 표시 링 · 노출 링 · 문양 · 거품 · 먼지 — 작은 곳은 문양 유지) */
 export const SHARED_FRAMES: readonly string[] = [
   'shadow-survivor',

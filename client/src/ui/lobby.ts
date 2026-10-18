@@ -181,6 +181,8 @@ export class LobbyUI {
   private readonly tutorial = new TouchTutorialCard(() => this.tutorialSeen());
   /** 마지막으로 그린 방 상태 (설정에서 안내 다시 보기를 누르면 그 자리에서 다시 그린다) */
   private lastLobby: LobbyState | null = null;
+  /** 방 · 빠른 매칭 역할 카드의 그림 svg 노드 (역할|스타일 → 노드, cardFigure). 스타일이 바뀌면 비운다 */
+  private readonly cardFigures = new Map<string, Element>();
   /** 역할 카드 능력 줄의 입력 방식 */
   private readonly mode: InputMode = device.touch ? 'touch' : 'keyboard';
   /** 첫 화면 서버 상태 줄 (M13b): 연결과 상관없이 첫 화면을 그리고 이 줄로 알린다 */
@@ -255,6 +257,7 @@ export class LobbyUI {
    * 첫 화면은 다시 그리지 않는다(입력한 이름 · 방 코드가 지워진다) — 선택 상자 값만 맞춘다. 숨어 있으면(판 중) 다음에 그릴 때 따른다
    */
   private charStyleChanged(): void {
+    this.cardFigures.clear();
     if (this.root.style.display === 'none') return;
     if (this.lastLobby && this.atRoom) {
       // 빠른 매칭 남은 시간 글자는 다음 tick(0.25초)까지 비므로 그대로 옮겨 둔다
@@ -847,13 +850,36 @@ export class LobbyUI {
       this.content.querySelector<HTMLElement>(`[data-testid="${focusId}"]`)?.focus({ preventScroll: true });
   }
 
+  /**
+   * 방 · 빠른 매칭 역할 카드 그림. 로비 상태가 올 때마다 카드를 새로 만들지만, 그림 svg 노드는 같은 역할 · 스타일이면 앞 화면의 것을
+   * 새 카드로 옮겨 쓴다(새 캐릭터 정면 그림은 하나에 약 30KB · 경로 100개 — 준비 · 이름이 바뀔 때마다 다시 해석하지 않게).
+   * 한 화면에 역할마다 카드가 하나라 옮겨도 겹치지 않는다
+   */
+  private cardFigure(role: Role): HTMLSpanElement {
+    const style = currentCharStyle();
+    const key = `${role}|${style}`;
+    const cached = this.cardFigures.get(key);
+    if (!cached) {
+      const span = roleFigure('rc-figure', role);
+      const svg = span.querySelector(':scope > svg');
+      if (svg) this.cardFigures.set(key, svg);
+      return span;
+    }
+    const span = h('span', {
+      class: style === 'new' ? `rc-figure ${FRONT_FIGURE_CLASS}` : 'rc-figure',
+      'aria-hidden': 'true',
+    });
+    span.append(cached);
+    return span;
+  }
+
   /** 역할 카드: 큰 실루엣 + 문양 + 이름 + 소개 + 능력(키캡) + 주인 */
   private roleCard(role: Role, lobby: LobbyState): HTMLElement {
     const info = ROLE_CARDS[role];
     const owner = lobby.players.find((p) => p.role === role);
     const mine = owner !== undefined && owner.id === this.you;
     const taken = owner !== undefined && !mine;
-    const figure = roleFigure('rc-figure', role);
+    const figure = this.cardFigure(role);
     if (mine) {
       figure.removeAttribute('aria-hidden');
       figure.append(h('span', { class: 'rc-tag' }, icon('check', 15), UI_TEXT.myRole));

@@ -9,10 +9,10 @@ import { expect, test } from '@playwright/test';
 /** M10 시작 전(7d79dee) 같은 방법으로 잰 값 (바이트). Vite 표시로는 348.45kB */
 const BEFORE_M10 = 346_679;
 /**
- * 늘 지키는 상한 (휴대폰 첫 접속): M10 전 값 + 캐릭터 리디자인 그림 코드 몫 8KiB (DECISIONS 8절 '번들 예산').
- * 새 캐릭터 그림(art/chars, gzip 약 21.6KB)은 줄일 수 없는 그림 명령이라 상한을 그만큼만 올렸다
+ * 늘 지키는 상한 (휴대폰 첫 접속): M10 전 값 + 2KiB (DECISIONS 8절 '번들 예산'). 캐릭터 리디자인(PR #21)에서 처음 M10 전 값을
+ * 넘었다(실측 347,683B = M10 전 +1.0KiB, 새 캐릭터 그림 명령 gzip 약 21.6KB). 상한은 실측에 1KiB 남짓만 남긴다
  */
-const CAP = BEFORE_M10 + 8 * 1024;
+const CAP = BEFORE_M10 + 2 * 1024;
 /**
  * 마일스톤마다의 예산: 직전 마일스톤 병합 값에서 이번 마일스톤이 더 쓸 수 있는 양 (DECISIONS M11 "번들 예산").
  * M10c는 Phaser 사용자 빌드 직후 243,281B에서 +25KiB였다. 다음 마일스톤에서 기준을 그 병합 값으로 옮긴다
@@ -26,21 +26,17 @@ const CAP = BEFORE_M10 + 8 * 1024;
 // 정면 그림 UI (DECISIONS 8절 '번들 예산')
 const MILESTONE = { name: '캐릭터 리디자인', base: 322_735, baseName: 'PR #20 병합', budget: 28 * 1024 };
 
-test(
-  'JS 번들 gzip: 마일스톤 예산 이하, 상한(리마스터 전 + 캐릭터 그림 몫 8KiB) 아래',
-  { tag: '@core' },
-  () => {
-    const dir = join(process.cwd(), 'client/dist/assets');
-    let total = 0;
-    for (const f of readdirSync(dir))
-      if (f.endsWith('.js')) total += gzipSync(readFileSync(join(dir, f))).length;
-    const kib = (n: number): string => `${n >= 0 ? '+' : ''}${(n / 1024).toFixed(1)}KiB`;
-    const M = MILESTONE;
-    console.log(
-      `[번들] JS gzip ${total}B (${M.baseName} ${M.base}B ${kib(total - M.base)} / ${M.name} 예산 +${M.budget / 1024}KiB, M10 전 ${BEFORE_M10}B ${kib(total - BEFORE_M10)}, 상한 ${CAP}B)`,
-    );
-    expect(total).toBeGreaterThan(M.base / 2);
-    expect(total - M.base).toBeLessThanOrEqual(M.budget);
-    expect(total).toBeLessThan(CAP);
-  },
-);
+test('JS 번들 gzip: 마일스톤 예산 이하, 상한(리마스터 전 + 2KiB) 아래', { tag: '@core' }, () => {
+  const dir = join(process.cwd(), 'client/dist/assets');
+  let total = 0;
+  for (const f of readdirSync(dir))
+    if (f.endsWith('.js')) total += gzipSync(readFileSync(join(dir, f))).length;
+  const kib = (n: number): string => `${n >= 0 ? '+' : ''}${(n / 1024).toFixed(1)}KiB`;
+  const M = MILESTONE;
+  console.log(
+    `[번들] JS gzip ${total}B (${M.baseName} ${M.base}B ${kib(total - M.base)} / ${M.name} 예산 +${M.budget / 1024}KiB, M10 전 ${BEFORE_M10}B ${kib(total - BEFORE_M10)}, 상한 ${CAP}B)`,
+  );
+  expect(total).toBeGreaterThan(M.base / 2);
+  expect(total - M.base).toBeLessThanOrEqual(M.budget);
+  expect(total).toBeLessThan(CAP);
+});

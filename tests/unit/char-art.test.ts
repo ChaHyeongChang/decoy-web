@@ -7,7 +7,14 @@
 import { describe, expect, it } from 'vitest';
 import { COMMON_ART, MONSTER_ART, SURVIVOR_ART } from '../../client/src/art/chars/index';
 import { path, toSvg, transformDrawing, type Drawing, type Paint } from '../../client/src/art/chars/kit';
-import { drawingPoints, monsterOver, samplePath, survivorOver } from '../../client/src/art/chars/measure';
+import {
+  drawingMask,
+  drawingPoints,
+  monsterOver,
+  samplePath,
+  survivorOver,
+} from '../../client/src/art/chars/measure';
+import { maskIoU } from '../../client/src/art/shapes';
 import {
   FRONT_REST,
   HIDDEN_REST,
@@ -183,6 +190,41 @@ describe('새 캐릭터 그림: 범위 · 유한값', () => {
   });
 });
 
+describe('새 캐릭터 그림: 색만으로 구분하지 않기 (VISUAL_SPEC 0장 ④)', () => {
+  // 기존 실루엣 시험(shapes.test)과 같은 기준 · 크기 · 방향. 마스크 = 불투명한 칠(은은한 빛 · 네온 번짐 제외)
+  const SIZES = [12.7, 18, 36];
+  const roleMask = (r: (typeof ROLES)[number], d: number, rot: number): Uint8Array =>
+    drawingMask(SURVIVOR_ART[r].top(SURVIVOR_REST, { w: W }), d, rot);
+
+  it('역할끼리 겹침(IoU) 0.8 이하 — 12.7 · 18 · 36px, 두 방향', () => {
+    for (const d of SIZES)
+      for (const rot of [0, 0.6])
+        for (let i = 0; i < ROLES.length; i += 1)
+          for (let j = i + 1; j < ROLES.length; j += 1) {
+            const a = ROLES[i]!;
+            const b = ROLES[j]!;
+            expect(maskIoU(roleMask(a, d, rot), roleMask(b, d, rot)), `${a}-${b} ${d}px`).toBeLessThanOrEqual(
+              0.8,
+            );
+          }
+  });
+
+  it('괴물 화면 공통 생존자와 각 역할의 겹침 0.85 이하', () => {
+    for (const d of SIZES)
+      for (const rot of [0, 0.6]) {
+        const hidden = drawingMask(COMMON_ART.top(HIDDEN_REST, { w: W }), d, rot);
+        for (const r of ROLES)
+          expect(maskIoU(hidden, roleMask(r, d, rot)), `hidden-${r} ${d}px`).toBeLessThanOrEqual(0.85);
+      }
+  });
+
+  it('마스크 자체 확인: 같은 그림은 겹침 1, 비어 있지 않다', () => {
+    const m = roleMask('runner', 18, 0);
+    expect(m.some((v) => v === 1)).toBe(true);
+    expect(maskIoU(m, roleMask('runner', 18, 0))).toBe(1);
+  });
+});
+
 describe('새 캐릭터 그림: 괴물 화면 공통 생존자 (VISUAL_SPEC 0장 ③)', () => {
   it('칠하는 색은 무채색 계열뿐 (색 폭 20/255 이하: 옛 숨은 생존자와 같은 차가운 회색까지) — 역할색 · 괴물 빨강이 없다', () => {
     const roleColors = new Set<number>([ROLE.runner, ROLE.guard, ROLE.scout, ROLE.monster]);
@@ -207,7 +249,7 @@ describe('새 캐릭터 그림: 괴물 화면 공통 생존자 (VISUAL_SPEC 0장
     expect(Object.keys(SURVIVOR_ART).sort()).toEqual(['guard', 'runner', 'scout']);
   });
 
-  it('같은 자세면 같은 그림 (숨쉬기 · 걷기 외에 다른 입력이 없다)', () => {
+  it('결정적: 같은 자세면 같은 그림 (다른 입력이 들어올 자리가 없다는 것은 자세 타입 시험이 본다)', () => {
     const a = COMMON_ART.top({ ...HIDDEN_REST, walk: 1.2, stride: 1 }, { w: W });
     const b = COMMON_ART.top({ ...HIDDEN_REST, walk: 1.2, stride: 1 }, { w: W });
     expect(a).toEqual(b);

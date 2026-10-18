@@ -300,7 +300,7 @@ test(
       const still = await captureBodies(host, bodies, { refColors: ref });
       console.log(`[m10-visual] 괴물 화면 (${style}): ${describeCapture(still)}`);
       expect(still.ok).toBe(true);
-      // 멈춰 있으면 두 스타일 모두 같은 그림 키 하나 (새 스타일 걷기 · 수감 자세도 역할 없이 고른다: char-frames 단위 시험)
+      // 멈춰 있으면 두 스타일 모두 같은 그림 키 하나 (새 스타일 걷기 자세도 역할 없이 걷기 값으로만 고른다: char-frames 단위 시험)
       const sprites = still.drawn.filter((d) => d.kind === 'survivor').map((d) => d.sprite);
       expect(sprites, style).toEqual(['survivor-hidden', 'survivor-hidden', 'survivor-hidden']);
       for (const s of still.stats) {

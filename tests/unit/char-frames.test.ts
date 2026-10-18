@@ -1,11 +1,12 @@
 // 새 캐릭터 스타일 아틀라스 프레임 (캐릭터 리디자인 2단계, client/src/art/charFrames.ts): 굽는 그림 · 이름 표 · 고르기.
-//  - 괴물 화면 생존자 프레임은 걷기 위상 · 걷기 세기 · 수감 여부만으로 고른다 (역할 · 체력 · 능력 · 구조 인자 없음, VISUAL_SPEC 0장 ③)
+//  - 괴물 화면 생존자 프레임은 걷기 위상 · 걷기 세기만으로 고른다 (역할 · 체력 · 능력 · 구조 · 수감 인자 없음, VISUAL_SPEC 0장 ③)
 //  - 'survivor-hidden*' 프레임은 공통 생존자 그림(COMMON_ART)뿐이고 무채색이다
 //  - 리그가 쓰는 옛 이름이 새 스타일 텍스처에 모두 있다 (Phaser는 없는 프레임에 경고를 낸다)
 //  - 모든 프레임 그림이 굽기 상자 안 · 크기 기준 안
 import { describe, expect, it } from 'vitest';
 import {
   CLOAK_FRAMES,
+  DrawingMemo,
   EMPTY_ALIASES,
   HIDDEN_FRAME_NAMES,
   MONSTER_FRAME_NAMES,
@@ -113,7 +114,7 @@ describe('새 캐릭터 프레임: 괴물 화면 공통 생존자 (VISUAL_SPEC 0
     expect(hiddenFrameNew.length).toBe(2);
   });
 
-  it('같은 걷기 값이면 누구든 같은 프레임 이름이고, 이름은 공통 생존자 쉬기 · 걷기 표 안에 있다', () => {
+  it('결정적: 같은 걷기 값이면 같은 프레임 이름이고(입력은 걷기 값 둘뿐), 이름은 공통 생존자 쉬기 · 걷기 표 안에 있다', () => {
     const names = new Set<string>([HIDDEN_FRAME_NAMES.rest, ...HIDDEN_FRAME_NAMES.walk]);
     const rng = new Rng(11);
     for (let k = 0; k < 2000; k += 1) {
@@ -259,5 +260,28 @@ describe('새 캐릭터 프레임: 굽기 상자 · 크기 기준', () => {
       const over = s.unit === 's' ? survivorOver(d) : monsterOver(d, s.name === MONSTER_FRAME_NAMES.dash);
       expect(over, s.name).toBeNull();
     }
+  });
+});
+
+describe('새 캐릭터 프레임: 그림 명령 기억 (판 중 배율이 바뀌어 다시 굽기)', () => {
+  it('같은 외곽선 두께면 다시 만들지 않고, 두께가 바뀌면(반지름이 바뀌면) 그 자리를 바꾼다', () => {
+    const memo = new DrawingMemo();
+    const a = specs[0]!;
+    const b = specs[1]!;
+    const d1 = memo.get(a, W);
+    expect(memo.get(a, W)).toBe(d1);
+    memo.get(b, W);
+    expect(memo.made).toBe(2);
+    const d2 = memo.get(a, W * 2);
+    expect(d2).not.toBe(d1);
+    expect(memo.made).toBe(3);
+    expect(memo.size).toBe(2);
+    memo.clear();
+    expect(memo.size).toBe(0);
+  });
+
+  it('기억한 그림은 새로 그린 그림과 같다 (같은 입력 → 같은 명령)', () => {
+    const memo = new DrawingMemo();
+    for (const s of specs.slice(0, 12)) expect(memo.get(s, W)).toEqual(s.draw(W));
   });
 });

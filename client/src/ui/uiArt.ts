@@ -213,7 +213,24 @@ function frontDrawing(id: Role | 'common'): Drawing {
  * 정면 캐릭터. stage = false면 무대 빛을 뺀다(결과 화면 팀 문장처럼 여럿을 겹칠 때). svg 하나로 돌려준다
  */
 export function frontFigureSvg(id: Role | 'common', stage = true): string {
-  const n = ++uid;
+  // 그림 글자는 (그림, 무대 빛)마다 한 번만 만들고, 부를 때마다 id 앞붙이 자리(FRONT_ID_SLOT)만 새 번호로 바꾼다
+  // (한 화면에 같은 그림이 여럿이어도 그라디언트 id가 겹치지 않게)
+  const key = `${id}|${stage ? 1 : 0}`;
+  let parts = frontTemplates.get(key);
+  if (parts === undefined) {
+    parts = frontFigureTemplate(id, stage).split(FRONT_ID_SLOT);
+    frontTemplates.set(key, parts);
+  }
+  return parts.join(String(++uid));
+}
+
+/** 정면 그림 글자 틀의 id 번호 자리 (그림 글자에 나오지 않는 글자) */
+const FRONT_ID_SLOT = '@@';
+/** (그림, 무대 빛) → id 번호 자리로 자른 그림 글자 (많아야 5 × 2개) */
+const frontTemplates = new Map<string, string[]>();
+
+function frontFigureTemplate(id: Role | 'common', stage: boolean): string {
+  const n = FRONT_ID_SLOT;
   const { size, dx, dy } = FRONT_FIGURE[id];
   const k = size / 2;
   const inner = toSvg(frontDrawing(id), { viewBox: [-1, -1, 2, 2], idPrefix: `ff${n}x` })

@@ -92,6 +92,8 @@ export const SCOUT_COLOR = {
   /** 위 그림 장갑 (재킷보다 한 단 짙은 초록 — 몸 옆에 어두운 점 · 고리로 떨어져 보이지 않게) */
   gloveTop: shade(ROLE.scout, 0.15),
   hair: 0x1b2430,
+  /** 정면 입 (짙은 갈색) */
+  mouth: 0x5b2a22,
 } as const;
 
 const C = SCOUT_COLOR;
@@ -696,7 +698,7 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
       .Q(0.0, hy + 0.3, 0.08, hy + 0.215)
       .Q(0.0, hy + 0.25, -0.07, hy + 0.225)
       .Z().d,
-    solid(ink(0x5b2a22)),
+    solid(ink(C.mouth)),
   );
   // 7) 오른팔(화면 왼쪽) + 접은 망원경 (층을 나눠 굵은 외곽선): 위 그림처럼 오른손에 짧게 접어 쥐고 대물 끝을 바깥 위로
   //    비스듬히 — 얼굴 · 고글이 주인공이고 망원경은 어깨 옆 곁들이. 자리는 화면 오른쪽 기준으로 잡고 좌우로 뒤집어 놓는다

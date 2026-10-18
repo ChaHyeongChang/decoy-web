@@ -13,6 +13,7 @@ M10 비주얼 리마스터(어두운 시설 · 청록 네온 · 붉은 괴물) �
 | `mapArtBadges` | `client/src/art/mapArtBadges.ts` |
 | `shapes` | `client/src/art/shapes.ts` |
 | `charFrames` | `client/src/art/charFrames.ts` |
+| `chars` | `client/src/art/chars/index.ts` (새 캐릭터 그림 모음 · 재질 색) |
 | `anim` | `client/src/art/anim.ts` |
 | `fx` | `client/src/art/fx.ts` |
 | `icons` | `client/src/art/icons.ts` |
@@ -84,7 +85,7 @@ M10 비주얼 리마스터(어두운 시설 · 청록 네온 · 붉은 괴물) �
 캐릭터 스타일(4.5, 기존 / 새 캐릭터)과 무관하다. 새 캐릭터 스타일에서도 괴물 화면 생존자는 공통 생존자 그림(`art/chars/common.ts`, 무채색만) 하나이고, 자세 프레임은 걷기 위상 · 걷기 세기만으로 고른다(`art/charFrames.ts` hiddenFrameNew — 역할 · 체력 · 능력 · 구조 · 수감 인자가 없다). 수감 자세도 쓰지 않는다: 기존 스타일은 수감자와 자유 생존자를 같은 흰 몸으로 그리므로(감옥 문은 수감자만 막아 자유 생존자도 감옥 안에 설 수 있다) 새 스타일도 같은 정보량이다. 멈춰 있으면 그림 키는 두 스타일 모두 `survivor-hidden`이다. 스타일은 기기에만 저장하고 서버로 보내지 않는다. 괴물 화면은 괴물 자신의 설정만 따른다.
 
 - `tests/e2e/m10-visual.spec.ts` 「캐릭터 스타일과 무관한 흰색 위장: 괴물 화면 세 생존자는 새 캐릭터 · 기존 어느 스타일이든 같은 공통 그림, 생존자 쪽 스타일과도 무관」
-- `tests/unit/char-frames.test.ts` 「프레임 고르기는 걷기 위상 · 걷기 세기 2개만 받는다 — 역할 · 체력 · 능력 · 구조 · 수감 자리가 없다 (타입 검사)」 · 「같은 걷기 값이면 누구든 같은 프레임 이름이고, 이름은 공통 생존자 쉬기 · 걷기 표 안에 있다」 · 「'survivor-hidden*' 프레임은 공통 생존자 그림뿐이고 무채색이다 (역할색 · 괴물 빨강 없음)」
+- `tests/unit/char-frames.test.ts` 「프레임 고르기는 걷기 위상 · 걷기 세기 2개만 받는다 — 역할 · 체력 · 능력 · 구조 · 수감 자리가 없다 (타입 검사)」 · 「결정적: 같은 걷기 값이면 같은 프레임 이름이고(입력은 걷기 값 둘뿐), 이름은 공통 생존자 쉬기 · 걷기 표 안에 있다」 · 「'survivor-hidden*' 프레임은 공통 생존자 그림뿐이고 무채색이다 (역할색 · 괴물 빨강 없음)」
 - `tests/unit/char-art.test.ts` 「자세 타입에 역할 · 능력 · 피격 · 구조 값이 없다 (타입 검사)」 · 「칠하는 색은 무채색 계열뿐 (색 폭 20/255 이하: 옛 숨은 생존자와 같은 차가운 회색까지) — 역할색 · 괴물 빨강이 없다」
 
 ### ④ 색만으로 구분하지 않기
@@ -102,6 +103,7 @@ M10 비주얼 리마스터(어두운 시설 · 청록 네온 · 붉은 괴물) �
 | 역할 (새 캐릭터 스타일, 4.5) | 실루엣(러너 넓은 어깨 + 앞 후드 머리, 가드 앞 방패 호, 스카우트 고글 고리 + 짧은 망원경, 공통 생존자 흰 둥근 몸 + 짙은 가리개) + 같은 문양 |
 
 - `tests/unit/shapes.test.ts` 「역할끼리 겹침(IoU) 0.8 이하 — 12.7 · 18 · 36px, 두 방향」 · 「괴물 화면 공통 실루엣과 각 역할의 겹침 0.85 이하」 · 「앞 돌출은 1.55r 이내 (역할마다 커 보이지 않게)」
+- `tests/unit/char-art.test.ts` (새 캐릭터 스타일, 같은 기준) 「역할끼리 겹침(IoU) 0.8 이하 — 12.7 · 18 · 36px, 두 방향」 · 「괴물 화면 공통 생존자와 각 역할의 겹침 0.85 이하」 — 실측 역할끼리 0.64~0.72, 공통과 0.69~0.79
 - `tests/unit/rangeDraw.test.ts` 「coneRed > 0이면 줄을 긋고, 모든 줄은 판정 다각형 안 (끝점은 경계 위, 가운데는 안)」 · 「펄스: 0.6초 주기로 알파가 오르내리고(같은 위상이면 같은 값), 빨강 세기에 비례」 · 「막힘은 × 표시를 더 긋는다 (색만으로 구분하지 않기)」
 - `tests/unit/objects.test.ts` 「상태는 색만이 아니라 아이콘으로도 갈린다 (점령 중 ▶ · 정지 ‖ · 완료 ✓), 경고 주황은 정지에만」
 - `tests/unit/hud.test.ts` 「거점 상태: 서버 blocked = 정지, 점령 중 · 정지 · 완료는 서로 다른 칩 아이콘 (색만으로 구분하지 않기)」 · 「타이머: 최후의 30초 > 1분 미만 > 보통, 모드마다 아이콘도 다르다」 · 「생존자 상태는 아이콘이 모두 다르고, 상태 이름은 지금 문구 그대로」
@@ -395,7 +397,26 @@ M10 비주얼 리마스터(어두운 시설 · 청록 네온 · 붉은 괴물) �
 - **색**: 몸 가운데는 역할색, 외곽선 `#05080C` 1.8 월드 px(기존과 같은 두께). 공통 생존자는 무채색만(색 폭 20/255 이하). 청록 네온은 정면 그림 생존자 셋의 옷 · 장비에만(1.2 예외)
 - **작은 곳은 문양**: HUD 팀 칸 · 점수판 · 플레이어 목록 · 로비 아바타 · 결과 표 · 미니맵 · 괴물 화면 능력 노출 문양 · 기절 별은 스타일과 상관없이 4.4 문양 그대로(사용자 결정 6)
 
-**월드 텍스처** (`art/atlas.ts` bakeAtlas, `style: 'new'`): 고른 스타일 한 장만 굽는다(로비 대기 중 미리 굽기, 판 중 배율이 바뀌면 다시). 자세마다 한 칸이고, 앞이 긴 그림이라 직사각 칸(생존자 x −1.08~1.6 · y ±1.26, 괴물 x · y ±1.32 · ±1.2)에 굽고 칸 안 중심을 Phaser 프레임 pivot으로 둔다(새 텍스처는 모든 프레임에 pivot). 쉬는 자세는 옛 이름 그대로(`survivor-hidden` · `survivor-runner` · `monster-idle-0` …), 자세 프레임은 옛 이름 + `~` 꼬리표(`survivor-hidden~w3`). 그림자 · 나 표시 링 · 노출 링 · 문양 · 거품 · 먼지는 기존 그림 그대로 굽고, 새 그림 안에 있는 옛 부품(발 · 윤기 · 발톱 · 눈 · 눈빛)은 빈 칸 하나를 가리켜 알파 0으로 둔다 — 캐릭터마다 이미지 2장(그림자 + 몸). 배율 2에서 약 2.0MiB(기존 약 1.0MiB), 품질 높음 1920×1080@2 전체 텍스처 31.2MiB(예산 32MiB)
+**새 캐릭터 재질 색** (코드로 그리는 그림의 바탕 색. 그늘 · 밝은 면 · 그라디언트는 이 색과 역할색 · 외곽선을 섞어 만든다 — `art/chars/kit.ts` shade · tint · mix. 눈 · 렌즈 반짝임은 흰색)
+
+| 재질 | 값 | 코드 |
+|---|---|---|
+| 피부 · 피부 그늘 · 정면 눈 | `#D9A27E` · `#A8725A` · `#101820` | `chars.MAT.skin` `chars.MAT.skinShade` `chars.MAT.eye` |
+| 사망 회색 (4.3과 같다) | `#6B7280` | `chars.DEAD_GRAY` |
+| 러너 후드티(역할색) · 그늘 · 위 그림 챙 띠 | `#3B82F6` · `#1E3A8A` · `#60A5FA` | `chars.RUNNER_COLOR.hoodie` `chars.RUNNER_COLOR.deep` `chars.RUNNER_COLOR.neon` |
+| 러너 바지 · 신발 · 밑창 · 장갑 · 머리 | `#253041` · `#2B3646` · `#CBD5E1` · `#334155` · `#1B2430` | `chars.RUNNER_COLOR.pants` `chars.RUNNER_COLOR.shoe` `chars.RUNNER_COLOR.sole` `chars.RUNNER_COLOR.glove` `chars.RUNNER_COLOR.hair` |
+| 가드 갑옷(역할색) · 그늘 · 방패 테 (글자용 역할색) | `#A855F7` · `#581C87` · `#C084FC` | `chars.GUARD_COLOR.armor` `chars.GUARD_COLOR.deep` `chars.GUARD_COLOR.neon` |
+| 가드 금속 · 바지 · 장화 · 밑창 · 장갑 | `#2B3646` · `#253041` · `#1B2430` · `#0F151D` · `#444E5C` | `chars.GUARD_COLOR.steel` `chars.GUARD_COLOR.pants` `chars.GUARD_COLOR.boot` `chars.GUARD_COLOR.sole` `chars.GUARD_COLOR.glove` |
+| 스카우트 재킷(역할색) · 그늘 · 렌즈 빛 (글자용 역할색) · 정면 재킷 | `#22C55E` · `#14532D` · `#4ADE80` · `#1DA750` | `chars.SCOUT_COLOR.jacket` `chars.SCOUT_COLOR.deep` `chars.SCOUT_COLOR.neon` `chars.SCOUT_COLOR.coat` |
+| 스카우트 금속 · 어두운 금속 · 정면 배낭 · 위 그림 배낭 · 고글 끈 | `#94A79B` · `#2B3646` · `#136C34` · `#157A3A` · `#147237` | `chars.SCOUT_COLOR.steel` `chars.SCOUT_COLOR.gunmetal` `chars.SCOUT_COLOR.pack` `chars.SCOUT_COLOR.packTop` `chars.SCOUT_COLOR.band` |
+| 스카우트 끈 · 바지 · 장화 · 밑창 · 장갑 · 위 그림 장갑 · 머리 · 입 | `#1B2430` · `#253041` · `#2B3646` · `#0F151D` · `#178640` · `#1DA750` · `#1B2430` · `#5B2A22` | `chars.SCOUT_COLOR.strap` `chars.SCOUT_COLOR.pants` `chars.SCOUT_COLOR.boot` `chars.SCOUT_COLOR.sole` `chars.SCOUT_COLOR.glove` `chars.SCOUT_COLOR.gloveTop` `chars.SCOUT_COLOR.hair` `chars.SCOUT_COLOR.mouth` |
+| 공통 생존자 방호복(0.1 숨은 생존자 흰색) · 테 · 장갑 · 장화 · 밑창 | `#F8FAFC` · `#C5CAD1` · `#D3D8DE` · `#B7BEC6` · `#5B636C` | `chars.COMMON_COLOR.suit` `chars.COMMON_COLOR.rim` `chars.COMMON_COLOR.glove` `chars.COMMON_COLOR.boot` `chars.COMMON_COLOR.sole` |
+| 공통 생존자 가리개 · 짙은 가리개 · 가리개 유리 · 솔기 | `#9AA3AD` · `#3A4048` · `#5B636C` · `#AEB5BD` | `chars.COMMON_COLOR.visor` `chars.COMMON_COLOR.visorDark` `chars.COMMON_COLOR.visorGlass` `chars.COMMON_COLOR.seam` |
+| 괴물 두건(역할색) · 망토 · 깊은 망토 · 소매 | `#EF4444` · `#9E2D2D` · `#5A1219` · `#732121` | `chars.MONSTER_COLOR.hood` `chars.MONSTER_COLOR.cloak` `chars.MONSTER_COLOR.cloakDeep` `chars.MONSTER_COLOR.sleeve` |
+| 괴물 뼈 · 뼈 그늘 · 손 · 얼굴 · 가장 깊은 그늘 | `#F1E6E8` · `#B59EA3` · `#2A0E12` · `#1A0B0E` · `#070203` | `chars.MONSTER_COLOR.bone` `chars.MONSTER_COLOR.boneShade` `chars.MONSTER_COLOR.hand` `chars.MONSTER_COLOR.face` `chars.MONSTER_COLOR.void` |
+| 괴물 눈 · 눈빛 · 림 (글자용 역할색) | `#FFF1F2` · `#FB7185` · `#F87171` | `chars.MONSTER_COLOR.eye` `chars.MONSTER_COLOR.eyeGlow` `chars.MONSTER_COLOR.neon` |
+
+**월드 텍스처** (`art/atlas.ts` bakeAtlas, `style: 'new'`): 고른 스타일 한 장만 굽는다(로비 대기 중 미리 굽기, 판 중 배율이 바뀌면 다시). 자세마다 한 칸이고, 앞이 긴 그림이라 직사각 칸(생존자 x −1.08~1.6 · y ±1.26, 괴물 x · y ±1.32 · ±1.2)에 굽고 칸 안 중심을 Phaser 프레임 pivot으로 둔다(새 텍스처는 모든 프레임에 pivot). 쉬는 자세는 옛 이름 그대로(`survivor-hidden` · `survivor-runner` · `monster-idle-0` …), 자세 프레임은 옛 이름 + `~` 꼬리표(`survivor-hidden~w3`). 그림자 · 나 표시 링 · 노출 링 · 문양 · 거품 · 먼지는 기존 그림 그대로 굽고, 새 그림 안에 있는 옛 부품(발 · 윤기 · 발톱 · 눈 · 눈빛)은 빈 칸 하나를 가리켜 알파 0으로 둔다 — 캐릭터마다 이미지 2장(그림자 + 몸). 배율 2에서 약 1.74MiB(기존 약 1.0MiB), 품질 높음 1920×1080@2 전체 텍스처 약 31.0MiB(예산 32MiB)
 
 | 대상 | 프레임 |
 |---|---|
@@ -419,7 +440,7 @@ M10 비주얼 리마스터(어두운 시설 · 청록 네온 · 붉은 괴물) �
 | 생존자 칸 상자 앞 · 뒤 · 옆 (몸 반지름 배수) | `1.6` · `-1.08` · `1.26` | `charFrames.SURVIVOR_BOX.x1` `charFrames.SURVIVOR_BOX.x0` `charFrames.SURVIVOR_BOX.y1` |
 | 괴물 칸 상자 앞 · 뒤 · 옆 | `1.32` · `-1.32` · `1.2` | `charFrames.MONSTER_BOX.x1` `charFrames.MONSTER_BOX.x0` `charFrames.MONSTER_BOX.y1` |
 
-**성능**: 새 스타일도 일의 양 예산(렌더링 최적화) 기준값 안이다 — 캐릭터마다 이미지가 5장에서 2장으로 줄어 Canvas `drawImage`가 프레임당 236 → 226(생존자 화면), WebGL 그리기 호출은 같다(`tests/e2e/perf-budget.spec.ts` · `tests/e2e/perf-budget.webgl.spec.ts`의 `-new` 장면, 기준값은 기존 스타일 값 그대로). 굽는 시간은 이 컨테이너에서 약 90ms(기존 약 6ms)라 로비에서 미리 굽는다.
+**성능**: 새 스타일도 일의 양 예산(렌더링 최적화) 기준값 안이다 — 캐릭터마다 이미지가 5장에서 2장으로 줄어 Canvas `drawImage`가 프레임당 236 → 226(생존자 화면), WebGL 그리기 호출은 같다(`tests/e2e/perf-budget.spec.ts` · `tests/e2e/perf-budget.webgl.spec.ts`의 `-new` 장면: 새 스타일 실측 기준값과 짝 기존 장면 기준값을 함께 넘지 않는다). 굽는 시간은 이 컨테이너에서 약 90ms(기존 약 6ms)라 로비에서 미리 굽는다. 첫 화면 · 봇과 연습 고르기에서도 빌드에 넣은 수치의 반지름으로 굽는다(연습은 고르자마자 판이 시작돼 로비 대기가 없다). 판 중에 배율이 바뀌면(자동 품질 하향 · 되돌림, 창 크기 · 회전) 다시 굽지만, 그림 명령은 기억해 둔 것(`charFrames.DrawingMemo`, 외곽선 두께가 반지름만의 함수라 배율과 무관)을 쓰고 래스터만 한다.
 
 - 시험: `tests/unit/char-frames.test.ts` 「리그가 쓰는 옛 이름이 새 스타일 텍스처에 모두 있다 (없는 프레임 경고 방지)」 · 「모든 프레임 그림이 굽기 상자 안에 든다 (직사각 칸이 그림을 자르지 않게)」 · 「굽는 모든 자세가 크기 기준 안 (생존자 앞 1.55r · 옆 1.05r · 뒤 1.0r, 괴물 1.12r · 돌진 1.35r)」
 - `tests/e2e/m10-fog.webgl.spec.ts` 「새 캐릭터 스타일 · 품질 높음 1920×1080@2: 자세별 캐릭터 아틀라스를 더해도 텍스처 메모리가 예산(32MB) 이하이고 콘솔이 깨끗하다」

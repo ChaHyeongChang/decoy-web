@@ -1,6 +1,7 @@
 // DECOY 클라이언트 진입점
 import Phaser from 'phaser';
 import { App, readParams } from './app';
+import { PRACTICE_BALANCE } from './localServer';
 import { sfx } from './audio';
 import { installDebug } from './debug';
 import { canOfferFullscreen, device, enterFullscreen, initDevice, onDeviceChange } from './device';
@@ -547,8 +548,10 @@ function schedulePrebake(): void {
     // 터치: 판 배치(논리 크기 → 배율 · HUD 서명)로 굽는다. 아니면 첫 판 시작 때 맵 · 캐릭터 · HUD를 모두 다시 굽는다
     if (device.touch) applyMatchLayout();
     prebakeFogArt();
-    const b = app.balance;
-    if (b) prebakeAtlas(game.scene.getScene('idle'), b.survivor.radius, b.monster.radius);
+    // welcome 전(첫 화면 · 봇과 연습 고르기)에는 빌드에 넣은 수치의 반지름으로 굽는다: 연습은 고르자마자 판이 시작돼
+    // 로비 대기가 없다. 온라인 서버 수치가 다르면 로비에서 다시 굽는다
+    const b = app.balance ?? PRACTICE_BALANCE;
+    prebakeAtlas(game.scene.getScene('idle'), b.survivor.radius, b.monster.radius);
     // HUD 아틀라스도 (배율 2 Canvas에서 약 28ms, 같은 배율이면 아무것도 하지 않는다)
     prebakeHud(game.textures);
   };
