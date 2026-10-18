@@ -661,7 +661,7 @@ export class LobbyUI {
     return h(
       'label',
       { class: 'field field-select field-chars' },
-      icon('eye', 18),
+      // 아이콘 없이 이름만 (프레임 제한 상자와 같다 — 눈 아이콘은 게임에서 '발각' 뜻이라 쓰지 않는다)
       h('span', { class: 'field-label' }, UI_TEXT.charStyle),
       select,
     );
