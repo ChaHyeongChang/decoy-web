@@ -31,6 +31,14 @@ import {
   type Capture,
 } from './visualProbe';
 
+/** 판 중 캐릭터 스타일을 바꾸고, 그 스타일 아틀라스를 실제로 올릴 때까지 기다린다 (설정 · 디버그 훅과 같은 경로) */
+async function useCharStyle(page: Page, style: 'classic' | 'new'): Promise<void> {
+  await page.evaluate((s) => window.__DECOY__?.setCharStyle(s), style);
+  await page.waitForFunction((s) => window.__DECOY__?.gfx.features.atlasStyle === s, style, {
+    timeout: 10_000,
+  });
+}
+
 const ROLE_HEX = { runner: 0x3b82f6, guard: 0xa855f7, scout: 0x22c55e, monster: 0xef4444 } as const;
 /** 기절 별 색 (부채꼴 노랑) */
 const STAR_HEX = 0xeab308;
@@ -291,10 +299,11 @@ test(
     for (const style of ['new', 'classic'] as const) {
       if (style === 'classic') {
         // 판 중에 기존으로 바꾼다 (설정과 같은 경로, 다음 프레임에 그림을 다시 굽는다)
-        await host.evaluate(() => window.__DECOY__?.setCharStyle('classic'));
-        await host.waitForTimeout(600);
+        await useCharStyle(host, 'classic');
       }
       expect(await host.evaluate(() => window.__DECOY__?.gfx.charStyle)).toBe(style);
+      // 그 스타일 아틀라스로 그리고 있다 (헛측정이 아님)
+      expect(await host.evaluate(() => window.__DECOY__?.gfx.features.atlasStyle)).toBe(style);
       const bodies = await hiddenBodies(host, sr);
       expect(bodies.length).toBe(3);
       const still = await captureBodies(host, bodies, { refColors: ref });
@@ -313,8 +322,7 @@ test(
     }
 
     // 새 스타일로 되돌려 노출 창: 그 한 명만 역할색 테두리 + 문양, 몸 그림 키는 그대로
-    await host.evaluate(() => window.__DECOY__?.setCharStyle('new'));
-    await host.waitForTimeout(600);
+    await useCharStyle(host, 'new');
     const bodies = await hiddenBodies(host, sr);
     await p.scout.page.keyboard.press('Space');
     const rev = await captureBodies(host, bodies, { waitEffect: 'reveal', refColors: ref });
@@ -335,7 +343,7 @@ test(
   },
 );
 
-test('생존자 화면 역할색 유지: 빛 바닥 · 빨강 · 노랑 부채꼴 · 공격 범위 안에서 팀원 몸 ΔE ≤ 15, 몸/바깥 링 대비 3:1', async ({
+test('생존자 화면 역할색 유지: 빛 바닥 · 빨강 · 노랑 부채꼴 · 공격 범위 안에서 팀원 몸 ΔE ≤ 15, 몸/바깥 링 대비 3:1 — 기존 · 새 캐릭터 두 스타일', async ({
   browser,
 }) => {
   const q = '&quality=low';
@@ -348,8 +356,22 @@ test('생존자 화면 역할색 유지: 빛 바닥 · 빨강 · 노랑 부채�
   await settle(p.monster);
   await view.evaluate(() => window.__DECOY__?.freezeClock(1000));
   const ref = { guard: ROLE_HEX.guard, scout: ROLE_HEX.scout };
-  /** 잰다. inside가 있으면 재기 전에 팀원 원판이 그 정보 항목(부채꼴 · 범위) 안인지 먼저 확인한다 */
+  /**
+   * 잰다 (styles 순서로 러너 화면 캐릭터 스타일을 바꿔 가며 같은 장면을 잰다 — VISUAL_SPEC 0장 ②는 두 스타일 모두).
+   * inside가 있으면 재기 전에 팀원 원판이 그 정보 항목(부채꼴 · 범위) 안인지 먼저 확인한다
+   */
   const check = async (
+    label0: string,
+    waitEffect?: string,
+    inside?: (info: InfoItem[]) => InfoItem | undefined,
+    styles: readonly ('classic' | 'new')[] = ['classic', 'new'],
+  ): Promise<void> => {
+    for (const style of styles) {
+      await useCharStyle(view, style);
+      await measure(`${label0} · ${style === 'new' ? '새 캐릭터' : '기존'}`, waitEffect, inside);
+    }
+  };
+  const measure = async (
     label: string,
     waitEffect?: string,
     inside?: (info: InfoItem[]) => InfoItem | undefined,
@@ -417,12 +439,17 @@ test('생존자 화면 역할색 유지: 빛 바닥 · 빨강 · 노랑 부채�
   await place(host, { monster: [p.monster.id, 40.1, 11.8, Math.PI] }, false);
   await aimAt(host, 34, 11.8);
   await view.waitForTimeout(700);
-  await host.mouse.down({ button: 'left' });
-  await host.mouse.up({ button: 'left' });
-  await check('공격 범위 안', 'attackRange', (info) =>
-    info.find((i) => i.kind === 'range' && i.tag === 'attack'),
-  );
-  await view.waitForTimeout(1800);
+  // 공격 범위는 준비 동안만 보이므로 스타일마다 한 번씩 친다 (스타일은 누르기 전에 바꿔 둔다)
+  const inRange = (info: InfoItem[]): InfoItem | undefined =>
+    info.find((i) => i.kind === 'range' && i.tag === 'attack');
+  for (const style of ['classic', 'new'] as const) {
+    await useCharStyle(view, style);
+    await host.mouse.down({ button: 'left' });
+    await host.mouse.up({ button: 'left' });
+    await check('공격 범위 안', 'attackRange', inRange, [style]);
+    await view.waitForTimeout(1800);
+  }
+  await useCharStyle(view, 'classic');
   // 생존자 화면 범위 경계 = 판정값 (팀원이 없는 쪽으로 친다)
   await place(host, { guard: [p.guard.id, 37.6, 11.6, 0.5], scout: [p.scout.id, 36.2, 12.7, 2.2] });
   await place(host, { monster: [p.monster.id, 38.5, 10.6, -Math.PI / 2] }, false);

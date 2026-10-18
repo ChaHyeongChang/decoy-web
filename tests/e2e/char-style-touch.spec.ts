@@ -104,36 +104,61 @@ test('터치 설정 판: 캐릭터 스타일 줄(기존 · 새 캐릭터, 기본
   await context.close();
 });
 
-test('터치 설정 판 · 저장소가 막힌 브라우저: 고른 캐릭터 스타일이 이번 접속에 적용되고 설정 판에 저장되지 않는다는 안내', async ({
+test('터치 설정 판 · 저장소가 막힌 브라우저: 고른 캐릭터 스타일이 이번 접속에 적용되고 설정 판에 저장되지 않는다는 안내 (두 열이면 두 열 아래 한 줄, 화면 안)', async ({
   browser,
 }) => {
-  const { context, page, problems } = await newPlayerPage(browser, dpr1(PHONE_LANDSCAPE));
-  await context.addInitScript(stubFullscreen);
-  // 쿠키 · 사이트 데이터 차단: localStorage에 접근만 해도 SecurityError (frame-limit · char-style과 같은 흉내)
-  await context.addInitScript(() => {
-    Object.defineProperty(window, 'localStorage', {
-      configurable: true,
-      get() {
-        throw new DOMException('사이트 데이터 차단', 'SecurityError');
-      },
+  for (const dev of [PHONE_LANDSCAPE, PHONE_SMALL]) {
+    const { context, page, problems } = await newPlayerPage(browser, dpr1(dev));
+    await context.addInitScript(stubFullscreen);
+    // 쿠키 · 사이트 데이터 차단: localStorage에 접근만 해도 SecurityError (frame-limit · char-style과 같은 흉내)
+    await context.addInitScript(() => {
+      Object.defineProperty(window, 'localStorage', {
+        configurable: true,
+        get() {
+          throw new DOMException('사이트 데이터 차단', 'SecurityError');
+        },
+      });
     });
-  });
-  await page.goto(`/?${BASE_QUERY.slice(1)}`);
-  const panel = page.getByTestId('settings-panel');
-  await press(page.getByTestId('settings-button'));
-  expect(await pressed(page)).toEqual(['true', 'false']);
-  await expect(panel.locator('.quality-note')).toBeHidden();
-  await press(page.getByTestId('char-style-new'));
-  await expect.poll(() => applied(page), POLL).toBe('new');
-  expect(await pressed(page)).toEqual(['false', 'true']);
-  await expect(panel.locator('.quality-note')).toBeVisible();
-  await expect(panel.locator('.quality-note')).toHaveText(UI_TEXT.qualityNotSaved);
-  // 다시 열어도 이번 접속에서 고른 값
-  await press(page.getByTestId('settings-button'));
-  await press(page.getByTestId('settings-button'));
-  expect(await pressed(page)).toEqual(['false', 'true']);
-  expect(problems).toEqual([]);
-  await context.close();
+    await page.goto(`/?${BASE_QUERY.slice(1)}`);
+    const panel = page.getByTestId('settings-panel');
+    await press(page.getByTestId('settings-button'));
+    expect(await pressed(page)).toEqual(['true', 'false']);
+    await expect(panel.locator('.quality-note')).toBeHidden();
+    await press(page.getByTestId('char-style-new'));
+    await expect.poll(() => applied(page), POLL).toBe('new');
+    expect(await pressed(page)).toEqual(['false', 'true']);
+    await expect(panel.locator('.quality-note')).toBeVisible();
+    await expect(panel.locator('.quality-note')).toHaveText(UI_TEXT.qualityNotSaved);
+    // 낮은 가로 화면(두 열)이면 안내는 두 열 아래 한 줄 전체 — 어느 열의 줄이 저장에 실패해도 같은 자리. 판은 화면 안
+    const box = await panel.evaluate((el) => {
+      const cols = [...el.querySelectorAll(':scope > .life-col')].map((c) => c.getBoundingClientRect());
+      const n = el.querySelector(':scope > .quality-note')?.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      return {
+        two: el.classList.contains('life-two'),
+        cols: cols.map((c) => ({ l: c.left, r: c.right, b: c.bottom })),
+        note: n ? { l: n.left, r: n.right, t: n.top } : null,
+        panel: { t: r.top, b: r.bottom },
+        vh: window.innerHeight,
+      };
+    });
+    const label = dev.viewport ? `${dev.viewport.width}×${dev.viewport.height}` : '';
+    expect(box.two, label).toBe(true);
+    expect(box.cols.length, label).toBe(2);
+    expect(box.note, label).not.toBeNull();
+    const [c0, c1] = box.cols;
+    expect(box.note!.t, `${label} 안내가 두 열 아래`).toBeGreaterThanOrEqual(Math.max(c0!.b, c1!.b) - 1);
+    expect(box.note!.l, `${label} 안내 왼쪽 = 첫 열 왼쪽`).toBeLessThanOrEqual(c0!.l + 1);
+    expect(box.note!.r, `${label} 안내 오른쪽 = 둘째 열 오른쪽`).toBeGreaterThanOrEqual(c1!.r - 1);
+    expect(box.panel.t, `${label} 판 위`).toBeGreaterThanOrEqual(0);
+    expect(box.panel.b, `${label} 판 아래`).toBeLessThanOrEqual(box.vh);
+    // 다시 열어도 이번 접속에서 고른 값
+    await press(page.getByTestId('settings-button'));
+    await press(page.getByTestId('settings-button'));
+    expect(await pressed(page)).toEqual(['false', 'true']);
+    expect(problems).toEqual([]);
+    await context.close();
+  }
 });
 
 /** 설정 판과 판 안 단추 중 안전 영역 밖(.lobby 사각형 밖)인 것: 'testid(또는 글자) 왼,오,위,아래' */

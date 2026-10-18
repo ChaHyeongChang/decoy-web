@@ -175,6 +175,24 @@ test('저장소가 막힌 브라우저: 고른 캐릭터 스타일이 이번 접
   await context.close();
 });
 
+test('주소 ?chars가 저장값보다 먼저이고 저장값을 바꾸지 않는다 (저장 새 캐릭터 + ?chars=classic → 기존, 주소 없이 다시 열면 저장값)', async ({
+  browser,
+}) => {
+  const { context, page, problems } = await newPlayerPage(browser);
+  await page.goto(`/?${BASE_QUERY.slice(1)}`);
+  await page.evaluate((k) => localStorage.setItem(k, 'new'), KEY);
+  await page.goto(`/?${BASE_QUERY.slice(1)}&chars=classic`);
+  await expect.poll(() => applied(page)).toBe('classic');
+  await expect(page.getByTestId('char-style-select')).toHaveValue('classic');
+  expect(await stored(page)).toBe('new');
+  // 주소 값 없이 다시 열면 저장값
+  await page.goto(`/?${BASE_QUERY.slice(1)}`);
+  await expect.poll(() => applied(page)).toBe('new');
+  expect(await stored(page)).toBe('new');
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
 test('방 역할 카드 · 빠른 매칭 대기: 새 캐릭터면 정면 그림(front), 기존이면 위에서 본 실루엣 — 방에서 바꾸면 카드를 바로 다시 그린다', async ({
   browser,
 }) => {
@@ -304,6 +322,7 @@ test('결과 화면: 새 캐릭터면 팀 문장이 정면 그림(괴물 승리 
   // ?chars=new: 이번 접속에만 (저장하지 않는다)
   const code = await createRoom(page, '&bots=1&chars=new');
   expect(await applied(page)).toBe('new');
+  expect(await stored(page), '?chars는 저장하지 않는다').toBeNull();
   await pickRoleAndReady(page, 'runner');
   await page.getByTestId('start-button').click();
   await waitForSnapshots(page, 3);

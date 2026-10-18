@@ -69,7 +69,7 @@ M10 비주얼 리마스터(어두운 시설 · 청록 네온 · 붉은 괴물) �
 
 - `tests/unit/palette.test.ts` 「역할색은 규칙 색(balance.json roles.color)과 같고, 괴물 화면 생존자는 #F8FAFC」 · 「글자 쌍은 모두 4.5:1 이상」 · 「캐릭터 몸과 외곽선은 3:1 이상」
 - `tests/unit/hud.test.ts` 「HUD 글자 쌍은 모두 기준 이상 (글자 4.5:1, 아이콘 3:1)」
-- `tests/e2e/m10-visual.spec.ts` 「생존자 화면 역할색 유지: 빛 바닥 · 빨강 · 노랑 부채꼴 · 공격 범위 안에서 팀원 몸 ΔE ≤ 15, 몸/바깥 링 대비 3:1」
+- `tests/e2e/m10-visual.spec.ts` 「생존자 화면 역할색 유지: 빛 바닥 · 빨강 · 노랑 부채꼴 · 공격 범위 안에서 팀원 몸 ΔE ≤ 15, 몸/바깥 링 대비 3:1 — 기존 · 새 캐릭터 두 스타일」
 - `tests/unit/visual-spec.test.ts` 「표의 코드 열 값이 코드 상수와 같다」
 
 ### ③ 괴물 화면의 생존자 흰색 위장
@@ -416,7 +416,7 @@ M10 비주얼 리마스터(어두운 시설 · 청록 네온 · 붉은 괴물) �
 | 괴물 뼈 · 뼈 그늘 · 손 · 얼굴 · 가장 깊은 그늘 | `#F1E6E8` · `#B59EA3` · `#2A0E12` · `#1A0B0E` · `#070203` | `chars.MONSTER_COLOR.bone` `chars.MONSTER_COLOR.boneShade` `chars.MONSTER_COLOR.hand` `chars.MONSTER_COLOR.face` `chars.MONSTER_COLOR.void` |
 | 괴물 눈 · 눈빛 · 림 (글자용 역할색) | `#FFF1F2` · `#FB7185` · `#F87171` | `chars.MONSTER_COLOR.eye` `chars.MONSTER_COLOR.eyeGlow` `chars.MONSTER_COLOR.neon` |
 
-**월드 텍스처** (`art/atlas.ts` bakeAtlas, `style: 'new'`): 고른 스타일 한 장만 굽는다(로비 대기 중 미리 굽기, 판 중 배율이 바뀌면 다시). 자세마다 한 칸이고, 앞이 긴 그림이라 직사각 칸(생존자 x −1.08~1.6 · y ±1.26, 괴물 x · y ±1.32 · ±1.2)에 굽고 칸 안 중심을 Phaser 프레임 pivot으로 둔다(새 텍스처는 모든 프레임에 pivot). 쉬는 자세는 옛 이름 그대로(`survivor-hidden` · `survivor-runner` · `monster-idle-0` …), 자세 프레임은 옛 이름 + `~` 꼬리표(`survivor-hidden~w3`). 그림자 · 나 표시 링 · 노출 링 · 문양 · 거품 · 먼지는 기존 그림 그대로 굽고, 새 그림 안에 있는 옛 부품(발 · 윤기 · 발톱 · 눈 · 눈빛)은 빈 칸 하나를 가리켜 알파 0으로 둔다 — 캐릭터마다 이미지 2장(그림자 + 몸). 배율 2에서 약 1.74MiB(기존 약 1.0MiB), 품질 높음 1920×1080@2 전체 텍스처 약 31.0MiB(예산 32MiB)
+**월드 텍스처** (`art/atlas.ts` bakeAtlas, `style: 'new'`): 고른 스타일 한 장만 굽는다(로비 대기 중 미리 굽기, 판 중 배율이 바뀌면 다시). 자세마다 한 칸이고, 앞이 긴 그림이라 직사각 칸(생존자 x −1.08~1.6 · y ±1.26, 괴물 x · y ±1.32 · ±1.2)에 굽고 칸 안 중심을 Phaser 프레임 pivot으로 둔다(새 텍스처는 모든 프레임에 pivot). 쉬는 자세는 옛 이름 그대로(`survivor-hidden` · `survivor-runner` · `monster-idle-0` …), 자세 프레임은 옛 이름 + `~` 꼬리표(`survivor-hidden~w3`). 그림자 · 나 표시 링 · 노출 링 · 문양 · 거품 · 먼지는 기존 그림 그대로 굽고, 새 그림 안에 있는 옛 부품(발 · 윤기 · 발톱 · 눈 · 눈빛)은 빈 칸 하나를 가리켜 알파 0으로 둔다 — 캐릭터마다 이미지 2장(그림자 + 몸). 배율 2에서 약 1.74MiB(기존 약 1.0MiB), 품질 높음 1920×1080@2 전체 텍스처 30.98MiB(예산 32MiB)
 
 | 대상 | 프레임 |
 |---|---|
