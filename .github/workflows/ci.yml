@@ -3,7 +3,7 @@
 # - PR 병합 직전 수동 실행(workflow_dispatch, 그 PR 브랜치에서): 빠른 검사 + 전체 E2E(4개 작업으로 나눠 동시에) +
 #   지연 봇 전체 판 + 배포 검증. 모두 success여야 병합한다 (docs/MOBILE_PLAN.md 3절, DECISIONS 4절 "CI 나누기")
 #   Actions 탭 → CI → Run workflow → 브랜치 고르기 (또는 API workflow_dispatch, ref = PR 브랜치)
-# private 저장소지만 비밀 값은 쓰지 않는다 (포크 PR에서도 같은 검사가 돈다).
+# 공개 저장소(2026-10-18부터). 비밀 값은 쓰지 않는다 (포크 PR에서도 같은 검사가 돈다).
 name: CI
 
 on:
