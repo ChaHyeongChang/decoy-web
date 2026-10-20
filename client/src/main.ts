@@ -563,6 +563,9 @@ function schedulePrebake(): void {
 onGfxChange(schedulePrebake);
 // 캐릭터 스타일을 바꾸면 그 스타일 그림을 로비에서 미리 굽는다 (판 중이면 판 장면이 다음 프레임에 굽는다)
 onCharStyleChange(schedulePrebake);
+// 부팅 직후(첫 화면 · 봇과 연습 고르기)에도 한 번 굽는다: Phaser가 생성자 안에서 바로 부팅하면 부팅 때의 그래픽 변경 알림이
+// 위 구독보다 먼저 지나간다. 연습은 고르자마자 판이 시작돼 로비 대기가 없다 (새 캐릭터 아틀라스는 약 90ms)
+schedulePrebake();
 
 // UI 폰트를 부팅 때부터 받는다. Phaser 글자는 만들 때의 글꼴로 굳으므로, 다 받으면 이미 있는 글자를 다시 그린다
 const relayoutScenes = (): void => {

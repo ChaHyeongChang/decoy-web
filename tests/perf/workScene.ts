@@ -178,9 +178,10 @@ export async function measureWork(browser: Browser, sc: WorkScene): Promise<Work
     await advance(page, WARM_MS);
     if ((await page.evaluate(() => window.__DECOY__?.transport)) !== 'local')
       throw new Error('연습 판이 아니다');
-    // 장면 스타일의 캐릭터 아틀라스로 그리고 있다 (?chars를 놓쳐 기존 그림으로 재는 헛측정이 아님)
+    // 장면 스타일의 캐릭터 아틀라스로 그리고 있다 (?chars를 놓쳐 기존 그림으로 재는 헛측정이 아님). atlasStyle은 캐릭터 리디자인
+    // (PR #21) 이후 빌드에만 있다: 기존 장면은 값이 없으면(최적화 전 · 옛 빌드 비교 측정) 기존으로 본다
     const atlasStyle = await page.evaluate(() => window.__DECOY__?.gfx.features.atlasStyle);
-    if (atlasStyle !== (sc.chars ?? 'classic'))
+    if (sc.chars ? atlasStyle !== sc.chars : atlasStyle !== undefined && atlasStyle !== 'classic')
       throw new Error(`캐릭터 아틀라스 스타일 ${String(atlasStyle)} (장면 ${sc.chars ?? 'classic'})`);
     // 마우스를 화면 가운데 오른쪽 위로 (괴물 조준이 한쪽을 본다)
     await page.mouse.move(820, 300);

@@ -537,11 +537,6 @@ export function cloakFrameName(kind: 'idle' | 'move', i: number): string {
 /** 새 스타일 그림 명령 기억 (판 중 배율이 바뀌어 다시 구울 때 래스터만). 기존 스타일을 구우면 비운다 */
 const drawMemo = new DrawingMemo();
 
-/** 시험 · 디버그: 그림 명령을 새로 만든 횟수와 기억한 개수 */
-export function drawMemoStats(): { made: number; size: number } {
-  return { made: drawMemo.made, size: drawMemo.size };
-}
-
 function newFrameDefs(survivorR: number, monsterR: number): FrameDef[] {
   const defs = classicFrameDefs().filter((d) => SHARED_FRAMES.includes(d.name));
   const ws = ART.outlineWorldPx / (survivorR * TILE_PX);
@@ -789,8 +784,11 @@ export function ensureAtlas(textures: TextureHost, params: AtlasParams): { key: 
   current = { key, build };
   gfxState.features.atlasBakeMs = Math.round(build.ms * 10) / 10;
   gfxState.features.atlasBytes = build.canvas.width * build.canvas.height * 4;
-  // 지금 올린(그리는) 아틀라스의 캐릭터 스타일 (시험: 스타일을 바꾼 뒤 실제로 다시 구웠는지)
+  // 지금 올린(그리는) 아틀라스의 캐릭터 스타일 · 배율, 새 스타일 그림 명령을 새로 만든 누적 횟수
+  // (시험: 스타일을 바꾼 뒤 실제로 다시 구웠는지, 배율만 바뀐 다시 굽기가 그림 명령을 다시 만들지 않는지)
   gfxState.features.atlasStyle = build.params.style ?? 'classic';
+  gfxState.features.atlasZoom = build.params.zoom;
+  gfxState.features.atlasDrawingsMade = drawMemo.made;
   return current;
 }
 

@@ -433,7 +433,7 @@ export class WorldRenderer {
   private fades = new Map<string, Fade>();
   /** 생존자 화면: 최근 피격 (이벤트 좌표) */
   /** 생존자 화면 피격 (id = 맞은 팀원: 받은 뒤 첫 프레임에 이벤트 자리에서 가장 가까운 한 명. undefined = 아직 안 정함) */
-  private hits: { x: number; y: number; you: boolean; t0: number; id?: string | null }[] = [];
+  private hits: { x: number; y: number; you: boolean; t0: number; id?: string }[] = [];
   /** 생존자 화면: 팀원 질주 끝 시각 (performance.now, 규칙 시간 sprintDuration) */
   private sprintUntil = 0;
   /** 새 스타일 자세: 가드 밀치기 · 스카우트 탐지 · 괴물 타격 · 포효 이벤트를 받은 시각 (ms) */
@@ -1695,9 +1695,14 @@ export class WorldRenderer {
       this.pushDisk(v.selfId, v.me.x, v.me.y, isMonster ? mR : sR);
     let starsDrawn = false;
 
-    // 피격은 이벤트 자리(0.8타일 이내)에서 가장 가까운 팀원 한 명에게만 붙인다 (붙어 선 다른 팀원은 젖히지 않는다)
+    // 피격은 이벤트 자리(0.8타일 이내)에서 가장 가까운 자유 팀원 한 명에게만 붙인다 (붙어 선 다른 팀원은 젖히지 않는다).
+    // 팀원은 보간 지연만큼 뒤에 그려져 달리던 팀원이 아직 0.8타일 밖일 수 있다: 못 찾으면 정하지 않고 다음 프레임에 다시 본다
     if (!isMonster)
-      for (const h of this.hits) if (!h.you && h.id === undefined) h.id = this.nearestTeammate(v, h.x, h.y);
+      for (const h of this.hits)
+        if (!h.you && h.id === undefined) {
+          const id = this.nearestTeammate(v, h.x, h.y);
+          if (id !== null) h.id = id;
+        }
 
     // 다른 생존자
     for (const [id, s] of v.survivors) {
@@ -1755,7 +1760,7 @@ export class WorldRenderer {
           g.stepping,
           s.protected,
           false,
-          this.hitFor(id, false, realMs),
+          s.status === 'free' ? this.hitFor(id, false, realMs) : null,
           seedOf(id),
           animMs,
           appear,
@@ -1985,12 +1990,12 @@ export class WorldRenderer {
     return null;
   }
 
-  /** 피격 자리에서 0.8타일 이내의 가장 가까운 팀원 (없으면 null) */
+  /** 피격 자리에서 0.8타일 이내의 가장 가까운 자유 팀원 (맞을 수 있는 것은 자유 생존자뿐, 없으면 null) */
   private nearestTeammate(v: FrameView, x: number, y: number): string | null {
     let best: string | null = null;
     let bestD = 0.8;
     for (const [id, s] of v.survivors) {
-      if (s.status === 'dead' || s.status === 'escaped') continue;
+      if (s.status !== 'free') continue;
       const d = Math.hypot(s.x - x, s.y - y);
       if (d < bestD) {
         bestD = d;

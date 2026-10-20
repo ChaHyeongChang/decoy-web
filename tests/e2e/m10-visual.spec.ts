@@ -444,6 +444,17 @@ test('생존자 화면 역할색 유지: 빛 바닥 · 빨강 · 노랑 부채�
     info.find((i) => i.kind === 'range' && i.tag === 'attack');
   for (const style of ['classic', 'new'] as const) {
     await useCharStyle(view, style);
+    // 앞 스타일에서 맞은 체력을 되돌린다 (두 스타일이 같은 장면: 부상 긁힘 · 두 번째 타격 수감 없이)
+    for (const id of [p.guard.id, p.scout.id])
+      await sendTest(host, { kind: 'setSurvivor', target: id, status: 'free', hp: 2 });
+    await view.waitForFunction(
+      (ids) => {
+        const sv = window.__DECOY__?.getLastSnapshot()?.survivors ?? [];
+        return ids.every((id) => sv.find((s) => s.id === id)?.hp === 2);
+      },
+      [p.guard.id, p.scout.id],
+      { timeout: 10_000 },
+    );
     await host.mouse.down({ button: 'left' });
     await host.mouse.up({ button: 'left' });
     await check('공격 범위 안', 'attackRange', inRange, [style]);

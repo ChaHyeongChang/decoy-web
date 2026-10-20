@@ -193,6 +193,35 @@ test('주소 ?chars가 저장값보다 먼저이고 저장값을 바꾸지 않�
   await context.close();
 });
 
+test('새 캐릭터: 봇과 연습 고르기 화면에서 미리 굽고(판 시작 전에 새 아틀라스), 판 중 창 크기가 바뀌어 다시 구워도 그림 명령은 다시 만들지 않는다', async ({
+  browser,
+}) => {
+  const { context, page, problems } = await newPlayerPage(browser);
+  await page.goto(`/?${BASE_QUERY.slice(1)}&chars=new`);
+  await page.getByTestId('practice').click();
+  await expect(page.getByTestId('practice-role-runner')).toBeVisible();
+  // welcome 전(첫 화면 · 연습 고르기)에도 빌드 수치 반지름으로 미리 굽는다: 판 첫 프레임에서 굽지 않게
+  const feat = (): Promise<Record<string, unknown>> =>
+    page.evaluate(() => ({ ...(window.__DECOY__?.gfx.features ?? {}) }));
+  await expect.poll(async () => (await feat()).atlasStyle).toBe('new');
+  const before = await feat();
+  const made = Number(before.atlasDrawingsMade);
+  expect(made, '새 스타일 그림 명령을 만들었다').toBeGreaterThan(0);
+  await page.getByTestId('practice-role-runner').click();
+  await waitForSnapshots(page, 3);
+  // 판을 시작해도 같은 배율 · 반지름이면 다시 굽지 않는다
+  expect((await feat()).atlasDrawingsMade).toBe(made);
+  // 판 중 창 크기 → 배율이 바뀌면 다시 굽지만 래스터만 한다 (그림 명령 수 그대로). 지금 크기와 다른 크기로
+  const wide = (await page.evaluate(() => window.innerWidth)) >= 1200;
+  await page.setViewportSize(wide ? { width: 960, height: 540 } : { width: 1280, height: 720 });
+  await expect.poll(async () => (await feat()).atlasZoom).not.toBe(before.atlasZoom);
+  const after = await feat();
+  expect(after.atlasStyle).toBe('new');
+  expect(after.atlasDrawingsMade, '배율만 바뀐 다시 굽기는 그림 명령을 다시 만들지 않는다').toBe(made);
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
 test('방 역할 카드 · 빠른 매칭 대기: 새 캐릭터면 정면 그림(front), 기존이면 위에서 본 실루엣 — 방에서 바꾸면 카드를 바로 다시 그린다', async ({
   browser,
 }) => {
