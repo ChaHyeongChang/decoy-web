@@ -44,6 +44,7 @@ DECOY의 그래픽은 **코드로 그린다**. 저장소에 들어 있는 이미
 | 맵 재질 (강판 바닥 · 2.5D 벽 · 기둥 · 감옥 · 거점 · 탈출구 · 네온 · 발광) | `client/src/art/mapArt.ts` · `mapArtGeom.ts` · `noise.ts`, `client/src/render/fogPaint.ts` · `fogGpu.ts` · `baseLayer.ts` · `objects.ts` |
 | 안개 · 빛 지도 · 후처리(비네트 · 색보정 셰이더) | `client/src/render/fogMath.ts` · `fogPaint.ts` · `fogGpu.ts` · `effects.ts` |
 | 캐릭터 · 괴물 실루엣 · 문양 · 애니메이션 프레임 | `client/src/art/shapes.ts` · `atlas.ts` · `anim.ts`, `client/src/render/characters.ts` |
+| 새 캐릭터 스타일 (위에서 본 그림 · 정면 그림 · 자세 프레임, 캐릭터 리디자인) | `client/src/art/chars/`(그림 도구 · 캐릭터별 파일) · `client/src/art/charFrames.ts`, 로비 · 결과 SVG는 `client/src/ui/uiArt.ts` |
 | 입자 · 화면 효과 | `client/src/art/fx.ts`, `client/src/render/effects.ts` · `worldRenderer.ts` |
 | 배지 | `client/src/art/mapArtBadges.ts`, `client/src/render/objects.ts` |
 | 부채꼴 · 범위 표시 | `client/src/render/vision.ts` |

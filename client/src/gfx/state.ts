@@ -35,6 +35,7 @@ export const gfxState: GfxState = {
   displayHz: 60,
   targetHz: 60,
   upgrades: 0,
+  charStyle: 'classic',
 };
 
 /** 지금 품질 · 렌더러 · 기기에 맞춘 설정 */

@@ -1,11 +1,13 @@
-// 앱 생명주기 화면 (M12, MOBILE_PLAN M12 5 · 6 · 8번): 판 직전 터치 안내 카드, 설정(진동 · 프레임 제한 · 터치 안내 다시 보기),
-// 판 중 뒤로 가기 확인, 다른 탭 안내 + "여기서 계속하기". 모양은 로비와 같은 깎은 패널 · 버튼(lifecycle.css, style.css 토큰),
-// 문구는 storyText.ts(APP_TEXT · TOUCH_TEXT · UI_TEXT)에서만. 판 중 매 프레임 건드리지 않는다(열고 닫을 때만 DOM을 바꾼다)
+// 앱 생명주기 화면 (M12, MOBILE_PLAN M12 5 · 6 · 8번): 판 직전 터치 안내 카드, 설정(진동 · 프레임 제한 · 캐릭터 스타일 ·
+// 터치 안내 다시 보기), 판 중 뒤로 가기 확인, 다른 탭 안내 + "여기서 계속하기". 모양은 로비와 같은 깎은 패널 · 버튼
+// (lifecycle.css, style.css 토큰), 문구는 storyText.ts(APP_TEXT · TOUCH_TEXT · UI_TEXT)에서만. 판 중 매 프레임 건드리지 않는다
+// (열고 닫을 때만 DOM을 바꾼다)
 import { teamOf, type Role } from '@decoy/shared';
 import { APP_TEXT, TOUCH_TEXT, UI_TEXT } from '../data/storyText';
+import { CHAR_STYLES, currentCharStyle, setCharStyle, type CharStyle } from '../gfx/charStyle';
 import type { FrameLimit } from '../gfx/framePacing';
 import type { LeaveKind } from '../lifecycle';
-import { h, icon, roleVars, svgSpan } from './uiArt';
+import { frontFigureSvg, h, icon, roleVars, svgSpan } from './uiArt';
 import './lifecycle.css';
 
 // ───────────── 가운데 카드 (확인 창 · 다른 탭 안내) ─────────────
@@ -232,12 +234,17 @@ function controlsDiagram(team: 'monster' | 'survivor'): string {
 /**
  * 판 직전 터치 안내 카드 (MOBILE_PLAN M12 5번): 제목 + 역할별 본문(번호 = 그림의 번호) + "알겠어요".
  * 로비 방 화면은 준비 뒤 명령 줄 바로 위에 띄운다(시작 · 준비 버튼을 가리지 않는다). 빠른 매칭 대기 · 연습 시작 전(M13)도
- * 같은 카드를 만들어 붙인다. 닫으면 onOk (보통 markTouchTutorialShown)
+ * 같은 카드를 만들어 붙인다. 닫으면 onOk (보통 markTouchTutorialShown).
+ * 캐릭터 스타일이 새 캐릭터면 제목 왼쪽에 내 역할의 작은 정면 그림(가장 낮은 화면에서도 세로로 쌓지 않는다). 기존이면 그림 없음
  */
 export class TouchTutorialCard {
   readonly el: HTMLElement;
   private team: 'monster' | 'survivor' | null = null;
   private role: Role | null = null;
+  /** 그린 캐릭터 스타일 (바뀌면 다시 그린다) */
+  private style: CharStyle | null = null;
+  /** 새 캐릭터 스타일의 내 역할 정면 그림 (기존 스타일이면 null) */
+  private figure: HTMLSpanElement | null = null;
 
   /** 보이는 중이다 (다시 붙여도 등장 움직임을 되풀이하지 않는다) */
   private shown = false;
@@ -265,14 +272,28 @@ export class TouchTutorialCard {
     this.el.remove();
   }
 
-  /** 역할에 맞게 그린다 (같은 역할이면 그대로) */
+  /**
+   * 역할 · 캐릭터 스타일에 맞게 그린다 (같은 역할 · 같은 스타일이면 그대로). 같은 팀 · 같은 스타일이면 본문은 두고
+   * 역할색(과 새 캐릭터면 정면 그림)만 바꾼다
+   */
   render(role: Role): HTMLElement {
     const team = teamOf(role);
-    if (this.role === role) return this.el;
+    const style = currentCharStyle();
+    if (this.role === role && this.style === style) return this.el;
+    const sameBody = this.team === team && this.style === style && this.el.firstChild !== null;
     this.role = role;
+    this.style = style;
     this.el.setAttribute('style', roleVars(role));
-    if (this.team === team && this.el.firstChild) return this.el;
+    if (sameBody) {
+      if (this.figure) {
+        const next = ttFigure(role);
+        this.figure.replaceWith(next);
+        this.figure = next;
+      }
+      return this.el;
+    }
     this.team = team;
+    this.figure = style === 'new' ? ttFigure(role) : null;
     const title = nextId('tt-title');
     const lines = team === 'monster' ? TOUCH_TEXT.tutorialMonster : TOUCH_TEXT.tutorialSurvivor;
     const ok = h(
@@ -285,12 +306,14 @@ export class TouchTutorialCard {
     const list = h('ol', { class: 'tt-list' });
     for (const line of lines) list.append(h('li', {}, line));
     this.el.setAttribute('aria-labelledby', title);
+    const heading = h('h2', { id: title, class: 'tt-title' }, TOUCH_TEXT.tutorialTitle);
     this.el.replaceChildren(
       h('div', { class: 'tt-side' }, svgSpan('tt-art', controlsDiagram(team)), ok),
       h(
         'div',
         { class: 'tt-main-col' },
-        h('h2', { id: title, class: 'tt-title' }, TOUCH_TEXT.tutorialTitle),
+        // 기존 스타일은 예전과 같은 구조 (제목 바로 아래 목록)
+        this.figure ? h('div', { class: 'tt-head' }, this.figure, heading) : heading,
         list,
       ),
     );
@@ -298,7 +321,14 @@ export class TouchTutorialCard {
   }
 }
 
-// ───────────── 설정 (진동 · 프레임 제한 · 터치 안내 다시 보기) ─────────────
+/** 터치 안내 카드 제목 옆 내 역할 정면 그림 (새 캐릭터 스타일, 장식: 스크린 리더는 건너뜀) */
+function ttFigure(role: Role): HTMLSpanElement {
+  const s = svgSpan('tt-figure', frontFigureSvg(role));
+  s.dataset.testid = 'touch-tutorial-figure';
+  return s;
+}
+
+// ───────────── 설정 (진동 · 프레임 제한 · 캐릭터 스타일 · 터치 안내 다시 보기) ─────────────
 
 export interface SettingsHooks {
   /** 진동 줄을 보이는가 (터치 모드 + 진동 API가 있는 기기) */
@@ -307,6 +337,11 @@ export interface SettingsHooks {
   frameLimit: boolean;
   /** 터치 안내 다시 보기 줄을 보이는가 (터치 모드) */
   tutorial: boolean;
+  /**
+   * 캐릭터 스타일 줄(기존 / 새 캐릭터)을 보이는가. 생략하면 보인다 (터치 모드 설정 판에는 늘 있다 — PC는 첫 화면 선택 상자).
+   * 값은 gfx/charStyle을 바로 읽고 쓴다 (그림만 바꾸고 서버로 보내지 않는다)
+   */
+  charStyle?: boolean;
   hapticsOn(): boolean;
   /** 진동 설정을 바꾼다. 저장하지 못하면 false (이번 접속에는 적용) */
   setHaptics(on: boolean): boolean;
@@ -317,6 +352,12 @@ export interface SettingsHooks {
   replayTutorial(): void;
 }
 
+/** 설정 판 캐릭터 스타일 이름 (기존 · 새 캐릭터) */
+const CHAR_STYLE_LABEL: Record<CharStyle, string> = {
+  classic: UI_TEXT.charStyleClassic,
+  new: UI_TEXT.charStyleNew,
+};
+
 /** 설정 판 프레임 제한 선택지 (자동 · 60 · 120) */
 const FRAME_LIMIT_SEGS: readonly { value: FrameLimit; label: string }[] = [
   { value: 'auto', label: UI_TEXT.frameLimitAuto },
@@ -325,10 +366,11 @@ const FRAME_LIMIT_SEGS: readonly { value: FrameLimit; label: string }[] = [
 ];
 
 /**
- * 설정 단추 + 떠 있는 설정 판 (터치 모드에서만 만든다 — PC 로비는 그대로). 줄: 진동(있는 기기만) · 프레임 제한 · 저장 실패
- * 안내 · 터치 안내 다시 보기. 고른 쪽 = ✓ + 바탕(색만으로 구분하지 않기). 단추를 다시 누르거나 바깥을 누르거나
+ * 설정 단추 + 떠 있는 설정 판 (터치 모드에서만 만든다 — PC 로비는 그대로). 줄: 진동(있는 기기만) · 프레임 제한 · 캐릭터 스타일 ·
+ * 저장 실패 안내 · 터치 안내 다시 보기. 고른 쪽 = ✓ + 바탕(색만으로 구분하지 않기). 단추를 다시 누르거나 바깥을 누르거나
  * Esc · 스크롤 · 창 크기 변화면 닫힌다. 판은 로비 루트에 고정 위치(창 기준)로 붙여 패널 모서리 깎기(clip-path)에 잘리지
- * 않게 하고, 열 때 한 번 단추 자리를 잰다
+ * 않게 하고, 열 때 한 번 단추 자리를 잰다. 줄은 두 묶음(진동 · 프레임 제한 / 캐릭터 스타일 · 안내 다시 보기)이라 낮은 가로
+ * 화면에서는 두 열로 놓는다(lifecycle.css — 가장 낮은 휴대폰 802×293에서도 판이 화면 안)
  */
 export class SettingsMenu {
   private readonly panel: HTMLDivElement;
@@ -338,6 +380,8 @@ export class SettingsMenu {
   private readonly onOff: HTMLButtonElement | null = null;
   /** 프레임 제한 단추 (줄이 없으면 비어 있다) */
   private readonly frameSegs: { value: FrameLimit; button: HTMLButtonElement }[] = [];
+  /** 캐릭터 스타일 단추 (줄이 없으면 비어 있다) */
+  private readonly styleSegs: { value: CharStyle; button: HTMLButtonElement }[] = [];
   private trigger: HTMLButtonElement | null = null;
   private readonly outside = (e: Event): void => {
     const t = e.target;
@@ -346,7 +390,8 @@ export class SettingsMenu {
   };
 
   constructor(
-    host: HTMLElement,
+    /** 판을 붙이는 곳 (로비 .lobby — 안전 영역 안으로 들어가 있다). 판 자리의 한계로도 쓴다 */
+    private readonly host: HTMLElement,
     private readonly hooks: SettingsHooks,
   ) {
     const title = nextId('settings-title');
@@ -366,7 +411,9 @@ export class SettingsMenu {
       APP_TEXT.tutorialReplayDone,
     );
     this.done.hidden = true;
-    const rows: HTMLElement[] = [h('h2', { id: title, class: 'life-settings-title' }, APP_TEXT.settings)];
+    // 두 묶음: 기기 설정(진동 · 프레임 제한) / 보기 설정(캐릭터 스타일 · 저장 실패 안내 · 터치 안내 다시 보기)
+    const rows: HTMLElement[] = [];
+    const more: HTMLElement[] = [];
     const seg = (testid: string, label: string): HTMLButtonElement =>
       h(
         'button',
@@ -415,8 +462,29 @@ export class SettingsMenu {
         ),
       );
     }
-    // 저장 실패 안내는 진동 · 프레임 제한 줄 아래 하나 (저장소가 막히면 둘 다 못 쓴다)
-    if (hooks.haptics || hooks.frameLimit) rows.push(this.note);
+    if (hooks.charStyle !== false) {
+      for (const value of CHAR_STYLES) {
+        const button = seg(`char-style-${value}`, CHAR_STYLE_LABEL[value]);
+        button.addEventListener('click', () => this.setCharStyle(value));
+        this.styleSegs.push({ value, button });
+      }
+      more.push(
+        h(
+          'div',
+          {
+            class: 'life-row life-style',
+            role: 'group',
+            'aria-label': UI_TEXT.charStyle,
+            'data-testid': 'char-style-row',
+          },
+          h('span', { class: 'field-label' }, UI_TEXT.charStyle),
+          h('span', { class: 'segs' }, ...this.styleSegs.map((s) => s.button)),
+        ),
+      );
+    }
+    // 저장 실패 안내는 진동 · 프레임 제한 · 캐릭터 스타일 줄 아래 하나 (저장소가 막히면 셋 다 못 쓴다). 판 직속으로 두고
+    // 한 열이면 설정 줄 다음 · 안내 다시 보기 앞(CSS order), 두 열이면 두 열 아래 한 줄 전체(어느 열의 줄이 실패해도 같은 자리)
+    const note = hooks.haptics || hooks.frameLimit || this.styleSegs.length > 0 ? [this.note] : [];
     if (hooks.tutorial) {
       const replay = h(
         'button',
@@ -428,9 +496,16 @@ export class SettingsMenu {
         hooks.replayTutorial();
         this.done.hidden = false;
       });
-      rows.push(replay, this.done);
+      more.push(replay, this.done);
     }
-    this.panel.append(...rows);
+    // 묶음 상자는 보통 화면에서 display: contents(한 열 그대로), 낮은 가로 화면에서 두 열 (둘 다 있을 때만)
+    const cols = [rows, more].filter((c) => c.length > 0).map((c) => h('div', { class: 'life-col' }, ...c));
+    this.panel.classList.toggle('life-two', cols.length === 2);
+    this.panel.append(
+      h('h2', { id: title, class: 'life-settings-title' }, APP_TEXT.settings),
+      ...cols,
+      ...note,
+    );
     this.panel.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         this.close();
@@ -442,7 +517,7 @@ export class SettingsMenu {
 
   /** 설정에 보일 것이 있는가 */
   get useful(): boolean {
-    return this.hooks.haptics || this.hooks.frameLimit || this.hooks.tutorial;
+    return this.hooks.haptics || this.hooks.frameLimit || this.styleSegs.length > 0 || this.hooks.tutorial;
   }
 
   get isOpen(): boolean {
@@ -482,6 +557,7 @@ export class SettingsMenu {
     trigger.setAttribute('aria-expanded', 'true');
     this.syncHaptics();
     this.syncFrameLimit();
+    this.syncCharStyle();
     this.done.hidden = true;
     this.panel.hidden = false;
     this.place(trigger);
@@ -506,20 +582,27 @@ export class SettingsMenu {
 
   private readonly closeSoon = (): void => this.close();
 
-  /** 단추 위(자리가 없으면 아래)에, 화면 안쪽으로 (창 기준 고정 위치). 열 때 한 번만 잰다 */
+  /**
+   * 단추 위(자리가 없으면 아래)에, 안전 영역 안쪽으로 (창 기준 고정 위치). 열 때 한 번만 잰다.
+   * 한계는 창이 아니라 host(.lobby, 안전 영역만큼 들어간 사각형)와 창이 겹치는 곳 — 노치 휴대폰 가로에서 넓은 두 열 판이
+   * 노치 쪽 띠로 밀려나지 않게 (M12 안전 영역 규칙). 안전 영역이 없으면(PC · 대부분의 휴대폰) 창과 같다
+   */
   private place(trigger: HTMLElement): void {
     const r = trigger.getBoundingClientRect();
     const p = this.panel.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
+    const box = this.host.getBoundingClientRect();
     const margin = 8;
-    // 단추가 화면 왼쪽 반이면 왼쪽 끝을, 오른쪽 반이면 오른쪽 끝을 맞춘다
-    let left = r.left + r.width / 2 < vw / 2 ? r.left : r.right - p.width;
-    left = Math.max(margin, Math.min(vw - p.width - margin, left));
+    const minX = Math.max(0, box.left) + margin;
+    const maxX = Math.min(window.innerWidth, box.right) - margin;
+    const minY = Math.max(0, box.top) + margin;
+    const maxY = Math.min(window.innerHeight, box.bottom) - margin;
+    // 단추가 안전 영역 왼쪽 반이면 왼쪽 끝을, 오른쪽 반이면 오른쪽 끝을 맞춘다
+    let left = r.left + r.width / 2 < (minX + maxX) / 2 ? r.left : r.right - p.width;
+    left = Math.max(minX, Math.min(maxX - p.width, left));
     let top = r.top - p.height - margin;
-    if (top < margin) top = Math.min(vh - p.height - margin, r.bottom + margin);
+    if (top < minY) top = Math.min(maxY - p.height, r.bottom + margin);
     this.panel.style.left = `${Math.round(left)}px`;
-    this.panel.style.top = `${Math.round(Math.max(margin, top))}px`;
+    this.panel.style.top = `${Math.round(Math.max(minY, top))}px`;
   }
 
   private setHaptics(on: boolean): void {
@@ -530,6 +613,18 @@ export class SettingsMenu {
   private setFrameLimit(limit: FrameLimit): void {
     this.note.hidden = this.hooks.setFrameLimit(limit);
     this.syncFrameLimit();
+  }
+
+  /** 캐릭터 스타일을 고른다: 바로 적용(로비 그림은 onCharStyleChange 구독이 다시 그린다)하고 저장, 못 하면 안내 */
+  private setCharStyle(style: CharStyle): void {
+    this.note.hidden = setCharStyle(style);
+    this.syncCharStyle();
+  }
+
+  private syncCharStyle(): void {
+    if (this.styleSegs.length === 0) return;
+    const now = currentCharStyle();
+    for (const s of this.styleSegs) s.button.setAttribute('aria-pressed', String(s.value === now));
   }
 
   private syncFrameLimit(): void {

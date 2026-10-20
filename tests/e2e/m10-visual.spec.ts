@@ -1,7 +1,8 @@
 // M10b 캐릭터 · 효과 (Canvas 렌더러 · 소프트웨어 합성 · 1920×1080 배율 1). VISUAL_SPEC 0장 불변 항목을 픽셀로 지킨다:
 //  - 괴물 화면 흰색 위장: 부채꼴 · 근접 원 · 공격 범위 안에서도 생존자 몸 원판은 무채색 · 밝음, 역할 4색과 멀다.
 //    그림 키는 모두 'survivor-hidden'이고 세 몸의 흰 폭 · 그림자 폭 · 평균색이 같다(±1px · ΔE ≤ 1).
-//    능력 노출 중인 한 명만 1초 동안(0.8초 시점에도) 역할색 테두리 + 머리 위 문양
+//    능력 노출 중인 한 명만 1초 동안(0.8초 시점에도) 역할색 테두리 + 머리 위 문양.
+//    캐릭터 스타일(기존 / 새 캐릭터, 캐릭터 리디자인 2단계)과 무관하게 같다: 새 스타일에서 같은 검사 + 판 중 기존으로 바꿔 다시
 //  - 노출 문양 · 기절 별 · 기절 채도 감소가 다른 캐릭터 몸 · 노출 링을 덮지 않는다
 //  - 생존자 화면 역할색 유지: 빛 바닥 · 노랑 · 빨강 부채꼴 · 공격 범위 안(정보 항목으로 포함관계 확인)에서 팀원 몸 평균색 ΔE ≤ 15,
 //    몸/바깥 링 대비 3:1. 부채꼴 가장자리 선은 팀원 접지 그림자 둘레에서도 끊기지 않는다
@@ -29,6 +30,14 @@ import {
   type BodyProbe,
   type Capture,
 } from './visualProbe';
+
+/** 판 중 캐릭터 스타일을 바꾸고, 그 스타일 아틀라스를 실제로 올릴 때까지 기다린다 (설정 · 디버그 훅과 같은 경로) */
+async function useCharStyle(page: Page, style: 'classic' | 'new'): Promise<void> {
+  await page.evaluate((s) => window.__DECOY__?.setCharStyle(s), style);
+  await page.waitForFunction((s) => window.__DECOY__?.gfx.features.atlasStyle === s, style, {
+    timeout: 10_000,
+  });
+}
 
 const ROLE_HEX = { runner: 0x3b82f6, guard: 0xa855f7, scout: 0x22c55e, monster: 0xef4444 } as const;
 /** 기절 별 색 (부채꼴 노랑) */
@@ -120,6 +129,27 @@ function expectSameHidden(c: Capture, label: string): void {
   for (const s of rest) {
     s.widths.forEach((w, i) =>
       expect(Math.abs(w - a!.widths[i]!), `${label} ${s.name} 흰 폭 ${i}`).toBeLessThanOrEqual(1),
+    );
+    expect(s.shadowW, `${label} ${s.name} 그림자`).not.toBeNull();
+    expect(Math.abs(s.shadowW! - a!.shadowW!), `${label} ${s.name} 그림자 폭`).toBeLessThanOrEqual(1);
+    expect(deltaE(s.mean, a!.mean), `${label} ${s.name} 몸 평균색`).toBeLessThanOrEqual(1);
+  }
+}
+
+/**
+ * 세 숨은 몸이 같은 실루엣인가 (어느 캐릭터 스타일이든): 바라보는 방향 기준 네 축의 바깥 실루엣 폭 ±1px, 그림자 폭 ±1px,
+ * 평균색 ΔE ≤ 1. 새 캐릭터 그림은 몸 안에 가는 선 · 무늬가 있어 가운데에서 잰 첫 경계(widths)가 회전마다 문턱 근처에서
+ * 흔들리므로 바깥에서 잰다 (몸 안 밝기 분포는 괴물 시야 빛의 거리 감쇠 · 바닥 배경이 섞여 몸끼리 비교하지 않는다)
+ */
+function expectSameShape(c: Capture, label: string): void {
+  const [a, ...rest] = c.stats;
+  expect(a, label).toBeDefined();
+  console.log(
+    `[m10-visual] ${label} 바깥 폭 ${c.stats.map((s) => s.outerWidths.map((w) => w.toFixed(1)).join('/')).join(' | ')} · 그림자 ${c.stats.map((s) => s.shadowW?.toFixed(1)).join(' | ')} · 평균색 ${c.stats.map((s) => s.mean.map((v) => v.toFixed(0)).join(',')).join(' | ')}`,
+  );
+  for (const s of rest) {
+    s.outerWidths.forEach((w, i) =>
+      expect(Math.abs(w - a!.outerWidths[i]!), `${label} ${s.name} 바깥 폭 ${i}`).toBeLessThanOrEqual(1),
     );
     expect(s.shadowW, `${label} ${s.name} 그림자`).not.toBeNull();
     expect(Math.abs(s.shadowW! - a!.shadowW!), `${label} ${s.name} 그림자 폭`).toBeLessThanOrEqual(1);
@@ -238,7 +268,82 @@ test(
   },
 );
 
-test('생존자 화면 역할색 유지: 빛 바닥 · 빨강 · 노랑 부채꼴 · 공격 범위 안에서 팀원 몸 ΔE ≤ 15, 몸/바깥 링 대비 3:1', async ({
+test(
+  '캐릭터 스타일과 무관한 흰색 위장: 괴물 화면 세 생존자는 새 캐릭터 · 기존 어느 스타일이든 같은 공통 그림, 생존자 쪽 스타일과도 무관',
+  { tag: '@core' },
+  async ({ browser }) => {
+    // 괴물은 새 캐릭터, 생존자 셋은 서로 다른 스타일 (괴물 화면은 괴물 자신의 설정만 따른다)
+    const q = '&quality=low';
+    const { players } = await startFourPlayerMatch(browser, undefined, [
+      `${q}&chars=new`,
+      `${q}&chars=new`,
+      `${q}&chars=classic`,
+      q,
+    ]);
+    const p = roles(players);
+    const host = p.monster.page;
+    const sr = balance.survivor.radius;
+    await settle(p.monster);
+    await place(host, {
+      runner: [p.runner.id, 41, 11, 0.3],
+      guard: [p.guard.id, 39.6, 12, -2.6],
+      scout: [p.scout.id, 38, 10.6, 1.2],
+    });
+    await place(host, { monster: [p.monster.id, 42, 11.4, Math.PI] }, false);
+    await aimAt(host, 36, 11.4);
+    await host.evaluate(() => window.__DECOY__?.freezeClock(1000));
+    await host.waitForTimeout(900);
+    expect((await lastSnapshot(host))!.survivors.length).toBe(3);
+    const ref = { runner: ROLE_HEX.runner, guard: ROLE_HEX.guard, scout: ROLE_HEX.scout };
+
+    for (const style of ['new', 'classic'] as const) {
+      if (style === 'classic') {
+        // 판 중에 기존으로 바꾼다 (설정과 같은 경로, 다음 프레임에 그림을 다시 굽는다)
+        await useCharStyle(host, 'classic');
+      }
+      expect(await host.evaluate(() => window.__DECOY__?.gfx.charStyle)).toBe(style);
+      // 그 스타일 아틀라스로 그리고 있다 (헛측정이 아님)
+      expect(await host.evaluate(() => window.__DECOY__?.gfx.features.atlasStyle)).toBe(style);
+      const bodies = await hiddenBodies(host, sr);
+      expect(bodies.length).toBe(3);
+      const still = await captureBodies(host, bodies, { refColors: ref });
+      console.log(`[m10-visual] 괴물 화면 (${style}): ${describeCapture(still)}`);
+      expect(still.ok).toBe(true);
+      // 멈춰 있으면 두 스타일 모두 같은 그림 키 하나 (새 스타일 걷기 자세도 역할 없이 걷기 값으로만 고른다: char-frames 단위 시험)
+      const sprites = still.drawn.filter((d) => d.kind === 'survivor').map((d) => d.sprite);
+      expect(sprites, style).toEqual(['survivor-hidden', 'survivor-hidden', 'survivor-hidden']);
+      for (const s of still.stats) {
+        expect(s.whiteFrac, `${style} ${s.name} 흰 비율`).toBeGreaterThanOrEqual(0.9);
+        expect(s.minRoleDeltaE, `${style} ${s.name} 역할색 ΔE`).toBeGreaterThanOrEqual(40);
+        expect(s.ringRoleHits, `${style} ${s.name} 링 역할색`).toBeLessThanOrEqual(2);
+      }
+      expect(still.info.filter((i) => i.kind === 'reveal')).toEqual([]);
+      expectSameShape(still, `괴물 화면 세 몸 (${style})`);
+    }
+
+    // 새 스타일로 되돌려 노출 창: 그 한 명만 역할색 테두리 + 문양, 몸 그림 키는 그대로
+    await useCharStyle(host, 'new');
+    const bodies = await hiddenBodies(host, sr);
+    await p.scout.page.keyboard.press('Space');
+    const rev = await captureBodies(host, bodies, { waitEffect: 'reveal', refColors: ref });
+    console.log(`[m10-visual] 괴물 화면 (새 스타일 스카우트 노출): ${describeCapture(rev)}`);
+    expect(rev.ok).toBe(true);
+    expect(rev.info.filter((i) => i.kind === 'reveal').map((i) => i.tag)).toEqual(['scout']);
+    expect(rev.drawn.filter((d) => d.kind === 'survivor').every((d) => d.sprite === 'survivor-hidden')).toBe(
+      true,
+    );
+    for (const s of rev.stats) {
+      expect(s.whiteFrac, `${s.name} 흰 비율 (노출 중)`).toBeGreaterThanOrEqual(0.9);
+      if (s.name === 'scout') expect(s.ringRoleHits, '스카우트 역할색 테두리').toBeGreaterThan(20);
+      else expect(s.ringRoleHits, `${s.name} 테두리 없음`).toBeLessThanOrEqual(2);
+    }
+
+    for (const pl of players) expect(pl.problems).toEqual([]);
+    await closeAll(players);
+  },
+);
+
+test('생존자 화면 역할색 유지: 빛 바닥 · 빨강 · 노랑 부채꼴 · 공격 범위 안에서 팀원 몸 ΔE ≤ 15, 몸/바깥 링 대비 3:1 — 기존 · 새 캐릭터 두 스타일', async ({
   browser,
 }) => {
   const q = '&quality=low';
@@ -251,8 +356,22 @@ test('생존자 화면 역할색 유지: 빛 바닥 · 빨강 · 노랑 부채�
   await settle(p.monster);
   await view.evaluate(() => window.__DECOY__?.freezeClock(1000));
   const ref = { guard: ROLE_HEX.guard, scout: ROLE_HEX.scout };
-  /** 잰다. inside가 있으면 재기 전에 팀원 원판이 그 정보 항목(부채꼴 · 범위) 안인지 먼저 확인한다 */
+  /**
+   * 잰다 (styles 순서로 러너 화면 캐릭터 스타일을 바꿔 가며 같은 장면을 잰다 — VISUAL_SPEC 0장 ②는 두 스타일 모두).
+   * inside가 있으면 재기 전에 팀원 원판이 그 정보 항목(부채꼴 · 범위) 안인지 먼저 확인한다
+   */
   const check = async (
+    label0: string,
+    waitEffect?: string,
+    inside?: (info: InfoItem[]) => InfoItem | undefined,
+    styles: readonly ('classic' | 'new')[] = ['classic', 'new'],
+  ): Promise<void> => {
+    for (const style of styles) {
+      await useCharStyle(view, style);
+      await measure(`${label0} · ${style === 'new' ? '새 캐릭터' : '기존'}`, waitEffect, inside);
+    }
+  };
+  const measure = async (
     label: string,
     waitEffect?: string,
     inside?: (info: InfoItem[]) => InfoItem | undefined,
@@ -320,12 +439,28 @@ test('생존자 화면 역할색 유지: 빛 바닥 · 빨강 · 노랑 부채�
   await place(host, { monster: [p.monster.id, 40.1, 11.8, Math.PI] }, false);
   await aimAt(host, 34, 11.8);
   await view.waitForTimeout(700);
-  await host.mouse.down({ button: 'left' });
-  await host.mouse.up({ button: 'left' });
-  await check('공격 범위 안', 'attackRange', (info) =>
-    info.find((i) => i.kind === 'range' && i.tag === 'attack'),
-  );
-  await view.waitForTimeout(1800);
+  // 공격 범위는 준비 동안만 보이므로 스타일마다 한 번씩 친다 (스타일은 누르기 전에 바꿔 둔다)
+  const inRange = (info: InfoItem[]): InfoItem | undefined =>
+    info.find((i) => i.kind === 'range' && i.tag === 'attack');
+  for (const style of ['classic', 'new'] as const) {
+    await useCharStyle(view, style);
+    // 앞 스타일에서 맞은 체력을 되돌린다 (두 스타일이 같은 장면: 부상 긁힘 · 두 번째 타격 수감 없이)
+    for (const id of [p.guard.id, p.scout.id])
+      await sendTest(host, { kind: 'setSurvivor', target: id, status: 'free', hp: 2 });
+    await view.waitForFunction(
+      (ids) => {
+        const sv = window.__DECOY__?.getLastSnapshot()?.survivors ?? [];
+        return ids.every((id) => sv.find((s) => s.id === id)?.hp === 2);
+      },
+      [p.guard.id, p.scout.id],
+      { timeout: 10_000 },
+    );
+    await host.mouse.down({ button: 'left' });
+    await host.mouse.up({ button: 'left' });
+    await check('공격 범위 안', 'attackRange', inRange, [style]);
+    await view.waitForTimeout(1800);
+  }
+  await useCharStyle(view, 'classic');
   // 생존자 화면 범위 경계 = 판정값 (팀원이 없는 쪽으로 친다)
   await place(host, { guard: [p.guard.id, 37.6, 11.6, 0.5], scout: [p.scout.id, 36.2, 12.7, 2.2] });
   await place(host, { monster: [p.monster.id, 38.5, 10.6, -Math.PI / 2] }, false);

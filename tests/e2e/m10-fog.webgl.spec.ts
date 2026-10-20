@@ -270,6 +270,32 @@ test('품질 높음 1920×1080@2: 안개 · 미니맵 텍스처 메모리가 예
   expect(problems).toEqual([]);
 });
 
+test('새 캐릭터 스타일 · 품질 높음 1920×1080@2: 자세별 캐릭터 아틀라스를 더해도 텍스처 메모리가 예산(32MB) 이하이고 콘솔이 깨끗하다', async ({
+  browser,
+}) => {
+  const { context, page, problems } = await startRunner(browser, '&renderer=webgl&quality=high&chars=new', 2);
+  await page.waitForTimeout(1000);
+  const info = await gfxInfo(page);
+  const extra = await page.evaluate(() => {
+    const g = window.__DECOY__!.gfx;
+    return { style: g.charStyle, zoom: g.zoom, atlasBytes: Number(g.features.atlasBytes ?? 0) };
+  });
+  await context.close();
+  console.log(
+    `[m10-fog.webgl] 새 스타일 높음 1920×1080@2 텍스처 바이트 ${info.textureBytes} (${(info.textureBytes / MB).toFixed(2)}MiB), 캐릭터 아틀라스 ${(extra.atlasBytes / MB).toFixed(2)}MiB`,
+  );
+  expect(extra.style).toBe('new');
+  expect(extra.zoom).toBe(2);
+  expect(info.renderer).toBe('webgl');
+  expect(info.quality).toBe('high');
+  expect(info.downgrades).toBe(0);
+  // 빈 통과가 아님: 새 스타일 아틀라스(자세 프레임 100여 장)는 기존(배율 2에서 약 1MiB)보다 크다
+  expect(extra.atlasBytes).toBeGreaterThan(1.5 * MB);
+  expect(info.textureBytes).toBeGreaterThan(20 * MB);
+  expect(info.textureBytes).toBeLessThanOrEqual(TEXTURE_BUDGET.high);
+  expect(problems).toEqual([]);
+});
+
 /** 상대를 시야 밖에서 걷게(작은 순간이동을 잇달아) 하며 자리 픽셀을 여러 번 잰 뒤, 상대를 멀리 보낸 같은 자리 빈 바닥과 비교한다 */
 async function hiddenVsEmpty(
   s: Session,

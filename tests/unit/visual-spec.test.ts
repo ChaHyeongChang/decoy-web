@@ -7,6 +7,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import * as anim from '../../client/src/art/anim';
+import * as charFrames from '../../client/src/art/charFrames';
+import * as chars from '../../client/src/art/chars/index';
 import * as fx from '../../client/src/art/fx';
 import * as icons from '../../client/src/art/icons';
 import * as mapArtBadges from '../../client/src/art/mapArtBadges';
@@ -33,6 +35,8 @@ const MODULES: Readonly<Record<string, { file: string; mod: object }>> = {
   mapArtGeom: { file: 'client/src/art/mapArtGeom.ts', mod: mapArtGeom },
   mapArtBadges: { file: 'client/src/art/mapArtBadges.ts', mod: mapArtBadges },
   shapes: { file: 'client/src/art/shapes.ts', mod: shapes },
+  charFrames: { file: 'client/src/art/charFrames.ts', mod: charFrames },
+  chars: { file: 'client/src/art/chars/index.ts', mod: chars },
   anim: { file: 'client/src/art/anim.ts', mod: anim },
   fx: { file: 'client/src/art/fx.ts', mod: fx },
   icons: { file: 'client/src/art/icons.ts', mod: icons },

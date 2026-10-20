@@ -1,6 +1,11 @@
 {
   "margin": 1.05,
   "measuredAt": "PR #20 통합",
+  "sceneAt": {
+    "canvas-high-runner-new": "캐릭터 리디자인 PR #21",
+    "canvas-high-monster-new": "캐릭터 리디자인 PR #21",
+    "webgl-high-runner-s25-new": "캐릭터 리디자인 PR #21"
+  },
   "scenes": {
     "canvas-high-runner": {
       "pathMainPerFrame": 569.78,
@@ -29,6 +34,41 @@
       "uploadsPerSec": 83.7,
       "uploadPxPerFrame": 72526.1,
       "bufferBytesPerFrame": 112488.98,
+      "programsPerFrame": 6,
+      "framebuffersPerFrame": 3,
+      "pathOffPerFrame": 447.01,
+      "paintOffPerFrame": 21.48,
+      "textPerSec": 3.4,
+      "resizePerSec": 12.8,
+      "readbackPerSec": 0.8
+    },
+    "canvas-high-runner-new": {
+      "pathMainPerFrame": 569.78,
+      "paintMainPerFrame": 239.4,
+      "stateMainPerFrame": 699.78,
+      "drawImagePerFrame": 225.82,
+      "pathOffPerFrame": 365.45,
+      "paintOffPerFrame": 14.85,
+      "textPerSec": 3.4,
+      "resizePerSec": 12.8,
+      "readbackPerSec": 0.8
+    },
+    "canvas-high-monster-new": {
+      "pathMainPerFrame": 257.35,
+      "paintMainPerFrame": 161.95,
+      "stateMainPerFrame": 494.53,
+      "drawImagePerFrame": 159.5,
+      "pathOffPerFrame": 141.86,
+      "paintOffPerFrame": 19.46,
+      "textPerSec": 4,
+      "resizePerSec": 16.6,
+      "readbackPerSec": 0.8
+    },
+    "webgl-high-runner-s25-new": {
+      "drawsPerFrame": 10,
+      "uploadsPerSec": 83.7,
+      "uploadPxPerFrame": 72526.1,
+      "bufferBytesPerFrame": 110764.18,
       "programsPerFrame": 6,
       "framebuffersPerFrame": 3,
       "pathOffPerFrame": 447.01,

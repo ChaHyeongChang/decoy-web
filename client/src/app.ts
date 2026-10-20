@@ -21,6 +21,7 @@ import { UI_TEXT } from './data/storyText';
 import { device } from './device';
 import { isFrameLimit, type FrameLimit } from './gfx/framePacing';
 import type { QualityTier } from './gfx/presets';
+import { parseCharStyle, type CharStyle } from './gfx/charStyle';
 import { parseQuality } from './gfx/quality';
 import { haptics } from './haptics';
 import {
@@ -85,6 +86,8 @@ export interface AppParams {
    * 그 밖에는 null. 측정 표시는 ?debug=1 오버레이(ui/debugOverlay.ts)
    */
   fpsLimit: FrameLimit | null;
+  /** ?chars=new|classic: 이번 접속의 캐릭터 스타일 (시험 · 촬영용. 저장한 선택보다 우선, 저장하지 않음). 그 밖에는 null */
+  chars: CharStyle | null;
 }
 
 export function readParams(search: string): AppParams {
@@ -106,6 +109,7 @@ export function readParams(search: string): AppParams {
     practice: p.get('practice') === '1',
     touch: p.get('touch'),
     fpsLimit: isFrameLimit(fpsLimit) ? fpsLimit : null,
+    chars: parseCharStyle(p.get('chars')),
   };
 }
 

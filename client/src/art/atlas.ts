@@ -4,13 +4,18 @@
 // 해상도: 화면에서 1텍셀 ≈ 기기 1px (zoom × MAP_SCALE × TILE_PX × 크기). zoom이 바뀌면(onGfxChange) 다시 굽는다.
 // 입체감: 가장자리 어두운 외곽선(OUTLINE), 몸은 위에서 비춘 돔 음영(가운데 원판은 역할색 그대로 — 생존자 화면
 // 역할색 유지), 회전하지 않는 반사광(spec), 부드러운 바닥 그림자 + 접지 그림자(바깥 링 대비 3:1).
-// 괴물 화면의 생존자 그림은 'survivor-hidden' 하나 · 'foot-hidden' 하나 · 공통 그림자뿐이다(역할 · 체력과 무관).
+// 괴물 화면의 생존자 그림은 기존 스타일에서 'survivor-hidden' 하나 · 'foot-hidden' 하나 · 공통 그림자뿐이다(역할 · 체력과 무관).
+// 새 스타일은 공통 생존자의 쉬기 · 걷기 8장 · 흰 번쩍('survivor-hidden', '~w0..7', '-flash')이고 걷기 위상 · 세기만으로 고른다
+// (charFrames.ts hiddenFrameNew). 'foot-hidden'은 빈 칸 별칭이다.
 import Phaser from 'phaser';
 import { TILE_PX } from '@decoy/shared';
+import { currentCharStyle, type CharStyle } from '../gfx/charStyle';
 import { gfxState } from '../gfx/state';
 import { createCanvasTexture, removeCanvasTexture } from '../render/fogPaint';
 import { MAP_SCALE } from '../ui/layout';
 import { cloakPoseFor, ANIM } from './anim';
+import { DrawingMemo, EMPTY_ALIASES, SHARED_FRAMES, newStyleFrameSpecs, type FrameBox } from './charFrames';
+import { clearPathCache, drawToCanvas } from './chars/kit';
 import { HIDDEN_SURVIVOR, OUTLINE, ROLE } from './palette';
 import {
   GLYPHS,
@@ -69,6 +74,8 @@ export interface AtlasParams {
   /** 생존자 · 괴물 판정 반지름 (타일, balance) */
   survivorR: number;
   monsterR: number;
+  /** 캐릭터 스타일 (캐릭터 리디자인 2단계). 없으면 기존 — 고른 스타일 하나만 굽는다(텍스처 예산) */
+  style?: CharStyle;
 }
 
 export interface AtlasFrame {
@@ -76,6 +83,12 @@ export interface AtlasFrame {
   y: number;
   w: number;
   h: number;
+  /**
+   * 그림 중심의 칸 안 자리 (0~1, Phaser frame pivot). 새 스타일만 쓴다: 앞이 긴 그림을 직사각 칸에 굽기 때문이다.
+   * 새 스타일 텍스처는 모든 프레임에 pivot을 둔다(없는 프레임으로 바꾸면 Phaser가 앞 프레임의 origin을 그대로 둔다)
+   */
+  pivotX?: number;
+  pivotY?: number;
 }
 
 export interface AtlasBuild {
@@ -505,14 +518,48 @@ interface FrameDef {
   ext: number;
   unit: 's' | 'm';
   draw: (ctx: Ctx, k: number, w: number) => void;
+  /** 직사각 칸 (새 스타일 캐릭터 그림). 있으면 ext 대신 이 상자로 칸을 잡고 중심을 pivot으로 적는다 */
+  box?: FrameBox;
 }
+
+/** 빈 칸 이름 (EMPTY_ALIASES가 모두 이 칸을 가리킨다) */
+const EMPTY_FRAME = '~empty';
 
 /** 망토 프레임 이름 */
 export function cloakFrameName(kind: 'idle' | 'move', i: number): string {
   return `monster-${kind}-${i}`;
 }
 
-function frameDefs(): FrameDef[] {
+/**
+ * 새 스타일 프레임: 옛 그림 중 공용 프레임 + 새 캐릭터 그림(자세마다 한 칸) + 빈 칸 하나.
+ * 새 그림의 외곽선 두께는 옛 그림과 같은 월드 px(ART.outlineWorldPx)를 그 단위의 그림 단위로 바꾼 값이다
+ */
+/** 새 스타일 그림 명령 기억 (판 중 배율이 바뀌어 다시 구울 때 래스터만). 기존 스타일을 구우면 비운다 */
+const drawMemo = new DrawingMemo();
+
+function newFrameDefs(survivorR: number, monsterR: number): FrameDef[] {
+  const defs = classicFrameDefs().filter((d) => SHARED_FRAMES.includes(d.name));
+  const ws = ART.outlineWorldPx / (survivorR * TILE_PX);
+  const wm = ART.outlineWorldPx / (monsterR * TILE_PX);
+  for (const spec of newStyleFrameSpecs()) {
+    const ow = spec.unit === 's' ? ws : wm;
+    defs.push({
+      name: spec.name,
+      ext: 0,
+      unit: spec.unit,
+      box: spec.box,
+      draw: (c, k) => drawToCanvas(c, drawMemo.get(spec, ow), k),
+    });
+  }
+  defs.push({ name: EMPTY_FRAME, ext: 0, unit: 's', draw: () => undefined });
+  return defs;
+}
+
+function frameDefs(params: AtlasParams): FrameDef[] {
+  return params.style === 'new' ? newFrameDefs(params.survivorR, params.monsterR) : classicFrameDefs();
+}
+
+function classicFrameDefs(): FrameDef[] {
   const defs: FrameDef[] = [];
   const ids: SurvivorShapeId[] = ['runner', 'guard', 'scout', 'hidden'];
   for (const id of ids) {
@@ -601,9 +648,9 @@ function frameDefs(): FrameDef[] {
   return defs;
 }
 
-/** 지금 그래픽 상태의 굽기 값 */
+/** 지금 그래픽 상태의 굽기 값 (캐릭터 스타일 포함) */
 export function atlasParamsFor(survivorR: number, monsterR: number): AtlasParams {
-  return { zoom: gfxState.zoom, survivorR, monsterR };
+  return { zoom: gfxState.zoom, survivorR, monsterR, style: currentCharStyle() };
 }
 
 /** 텍셀 / 월드 px (= 화면 기기 px / 월드 px) */
@@ -611,46 +658,85 @@ export function texelsPerWorldPx(zoom: number): number {
   return Math.max(0.25, zoom) * MAP_SCALE;
 }
 
-/** 모든 프레임을 한 캔버스에 그린다 (선반 채우기, 프레임 사이 2px 틈) */
+/** 칸 크기 · 그림 중심 (텍셀). 정사각 칸은 가운데, 직사각 칸은 상자 원점 자리 */
+interface Cell {
+  d: FrameDef;
+  w: number;
+  h: number;
+  /** 그림 중심의 칸 안 자리 (텍셀) */
+  ox: number;
+  oy: number;
+}
+
+function cellOf(d: FrameDef, unitPx: { s: number; m: number }, w: number): Cell {
+  const u = unitPx[d.unit];
+  const pad = w + 2;
+  if (d.name === EMPTY_FRAME) return { d, w: 4, h: 4, ox: 2, oy: 2 };
+  if (d.box) {
+    const b = d.box;
+    return {
+      d,
+      w: Math.ceil((b.x1 - b.x0) * u + 2 * pad),
+      h: Math.ceil((b.y1 - b.y0) * u + 2 * pad),
+      ox: pad - b.x0 * u,
+      oy: pad - b.y0 * u,
+    };
+  }
+  const size = Math.ceil(2 * d.ext * u + 2 * w + 4);
+  return { d, w: size, h: size, ox: size / 2, oy: size / 2 };
+}
+
+/** 모든 프레임을 한 캔버스에 그린다 (선반 채우기, 프레임 사이 2px 틈). 고른 스타일 하나만 굽는다 */
 export function bakeAtlas(params: AtlasParams): AtlasBuild {
   const t0 = performance.now();
   const tpw = texelsPerWorldPx(params.zoom);
   const unitPx = { s: params.survivorR * TILE_PX * tpw, m: params.monsterR * TILE_PX * tpw };
   const w = ART.outlineWorldPx * tpw;
-  const defs = frameDefs();
-  const sized = defs.map((d) => ({ d, size: Math.ceil(2 * d.ext * unitPx[d.unit] + 2 * w + 4) }));
-  sized.sort((a, b) => b.size - a.size);
+  const isNew = params.style === 'new';
+  const cells = frameDefs(params).map((d) => cellOf(d, unitPx, w));
+  cells.sort((a, b) => b.h - a.h || b.w - a.w);
   const width = unitPx.s > 14 ? 1024 : 512;
   const frames = new Map<string, AtlasFrame>();
   let x = 0;
   let y = 0;
   let rowH = 0;
-  for (const { d, size } of sized) {
-    if (x + size > width) {
+  for (const c of cells) {
+    if (x + c.w > width) {
       x = 0;
       y += rowH + 2;
       rowH = 0;
     }
-    frames.set(d.name, { x, y, w: size, h: size });
-    x += size + 2;
-    rowH = Math.max(rowH, size);
+    const f: AtlasFrame = { x, y, w: c.w, h: c.h };
+    if (isNew) {
+      f.pivotX = c.ox / c.w;
+      f.pivotY = c.oy / c.h;
+    }
+    frames.set(c.d.name, f);
+    x += c.w + 2;
+    rowH = Math.max(rowH, c.h);
   }
+  // 새 스타일: 쓰지 않는 옛 부품 이름은 빈 칸 하나를 같이 가리킨다
+  const empty = frames.get(EMPTY_FRAME);
+  if (isNew && empty) for (const name of EMPTY_ALIASES) frames.set(name, empty);
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = Math.max(4, y + rowH);
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('캐릭터 그림 캔버스를 만들 수 없습니다');
-  for (const { d } of sized) {
-    const f = frames.get(d.name);
+  for (const c of cells) {
+    const f = frames.get(c.d.name);
     if (!f) continue;
     ctx.save();
     ctx.beginPath();
     ctx.rect(f.x, f.y, f.w, f.h);
     ctx.clip();
-    ctx.translate(f.x + f.w / 2, f.y + f.h / 2);
-    d.draw(ctx, unitPx[d.unit], w);
+    ctx.translate(f.x + c.ox, f.y + c.oy);
+    c.d.draw(ctx, unitPx[c.d.unit], w);
     ctx.restore();
   }
+  // Path2D는 굽기 한 번 안에서만 다시 쓴다(경로 글자가 커서 들고 있지 않는다). 그림 명령은 다음 굽기를 위해 둔다
+  if (isNew) clearPathCache();
+  else drawMemo.clear();
   return { canvas, frames, params, ms: performance.now() - t0, texPerWorld: tpw };
 }
 
@@ -662,7 +748,12 @@ let pending: AtlasBuild | null = null;
 let keySeq = 0;
 
 function sameParams(a: AtlasParams, b: AtlasParams): boolean {
-  return Math.abs(a.zoom - b.zoom) < 1e-6 && a.survivorR === b.survivorR && a.monsterR === b.monsterR;
+  return (
+    Math.abs(a.zoom - b.zoom) < 1e-6 &&
+    a.survivorR === b.survivorR &&
+    a.monsterR === b.monsterR &&
+    (a.style ?? 'classic') === (b.style ?? 'classic')
+  );
 }
 
 /** 텍스처 관리자 (Phaser TextureManager 중 쓰는 부분) */
@@ -680,12 +771,24 @@ export function ensureAtlas(textures: TextureHost, params: AtlasParams): { key: 
   keySeq += 1;
   const key = `decoy-chars-${keySeq}`;
   const tex = createCanvasTexture(textures, key, build.canvas);
-  for (const [name, f] of build.frames) tex.add(name, 0, f.x, f.y, f.w, f.h);
+  for (const [name, f] of build.frames) {
+    const frame = tex.add(name, 0, f.x, f.y, f.w, f.h);
+    if (frame && f.pivotX !== undefined && f.pivotY !== undefined) {
+      frame.customPivot = true;
+      frame.pivotX = f.pivotX;
+      frame.pivotY = f.pivotY;
+    }
+  }
   // 회전 · 크기 변화가 있는 그림이라 선형 보간 (게임 설정이 pixelArt로 잡혀도 계단이 생기지 않게)
   tex.setFilter(Phaser.Textures.FilterMode.LINEAR);
   current = { key, build };
   gfxState.features.atlasBakeMs = Math.round(build.ms * 10) / 10;
   gfxState.features.atlasBytes = build.canvas.width * build.canvas.height * 4;
+  // 지금 올린(그리는) 아틀라스의 캐릭터 스타일 · 배율, 새 스타일 그림 명령을 새로 만든 누적 횟수
+  // (시험: 스타일을 바꾼 뒤 실제로 다시 구웠는지, 배율만 바뀐 다시 굽기가 그림 명령을 다시 만들지 않는지)
+  gfxState.features.atlasStyle = build.params.style ?? 'classic';
+  gfxState.features.atlasZoom = build.params.zoom;
+  gfxState.features.atlasDrawingsMade = drawMemo.made;
   return current;
 }
 

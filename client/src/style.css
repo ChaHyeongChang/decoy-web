@@ -925,6 +925,25 @@ select {
   font-size: 13px;
   font-weight: 800;
 }
+/* 새 캐릭터(정면 그림, 'front') 내 역할 카드: 정면 그림은 머리가 그림 상자 위 가운데라, 카드가 좁으면 오른쪽 위 '내 역할'
+   배지가 머리 · 얼굴을 덮었다(좁은 휴대폰 658×320 · PC 420×820 — 검토 반영). 좁을 때만 그림을 배지 왼쪽으로 비켜 세운다:
+   오른쪽 안쪽 여백 = 2 × (배지 칸 + 그림 반폭 − 카드 옆 여백) − 100%. 100%는 카드 안쪽 폭이고, 그림 상자는 카드 옆 여백만큼
+   음수 여백으로 넓다. 배지 칸 = 배지 오른쪽 여백 + 배지 폭(약 74px) + 틈 4px, 그림 반폭 = 가장 넓은 괴물(망토 · 발톱) 기준
+   그림 크기의 0.32. 넓은 카드는 0 아래라 0(가운데 그대로), 아주 좁은 창은 그림이 카드 왼쪽 밖으로 나가지 않게(6px 남김)
+   멈춘다(clamp의 위 끝). 그림 크기 · 여백이 바뀌는 낮은 창 규칙에서 값을 다시 둔다. 기존 스타일(위에서 본 실루엣)은 그대로 */
+.role-card.mine .rc-figure.front {
+  --fr-tag: 88px;
+  --fr-half: 48px;
+  --fr-pad: 16px;
+  padding-right: clamp(
+    0px,
+    calc(2 * (var(--fr-tag) + var(--fr-half) - var(--fr-pad)) - 100%),
+    calc(100% + 2 * (var(--fr-pad) - var(--fr-half)) - 12px)
+  );
+}
+.role-card.mine .rc-figure.front > svg {
+  flex: none;
+}
 .rc-head {
   display: flex;
   align-items: center;
@@ -1128,6 +1147,9 @@ select {
     height: 120px;
     margin-top: -4px;
   }
+  .role-card.mine .rc-figure.front {
+    --fr-half: 39px;
+  }
   .rc-body {
     gap: 8px;
     padding-bottom: 10px;
@@ -1201,6 +1223,11 @@ select {
   .rc-tag {
     top: 6px;
     right: 6px;
+  }
+  .role-card.mine .rc-figure.front {
+    --fr-tag: 84px;
+    --fr-half: 29px;
+    --fr-pad: 12px;
   }
   .glyph {
     width: 26px;
@@ -1426,6 +1453,22 @@ select {
   height: 88px;
   filter: drop-shadow(0 0 14px rgba(239, 68, 68, 0.45));
 }
+/* 새 캐릭터 정면 그림 (캐릭터 리디자인 2단계, 'front'): 사람 모양이라 둥근 실루엣 · 문양보다 상자를 덜 채운다(그림 위 약 1/6이
+   빈다). 조금 크게 두고 빈 위쪽은 음수 여백으로 접어, 팀 문장 높이가 옆 승리 글자 칸을 넘지 않게 한다(결과 상자 높이 그대로).
+   생존자 셋은 몸이 좁아 옆 여백을 더 접어 붙여 둔다(셋 폭은 기존 실루엣과 비슷). 글자 줄 아래 틈이 생기지 않게 block */
+.emblem.front svg {
+  display: block;
+}
+.emblem.survivors.front svg {
+  width: 84px;
+  height: 84px;
+  margin: -10px -19px 0;
+}
+.emblem.monster.front svg {
+  width: 96px;
+  height: 96px;
+  margin-top: -10px;
+}
 .emblem.void {
   color: var(--text-dim);
 }
@@ -1597,6 +1640,16 @@ select {
     width: 54px;
     height: 54px;
   }
+  .emblem.survivors.front svg {
+    width: 68px;
+    height: 68px;
+    margin: -8px -15px 0;
+  }
+  .emblem.monster.front svg {
+    width: 72px;
+    height: 72px;
+    margin-top: -8px;
+  }
   .result-winner {
     font-size: 34px;
   }
@@ -1702,6 +1755,18 @@ select {
     background: linear-gradient(180deg, rgba(11, 22, 34, 0), rgba(11, 22, 34, 0.94) 22%);
   }
 }
+/* 좁은 휴대폰 가로(폭 720 이하 · 높이 500 이하): 연습 역할 버튼 넷이 한 줄이라 칸이 약 70px — 문양 + 이름을 한 줄에 두면
+   '스카우트'가 잘린다(스토어 촬영 640×360에서 발견). 문양을 이름 위로 올린다(네 버튼 모두 같은 높이) */
+@media (max-height: 500px) and (max-width: 720px) {
+  .practice-role .rc-head {
+    flex-direction: column;
+    gap: 0;
+  }
+  .practice-role .glyph {
+    width: 20px;
+    height: 20px;
+  }
+}
 /* 낮은 가로 화면 (휴대폰): 첫 화면은 작은 로고를 패널 옆에, 방 화면은 촘촘하게 */
 @media (max-height: 500px) {
   .practice-roles {
@@ -1788,6 +1853,10 @@ select {
     height: 70px;
     margin-top: -6px;
   }
+  .role-card.mine .rc-figure.front {
+    --fr-half: 23px;
+    --fr-pad: 10px;
+  }
   .role-name {
     font-size: 17px;
   }
@@ -1834,6 +1903,16 @@ select {
   .emblem.survivors svg {
     width: 46px;
     height: 46px;
+  }
+  .emblem.survivors.front svg {
+    width: 58px;
+    height: 58px;
+    margin: -7px -13px 0;
+  }
+  .emblem.monster.front svg {
+    width: 62px;
+    height: 62px;
+    margin-top: -7px;
   }
   .result-ending {
     font-size: 15px;

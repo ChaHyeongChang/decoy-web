@@ -7,6 +7,10 @@
 //
 // 괴물 화면의 생존자(흰색 위장, R7)는 drawHiddenSurvivor만 그린다. 이 함수는 역할 · 체력 · 능력 상태 인자를
 // **받지 않는다**(art/anim.ts hiddenSurvivorPose): 모두 같은 그림 키 · 크기 · 숨쉬기 · 걷기 · 그림자 · 발먼지다.
+//
+// 캐릭터 스타일(캐릭터 리디자인 2단계): 리그는 만들 때의 아틀라스 스타일을 들고 있다. 새 스타일은 자세마다 구운 몸 그림
+// (art/charFrames.ts 이름 표) 하나 + 그림자만 보인다 — 발 · 윤기 · 발톱 · 눈 · 눈빛 이미지는 새 그림 안에 있어 알파 0이다.
+// 새 스타일 괴물 화면 생존자도 hiddenFrameNew(걷기 위상 · 걷기 세기)만으로 프레임을 고른다(수감 여부도 쓰지 않는다).
 import Phaser from 'phaser';
 import { TILE_PX, type RoleId } from '@decoy/shared';
 import {
@@ -21,7 +25,15 @@ import {
   type HitReact,
   type WalkPose,
 } from '../art/anim';
+import {
+  NEW_POSE_MS,
+  hiddenFrameNew,
+  teamFlashNew,
+  teamFrameNew,
+  type TeamFrameInput,
+} from '../art/charFrames';
 import { CONE, DANGER, OUTLINE, ROLE, WARN } from '../art/palette';
+import type { CharStyle } from '../gfx/charStyle';
 import {
   CLAW_ANCHOR,
   CLAW_SPREAD,
@@ -82,6 +94,16 @@ const HIDDEN_FLASH = 'survivor-hidden-flash';
 const hiddenScratch = newHiddenSurvivorPose();
 const walkScratch = newWalkPose();
 const hitScratch: HitReact = { flash: 0, squash: 0 };
+/** 새 스타일 팀원 프레임 고르기 입력 (그릇 하나를 다시 쓴다) */
+const teamFrameScratch: TeamFrameInput = {
+  walkPhase: 0,
+  stepping: 0,
+  action: 0,
+  captive: false,
+  reach: false,
+  hit: false,
+  gray: false,
+};
 const glyphAt = { x: 0, y: 0 };
 /** 기절 별 꼭짓점 10개 (strokePoints · fillPoints가 바로 명령으로 옮겨 적는다) */
 const starPts: Phaser.Math.Vector2[] = Array.from({ length: 10 }, () => new Phaser.Math.Vector2());
@@ -172,6 +194,8 @@ export class SurvivorRig extends Rig {
     key: string,
     layers: CharacterLayers,
     readonly tpw: number,
+    /** 이 리그를 만든 아틀라스의 캐릭터 스타일 */
+    readonly style: CharStyle = 'classic',
   ) {
     super(scene, key);
     this.shadow = this.make(layers.shadows, 'shadow-survivor');
@@ -186,7 +210,7 @@ export class SurvivorRig extends Rig {
   }
 }
 
-/** 생존자 몸 공통 배치 (그림자 · 발 · 몸 · 반사광). 몸 반지름 r (타일) */
+/** 생존자 몸 공통 배치 (그림자 · 발 · 몸 · 반사광). 몸 반지름 r (타일). 새 스타일은 발 · 반사광을 숨긴다(몸 그림 안에 있다) */
 function placeSurvivor(
   rig: SurvivorRig,
   bodyFrame: string,
@@ -206,6 +230,14 @@ function placeSurvivor(
   const sx = s * (1 + squash * ANIM.squashAmt);
   const sy = s * (1 - squash * ANIM.squashAmt);
   put(rig.shadow, 'shadow-survivor', px, py, 0, s, s, alpha);
+  if (rig.style === 'new') {
+    rig.footA.setVisible(false);
+    rig.footB.setVisible(false);
+    rig.spec.setVisible(false);
+    put(rig.body, bodyFrame, px, py, rotation, sx, sy, alpha);
+    rig.sprite = bodyFrame;
+    return;
+  }
   const c = Math.cos(rotation);
   const sn = Math.sin(rotation);
   const rp = r * T * scale;
@@ -239,7 +271,9 @@ function placeSurvivor(
 /**
  * 괴물 화면의 생존자 (흰색 위장). 역할 · 체력 · 능력 인자가 없다: 그림 키 'survivor-hidden', 발 'foot-hidden',
  * 공통 그림자, 같은 숨쉬기 · 걷기 곡선. reveal은 서버가 능력 노출 창(1초) 동안 보낸 역할 → 역할색 테두리 + 머리 위 문양.
- * others = 이 화면에 그린 다른 캐릭터 몸 원 (노출 문양이 그 몸과 겹치지 않는 자리를 고른다)
+ * others = 이 화면에 그린 다른 캐릭터 몸 원 (노출 문양이 그 몸과 겹치지 않는 자리를 고른다).
+ * 새 스타일 프레임은 걷기 위상 · 걷기 세기로만 고른다(art/charFrames.ts hiddenFrameNew — 수감 자세도 쓰지 않는다: 기존 스타일과
+ * 같은 정보량). reveal은 테두리 · 문양에만 쓰고 프레임을 고르는 데 쓰지 않는다
  */
 export function drawHiddenSurvivor(
   rig: SurvivorRig,
@@ -266,7 +300,8 @@ export function drawHiddenSurvivor(
     PROTECTED_ALPHA,
     hiddenScratch,
   );
-  placeSurvivor(rig, p.sprite, p.foot, p.x, p.y, p.rotation, p.scale, p.feet, p.alpha, bodyR, 0);
+  const body = rig.style === 'new' ? hiddenFrameNew(walkPhase, stepping) : p.sprite;
+  placeSurvivor(rig, body, p.foot, p.x, p.y, p.rotation, p.scale, p.feet, p.alpha, bodyR, 0);
   put(rig.flash, HIDDEN_FLASH, x * T, y * T, p.rotation, p.scale / rig.tpw, p.scale / rig.tpw, 0);
   attachments(rig, x, y, p.scale, p.alpha, protectedFlag, p.blinkOutline, p.reveal, bodyR, others);
 }
@@ -294,6 +329,12 @@ export interface TeamSurvivorPose {
   fade: number;
   /** 사망 회색 */
   gray: boolean;
+  /** 능력 동작 0~1 (새 스타일 자세만: 러너 질주 · 가드 밀치기 · 스카우트 탐지) */
+  action: number;
+  /** 수감 중 (새 스타일 자세만) */
+  captive: boolean;
+  /** 구조 중 (새 스타일 자세만) */
+  reach: boolean;
 }
 
 /** 빈 몸 원 목록 (생존자 화면의 팀원은 노출 문양이 없다) */
@@ -310,10 +351,25 @@ export function drawTeamSurvivor(rig: SurvivorRig, p: TeamSurvivorPose, bodyR: n
   const alpha = (p.protectedFlag ? PROTECTED_ALPHA : 1) * p.fade;
   const rot = p.face + w.lean;
   const frames = ROLE_FRAMES[p.role];
-  const body = p.gray ? frames.gray : frames.body;
-  placeSurvivor(rig, body, frames.foot, p.x, p.y, rot, scale, w.feet, alpha, bodyR, hit.squash);
   const s = scale / rig.tpw;
-  put(rig.flash, frames.flash, p.x * T, p.y * T, rot, s, s, hit.flash * 0.9 * p.fade);
+  if (rig.style === 'new') {
+    // 새 스타일: 자세 프레임 하나 (피격은 젖힌 자세 + 그 실루엣 흰 번쩍, 찌그러짐 없음)
+    const f = teamFrameScratch;
+    const hitOn = p.hitMs !== null && p.hitMs >= 0 && p.hitMs < NEW_POSE_MS.hit;
+    f.walkPhase = p.walkPhase;
+    f.stepping = p.stepping;
+    f.action = p.action;
+    f.captive = p.captive;
+    f.reach = p.reach;
+    f.hit = hitOn;
+    f.gray = p.gray;
+    placeSurvivor(rig, teamFrameNew(p.role, f), frames.foot, p.x, p.y, rot, scale, w.feet, alpha, bodyR, 0);
+    put(rig.flash, teamFlashNew(p.role, hitOn), p.x * T, p.y * T, rot, s, s, hit.flash * 0.9 * p.fade);
+  } else {
+    const body = p.gray ? frames.gray : frames.body;
+    placeSurvivor(rig, body, frames.foot, p.x, p.y, rot, scale, w.feet, alpha, bodyR, hit.squash);
+    put(rig.flash, frames.flash, p.x * T, p.y * T, rot, s, s, hit.flash * 0.9 * p.fade);
+  }
   attachments(
     rig,
     p.x,
@@ -388,6 +444,8 @@ export class MonsterRig extends Rig {
     key: string,
     layers: CharacterLayers,
     readonly tpw: number,
+    /** 이 리그를 만든 아틀라스의 캐릭터 스타일 */
+    readonly style: CharStyle = 'classic',
   ) {
     super(scene, key);
     this.shadow = this.make(layers.shadows, 'shadow-monster');
@@ -427,6 +485,15 @@ export function drawMonsterRig(rig: MonsterRig, p: MonsterPose, bodyR: number): 
   const rp = bodyR * T * p.scale;
   put(rig.shadow, 'shadow-monster', px, py, 0, s, s, p.alpha);
   put(rig.body, p.frame, px, py, p.aim, sx, sy, p.alpha);
+  if (rig.style === 'new') {
+    // 새 스타일: 발톱 · 눈 · 눈빛은 몸 그림 안에 있다
+    rig.clawA.setVisible(false);
+    rig.clawB.setVisible(false);
+    rig.eyes.setVisible(false);
+    rig.glow.setVisible(false);
+    rig.sprite = p.frame;
+    return;
+  }
   // 발톱: 망토 앞 가장자리 위. 공격 준비에는 앞으로 내밀고 더 벌린다 (side 1 = clawA, −1 = clawB)
   const lx = CLAW_ANCHOR.x + 0.14 * p.raise;
   for (let side = 1; side >= -1; side -= 2) {

@@ -4,7 +4,7 @@
 //    (main.ts가 pacingHooks.setLimit에서 pacer와 gfxState.frameLimit을 바꾸고, 시작할 때 저장값을 읽는다). 새로고침 뒤에도 고른 값
 //  - 저장소가 막혀도 이번 접속에는 적용되고(첫 화면을 다시 그려도 고른 값), '저장되지 않아요' 안내는 그래픽 줄과 하나를 같이 쓴다
 //  - 터치: 첫 화면에는 선택 상자가 없고 설정 판에 자동 · 60 · 120(고른 칸 = ✓ + 바탕, aria-pressed), 진동이 없는 기기에도 있고,
-//    가장 낮은 휴대폰 가로(Pixel 5 802×293)에서도 설정 판의 단추가 모두 화면 안
+//    가장 낮은 휴대폰 가로(Pixel 5 802×293)에서도 설정 판의 단추가 모두 화면 안 (캐릭터 스타일 줄까지 — 낮은 화면은 두 열)
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { UI_TEXT } from '../../client/src/data/storyText';
 import { FRAME_LIMIT_STORAGE_KEY } from '../../client/src/gfx/framePacing';
@@ -202,25 +202,42 @@ test('터치: 진동이 없는 기기에도 설정 판에 프레임 제한이 �
   await expect(panel).toBeVisible();
   await expect(panel.getByTestId('haptics-on')).toHaveCount(0);
   await expect(panel.getByTestId('frame-limit-row')).toBeVisible();
-  for (const id of ['frame-limit-auto', 'frame-limit-60', 'frame-limit-120', 'tutorial-replay'])
+  for (const id of [
+    'frame-limit-auto',
+    'frame-limit-60',
+    'frame-limit-120',
+    'char-style-classic',
+    'char-style-new',
+    'tutorial-replay',
+  ])
     await expect(page.getByTestId(id), id).toBeInViewport({ ratio: 1 });
   await press(page.getByTestId('frame-limit-60'));
   await expect.poll(() => appliedLimit(page), POLL).toBe('60');
   expect(await stored(page)).toBe('60');
-  // 진동이 있는 같은 낮은 화면: 진동 줄까지 든 판도 화면 안
+  // 진동이 있는 같은 낮은 화면: 진동 · 캐릭터 스타일 줄까지 든 판도 화면 안. 안내 다시 보기를 눌러 '다시 보여 드려요'가
+  // 붙어도 그대로 (두 열 중 오른쪽 열이 길어진다)
   const vib = await newPlayerPage(browser, dpr1(PHONE_SMALL));
   await stubFullscreen(vib.context);
   await vib.page.goto(`/?${BASE_QUERY.slice(1)}`);
   await press(vib.page.getByTestId('settings-button'));
-  for (const id of [
+  const ids = [
     'haptics-on',
     'haptics-off',
     'frame-limit-auto',
     'frame-limit-60',
     'frame-limit-120',
+    'char-style-classic',
+    'char-style-new',
     'tutorial-replay',
-  ])
+  ];
+  for (const id of ids)
     await expect(vib.page.getByTestId(id), `진동 있음 ${id}`).toBeInViewport({ ratio: 1 });
+  await press(vib.page.getByTestId('tutorial-replay'));
+  const done = vib.page.getByTestId('settings-panel').locator('.life-done');
+  await expect(done).toBeVisible();
+  for (const id of ids)
+    await expect(vib.page.getByTestId(id), `다시 보기 뒤 ${id}`).toBeInViewport({ ratio: 1 });
+  await expect(done).toBeInViewport({ ratio: 1 });
   expect([...problems, ...vib.problems]).toEqual([]);
   await vib.context.close();
   await context.close();

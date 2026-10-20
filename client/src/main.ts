@@ -1,9 +1,11 @@
 // DECOY 클라이언트 진입점
 import Phaser from 'phaser';
 import { App, readParams } from './app';
+import { PRACTICE_BALANCE } from './localServer';
 import { sfx } from './audio';
 import { installDebug } from './debug';
 import { canOfferFullscreen, device, enterFullscreen, initDevice, onDeviceChange } from './device';
+import { initCharStyle, onCharStyleChange } from './gfx/charStyle';
 import { Pacer, loadFrameLimit, pacingHooks, patchTimeStep, targetHzFor } from './gfx/framePacing';
 import { sessionFrameStats } from './gfx/frameStats';
 import type { QualityPreset, QualityTier, RendererKind } from './gfx/presets';
@@ -54,6 +56,8 @@ initDevice(params.touch);
 const uiRoot = document.getElementById('ui-root') ?? document.body;
 const gameRoot = document.getElementById('game-root') ?? document.body;
 const app = new App(params, uiRoot);
+// 캐릭터 스타일: ?chars(시험 · 촬영용)는 이번 접속에만, 아니면 저장값 · 기존 (gfx/charStyle.ts)
+initCharStyle(params.chars);
 
 // 프레임 페이싱 상태 (아래 '프레임 페이싱'에서 Phaser 루프에 끼운다). 품질을 정할 때 시작 목표 FPS를 읽으므로 먼저 만든다.
 // ?fpsLimit(시험용)는 이번 접속에만, 아니면 로비에서 고른 저장값
@@ -544,8 +548,10 @@ function schedulePrebake(): void {
     // 터치: 판 배치(논리 크기 → 배율 · HUD 서명)로 굽는다. 아니면 첫 판 시작 때 맵 · 캐릭터 · HUD를 모두 다시 굽는다
     if (device.touch) applyMatchLayout();
     prebakeFogArt();
-    const b = app.balance;
-    if (b) prebakeAtlas(game.scene.getScene('idle'), b.survivor.radius, b.monster.radius);
+    // welcome 전(첫 화면 · 봇과 연습 고르기)에는 빌드에 넣은 수치의 반지름으로 굽는다: 연습은 고르자마자 판이 시작돼
+    // 로비 대기가 없다. 온라인 서버 수치가 다르면 로비에서 다시 굽는다
+    const b = app.balance ?? PRACTICE_BALANCE;
+    prebakeAtlas(game.scene.getScene('idle'), b.survivor.radius, b.monster.radius);
     // HUD 아틀라스도 (배율 2 Canvas에서 약 28ms, 같은 배율이면 아무것도 하지 않는다)
     prebakeHud(game.textures);
   };
@@ -555,6 +561,11 @@ function schedulePrebake(): void {
   }, 50);
 }
 onGfxChange(schedulePrebake);
+// 캐릭터 스타일을 바꾸면 그 스타일 그림을 로비에서 미리 굽는다 (판 중이면 판 장면이 다음 프레임에 굽는다)
+onCharStyleChange(schedulePrebake);
+// 부팅 직후(첫 화면 · 봇과 연습 고르기)에도 한 번 굽는다: Phaser가 생성자 안에서 바로 부팅하면 부팅 때의 그래픽 변경 알림이
+// 위 구독보다 먼저 지나간다. 연습은 고르자마자 판이 시작돼 로비 대기가 없다 (새 캐릭터 아틀라스는 약 90ms)
+schedulePrebake();
 
 // UI 폰트를 부팅 때부터 받는다. Phaser 글자는 만들 때의 글꼴로 굳으므로, 다 받으면 이미 있는 글자를 다시 그린다
 const relayoutScenes = (): void => {
