@@ -10,7 +10,7 @@ import { expect, test } from '@playwright/test';
 const BEFORE_M10 = 346_679;
 /**
  * 늘 지키는 상한 (휴대폰 첫 접속): M10 전 값 + 2KiB (DECISIONS 8절 '번들 예산'). 캐릭터 리디자인(PR #21)에서 처음 M10 전 값을
- * 넘었다(실측 347,739B = M10 전 +1.0KiB, 새 캐릭터 그림 명령 gzip 약 21.6KB). 상한은 실측에 1KiB 남짓만 남긴다
+ * 넘었다(실측 347,785B = M10 전 +1.1KiB, 새 캐릭터 그림 명령 gzip 약 21.6KB). 상한은 실측에 1KiB 남짓만 남긴다
  */
 const CAP = BEFORE_M10 + 2 * 1024;
 /**
