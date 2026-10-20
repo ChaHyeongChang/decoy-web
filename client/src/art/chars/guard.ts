@@ -175,6 +175,21 @@ function armorDome(base: number, ink: Ink, reach: number, cx = 0, cy = 0): Paint
   ]);
 }
 
+/**
+ * 위 그림 헬멧 (몸 가운데): 공통 돔보다 한 단 밝게 — 실제 크기(반지름 몇 px)에서 둘레 음영 · 앞 챙이 가운데로 번져도
+ * 몸 가운데 원판(0.45r)이 역할색만큼 밝다(VISUAL_SPEC 0장 ② 몸/바깥 링 대비 3:1). visorIn = 앞 챙 안쪽 반지름(헬멧 반지름 배수)
+ */
+const HELMET = { visorIn: 0.76 } as const;
+
+function helmetPaint(ink: Ink, reach: number, cx: number, cy: number): Paint {
+  return radial(cx, cy, reach, [
+    [0, ink(tint(C.armor, 0.18))],
+    [0.5, ink(tint(C.armor, 0.06))],
+    [0.85, ink(C.armor)],
+    [1, ink(shade(C.armor, 0.2))],
+  ]);
+}
+
 /** 위에서 본 방패 치수 (가운데 · 끝 반지름, 반각): 보통 · 수감(끌어안은 작은 호) · 구조 중(왼쪽으로 비킨 좁은 호) */
 const SHIELD_FREE = { ro: 1.36, roEnd: 1.44, ri: 0.8, riEnd: 1.08, half: 0.86 } as const;
 const SHIELD_CAPTIVE = { ro: 1.1, roEnd: 1.1, ri: 0.76, riEnd: 0.88, half: 0.74 } as const;
@@ -370,12 +385,12 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
   // 6) 헬멧: 보라 돔 + 가운데 볏 + 앞 챙
   const [hx, hy] = r.head;
   const R = r.headR * 1.02;
-  sk.part(path().circle(hx, hy, R).d, domePaint(C.armor, ink, R * 1.2, hx - 0.04, hy), ink(OUTLINE));
+  sk.part(path().circle(hx, hy, R).d, helmetPaint(ink, R * 1.2, hx - 0.04, hy), ink(OUTLINE));
   // 앞 챙 (어두운 보라 띠)
   sk.fill(
     path()
       .arc(hx, hy, R * 0.97, -1.05, 1.05)
-      .arc(hx, hy, R * 0.66, 0.9, -0.9, false)
+      .arc(hx, hy, R * HELMET.visorIn, 0.9, -0.9, false)
       .Z().d,
     solid(ink(C.deep)),
   );

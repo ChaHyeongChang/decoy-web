@@ -440,9 +440,11 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
   const pk = 1 - 0.08 * captive - 0.04 * hit;
   // 목: 머리 원 뒤쪽 옆(±125°)에 붙는다
   const neck: Pt = [(hx - 0.57 * R) / pk, (0.82 * R) / pk];
+  // 몸판 칠은 역할색 그대로(팔 · 주먹보다 한 단 밝게): 실제 크기에서 몸 가운데 원판(0.45r)이 역할색만큼 밝다
+  // (VISUAL_SPEC 0장 ② 몸/바깥 링 대비 3:1 — 공격 범위 · 빛 바닥 위에서도)
   sk.part(
     path(P).smooth(platePts(PLATE.back, r.halfW, PLATE.shoulderX, PLATE.chest, neck, PLATE.rim, pk), 1).d,
-    brightDome(body, ink, 1.1),
+    brightDome(tint(C.hoodie, 0.06), ink, 1.1),
     ink(OUTLINE),
     1,
     0.2,
