@@ -23,9 +23,12 @@ export class MiniComposite {
     this.lift = rimLiftPath(lpt);
   }
 
-  /** 정적 맵 (빛 지도 해상도, 발광 포함). 캐시에서 */
+  /** 정적 맵 (빛 지도 해상도, 발광 포함). 처음 읽을 때 캐시에서 가져와 붙잡는다 */
+  private st: HTMLCanvasElement | null = null;
+
   get staticMap(): HTMLCanvasElement {
-    return getStaticMap(this.lpt / TILE_PX, true);
+    this.st ??= getStaticMap(this.lpt / TILE_PX, true);
+    return this.st;
   }
 
   /** 이번 주기의 기록을 넘긴다 (바뀌었을 때만: 다음에 읽을 때 다시 합성). 넘긴 기록은 다음 넘김까지 붙잡는다 */
