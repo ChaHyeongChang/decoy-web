@@ -1,5 +1,5 @@
 {
-  "createdAt": "2026-10-23T18:42:53.637Z",
+  "createdAt": "2026-10-23T21:30:05.606Z",
   "records": [
     {
       "file": "phone-medium-survivor-classic.png",
@@ -14,7 +14,7 @@
       "device": "phone-medium",
       "scene": "survivor",
       "style": "new",
-      "atlasBytes": 1368064,
+      "atlasBytes": 1302528,
       "tpw": 1.582
     },
     {
@@ -30,7 +30,7 @@
       "device": "phone-medium",
       "scene": "monster",
       "style": "new",
-      "atlasBytes": 1368064,
+      "atlasBytes": 1302528,
       "tpw": 1.582
     },
     {
@@ -46,7 +46,7 @@
       "device": "phone-low",
       "scene": "survivor",
       "style": "new",
-      "atlasBytes": 1034240,
+      "atlasBytes": 903168,
       "tpw": 1.318
     },
     {
@@ -62,7 +62,7 @@
       "device": "phone-low",
       "scene": "monster",
       "style": "new",
-      "atlasBytes": 1034240,
+      "atlasBytes": 903168,
       "tpw": 1.318
     },
     {
@@ -78,7 +78,7 @@
       "device": "pc-high",
       "scene": "survivor",
       "style": "new",
-      "atlasBytes": 4063232,
+      "atlasBytes": 3477504,
       "tpw": 2.789
     },
     {
@@ -94,7 +94,7 @@
       "device": "pc-high",
       "scene": "monster",
       "style": "new",
-      "atlasBytes": 4063232,
+      "atlasBytes": 3477504,
       "tpw": 2.789
     }
   ],
