@@ -497,7 +497,8 @@ test('생존자 화면 역할색 유지: 빛 바닥 · 빨강 · 노랑 부채�
   await place(host, {
     guard: [p.guard.id, 23.5, 15.5, 0.6],
     scout: [p.scout.id, 24.5, 16.4, -2.4],
-    runner: [p.runner.id, 24, 23.6, -Math.PI / 2],
+    // 러너는 감옥 서쪽: 확대 창(16 × 10.7타일)에 감옥 안 두 팀원이 들어오고, 괴물 부채꼴(북쪽 ±55°, 5타일) · 근접 원 밖
+    runner: [p.runner.id, 18.5, 16, 0],
   });
   // 괴물은 (24,19.6): 두 팀원이 부채꼴 호(5타일)에서 0.8타일 넘게 안쪽이라 경계 선이 바깥 링을 지나지 않는다
   await place(host, { monster: [p.monster.id, 24, 19.6, -Math.PI / 2] }, false);
