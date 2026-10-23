@@ -529,7 +529,7 @@ async function qualityRun(
   quality: 'high' | 'medium' | 'low',
 ): Promise<{
   drawn: string[];
-  info: InfoItem[];
+  info: (Omit<InfoItem, 'dir'> & { dir: string | null })[];
   stats: Awaited<ReturnType<typeof captureBodies>>['stats'];
   fxTargets: { layer: string; effects: string[] }[];
   features: Record<string, unknown>;
@@ -578,12 +578,21 @@ async function qualityRun(
   });
   const roleOf: Record<string, string> = Object.fromEntries(players.map((pl) => [pl.id, pl.role]));
   const r3 = (v: number): number => Math.round(v * 1000) / 1000;
+  // 괴물 방향은 이 시험의 입력(마우스 조준)이다: mousemove는 정수 px라 커서 아래 월드 자리에 반올림 찌꺼기가 남고, 확대 화면의
+  // 창은 품질(백버퍼)마다 기기 px 격자에 맞춰 놓여 그 찌꺼기가 판마다 다르다(CI 전체 검사에서 서쪽 조준 ±0.002rad). 정보가 아니라
+  // 입력 차이라 괴물 방향만 0.01 단위로 견준다 — 위 조준 대기(π ± 0.005)보다 거칠다. 나머지는 그대로 0.001 단위
+  const r2 = (v: number): number => Math.round(v * 100) / 100 + 0;
   const drawn = c.drawn
-    .map(
-      (d) =>
-        `${d.kind}:${d.tag ?? roleOf[d.id] ?? d.id}:${r3(d.x)},${r3(d.y)},${r3(Math.cos(d.face))},${r3(Math.sin(d.face))}`,
-    )
+    .map((d) => {
+      const r = d.kind === 'monster' ? r2 : r3;
+      return `${d.kind}:${d.tag ?? roleOf[d.id] ?? d.id}:${r3(d.x)},${r3(d.y)},${r(Math.cos(d.face))},${r(Math.sin(d.face))}`;
+    })
     .sort();
+  const info = c.info.map((i) =>
+    i.kind === 'cone' && i.dir !== null
+      ? { ...i, dir: `${r2(Math.cos(i.dir))},${r2(Math.sin(i.dir))}` }
+      : { ...i, dir: i.dir === null ? null : String(i.dir) },
+  );
   const fxTargets = await view.evaluate(() => window.__DECOY__?.getFxTargets() ?? []);
   const features = await view.evaluate(() => ({ ...window.__DECOY__!.gfx.features }));
   console.log(
@@ -591,7 +600,7 @@ async function qualityRun(
   );
   const problems = players.flatMap((pl) => pl.problems);
   await closeAll(players);
-  return { drawn, info: c.info, stats: c.stats, fxTargets, features, problems };
+  return { drawn, info, stats: c.stats, fxTargets, features, problems };
 }
 
 test('품질 높음 · 중간 · 낮음: 정보 레이어 · 그린 엔티티가 같고, 효과가 몸 · 링을 바꾸지 않으며, 후처리는 구조 레이어에만', async ({
