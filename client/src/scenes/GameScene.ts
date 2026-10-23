@@ -196,7 +196,16 @@ export class GameScene extends Phaser.Scene {
   private frameCovers: Phaser.GameObjects.GameObject[] = [];
   /** 창 밖에 통째로 있어 이번 프레임 그리지 않는 월드 그림 (cameraFilter로 거른다 — visible · 게임 상태는 그대로) */
   private readonly culled = new Set<Phaser.GameObjects.GameObject>();
-  private readonly cullRect = new Phaser.Geom.Rectangle();
+  /**
+   * getBounds 결과 그릇. 배포 빌드의 Phaser 사용자 빌드(phaserCore.js)에는 Phaser.Geom이 없어 Rectangle을 만들 수 없다 →
+   * 평범한 객체를 쓴다. getBounds는 그릇의 x · y · width · height만 읽고 쓴다(GetBounds.js) — 타입만 맞추려는 변환이다
+   */
+  private readonly cullRect = {
+    x: 0,
+    y: 0,
+    width: 0,
+    height: 0,
+  } as unknown as Phaser.Geom.Rectangle;
   private dipCover: Phaser.GameObjects.Rectangle | null = null;
   /** 괴물: 예측한 돌진을 누른 마지막 시각 (입력 틱, 돌진 잔상 격자의 시작) */
   private localDashAt: number | null = null;
