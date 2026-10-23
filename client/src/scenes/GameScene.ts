@@ -2,6 +2,8 @@
 import Phaser from 'phaser';
 import {
   BTN,
+  MAP_H,
+  MAP_W,
   TILE_PX,
   type AnimDebug,
   type CameraDebug,
@@ -28,7 +30,7 @@ import { qualityHooks, sessionAutoDowngrade, type AdaptContext, type FrameSample
 import { getFpsOverride, gfxNow, gfxState, probeSlot } from '../gfx/state';
 import { haptics } from '../haptics';
 import { InputLog, InputSampler } from '../input';
-import { AimHold } from '../aimHold';
+import { AimHold, aimAnchor } from '../aimHold';
 import { applyDashStart, applyWindupLock, predictMonsterPress, type LocalWindup } from '../localActions';
 import { COLOR } from '../render/colors';
 import { CameraDirector, devPerTile } from '../render/cameraDirector';
@@ -156,6 +158,8 @@ export class GameScene extends Phaser.Scene {
   private readonly aimHold = new AimHold();
   private readonly aimPointer = { x: 0, y: 0 };
   private readonly aimCursor = new Phaser.Math.Vector2();
+  /** 조준 붙잡기 기준 카메라 가운데 (타일 → 월드 px, 입력 틱마다 다시 쓴다) */
+  private readonly aimAnchorTile = { x: 0, y: 0 };
   /** 따라가는 카메라 (판 장면마다 새로) · 창 밖 가리개 · 잘라 옮김 어두워짐 */
   private director: CameraDirector | null = null;
   private frameCovers: Phaser.GameObjects.Rectangle[] = [];
@@ -718,13 +722,24 @@ export class GameScene extends Phaser.Scene {
     }
     // 손가락 포인터는 조준을 바꾸지 않는다(터치스크린 노트북의 손가락 · 손바닥): 마우스 포인터만
     const p = this.input.mousePointer ?? this.input.activePointer;
-    // 조준 = 화면에 그려진 괴물(지난 프레임의 창)에서 커서 쪽. 커서가 움직였을 때만 다시 재고, 카메라만 움직이면(앞당김 · 따라가기 ·
-    // 흔들림) 마지막 방향을 그대로 둔다 (aimHold.ts: 화면이 움직여도 조준이 흘러가지 않게)
+    // 조준 = 화면에 그려진 괴물(지난 프레임의 창)에서 커서 쪽. 커서가 움직였을 때 커서 월드 자리를 재고, 그 사이에는 그 자리를
+    // 기준 카메라(앞당김 · 따라가기 지연 없이 괴물 가운데, 맵 안으로 자름)를 따라 옮긴 곳을 겨눈다 (aimHold.ts: 앞당김이 조준을
+    // 끌지 않고, 맵 끝에 막힌 화면에서는 커서 쪽으로 돈다)
     const w = this.cameras.main.getWorldPoint(p.x, p.y, this.aimCursor);
     const body = tileToScreen(this.localPos.x, this.localPos.y);
+    const a = aimAnchor(
+      this.localPos.x,
+      this.localPos.y,
+      VIEW_TILES_W,
+      VIEW_TILES_H,
+      MAP_W,
+      MAP_H,
+      this.aimAnchorTile,
+    );
+    const anchor = tileToScreen(a.x, a.y);
     this.aimPointer.x = p.x;
     this.aimPointer.y = p.y;
-    return this.aimHold.update(this.aimPointer, w, body, 0.05 * TILE_PX * WORLD_SCALE, me.face);
+    return this.aimHold.update(this.aimPointer, w, body, anchor, 0.05 * TILE_PX * WORLD_SCALE, me.face);
   }
 
   /**

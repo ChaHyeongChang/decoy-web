@@ -83,6 +83,61 @@ test('괴물: 마우스를 가만히 두고 걸으면 화면이 움직여도 조
   await s.context.close();
 });
 
+test('괴물: 맵 끝에 막힌 화면에서 마우스를 가만히 두고 걸으면 조준이 화면의 커서 쪽으로 돈다 (검토 반영)', async ({
+  browser,
+}) => {
+  const s = await startBotRoom(browser, QUERY, 'monster');
+  const { page } = s;
+  const you = (await page.evaluate(() => window.__DECOY__!.you)) ?? '';
+  // 거점 B 방 동쪽 끝 (x 45.5): 창은 맵 오른쪽 끝에 막힌다(가운데 x ≤ 40). 북쪽을 본다
+  await teleportSelf(s, you, 45.5, 12, -Math.PI / 2);
+  await s.send({ kind: 'freeze', target: you, frozen: false });
+  await settle(page);
+  await page.evaluate(() => window.__DECOY__?.setCameraShake(0));
+  await waitCamera(page);
+  // 커서: 그려진 괴물 3타일 위 (화면 px)
+  const geom = (): Promise<{ k: number; me: { x: number; y: number }; view: { x: number; y: number } }> =>
+    page.evaluate(() => {
+      const d = window.__DECOY__!;
+      const a = d.tileToClient(0, 0)!;
+      const b = d.tileToClient(1, 0)!;
+      return { k: b.x - a.x, me: d.getLocalState()!, view: d.getCamera()!.view };
+    });
+  const g0 = await geom();
+  const at = await page.evaluate(([x, y]) => window.__DECOY__!.tileToClient(x!, y!)!, [g0.me.x, g0.me.y - 3]);
+  const cx = Math.round(at.x);
+  const cy = Math.round(at.y);
+  await page.mouse.move(cx + 1, cy);
+  await page.mouse.move(cx, cy);
+  await expect
+    .poll(() => page.evaluate(() => window.__DECOY__!.getLastInput()?.aim ?? Number.NaN))
+    .toBeCloseTo(-Math.PI / 2, 1);
+  const aim0 = await page.evaluate(() => window.__DECOY__!.getLastInput()?.aim ?? Number.NaN);
+  // 마우스는 그대로, 서쪽으로 약 5타일 걷는다
+  await page.keyboard.down('KeyA');
+  await page.waitForFunction((x0) => (window.__DECOY__?.getLocalState()?.x ?? x0) < x0 - 5, g0.me.x, {
+    timeout: 10_000,
+  });
+  await page.keyboard.up('KeyA');
+  await waitCamera(page);
+  await page.waitForTimeout(300);
+  const g1 = await geom();
+  const aim1 = await page.evaluate(() => window.__DECOY__!.getLastInput()?.aim ?? Number.NaN);
+  // 화면의 커서가 가리키는 월드 자리 (지금 창 기준)
+  const rect0 = await page.evaluate(() => window.__DECOY__!.tileToClient(0, 0)!);
+  const ct = { x: (cx - rect0.x) / g1.k, y: (cy - rect0.y) / g1.k };
+  const seen = Math.atan2(ct.y - g1.me.y, ct.x - g1.me.x);
+  const err = Math.abs(Math.atan2(Math.sin(aim1 - seen), Math.cos(aim1 - seen)));
+  console.log(
+    `[camera] 맵 끝 걷기: 괴물 x ${g0.me.x.toFixed(2)} → ${g1.me.x.toFixed(2)}, 창 x ${g0.view.x} → ${g1.view.x}, 조준 ${aim0.toFixed(3)} → ${aim1.toFixed(3)}, 화면의 커서 방향 ${seen.toFixed(3)} (차 ${((err * 180) / Math.PI).toFixed(1)}°)`,
+  );
+  // 조준이 실제로 돌았고(예전에는 처음 방향 그대로 — 커서와 50° 넘게 어긋났다), 화면의 커서 방향과 7° 안
+  expect(Math.abs(aim1 - aim0)).toBeGreaterThan((30 * Math.PI) / 180);
+  expect(err).toBeLessThan((7 * Math.PI) / 180);
+  expect(s.problems).toEqual([]);
+  await s.context.close();
+});
+
 /** 화살표와 같은 프레임의 메인 그림 (한 번의 evaluate) */
 async function markersAndDrawn(page: Page): Promise<{
   markers: { kind: string; id: string; tx: number; ty: number }[];
