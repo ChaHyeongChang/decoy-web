@@ -245,7 +245,18 @@ export const HUD_TEXT = {
   imprisonedHint: '수감 중 — 동료가 감옥 문 앞에서 E로 구조하면 풀려난다',
   /** 터치 (M12) */
   imprisonedHintTouch: '수감 중 — 동료가 감옥 문 앞에서 구조 버튼을 누르고 있으면 풀려난다',
-  spectating: '관전 중',
+  /** 따라가는 카메라: 수감 중 동료 화면 보기 안내 */
+  imprisonedWatchHint: '수감 중 — 동료가 감옥 문 앞에서 E로 구조하면 풀려난다 · 1 2 3 동료 화면 보기',
+  imprisonedWatchHintTouch: '수감 중 — 동료가 구조해 주면 풀려난다 · 팀 카드를 누르면 동료 화면',
+  spectating: '관전 중 — 1 2 3으로 볼 동료 바꾸기',
+  /** 확대 1(맵 전체가 보임): 옮겨 볼 것이 없다 */
+  spectatingPlain: '관전 중',
+  spectatingTouch: '관전 중 — 팀 카드를 눌러 볼 동료 바꾸기',
+  /** 수감 중 동료 화면을 보는 동안 (따라가는 카메라) */
+  watchingMate: '동료 화면 보는 중 — 내 번호를 누르면 감옥으로 돌아온다',
+  watchingMateTouch: '동료 화면 보는 중 — 내 카드를 누르면 돌아온다',
+  /** 관전 중인 팀 카드 태그 */
+  watchTag: '보는 중',
   last30: '최후',
   attack: '공격',
   dash: '돌진',

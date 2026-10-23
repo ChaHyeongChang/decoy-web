@@ -15,6 +15,7 @@ import {
   type InputLogEntry,
   type Role,
   type Snapshot,
+  type SurvivorStatus,
   isKeptNote,
 } from '@decoy/shared';
 import type { App } from '../app';
@@ -55,6 +56,8 @@ import {
   tileToScreen,
 } from '../ui/layout';
 import { Minimap } from '../ui/minimap';
+import { EdgeMarkers, edgeMetrics } from '../ui/edgeMarkers';
+import { edgeTargets, placeEdges, type EdgeMarker, type EdgeTarget } from '../render/offscreen';
 import { Scoreboard, TutorialOverlay } from '../ui/overlays';
 import { PROBE_DEPTH, drawProbeText } from '../ui/text';
 import { TouchControls, type TouchView } from '../ui/touchControls';
@@ -118,6 +121,22 @@ export class GameScene extends Phaser.Scene {
   private kit!: HudKit;
   private hud!: Hud;
   private minimap!: Minimap;
+  /** 화면 밖 화살표 (확대 1이면 없음: 맵 전체가 보인다) */
+  private edges: EdgeMarkers | null = null;
+  private readonly edgeTargetBuf: EdgeTarget[] = [];
+  private readonly edgePlaced: EdgeMarker[] = [];
+  /** 카드 탭 · 클릭으로 고른 팀 카드 번호 (관전, 다음 프레임에 처리) */
+  private cardPick: number | null = null;
+  /** 터치 엄지 버튼 사각형 (논리 px, 화살표가 피한다) */
+  private thumbBoxes: readonly { x: number; y: number; w: number; h: number }[] = [];
+  /** 이번 프레임 캐릭터 몸 자리 (논리 px, 화살표가 겹치면 흐리게) — 그릇 재사용 */
+  private readonly bodyPts: { x: number; y: number }[] = [];
+  private readonly statusOf = (id: string): SurvivorStatus | null => {
+    const list = this.app.lastSnap?.survivors;
+    if (!list) return null;
+    for (const s of list) if (s.id === id) return s.status;
+    return null;
+  };
   private banners!: Banners;
   /** 첫 판에만 만든다 (두 번째 판부터는 보이지 않으므로 글자 · 이미지를 만들지 않는다) */
   private tutorial: TutorialOverlay | null = null;
@@ -213,6 +232,11 @@ export class GameScene extends Phaser.Scene {
     this.app = data.app;
     this.seq = 0;
     this.acc = 0;
+  }
+
+  /** 미니맵을 맵 창 안에 두었는가 (디버그 · 시험) */
+  get minimapInset(): boolean {
+    return (this.minimap?.insetRect ?? null) !== null;
   }
 
   get minimapDrawn(): DrawnEntity[] {
@@ -353,6 +377,8 @@ export class GameScene extends Phaser.Scene {
     this.kit = new HudKit(this);
     this.hud = new Hud(this.kit, info, balance, device.touch);
     this.minimap = new Minimap(this, this.kit, info.role === 'monster');
+    this.edges = CAM_ZOOM > 1 ? new EdgeMarkers(this.kit) : null;
+    this.thumbBoxes = [];
     this.banners = new Banners(this.kit);
     // 첫 판 조작 안내는 키보드 · 마우스용이라 터치 모드에서는 만들지 않는다 (터치는 판 직전 안내 + 판 중 위치 표시, M12)
     this.tutorial = info.firstMatch && !device.touch ? new TutorialOverlay(this.kit, info) : null;
@@ -401,11 +427,22 @@ export class GameScene extends Phaser.Scene {
             return r.height > 0 ? { left: r.left, top: r.top, k: r.height / VIEW_H } : null;
           },
           onCovered: (ids) => this.minimap.setHidden(ids.has('minimap')),
+          onThumbs: (boxes) => {
+            this.thumbBoxes = boxes;
+          },
         },
       });
       // 판 직전 터치 안내를 본 판이면 처음 10초 동안 스틱 · 버튼 자리를 보인다 (입력을 막지 않는다)
       if (takeTouchHints()) this.touchControls.showHints(TOUCH_HINT_MS);
     }
+    // 관전 카드 고르기: 창 단위 캡처로 받아 캔버스 논리 좌표의 팀 카드 사각형과 맞춘다 (카드는 캔버스 그림이라 DOM 터치 대상이
+    // 아니다 — 수감 중에도 켜져 있는 터치 이동 영역이 손가락을 먼저 붙잡지 않게 맞으면 전파를 멈춘다)
+    this.cardPick = null;
+    const onCardDown = (e: PointerEvent): void => this.onCardDown(e);
+    window.addEventListener('pointerdown', onCardDown, true);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () =>
+      window.removeEventListener('pointerdown', onCardDown, true),
+    );
     this.roarPings = [];
     // 'match' 뒤 이 장면이 생기기 전(판 시작 대기 · 세로 안내 · 다시 들어온 판의 장면 재시작)에 온 거점 메모를 다시 보인다.
     // 장면이 생긴 뒤의 메모는 아래 구독이 받는다 (M12 검토: 재접속 때 서버가 남겨 보낸 메모가 터치에서 사라지던 것)
@@ -489,6 +526,72 @@ export class GameScene extends Phaser.Scene {
       .setVisible(false);
   }
 
+  /** 화면 좌표 (창 CSS px) → 논리 px (캔버스 사각형 기준) */
+  private toLogical(clientX: number, clientY: number): { x: number; y: number } | null {
+    const r = this.game.canvas.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return null;
+    return { x: ((clientX - r.left) / r.width) * VIEW_W, y: ((clientY - r.top) / r.height) * VIEW_H };
+  }
+
+  /** 팀 카드 i의 판정 사각형 (논리 px, 칸 사이 빈틈이 없게 간격의 반씩 넓힌다) */
+  private cardHitRect(i: number): { x: number; y: number; w: number; h: number } | null {
+    const c = this.hud.cardRect(i);
+    if (!c) return null;
+    const g = this.hud.cardGap / 2;
+    return { x: c.x - g, y: c.y - g, w: c.w + g * 2, h: c.h + g * 2 };
+  }
+
+  /** 관전 카드 고르기 (창 단위 pointerdown 캡처) */
+  private onCardDown(e: PointerEvent): void {
+    if (CAM_ZOOM <= 1 || !this.director?.canSpectate) return;
+    // 점수판이 열려 있으면 닫기 동작이 먼저 (터치 점수판 버튼 · Tab)
+    if (this.sampler.tabHeld || (this.touchControls?.scoreboard ?? false)) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const p = this.toLogical(e.clientX, e.clientY);
+    if (!p) return;
+    for (let i = 0; i < 3; i += 1) {
+      const c = this.cardHitRect(i);
+      if (!c || p.x < c.x || p.x > c.x + c.w || p.y < c.y || p.y > c.y + c.h) continue;
+      this.cardPick = i;
+      e.stopPropagation();
+      return;
+    }
+  }
+
+  /** 숫자 키 · 카드로 고른 동료로 관전을 옮긴다 (내 카드 · 내 번호면 내 시점으로) */
+  private applySpectatePick(snap: Snapshot): void {
+    const keyPick = this.sampler.takeSpectatePick();
+    const pick = this.cardPick ?? keyPick;
+    this.cardPick = null;
+    const d = this.director;
+    if (pick === null || !d || !d.canSpectate) return;
+    const id = this.hud.cardIds[pick] ?? null;
+    if (id === null) return;
+    d.request(id === snap.you.id ? null : id);
+  }
+
+  /** 디버그 · 시험: 관전 카드 판정 사각형 (창 CSS px) */
+  get spectateCards(): { index: number; id: string | null; x: number; y: number; w: number; h: number }[] {
+    const out: { index: number; id: string | null; x: number; y: number; w: number; h: number }[] = [];
+    const r = this.game.canvas.getBoundingClientRect();
+    if (!this.hud || r.width <= 0) return out;
+    const kx = r.width / VIEW_W;
+    const ky = r.height / VIEW_H;
+    for (let i = 0; i < 3; i += 1) {
+      const c = this.hud.cardRect(i);
+      if (!c) continue;
+      out.push({
+        index: i,
+        id: this.hud.cardIds[i] ?? null,
+        x: r.left + c.x * kx,
+        y: r.top + c.y * ky,
+        w: c.w * kx,
+        h: c.h * ky,
+      });
+    }
+    return out;
+  }
+
   /** 카드 순서 생존자 id (러너 · 가드 · 스카우트, 생존자 화면 명단) */
   private teamOrder(): readonly string[] {
     const roster = this.app.match?.roster ?? [];
@@ -523,7 +626,7 @@ export class GameScene extends Phaser.Scene {
       dip: r3(d.dip(performance.now())),
       shakes: d.shake.active,
       shakeScale: d.shake.scale,
-      markers: [],
+      markers: this.edges?.debug() ?? [],
     };
   }
 
@@ -891,6 +994,58 @@ export class GameScene extends Phaser.Scene {
     return view;
   }
 
+  /**
+   * 화면 밖 화살표: 이번 프레임 메인 그림(drawn) · 세계 상태 · 고정 맵 자리에서만 대상을 고르고(render/offscreen.ts) 창
+   * 가장자리 안쪽에 놓는다. 엄지 버튼 · 안쪽 미니맵을 피하고, 캐릭터 몸과 겹치면 흐리게 한다
+   */
+  private updateEdges(
+    snap: Snapshot,
+    view: { x: number; y: number; w: number; h: number },
+    now: number,
+  ): void {
+    const edges = this.edges;
+    if (!edges) return;
+    const role = snap.you.role;
+    const targets = edgeTargets(
+      {
+        role,
+        selfId: snap.you.id,
+        myStatus: snap.you.surv?.status ?? null,
+        followId: this.director?.follow ?? snap.you.id,
+        drawn: this.drawn,
+        statusOf: this.statusOf,
+        roleOf: this.roleOf,
+        points: snap.world.points,
+        exits: snap.world.exits,
+      },
+      this.edgeTargetBuf,
+    );
+    const bodies = this.bodyPts;
+    let n = 0;
+    for (const d of this.drawn) {
+      if (d.kind === 'mark' || d.layer === 'minimap') continue;
+      const p = tileToScreen(d.x, d.y);
+      const b = bodies[n] ?? { x: 0, y: 0 };
+      b.x = p.x;
+      b.y = p.y;
+      bodies[n] = b;
+      n += 1;
+    }
+    bodies.length = n;
+    const m = edgeMetrics();
+    const balance = this.app.balance;
+    const bodyR = balance ? balance.survivor.radius * TILE_PX * WORLD_SCALE * 1.15 : 0;
+    const avoid = this.minimap.insetRect ? [...this.thumbBoxes, this.minimap.insetRect] : this.thumbBoxes;
+    placeEdges(
+      targets,
+      { view, rect: MAP_RECT },
+      { inset: m.inset, r: m.r, gap: m.gap, avoid, bodyR },
+      bodies,
+      this.edgePlaced,
+    );
+    edges.update(this.edgePlaced, role === 'monster', now);
+  }
+
   private renderFrame(delta: number): void {
     const app = this.app;
     const snap = app.lastSnap;
@@ -918,6 +1073,7 @@ export class GameScene extends Phaser.Scene {
     }
     const lw = this.localWindup;
     const survivors = app.survivorsInterp.sample(renderTime);
+    this.applySpectatePick(snap);
     const view = this.updateCamera(now, delta, me, survivors);
     this.world.draw(
       {
@@ -949,7 +1105,17 @@ export class GameScene extends Phaser.Scene {
     this.kit.sync();
     // 미니맵 바닥: 안개 그림이 바뀐 다음 프레임에 줄여 그린다 (없거나 숨었으면 읽지 않는다. 다시 보이면 그 프레임에 한 번)
     this.minimap.syncBase(this.world.baseRefreshed, this.world);
+    const d = this.director;
+    this.minimap.setWorld(
+      snap.world.points,
+      snap.world.exits,
+      CAM_ZOOM > 1 ? view : null,
+      d?.spectating ?? null,
+      Math.floor(now / 500) % 2 === 1,
+    );
     this.minimap.update(this.drawn, snap.you.role, this.roleOf);
+    this.updateEdges(snap, view, now);
+    this.hud.setWatching(d?.spectating ?? null, CAM_ZOOM > 1 && (d?.canSpectate ?? false));
     this.hud.update(snap, now);
 
     // 괴물 경고 줄 (감옥 캠핑 · 거점 지키기): 지속 배너 자리에 주황 리본 + 아이콘

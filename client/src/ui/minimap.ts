@@ -5,8 +5,11 @@
 // 엔티티 그림은 HUD 아틀라스 프레임을 쓰는 이미지라 매 프레임 자리 · 방향만 바꾼다 (Graphics 없음)
 // 렌더링 최적화 2: 바닥은 안개 그림이 바뀐 다음 프레임에 그린다(안개 합성과 같은 프레임에 겹치지 않게, hudGate.ts
 // BaseRefreshPacer). 엔티티 줄은 매 프레임 새 배열 · 사본 · 닫힘 함수를 만들지 않는다(디버그 drawn은 읽을 때 사본)
-// M12 터치 배치: 오른쪽 칸 남는 자리(HUD.touch 역할별 minimap)에 둔다. 자리가 없으면 만들지 않는다 — 터치 배치는 판 화면
-// 전체가 늘 보여 같은 정보다(축소 합성도 하지 않아 그만큼 싸다). 판 중 창이 낮아져 엄지 버튼이 덮으면 숨긴다(setHidden, 같은 이유)
+// M12 터치 배치: 오른쪽 칸 남는 자리(HUD.touch 역할별 minimap)에 둔다. 판 중 창이 낮아져 엄지 버튼이 덮으면 숨긴다(setHidden).
+// 따라가는 카메라: 확대 화면에서는 맵 전체가 보이지 않으므로 미니맵이 필수다 — 옆 칸에 자리가 없는 배치(16:9 휴대폰 column ·
+// 태블릿 band · 가장 낮은 휴대폰 괴물)는 맵 창 안 오른쪽 위에 둔다(layout minimapInset, R15의 예외: DECISIONS). 확대 1이면 맵 전체가
+// 보여 예전처럼 자리가 없으면 만들지 않는다. 보이는 창 사각형 · 거점 · 탈출구 상태(양쪽 화면에 같은 세계 상태) · 관전 중인 동료
+// 고리를 더 그린다 — 엔티티는 여전히 메인 화면에 그린 목록만이라 정보 규칙이 같다
 import Phaser from 'phaser';
 import {
   CAPTURE_POINTS,
@@ -15,6 +18,8 @@ import {
   MAP_W,
   PRISON_CENTER,
   type DrawnEntity,
+  type ExitView,
+  type PointView,
   type Role,
 } from '@decoy/shared';
 import { HUD_TEXT } from '../data/storyText';
@@ -26,7 +31,7 @@ import { FR } from './hudArt';
 import { BaseRefreshPacer } from './hudGate';
 import type { HudKit, Slice, Spr } from './hudKit';
 import type { CrispText } from './text';
-import { HUD } from './layout';
+import { CAM_ZOOM, HUD } from './layout';
 
 /** 미니맵 자리 (논리 px): 그림 왼쪽 위 · 폭, 틀 여백 · 제목 줄 */
 interface Place {
@@ -37,13 +42,17 @@ interface Place {
   title: number;
 }
 
-/** 이 판의 미니맵 자리 (터치 배치에서 자리가 없으면 null) */
-function placeFor(monster: boolean): Place | null {
+/** 이 판의 미니맵 자리 (터치 배치에서 자리가 없고 확대 1이면 null). inset = 맵 창 안 */
+function placeFor(monster: boolean): (Place & { inset: boolean }) | null {
   const t = HUD.touch;
-  if (!t) return HUD.minimap;
+  if (!t) return { ...HUD.minimap, inset: false };
   const m = (monster ? t.monster : t.survivor).minimap;
   const k = HUD.s;
-  return m ? { ...m, pad: HUD.minimap.pad * k, title: HUD.minimap.title * k } : null;
+  if (m) return { ...m, pad: HUD.minimap.pad * k, title: HUD.minimap.title * k, inset: false };
+  // 따라가는 카메라: 옆 칸에 자리가 없으면 맵 창 안 오른쪽 위 (layout.insetCss가 엄지 · 시스템 버튼을 피해 정한 자리)
+  const inset = (monster ? t.monster : t.survivor).minimapInset;
+  if (CAM_ZOOM <= 1 || !inset) return null;
+  return { ...inset, pad: HUD.minimap.pad * k, title: HUD.minimap.title * k, inset: true };
 }
 
 const MINIMAP_KEY = 'minimap';
@@ -58,7 +67,20 @@ const MM = {
   runner: FR.mm('runner'),
   guard: FR.mm('guard'),
   scout: FR.mm('scout'),
+  watch: FR.mm('watch'),
 } as const;
+/** 거점 · 탈출구 상태 그림 */
+const MM_POINT: Readonly<Record<PointView['state'], string>> = {
+  idle: FR.mm('point'),
+  capturing: FR.mm('point:capturing'),
+  blocked: FR.mm('point:blocked'),
+  done: FR.mm('point:done'),
+};
+const MM_EXIT: Readonly<Record<ExitView['state'], string>> = {
+  inactive: FR.mm('exit:off'),
+  active: FR.mm('exit:active'),
+  open: FR.mm('exit'),
+};
 
 export class Minimap {
   private readonly canvas: HTMLCanvasElement;
@@ -67,6 +89,12 @@ export class Minimap {
   private readonly image: Phaser.GameObjects.Image | null = null;
   /** 자리 (null = 터치 배치에 자리가 없어 그리지 않는다) */
   private readonly at: Place | null;
+  /** 거점 A · B, 탈출구 N · S 그림 (상태별 프레임) */
+  private readonly pointMarks: Spr[] = [];
+  private readonly exitMarks: Spr[] = [];
+  /** 보이는 창 사각형 (확대 화면) · 관전 중인 동료 고리 */
+  private viewBox: Slice | null = null;
+  private watchRing: Spr | null = null;
   /** 엔티티 그림 (재사용) */
   private readonly pool: Spr[] = [];
   /** 이번 프레임에 이 미니맵이 다시 찍은 메인 화면 엔티티 (배열 재사용, 디버그 drawn이 읽을 때 사본을 만든다) */
@@ -87,6 +115,8 @@ export class Minimap {
   private hidden = false;
   /** 숨긴 동안 바닥을 갱신하지 않았다: 다시 보이면 바로 한 번 그린다 */
   stale = false;
+  /** 맵 창 안에 둔 미니맵의 틀 사각형 (논리 px, 화면 밖 화살표가 피한다). 맵 밖 자리면 null */
+  insetRect: { x: number; y: number; w: number; h: number } | null = null;
 
   constructor(
     scene: Phaser.Scene,
@@ -122,13 +152,29 @@ export class Minimap {
           .setOrigin(0, 0.5)
           .setText(HUD_TEXT.minimap),
       );
-      // 늘 표시 위치: 거점 · 감옥 · 탈출구
-      const mark = (f: string, x: number, y: number): number =>
-        c.push(kit.spr(41).set(f, this.px(x), this.py(y)));
-      for (const p of Object.values(CAPTURE_POINTS)) mark(FR.mm('point'), p.x, p.y);
+      // 늘 표시 위치: 거점 · 감옥 · 탈출구 (거점 · 탈출구는 상태에 따라 프레임만 바꾼다)
+      const mark = (f: string, x: number, y: number): Spr => {
+        const sp = kit.spr(41).set(f, this.px(x), this.py(y));
+        c.push(sp);
+        return sp;
+      };
+      for (const id of ['A', 'B'] as const)
+        this.pointMarks.push(mark(MM_POINT.idle, CAPTURE_POINTS[id].x, CAPTURE_POINTS[id].y));
       mark(FR.mm('prison'), PRISON_CENTER.x, PRISON_CENTER.y);
-      for (const e of Object.values(EXITS)) mark(FR.mm('exit'), e.center.x, e.center.y);
+      for (const id of ['N', 'S'] as const)
+        this.exitMarks.push(mark(MM_EXIT.inactive, EXITS[id].center.x, EXITS[id].center.y));
+      // 보이는 창 (확대 화면에서만, 엔티티 아래) · 관전 중인 동료 고리 (엔티티 위)
+      if (CAM_ZOOM > 1) {
+        const vb = kit.slice(41.5);
+        vb.hollow = true;
+        this.viewBox = vb;
+        c.push(vb);
+        this.watchRing = kit.spr(42.5, false);
+      }
     });
+    this.insetRect = M.inset
+      ? { x: M.x - M.pad, y: M.y - M.title, w: this.w + M.pad * 2, h: this.h + M.title + M.pad }
+      : null;
     this.image = scene.add
       .image(M.x, M.y, MINIMAP_KEY)
       .setOrigin(0, 0)
@@ -157,6 +203,7 @@ export class Minimap {
       else p.setVisible(!on);
     }
     for (const s of this.pool) s.show(false);
+    this.watchRing?.show(false);
     this.src.length = 0;
   }
 
@@ -237,9 +284,48 @@ export class Minimap {
     s.img.setRotation(rot);
   }
 
+  /**
+   * 거점 · 탈출구 상태와 보이는 창 · 관전 중인 동료 (프레임마다, update 전). 세계 상태는 양쪽 화면에 같이 오는 값이고, 관전
+   * 고리는 메인 화면에 그린 동료에만 붙는다(update가 그 자리를 찾는다)
+   */
+  setWorld(
+    points: readonly PointView[],
+    exits: readonly ExitView[],
+    view: { x: number; y: number; w: number; h: number } | null,
+    watching: string | null,
+    blinkOff: boolean,
+  ): void {
+    this.watching = watching;
+    if (!this.shown) return;
+    for (const p of points) {
+      const sp = this.pointMarks[p.id === 'A' ? 0 : 1];
+      // 괴물 화면 · 생존자 화면 모두: 점령 중은 깜빡이며 채워진 다이아 (상단 게이지와 같은 깜빡임)
+      const f = p.state === 'capturing' && blinkOff ? MM_POINT.idle : MM_POINT[p.state];
+      const c = p.id === 'A' ? CAPTURE_POINTS.A : CAPTURE_POINTS.B;
+      sp?.set(f, this.px(c.x), this.py(c.y));
+    }
+    for (const e of exits) {
+      const sp = this.exitMarks[e.id === 'N' ? 0 : 1];
+      const c = EXITS[e.id].center;
+      sp?.set(MM_EXIT[e.state], this.px(c.x), this.py(c.y));
+    }
+    const vb = this.viewBox;
+    if (vb) {
+      if (view) {
+        const x0 = this.px(view.x);
+        const y0 = this.py(view.y);
+        vb.set('mmview', x0, y0, this.px(view.x + view.w) - x0, this.py(view.y + view.h) - y0).show(true);
+      } else vb.show(false);
+    }
+  }
+
+  /** 관전 중인 동료 id (setWorld) */
+  private watching: string | null = null;
+
   /** 메인 화면에 그린 엔티티만 다시 찍는다 (프레임마다: 새 배열 · 사본 · 닫힘 함수 없이) */
   update(mainDrawn: readonly DrawnEntity[], myRole: Role, roleOf: (id: string) => Role | null): void {
     if (!this.shown) return;
+    let ring = false;
     const src = this.src;
     src.length = 0;
     this.used = 0;
@@ -256,9 +342,14 @@ export class Minimap {
         const role = d.kind === 'self' ? myRole : myRole === 'monster' ? null : roleOf(d.id);
         if (d.kind === 'self') this.put(MM.self, x, y, 0);
         this.put(role && role !== 'monster' ? MM[role] : MM.hidden, x, y, d.face);
+        if (d.kind === 'survivor' && d.id === this.watching && this.watchRing) {
+          this.watchRing.set(MM.watch, x, y).show(true);
+          ring = true;
+        }
       }
       src.push(d);
     }
+    if (!ring) this.watchRing?.show(false);
     for (let i = this.used; i < this.pool.length; i += 1) this.pool[i]?.show(false);
   }
 

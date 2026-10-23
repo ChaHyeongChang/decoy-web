@@ -23,6 +23,16 @@ const BUTTON_KEYS: Record<string, number> = {
   KeyQ: BTN.ROAR,
 };
 
+/** 관전 고르기 (수감 · 사망 · 탈출 중 동료 화면 보기): 숫자 키 → 팀 카드 번호 (0부터, 카드 순서) */
+export const SPECTATE_KEYS: Readonly<Record<string, number>> = {
+  Digit1: 0,
+  Digit2: 1,
+  Digit3: 2,
+  Numpad1: 0,
+  Numpad2: 1,
+  Numpad3: 2,
+};
+
 /** 창 단위 이벤트를 받는 곳 (브라우저에서는 window · document · screen.orientation. 단위 테스트는 가짜 EventTarget) */
 export interface InputEnv {
   /** keydown · keyup · pointerup · blur · orientationchange (터치 모드: pointerdown · pointermove 캡처) */
@@ -79,11 +89,20 @@ export class InputSampler {
   tabHeld = false;
   /** 아무 키나 눌림 (안내 오버레이 닫기용) */
   anyKeyPressed = false;
+  /** 숫자 키로 고른 팀 카드 번호 (관전, 판 장면이 takeSpectatePick으로 꺼낸다). 입력 프레임에는 넣지 않는다 */
+  private spectatePick: number | null = null;
   private readonly cleanup: Array<() => void> = [];
 
   /** 지금 입력 방식: 터치 소스가 붙어 있으면 'touch' */
   get mode(): 'keyboard' | 'touch' {
     return this.touch ? 'touch' : 'keyboard';
+  }
+
+  /** 숫자 키로 고른 팀 카드 번호를 꺼낸다 (없으면 null) */
+  takeSpectatePick(): number | null {
+    const p = this.spectatePick;
+    this.spectatePick = null;
+    return p;
   }
 
   /** 터치 모드에서 마우스 커서 조준을 쓸 수 있는가 (PC 모드는 늘 참) */
@@ -122,6 +141,8 @@ export class InputSampler {
         return;
       }
       this.anyKeyPressed = true;
+      const pick = SPECTATE_KEYS[e.code];
+      if (pick !== undefined && !e.repeat) this.spectatePick = pick;
       if (MOVE_KEYS[e.code] || BUTTON_KEYS[e.code] !== undefined) e.preventDefault();
       // 키 자동 반복은 pressed를 다시 켜지 않는다 (이미 누르고 있는 키)
       if (!this.keys.has(e.code)) {
@@ -212,6 +233,7 @@ export class InputSampler {
     this.held = 0;
     this.pressed = 0;
     this.tabHeld = false;
+    this.spectatePick = null;
     this.touch?.reset();
   }
 

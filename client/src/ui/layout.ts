@@ -84,6 +84,12 @@ export const TOUCH_UI = {
   minimapMin: 72,
 } as const;
 
+/**
+ * 맵 창 안 미니맵 (따라가는 카메라, CSS px): 맵 가로의 frac · maxCss 이하, 맵 끝에서 margin. 엄지 버튼 무리는 화면 오른쪽
+ * 절반 안에 있다고 보고(가장 왼쪽 포효 버튼도 그 안) 그 위 끝 위에서 멈춘다
+ */
+export const MINIMAP_INSET = { frac: 0.22, maxCss: 200, margin: 6, min: 60 } as const;
+
 /** 터치 HUD 부품 크기 (그림 단위: × uiScale = 논리 px) */
 export const TOUCH_PART = {
   /** 팀 카드 한 장 (실루엣 · 상태 아이콘 · 체력 칸 · 수감 눈금) */
@@ -334,6 +340,12 @@ export interface TouchHudPlan {
   cards: { x: number; y: number; w: number; h: number; cols: number; gap: number };
   /** 미니맵 그림 왼쪽 위 · 폭 (틀 · 제목은 바깥). 자리가 없으면 null */
   minimap: { x: number; y: number; w: number } | null;
+  /**
+   * 옆 칸에 자리가 없을 때 맵 창 안 오른쪽 위에 둘 미니맵 (그림 왼쪽 위 · 폭, 틀 · 제목은 바깥 — 틀까지 맵 창 안).
+   * 따라가는 카메라(확대 화면)에서만 쓴다(minimap.ts): 확대 1이면 맵 전체가 보여 필요 없다. 엄지 버튼 · 시스템 버튼과
+   * 겹치지 않는다. rects에는 넣지 않는다(맵 밖 부품 목록 — 이동 영역 시작 · 덮임 판단에 쓰지 않는다)
+   */
+  minimapInset: { x: number; y: number; w: number } | null;
   /** 늘 떠 있는 부품 사각형 (맵 · 엄지 영역과 겹치지 않는다, 터치 화면이 이동 영역을 이 아래에서 시작한다) */
   rects: { id: string; rect: Rect }[];
 }
@@ -371,12 +383,14 @@ function planCss(
   band: number,
   mapLeft: number,
   monster: boolean,
+  map: Box,
 ): {
   timer: Box & { label: boolean };
   gaugeA: Box;
   gaugeB: Box;
   cards: Box & { cols: number; cw: number; ch: number };
   minimap: Box | null;
+  inset: Box | null;
 } {
   const U = TOUCH_UI;
   const P = TOUCH_PART;
@@ -407,7 +421,7 @@ function planCss(
     const leftX = timer.x - U.gap * 2 - pairW;
     const gx = leftX >= cards.x + cards.w + U.gap * 2 ? leftX : timer.x + timer.w + U.gap * 2;
     const [ga, gb] = pairAt(gx, cy - g / 2);
-    return { timer, gaugeA: ga, gaugeB: gb, cards, minimap: null };
+    return { timer, gaugeA: ga, gaugeB: gb, cards, minimap: null, inset: insetCss(W, map, r) };
   }
 
   const cw = mapLeft;
@@ -488,7 +502,52 @@ function planCss(
           h: (mmW * MAP_H) / MAP_W,
         }
       : null;
-  return { timer: timerBox, gaugeA: ga, gaugeB: gb, cards, minimap };
+  return {
+    timer: timerBox,
+    gaugeA: ga,
+    gaugeB: gb,
+    cards,
+    minimap,
+    inset: minimap ? null : insetCss(W, map, r),
+  };
+}
+
+/**
+ * 맵 창 안 미니맵 자리 (CSS px, 그림 사각형 — 틀 · 제목은 바깥). 후보 둘: ① 맵 오른쪽 위 구석(시스템 버튼이 맵에 걸치면 그
+ * 아래) ② 시스템 버튼 왼쪽의 맵 위 끝. 엄지 버튼 무리(화면 오른쪽 절반, 위 끝 clusterTop) 위에서 멈추도록 줄이고, 더 큰 쪽을
+ * 고른다(같으면 ①). 최소 폭(MINIMAP_INSET.min — 확대 화면에서는 미니맵이 필수라 옆 칸 미니맵보다 작게 허용)보다 작으면 null
+ */
+function insetCss(
+  W: number,
+  map: Box,
+  r: { clusterTop: number; sysLeft: number; sysBottom: number },
+): Box | null {
+  const a = TOUCH_UI.art;
+  const mm = TOUCH_PART.minimap;
+  const pad = mm.pad * a;
+  const title = mm.title * a;
+  const M = MINIMAP_INSET.margin;
+  const full = Math.min(map.w * MINIMAP_INSET.frac, MINIMAP_INSET.maxCss);
+  const ratio = MAP_H / MAP_W;
+  const fit = (right: number, top: number): Box | null => {
+    let w = full;
+    // 엄지 무리(오른쪽 절반)와 가로로 겹치면 그 위 끝 위에서 멈춘다
+    const left = right - w - pad * 2;
+    if (right > W / 2 || left > W / 2) {
+      const room = r.clusterTop - MIN_GAP - top - title - pad;
+      w = Math.min(w, room / ratio);
+    }
+    // 맵 아래 끝 안
+    w = Math.min(w, (map.y + map.h - M - top - title - pad) / ratio);
+    if (w < MINIMAP_INSET.min) return null;
+    return { x: right - pad - w, y: top + title, w, h: w * ratio };
+  };
+  const mapRight = map.x + map.w;
+  const intrude = r.sysLeft < mapRight;
+  const a1 = fit(mapRight - M, intrude ? Math.max(map.y + M, r.sysBottom + MIN_GAP) : map.y + M);
+  const a2 = intrude ? fit(Math.min(mapRight - M, r.sysLeft - MIN_GAP), map.y + M) : null;
+  if (a1 && a2) return a2.w > a1.w + 0.5 ? a2 : a1;
+  return a1 ?? a2;
 }
 
 /**
@@ -506,8 +565,9 @@ export function touchHudPlan(l: LayoutInfo): TouchHud | null {
   const mapH = MAP_DRAW_H / L;
   const mode: TouchHudMode = l.kind === 'touchWide' ? 'wide' : mapLeft >= U.minSide - 0.5 ? 'column' : 'band';
   const toL = (b: Box): Rect => ({ x: b.x * L, y: b.y * L, w: b.w * L, h: b.h * L });
+  const mapCss: Box = { x: mapLeft, y: l.mapY / L, w: MAP_DRAW_W / L, h: mapH };
   const plan = (monster: boolean): TouchHudPlan => {
-    const p = planCss(W, H, mode, band, mapLeft, monster);
+    const p = planCss(W, H, mode, band, mapLeft, monster, mapCss);
     const rects: { id: string; rect: Rect }[] = [
       { id: 'timer', rect: toL(p.timer) },
       { id: 'gaugeA', rect: toL(p.gaugeA) },
@@ -553,6 +613,7 @@ export function touchHudPlan(l: LayoutInfo): TouchHud | null {
         gap: U.gap * L,
       },
       minimap: p.minimap ? { x: p.minimap.x * L, y: p.minimap.y * L, w: p.minimap.w * L } : null,
+      minimapInset: p.inset ? { x: p.inset.x * L, y: p.inset.y * L, w: p.inset.w * L } : null,
       rects,
     };
   };

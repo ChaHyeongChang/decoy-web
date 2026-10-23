@@ -19,6 +19,8 @@ export default defineConfig({
       args: [
         '--enable-unsafe-swiftshader',
         '--use-angle=swiftshader',
+        // DOM 타일은 CPU로 래스터 (SwiftShader GPU 래스터는 버튼 상태가 바뀐 뒤 다른 버튼 타일을 엉뚱한 자리에 한 벌 더 찍는다)
+        '--disable-gpu-rasterization',
         '--disable-background-timer-throttling',
         '--disable-renderer-backgrounding',
         '--disable-backgrounding-occluded-windows',

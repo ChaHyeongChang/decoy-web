@@ -155,6 +155,10 @@
 | 로비 | 가드 역할 카드 능력 줄 | Space 밀치기 — 가까운 괴물을 잠깐 기절시킨다 | 밀치기 — 가까운 괴물을 잠깐 기절시킨다 | `ROLE_CARDS.guard.ability` · `abilityTouch` |
 | 로비 | 스카우트 역할 카드 능력 줄 | Space 탐지 — 4초간 괴물 위치를 팀 전원에게 보여 준다 | 탐지 — 4초간 괴물 위치를 팀 전원에게 보여 준다 | `ROLE_CARDS.scout.ability` · `abilityTouch` |
 | 판 | 수감 중 안내 | 수감 중 — 동료가 감옥 문 앞에서 E로 구조하면 풀려난다 | 수감 중 — 동료가 감옥 문 앞에서 구조 버튼을 누르고 있으면 풀려난다 | `HUD_TEXT.imprisonedHint` · `imprisonedHintTouch` |
+| 판 (확대 화면) | 수감 중 안내 + 관전 | 수감 중 — 동료가 감옥 문 앞에서 E로 구조하면 풀려난다 · 1 2 3 동료 화면 보기 | 수감 중 — 동료가 구조해 주면 풀려난다 · 팀 카드를 누르면 동료 화면 | `HUD_TEXT.imprisonedWatchHint` · `imprisonedWatchHintTouch` |
+| 판 (확대 화면) | 수감 중 동료 화면 보는 동안 | 동료 화면 보는 중 — 내 번호를 누르면 감옥으로 돌아온다 | 동료 화면 보는 중 — 내 카드를 누르면 돌아온다 | `HUD_TEXT.watchingMate` · `watchingMateTouch` |
+| 판 (확대 화면) | 사망 · 탈출 뒤 관전 | 관전 중 — 1 2 3으로 볼 동료 바꾸기 | 관전 중 — 팀 카드를 눌러 볼 동료 바꾸기 | `HUD_TEXT.spectating` · `spectatingTouch` |
+| 판 (확대 화면) | 관전 중인 동료 카드 태그 (PC) | 보는 중 | (눈 아이콘) | `HUD_TEXT.watchTag` |
 | 판 | 안내 · 점수판 닫기 | 아무 키나 누르면 닫힘 · Tab으로 다시 보기 | 화면을 누르면 닫힘 · 점수판 버튼으로 다시 보기 | `HUD_TEXT.closeHint` · `closeHintTouch` |
 
 - 터치 모드에서 수감 안내는 판 맨 아래 가장자리 띠 안 안내 줄에(PC는 아래 띠 가운데 행동 칸 자리), 닫기 안내는 점수판 맨 아래 줄에 나온다(터치 점수판은 점수판 버튼으로 켜고, 열려 있으면 화면 어디를 눌러도 닫힌다). 첫 판 조작 안내 오버레이(PC)는 터치 모드에서 만들지 않는다

@@ -261,6 +261,8 @@ export interface HudLayout {
   map: { x: number; y: number; w: number; h: number };
   /** 보이는 HUD 글자 · 그림 (월드 · 화면 효과 제외) */
   items: HudLayoutItem[];
+  /** 미니맵을 맵 창 안에 두었다 (따라가는 카메라: 옆 칸에 자리가 없는 확대 화면, R15 예외) */
+  minimapInset: boolean;
 }
 
 export interface DecoyDebug {
@@ -276,6 +278,8 @@ export interface DecoyDebug {
   getAnimState(): AnimDebug | null;
   /** 카메라 상태 (판 장면이 없으면 null) */
   getCamera(): CameraDebug | null;
+  /** 관전 카드 판정 사각형 (창 CSS px, 카드 순서 번호 · 동료 id) — 따라가는 카메라 */
+  getSpectateCards(): { index: number; id: string | null; x: number; y: number; w: number; h: number }[];
   /** 프레임 제한을 바꾼다 (로비 선택과 같은 경로, 저장하지 않음) */
   setFrameLimit(limit: 'auto' | '60' | '120'): void;
   /** 캐릭터 스타일을 바꾼다 (설정과 같은 경로, 저장하지 않음). 판 중이면 다음 프레임에 그림을 다시 굽는다 */

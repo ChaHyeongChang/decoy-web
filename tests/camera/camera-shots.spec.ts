@@ -6,15 +6,12 @@
 // 확대는 시험 · 촬영용 ?cam(로컬 주소에서만 받는다). 캐릭터 스타일은 새 캐릭터(?chars=new): 이번 작업의 대상 그림
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type Browser, type BrowserContextOptions, type Page } from '@playwright/test';
-import type { CameraDebug, Role, TestCommand } from '@decoy/shared';
-import { watchConsole } from '../e2e/helpers';
+import { expect, test, type BrowserContextOptions, type Page } from '@playwright/test';
+import type { CameraDebug } from '@decoy/shared';
 import { MultiTouch } from '../e2e/touch';
+import { log, openTab, placeBots, placeSelf, send, settleHud, soloMatch, tapTarget } from './shotKit';
 
 const OUT = 'artifacts/camera/shots';
-const log = (m: string): void => {
-  if (process.env.DECOY_CAMERA_LOG) console.log(m);
-};
 const DEVICES: { name: string; ctx: BrowserContextOptions; quality: string }[] = [
   {
     name: 'phone-800x360',
@@ -58,134 +55,6 @@ interface Shot {
 const shots: Shot[] = [];
 const problems: string[] = [];
 
-async function send(page: Page, cmd: TestCommand): Promise<void> {
-  await page.evaluate((c) => window.__DECOY__?.sendTest(c), cmd);
-}
-
-async function press(page: Page, testId: string): Promise<void> {
-  const el = page.getByTestId(testId);
-  await expect(el).toBeEnabled();
-  if (await page.evaluate(() => matchMedia('(pointer: coarse)').matches)) await el.tap();
-  else await el.click();
-}
-
-interface Tab {
-  page: Page;
-  close(): Promise<void>;
-}
-
-async function openTab(browser: Browser, ctx: BrowserContextOptions, label: string): Promise<Tab> {
-  const context = await browser.newContext(ctx);
-  await context.addInitScript(() => {
-    try {
-      localStorage.setItem('decoy:touchTutorial', '1');
-    } catch {
-      // 저장소가 막혀도 촬영은 한다
-    }
-  });
-  const page = await context.newPage();
-  const list: string[] = [];
-  watchConsole(page, list);
-  return {
-    page,
-    close: async () => {
-      problems.push(...list.map((p) => `${label} ${p}`));
-      await context.close();
-    },
-  };
-}
-
-async function soloMatch(
-  page: Page,
-  role: Role,
-  zoom: number,
-  quality: string,
-): Promise<{ code: string; you: string }> {
-  await page.goto(`/?debug=hook&renderer=webgl&quality=${quality}&chars=new&cam=${zoom}&bots=1`);
-  await expect(page.getByTestId('server-status')).toHaveAttribute('data-state', 'connected');
-  await press(page, 'create-room');
-  await expect(page.getByTestId('room-code')).toHaveText(/^[A-Z]{4}$/);
-  const code = (await page.getByTestId('room-code').textContent()) ?? '';
-  await press(page, `role-${role}`);
-  await expect(page.getByTestId(`role-${role}`)).toHaveClass(/mine/);
-  await press(page, 'ready-button');
-  await press(page, 'start-button');
-  await page.waitForFunction(() => (window.__DECOY__?.snapCount ?? 0) >= 3, null, { timeout: 30_000 });
-  await page.evaluate(() => window.__DECOY__?.injectFps(60));
-  return { code, you: await page.evaluate(() => window.__DECOY__?.you ?? '') };
-}
-
-interface TruthPlayer {
-  id: string;
-  role: string;
-  x: number;
-  y: number;
-}
-
-async function players(page: Page, code: string): Promise<TruthPlayer[]> {
-  const r = await page.request.get(`/test/state?room=${code}`);
-  expect(r.ok()).toBe(true);
-  return ((await r.json()) as { players: TruthPlayer[] }).players;
-}
-
-async function placeBots(
-  page: Page,
-  code: string,
-  spots: readonly (readonly [Role, number, number, number])[],
-): Promise<void> {
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const all = await players(page, code);
-    for (const [role, x, y, face] of spots) {
-      const p = all.find((q) => q.role === role);
-      if (!p) throw new Error(`봇 ${role} 없음`);
-      await send(page, { kind: 'teleport', target: p.id, x, y, face });
-      await send(page, { kind: 'freeze', target: p.id, frozen: true });
-    }
-    await page.waitForTimeout(200);
-    const now = await players(page, code);
-    const off = spots.some(([role, x, y]) => {
-      const p = now.find((q) => q.role === role);
-      return !p || Math.hypot(p.x - x, p.y - y) > 1e-3;
-    });
-    if (!off) return;
-  }
-  throw new Error('봇을 자리에 놓지 못함');
-}
-
-async function placeSelf(
-  page: Page,
-  code: string,
-  you: string,
-  x: number,
-  y: number,
-  face: number,
-): Promise<void> {
-  await send(page, { kind: 'teleport', target: you, x, y, face });
-  await expect
-    .poll(async () => {
-      const me = (await players(page, code)).find((p) => p.id === you);
-      return me !== undefined && Math.hypot(me.x - x, me.y - y) < 0.05;
-    })
-    .toBe(true);
-  await page.waitForFunction(
-    ([tx, ty]) => {
-      const st = window.__DECOY__?.getLocalState();
-      return st !== null && st !== undefined && Math.hypot(st.x - tx!, st.y - ty!) < 0.05;
-    },
-    [x, y],
-    { timeout: 20_000 },
-  );
-}
-
-async function tapTarget(page: Page, id: string): Promise<void> {
-  const t = await page.evaluate(
-    (want) => window.__DECOY__?.getTouchTargets().find((x) => x.id === want) ?? null,
-    id,
-  );
-  if (!t) throw new Error(`터치 대상 ${id} 없음`);
-  await page.touchscreen.tap(t.x + t.w / 2, t.y + t.h / 2);
-}
-
 async function shoot(page: Page, device: string, zoom: number, scene: string): Promise<void> {
   // 카메라가 자리 잡을 때까지 (따라가기 · 앞당김 시간 상수의 몇 배)
   await page.waitForTimeout(1500);
@@ -194,16 +63,6 @@ async function shoot(page: Page, device: string, zoom: number, scene: string): P
   mkdirSync(join(OUT, device), { recursive: true });
   await page.screenshot({ path: join(OUT, file) });
   shots.push({ file, device, zoom, scene, camera });
-}
-
-/** 판 시작 알림 · 처음 위치 표시가 걷히고 조작 안내를 닫는다 */
-async function settleHud(page: Page): Promise<void> {
-  await page.waitForFunction(() => (window.__DECOY__?.getBanners() ?? []).length === 0, null, {
-    timeout: 30_000,
-  });
-  // PC 첫 판 조작 안내: 아무 키나 누르면 닫힌다 (움직이지 않는 키)
-  await page.keyboard.press('KeyZ');
-  await page.waitForTimeout(300);
 }
 
 test.beforeAll(() => {
@@ -230,7 +89,7 @@ for (const dev of DEVICES) {
   if (ONLY && !dev.name.includes(ONLY)) continue;
   for (const zoom of ZOOMS) {
     test(`${dev.name} 확대 ${zoom}: 생존자 화면`, async ({ browser }) => {
-      const tab = await openTab(browser, dev.ctx, `${dev.name} z${zoom} 생존자`);
+      const tab = await openTab(browser, dev.ctx, `${dev.name} z${zoom} 생존자`, problems);
       const { page } = tab;
       const { code, you } = await soloMatch(page, 'runner', zoom, dev.quality);
       // 러너는 거점 B 방 가운데. 가드는 거점 B 점령 중, 스카우트는 방 밖 북서쪽(7.5타일),
@@ -251,7 +110,7 @@ for (const dev of DEVICES) {
     });
 
     test(`${dev.name} 확대 ${zoom}: 괴물 화면 탐색 · 추적`, async ({ browser }) => {
-      const tab = await openTab(browser, dev.ctx, `${dev.name} z${zoom} 괴물`);
+      const tab = await openTab(browser, dev.ctx, `${dev.name} z${zoom} 괴물`, problems);
       const { page } = tab;
       const { code, you } = await soloMatch(page, 'monster', zoom, dev.quality);
       // 괴물은 거점 B 방 남쪽에서 북쪽을 본다. 생존자: 러너 3.3타일 · 가드 4.9타일(탐색 시야 안), 스카우트 8.1타일(추적 시야에서만)

@@ -40,6 +40,8 @@ export interface TouchControlsOptions {
     rects: readonly { id: string; rect: Box }[];
     canvas: () => { left: number; top: number; k: number } | null;
     onCovered?: (ids: ReadonlySet<string>) => void;
+    /** 다시 배치할 때마다 조준 스틱 · 버튼 사각형 (논리 px): 화면 밖 화살표가 엄지 버튼 아래로 숨지 않게 피한다 */
+    onThumbs?: (boxes: readonly Box[]) => void;
   };
 }
 
@@ -592,6 +594,14 @@ export class TouchControls {
     );
     this.layout = L;
     this.opts.hud?.onCovered?.(hudCovered(L, boxes));
+    const hud = this.opts.hud;
+    const c = hud?.canvas();
+    if (hud?.onThumbs && c && c.k > 0) {
+      const thumbs: Box[] = [];
+      for (const b of [L.aim, ...Object.values(L.buttons)])
+        if (b) thumbs.push({ x: (b.x - c.left) / c.k, y: (b.y - c.top) / c.k, w: b.w / c.k, h: b.h / c.k });
+      hud.onThumbs(thumbs);
+    }
     const place = (el: HTMLElement | undefined, b: Box | null | undefined): void => {
       if (el && b)
         Object.assign(el.style, { left: `${b.x}px`, top: `${b.y}px`, width: `${b.w}px`, height: `${b.h}px` });

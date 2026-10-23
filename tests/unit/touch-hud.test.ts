@@ -231,6 +231,51 @@ describe('터치 HUD 자리 touchHudPlan', () => {
     for (const r of L.HUD.touch!.monster.rects) expect(r.rect.y + r.rect.h).toBeLessThanOrEqual(L.MAP_RECT.y);
   });
 
+  it('따라가는 카메라: 옆 칸에 미니맵 자리가 없으면 맵 창 안 미니맵 자리가 있다 — 틀까지 맵 안, 터치 버튼 · 다른 HUD 부품과 안 겹침', () => {
+    const art = L.TOUCH_UI.art;
+    const pad = L.TOUCH_PART.minimap.pad * art;
+    const title = L.TOUCH_PART.minimap.title * art;
+    let insets = 0;
+    for (const [name, w, h] of SCREENS) {
+      L.applyLayout(L.layoutFor(w, h, true));
+      const t = L.HUD.touch!;
+      const k = t.L;
+      const map = { x: L.MAP_RECT.x / k, y: L.MAP_RECT.y / k, w: L.MAP_RECT.w / k, h: L.MAP_RECT.h / k };
+      for (const monster of [true, false]) {
+        const p = monster ? t.monster : t.survivor;
+        const label = `${name} ${monster ? '괴물' : '생존자'}`;
+        // 옆 칸 미니맵이 있으면 안쪽 미니맵은 없다. 16:9 · 태블릿처럼 옆 칸이 없으면 반드시 있다
+        if (p.minimap) {
+          expect(p.minimapInset, label).toBeNull();
+          continue;
+        }
+        expect(p.minimapInset, label).not.toBeNull();
+        insets += 1;
+        const i = p.minimapInset!;
+        const f = {
+          x: i.x / k - pad,
+          y: i.y / k - title,
+          w: i.w / k + pad * 2,
+          h: ((i.w / k) * 2) / 3 + title + pad,
+        };
+        expect(i.w / k, label).toBeGreaterThanOrEqual(L.MINIMAP_INSET.min);
+        expect(f.x, label).toBeGreaterThanOrEqual(map.x - 0.01);
+        expect(f.y, label).toBeGreaterThanOrEqual(map.y - 0.01);
+        expect(f.x + f.w, label).toBeLessThanOrEqual(map.x + map.w + 0.01);
+        expect(f.y + f.h, label).toBeLessThanOrEqual(map.y + map.h + 0.01);
+        const lay = touchLayout(w, h, { l: 0, r: 0, t: 0, b: 0 }, monster, true);
+        for (const b of [lay.aim, ...Object.values(lay.buttons)])
+          if (b) expect(overlaps(f, b), `${label} ↔ 버튼`).toBe(false);
+        for (const r of p.rects)
+          expect(
+            overlaps(f, { x: r.rect.x / k, y: r.rect.y / k, w: r.rect.w / k, h: r.rect.h / k }),
+            `${label} ↔ ${r.id}`,
+          ).toBe(false);
+      }
+    }
+    expect(insets).toBeGreaterThan(8);
+  });
+
   it('HUD를 넘기지 않으면 터치 화면 배치는 M11 그대로 (이동 영역 = 왼쪽 40% 전체 높이)', () => {
     const a = touchLayout(863, 360, { l: 0, r: 0, t: 0, b: 0 }, true, true);
     const b = touchLayout(863, 360, { l: 0, r: 0, t: 0, b: 0 }, true, true, []);
