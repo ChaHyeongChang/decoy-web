@@ -803,6 +803,7 @@ export function ensureAtlas(textures: TextureHost, params: AtlasParams): { key: 
   current = { key, build };
   gfxState.features.atlasBakeMs = Math.round(build.ms * 10) / 10;
   gfxState.features.atlasBytes = build.canvas.width * build.canvas.height * 4;
+  gfxState.features.atlasTexPerWorld = Math.round(build.texPerWorld * 1000) / 1000;
   // 지금 올린(그리는) 아틀라스의 캐릭터 스타일 · 배율, 새 스타일 그림 명령을 새로 만든 누적 횟수
   // (시험: 스타일을 바꾼 뒤 실제로 다시 구웠는지, 배율만 바뀐 다시 굽기가 그림 명령을 다시 만들지 않는지)
   gfxState.features.atlasStyle = build.params.style ?? 'classic';

@@ -526,6 +526,11 @@ export class GameScene extends Phaser.Scene {
       .setVisible(false);
   }
 
+  /** 흔들림 세기 배율 (디버그 · 시험, 나중 '흔들림 줄이기' 설정과 같은 값) */
+  setShakeScale(scale: number): void {
+    if (this.director) this.director.shake.scale = Math.max(0, scale);
+  }
+
   /** 화면 좌표 (창 CSS px) → 논리 px (캔버스 사각형 기준) */
   private toLogical(clientX: number, clientY: number): { x: number; y: number } | null {
     const r = this.game.canvas.getBoundingClientRect();

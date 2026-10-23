@@ -95,6 +95,7 @@ export function installDebug(app: App, overlay: boolean): void {
     getAnimState: () => gameScene(app)?.animDebug ?? null,
     getCamera: () => gameScene(app)?.cameraDebug ?? null,
     getSpectateCards: () => gameScene(app)?.spectateCards ?? [],
+    setCameraShake: (scale) => gameScene(app)?.setShakeScale(scale),
     setFrameLimit: (limit) => pacingHooks.setLimit?.(limit),
     setCharStyle: (style) => void setCharStyle(style, false),
     probeText: (text, x, y, px) => probeSlot.draw?.(text, x, y, px),

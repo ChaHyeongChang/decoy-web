@@ -354,3 +354,25 @@ export async function recordInputs(page: Page, pollMs = 150): Promise<InputRecor
     }, stop);
   return { entries: () => read(false), stop: () => read(true) };
 }
+
+/** 따라가는 카메라와 무관한 픽셀 · 조준 시험: 맵 전체 고정 화면(확대 1, 로컬 주소에서만 받는다) */
+export const CAM1 = '&cam=1';
+
+/**
+ * 따라가는 카메라가 자리 잡을 때까지: 창이 두 번 연속 같고 어두워짐 · 흔들림이 없다 (순간 이동 뒤 화면 좌표를 읽기 전에)
+ */
+export async function waitCamera(page: Page, timeout = 15_000): Promise<void> {
+  let prev = '';
+  await expect
+    .poll(
+      async () => {
+        const c = await page.evaluate(() => window.__DECOY__?.getCamera() ?? null);
+        const key = c ? `${c.view.x},${c.view.y}` : '';
+        const still = c !== null && key === prev && c.dip === 0 && c.shakes === 0;
+        prev = key;
+        return still;
+      },
+      { intervals: [120], timeout },
+    )
+    .toBe(true);
+}

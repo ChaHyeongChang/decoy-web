@@ -44,14 +44,16 @@ export function drawingPoints(dr: Drawing): [number, number][] {
 }
 
 /**
- * 크기 기준 (사용자 결정: 기존 시각 명세를 지킨다 — 그림이 판정보다 크면 맞았는지 헷갈린다).
- *  - 생존자: 앞 ±60° 안은 1.55r까지(VISUAL_SPEC 4.1 앞 돌출 한도), 앞쪽 반의 그 밖(옆)은 1.05r, 뒤쪽 반은 1.0r
+ * 크기 기준 (사용자 결정: 그림이 판정보다 크면 맞았는지 헷갈린다). 따라가는 카메라 3단계에서 확대 화면 기준으로 줄였다:
+ * 그림이 실제 판정 범위보다 눈에 띄게 커 보이지 않게 최대 1.15배 (index.ts TOP_SQUEEZE가 맞춘다)
+ *  - 생존자: 앞 ±60° 안은 1.15r까지(이전 1.55r), 앞쪽 반의 그 밖(옆)은 1.05r, 뒤쪽 반은 1.0r
  *    (옛 shapes.test.ts '옆 · 뒤로는 몸 원 밖으로 나가지 않는다'와 같은 뜻, 옆은 손 둥근 끝 몫 0.05r)
- *  - 괴물: 모든 자세 1.12r(VISUAL_SPEC 4.1 '자락 끝 1.12 이내'를 발톱 · 팔까지), 돌진만 1.35r
+ *  - 괴물: 모든 자세 1.12r(VISUAL_SPEC 4.1 '자락 끝 1.12 이내'를 발톱 · 팔까지), 돌진도 1.15r(이전 1.35r)
+ * 기존 스타일 도형(art/shapes.ts)은 이 기준과 따로 그대로 둔다
  */
 export const SIZE_RULE = {
-  survivor: { sector: Math.PI / 3, front: 1.55, side: 1.05, back: 1.0 },
-  monster: { all: 1.12, dash: 1.35 },
+  survivor: { sector: Math.PI / 3, front: 1.15, side: 1.05, back: 1.0 },
+  monster: { all: 1.12, dash: 1.15 },
 } as const;
 
 /** 반올림 몫 */

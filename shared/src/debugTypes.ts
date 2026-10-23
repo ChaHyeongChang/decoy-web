@@ -278,6 +278,8 @@ export interface DecoyDebug {
   getAnimState(): AnimDebug | null;
   /** 카메라 상태 (판 장면이 없으면 null) */
   getCamera(): CameraDebug | null;
+  /** 화면 흔들림 세기 배율 (0 = 끔, 시험의 픽셀 탐침용 — '흔들림 줄이기'와 같은 값) */
+  setCameraShake(scale: number): void;
   /** 관전 카드 판정 사각형 (창 CSS px, 카드 순서 번호 · 동료 id) — 따라가는 카메라 */
   getSpectateCards(): { index: number; id: string | null; x: number; y: number; w: number; h: number }[];
   /** 프레임 제한을 바꾼다 (로비 선택과 같은 경로, 저장하지 않음) */

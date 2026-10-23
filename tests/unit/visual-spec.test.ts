@@ -19,6 +19,7 @@ import * as presets from '../../client/src/gfx/presets';
 import * as quality from '../../client/src/gfx/quality';
 import * as colors from '../../client/src/render/colors';
 import { ambientRgb } from '../../client/src/render/fogMath';
+import * as camera from '../../client/src/render/camera';
 import * as vision from '../../client/src/render/vision';
 import * as fonts from '../../client/src/ui/fonts';
 import * as hudArt from '../../client/src/ui/hudArt';
@@ -41,6 +42,7 @@ const MODULES: Readonly<Record<string, { file: string; mod: object }>> = {
   fx: { file: 'client/src/art/fx.ts', mod: fx },
   icons: { file: 'client/src/art/icons.ts', mod: icons },
   vision: { file: 'client/src/render/vision.ts', mod: vision },
+  camera: { file: 'client/src/render/camera.ts', mod: camera },
   presets: { file: 'client/src/gfx/presets.ts', mod: presets },
   quality: { file: 'client/src/gfx/quality.ts', mod: quality },
   hudArt: { file: 'client/src/ui/hudArt.ts', mod: hudArt },
