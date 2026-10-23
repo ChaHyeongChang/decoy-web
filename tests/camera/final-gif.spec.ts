@@ -36,7 +36,6 @@ test('휴대폰 800×360: 걷기 따라가기 · 화면 밖 화살표 → 수감
     }
   });
   const page = await context.newPage();
-  const t0 = Date.now();
   const problems: string[] = [];
   watchConsole(page, problems);
   await page.goto('/?debug=hook&renderer=webgl&quality=medium&chars=new&bots=1');
@@ -69,7 +68,6 @@ test('휴대폰 800×360: 걷기 따라가기 · 화면 밖 화살표 → 수감
     void cdp.send('Page.screencastFrameAck', { sessionId: f.sessionId }).catch(() => undefined);
   });
   await cdp.send('Page.startScreencast', { format: 'png', everyNthFrame: 1 });
-  const start = (Date.now() - t0) / 1000;
   // 걷기: 동쪽으로 방을 나가 복도 → 남동으로 비켜 감옥 철창 아래 → 동쪽
   const hold = async (keys: string[], ms: number): Promise<void> => {
     for (const k of keys) await page.keyboard.down(k);
@@ -94,7 +92,6 @@ test('휴대폰 800×360: 걷기 따라가기 · 화면 밖 화살표 → 수감
   await page.touchscreen.tap(card.x + card.w / 2, card.y + card.h / 2);
   await expect.poll(() => page.evaluate(() => window.__DECOY__?.getCamera()?.spectating)).toBe(guard);
   await page.waitForTimeout(2200);
-  const end = (Date.now() - t0) / 1000;
   await cdp.send('Page.stopScreencast');
   await context.close();
   if (frames.length < 20) throw new Error(`송출 프레임이 너무 적다 (${frames.length})`);
@@ -131,7 +128,8 @@ test('휴대폰 800×360: 걷기 따라가기 · 화면 밖 화살표 → 수감
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
   manifest.gif = {
     file: 'phone-800x360/walk-spectate.gif',
-    seconds: Math.round((end - start) * 10) / 10,
+    // GIF 길이 = 첫 프레임 ~ 마지막 프레임 시각 + 마지막 프레임 0.1초 (concat 목록의 길이 합과 같다)
+    seconds: Math.round(((last?.t ?? 0) - (frames[0]?.t ?? 0) + 0.1) * 10) / 10,
     fps: 12,
     scene: '러너 걷기(따라가기 · 화면 밖 화살표 · 공유 시야 괴물) → 수감(잘라 옮기기) → 가드 카드 탭 관전',
   };

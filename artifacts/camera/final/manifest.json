@@ -1237,7 +1237,7 @@
   "problems": [],
   "gif": {
     "file": "phone-800x360/walk-spectate.gif",
-    "seconds": 10,
+    "seconds": 9.5,
     "fps": 12,
     "scene": "러너 걷기(따라가기 · 화면 밖 화살표 · 공유 시야 괴물) → 수감(잘라 옮기기) → 가드 카드 탭 관전"
   }

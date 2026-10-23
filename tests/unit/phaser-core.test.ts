@@ -4,6 +4,7 @@
 // 사용자 빌드에 있는지 본다
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import * as ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 /** phaser-core.js의 `var Phaser = { ... }`에서 require로 붙은 경로(그 아래는 모두 있다) */
@@ -50,31 +51,51 @@ function tsFiles(dir: string): string[] {
 }
 
 /**
- * 값으로 쓰는 Phaser 경로 (타입 자리는 뺀다: 바로 앞이 `:` `<` `|` `&` `,`(타입 인자 안) · `as` · `extends` ·
- * `implements` · `typeof` · `keyof`, 또는 `type X =` 오른쪽). 값 자리 = new · instanceof · 호출 · 속성 읽기
+ * 소스 하나에서 값으로 쓰는 Phaser 경로: TypeScript 구문 트리에서 `Phaser`로 시작하는 속성 접근 식(가장 바깥 사슬)을 모은다.
+ * 타입 자리(`: Phaser.X` · `as Phaser.X` · `<Phaser.X>` · `type T = Phaser.X` · 타입 안 `typeof`)는 QualifiedName이라 저절로
+ * 빠진다. `implements`와 인터페이스 `extends`는 타입이라 빼고, 클래스 `extends`는 모듈을 읽을 때 값으로 쓰여 넣는다.
+ * (검토 반영: 예전 정규식은 객체 값 · 화살표 본문 · 문장 시작 · 클래스 extends를 놓쳤다)
  */
+function scanSource(file: string, src: string): { file: string; path: string }[] {
+  const uses: { file: string; path: string }[] = [];
+  const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true);
+  /** 식별자 Phaser에서 시작하는 순수 속성 접근 사슬이면 'Phaser.A.B', 아니면 null */
+  const chain = (n: ts.Expression): string | null => {
+    if (ts.isIdentifier(n)) return n.text === 'Phaser' ? 'Phaser' : null;
+    if (ts.isPropertyAccessExpression(n)) {
+      const head = chain(n.expression);
+      return head === null ? null : `${head}.${n.name.text}`;
+    }
+    return null;
+  };
+  const typeOnlyHeritage = (n: ts.Node): boolean => {
+    const clause = n.parent;
+    if (!ts.isExpressionWithTypeArguments(n) || !clause || !ts.isHeritageClause(clause)) return false;
+    return clause.token === ts.SyntaxKind.ImplementsKeyword || ts.isInterfaceDeclaration(clause.parent);
+  };
+  const visit = (n: ts.Node): void => {
+    if (typeOnlyHeritage(n)) return;
+    if (ts.isPropertyAccessExpression(n)) {
+      const outer = ts.isPropertyAccessExpression(n.parent) && n.parent.expression === n;
+      const path = outer ? null : chain(n);
+      if (path !== null) {
+        uses.push({ file, path });
+        return;
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return uses;
+}
+
+/** 클라이언트 코드(Phaser를 들여오는 파일)가 값으로 쓰는 Phaser 경로 */
 function valueUses(): { file: string; path: string }[] {
   const uses: { file: string; path: string }[] = [];
   for (const file of tsFiles('client/src')) {
-    const src = readFileSync(file, 'utf8')
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/\/\/.*$/gm, '');
+    const src = readFileSync(file, 'utf8');
     if (!/^import Phaser from 'phaser';$/m.test(src)) continue;
-    for (const m of src.matchAll(/(new|instanceof)\s+(Phaser(?:\.[A-Za-z0-9_]+)+)/g))
-      uses.push({ file, path: m[2] ?? '' });
-    // 속성 읽기 · 호출: `= Phaser.Scale.FIT`, `(Phaser.BlendModes.ADD)`, `Phaser.Math.Between(` 처럼 값 자리
-    for (const m of src.matchAll(/([=(,?!]|return|\|\||&&)\s*(Phaser(?:\.[A-Za-z0-9_]+)+)/g)) {
-      const before = src.slice(Math.max(0, (m.index ?? 0) - 1), m.index ?? 0);
-      // `<A, Phaser.X>` 같은 타입 인자 안의 `,`는 타입이다 — 그 앞 문맥이 `<`로 열려 있으면 뺀다
-      if (m[1] === ',' && /<[^>()]*$/.test(src.slice(Math.max(0, (m.index ?? 0) - 120), m.index ?? 0)))
-        continue;
-      if (before === '=' && m[1] === '=') {
-        // `type X = Phaser.Y` 는 타입
-        const line = src.slice(src.lastIndexOf('\n', m.index ?? 0) + 1, m.index ?? 0);
-        if (/\btype\s+\w+\s*$/.test(line)) continue;
-      }
-      uses.push({ file, path: m[2] ?? '' });
-    }
+    uses.push(...scanSource(file, src));
   }
   return uses;
 }
@@ -101,10 +122,43 @@ describe('Phaser 사용자 빌드 (배포 빌드)', () => {
     expect(has('Phaser.Math.Clamp')).toBe(false);
   });
 
+  it('스캔: 값 자리는 모두 잡고 타입 자리는 뺀다', () => {
+    const src = [
+      "import Phaser from 'phaser';",
+      'const a = { alpha: Phaser.Math.Clamp(1, 0, 1) };',
+      'const f = (v: number): number => Phaser.Math.Between(v, 0);',
+      'Phaser.Utils.Array.Shuffle([]);',
+      'const t = a ? 1 : Phaser.Scale.FIT;',
+      'class Z extends Phaser.GameObjects.Zone {}',
+      'const r = new Phaser.Geom.Rectangle();',
+      'if (r instanceof Phaser.GameObjects.Image) void 0;',
+      'const arr = [Phaser.BlendModes.ADD, `${Phaser.VERSION}`];',
+      'let x: Phaser.Geom.Circle | null = null;',
+      'type T = Phaser.Math.Vector2;',
+      'const y = x as Phaser.GameObjects.Sprite | null;',
+      'interface I extends Phaser.Types.Core.GameConfig {}',
+      'class W implements Phaser.Types.Input.InputConfiguration {}',
+      'const s = new Set<Phaser.GameObjects.Text>();',
+    ].join('\n');
+    const got = scanSource('x.ts', src).map((u) => u.path);
+    expect(got).toEqual([
+      'Phaser.Math.Clamp',
+      'Phaser.Math.Between',
+      'Phaser.Utils.Array.Shuffle',
+      'Phaser.Scale.FIT',
+      'Phaser.GameObjects.Zone',
+      'Phaser.Geom.Rectangle',
+      'Phaser.GameObjects.Image',
+      'Phaser.BlendModes.ADD',
+      'Phaser.VERSION',
+    ]);
+  });
+
   it('클라이언트 코드가 값으로 쓰는 Phaser 경로가 모두 사용자 빌드에 있다', () => {
     const uses = valueUses();
-    // 스캔이 실제로 무언가를 찾는지 (new Phaser.Game · instanceof Phaser.GameObjects.Image 등)
+    // 스캔이 실제로 무언가를 찾는지 (new Phaser.Game · instanceof Phaser.GameObjects.Image · class extends Phaser.Scene 등)
     expect(uses.some((u) => u.path === 'Phaser.Game')).toBe(true);
+    expect(uses.some((u) => u.path === 'Phaser.Scene')).toBe(true);
     expect(uses.some((u) => u.path.startsWith('Phaser.GameObjects.'))).toBe(true);
     const missing = uses.filter((u) => !has(u.path)).map((u) => `${u.file}: ${u.path}`);
     expect(missing).toEqual([]);

@@ -2,8 +2,9 @@
 // 가상 시계 120Hz에서 같은 시드 · 같은 조작의 봇과 연습 판을 돌려 센 프레임당 일의 양(tests/perf/workScene.ts)이 기준값 × MARGIN을 넘으면 실패한다.
 // 횟수는 기계 · 부하와 상관없이 같은 빌드면 같으므로 시간 게이트(m3-info FPS 게이트)와 달리 흔들리지 않는다.
 // 일부러 늘렸다면(새 연출 등) 기준값을 다시 재서 perf-budget.json을 고치고 DECISIONS에 이유를 적는다:
-//   DECOY_PERF_LABEL=budget npx playwright test --config tests/perf/playwright.config.ts work-counts
-//   node scripts/perf-budget.mjs artifacts/perf/budget/work-counts.json   ← perf-budget.json의 baseline을 다시 쓴다
+//   DECOY_PERF_LABEL=<이번 변경 이름> npx playwright test --config tests/perf/playwright.config.ts work-counts
+//   node scripts/perf-budget.mjs artifacts/perf/<이번 변경 이름>/work-counts.json   ← perf-budget.json의 baseline을 다시 쓴다
+// 이름은 변경마다 새로 짓는다(문서가 인용한 지난 측정 파일을 덮어쓰지 않게, 예: camera-before · camera-after)
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, test } from '@playwright/test';

@@ -359,10 +359,12 @@ export async function recordInputs(page: Page, pollMs = 150): Promise<InputRecor
 export const CAM1 = '&cam=1';
 
 /**
- * 괴물 탭에서 마우스로 (x, y) 타일을 조준하고, 서버가 받은 조준(내 괴물 face)이 커서 쪽이 될 때까지 확인한다.
- * 조준 붙잡기(client/src/aimHold.ts)는 커서가 움직일 때만 그려진 괴물 → 커서 방향을 다시 잰다: 순간 이동 직후 그려진 괴물이
- * 아직 따라오는 중에 커서를 옮기면 틀린 방향이 붙잡힌다. 그러면 1px 비켰다 돌아와 다시 재게 한다. 커서는 정수 px에 두고, 서버
- * 자리에서 그 커서 px로 가는 화면 방향과 1px 안(타일 목표와의 차이는 px 반올림뿐 — 확대 1 · 6타일에서 약 0.003rad)이면 맞다.
+ * 괴물 탭에서 마우스로 (x, y) 타일을 조준하고, 서버가 받은 조준(내 괴물 face)이 그 타일 쪽이 될 때까지 확인한다.
+ * 조준 붙잡기(client/src/aimHold.ts)는 커서가 움직일 때 커서 아래 월드 자리를 잰다: 순간 이동이 아직 이 탭에 닿지 않았거나
+ * 창이 따라오는 중에 커서를 옮기면 지난 창 기준의 화면 자리라 엉뚱한 타일이 붙잡힌다. 그러면 창이 멈춘 뒤 화면 자리를 다시 재어
+ * 옮긴다. 확인은 서버 자리 → 목표 타일의 화면 방향과 커서 반올림(1.5px) 안이면 맞다 — 커서 px 쪽을 보는지만 보면 지난 창 기준으로
+ * 놓인 커서도 통과한다(CI 전체 검사의 m8-effects 공격이 빗나감, CPU 6배 느림으로 재현). 이 탭이 보내는 목표 조준(마지막 입력
+ * 프레임 aim)도 같은 방향이어야 한다.
  * 괴물이 아니면 확인하지 않는다. 끝나면 앞당김으로 다시 움직인 창이 멈출 때까지 기다린다
  */
 export async function aimMonsterAt(page: Page, x: number, y: number): Promise<void> {
@@ -378,20 +380,29 @@ export async function aimMonsterAt(page: Page, x: number, y: number): Promise<vo
     await page.mouse.move(cx, cy);
     const ok = await page
       .waitForFunction(
-        ([px, py]) => {
+        ([tx, ty]) => {
           const d = window.__DECOY__;
           const s = d?.getLastSnapshot();
           if (!d || !s || s.you.role !== 'monster') return true;
           const m = s.you.move;
           const b = d.tileToClient(m.x, m.y);
-          if (!b) return false;
-          const dist = Math.hypot(px! - b.x, py! - b.y);
-          let e = m.face - Math.atan2(py! - b.y, px! - b.x);
-          while (e > Math.PI) e -= 2 * Math.PI;
-          while (e < -Math.PI) e += 2 * Math.PI;
-          return Math.abs(e) <= Math.max(0.002, 1 / Math.max(1, dist));
+          const t = d.tileToClient(tx!, ty!);
+          if (!b || !t) return false;
+          const dist = Math.hypot(t.x - b.x, t.y - b.y);
+          const want = Math.atan2(t.y - b.y, t.x - b.x);
+          const tol = Math.max(0.002, 1.5 / Math.max(1, dist));
+          const near = (a: number): boolean => {
+            let e = a - want;
+            while (e > Math.PI) e -= 2 * Math.PI;
+            while (e < -Math.PI) e += 2 * Math.PI;
+            return Math.abs(e) <= tol;
+          };
+          // 이 탭이 지금 보내는 목표 조준도 그쪽이어야 한다: 순간 이동의 face가 우연히 목표 방향이면 서버 face만으로는
+          // 엉뚱한 커서로 돌기 전에 통과한다 (m8-effects: teleport face 0 = 동쪽 목표)
+          const f = d.getLastInput();
+          return f !== null && Number.isFinite(f.aim) && near(f.aim) && near(m.face);
         },
-        [cx, cy],
+        [x, y],
         { timeout: 3000 },
       )
       .then(

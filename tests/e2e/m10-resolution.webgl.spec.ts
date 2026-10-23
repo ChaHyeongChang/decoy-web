@@ -415,13 +415,25 @@ test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 �
       const c = await page.evaluate((t) => window.__DECOY__?.tileToClient(t.x, t.y) ?? null, target);
       expect(c).not.toBeNull();
       await page.mouse.move(c!.x, c!.y);
-      // 회전 시간 + 보간 + 스냅샷 (SwiftShader 큰 백버퍼에서는 프레임이 느려 넉넉히)
-      await page.waitForTimeout(900);
-      const t = await truth(page, code);
+      // 회전 시간 + 보간 + 스냅샷이 지나 서버 조준이 커서 쪽으로 올 때까지 (고정 대기 0.9초 한 번 읽기는 느린 러너에서 짧았다:
+      // CI 전체 검사에서 크기 변경 뒤 첫 목표가 아직 앞 목표 방향(146.6°)이었고, CPU 6배 느림으로 같은 모양을 재현했다 — 늦게 올
+      // 뿐 맞는 방향으로 온다). 변환이 틀리면 이 방향으로 오지 않아 시간 초과로 실패한다
       const expected = Math.atan2(target.y - 21, target.x - 24);
-      const errDeg = (angDiff(t.monster!.aim, expected) * 180) / Math.PI;
-      console.log(`${label} 목표 (${target.x},${target.y}) 조준 오차 ${errDeg.toFixed(2)}°`);
-      expect(errDeg, `${label} 조준 오차`).toBeLessThan(2);
+      const t0 = Date.now();
+      let errDeg = Number.POSITIVE_INFINITY;
+      await expect
+        .poll(
+          async () => {
+            const t = await truth(page, code);
+            errDeg = (angDiff(t.monster!.aim, expected) * 180) / Math.PI;
+            return errDeg;
+          },
+          { message: `${label} 조준 오차`, timeout: 20_000, intervals: [300] },
+        )
+        .toBeLessThan(2);
+      console.log(
+        `${label} 목표 (${target.x},${target.y}) 조준 오차 ${errDeg.toFixed(2)}° (${Date.now() - t0}ms)`,
+      );
     }
   };
 

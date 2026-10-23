@@ -814,20 +814,13 @@ export class GameScene extends Phaser.Scene {
     }
     // 손가락 포인터는 조준을 바꾸지 않는다(터치스크린 노트북의 손가락 · 손바닥): 마우스 포인터만
     const p = this.input.mousePointer ?? this.input.activePointer;
-    // 조준 = 화면에 그려진 괴물(지난 프레임의 창)에서 커서 쪽. 커서가 움직였을 때 커서 월드 자리를 재고, 그 사이에는 그 자리를
-    // 기준 카메라(앞당김 · 따라가기 지연 없이 괴물 가운데, 맵 안으로 자름)를 따라 옮긴 곳을 겨눈다 (aimHold.ts: 앞당김이 조준을
-    // 끌지 않고, 맵 끝에 막힌 화면에서는 커서 쪽으로 돈다)
+    // 조준 = 괴물에서 커서 쪽. 커서가 움직였을 때 커서 월드 자리를 재고(지난 프레임의 창), 그 사이에는 그 자리를 기준 카메라
+    // (앞당김 · 따라가기 지연 없이 괴물 가운데, 맵 안으로 자름)를 따라 옮긴 곳을 겨눈다 (aimHold.ts: 앞당김이 조준을 끌지 않고,
+    // 맵 끝에 막힌 화면에서는 커서 쪽으로 돈다). 괴물 자리는 이 입력 틱의 예측 상태(me)다 — 그리는 자리(localPos)는 프레임마다
+    // 보간해 주사율에 따라 달라, 마우스를 두고 걸을 때 다시 재는 조준이 60Hz · 120Hz에서 달라졌다(frame-independence 시험)
     const w = this.cameras.main.getWorldPoint(p.x, p.y, this.aimCursor);
-    const body = tileToScreen(this.localPos.x, this.localPos.y);
-    const a = aimAnchor(
-      this.localPos.x,
-      this.localPos.y,
-      VIEW_TILES_W,
-      VIEW_TILES_H,
-      MAP_W,
-      MAP_H,
-      this.aimAnchorTile,
-    );
+    const body = tileToScreen(me.x, me.y);
+    const a = aimAnchor(me.x, me.y, VIEW_TILES_W, VIEW_TILES_H, MAP_W, MAP_H, this.aimAnchorTile);
     const anchor = tileToScreen(a.x, a.y);
     this.aimPointer.x = p.x;
     this.aimPointer.y = p.y;

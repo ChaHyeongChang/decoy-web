@@ -172,7 +172,7 @@ DECOY_PERF_DIR=<빌드한 다른 checkout> DECOY_PERF_LABEL=before \
 - 로비에서 미리 구운 캐시는 판 합성이 남길 것과 같다(Canvas는 발광 캔버스를 버린다 — 판 시작 때 캐시가 바뀌지 않는다, `m12-screen.spec.ts`)
 - 미니맵 바닥(맵 전체 합성)은 확대 화면에서 200ms에 한 번까지(`minimap.ts` MINIMAP_BASE_MS). 메인 창이 맵의 1/9이라 안개 주기마다 맵 전체를 합성하면 미니맵이 메인보다 비싸다
 
-**일의 양 (예산 게이트, `tests/e2e/perf-budget*.spec.ts`)** — 가상 시계 120Hz · 10초, 같은 시드 연습 판 · 같은 조작(`tests/perf/workScene.ts`). 확대 3 첫 구현은 HUD에 새로 생긴 화면 밖 화살표 · 가리개 · 미니맵 창 사각형과, 창 밖에 있어도 그리던 월드 그림 때문에 Canvas 화면 일이 늘었다(`artifacts/perf/budget/work-counts.json`). 같은 화소를 그대로 두는 거르기 네 가지로 확대 1 기준값 아래로 되돌렸다(`artifacts/perf/camera-after/work-counts.json`).
+**일의 양 (예산 게이트, `tests/e2e/perf-budget*.spec.ts`)** — 가상 시계 120Hz · 10초, 같은 시드 연습 판 · 같은 조작(`tests/perf/workScene.ts`). 확대 3 첫 구현은 HUD에 새로 생긴 화면 밖 화살표 · 가리개 · 미니맵 창 사각형과, 창 밖에 있어도 그리던 월드 그림 때문에 Canvas 화면 일이 늘었다(`artifacts/perf/camera-before/work-counts.json`). 같은 화소를 그대로 두는 거르기 네 가지로 크게 늘었던 셈(화면 칠하기 · 상태 · drawImage · 화면 밖 경로 · 칠하기 · WebGL 버퍼)은 확대 1 기준값 아래로, 나머지 셈도 확대 1 기준값 × 1.05 안으로 되돌렸다(괴물 화면 경로만 넘음, 아래 \*, `artifacts/perf/camera-after/work-counts.json`).
 
 | 장면 · 셈 (프레임당) | 확대 1 (PR #20 · #21 기준값) | 확대 3 첫 구현 | 확대 3 거르기 뒤 |
 |---|---|---|---|
@@ -180,8 +180,10 @@ DECOY_PERF_DIR=<빌드한 다른 checkout> DECOY_PERF_LABEL=before \
 | 같은 장면 상태 저장 · 되돌리기 · 변환 | 730.58 | 787.16 | 664.06 |
 | 같은 장면 drawImage | 236.09 | 249.91 | 211.87 |
 | 같은 장면 화면 밖 경로 (미니맵 합성) | 365.45 | 421.38 | 321.33 |
+| 같은 장면 화면 밖 칠하기 | 14.85 | 18.23 | 5.85 |
 | Canvas 높음 괴물 화면 경로 | 257.35 | 254.96 | 272.83 * |
 | 같은 장면 화면 밖 경로 | 141.86 | 164.37 | 90.49 |
+| 같은 장면 화면 밖 칠하기 | 19.46 | 22.55 | 8.71 |
 | WebGL 높음(백버퍼 1/4) 버퍼 바이트 | 112,489 | 121,557 | 89,388 |
 | 같은 장면 그리기 호출 | 10 | 8 | 8 |
 

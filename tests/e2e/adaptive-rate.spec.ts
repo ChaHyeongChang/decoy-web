@@ -97,9 +97,10 @@ async function startPractice(page: Page, query: string): Promise<void> {
   await page.waitForFunction(() => (window.__DECOY__?.getLastSnapshot() ?? null) !== null, null, {
     timeout: 30_000,
   });
-  // 봇을 모두 묶는다(기기 안 테스트 훅 freeze — 연습 봇은 묶이면 아무것도 하지 않는다): 사람(러너)이 가만히 있으면 연습 괴물 봇이
-  // 약 50초 만에 이겨 판이 끝나고, 판이 끝나면 판 중 측정이 멈춘다. 첫 시험은 판 시작부터 약 70초가 필요하다(하향 16초 · 조용한
-  // 20초 · 여유 15초 · 올린 뒤 확인 13초). 묶어도 그리기 · 측정 경로는 같다(FPS는 injectFps로 준다)
+  // 봇을 모두 묶는다(기기 안 테스트 훅 freeze — 묶인 봇은 움직이지 못하고 괴물 봇은 공격 · 돌진 · 포효를 하지 않는다):
+  // 사람(러너)이 가만히 있으면 연습 괴물 봇이 1분 안팎에 이겨 판이 끝나고, 판이 끝나면 판 중 측정이 멈춘다. 첫 시험은 판
+  // 시작부터 약 70초가 필요하다(하향 16초 · 조용한 20초 · 여유 15초 · 올린 뒤 확인 13초). 묶어도 그리기 · 측정 경로는 같다
+  // (FPS는 injectFps로 준다)
   await expect
     .poll(() => page.evaluate(() => (window.__DECOY__?.getTruth()?.players ?? []).length), { timeout: 5_000 })
     .toBe(4);
