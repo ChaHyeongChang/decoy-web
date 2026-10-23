@@ -5,7 +5,15 @@
 // 따라가는 카메라: 맵 곳곳의 고정 탐침을 한 화면에서 재므로 맵 전체 고정 화면(?cam=1)에서 돈다(안개 · 정보 차단은 카메라와
 // 무관하다 — 서버가 보내지 않고, 그림은 같은 코드). 확대 화면의 숨은 상대 픽셀 · 텍스처 예산은 camera.spec.ts
 import { expect, test, type Page } from '@playwright/test';
-import { CAM1, closeAll, lastSnapshot, sendTest, startFourPlayerMatch, type Player } from './helpers';
+import {
+  aimMonsterAt,
+  CAM1,
+  closeAll,
+  lastSnapshot,
+  sendTest,
+  startFourPlayerMatch,
+  type Player,
+} from './helpers';
 
 const QUALITY = `&quality=low${CAM1}`;
 
@@ -82,11 +90,8 @@ async function settle(p: Player): Promise<void> {
   await p.page.evaluate(() => window.__DECOY__?.freezeClock(1000));
 }
 
-/** 괴물 조준을 타일 좌표 쪽으로 (괴물 화면은 커서 방향을 본다) */
-async function aimAt(page: Page, x: number, y: number): Promise<void> {
-  const c = await page.evaluate(([tx, ty]) => window.__DECOY__?.tileToClient(tx!, ty!) ?? null, [x, y]);
-  await page.mouse.move(c!.x, c!.y);
-}
+/** 괴물 조준을 타일 좌표 쪽으로 (괴물 화면은 커서 방향을 본다 — 서버 조준까지 확인, helpers.aimMonsterAt) */
+const aimAt = aimMonsterAt;
 
 // 탐침 위치 (shared/src/map.ts MAP_ROWS 기준, 거점 · 탈출구 · 배지 · 배너에서 떨어진 곳)
 const P_FLOOR: [number, number] = [21.5, 27.5]; // 바닥 칸

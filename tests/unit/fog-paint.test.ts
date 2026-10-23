@@ -625,6 +625,50 @@ describe('기록 펜 (PenRecord): 안개 주기마다 기록해 바뀐 조각만
     expect(again.ops).toEqual(rec.ops);
   });
 
+  it('자르기(타일 사각형)를 주면 그 밖에 통째로 있는 명령만 건너뛰고, 걸치거나 안인 것 · NaN은 그대로 같은 순서로 그린다 (따라가는 카메라 Canvas 영역 합성)', () => {
+    const rec = new PenRecord();
+    rec.fillCircle(10, 10, 1, 0xff0000, 1); // 안
+    rec.fillCircle(30, 10, 1, 0xff0000, 1); // 밖 (x0 29 > 20)
+    rec.strokeCircle(21, 5, 2, 3, 0x00ff00, 1); // 걸침 (x0 19)
+    rec.strokeArc(5, 40, 1, 0, 0, 1, 2, 0x0000ff, 1); // 밖 (y0 39 > 20)
+    rec.fillPoly(
+      [
+        { x: 1, y: 1 },
+        { x: 3, y: 1 },
+        { x: 2, y: 3 },
+      ],
+      0x123456,
+      0.5,
+    ); // 안
+    rec.fillPoly(
+      [
+        { x: 25, y: 1 },
+        { x: 27, y: 1 },
+        { x: 26, y: 3 },
+      ],
+      0x123456,
+      0.5,
+    ); // 밖
+    rec.line(15, 15, 25, 15, 2, 0xffffff, 1); // 걸침
+    rec.line(22, 22, 30, 30, 2, 0xffffff, 1); // 밖
+    rec.fillCircle(NaN, 5, 1, 0xff0000, 1); // NaN: 건너뛰지 않는다
+    const all = new LogPen();
+    rec.replay(all);
+    expect(all.calls.length).toBe(9);
+    const clipped = new LogPen();
+    rec.replay(clipped, { x0: 0, y0: 0, x1: 20, y1: 20 });
+    const keep = [0, 2, 4, 6, 8];
+    expect(clipped.calls).toEqual(keep.map((i) => all.calls[i]));
+    // 자르기 null = 예전과 같은 호출
+    const none = new LogPen();
+    rec.replay(none, null);
+    expect(none.calls).toEqual(all.calls);
+    // 기록 펜으로 옮길 때는 자르지 않는다
+    const copy = new PenRecord();
+    rec.replay(copy, { x0: 0, y0: 0, x1: 20, y1: 20 });
+    expect(copy.ops).toEqual(rec.ops);
+  });
+
   it('sameAs: 같은 그림이면 참, 시각 · 진행이 바뀌거나 길이가 다르면 거짓 (그때만 다시 그려 올린다)', () => {
     const a = new PenRecord();
     const c = new PenRecord();

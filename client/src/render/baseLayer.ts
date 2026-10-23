@@ -43,6 +43,7 @@ import {
   rimLiftPath,
   uploadCanvasTexture,
   type SoftLight,
+  type TileClip,
 } from './fogPaint';
 
 export type { SoftLight } from './fogPaint';
@@ -255,6 +256,8 @@ export class CanvasFog implements FogLayer {
   private ry = 0;
   private doneX = -1;
   private doneY = -1;
+  /** 바닥 명령 다시 그리기 자르기 (영역 + 1타일, commit마다 채운다) */
+  private readonly clip: TileClip = { x0: 0, y0: 0, x1: 0, y1: 0 };
   lastCommitMs = 0;
   changed = true;
   private t0 = 0;
@@ -387,7 +390,14 @@ export class CanvasFog implements FogLayer {
         const h = Math.min(this.base.height, st.height - y0);
         if (w > 0 && h > 0) c.drawImage(st, x0, y0, w, h, x0, y0, w, h);
       }
-      this.rec.replay(this.pen);
+      // 영역 캔버스 밖(영역 + 1타일 — 선 굵기 · 안티에일리어싱 여유)에 통째로 있는 명령은 건너뛴다: 같은 화소, 먼 팀원 시야 ·
+      // 거점 눈금을 칠하지 않는다. 미니맵 합성은 맵 전체라 자르지 않는다
+      const cl = this.clip;
+      cl.x0 = this.rx - 1;
+      cl.y0 = this.ry - 1;
+      cl.x1 = this.rx + this.rw + 1;
+      cl.y1 = this.ry + this.rh + 1;
+      this.rec.replay(this.pen, this.whole ? null : cl);
       if (this.light) {
         const l = this.light;
         const lk = l.k;
