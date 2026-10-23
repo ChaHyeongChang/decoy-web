@@ -94,7 +94,7 @@ import {
 } from './characters';
 import { STUN_VEIL, WorldPostFx } from './effects';
 import { ALPHA, FOG } from './colors';
-import { chunkAtlasFor, createFogLayer, fogArtParams, type FogLayer } from './baseLayer';
+import { chunkAtlasFor, createFogLayer, fogArtParams, stepFogArt, type FogLayer } from './baseLayer';
 import type { ViewRect } from './camera';
 import {
   ConeRedTrack,
@@ -190,6 +190,8 @@ export interface WorldAnimDebug {
  * 정해진 시각에 위상을 고정해 갱신한다(fogMath PhaseClock): 60fps에서는 예전처럼 3 · 2프레임마다, 120fps는 6 · 4프레임마다.
  * 괴물 주기는 예전 '33ms 넘게 지나면'이 60fps에서 실제로 두 프레임(33.3ms)마다였던 것을 그대로 1/30초로 적는다
  */
+/** 판 중 품질 · 해상도가 바뀌어 맵 그림을 다시 구울 때 한 프레임에 쓰는 시간 (ms, 로비 미리 굽기 main.ts PREBAKE_STEP_MS와 같다) */
+const FOG_REBAKE_STEP_MS = 8;
 const SURVIVOR_FOG_MS = 50;
 const MONSTER_FOG_MS = 1000 / 30;
 
@@ -717,6 +719,9 @@ export class WorldRenderer {
   }
 
   private rebuildFog(): void {
+    // 새 배율 맵 그림을 프레임마다 조금씩 굽고 다 구운 뒤에 바꾼다 (그동안 지난 안개 레이어를 그대로 그린다)
+    const renderer: RendererKind = this.scene.game.renderer.type === Phaser.WEBGL ? 'webgl' : 'canvas';
+    if (!stepFogArt(renderer, FOG_REBAKE_STEP_MS)) return;
     this.fogDirty = false;
     this.post.clear();
     this.fog.destroy();

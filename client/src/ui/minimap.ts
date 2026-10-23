@@ -94,6 +94,8 @@ export class Minimap {
   private readonly image: Phaser.GameObjects.Image | null = null;
   /** 자리 (null = 터치 배치에 자리가 없어 그리지 않는다) */
   private readonly at: Place | null;
+  /** 처음 자리가 맵 창 안인가 (layout minimapInset) */
+  private readonly homeInset: boolean;
   /** 거점 A · B, 탈출구 N · S 그림 (상태별 프레임) */
   private readonly pointMarks: Spr[] = [];
   private readonly exitMarks: Spr[] = [];
@@ -122,6 +124,14 @@ export class Minimap {
   stale = false;
   /** 맵 창 안에 둔 미니맵의 틀 사각형 (논리 px, 화면 밖 화살표가 피한다). 맵 밖 자리면 null */
   insetRect: { x: number; y: number; w: number; h: number } | null = null;
+  /** 옮긴 만큼 (논리 px, relocate — 판 중 창이 낮아져 엄지 버튼이 덮을 때 맵 창 안으로) */
+  private ox = 0;
+  private oy = 0;
+  /** 옮길 때 다시 놓는 늘 그대로인 그림: 틀 · 제목 아이콘 · 제목 글자 · 감옥 표시 */
+  private frameSlice: Slice | null = null;
+  private titleIcon: Spr | null = null;
+  private titleText: CrispText | null = null;
+  private prisonMark: Spr | null = null;
 
   constructor(
     scene: Phaser.Scene,
@@ -130,6 +140,7 @@ export class Minimap {
   ) {
     const M = placeFor(monster);
     this.at = M;
+    this.homeInset = M?.inset ?? false;
     this.w = M?.w ?? 0;
     this.h = Math.round((this.w * MAP_H) / MAP_W);
     this.scale = minimapScaleFor(gfxState.zoom);
@@ -141,22 +152,20 @@ export class Minimap {
     if (!ctx) throw new Error('미니맵 캔버스를 만들 수 없습니다');
     this.ctx = ctx;
     if (!M) return;
-    const k = HUD.s;
     // 이전 판의 같은 키는 지우고, getImageData 사본을 만드는 addCanvas 대신 사본 없이 올린다
     this.texture = createCanvasTexture(scene.textures, MINIMAP_KEY, this.canvas);
     kit.named('minimap', () => {
       const c = this.chrome;
       // 틀: 깎은 모서리 패널 + 제목 (지도 아이콘 + 글자)
-      c.push(
-        kit.slice(39).set('mm', M.x - M.pad, M.y - M.title, this.w + M.pad * 2, this.h + M.title + M.pad),
-      );
-      c.push(kit.spr(41).set(FR.icon('map', NEON, 18), M.x + 11 * k, M.y - M.title / 2 - 1 * k));
-      c.push(
-        kit
-          .text(M.x + 26 * k, M.y - M.title / 2 - 1 * k, HUD.font.mapTitle, NEON, 42, true)
-          .setOrigin(0, 0.5)
-          .setText(HUD_TEXT.minimap),
-      );
+      this.frameSlice = kit.slice(39);
+      c.push(this.frameSlice);
+      this.titleIcon = kit.spr(41);
+      c.push(this.titleIcon);
+      this.titleText = kit
+        .text(0, 0, HUD.font.mapTitle, NEON, 42, true)
+        .setOrigin(0, 0.5)
+        .setText(HUD_TEXT.minimap);
+      c.push(this.titleText);
       // 늘 표시 위치: 거점 · 감옥 · 탈출구 (거점 · 탈출구는 상태에 따라 프레임만 바꾼다)
       const mark = (f: string, x: number, y: number): Spr => {
         const sp = kit.spr(41).set(f, this.px(x), this.py(y));
@@ -165,7 +174,7 @@ export class Minimap {
       };
       for (const id of ['A', 'B'] as const)
         this.pointMarks.push(mark(MM_POINT.idle, CAPTURE_POINTS[id].x, CAPTURE_POINTS[id].y));
-      mark(FR.mm('prison'), PRISON_CENTER.x, PRISON_CENTER.y);
+      this.prisonMark = mark(FR.mm('prison'), PRISON_CENTER.x, PRISON_CENTER.y);
       for (const id of ['N', 'S'] as const)
         this.exitMarks.push(mark(MM_EXIT.inactive, EXITS[id].center.x, EXITS[id].center.y));
       // 보이는 창 (확대 화면에서만, 엔티티 아래) · 관전 중인 동료 고리 (엔티티 위)
@@ -181,19 +190,63 @@ export class Minimap {
         .setName('minimap');
       this.chrome.push(this.viewBox);
     }
-    this.insetRect = M.inset
-      ? { x: M.x - M.pad, y: M.y - M.title, w: this.w + M.pad * 2, h: this.h + M.title + M.pad }
-      : null;
     this.image = scene.add
       .image(M.x, M.y, MINIMAP_KEY)
       .setOrigin(0, 0)
       .setDepth(40)
       .setScale(this.w / this.canvas.width, this.h / this.canvas.height)
       .setName('minimap');
+    this.placeChrome();
     const off = onGfxChange(() => {
       this.resizePending = true;
     });
     scene.events.once(Phaser.Scenes.Events.SHUTDOWN, off);
+  }
+
+  /** 틀 (제목 · 여백 포함) 크기 (논리 px). 자리가 없으면 null */
+  get frameSize(): { w: number; h: number } | null {
+    const M = this.at;
+    return M ? { w: this.w + M.pad * 2, h: this.h + M.title + M.pad } : null;
+  }
+
+  /** 늘 그대로인 그림(틀 · 제목 · 감옥 표시 · 바닥 이미지)을 지금 자리(집 + 옮긴 만큼)에 놓고 피할 사각형을 정한다 */
+  private placeChrome(): void {
+    const M = this.at;
+    if (!M) return;
+    const k = HUD.s;
+    const x = M.x + this.ox;
+    const y = M.y + this.oy;
+    const f = this.frameSize!;
+    this.frameSlice?.set('mm', x - M.pad, y - M.title, f.w, f.h);
+    this.titleIcon?.set(FR.icon('map', NEON, 18), x + 11 * k, y - M.title / 2 - 1 * k);
+    this.titleText?.setPosition(x + 26 * k, y - M.title / 2 - 1 * k);
+    this.prisonMark?.set(FR.mm('prison'), this.px(PRISON_CENTER.x), this.py(PRISON_CENTER.y));
+    this.image?.setPosition(x, y);
+    // 맵 창 안이면(처음부터 안쪽 자리 · 옮김) 화면 밖 화살표가 피한다
+    this.insetRect =
+      this.homeInset || this.ox !== 0 || this.oy !== 0
+        ? { x: x - M.pad, y: y - M.title, w: f.w, h: f.h }
+        : null;
+  }
+
+  /**
+   * 틀 왼쪽 위를 to(논리 px)로 옮긴다 (null = 처음 자리). 판 중 창이 낮아져 엄지 버튼이 옆 칸 미니맵을 덮으면 확대 화면에서는
+   * 숨기지 않고 맵 창 안 빈 구석으로 옮긴다(GameScene, layout.minimapFallback). 엔티티 · 상태 · 창 사각형은 다음 프레임 px · py로
+   */
+  relocate(to: { x: number; y: number } | null): void {
+    const M = this.at;
+    if (!M) return;
+    const ox = to ? to.x - (M.x - M.pad) : 0;
+    const oy = to ? to.y - (M.y - M.title) : 0;
+    if (ox === this.ox && oy === this.oy) return;
+    this.ox = ox;
+    this.oy = oy;
+    this.placeChrome();
+  }
+
+  /** 옮겨 둔 자리인가 (디버그 · 시험) */
+  get relocated(): boolean {
+    return this.ox !== 0 || this.oy !== 0;
   }
 
   /** 미니맵을 그리는가 (터치 배치에 자리가 없거나 숨겼으면 아니다) */
@@ -279,11 +332,11 @@ export class Minimap {
   }
 
   private px(x: number): number {
-    return (this.at?.x ?? 0) + (x / MAP_W) * this.w;
+    return (this.at?.x ?? 0) + this.ox + (x / MAP_W) * this.w;
   }
 
   private py(y: number): number {
-    return (this.at?.y ?? 0) + (y / MAP_H) * this.h;
+    return (this.at?.y ?? 0) + this.oy + (y / MAP_H) * this.h;
   }
 
   private sprite(i: number): Spr {

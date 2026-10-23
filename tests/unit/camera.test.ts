@@ -5,6 +5,7 @@ import { MAP_H, MAP_W, type SurvivorView } from '@decoy/shared';
 import { camOverrideAllowed, parseCamZoom } from '../../client/src/app';
 import { chunkBox, chunkRange, chunkTilesFor, slotsFor } from '../../client/src/art/mapChunks';
 import {
+  cullable,
   CAMERA,
   CameraRig,
   SHAKE,
@@ -307,5 +308,37 @@ describe('맵 조각 · 합성 예산 · ?cam', () => {
     expect(camOverrideAllowed('127.0.0.1')).toBe(true);
     expect(camOverrideAllowed('decoy.onrender.com')).toBe(false);
     expect(camOverrideAllowed('192.168.0.10')).toBe(false);
+  });
+});
+
+describe('창 밖 컬링 (cullable)', () => {
+  const map = { x: 246, y: 64, w: 1428, h: 952 };
+  const view = { viewW: 1920, viewH: 1080, canvasW: 1920, canvasH: 1080 };
+  const r = (x: number, y: number, width: number, height: number) => ({ x, y, width, height });
+
+  it('맵 창(± 여유)과 겹치면 그린다, 가리개 밑 · 캔버스 밖에 통째로 있으면 거른다', () => {
+    expect(cullable(r(500, 500, 40, 40), map, 1, view)).toBe(false);
+    // 가장자리에 걸침
+    expect(cullable(r(230, 500, 20, 20), map, 1, view)).toBe(false);
+    // 여유 1px 안
+    expect(cullable(r(225, 500, 20.5, 20), map, 1, view)).toBe(false);
+    // 왼쪽 가리개 밑 · 위 가리개 밑 · 캔버스 밖
+    expect(cullable(r(100, 500, 40, 40), map, 1, view)).toBe(true);
+    expect(cullable(r(500, 10, 40, 40), map, 1, view)).toBe(true);
+    expect(cullable(r(-400, -300, 40, 40), map, 1, view)).toBe(true);
+    expect(cullable(r(2500, 2000, 40, 40), map, 1, view)).toBe(true);
+  });
+
+  it('캔버스가 논리 크기보다 조금 크면 가리개가 못 덮는 오른쪽 · 아래 띠에 걸친 그림은 그린다', () => {
+    const big = { viewW: 1920, viewH: 1080, canvasW: 1921.4, canvasH: 1081.2 };
+    expect(cullable(r(1900, 1079, 30, 10), map, 1, big)).toBe(false);
+    expect(cullable(r(1919, 500, 10, 10), map, 1, big)).toBe(false);
+    // 띠가 없으면(같은 크기) 거른다
+    expect(cullable(r(1900, 1079, 30, 10), map, 1, view)).toBe(true);
+  });
+
+  it('좌표가 숫자가 아니면 거르지 않는다', () => {
+    expect(cullable(r(Number.NaN, 0, 10, 10), map, 1, view)).toBe(false);
+    expect(cullable(r(0, 0, Number.POSITIVE_INFINITY, 10), map, 1, view)).toBe(false);
   });
 });

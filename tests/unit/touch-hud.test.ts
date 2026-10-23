@@ -341,6 +341,65 @@ describe('판 중 창이 낮아지면 엄지 버튼이 덮는 HUD 부품 hudCove
     expect(covered(915, 412, 405, true)).toEqual([]);
   });
 
+  it('따라가는 카메라: 덮인 미니맵은 숨기지 않고 맵 창 안 빈 구석으로 옮길 자리가 있다 — 맵 안, 그 창의 엄지 · 시스템 버튼과 안 겹침 (검토 반영)', () => {
+    for (const [w, h, nh, monster] of [
+      [915, 412, 356, true],
+      [915, 412, 330, true],
+      [863, 360, 304, true],
+      [802, 293, 250, false],
+    ] as const) {
+      const l = L.layoutFor(w, h, true);
+      L.applyLayout(l);
+      const plan = monster ? L.HUD.touch!.monster : L.HUD.touch!.survivor;
+      const mm = plan.minimap!;
+      const k0 = L.HUD.s;
+      const frame = {
+        w: mm.w + L.HUD.minimap.pad * k0 * 2,
+        h: (mm.w * 2) / 3 + L.HUD.minimap.title * k0 + L.HUD.minimap.pad * k0,
+      };
+      const r = computeRenderSize({
+        cssW: w,
+        cssH: nh,
+        dpr: 1,
+        logicalW: l.viewW,
+        logicalH: l.viewH,
+        preset: { dprCap: 1, maxPixels: 1e12 },
+        scaleOverride: null,
+      });
+      const k = r.dispH / l.viewH;
+      const T = touchLayout(w, nh, { l: 0, r: 0, t: 0, b: 0 }, monster, true);
+      // touchControls.onThumbs와 같은 식: 창 CSS px → 논리 px
+      const thumbs = [T.aim, ...Object.values(T.buttons)]
+        .filter((b): b is Box => !!b)
+        .map((b) => ({ x: (b.x - r.left) / k, y: (b.y - r.top) / k, w: b.w / k, h: b.h / k }));
+      const Lk = L.HUD.touch!.L;
+      const spot = L.minimapFallback(L.MAP_RECT, frame, thumbs, L.MINIMAP_INSET.margin * Lk, L.MIN_GAP * Lk);
+      const label = `${w}×${h} → ${nh} ${monster ? '괴물' : '생존자'}`;
+      expect(spot, label).not.toBeNull();
+      const f = { x: spot!.x, y: spot!.y, w: frame.w, h: frame.h };
+      const m = L.MAP_RECT;
+      expect(f.x, label).toBeGreaterThanOrEqual(m.x);
+      expect(f.y, label).toBeGreaterThanOrEqual(m.y);
+      expect(f.x + f.w, label).toBeLessThanOrEqual(m.x + m.w + 1e-6);
+      expect(f.y + f.h, label).toBeLessThanOrEqual(m.y + m.h + 1e-6);
+      for (const b of thumbs) expect(overlaps(f, b), `${label} ↔ 버튼`).toBe(false);
+    }
+  });
+
+  it('minimapFallback: 맵 창 안 오른쪽 위, 엄지 · 시스템 버튼에 막히거나 맵보다 크면 null', () => {
+    const map = { x: 100, y: 50, w: 900, h: 600 };
+    const frame = { w: 200, h: 150 };
+    expect(L.minimapFallback(map, frame, [], 10, 8)).toEqual({ x: 790, y: 60 });
+    const tr = { x: 760, y: 40, w: 100, h: 100 };
+    expect(L.minimapFallback(map, frame, [tr], 10, 8)).toBeNull();
+    // 간격(gap) 밖이면 상관없다
+    expect(L.minimapFallback(map, frame, [{ x: 600, y: 300, w: 100, h: 100 }], 10, 8)).toEqual({
+      x: 790,
+      y: 60,
+    });
+    expect(L.minimapFallback(map, { w: 900, h: 100 }, [], 10, 8)).toBeNull();
+  });
+
   it('닿기만 하면 덮은 것이 아니다', () => {
     const T = touchLayout(863, 360, { l: 0, r: 0, t: 0, b: 0 }, true, false);
     const sb = T.buttons.scoreboard!;

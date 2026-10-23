@@ -205,6 +205,17 @@ export function prebakeFogStep(
   return true;
 }
 
+/**
+ * 판 중 품질 · 해상도가 바뀌어 안개 레이어를 다시 만들기 전 한 걸음: 새 배율 맵 전체 그림과 미니맵 작은 그림을 budgetMs씩 나눠
+ * 굽는다(다 구웠으면 true). 캐시를 정리하지 않는다 — 다 구울 때까지 지난 레이어가 지난 그림을 그대로 쓴다(검토 반영: 예전에는
+ * 자동 하향 순간 맵 전체를 한 번에 구워 판 중에 끊겼다, VISUAL_SPEC 12.7)
+ */
+export function stepFogArt(renderer: RendererKind, budgetMs: number): boolean {
+  const p = fogArtParams(renderer);
+  if (!bakeStaticMapStep(p.k / TILE_PX, true, budgetMs)) return false;
+  return bakeStaticMapStep(p.lightPxPerTile / TILE_PX, true, budgetMs);
+}
+
 /** 미리 굽기를 한 번에 끝까지 (시험 · 판 장면을 만들 때 아직 덜 구웠으면). 걸린 시간(ms) */
 export function prebakeFogArt(renderer: RendererKind = gfxState.renderer, at: Vec2 | null = null): number {
   const t0 = performance.now();

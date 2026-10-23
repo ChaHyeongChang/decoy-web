@@ -90,6 +90,29 @@ export const TOUCH_UI = {
  */
 export const MINIMAP_INSET = { frac: 0.22, maxCss: 200, margin: 6, min: 60 } as const;
 
+/**
+ * 판 중 창이 낮아져 엄지 버튼이 옆 칸 미니맵을 덮었을 때 미니맵 틀을 옮길 자리 (논리 px, 틀 왼쪽 위). 확대 화면에서는 맵
+ * 전체가 보이지 않아 미니맵이 필수라 숨기지 않고 맵 창 안 오른쪽 위 구석으로 옮긴다(검토 반영): 틀이 맵 안이고 피할 사각형
+ * (엄지 버튼 · 시스템 버튼, 간격 gap)과 겹치지 않으면 그 자리, 아니면 null (그때는 예전처럼 숨긴다). 왼쪽은 이동 영역(화면 왼쪽
+ * 40%)이 그 아래까지 올라와 있어 쓰지 않는다
+ */
+export function minimapFallback(
+  map: { x: number; y: number; w: number; h: number },
+  frame: { w: number; h: number },
+  avoid: readonly { x: number; y: number; w: number; h: number }[],
+  margin: number,
+  gap: number,
+): { x: number; y: number } | null {
+  if (frame.w + margin * 2 > map.w || frame.h + margin * 2 > map.h) return null;
+  const y = map.y + margin;
+  const x = map.x + map.w - margin - frame.w;
+  const free = avoid.every(
+    (b) =>
+      x >= b.x + b.w + gap || b.x >= x + frame.w + gap || y >= b.y + b.h + gap || b.y >= y + frame.h + gap,
+  );
+  return free ? { x, y } : null;
+}
+
 /** 터치 HUD 부품 크기 (그림 단위: × uiScale = 논리 px) */
 export const TOUCH_PART = {
   /** 팀 카드 한 장 (실루엣 · 상태 아이콘 · 체력 칸 · 수감 눈금) */

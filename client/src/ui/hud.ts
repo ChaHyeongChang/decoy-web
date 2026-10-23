@@ -691,6 +691,11 @@ export class Hud {
     });
   }
 
+  /** 보이는 안내 줄 패널 사각형 (논리 px, 없으면 null): 화면 밖 화살표가 그 아래로 숨지 않게 피한다 (넓은 터치 배치는 맵이 화면 높이 가득) */
+  get hintRect(): { x: number; y: number; w: number; h: number } | null {
+    return this.hintText === '' ? null : this.hint.panel.bounds;
+  }
+
   /** 안내 줄: PC는 아래 띠 가운데(행동 칸 자리), 터치는 맨 아래 가장자리 띠(터치 대상이 없는 곳) */
   private drawHint(h: { text: string; icon: string } | null): void {
     const H = this.hint;

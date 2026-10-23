@@ -342,3 +342,28 @@ export class ScreenShake {
     return this.items.length;
   }
 }
+
+/**
+ * 창 밖 컬링 (따라가는 카메라, 성능): 이 사각형(논리 px)의 그림이 화면에 한 화소도 안 보이는가. 보이는 곳 = 맵 창(map ± pad)과,
+ * 캔버스가 논리 크기(viewW × viewH)보다 반올림으로 조금 클 때 창 밖 가리개(가장자리 0.5px 겹침)가 덮지 못하는 오른쪽 · 아래 띠
+ * (viewW + 0.5 ~ canvasW, viewH + 0.5 ~ canvasH). 둘 다와 겹치지 않으면 참 — 가리개는 불투명이라 그 밑 그림은 화소를 바꾸지 않는다.
+ * pad는 안티에일리어싱 여유(기기 1px 이상)
+ */
+export function cullable(
+  b: { x: number; y: number; width: number; height: number },
+  map: { x: number; y: number; w: number; h: number },
+  pad: number,
+  view: { viewW: number; viewH: number; canvasW: number; canvasH: number },
+): boolean {
+  if (![b.x, b.y, b.width, b.height].every(Number.isFinite)) return false;
+  const x1 = b.x + b.width;
+  const y1 = b.y + b.height;
+  const hits = (ax: number, ay: number, bx: number, by: number): boolean =>
+    x1 > ax && b.x < bx && y1 > ay && b.y < by;
+  if (hits(map.x - pad, map.y - pad, map.x + map.w + pad, map.y + map.h + pad)) return false;
+  if (view.canvasW > view.viewW + 0.5 && hits(view.viewW + 0.5, -Infinity, view.canvasW, Infinity))
+    return false;
+  if (view.canvasH > view.viewH + 0.5 && hits(-Infinity, view.viewH + 0.5, Infinity, view.canvasH))
+    return false;
+  return true;
+}

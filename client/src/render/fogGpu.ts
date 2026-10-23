@@ -372,6 +372,20 @@ export class GpuFog implements FogLayer {
   /** 테두리 리프트 (ADD, 곱하기 뒤): 작은 아틀라스 + 블리터 (합성 배율 px 좌표라 1/s 컨테이너에 담는다) */
   private readonly liftKey: string;
   private readonly liftBox: Phaser.GameObjects.Container;
+  /**
+   * 테두리 리프트 조각과 그 합성 px 사각형: 창 밖 조각은 그리지 않는다(블리터는 창 거르기를 하지 않아 맵 전체 조각을 매 프레임
+   * 싣는다 — 확대 3에서 버퍼의 약 20%). 창이 움직일 때만 다시 고른다
+   */
+  private readonly liftBobs: {
+    bob: Phaser.GameObjects.Bob;
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+  }[] = [];
+  private readonly liftAt = { x: Number.NaN, y: Number.NaN, w: Number.NaN, h: Number.NaN };
+  /** 합성 px / 타일 */
+  private readonly k: number;
   private readonly s: number;
   private readonly ox: number;
   private readonly oy: number;
@@ -392,6 +406,7 @@ export class GpuFog implements FogLayer {
     this.oy = oy;
     const lpt = opts.lightPxPerTile;
     const k = TILE_PX * WORLD_SCALE * s;
+    this.k = k;
     // 정적 맵: 조각 아틀라스 (발광을 구워 넣는다 — 따라가는 카메라에서는 발광을 따로 올리지 않는다). 조각은 판 전에 구운
     // 맵 전체 그림에서 복사만 한다: 로비에서 덜 구웠으면(연습 바로 시작) 여기서 끝까지 굽는다 — 판 중에는 칠하지 않는다
     getStaticMap(k / TILE_PX, true);
@@ -437,7 +452,12 @@ export class GpuFog implements FogLayer {
     const liftTex = createCanvasTexture(scene.textures, this.liftKey, lift.canvas);
     for (const f of atlas.frames) liftTex.add(f.name, 0, f.ax, f.ay, f.w, f.h);
     const blit = scene.make.blitter({ key: this.liftKey }, false).setBlendMode(Phaser.BlendModes.ADD);
-    for (const b of atlas.bobs) blit.create(b.x, b.y, b.frame);
+    const frameOf = new Map(atlas.frames.map((f) => [f.name, f]));
+    for (const b of atlas.bobs) {
+      const f = frameOf.get(b.frame);
+      const bob = blit.create(b.x, b.y, b.frame);
+      this.liftBobs.push({ bob, x0: b.x, y0: b.y, x1: b.x + (f?.w ?? 0), y1: b.y + (f?.h ?? 0) });
+    }
     this.liftBox = scene.make
       .container({ x: ox, y: oy }, false)
       .setScale(1 / s)
@@ -462,6 +482,32 @@ export class GpuFog implements FogLayer {
   /** 미니맵 합성 (마지막 commit 뒤 처음 읽을 때만 합성한다) */
   get miniSource(): HTMLCanvasElement {
     return this.mini.canvas;
+  }
+
+  /**
+   * 창 밖 테두리 리프트 조각을 숨긴다 (창이 움직였을 때만): 조각 사각형(합성 px)이 창(합성 px ± 2)과 겹치지 않으면 그리지
+   * 않는다. 창 밖은 가리개 밑이라 같은 화소다. 흔들림은 창 자리에 이미 들어 있다
+   */
+  private cullLift(view: ViewRect): void {
+    const at = this.liftAt;
+    if (view.x === at.x && view.y === at.y && view.w === at.w && view.h === at.h) return;
+    at.x = view.x;
+    at.y = view.y;
+    at.w = view.w;
+    at.h = view.h;
+    const k = this.k;
+    const m = 2;
+    const x0 = view.x * k - m;
+    const y0 = view.y * k - m;
+    const x1 = (view.x + view.w) * k + m;
+    const y1 = (view.y + view.h) * k + m;
+    let shown = 0;
+    for (const b of this.liftBobs) {
+      const on = b.x1 > x0 && b.x0 < x1 && b.y1 > y0 && b.y0 < y1;
+      if (b.bob.visible !== on) b.bob.setVisible(on);
+      if (on) shown += 1;
+    }
+    gfxState.features.liftShown = shown;
   }
 
   /**
@@ -509,6 +555,7 @@ export class GpuFog implements FogLayer {
       uploadCanvasTexture(tex);
     }
     gfxState.features.chunkImages = n;
+    this.cullLift(view);
     return false;
   }
 

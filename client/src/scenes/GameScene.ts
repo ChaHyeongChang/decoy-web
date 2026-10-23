@@ -33,6 +33,7 @@ import { InputLog, InputSampler } from '../input';
 import { AimHold, aimAnchor } from '../aimHold';
 import { applyDashStart, applyWindupLock, predictMonsterPress, type LocalWindup } from '../localActions';
 import { COLOR } from '../render/colors';
+import { cullable } from '../render/camera';
 import { CameraDirector, devPerTile } from '../render/cameraDirector';
 import { UI } from '../art/palette';
 import { ScreenEffects, collectFxTargets } from '../render/effects';
@@ -49,12 +50,15 @@ import {
   CAM_ZOOM,
   HUD,
   MAP_RECT,
+  MINIMAP_INSET,
+  MIN_GAP,
   VIEW_H,
   VIEW_TILES_H,
   VIEW_TILES_W,
   VIEW_W,
   WORLD_SCALE,
   fitCamera,
+  minimapFallback,
   tileToScreen,
 } from '../ui/layout';
 import { Minimap } from '../ui/minimap';
@@ -158,11 +162,41 @@ export class GameScene extends Phaser.Scene {
   private readonly aimHold = new AimHold();
   private readonly aimPointer = { x: 0, y: 0 };
   private readonly aimCursor = new Phaser.Math.Vector2();
+  /** 화면 밖 화살표가 피할 사각형 (프레임마다 다시 채운다) */
+  private readonly edgeAvoid: { x: number; y: number; w: number; h: number }[] = [];
+
+  /** 판 중 창이 낮아져 엄지 버튼이 옆 칸 미니맵을 덮었다 (TouchControls onCovered) */
+  private minimapCovered = false;
+
+  /**
+   * 미니맵 자리: 엄지 버튼이 덮지 않으면 처음 자리. 덮으면 확대 화면에서는 맵 창 안 빈 구석으로 옮기고(미니맵이 필수, 검토 반영),
+   * 옮길 자리가 없거나 확대 1이면 예전처럼 숨긴다(M12 — 판 화면 전체가 보여 같은 정보)
+   */
+  private placeMinimap(): void {
+    const mm = this.minimap;
+    if (!this.minimapCovered) {
+      mm.relocate(null);
+      mm.setHidden(false);
+      return;
+    }
+    const size = mm.frameSize;
+    const L = HUD.touch?.L ?? 1;
+    const spot =
+      CAM_ZOOM > 1 && size
+        ? minimapFallback(MAP_RECT, size, this.thumbBoxes, MINIMAP_INSET.margin * L, MIN_GAP * L)
+        : null;
+    mm.relocate(spot);
+    mm.setHidden(spot === null);
+  }
+
   /** 조준 붙잡기 기준 카메라 가운데 (타일 → 월드 px, 입력 틱마다 다시 쓴다) */
   private readonly aimAnchorTile = { x: 0, y: 0 };
   /** 따라가는 카메라 (판 장면마다 새로) · 창 밖 가리개 · 잘라 옮김 어두워짐 */
   private director: CameraDirector | null = null;
-  private frameCovers: Phaser.GameObjects.Rectangle[] = [];
+  private frameCovers: Phaser.GameObjects.GameObject[] = [];
+  /** 창 밖에 통째로 있어 이번 프레임 그리지 않는 월드 그림 (cameraFilter로 거른다 — visible · 게임 상태는 그대로) */
+  private readonly culled = new Set<Phaser.GameObjects.GameObject>();
+  private readonly cullRect = new Phaser.Geom.Rectangle();
   private dipCover: Phaser.GameObjects.Rectangle | null = null;
   /** 괴물: 예측한 돌진을 누른 마지막 시각 (입력 틱, 돌진 잔상 격자의 시작) */
   private localDashAt: number | null = null;
@@ -430,9 +464,13 @@ export class GameScene extends Phaser.Scene {
             const r = canvas.getBoundingClientRect();
             return r.height > 0 ? { left: r.left, top: r.top, k: r.height / VIEW_H } : null;
           },
-          onCovered: (ids) => this.minimap.setHidden(ids.has('minimap')),
+          onCovered: (ids) => {
+            this.minimapCovered = ids.has('minimap');
+            this.placeMinimap();
+          },
           onThumbs: (boxes) => {
             this.thumbBoxes = boxes;
+            this.placeMinimap();
           },
         },
       });
@@ -513,21 +551,66 @@ export class GameScene extends Phaser.Scene {
       [0, m.y, m.x, m.h],
       [m.x + m.w, m.y, W - m.x - m.w, m.h],
     ];
+    // 가리개 넷을 Graphics 하나로 (사각형 넷이면 프레임마다 save · setTransform · restore가 넷이다 — 같은 화소)
+    const g = this.add.graphics().setDepth(37);
+    g.fillStyle(UI.background, 1);
     for (const [x, y, w, h] of rects) {
       if (w <= 0 || h <= 0) continue;
       // 가장자리 반 픽셀 비침이 없게 1px 겹친다
-      const r = this.add
-        .rectangle(x - 0.5, y - 0.5, w + 1, h + 1, UI.background)
-        .setOrigin(0, 0)
-        .setDepth(37);
-      this.frameCovers.push(r);
+      g.fillRect(x - 0.5, y - 0.5, w + 1, h + 1);
     }
+    this.frameCovers.push(g);
     this.dipCover = this.add
       .rectangle(m.x, m.y, m.w, m.h, 0x000000)
       .setOrigin(0, 0)
       .setDepth(36)
       .setAlpha(0)
       .setVisible(false);
+  }
+
+  /**
+   * 창 밖 컬링 (성능, 확대 화면만): 월드 그림(깊이 36 아래의 Image · Sprite · Text) 가운데 맵 창 밖(가리개 밑 · 캔버스 밖)에
+   * 통째로 있는 것은 이번 프레임 그리지 않는다. visible은 건드리지 않고 카메라 거르기(cameraFilter)만 쓴다 — 캐릭터 · 정보 코드가
+   * 정하는 보이기 상태와 디버그 목록은 그대로다. 지난 프레임에 거른 것은 먼저 되돌린다(깊이 · 부모가 바뀌어도 숨은 채로 남지 않게).
+   * 가리개가 불투명이라 같은 화소다 (render/camera.ts cullable)
+   */
+  private cullWorld(): void {
+    for (const o of this.culled) o.cameraFilter = 0;
+    this.culled.clear();
+    if (CAM_ZOOM <= 1) return;
+    const cam = this.cameras.main;
+    const z = gfxState.zoom > 0 ? gfxState.zoom : 1;
+    const pad = Math.max(1, 0.5 + 1 / z);
+    const view = {
+      viewW: VIEW_W,
+      viewH: VIEW_H,
+      canvasW: this.game.canvas.width / z,
+      canvasH: this.game.canvas.height / z,
+    };
+    const r = this.cullRect;
+    const visit = (o: Phaser.GameObjects.GameObject): void => {
+      if (o instanceof Phaser.GameObjects.Container) {
+        if (o.visible) for (const c of o.list) visit(c);
+        return;
+      }
+      if (
+        !(o instanceof Phaser.GameObjects.Image) &&
+        !(o instanceof Phaser.GameObjects.Sprite) &&
+        !(o instanceof Phaser.GameObjects.Text)
+      )
+        return;
+      if (!o.visible) return;
+      o.getBounds(r);
+      if (cullable(r, MAP_RECT, pad, view)) {
+        o.cameraFilter = cam.id;
+        this.culled.add(o);
+      }
+    };
+    for (const o of this.children.list) {
+      const d = (o as Phaser.GameObjects.GameObject & { depth?: number }).depth ?? 0;
+      if (d < 36) visit(o);
+    }
+    gfxState.features.culledObjects = this.culled.size;
   }
 
   /** 흔들림 세기 배율 (디버그 · 시험, 나중 '흔들림 줄이기' 설정과 같은 값) */
@@ -1055,7 +1138,14 @@ export class GameScene extends Phaser.Scene {
     const m = edgeMetrics();
     const balance = this.app.balance;
     const bodyR = balance ? balance.survivor.radius * TILE_PX * WORLD_SCALE * 1.15 : 0;
-    const avoid = this.minimap.insetRect ? [...this.thumbBoxes, this.minimap.insetRect] : this.thumbBoxes;
+    // 피할 사각형: 엄지 버튼 · 맵 안 미니맵 · 보이는 안내 줄 (검토 반영: 넓은 터치 배치는 맵이 화면 높이 가득이라 아래 화살표가
+    // 수감 · 관전 안내 줄 밑에 깔렸다). 배열 하나를 다시 쓴다
+    const avoid = this.edgeAvoid;
+    avoid.length = 0;
+    for (const b of this.thumbBoxes) avoid.push(b);
+    if (this.minimap.insetRect) avoid.push(this.minimap.insetRect);
+    const hint = this.hud.hintRect;
+    if (hint) avoid.push(hint);
     placeEdges(
       targets,
       { view, rect: MAP_RECT },
@@ -1170,6 +1260,8 @@ export class GameScene extends Phaser.Scene {
     const tab = this.sampler.tabHeld || (this.touchControls?.scoreboard ?? false);
     this.tutorial?.update(now, anyKey || tab);
     this.scoreboard.update(tab, snap);
+    // 이번 프레임 월드 그림이 다 놓인 뒤: 창 밖 그림은 그리지 않는다
+    this.cullWorld();
   }
 
   /**
