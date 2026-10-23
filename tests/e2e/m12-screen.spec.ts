@@ -237,18 +237,16 @@ test('글자 · 겹침: 휴대폰 높이 293 · 320 · 360 · 16:9 두 가지에
     );
 
     if (role === 'runner') {
-      // 수감: 아래 안내 줄(터치 문구)이 가장자리 띠 안에서 버튼과 겹치지 않는다
+      // 수감: 아래 안내 줄(터치 문구)이 가장자리 띠 안에서 버튼과 겹치지 않는다. 따라가는 카메라에서는 수감 중 관전을 알리는
+      // 더 긴 문구다(팀 카드를 누르면 동료 화면, STORY_TEXT imprisonedWatchHintTouch)
+      const jailText = '수감 중 — 동료가 구조해 주면 풀려난다 · 팀 카드를 누르면 동료 화면';
       await sendTest(page, { kind: 'setSurvivor', target: s.id, status: 'imprisoned', imprisonCount: 1 });
-      await page.waitForFunction(
-        () => String(window.__DECOY__?.getHud().hint ?? '').includes('구조 버튼'),
-        null,
-        {
-          polling: 150,
-        },
-      );
+      await page.waitForFunction((want) => String(window.__DECOY__?.getHud().hint ?? '') === want, jailText, {
+        polling: 150,
+      });
       const jailed = await checkScreen(page, `${label} 수감`);
       const hint = jailed.layout.items.find((i) => i.id === 'hint' && i.kind === 'text');
-      expect(hint?.text, label).toBe('수감 중 — 동료가 감옥 문 앞에서 구조 버튼을 누르고 있으면 풀려난다');
+      expect(hint?.text, label).toBe(jailText);
     }
     // 점수판: 터치 문구 · 닫기 안내, 글자 12px 이상 · 화면 안, 화면 어디를 눌러도 닫힌다
     const board = centerOf(await waitForTouchTarget(page, 'scoreboard'));

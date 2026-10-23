@@ -24,7 +24,7 @@ import {
   type CaptureOptions,
   type RayResult,
 } from './visualProbe';
-import { CAM1, waitCamera } from './helpers';
+import { aimMonsterAt, CAM1 } from './helpers';
 
 const balance = validateBalance(JSON.parse(readFileSync('config/balance.json', 'utf8')));
 const ROLE_HEX = { runner: 0x3b82f6, guard: 0xa855f7, scout: 0x22c55e } as const;
@@ -137,13 +137,8 @@ async function startRoom(
   };
 }
 
-/** 따라가는 카메라: 순간이동 뒤 창이 멈춘 다음 커서를 옮긴다(흔들림 끔 — 표본 · 조준이 창 움직임에 흔들리지 않게) */
-async function aimAt(page: Page, x: number, y: number): Promise<void> {
-  await page.evaluate(() => window.__DECOY__?.setCameraShake(0));
-  await waitCamera(page);
-  const c = await page.evaluate(([tx, ty]) => window.__DECOY__?.tileToClient(tx!, ty!) ?? null, [x, y]);
-  await page.mouse.move(c!.x, c!.y);
-}
+/** 괴물 조준 (따라가는 카메라: 창이 멈춘 뒤 커서를 옮기고 서버 조준이 그 방향인지 확인 — helpers.aimMonsterAt) */
+const aimAt = aimMonsterAt;
 
 async function noBanners(page: Page): Promise<void> {
   await page.waitForFunction(() => (window.__DECOY__?.getBanners() ?? []).length === 0, null, {

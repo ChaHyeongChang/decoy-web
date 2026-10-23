@@ -21,7 +21,7 @@ import {
   type InfoItem,
   type Role,
 } from '@decoy/shared';
-import { closeAll, lastSnapshot, sendTest, startFourPlayerMatch, waitCamera, type Player } from './helpers';
+import { aimMonsterAt, closeAll, lastSnapshot, sendTest, startFourPlayerMatch, type Player } from './helpers';
 import {
   captureBodies,
   captureSweep,
@@ -53,13 +53,8 @@ async function settle(p: Player): Promise<void> {
   });
 }
 
-/** 따라가는 카메라: 순간이동 뒤 창이 멈춘 다음 커서를 옮긴다(흔들림 끔 — 표본 · 조준이 창 움직임에 흔들리지 않게) */
-async function aimAt(page: Page, x: number, y: number): Promise<void> {
-  await page.evaluate(() => window.__DECOY__?.setCameraShake(0));
-  await waitCamera(page);
-  const c = await page.evaluate(([tx, ty]) => window.__DECOY__?.tileToClient(tx!, ty!) ?? null, [x, y]);
-  await page.mouse.move(c!.x, c!.y);
-}
+/** 괴물 조준 (따라가는 카메라: 창이 멈춘 뒤 커서를 옮기고 서버 조준이 그 방향인지 확인 — helpers.aimMonsterAt) */
+const aimAt = aimMonsterAt;
 
 async function place(
   host: Page,
@@ -477,7 +472,8 @@ test('생존자 화면 역할색 유지: 빛 바닥 · 빨강 · 노랑 부채�
   // 생존자 화면 범위 경계 = 판정값 (팀원이 없는 쪽으로 친다)
   await place(host, { guard: [p.guard.id, 37.6, 11.6, 0.5], scout: [p.scout.id, 36.2, 12.7, 2.2] });
   await place(host, { monster: [p.monster.id, 38.5, 10.6, -Math.PI / 2] }, false);
-  await aimAt(host, 38.5, 4);
+  // 북쪽 3.6타일 (확대 창 안: 창 위쪽 끝 근처를 누르면 HUD 띠 · 창 밖에 떨어질 수 있다)
+  await aimAt(host, 38.5, 7);
   await view.waitForTimeout(700);
   const mon = (await lastSnapshot(view))!.monster!;
   // 재기를 먼저 시작하고 누른다 (확대 화면은 프레임이 느려 누른 뒤 시작하면 0.4초 준비 프레임이 지나간다)
