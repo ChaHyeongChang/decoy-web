@@ -343,8 +343,44 @@ function paintNoise(P: Painter, seed: number): void {
   c.save();
   c.globalCompositeOperation = 'overlay';
   c.imageSmoothingEnabled = true;
-  c.drawImage(noiseMap(seed), 0, 0, P.W, P.H);
+  drawStretched(c, noiseMap(seed), P.W, P.H, P.cull);
   c.restore();
+}
+
+/**
+ * 작은 그림(잡음 · 발광 지도)을 맵 전체 W × H에 늘려 그린다. 자르는 상자가 있으면 거기 드는 원본 조각만 (띠 · 조각 굽기마다
+ * 큰 그림 전체를 늘려 그리지 않게). 둘레 2 원본 px를 더 읽어 선형 보간의 가장자리 처리가 자르기 밖에서 일어나게 한다:
+ * 한 번에 그린 것과 같은 화소
+ */
+function drawStretched(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLCanvasElement,
+  W: number,
+  H: number,
+  cull: PxBox | null,
+): void {
+  if (!cull) {
+    ctx.drawImage(img, 0, 0, W, H);
+    return;
+  }
+  const fx = img.width / W;
+  const fy = img.height / H;
+  const sx0 = Math.max(0, Math.floor(cull.x0 * fx) - 2);
+  const sy0 = Math.max(0, Math.floor(cull.y0 * fy) - 2);
+  const sx1 = Math.min(img.width, Math.ceil(cull.x1 * fx) + 2);
+  const sy1 = Math.min(img.height, Math.ceil(cull.y1 * fy) + 2);
+  if (sx1 > sx0 && sy1 > sy0)
+    ctx.drawImage(
+      img,
+      sx0,
+      sy0,
+      sx1 - sx0,
+      sy1 - sy0,
+      sx0 / fx,
+      sy0 / fy,
+      (sx1 - sx0) / fx,
+      (sy1 - sy0) / fy,
+    );
 }
 
 function paintDecal(P: Painter, dc: Decal): void {
@@ -913,7 +949,7 @@ export function paintStaticMap(
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(getGlowMap(), 0, 0, P.W, P.H);
+    drawStretched(ctx, getGlowMap(), P.W, P.H, cull);
     ctx.restore();
   }
 }
@@ -934,6 +970,7 @@ export function bakeStaticMap(scale: number, withGlow: boolean): HTMLCanvasEleme
  * 바뀐 뒤 옛 배율의 큰 캔버스(배율 2에서 약 22MB)를 붙잡지 않는다. keepStaticMaps 전에도 두 장을 넘기지 않는다
  */
 const cache = new Map<string, HTMLCanvasElement>();
+/** 캐시 장 수: 따라가는 카메라는 판 배율 큰 맵 + 미니맵 작은 맵 두 장을 함께 쓴다 */
 const CACHE_MAX = 2;
 let glowCanvas: HTMLCanvasElement | null = null;
 let glowCanvasScale = 0;
@@ -951,7 +988,126 @@ function recordCache(): void {
   gfxState.features.mapCacheCount = cache.size + (glowCanvas ? 1 : 0);
 }
 
-/** 같은 배율이면 다시 굽지 않는다 */
+// ───────────── 나눠 굽기 (따라가는 카메라: 판 전에 큰 정적 맵을 여러 번에 걸쳐 굽는다) ─────────────
+
+/** 나눠 굽는 띠 높이 (타일): 배율 3 PC(타일 89px)에서 띠 하나 약 4285 × 178px */
+export const BAKE_BAND_TILES = 2;
+
+/** 굽는 중인 정적 맵 (한 번에 하나: 판에 쓸 배율) */
+interface StaticJob {
+  key: string;
+  scale: number;
+  withGlow: boolean;
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  /** 다음에 구울 띠 번호 */
+  band: number;
+  bands: number;
+  /** 합계 · 가장 긴 띠 하나 (한 번에 막는 시간) */
+  ms: number;
+  maxBandMs: number;
+  /** 띠를 굽기 전 공통 준비 중 마친 수 (도형 · 바닥 무늬 → 잡음 지도 → 발광 지도): 첫 띠에 몰리지 않게 한 걸음씩 */
+  warm: number;
+}
+
+let job: StaticJob | null = null;
+
+/** 띠 하나를 굽는다 (정수 px 띠에 자르기 + 겹치는 것만 칠하기: 한 번에 구운 것과 같은 화소) */
+function bakeBand(j: StaticJob): void {
+  const t0 = performance.now();
+  const k = TILE_PX * j.scale;
+  const H = j.canvas.height;
+  const y0 = Math.min(H, Math.round(j.band * BAKE_BAND_TILES * k));
+  const y1 = j.band === j.bands - 1 ? H : Math.min(H, Math.round((j.band + 1) * BAKE_BAND_TILES * k));
+  const c = j.ctx;
+  c.save();
+  c.beginPath();
+  c.rect(0, y0, j.canvas.width, y1 - y0);
+  c.clip();
+  paintStaticMap(c, k, j.withGlow, { x0: -4, y0: y0 - 4, x1: j.canvas.width + 4, y1: y1 + 4 });
+  c.restore();
+  j.band += 1;
+  const ms = performance.now() - t0;
+  j.ms += ms;
+  j.maxBandMs = Math.max(j.maxBandMs, ms);
+}
+
+function finishJob(j: StaticJob): HTMLCanvasElement {
+  job = null;
+  cache.set(j.key, j.canvas);
+  while (cache.size > CACHE_MAX) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined || oldest === j.key) break;
+    cache.delete(oldest);
+  }
+  // 굽는 시간 기록: 한 번에 막는 시간(가장 긴 띠)과 합계
+  record('static', j.scale, j.maxBandMs);
+  gfxState.features.mapBakeTotalMs = Math.round(j.ms * 10) / 10;
+  recordCache();
+  return j.canvas;
+}
+
+/**
+ * 정적 맵을 budgetMs 안에서 띠 몇 개씩 굽는다 (로비 대기 · 첫 화면의 남는 시간에 여러 번 부른다 — 판 시작 전에 다 굽게).
+ * 다 구웠거나 이미 캐시에 있으면 true. 다른 배율을 굽던 중이면 그 일은 버린다
+ */
+export function bakeStaticMapStep(scale: number, withGlow: boolean, budgetMs: number): boolean {
+  const key = cacheKey(scale, withGlow);
+  if (cache.has(key)) return true;
+  if (!job || job.key !== key) {
+    const size = staticMapSize(scale);
+    const { canvas, ctx } = newCanvas(size.w, size.h);
+    job = {
+      key,
+      scale,
+      withGlow,
+      canvas,
+      ctx,
+      band: 0,
+      bands: Math.max(1, Math.ceil(MAP_H / BAKE_BAND_TILES)),
+      ms: 0,
+      maxBandMs: 0,
+      warm: 0,
+    };
+  }
+  const j = job;
+  const t0 = performance.now();
+  // 공통 준비: 하나씩 하고 예산을 넘으면 다음 걸음으로 (잡음 · 발광 지도는 각각 약 15~20ms)
+  const warmups: (() => void)[] = [
+    () => {
+      geomOf();
+      decalsOf(MAP_ART.seed);
+    },
+    () => noiseMap(MAP_ART.seed),
+    () => {
+      if (j.withGlow) getGlowMap();
+    },
+  ];
+  while (j.warm < warmups.length) {
+    warmups[j.warm]?.();
+    j.warm += 1;
+    const ms = performance.now() - t0;
+    if (ms >= budgetMs) {
+      j.ms += ms;
+      return false;
+    }
+  }
+  j.ms += performance.now() - t0;
+  do {
+    bakeBand(j);
+  } while (j.band < j.bands && performance.now() - t0 < budgetMs);
+  gfxState.features.mapBakeBands = j.band;
+  if (j.band < j.bands) return false;
+  finishJob(j);
+  return true;
+}
+
+/** 다 구운 정적 맵 (없으면 null — 굽지 않는다) */
+export function staticMapIfReady(scale: number, withGlow: boolean): HTMLCanvasElement | null {
+  return cache.get(cacheKey(scale, withGlow)) ?? null;
+}
+
+/** 같은 배율이면 다시 굽지 않는다 (나눠 굽던 중이면 남은 띠를 마저 굽는다) */
 export function getStaticMap(scale: number, withGlow: boolean): HTMLCanvasElement {
   const key = cacheKey(scale, withGlow);
   const hit = cache.get(key);
@@ -960,6 +1116,11 @@ export function getStaticMap(scale: number, withGlow: boolean): HTMLCanvasElemen
     cache.delete(key);
     cache.set(key, hit);
     return hit;
+  }
+  if (job && job.key === key) {
+    const j = job;
+    while (j.band < j.bands) bakeBand(j);
+    return finishJob(j);
   }
   const canvas = bakeStaticMap(scale, withGlow);
   cache.set(key, canvas);
@@ -992,6 +1153,7 @@ export interface StaticMapNeed {
 export function keepStaticMaps(needs: readonly StaticMapNeed[], glow: boolean): void {
   const keep = new Set(needs.map((n) => cacheKey(n.scale, n.withGlow)));
   for (const key of [...cache.keys()]) if (!keep.has(key)) cache.delete(key);
+  if (job && !keep.has(job.key)) job = null;
   if (!glow) glowCanvas = null;
   recordCache();
 }

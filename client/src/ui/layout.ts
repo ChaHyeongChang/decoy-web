@@ -230,8 +230,8 @@ export function layout(): Readonly<LayoutInfo> {
 // 확대해 보인다. 그래서 보이는 타일 수는 기기 · 화면비와 상관없이 같다(넓은 화면이 더 보지 않는다). 확대 수준은 판 내내
 // 고정이고 플레이어가 바꿀 수 없다(공정성, DECISIONS 9절). CAM은 카메라가 프레임마다 쓴다(render/camera.ts)
 
-/** 기본 확대 수준 (맵 전체가 보이던 배율 대비, 1 = 맵 전체). 사용자가 고른 값 (DECISIONS 9절) */
-export const DEFAULT_CAM_ZOOM = 1;
+/** 기본 확대 수준 (맵 전체가 보이던 배율 대비, 1 = 맵 전체): ② 중간 — 창 16 × 10.7타일. 사용자가 고른 값 (DECISIONS 9절) */
+export const DEFAULT_CAM_ZOOM = 3;
 
 /** 카메라 확대 (맵 전체가 보이던 배율 대비). 1이면 맵 전체 (옛 고정 화면) */
 export let CAM_ZOOM = 1;

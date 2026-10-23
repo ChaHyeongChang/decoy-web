@@ -29,7 +29,7 @@ import {
   type PointView,
   type Vec2,
 } from '@decoy/shared';
-import { keepStaticMaps } from '../art/mapArt';
+import { getStaticMap, keepStaticMaps } from '../art/mapArt';
 import { ChunkAtlas, chunkBox, chunkRange } from '../art/mapChunks';
 import type { ViewRect } from './camera';
 import { MiniComposite } from './fogMini';
@@ -332,9 +332,10 @@ const EXIT_KEY: Readonly<Record<ExitId, string>> = { N: 'exit-N', S: 'exit-S' };
 const ONE_POINT: PointView[] = [];
 const ONE_EXIT: ExitView[] = [];
 
-/** 조각을 미리 굽는 여유 (타일): 창 둘레 이만큼 안의 조각은 프레임마다 PREFETCH_PER_FRAME개까지 미리 굽는다 */
+/** 조각을 미리 옮겨 두는 여유 (타일): 창 둘레 이만큼 안의 조각은 프레임마다 PREFETCH_BUDGET_MS 안에서 미리 옮긴다 */
 export const PREFETCH_MARGIN = 2;
-const PREFETCH_PER_FRAME = 2;
+/** 프레임마다 둘레 조각을 미리 옮기는 시간 (ms). 조각 하나 = 맵 전체 그림에서 복사 + 일부 업로드 (약 0.1~0.3ms) */
+const PREFETCH_BUDGET_MS = 1.5;
 
 export class GpuFog implements FogLayer {
   readonly mode = 'gpu' as const;
@@ -391,7 +392,9 @@ export class GpuFog implements FogLayer {
     this.oy = oy;
     const lpt = opts.lightPxPerTile;
     const k = TILE_PX * WORLD_SCALE * s;
-    // 정적 맵: 조각 아틀라스 (발광을 구워 넣는다 — 따라가는 카메라에서는 발광을 따로 올리지 않는다)
+    // 정적 맵: 조각 아틀라스 (발광을 구워 넣는다 — 따라가는 카메라에서는 발광을 따로 올리지 않는다). 조각은 판 전에 구운
+    // 맵 전체 그림에서 복사만 한다: 로비에서 덜 구웠으면(연습 바로 시작) 여기서 끝까지 굽는다 — 판 중에는 칠하지 않는다
+    getStaticMap(k / TILE_PX, true);
     this.chunks = opts.chunks ?? new ChunkAtlas(k, VIEW_TILES_W, VIEW_TILES_H, PREFETCH_MARGIN, true);
     this.chunkKey = nextFogKey('fog-chunks');
     this.chunkTex = createCanvasTexture(scene.textures, this.chunkKey, this.chunks.canvas);
@@ -444,8 +447,14 @@ export class GpuFog implements FogLayer {
     gfxState.features.liftPieces = atlas.bobs.length;
 
     this.mini = new MiniComposite(lpt, this.light);
-    // 정적 맵 캐시는 미니맵 한 장만 남긴다 (옛 배율 · 다른 경로의 큰 캔버스를 붙잡지 않게). 발광은 조각 굽기가 쓴다
-    keepStaticMaps([{ scale: lpt / TILE_PX, withGlow: true }], true);
+    // 정적 맵 캐시는 조각을 복사할 맵 전체 그림과 미니맵 두 장만 남긴다 (옛 배율 · 다른 경로의 큰 캔버스를 붙잡지 않게)
+    keepStaticMaps(
+      [
+        { scale: k / TILE_PX, withGlow: true },
+        { scale: lpt / TILE_PX, withGlow: true },
+      ],
+      true,
+    );
     this.begin();
     this.commit();
   }
@@ -456,8 +465,8 @@ export class GpuFog implements FogLayer {
   }
 
   /**
-   * 보이는 창(타일)에 맞춰 조각 그림을 놓는다. 창 안 조각은 없으면 바로 굽고, 둘레 여유 안 조각은 프레임마다 몇 개씩 미리
-   * 굽는다. 프레임마다 부른다(그림 자리만 바꾼다). 늘 false (화면 합성이 따로 없어 안개 주기를 앞당길 일이 없다)
+   * 보이는 창(타일)에 맞춰 조각 그림을 놓는다. 창 안 조각은 없으면 바로 옮기고(맵 전체 그림에서 복사), 둘레 여유 안 조각은
+   * 프레임마다 시간 예산 안에서 미리 옮긴다. 프레임마다 부른다(그림 자리만 바꾼다). 늘 false (화면 합성이 따로 없어 안개 주기를 앞당길 일이 없다)
    */
   setView(view: ViewRect): boolean {
     const a = this.chunks;
@@ -488,11 +497,13 @@ export class GpuFog implements FogLayer {
       }
     }
     for (let i = n; i < this.chunkImgs.length; i += 1) this.chunkImgs[i]?.setVisible(false);
-    // 둘레 미리 굽기 (창 안은 위에서 다 구웠다)
+    // 둘레 미리 옮기기 (창 안은 위에서 다 옮겼다): 시간 예산 안에서만
     const p = chunkRange(view, PREFETCH_MARGIN, a.tiles);
-    let budget = PREFETCH_PER_FRAME;
-    for (let cy = p.cy0; cy <= p.cy1 && budget > 0; cy += 1)
-      for (let cx = p.cx0; cx <= p.cx1 && budget > 0; cx += 1) if (a.ensure(cx, cy)) budget -= 1;
+    const until = performance.now() + PREFETCH_BUDGET_MS;
+    let over = false;
+    for (let cy = p.cy0; cy <= p.cy1 && !over; cy += 1)
+      for (let cx = p.cx0; cx <= p.cx1 && !over; cx += 1)
+        if (a.ensure(cx, cy)) over = performance.now() > until;
     if (this.chunkFull) {
       this.chunkFull = false;
       uploadCanvasTexture(tex);

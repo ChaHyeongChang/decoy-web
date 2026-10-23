@@ -16,7 +16,7 @@
 //  - GpuFog (품질 높음 · 중간 + WebGL, fogGpu.ts): 정적 맵 텍스처 한 번 + 작은 빛 지도만 갱신해 MULTIPLY
 import type Phaser from 'phaser';
 import { MAP_H, MAP_W, TILE_PX, type Balance, type ExitView, type PointView, type Vec2 } from '@decoy/shared';
-import { getGlowMap, getStaticMap, keepStaticMaps } from '../art/mapArt';
+import { bakeStaticMapStep, getStaticMap, keepStaticMaps } from '../art/mapArt';
 import { ChunkAtlas, chunkRange } from '../art/mapChunks';
 import { effectivePreset, type RendererKind } from '../gfx/presets';
 import { gfxState } from '../gfx/state';
@@ -164,31 +164,47 @@ export function createFogLayer(
 }
 
 /**
- * 지금 그래픽 상태(품질 · 렌더러 · 백버퍼 배율 · 확대 수준)로 안개 레이어가 쓸 맵 그림을 미리 굽는다 (로비 대기 중에 부르면
- * 판 시작 때 굽지 않는다): 미니맵 정적 맵 · 발광 + 시작 자리(at) 둘레 창의 정적 맵 조각. 걸린 시간(ms)을 돌려준다
+ * 지금 그래픽 상태(품질 · 렌더러 · 백버퍼 배율 · 확대 수준)로 안개 레이어가 쓸 맵 그림을 미리 굽는 한 걸음 (로비 대기 · 첫 화면의
+ * 남는 시간에 budgetMs씩 여러 번 부른다 — 판 시작 때 굽지 않게, 판 중에는 부르지 않는다): 판 배율 맵 전체 그림(띠 몇 개씩) →
+ * 미니맵 작은 맵 · 발광 → (GPU) 시작 자리(at) 둘레 창의 조각 아틀라스(맵 전체 그림에서 복사). 다 끝났으면 true
  */
+export function prebakeFogStep(
+  renderer: RendererKind = gfxState.renderer,
+  at: Vec2 | null = null,
+  budgetMs = 8,
+): boolean {
+  const p = fogArtParams(renderer);
+  const big = p.k / TILE_PX;
+  const mini = p.lightPxPerTile / TILE_PX;
+  const whole = p.mode === 'canvas' && wholeRegion();
+  // 판에 쓸 두 장만 남긴다 (옛 배율 · 다른 경로의 큰 캔버스를 붙잡지 않게). 발광은 맵 전체 그림이 다 구워질 때까지 쓴다
+  keepStaticMaps(
+    whole
+      ? [{ scale: big, withGlow: true }]
+      : [
+          { scale: big, withGlow: true },
+          { scale: mini, withGlow: true },
+        ],
+    true,
+  );
+  if (!bakeStaticMapStep(big, true, budgetMs)) return false;
+  if (whole) return true;
+  getStaticMap(mini, true);
+  if (p.mode !== 'gpu' || !at) return true;
+  const atlas = chunkAtlasFor(p.k, p.margin);
+  const w = VIEW_TILES_W;
+  const h = VIEW_TILES_H;
+  const x = Math.max(0, Math.min(MAP_W - w, at.x - w / 2));
+  const y = Math.max(0, Math.min(MAP_H - h, at.y - h / 2));
+  const r = chunkRange({ x, y, w, h }, 0, atlas.tiles);
+  for (let cy = r.cy0; cy <= r.cy1; cy += 1) for (let cx = r.cx0; cx <= r.cx1; cx += 1) atlas.ensure(cx, cy);
+  return true;
+}
+
+/** 미리 굽기를 한 번에 끝까지 (시험 · 판 장면을 만들 때 아직 덜 구웠으면). 걸린 시간(ms) */
 export function prebakeFogArt(renderer: RendererKind = gfxState.renderer, at: Vec2 | null = null): number {
   const t0 = performance.now();
-  const p = fogArtParams(renderer);
-  if (p.mode === 'canvas' && wholeRegion()) {
-    // Canvas 합성 · 맵 전체(확대 1): 합성 배율 정적 맵 한 장 (CanvasFog와 같은 배율 · 발광)
-    getStaticMap(p.k / TILE_PX, true);
-    keepStaticMaps([{ scale: p.k / TILE_PX, withGlow: true }], false);
-    return performance.now() - t0;
-  }
-  getStaticMap(p.lightPxPerTile / TILE_PX, true);
-  keepStaticMaps([{ scale: p.lightPxPerTile / TILE_PX, withGlow: true }], true);
-  getGlowMap();
-  const atlas = chunkAtlasFor(p.k, p.margin);
-  if (at) {
-    const w = VIEW_TILES_W;
-    const h = VIEW_TILES_H;
-    const x = Math.max(0, Math.min(MAP_W - w, at.x - w / 2));
-    const y = Math.max(0, Math.min(MAP_H - h, at.y - h / 2));
-    const r = chunkRange({ x, y, w, h }, 0, atlas.tiles);
-    for (let cy = r.cy0; cy <= r.cy1; cy += 1)
-      for (let cx = r.cx0; cx <= r.cx1; cx += 1) atlas.ensure(cx, cy);
-  }
+  while (!prebakeFogStep(renderer, at, Infinity));
   return performance.now() - t0;
 }
 
@@ -201,13 +217,12 @@ export class CanvasFog implements FogLayer {
   readonly shader = false;
   private readonly base: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
-  /** 정적 맵 조각 (창이 맵보다 작을 때) */
-  private readonly chunks: ChunkAtlas | null;
   /**
-   * 합성 영역이 맵 전체일 때(확대 1)의 정적 맵 한 장: 조각 대신 한 번에 복사하고, 미니맵은 합성 캔버스를 그대로 줄여 쓴다
-   * (따라가는 카메라 전과 같은 일의 양 — perf-budget 기준값)
+   * 판 배율 정적 맵 전체 그림 (판 전에 나눠 구운 것, mapArt.bakeStaticMapStep). 합성은 영역만큼 잘라 한 번에 복사한다.
+   * 영역이 맵 전체(확대 1)면 미니맵도 합성 캔버스를 그대로 줄여 쓴다(따라가는 카메라 전과 같은 일의 양 — perf-budget 기준값)
    */
-  private readonly staticMap: HTMLCanvasElement | null;
+  private readonly staticMap: HTMLCanvasElement;
+  private readonly whole: boolean;
   private readonly light: LightMap | null;
   private readonly pen: CanvasPen;
   /** 이번 주기의 바닥 명령 (거점 · 탈출구 · 시야 채움, 그린 순서대로)과 빛 명령 */
@@ -253,21 +268,26 @@ export class CanvasFog implements FogLayer {
     this.rw = Math.min(MAP_W, Math.ceil(VIEW_TILES_W + REGION_MARGIN * 2));
     this.rh = Math.min(MAP_H, Math.ceil(VIEW_TILES_H + REGION_MARGIN * 2));
     const whole = this.rw === MAP_W && this.rh === MAP_H;
+    this.whole = whole;
     this.lift = rimLiftPath(k);
     gfxState.features.glowLayer = 'static';
     resetExitTracking();
     this.base = document.createElement('canvas');
+    // 판 배율 정적 맵 (발광 포함, 미리 구웠으면 캐시 · 덜 구웠으면 남은 띠를 지금)
+    keepStaticMaps(
+      whole
+        ? [{ scale: k / TILE_PX, withGlow: true }]
+        : [
+            { scale: k / TILE_PX, withGlow: true },
+            { scale: opts.lightPxPerTile / TILE_PX, withGlow: true },
+          ],
+      false,
+    );
+    this.staticMap = getStaticMap(k / TILE_PX, true);
     if (whole) {
-      // 맵 전체 (확대 1): 정적 맵 한 장 (발광 포함, 같은 배율이면 캐시)
-      this.chunks = null;
-      this.staticMap = getStaticMap(k / TILE_PX, true);
-      keepStaticMaps([{ scale: k / TILE_PX, withGlow: true }], false);
       this.base.width = this.staticMap.width;
       this.base.height = this.staticMap.height;
     } else {
-      this.staticMap = null;
-      this.chunks = opts.chunks ?? new ChunkAtlas(k, VIEW_TILES_W, VIEW_TILES_H, REGION_MARGIN, true);
-      this.chunks.onBaked = null;
       this.base.width = Math.ceil(this.rw * k) + 1;
       this.base.height = Math.ceil(this.rh * k) + 1;
     }
@@ -277,7 +297,6 @@ export class CanvasFog implements FogLayer {
     this.pen = new CanvasPen(ctx, k, s * WORLD_LINE);
     this.light = opts.fog ? new LightMap(opts.lightPxPerTile, opts.ambientCss, domLightSurface) : null;
     this.mini = whole ? null : new MiniComposite(opts.lightPxPerTile, this.light);
-    if (!whole) keepStaticMaps([{ scale: opts.lightPxPerTile / TILE_PX, withGlow: true }], true);
     this.key = nextFogKey('fog-base');
     // 안개 주기마다 다시 그리므로 addCanvas의 생성자 사본(getImageData)은 바로 쓸모없어진다 → 사본 없이 올린다
     this.texture = createCanvasTexture(scene.textures, this.key, this.base);
@@ -357,16 +376,13 @@ export class CanvasFog implements FogLayer {
       const y0 = Math.round(this.ry * k);
       c.setTransform(1, 0, 0, 1, -x0, -y0);
       c.globalCompositeOperation = 'source-over';
-      // 정적 맵: 맵 전체면 한 장, 아니면 조각 (없는 조각은 굽는다)
-      const a = this.chunks;
-      if (this.staticMap) c.drawImage(this.staticMap, 0, 0);
-      else if (a) {
-        const r = chunkRange({ x: this.rx, y: this.ry, w: this.rw, h: this.rh }, 0, a.tiles);
-        for (let cy = r.cy0; cy <= r.cy1; cy += 1)
-          for (let cx = r.cx0; cx <= r.cx1; cx += 1) {
-            a.ensure(cx, cy);
-            a.drawChunk(c, cx, cy);
-          }
+      // 정적 맵: 영역만큼 잘라 한 번에 복사 (맵 전체면 통째로)
+      const st = this.staticMap;
+      if (this.whole) c.drawImage(st, 0, 0);
+      else {
+        const w = Math.min(this.base.width, st.width - x0);
+        const h = Math.min(this.base.height, st.height - y0);
+        if (w > 0 && h > 0) c.drawImage(st, x0, y0, w, h, x0, y0, w, h);
       }
       this.rec.replay(this.pen);
       if (this.light) {
@@ -375,7 +391,7 @@ export class CanvasFog implements FogLayer {
         c.save();
         c.globalCompositeOperation = 'multiply';
         c.imageSmoothingEnabled = true;
-        if (this.staticMap) {
+        if (this.whole) {
           c.drawImage(l.canvas, 0, 0, this.base.width, this.base.height);
         } else {
           c.drawImage(

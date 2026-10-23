@@ -19,7 +19,9 @@ import {
   ScreenShake,
   coneBox,
   dipAlpha,
-  lookAhead,
+  lookAlong,
+  type Box4,
+  type CameraTarget,
   snapView,
   type ViewRect,
 } from './camera';
@@ -123,48 +125,70 @@ export class CameraDirector {
     this.dipAt = null;
   }
 
+  private readonly box: Box4 = { x0: 0, y0: 0, x1: 0, y1: 0 };
+  /** 이번 프레임 목표 (그릇 하나를 다시 쓴다: 프레임마다 객체를 만들지 않는다) */
+  private readonly target: CameraTarget = {
+    x: 0,
+    y: 0,
+    look: null,
+    tauS: CAMERA.followTauS,
+    keepInside: true,
+  };
+
   update(i: DirectorInput): ViewRect {
     this.rig.w = i.viewW;
     this.rig.h = i.viewH;
+    const t = this.target;
+    t.look = null;
+    t.tauS = CAMERA.followTauS;
+    let found = false;
     // 1) 따라갈 대상: 관전 중인 동료 > 내 캐릭터
-    let target: Vec2 | null = null;
-    let tau: number = CAMERA.followTauS;
-    let look: Vec2 | null = null;
     this.canSpectate = i.role !== 'monster' && canSpectate(i.myStatus);
     if (i.role !== 'monster') {
-      const cands = spectateCandidates(i.team, i.selfId, i.survivors);
-      if (this.requested === i.selfId) this.requested = null;
-      const spec = resolveSpectate(this.requested, i.myStatus, cands, i.survivors);
-      // 돌려볼 수 없는 상태가 되면(구조됨) 요청을 지운다: 다음 수감에서 다시 내 시점으로 시작
-      if (!this.canSpectate) this.requested = null;
+      if (this.requested === i.selfId || !this.canSpectate) this.requested = null;
+      const spec = this.canSpectate
+        ? resolveSpectate(
+            this.requested,
+            i.myStatus,
+            spectateCandidates(i.team, i.selfId, i.survivors),
+            i.survivors,
+          )
+        : null;
       this.spectating = spec;
       const s = spec !== null ? i.survivors.get(spec) : undefined;
       if (s) {
-        target = { x: s.x, y: s.y };
-        tau = CAMERA.spectateTauS;
+        t.x = s.x;
+        t.y = s.y;
+        t.tauS = CAMERA.spectateTauS;
         this.follow = spec;
+        found = true;
       }
     } else {
       this.spectating = null;
     }
-    if (!target && i.me) {
-      target = { x: i.me.x, y: i.me.y };
+    if (!found && i.me) {
+      t.x = i.me.x;
+      t.y = i.me.y;
       this.follow = i.selfId;
-      // 괴물: 조준 방향으로 앞당긴다 (지금 부채꼴 ∪ 근접 원이 창 안에 들게)
+      found = true;
+      // 괴물: 조준 방향으로 앞당긴다 (지금 부채꼴 ∪ 근접 원이 창 안에 들게, 조준과 평행)
       if (i.role === 'monster') {
         const shape = monsterConeShape(i.balance, i.blend);
-        const box = coneBox(i.me.face, shape.arc, shape.range, i.balance.monster.nearVisionRadius);
-        look = lookAhead(box, i.viewW, i.viewH, CAMERA.lookMargin);
-        this.look.x = look.x;
-        this.look.y = look.y;
+        const box = coneBox(i.me.face, shape.arc, shape.range, i.balance.monster.nearVisionRadius, this.box);
+        t.look = lookAlong(i.me.face, box, i.viewW, i.viewH, CAMERA.lookMargin, this.look);
       }
     }
-    if (!target) {
+    if (!found) {
       // 따라갈 것이 없으면(아직 자리가 없음) 지난 가운데
-      target = { x: this.rig.center.x, y: this.rig.center.y };
+      t.x = this.rig.center.x;
+      t.y = this.rig.center.y;
       this.follow = null;
     }
-    const f = this.rig.update(i.dtMs, { x: target.x, y: target.y, look, tauS: tau, keepInside: true });
+    if (t.look === null) {
+      this.look.x = 0;
+      this.look.y = 0;
+    }
+    const f = this.rig.update(i.dtMs, t);
     if (f.cut) {
       this.cuts += 1;
       this.dipAt = i.nowMs;

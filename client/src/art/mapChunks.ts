@@ -1,13 +1,15 @@
-// 정적 맵 조각 아틀라스 (따라가는 카메라). 확대한 맵 전체를 한 장으로 구우면 너무 크다(배율 4에서 6144 × 4096 = 100MB) →
-// 보이는 창 근처 조각(CHUNK 타일 정사각)만 한 캔버스의 칸에 굽는다. 칸은 원환으로 배정한다: 조각 (cx, cy)는 늘
+// 정적 맵 조각 아틀라스 (따라가는 카메라). 확대한 맵 전체를 한 장의 텍스처로 올리면 너무 크다 →
+// 보이는 창 근처 조각(CHUNK 타일 정사각)만 한 캔버스의 칸에 담아 올린다. 칸은 원환으로 배정한다: 조각 (cx, cy)는 늘
 // 칸 (cx mod nx, cy mod ny)이라, 창 + 여유가 nx × ny 조각보다 작으면 서로 다른 조각이 같은 칸을 다투지 않는다.
-// 조각 = 맵 전체 그림(k px / 타일)의 정수 px 사각형이고, 칸에는 그 둘레 GUTTER px까지 같이 굽는다: 확대해 그릴 때 선형
-// 보간이 이웃 칸 화소를 끌어오지 않고 실제 이웃 그림을 읽는다(조각 사이 이음매 없음). 굽기는 정수 이동 + 자르기를 건
-// 컨텍스트에 맵 전체 그림을 겹치는 것만 칠하므로(mapArt.paintStaticMap cull) 한 장으로 구운 것과 같은 화소다.
+// 조각 = 맵 전체 그림(k px / 타일)의 정수 px 사각형이고, 칸에는 그 둘레 GUTTER px까지 같이 담는다: 확대해 그릴 때 선형
+// 보간이 이웃 칸 화소를 끌어오지 않고 실제 이웃 그림을 읽는다(조각 사이 이음매 없음). 칸 그림은 판 전에 나눠 구운 맵 전체
+// 그림(CPU 캔버스, mapArt.bakeStaticMapStep)에서 복사한다: 판 중에는 칠하지 않는다(조각 하나 = 복사 + 일부 업로드).
+// 맵 전체 그림이 아직 없을 때만(시험 · 예외) 정수 이동 + 자르기를 건 컨텍스트에 겹치는 것만 칠한다(같은 화소).
+// 텍스처로는 칸만 올린다: 맵 전체를 텍스처로 올리면 배율 4에서 6144 × 4096 = 100MB라 GPU 예산(32MiB)을 넘는다.
 // 텍스처로 올리는 일은 쓰는 쪽(render/fogGpu.ts · baseLayer.ts)이 한다: 새로 구운 칸만 일부 올린다.
 import { MAP_H, MAP_W, TILE_PX } from '@decoy/shared';
 import { gfxState } from '../gfx/state';
-import { paintStaticMap } from './mapArt';
+import { paintStaticMap, staticMapIfReady } from './mapArt';
 
 /** 칸 둘레에 같이 굽는 이웃 그림 (px) */
 export const CHUNK_GUTTER = 1;
@@ -85,9 +87,11 @@ export class ChunkAtlas {
   readonly slotH: number;
   /** 칸마다 지금 든 조각 번호 (cy × cols + cx, 없으면 −1) */
   private readonly held: Int32Array;
-  /** 누적 굽기 수 · 시간 (측정) */
+  /** 누적 굽기 수 · 시간 (측정). copies = 구운 맵 전체에서 복사, paints = 직접 칠함(맵 전체가 아직 없을 때만) */
   bakes = 0;
   bakeMs = 0;
+  copies = 0;
+  paints = 0;
 
   constructor(
     /** px / 타일 (맵 전체 그림) */
@@ -154,19 +158,33 @@ export class ChunkAtlas {
     const c = w.ctx;
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.clearRect(0, 0, this.slotW, this.slotH);
-    c.save();
-    c.beginPath();
-    c.rect(0, 0, b.x1 - b.x0 + g * 2, b.y1 - b.y0 + g * 2);
-    c.clip();
-    c.translate(g - b.x0, g - b.y0);
-    // 겹치는 것만 칠한다 (선 굵기 · 안티에일리어싱 여유 4px)
-    paintStaticMap(c, this.k, this.withGlow, {
-      x0: b.x0 - g - 4,
-      y0: b.y0 - g - 4,
-      x1: b.x1 + g + 4,
-      y1: b.y1 + g + 4,
-    });
-    c.restore();
+    const full = staticMapIfReady(this.k / TILE_PX, this.withGlow);
+    if (full) {
+      // 판 전에 구운 맵 전체 그림에서 그 사각형(+ 테)만 복사한다 (판 중에는 칠하지 않는다: 끊김 없음). 맵 밖 테는 투명
+      const sx = Math.max(0, b.x0 - g);
+      const sy = Math.max(0, b.y0 - g);
+      const ex = Math.min(full.width, b.x1 + g);
+      const ey = Math.min(full.height, b.y1 + g);
+      if (ex > sx && ey > sy)
+        c.drawImage(full, sx, sy, ex - sx, ey - sy, sx - (b.x0 - g), sy - (b.y0 - g), ex - sx, ey - sy);
+      this.copies += 1;
+    } else {
+      c.save();
+      c.beginPath();
+      c.rect(0, 0, b.x1 - b.x0 + g * 2, b.y1 - b.y0 + g * 2);
+      c.clip();
+      c.translate(g - b.x0, g - b.y0);
+      // 겹치는 것만 칠한다 (선 굵기 · 안티에일리어싱 여유 4px)
+      paintStaticMap(c, this.k, this.withGlow, {
+        x0: b.x0 - g - 4,
+        y0: b.y0 - g - 4,
+        x1: b.x1 + g + 4,
+        y1: b.y1 + g + 4,
+      });
+      c.restore();
+      this.paints += 1;
+      gfxState.features.chunkPaints = Number(gfxState.features.chunkPaints ?? 0) + 1;
+    }
     const a = this.ctx;
     a.clearRect(sx, sy, this.slotW, this.slotH);
     a.drawImage(w.canvas, sx, sy);
@@ -177,12 +195,11 @@ export class ChunkAtlas {
     this.bakeMs += ms;
     gfxState.features.chunkBakes = Number(gfxState.features.chunkBakes ?? 0) + 1;
     gfxState.features.chunkBakeMs = Math.round((Number(gfxState.features.chunkBakeMs ?? 0) + ms) * 10) / 10;
-    // 정적 맵 굽기 시간 (측정 · 시험): 따라가는 카메라에서는 조각 하나를 굽는 가장 긴 시간
-    gfxState.features.mapBakeMs = Math.max(
-      Number(gfxState.features.mapBakeMs ?? 0),
-      Math.round(ms * 10) / 10,
+    // 조각 하나를 옮기는(복사 · 일부 업로드 알림 포함) 가장 긴 시간 (측정 · 시험: 판 중 끊김)
+    gfxState.features.chunkBakeMsMax = Math.max(
+      Number(gfxState.features.chunkBakeMsMax ?? 0),
+      Math.round(ms * 100) / 100,
     );
-    gfxState.features.mapBakeScale = Math.round((this.k / TILE_PX) * 1000) / 1000;
     return true;
   }
 

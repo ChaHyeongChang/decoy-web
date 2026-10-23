@@ -69,33 +69,42 @@ function wrap(a: number): number {
  * 시야 부채꼴(꼭짓점 = 괴물, 조준 aim, 전체 각 arc 라디안, 길이 range) ∪ 근접 원(반지름 near)의 외접 사각형 (괴물 기준 타일).
  * 벽은 보지 않는다(벽에 잘린 부채꼴보다 크거나 같다)
  */
+export interface Box4 {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
 export function coneBox(
   aim: number,
   arc: number,
   range: number,
   near: number,
-): { x0: number; y0: number; x1: number; y1: number } {
-  let x0 = -near;
-  let y0 = -near;
-  let x1 = near;
-  let y1 = near;
-  const add = (a: number): void => {
-    const x = Math.cos(a) * range;
-    const y = Math.sin(a) * range;
-    x0 = Math.min(x0, x);
-    y0 = Math.min(y0, y);
-    x1 = Math.max(x1, x);
-    y1 = Math.max(y1, y);
-  };
+  out: Box4 = { x0: 0, y0: 0, x1: 0, y1: 0 },
+): Box4 {
+  out.x0 = -near;
+  out.y0 = -near;
+  out.x1 = near;
+  out.y1 = near;
   const half = arc / 2;
-  add(aim - half);
-  add(aim + half);
+  boxAdd(out, aim - half, range);
+  boxAdd(out, aim + half, range);
   // 호 안에 든 축 방향 (0 · 90 · 180 · 270°)
   for (let k = 0; k < 4; k += 1) {
     const a = (k * Math.PI) / 2;
-    if (Math.abs(wrap(a - aim)) <= half) add(a);
+    if (Math.abs(wrap(a - aim)) <= half) boxAdd(out, a, range);
   }
-  return { x0, y0, x1, y1 };
+  return out;
+}
+
+function boxAdd(b: Box4, a: number, range: number): void {
+  const x = Math.cos(a) * range;
+  const y = Math.sin(a) * range;
+  b.x0 = Math.min(b.x0, x);
+  b.y0 = Math.min(b.y0, y);
+  b.x1 = Math.max(b.x1, x);
+  b.y1 = Math.max(b.y1, y);
 }
 
 /**
@@ -111,6 +120,34 @@ export function lookAhead(
   const mx = Math.max(0, w / 2 - margin);
   const my = Math.max(0, h / 2 - margin);
   return { x: clamp((box.x0 + box.x1) / 2, -mx, mx), y: clamp((box.y0 + box.y1) / 2, -my, my) };
+}
+
+/**
+ * 조준 방향으로만 앞당긴다 (괴물 화면, 실제로 쓰는 것): 앞당김 = α × 조준 단위 벡터. α는 시야 외접 사각형 가운데를 조준 방향에
+ * 투영한 길이이고(0 이상), 괴물 몸이 창 가장자리에서 margin 안쪽에 남도록 자른다. 앞당김이 늘 조준과 평행이라, 카메라가 앞당기며
+ * 움직여도 괴물은 화면에서 조준선을 따라서만 미끄러진다 → 화면의 커서가 조준선 위에 그대로 남고 조준이 흔들리지 않는다
+ * (사각형 가운데로 옮기는 lookAhead는 조준과 비스듬해 커서 기준 조준을 끌고 다닌다). out에 써서 돌려준다
+ */
+export function lookAlong(
+  aim: number,
+  box: { x0: number; y0: number; x1: number; y1: number },
+  w: number,
+  h: number,
+  margin: number,
+  out: Vec2,
+): Vec2 {
+  const ux = Math.cos(aim);
+  const uy = Math.sin(aim);
+  const proj = ((box.x0 + box.x1) / 2) * ux + ((box.y0 + box.y1) / 2) * uy;
+  const mx = Math.max(0, w / 2 - margin);
+  const my = Math.max(0, h / 2 - margin);
+  let max = Infinity;
+  if (Math.abs(ux) > 1e-9) max = Math.min(max, mx / Math.abs(ux));
+  if (Math.abs(uy) > 1e-9) max = Math.min(max, my / Math.abs(uy));
+  const a = Math.max(0, Math.min(proj, max));
+  out.x = a * ux;
+  out.y = a * uy;
+  return out;
 }
 
 /** 지수 감쇠 한 걸음 비율 (dt ms, τ 초): 프레임 수와 무관 */
@@ -144,10 +181,14 @@ export interface CameraFrame {
  * 맵 안으로 자른다. 맵 가장자리에서는 대상이 가운데가 아니다
  */
 export class CameraRig {
-  private pos: Vec2 | null = null;
-  private look: Vec2 = { x: 0, y: 0 };
+  /** 따라가는 자리 · 앞당김 (감쇠한 값). hasPos가 거짓이면 다음 프레임에 목표로 바로 옮긴다 */
+  private readonly pos: Vec2 = { x: 0, y: 0 };
+  private hasPos = false;
+  private readonly look: Vec2 = { x: 0, y: 0 };
   /** 마지막 가운데 (타일) */
   readonly center: Vec2 = { x: MAP_W / 2, y: MAP_H / 2 };
+  /** 돌려주는 프레임 (그릇 하나를 다시 쓴다) */
+  private readonly frame: CameraFrame = { view: { x: 0, y: 0, w: 0, h: 0 }, cut: false };
 
   constructor(
     public w: number,
@@ -156,7 +197,7 @@ export class CameraRig {
 
   /** 다음 프레임에 목표 자리로 바로 옮긴다 (판 시작) */
   reset(): void {
-    this.pos = null;
+    this.hasPos = false;
   }
 
   /**
@@ -166,10 +207,9 @@ export class CameraRig {
    * 작아 걸리지 않는다. 앞당김(look)이 아니라 따라가는 자리(pos)로 잰다
    */
   private shouldCut(t: CameraTarget): boolean {
-    const p = this.pos;
-    if (!p) return false;
-    const dx = Math.abs(t.x - p.x);
-    const dy = Math.abs(t.y - p.y);
+    if (!this.hasPos) return false;
+    const dx = Math.abs(t.x - this.pos.x);
+    const dy = Math.abs(t.y - this.pos.y);
     if (Math.hypot(dx, dy) > this.w * CAMERA.cutFraction) return true;
     if (!t.keepInside) return false;
     return (
@@ -178,22 +218,24 @@ export class CameraRig {
   }
 
   update(dtMs: number, t: CameraTarget): CameraFrame {
-    const wantLook = t.look ?? { x: 0, y: 0 };
+    const lx = t.look ? t.look.x : 0;
+    const ly = t.look ? t.look.y : 0;
     let cut = false;
-    if (this.pos === null) {
-      this.pos = { x: t.x, y: t.y };
-      this.look = { x: wantLook.x, y: wantLook.y };
-    } else if (this.shouldCut(t)) {
-      this.pos = { x: t.x, y: t.y };
-      this.look = { x: wantLook.x, y: wantLook.y };
-      cut = true;
+    const jump = !this.hasPos || this.shouldCut(t);
+    if (jump) {
+      cut = this.hasPos;
+      this.hasPos = true;
+      this.pos.x = t.x;
+      this.pos.y = t.y;
+      this.look.x = lx;
+      this.look.y = ly;
     } else {
       const a = follow(dtMs, t.tauS);
       this.pos.x += (t.x - this.pos.x) * a;
       this.pos.y += (t.y - this.pos.y) * a;
       const b = follow(dtMs, CAMERA.lookTauS);
-      this.look.x += (wantLook.x - this.look.x) * b;
-      this.look.y += (wantLook.y - this.look.y) * b;
+      this.look.x += (lx - this.look.x) * b;
+      this.look.y += (ly - this.look.y) * b;
     }
     let cx = this.pos.x + this.look.x;
     let cy = this.pos.y + this.look.y;
@@ -203,13 +245,18 @@ export class CameraRig {
       cx = clamp(cx, t.x - mx, t.x + mx);
       cy = clamp(cy, t.y - my, t.y + my);
     }
-    const c = clampCenter({ x: cx, y: cy }, this.w, this.h);
-    this.center.x = c.x;
-    this.center.y = c.y;
-    return {
-      view: { x: c.x - this.w / 2, y: c.y - this.h / 2, w: this.w, h: this.h },
-      cut,
-    };
+    // 맵 안으로 (clampCenter와 같은 식, 객체를 만들지 않는다)
+    const hx = this.w / 2;
+    const hy = this.h / 2;
+    this.center.x = this.w >= MAP_W ? MAP_W / 2 : clamp(cx, hx, MAP_W - hx);
+    this.center.y = this.h >= MAP_H ? MAP_H / 2 : clamp(cy, hy, MAP_H - hy);
+    const f = this.frame;
+    f.view.x = this.center.x - hx;
+    f.view.y = this.center.y - hy;
+    f.view.w = this.w;
+    f.view.h = this.h;
+    f.cut = cut;
+    return f;
   }
 }
 

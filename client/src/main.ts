@@ -31,7 +31,7 @@ import {
 } from './gfx/quality';
 import { currentPreset, gfxState, notifyGfxChange, onGfxChange, probeSlot } from './gfx/state';
 import { prebakeAtlas } from './art/atlas';
-import { prebakeFogArt } from './render/baseLayer';
+import { prebakeFogStep } from './render/baseLayer';
 import { computeRenderSize, type RenderSize } from './render/resolution';
 import { settleSize } from './render/settle';
 import { GameScene } from './scenes/GameScene';
@@ -549,27 +549,38 @@ app.subscribe((e) => {
  * 같은 품질 · 배율이면 캐시를 쓰므로 여러 번 불러도 싸다. 판 중에는 굽지 않는다(품질이 바뀌면 판 장면이 직접 다시 굽는다)
  */
 let prebakeTimer: number | null = null;
+/** 맵 그림 한 걸음 시간 (ms): 남는 시간 안에서 이만큼씩 나눠 굽는다 (로비 화면이 끊기지 않게) */
+const PREBAKE_STEP_MS = 8;
 function schedulePrebake(): void {
   if (prebakeTimer !== null) return;
+  const idle = (fn: (d: IdleDeadline | null) => void): void => {
+    if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(fn, { timeout: 1000 });
+    else setTimeout(() => fn(null), 16);
+  };
+  // 맵 그림: 띠 몇 개씩 남는 시간에 굽고, 다 굽기 전이면 다음 남는 시간에 이어 굽는다 (판이 시작되면 그만 — 판 장면이 마저 굽는다)
+  const fogStep = (d: IdleDeadline | null): void => {
+    if (!game.isBooted || game.scene.isActive('game')) return;
+    const mine = app.lobby?.players.find((p) => p.id === app.you)?.role ?? null;
+    const budget = d ? Math.max(2, Math.min(PREBAKE_STEP_MS, d.timeRemaining())) : PREBAKE_STEP_MS;
+    if (!prebakeFogStep(gfxState.renderer, mine === 'monster' ? MONSTER_SPAWN : PRISON_CENTER, budget))
+      idle(fogStep);
+  };
   const run = (): void => {
     prebakeTimer = null;
     if (!game.isBooted || game.scene.isActive('game')) return;
     // 터치: 판 배치(논리 크기 → 배율 · HUD 서명)로 굽는다. 아니면 첫 판 시작 때 맵 · 캐릭터 · HUD를 모두 다시 굽는다
     if (device.touch) applyMatchLayout();
-    // 따라가는 카메라: 내가 고른 역할의 시작 자리 둘레 맵 조각까지 미리 굽는다 (모르면 감옥 = 생존자 시작)
-    const mine = app.lobby?.players.find((p) => p.id === app.you)?.role ?? null;
-    prebakeFogArt(gfxState.renderer, mine === 'monster' ? MONSTER_SPAWN : PRISON_CENTER);
     // welcome 전(첫 화면 · 봇과 연습 고르기)에는 빌드에 넣은 수치의 반지름으로 굽는다: 연습은 고르자마자 판이 시작돼
     // 로비 대기가 없다. 온라인 서버 수치가 다르면 로비에서 다시 굽는다
     const b = app.balance ?? PRACTICE_BALANCE;
     prebakeAtlas(game.scene.getScene('idle'), b.survivor.radius, b.monster.radius);
     // HUD 아틀라스도 (배율 2 Canvas에서 약 28ms, 같은 배율이면 아무것도 하지 않는다)
     prebakeHud(game.textures);
+    // 따라가는 카메라: 판 배율 맵 전체 그림 → 미니맵 → 내가 고른 역할의 시작 자리 둘레 조각 (모르면 감옥 = 생존자 시작).
+    // 조각은 판 중에 맵 전체 그림에서 복사만 한다
+    idle(fogStep);
   };
-  prebakeTimer = window.setTimeout(() => {
-    if ('requestIdleCallback' in window) window.requestIdleCallback(run, { timeout: 1000 });
-    else run();
-  }, 50);
+  prebakeTimer = window.setTimeout(() => idle(run), 50);
 }
 onGfxChange(schedulePrebake);
 // 캐릭터 스타일을 바꾸면 그 스타일 그림을 로비에서 미리 굽는다 (판 중이면 판 장면이 다음 프레임에 굽는다)

@@ -2,6 +2,7 @@
 import Phaser from 'phaser';
 import {
   BTN,
+  TILE_PX,
   type AnimDebug,
   type CameraDebug,
   type DrawnEntity,
@@ -26,6 +27,7 @@ import { qualityHooks, sessionAutoDowngrade, type AdaptContext, type FrameSample
 import { getFpsOverride, gfxNow, gfxState, probeSlot } from '../gfx/state';
 import { haptics } from '../haptics';
 import { InputLog, InputSampler } from '../input';
+import { AimHold } from '../aimHold';
 import { applyDashStart, applyWindupLock, predictMonsterPress, type LocalWindup } from '../localActions';
 import { COLOR } from '../render/colors';
 import { CameraDirector, devPerTile } from '../render/cameraDirector';
@@ -50,7 +52,7 @@ import {
   VIEW_W,
   WORLD_SCALE,
   fitCamera,
-  screenToTile,
+  tileToScreen,
 } from '../ui/layout';
 import { Minimap } from '../ui/minimap';
 import { Scoreboard, TutorialOverlay } from '../ui/overlays';
@@ -131,6 +133,10 @@ export class GameScene extends Phaser.Scene {
   private blendRamp: LinearRamp | null = null;
   /** 판 장면을 만든 뒤 그린 프레임 수 (디버그 animDebug: 120Hz로 정말 그렸는지 시험이 본다) */
   private renderedFrames = 0;
+  /** 괴물 마우스 조준 붙잡기 (커서가 움직였을 때만 다시 잰다) */
+  private readonly aimHold = new AimHold();
+  private readonly aimPointer = { x: 0, y: 0 };
+  private readonly aimCursor = new Phaser.Math.Vector2();
   /** 따라가는 카메라 (판 장면마다 새로) · 창 밖 가리개 · 잘라 옮김 어두워짐 */
   private director: CameraDirector | null = null;
   private frameCovers: Phaser.GameObjects.Rectangle[] = [];
@@ -331,6 +337,7 @@ export class GameScene extends Phaser.Scene {
     CAM.y = 0;
     this.world = new WorldRenderer(this, FOG_ENABLED);
     this.makeCameraFrame();
+    this.aimHold.reset();
     this.myBlend = 0;
     this.blendRamp = null;
     this.renderedFrames = 0;
@@ -483,13 +490,21 @@ export class GameScene extends Phaser.Scene {
   }
 
   /** 카드 순서 생존자 id (러너 · 가드 · 스카우트, 생존자 화면 명단) */
-  private teamOrder(): string[] {
+  private teamOrder(): readonly string[] {
+    const roster = this.app.match?.roster ?? [];
+    if (this.teamOf === roster) return this.teamIds;
     const order = ['runner', 'guard', 'scout'];
-    return [...(this.app.match?.roster ?? [])]
+    this.teamOf = roster;
+    this.teamIds = [...roster]
       .filter((r) => r.role !== 'monster')
       .sort((a, b) => order.indexOf(a.role) - order.indexOf(b.role))
       .map((r) => r.id);
+    return this.teamIds;
   }
+
+  /** 카드 순서 명단 (이 판 명단이 그대로면 다시 만들지 않는다) */
+  private teamOf: readonly unknown[] | null = null;
+  private teamIds: string[] = [];
 
   /** 디버그 · 시험: 카메라 상태 */
   get cameraDebug(): CameraDebug | null {
@@ -589,13 +604,19 @@ export class GameScene extends Phaser.Scene {
     if (!me) return Number.NaN;
     // 이 판에서 마우스가 캔버스 위에서 움직이거나 판 화면을 누른 적이 없으면 포인터 자리(로비에서 누른 버튼 자리 · 0,0 · 마지막 터치 자리)를
     // 따라 돌지 않는다: 지금 방향 유지 (검토 반영 — 판 시작 조준이 로비 클릭 자리를 향하던 것)
-    if (!this.sampler.aimPointerReady) return me.face;
+    if (!this.sampler.aimPointerReady) {
+      this.aimHold.reset();
+      return me.face;
+    }
     // 손가락 포인터는 조준을 바꾸지 않는다(터치스크린 노트북의 손가락 · 손바닥): 마우스 포인터만
     const p = this.input.mousePointer ?? this.input.activePointer;
-    const w = this.cameras.main.getWorldPoint(p.x, p.y);
-    const t = screenToTile(w.x, w.y);
-    if (Math.hypot(t.x - me.x, t.y - me.y) < 0.05) return me.face;
-    return Math.atan2(t.y - me.y, t.x - me.x);
+    // 조준 = 화면에 그려진 괴물(지난 프레임의 창)에서 커서 쪽. 커서가 움직였을 때만 다시 재고, 카메라만 움직이면(앞당김 · 따라가기 ·
+    // 흔들림) 마지막 방향을 그대로 둔다 (aimHold.ts: 화면이 움직여도 조준이 흘러가지 않게)
+    const w = this.cameras.main.getWorldPoint(p.x, p.y, this.aimCursor);
+    const body = tileToScreen(this.localPos.x, this.localPos.y);
+    this.aimPointer.x = p.x;
+    this.aimPointer.y = p.y;
+    return this.aimHold.update(this.aimPointer, w, body, 0.05 * TILE_PX * WORLD_SCALE, me.face);
   }
 
   /**

@@ -172,7 +172,8 @@ describe('GPU 안개 미니맵 합성 (읽을 때만)', () => {
     }
     expect(composites()).toBe(0);
     expect(h.canvases.length).toBe(made);
-    expect(h.statics.length).toBe(0);
+    // 판 배율 맵 전체 그림(조각 복사용)은 레이어를 만들 때 가져온다. 미니맵 배율은 아직 없다
+    expect(h.statics.filter((x) => x.scale === LPT / TILE_PX).length).toBe(0);
     // 처음 읽으면 그때 정적 맵을 가져오고 캔버스를 만들어 한 번 합성한다
     expect(fog.miniSource).toBeDefined();
     expect(composites()).toBe(1);
