@@ -94,8 +94,10 @@ export class CameraDirector {
   /** 이번 프레임에 따라간 대상 */
   follow: string | null = null;
   canSpectate = false;
-  /** 괴물 앞당김 목표 (타일) */
+  /** 괴물 앞당김 목표 (lookAhead 원값, 타일) */
   readonly look: Vec2 = { x: 0, y: 0 };
+  /** 실제 앞당김 (창 가운데 − 괴물, 타일) */
+  readonly lookApplied: Vec2 = { x: 0, y: 0 };
   cuts = 0;
   private dipAt: number | null = null;
   private readonly shakeOut: Vec2 = { x: 0, y: 0 };
@@ -169,12 +171,24 @@ export class CameraDirector {
     }
     // 2) 흔들림 (월드만) → 맵 안 → 기기 픽셀 격자
     const sh = this.shake.offset(i.nowMs, this.shakeOut);
-    const x = Math.max(0, Math.min(MAP_W - i.viewW, f.view.x + sh.x));
-    const y = Math.max(0, Math.min(MAP_H - i.viewH, f.view.y + sh.y));
-    this.view.x = snapView(x, i.devPerTile);
-    this.view.y = snapView(y, i.devPerTile);
+    const maxX = Math.max(0, MAP_W - i.viewW);
+    const maxY = Math.max(0, MAP_H - i.viewH);
+    const x = Math.max(0, Math.min(maxX, f.view.x + sh.x));
+    const y = Math.max(0, Math.min(maxY, f.view.y + sh.y));
+    // 격자에 맞추되 맵 끝을 넘지 않게 (반올림이 끝을 반 기기 px 넘으면 Canvas 합성 영역이 창을 못 덮어 매 프레임 다시 합성한다)
+    const k = i.devPerTile;
+    this.view.x = k > 0 ? Math.min(snapView(x, k), Math.floor(maxX * k + 1e-9) / k) : x;
+    this.view.y = k > 0 ? Math.min(snapView(y, k), Math.floor(maxY * k + 1e-9) / k) : y;
     this.view.w = i.viewW;
     this.view.h = i.viewH;
+    // 실제 앞당김 (창 가운데 − 괴물: 감쇠 · 가장자리 · 맵 자르기 · 흔들림 뒤)
+    if (i.role === 'monster' && i.me) {
+      this.lookApplied.x = this.view.x + i.viewW / 2 - i.me.x;
+      this.lookApplied.y = this.view.y + i.viewH / 2 - i.me.y;
+    } else {
+      this.lookApplied.x = 0;
+      this.lookApplied.y = 0;
+    }
     return this.view;
   }
 

@@ -159,13 +159,31 @@ export class CameraRig {
     this.pos = null;
   }
 
+  /**
+   * 잘라 옮길 만큼 튀었는가: 창 폭의 cutFraction보다 멀거나, 가장자리 안쪽에 둘 대상이 한 번에 가장자리 띠(축마다 창 절반 −
+   * edgeMargin) 밖으로 나갔다. 띠 밖으로 튄 것을 미끄러지게 두면 keepInside가 그 프레임에 가운데를 순간이동시킨 뒤 따라가기가
+   * 따라올 때까지 멈칫한다. 연속 이동의 따라가기 늦음(빠르기 × τ, 괴물 돌진 16 × 0.12 ≈ 1.9타일)은 가장 좁은 띠(확대 4 세로 2.6)보다
+   * 작아 걸리지 않는다. 앞당김(look)이 아니라 따라가는 자리(pos)로 잰다
+   */
+  private shouldCut(t: CameraTarget): boolean {
+    const p = this.pos;
+    if (!p) return false;
+    const dx = Math.abs(t.x - p.x);
+    const dy = Math.abs(t.y - p.y);
+    if (Math.hypot(dx, dy) > this.w * CAMERA.cutFraction) return true;
+    if (!t.keepInside) return false;
+    return (
+      dx > Math.max(0, this.w / 2 - CAMERA.edgeMargin) || dy > Math.max(0, this.h / 2 - CAMERA.edgeMargin)
+    );
+  }
+
   update(dtMs: number, t: CameraTarget): CameraFrame {
     const wantLook = t.look ?? { x: 0, y: 0 };
     let cut = false;
     if (this.pos === null) {
       this.pos = { x: t.x, y: t.y };
       this.look = { x: wantLook.x, y: wantLook.y };
-    } else if (Math.hypot(t.x - this.pos.x, t.y - this.pos.y) > this.w * CAMERA.cutFraction) {
+    } else if (this.shouldCut(t)) {
       this.pos = { x: t.x, y: t.y };
       this.look = { x: wantLook.x, y: wantLook.y };
       cut = true;

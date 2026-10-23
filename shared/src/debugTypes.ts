@@ -144,8 +144,10 @@ export interface CameraDebug {
   spectating: string | null;
   /** 시점을 돌려볼 수 있는 상태인가 (수감 · 사망 · 탈출) */
   canSpectate: boolean;
-  /** 괴물 앞당김 (창 가운데 − 괴물, 타일) */
+  /** 괴물 앞당김 목표 (lookAhead 원값: 감쇠 · 가장자리 · 맵 자르기 · 흔들림 전, 타일) */
   look: { x: number; y: number };
+  /** 실제 앞당김 (창 가운데 − 괴물, 타일) */
+  lookApplied: { x: number; y: number };
   /** 잘라 옮긴 횟수 · 지금 어두워짐 알파 */
   cuts: number;
   dip: number;

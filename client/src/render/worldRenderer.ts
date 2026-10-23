@@ -72,7 +72,7 @@ import { CONE, DANGER, NEON, ROLE, WARN } from '../art/palette';
 import { effectivePreset, type QualityPreset, type RendererKind } from '../gfx/presets';
 import { currentCharStyle } from '../gfx/charStyle';
 import { gfxNow, gfxState, onGfxChange } from '../gfx/state';
-import { MAP_PX_H, MAP_PX_W, MAP_X, MAP_Y, WORLD_SCALE, worldLine } from '../ui/layout';
+import { CAM_ZOOM, MAP_PX_H, MAP_PX_W, MAP_X, MAP_Y, WORLD_SCALE, worldLine } from '../ui/layout';
 import {
   MonsterRig,
   SurvivorRig,
@@ -686,7 +686,7 @@ export class WorldRenderer {
       zoom: gfxState.zoom,
       ambientCss: rgbCss(ambientRgb(FOG.ambient, FOG.tint)),
       shader: p.shader,
-      chunks: chunkAtlasFor(p.k, p.margin),
+      chunks: p.mode === 'gpu' || CAM_ZOOM > 1 ? chunkAtlasFor(p.k, p.margin) : undefined,
     });
     gfxState.fogMode = fog.mode;
     gfxState.ambient = this.useFog ? FOG.ambient : 1;

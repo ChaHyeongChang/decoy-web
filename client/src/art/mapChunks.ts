@@ -5,7 +5,7 @@
 // 보간이 이웃 칸 화소를 끌어오지 않고 실제 이웃 그림을 읽는다(조각 사이 이음매 없음). 굽기는 정수 이동 + 자르기를 건
 // 컨텍스트에 맵 전체 그림을 겹치는 것만 칠하므로(mapArt.paintStaticMap cull) 한 장으로 구운 것과 같은 화소다.
 // 텍스처로 올리는 일은 쓰는 쪽(render/fogGpu.ts · baseLayer.ts)이 한다: 새로 구운 칸만 일부 올린다.
-import { MAP_H, MAP_W } from '@decoy/shared';
+import { MAP_H, MAP_W, TILE_PX } from '@decoy/shared';
 import { gfxState } from '../gfx/state';
 import { paintStaticMap } from './mapArt';
 
@@ -177,6 +177,12 @@ export class ChunkAtlas {
     this.bakeMs += ms;
     gfxState.features.chunkBakes = Number(gfxState.features.chunkBakes ?? 0) + 1;
     gfxState.features.chunkBakeMs = Math.round((Number(gfxState.features.chunkBakeMs ?? 0) + ms) * 10) / 10;
+    // 정적 맵 굽기 시간 (측정 · 시험): 따라가는 카메라에서는 조각 하나를 굽는 가장 긴 시간
+    gfxState.features.mapBakeMs = Math.max(
+      Number(gfxState.features.mapBakeMs ?? 0),
+      Math.round(ms * 10) / 10,
+    );
+    gfxState.features.mapBakeScale = Math.round((this.k / TILE_PX) * 1000) / 1000;
     return true;
   }
 

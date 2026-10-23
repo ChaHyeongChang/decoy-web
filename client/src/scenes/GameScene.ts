@@ -326,6 +326,9 @@ export class GameScene extends Phaser.Scene {
     if (!info || !balance) return;
     this.cameras.main.setBackgroundColor(COLOR.background);
     fitCamera(this.cameras.main);
+    // 지난 판의 창이 남아 있으면 첫 스냅샷 전까지 A · B 글자 · 조준이 엉뚱한 자리를 본다: 월드와 같은 (0, 0)에서 시작
+    CAM.x = 0;
+    CAM.y = 0;
     this.world = new WorldRenderer(this, FOG_ENABLED);
     this.makeCameraFrame();
     this.myBlend = 0;
@@ -500,6 +503,7 @@ export class GameScene extends Phaser.Scene {
       spectating: d.spectating,
       canSpectate: d.canSpectate,
       look: { x: r3(d.look.x), y: r3(d.look.y) },
+      lookApplied: { x: r3(d.lookApplied.x), y: r3(d.lookApplied.y) },
       cuts: d.cuts,
       dip: r3(d.dip(performance.now())),
       shakes: d.shake.active,

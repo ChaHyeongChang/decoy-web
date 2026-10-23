@@ -129,6 +129,14 @@ export function fogArtParams(renderer: RendererKind = gfxState.renderer): {
   };
 }
 
+/** Canvas 합성 영역이 맵 전체인가 (확대 1: 창 + 여유가 맵보다 크다) */
+function wholeRegion(): boolean {
+  return (
+    Math.ceil(VIEW_TILES_W + REGION_MARGIN * 2) >= MAP_W &&
+    Math.ceil(VIEW_TILES_H + REGION_MARGIN * 2) >= MAP_H
+  );
+}
+
 /** 미리 구운 조각 아틀라스 (판 장면의 안개 레이어가 같은 배율 · 창이면 그대로 쓴다) */
 let prebaked: { atlas: ChunkAtlas; key: string } | null = null;
 
@@ -162,6 +170,12 @@ export function createFogLayer(
 export function prebakeFogArt(renderer: RendererKind = gfxState.renderer, at: Vec2 | null = null): number {
   const t0 = performance.now();
   const p = fogArtParams(renderer);
+  if (p.mode === 'canvas' && wholeRegion()) {
+    // Canvas 합성 · 맵 전체(확대 1): 합성 배율 정적 맵 한 장 (CanvasFog와 같은 배율 · 발광)
+    getStaticMap(p.k / TILE_PX, true);
+    keepStaticMaps([{ scale: p.k / TILE_PX, withGlow: true }], false);
+    return performance.now() - t0;
+  }
   getStaticMap(p.lightPxPerTile / TILE_PX, true);
   keepStaticMaps([{ scale: p.lightPxPerTile / TILE_PX, withGlow: true }], true);
   getGlowMap();
@@ -187,7 +201,13 @@ export class CanvasFog implements FogLayer {
   readonly shader = false;
   private readonly base: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
-  private readonly chunks: ChunkAtlas;
+  /** 정적 맵 조각 (창이 맵보다 작을 때) */
+  private readonly chunks: ChunkAtlas | null;
+  /**
+   * 합성 영역이 맵 전체일 때(확대 1)의 정적 맵 한 장: 조각 대신 한 번에 복사하고, 미니맵은 합성 캔버스를 그대로 줄여 쓴다
+   * (따라가는 카메라 전과 같은 일의 양 — perf-budget 기준값)
+   */
+  private readonly staticMap: HTMLCanvasElement | null;
   private readonly light: LightMap | null;
   private readonly pen: CanvasPen;
   /** 이번 주기의 바닥 명령 (거점 · 탈출구 · 시야 채움, 그린 순서대로)과 빛 명령 */
@@ -203,7 +223,7 @@ export class CanvasFog implements FogLayer {
   private readonly key: string;
   private readonly texture: Phaser.Textures.Texture;
   private readonly image: Phaser.GameObjects.Image;
-  private readonly mini: MiniComposite;
+  private readonly mini: MiniComposite | null;
   /** px / 타일 (정적 맵 조각 · 합성) */
   private readonly k: number;
   private readonly s: number;
@@ -230,23 +250,34 @@ export class CanvasFog implements FogLayer {
     this.s = s;
     const k = TILE_PX * WORLD_SCALE * s;
     this.k = k;
-    this.chunks = opts.chunks ?? new ChunkAtlas(k, VIEW_TILES_W, VIEW_TILES_H, REGION_MARGIN, true);
-    this.chunks.onBaked = null;
     this.rw = Math.min(MAP_W, Math.ceil(VIEW_TILES_W + REGION_MARGIN * 2));
     this.rh = Math.min(MAP_H, Math.ceil(VIEW_TILES_H + REGION_MARGIN * 2));
+    const whole = this.rw === MAP_W && this.rh === MAP_H;
     this.lift = rimLiftPath(k);
     gfxState.features.glowLayer = 'static';
     resetExitTracking();
     this.base = document.createElement('canvas');
-    this.base.width = Math.ceil(this.rw * k) + 1;
-    this.base.height = Math.ceil(this.rh * k) + 1;
+    if (whole) {
+      // 맵 전체 (확대 1): 정적 맵 한 장 (발광 포함, 같은 배율이면 캐시)
+      this.chunks = null;
+      this.staticMap = getStaticMap(k / TILE_PX, true);
+      keepStaticMaps([{ scale: k / TILE_PX, withGlow: true }], false);
+      this.base.width = this.staticMap.width;
+      this.base.height = this.staticMap.height;
+    } else {
+      this.staticMap = null;
+      this.chunks = opts.chunks ?? new ChunkAtlas(k, VIEW_TILES_W, VIEW_TILES_H, REGION_MARGIN, true);
+      this.chunks.onBaked = null;
+      this.base.width = Math.ceil(this.rw * k) + 1;
+      this.base.height = Math.ceil(this.rh * k) + 1;
+    }
     const ctx = this.base.getContext('2d');
     if (!ctx) throw new Error('바닥 합성 캔버스를 만들 수 없습니다');
     this.ctx = ctx;
     this.pen = new CanvasPen(ctx, k, s * WORLD_LINE);
     this.light = opts.fog ? new LightMap(opts.lightPxPerTile, opts.ambientCss, domLightSurface) : null;
-    this.mini = new MiniComposite(opts.lightPxPerTile, this.light);
-    keepStaticMaps([{ scale: opts.lightPxPerTile / TILE_PX, withGlow: true }], true);
+    this.mini = whole ? null : new MiniComposite(opts.lightPxPerTile, this.light);
+    if (!whole) keepStaticMaps([{ scale: opts.lightPxPerTile / TILE_PX, withGlow: true }], true);
     this.key = nextFogKey('fog-base');
     // 안개 주기마다 다시 그리므로 addCanvas의 생성자 사본(getImageData)은 바로 쓸모없어진다 → 사본 없이 올린다
     this.texture = createCanvasTexture(scene.textures, this.key, this.base);
@@ -263,7 +294,7 @@ export class CanvasFog implements FogLayer {
   }
 
   get miniSource(): HTMLCanvasElement {
-    return this.mini.canvas;
+    return this.mini ? this.mini.canvas : this.base;
   }
 
   setView(view: ViewRect): boolean {
@@ -277,8 +308,8 @@ export class CanvasFog implements FogLayer {
       this.doneX >= 0 &&
       view.x >= this.doneX - 1e-6 &&
       view.y >= this.doneY - 1e-6 &&
-      view.x + view.w <= this.doneX + this.rw + 1e-6 &&
-      view.y + view.h <= this.doneY + this.rh + 1e-6;
+      Math.min(view.x + view.w, MAP_W) <= this.doneX + this.rw + 1e-6 &&
+      Math.min(view.y + view.h, MAP_H) <= this.doneY + this.rh + 1e-6;
     return !covers;
   }
 
@@ -326,14 +357,17 @@ export class CanvasFog implements FogLayer {
       const y0 = Math.round(this.ry * k);
       c.setTransform(1, 0, 0, 1, -x0, -y0);
       c.globalCompositeOperation = 'source-over';
-      // 정적 맵 조각 (없는 조각은 굽는다)
+      // 정적 맵: 맵 전체면 한 장, 아니면 조각 (없는 조각은 굽는다)
       const a = this.chunks;
-      const r = chunkRange({ x: this.rx, y: this.ry, w: this.rw, h: this.rh }, 0, a.tiles);
-      for (let cy = r.cy0; cy <= r.cy1; cy += 1)
-        for (let cx = r.cx0; cx <= r.cx1; cx += 1) {
-          a.ensure(cx, cy);
-          a.drawChunk(c, cx, cy);
-        }
+      if (this.staticMap) c.drawImage(this.staticMap, 0, 0);
+      else if (a) {
+        const r = chunkRange({ x: this.rx, y: this.ry, w: this.rw, h: this.rh }, 0, a.tiles);
+        for (let cy = r.cy0; cy <= r.cy1; cy += 1)
+          for (let cx = r.cx0; cx <= r.cx1; cx += 1) {
+            a.ensure(cx, cy);
+            a.drawChunk(c, cx, cy);
+          }
+      }
       this.rec.replay(this.pen);
       if (this.light) {
         const l = this.light;
@@ -341,17 +375,21 @@ export class CanvasFog implements FogLayer {
         c.save();
         c.globalCompositeOperation = 'multiply';
         c.imageSmoothingEnabled = true;
-        c.drawImage(
-          l.canvas,
-          this.rx * lk,
-          this.ry * lk,
-          this.rw * lk,
-          this.rh * lk,
-          this.rx * k,
-          this.ry * k,
-          this.rw * k,
-          this.rh * k,
-        );
+        if (this.staticMap) {
+          c.drawImage(l.canvas, 0, 0, this.base.width, this.base.height);
+        } else {
+          c.drawImage(
+            l.canvas,
+            this.rx * lk,
+            this.ry * lk,
+            this.rw * lk,
+            this.rh * lk,
+            this.rx * k,
+            this.ry * k,
+            this.rw * k,
+            this.rh * k,
+          );
+        }
         c.restore();
       }
       addRimLift(c, this.lift);
@@ -363,7 +401,7 @@ export class CanvasFog implements FogLayer {
       if (lightChanged || recChanged) {
         this.last = this.rec;
         this.rec = last ?? new PenRecord();
-        this.mini.take(this.last);
+        this.mini?.take(this.last);
       }
     } else {
       gfxState.features.fogSkips = Number(gfxState.features.fogSkips ?? 0) + 1;

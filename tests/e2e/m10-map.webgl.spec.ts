@@ -1,5 +1,5 @@
 // M10b 맵 · 오브젝트 (WebGL · SwiftShader · 품질 높음 · 1920×1080 배율 1, 봇 방 탭 하나): Canvas 낮음과 같은 검사를
-// GPU 합성 경로(발광 스프라이트 ADD · 빛 지도 MULTIPLY · 테두리 리프트 ADD · 경계 셰이더)에서 한다.
+// GPU 합성 경로(발광을 구운 정적 맵 조각 아틀라스 · 빛 지도 MULTIPLY · 테두리 리프트 ADD · 경계 셰이더)에서 한다.
 // 판 중 자동 하향은 injectFps(60)으로 막고 하향 0회를 단언한다. 텍스처 예산은 높음 32MiB.
 // 더해서: 맵 쪽 정적 · 동적 레이어 · 배지에 프레임마다 다시 테셀레이션하는 Graphics가 없다(R3), 멈춘 시계에서 열린 탈출구가
 // 다 열린 그림이다(R6), 페이지를 다시 열어도 맵 그림이 같다(T7 시드 결정성).
@@ -38,9 +38,12 @@ test('시야 밖 구조 대비 2.5:1 · 시간 불변 · 시야 안 바닥 밝�
   expect(g.quality).toBe('high');
   expect(g.fogMode).toBe('gpu');
   expect(g.downgrades).toBe(0);
-  // 높음은 발광을 따로 더한다 (빛 지도 곱하기 앞)
-  expect(r.glowLayer).toBe('sprite');
+  // 따라가는 카메라: 높음도 발광을 정적 맵 조각에 구워 넣는다 (빛 지도 곱하기 앞 그대로). 조각 경로가 실제로 돌았는지 함께 본다
+  expect(r.glowLayer).toBe('static');
   expect(r.glowBakeMs).toBeGreaterThan(0);
+  const f = await s.page.evaluate(() => window.__DECOY__!.gfx.features);
+  expect(Number(f.chunkImages ?? 0)).toBeGreaterThan(0);
+  expect(Number(f.chunkBakes ?? 0)).toBeGreaterThan(0);
   expectDarkAndLit(r);
   expect(r.textureBytes).toBeGreaterThan(0);
   expect(r.textureBytes).toBeLessThanOrEqual(HIGH_TEXTURE_BUDGET);
