@@ -248,6 +248,51 @@ describe('가장자리 배치', () => {
     expect(Math.hypot(m.x - nx, m.y - ny)).toBeGreaterThanOrEqual(L.r - 1e-6);
   });
 
+  it('같은 피할 사각형에 막힌 두 화살표는 같은 빈자리에 쌓이지 않는다 (검토 반영)', () => {
+    const box = { x: 860, y: 520, w: 100, h: 120 };
+    const out: EdgeMarker[] = [];
+    placeEdges([tgt('a', 40, 24), tgt('b', 38, 26)], v, { ...L, avoid: [box] }, [], out);
+    expect(out).toHaveLength(2);
+    for (const m of out) {
+      const nx = Math.max(box.x, Math.min(box.x + box.w, m.x));
+      const ny = Math.max(box.y, Math.min(box.y + box.h, m.y));
+      expect(Math.hypot(m.x - nx, m.y - ny)).toBeGreaterThanOrEqual(L.r - 1e-6);
+    }
+    const d = Math.hypot(out[0]!.x - out[1]!.x, out[0]!.y - out[1]!.y);
+    expect(d).toBeGreaterThanOrEqual(L.r * 2);
+  });
+
+  it('여러 화살표가 엄지 버튼 둘레에 몰려도 둘레를 따라 최소 간격(지름 + 틈) 넘게 떨어진다 (무작위 400판, 모퉁이에서는 직선 거리가 더 짧다)', () => {
+    const boxes = [
+      { x: 820, y: 470, w: 140, h: 170 },
+      { x: 0, y: 500, w: 160, h: 140 },
+    ];
+    let seed = 7;
+    const rnd = (): number => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed / 2147483648;
+    };
+    for (let trial = 0; trial < 400; trial += 1) {
+      const ts: EdgeTarget[] = [];
+      const base = rnd() * Math.PI * 2;
+      for (let i = 0; i < 4; i += 1) {
+        const a = base + (rnd() - 0.5) * 0.4;
+        ts.push(tgt(`t${i}`, 18 + Math.cos(a) * 30, 15.3 + Math.sin(a) * 30, i));
+      }
+      const out: EdgeMarker[] = [];
+      placeEdges(ts, v, { ...L, avoid: boxes }, [], out);
+      const t = { x0: L.inset, y0: L.inset, x1: 960 - L.inset, y1: 640 - L.inset };
+      const P = 2 * (t.x1 - t.x0 + (t.y1 - t.y0));
+      for (let i = 0; i < out.length; i += 1)
+        for (let j = i + 1; j < out.length; j += 1) {
+          const d = Math.abs(toPerim(t, out[i]!.x, out[i]!.y) - toPerim(t, out[j]!.x, out[j]!.y)) % P;
+          expect(Math.min(d, P - d), `판 ${trial} ${out[i]!.id}-${out[j]!.id}`).toBeGreaterThanOrEqual(
+            L.r * 2 + L.gap - 0.5,
+          );
+        }
+    }
+  });
+
   it('캐릭터 몸과 겹치면 흐리게', () => {
     const out: EdgeMarker[] = [];
     placeEdges([tgt('east', 40, 15)], v, L, [{ x: 935, y: 300 }], out);

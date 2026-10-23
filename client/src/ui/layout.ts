@@ -151,13 +151,34 @@ export function thumbReserve(
   w: number,
   h: number,
   monster: boolean,
-): { clusterTop: number; sysLeft: number; sysBottom: number; moveTop: number; zoneBottom: number } {
+): {
+  clusterTop: number;
+  sysLeft: number;
+  sysBottom: number;
+  moveTop: number;
+  zoneBottom: number;
+  /** 오른쪽 아래 버튼 무리의 버튼 · 조준 스틱 사각형 (touchControls.touchLayout과 같은 식) */
+  cluster: Box[];
+} {
   const t = thumbMetrics(h);
   const right = w - EDGE_BAND.side - t.pad;
   const bottom = h - EDGE_BAND.bottom - t.pad;
-  const clusterTop = monster
-    ? bottom - t.aimR * 2 - t.rowGap - t.btn
-    : bottom - t.ability / 2 - t.rescue / 2 - Math.round(t.ability * 0.3);
+  const sq = (x: number, y: number, s: number): Box => ({ x, y, w: s, h: s });
+  const cluster: Box[] = [];
+  if (monster) {
+    const r = t.aimR;
+    const aim = sq(right - r * 2, bottom - r * 2, r * 2);
+    const top = aim.y - t.rowGap - t.btn;
+    const mode = sq(aim.x + r - t.btn / 2, top, t.btn);
+    cluster.push(aim, sq(aim.x - t.gap - t.btn, aim.y + r - t.btn / 2, t.btn), mode);
+    cluster.push(sq(mode.x - t.gap - t.btn, top, t.btn));
+  } else {
+    const a = t.ability;
+    const rs = t.rescue;
+    cluster.push(sq(right - a, bottom - a, a));
+    cluster.push(sq(right - a - t.gap - rs, bottom - a / 2 - rs / 2 - Math.round(a * 0.3), rs));
+  }
+  const clusterTop = Math.min(...cluster.map((b) => b.y));
   const zoneBottom = h - EDGE_BAND.bottom;
   return {
     clusterTop,
@@ -165,6 +186,7 @@ export function thumbReserve(
     sysBottom: t.pad + 2 + t.sysH,
     moveTop: zoneBottom - t.moveR * 2 - 16,
     zoneBottom,
+    cluster,
   };
 }
 
@@ -421,7 +443,7 @@ function planCss(
     const leftX = timer.x - U.gap * 2 - pairW;
     const gx = leftX >= cards.x + cards.w + U.gap * 2 ? leftX : timer.x + timer.w + U.gap * 2;
     const [ga, gb] = pairAt(gx, cy - g / 2);
-    return { timer, gaugeA: ga, gaugeB: gb, cards, minimap: null, inset: insetCss(W, map, r) };
+    return { timer, gaugeA: ga, gaugeB: gb, cards, minimap: null, inset: insetCss(map, r) };
   }
 
   const cw = mapLeft;
@@ -508,20 +530,18 @@ function planCss(
     gaugeB: gb,
     cards,
     minimap,
-    inset: minimap ? null : insetCss(W, map, r),
+    inset: minimap ? null : insetCss(map, r),
   };
 }
 
 /**
  * 맵 창 안 미니맵 자리 (CSS px, 그림 사각형 — 틀 · 제목은 바깥). 후보 둘: ① 맵 오른쪽 위 구석(시스템 버튼이 맵에 걸치면 그
- * 아래) ② 시스템 버튼 왼쪽의 맵 위 끝. 엄지 버튼 무리(화면 오른쪽 절반, 위 끝 clusterTop) 위에서 멈추도록 줄이고, 더 큰 쪽을
- * 고른다(같으면 ①). 최소 폭(MINIMAP_INSET.min — 확대 화면에서는 미니맵이 필수라 옆 칸 미니맵보다 작게 허용)보다 작으면 null
+ * 아래) ② 시스템 버튼 왼쪽의 맵 위 끝. 틀이 엄지 버튼(실제 버튼 사각형 + 최소 간격)과 겹치지 않는 가장 큰 폭으로 줄이고, 더 큰
+ * 쪽을 고른다(같으면 ①). 최소 폭(MINIMAP_INSET.min — 확대 화면에서는 미니맵이 필수라 옆 칸 미니맵보다 작게 허용)보다 작으면 null.
+ * 버튼과 가로로 겹치지 않으면 그 버튼 높이와 상관없다 (검토 반영: 예전에는 오른쪽 절반이면 무리 맨 위 끝에서 멈춰, 낮은 16:9
+ * 화면의 괴물이 옆 칸 · 안쪽 미니맵을 둘 다 못 받았다)
  */
-function insetCss(
-  W: number,
-  map: Box,
-  r: { clusterTop: number; sysLeft: number; sysBottom: number },
-): Box | null {
+function insetCss(map: Box, r: { sysLeft: number; sysBottom: number; cluster: readonly Box[] }): Box | null {
   const a = TOUCH_UI.art;
   const mm = TOUCH_PART.minimap;
   const pad = mm.pad * a;
@@ -529,16 +549,23 @@ function insetCss(
   const M = MINIMAP_INSET.margin;
   const full = Math.min(map.w * MINIMAP_INSET.frac, MINIMAP_INSET.maxCss);
   const ratio = MAP_H / MAP_W;
+  const clear = (f: Box): boolean =>
+    r.cluster.every(
+      (b) =>
+        f.x >= b.x + b.w + MIN_GAP ||
+        b.x >= f.x + f.w + MIN_GAP ||
+        f.y >= b.y + b.h + MIN_GAP ||
+        b.y >= f.y + f.h + MIN_GAP,
+    );
   const fit = (right: number, top: number): Box | null => {
-    let w = full;
-    // 엄지 무리(오른쪽 절반)와 가로로 겹치면 그 위 끝 위에서 멈춘다
-    const left = right - w - pad * 2;
-    if (right > W / 2 || left > W / 2) {
-      const room = r.clusterTop - MIN_GAP - top - title - pad;
-      w = Math.min(w, room / ratio);
-    }
     // 맵 아래 끝 안
-    w = Math.min(w, (map.y + map.h - M - top - title - pad) / ratio);
+    let w = Math.min(full, (map.y + map.h - M - top - title - pad) / ratio);
+    // 엄지 버튼과 겹치지 않을 때까지 1 CSS px씩 줄인다 (배치를 정할 때 한 번, 200번 안)
+    while (w >= MINIMAP_INSET.min) {
+      const frame = { x: right - w - pad * 2, y: top, w: w + pad * 2, h: title + w * ratio + pad };
+      if (clear(frame)) break;
+      w -= 1;
+    }
     if (w < MINIMAP_INSET.min) return null;
     return { x: right - pad - w, y: top + title, w, h: w * ratio };
   };

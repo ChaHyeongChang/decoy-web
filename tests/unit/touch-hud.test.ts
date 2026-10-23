@@ -236,7 +236,14 @@ describe('터치 HUD 자리 touchHudPlan', () => {
     const pad = L.TOUCH_PART.minimap.pad * art;
     const title = L.TOUCH_PART.minimap.title * art;
     let insets = 0;
-    for (const [name, w, h] of SCREENS) {
+    // 낮은 16:9 브라우저 크기 (검토 반영: 괴물이 옆 칸 · 안쪽 미니맵을 둘 다 못 받던 크기)
+    const LOW_16_9: [string, number, number][] = [
+      ['16:9 낮음 592×280', 592, 280],
+      ['16:9 낮음 568×270', 568, 270],
+      ['16:9 낮음 600×300', 600, 300],
+      ['534×300', 534, 300],
+    ];
+    for (const [name, w, h] of [...SCREENS, ...LOW_16_9]) {
       L.applyLayout(L.layoutFor(w, h, true));
       const t = L.HUD.touch!;
       const k = t.L;

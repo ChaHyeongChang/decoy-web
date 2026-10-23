@@ -287,7 +287,7 @@ export function placeEdges(
   order.sort((a, b) => s[a]! - s[b]!);
   const n = order.length;
   if (n > 1 && minGap * n < P) {
-    for (let pass = 0; pass < 6; pass += 1) {
+    for (let pass = 0; pass < 16; pass += 1) {
       let moved = false;
       for (let k = 0; k < n; k += 1) {
         const a = order[k]!;
@@ -303,30 +303,46 @@ export function placeEdges(
       if (!moved) break;
     }
   }
-  for (let k = 0; k < picked.length; k += 1) {
-    const g = picked[k]!;
-    let at = s[k]!;
-    // 피할 사각형: 가까운 쪽으로 둘레를 따라 빠져나간다
-    if (L.avoid.length > 0) {
-      const blocked = (q: number): boolean => {
-        const p = fromPerim(t, q);
-        return L.avoid.some((b) => hitsBox(p.x, p.y, L.r, b));
-      };
-      if (blocked(at)) {
-        const step = 4;
-        for (let d = step; d < P / 2; d += step) {
-          if (!blocked(at + d)) {
-            at += d;
-            break;
-          }
-          if (!blocked(at - d)) {
-            at -= d;
-            break;
-          }
+  // 피할 사각형(엄지 버튼 · 맵 안 미니맵): 걸린 화살표만 가까운 쪽으로 둘레를 따라 빠져나간다. 빠져나갈 자리는 사각형뿐 아니라
+  // 이미 자리 잡은 다른 화살표(걸리지 않은 것 · 먼저 옮긴 것)와도 최소 간격을 지킨다 — 같은 버튼에 막힌 둘이 같은 빈자리에
+  // 겹쳐 쌓이지 않게 (검토 반영). 빈자리가 없으면 제자리
+  if (L.avoid.length > 0 && picked.length > 0) {
+    const inBox = (q: number): boolean => {
+      const p = fromPerim(t, q);
+      return L.avoid.some((b) => hitsBox(p.x, p.y, L.r, b));
+    };
+    const moving: number[] = [];
+    const fixed: number[] = [];
+    for (let k = 0; k < picked.length; k += 1) {
+      if (inBox(s[k]!)) moving.push(k);
+      else fixed.push(s[k]!);
+    }
+    const near = (q: number): boolean => {
+      for (const f of fixed) {
+        const d = Math.abs(q - f) % P;
+        if (Math.min(d, P - d) < minGap - 1e-6) return true;
+      }
+      return false;
+    };
+    const step = 4;
+    for (const k of moving) {
+      const at = s[k]!;
+      for (let d = step; d < P / 2; d += step) {
+        if (!inBox(at + d) && !near(at + d)) {
+          s[k] = at + d;
+          break;
+        }
+        if (!inBox(at - d) && !near(at - d)) {
+          s[k] = at - d;
+          break;
         }
       }
+      fixed.push(s[k]!);
     }
-    const p = fromPerim(t, at);
+  }
+  for (let k = 0; k < picked.length; k += 1) {
+    const g = picked[k]!;
+    const p = fromPerim(t, s[k]!);
     const tp = toScreen(v, g.tx, g.ty);
     let faded = false;
     for (const b of bodies)
