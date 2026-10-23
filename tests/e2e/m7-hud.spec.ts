@@ -51,11 +51,8 @@ test('역할별 스크린샷 4장 + 미니맵도 같은 정보 규칙', async ({
   await sendTest(host, { kind: 'teleport', target: scout.id, x: 37, y: 14 });
   await sendTest(host, { kind: 'teleport', target: monster.id, x: 26, y: 25, face: -1.9 });
   await sendTest(host, { kind: 'setPoint', point: 'B', progress: 0.45 });
-  // 따라가는 카메라: 창이 멈춘 뒤 감옥 쪽을 조준하고 서버 조준이 그 방향인지 확인한다 (helpers.aimMonsterAt)
-  await aimMonsterAt(host, 24, 19);
-  await host.mouse.down({ button: 'right' });
-  await host.mouse.up({ button: 'right' });
-  // 점령 시작 알림이 괴물에게 뜰 때까지
+  // 점령 시작 알림이 괴물에게 뜰 때까지. 알림은 러너를 A에 놓자마자 2초만 뜬다 — 카메라 · 조준을 기다리기 전에 본다
+  // (따라가는 카메라: 아래 조준 확인이 2초를 넘기면 알림이 지나가 있었다)
   await host.waitForFunction(
     () => (window.__DECOY__?.getBanners() ?? []).some((t) => t.includes('무언가 움직인다')),
     undefined,
@@ -63,6 +60,10 @@ test('역할별 스크린샷 4장 + 미니맵도 같은 정보 규칙', async ({
       timeout: 10_000,
     },
   );
+  // 따라가는 카메라: 창이 멈춘 뒤 감옥 쪽을 조준하고 서버 조준이 그 방향인지 확인한다 (helpers.aimMonsterAt)
+  await aimMonsterAt(host, 24, 19);
+  await host.mouse.down({ button: 'right' });
+  await host.mouse.up({ button: 'right' });
   await guard.page.waitForFunction(() => window.__DECOY__?.getLastSnapshot()?.you.surv?.spotted === true);
   await host.waitForTimeout(600);
   for (const p of players) {

@@ -1,5 +1,5 @@
 // 따라가는 카메라 3단계: 기존 · 새 캐릭터 스타일 확대 화면 비교 한 장 (node scripts/char-compare-zoom.mjs → artifacts/camera/chars/compare.png)
-// tests/camera/char-compare.spec.ts가 찍은 자른 그림(같은 장면 · 같은 순간, 스타일만 다름)을 HTML 한 장에 놓고 설치된 Chromium으로 찍는다
+// tests/camera/char-compare.spec.ts가 찍은 자른 그림(같은 장면 · 같은 자리, 스타일만 다름)을 HTML 한 장에 놓고 설치된 Chromium으로 찍는다
 /* global document */
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -47,7 +47,7 @@ const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>
   .miss { color: #f87171; }
 </style></head><body>
   <h1>확대 ② 중간에서 기존 · 새 캐릭터</h1>
-  <p>같은 장면 · 같은 순간에 스타일만 바꿔 찍었다(봇 · 장식 시계 멈춤, 기기 px 그대로 자름). 새 캐릭터 위 그림은 판정 반지름의 1.15배를 넘지 않게 앞 돌출(후드 · 방패 · 망원경 · 필터 · 발톱 · 돌진 자락)을 몸 쪽으로 당겼다. 기존 그림은 그대로다.</p>
+  <p>같은 장면 · 같은 자리에서 스타일만 바꿔 찍었다(봇 자리 · 장식 시계 멈춤, 기기 px 그대로 자름 — 괴물 봇의 시야 방향 · 모드와 점령 진행은 두 장 사이에 바뀔 수 있다). 새 캐릭터 위 그림은 판정 반지름의 1.15배를 넘지 않게 앞 돌출(후드 · 방패 · 망원경 · 필터 · 발톱 · 돌진 자락)을 몸 쪽으로 당겼다. 기존 그림은 그대로다.</p>
   ${body}
 </body></html>`;
 

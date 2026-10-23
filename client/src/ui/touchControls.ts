@@ -40,7 +40,10 @@ export interface TouchControlsOptions {
     rects: readonly { id: string; rect: Box }[];
     canvas: () => { left: number; top: number; k: number } | null;
     onCovered?: (ids: ReadonlySet<string>) => void;
-    /** 다시 배치할 때마다 조준 스틱 · 버튼 사각형 (논리 px): 화면 밖 화살표가 엄지 버튼 아래로 숨지 않게 피한다 */
+    /**
+     * 다시 배치할 때마다 엄지 대상 사각형 (논리 px, thumbAvoidBoxes — 버튼 이름표 · 이동 스틱 고리까지): 화면 밖 화살표 · 옮긴
+     * 미니맵이 엄지 버튼 아래로 숨지 않게 피한다
+     */
     onThumbs?: (boxes: readonly Box[]) => void;
   };
 }
@@ -63,6 +66,28 @@ export interface Insets {
 }
 
 export type TouchButtonId = 'dash' | 'roar' | 'mode' | 'ability' | 'rescue' | 'scoreboard' | 'fullscreen';
+
+/**
+ * 버튼 이름표(`.tc-cap`)가 버튼 상자 아래로 나오는 길이 (CSS px): style.css `.tc-cap` top = 100% − 9px, 높이 = line-height 15 +
+ * padding 1 + 2 = 18 → 9px 아래로 나온다. 이동 스틱 이름표도 고리 아래로 같은 만큼(`.tc-move > .tc-cap`). 시스템 버튼(점수판 · 전체
+ * 화면) 이름표는 버튼 안이다(`.tc-sys > .tc-cap`). touch-hud 단위 시험이 CSS와 대조한다
+ */
+export const CAP_BELOW = 9;
+
+/**
+ * 판 위 그림(화면 밖 화살표 · 옮긴 미니맵)이 피할 엄지 대상 (CSS px): 조준 스틱 · 버튼 상자와 이동 스틱이 쉬는 고리, 아래로 이름표까지.
+ * 버튼 상자만 피하면 화살표가 버튼 아래 이름표(예: '구조')에 반쯤 가려졌다 (최종 촬영에서 찾음)
+ */
+export function thumbAvoidBoxes(L: TouchLayout): Box[] {
+  const out: Box[] = [];
+  const below = (b: Box, sys: boolean): Box => ({ x: b.x, y: b.y, w: b.w, h: b.h + (sys ? 0 : CAP_BELOW) });
+  if (L.aim) out.push(below(L.aim, false));
+  for (const [id, b] of Object.entries(L.buttons) as [TouchButtonId, Box | undefined][])
+    if (b) out.push(below(b, id === 'scoreboard' || id === 'fullscreen'));
+  const r = L.moveR;
+  out.push(below({ x: L.moveHome.x - r, y: L.moveHome.y - r, w: 2 * r, h: 2 * r }, false));
+  return out;
+}
 
 // 화면 가장자리 제스처 띠(EDGE_BAND: 좌우 안전 영역 + 32px, 아래 + 24px — 이 띠에서 시작한 터치는 무시한다) ·
 // 터치 대상 최소 크기 · 간격(MIN_TARGET · MIN_GAP, CSS px = dp)은 layout.ts에 있다 (HUD 배치가 같은 수치로 엄지 자리를 비운다)
@@ -597,9 +622,12 @@ export class TouchControls {
     const hud = this.opts.hud;
     const c = hud?.canvas();
     if (hud?.onThumbs && c && c.k > 0) {
-      const thumbs: Box[] = [];
-      for (const b of [L.aim, ...Object.values(L.buttons)])
-        if (b) thumbs.push({ x: (b.x - c.left) / c.k, y: (b.y - c.top) / c.k, w: b.w / c.k, h: b.h / c.k });
+      const thumbs = thumbAvoidBoxes(L).map((b) => ({
+        x: (b.x - c.left) / c.k,
+        y: (b.y - c.top) / c.k,
+        w: b.w / c.k,
+        h: b.h / c.k,
+      }));
       hud.onThumbs(thumbs);
     }
     const place = (el: HTMLElement | undefined, b: Box | null | undefined): void => {
