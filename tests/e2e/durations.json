@@ -1,6 +1,8 @@
 {
   "adaptive-rate.spec.ts": 110,
   "bundle-size.spec.ts": 1,
+  "camera.spec.ts": 100,
+  "camera.webgl.spec.ts": 250,
   "char-style-touch.spec.ts": 45,
   "char-style.spec.ts": 35,
   "debug-overlay.spec.ts": 55,

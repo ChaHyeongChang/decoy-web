@@ -18,10 +18,24 @@ import {
   waitForSnapshots,
 } from './helpers';
 import { expectHiddenOpponentHasNoPixels } from './camera.shared';
-import { startBotRoom, settle } from './m10-map.shared';
+import { startBotRoom, settle, type Session } from './m10-map.shared';
 import { touchTargets, waitForTouchTarget } from './touch';
 
 const QUERY = '&renderer=canvas&quality=low';
+
+/** 내 캐릭터를 순간 이동하고, 내 자리가 거기 온 뒤 카메라가 멈출 때까지 (서버가 반영하기 전의 멈춘 창을 읽지 않게) */
+async function teleportSelf(s: Session, you: string, x: number, y: number, face: number): Promise<void> {
+  await s.send({ kind: 'teleport', target: you, x, y, face });
+  await s.page.waitForFunction(
+    ([tx, ty]) => {
+      const st = window.__DECOY__?.getLocalState();
+      return st !== null && st !== undefined && Math.hypot(st.x - tx!, st.y - ty!) < 0.05;
+    },
+    [x, y],
+    { timeout: 10_000 },
+  );
+  await waitCamera(s.page);
+}
 
 test('괴물: 마우스를 가만히 두고 걸으면 화면이 움직여도 조준이 흔들리지 않는다', async ({ browser }) => {
   const s = await startBotRoom(browser, QUERY, 'monster');
@@ -115,8 +129,7 @@ test('따라가기: 창이 내 캐릭터를 따라가고 맵 밖을 보이지 �
     [44.5, 28.5, true],
   ] as const) {
     const cuts0 = (await page.evaluate(() => window.__DECOY__!.getCamera()))!.cuts;
-    await s.send({ kind: 'teleport', target: you, x, y, face: 0 });
-    await waitCamera(page);
+    await teleportSelf(s, you, x, y, 0);
     const c = (await page.evaluate(() => window.__DECOY__!.getCamera()))!;
     // 맵 안
     expect(c.view.x).toBeGreaterThanOrEqual(0);
@@ -152,8 +165,7 @@ test('화면 밖 화살표 (생존자): 창 밖 팀원 · 보이는 괴물 · �
   await s.send({ kind: 'teleport', target: s.id('guard'), x: 40.5, y: 15.2, face: Math.PI });
   await s.send({ kind: 'teleport', target: s.id('monster'), x: 37.6, y: 18.4, face: -0.6 });
   await s.send({ kind: 'teleport', target: s.id('scout'), x: 25.5, y: 4.5, face: 0.3 });
-  await s.send({ kind: 'teleport', target: you, x: 9.5, y: 17, face: 0 });
-  await waitCamera(page);
+  await teleportSelf(s, you, 9.5, 17, 0);
   await expect
     .poll(async () => (await markersAndDrawn(page)).markers.map((m) => m.kind).sort(), { timeout: 15_000 })
     .toEqual(expect.arrayContaining(['monster', 'point', 'teammate', 'teammate']));
