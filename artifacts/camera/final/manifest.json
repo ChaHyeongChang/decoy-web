@@ -1,0 +1,1244 @@
+{
+  "createdAt": "2026-10-23T21:36:43.072Z",
+  "shots": [
+    {
+      "file": "pc-1920x1080/guide.png",
+      "device": "pc-1920x1080",
+      "scene": "guide",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 15.496,
+          "y": 10.162,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "lookApplied": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 0,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": [
+          {
+            "kind": "point",
+            "id": "A",
+            "tx": 8,
+            "ty": 16,
+            "x": 276,
+            "y": 562,
+            "dir": 3.1090661681980336
+          },
+          {
+            "kind": "point",
+            "id": "B",
+            "tx": 40,
+            "ty": 16,
+            "x": 1644,
+            "y": 561,
+            "dir": 0.030540399450092792
+          }
+        ]
+      }
+    },
+    {
+      "file": "pc-1920x1080/monster-arrows.png",
+      "device": "pc-1920x1080",
+      "scene": "monster-arrows",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 11.91,
+          "y": 21.008,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": -0.599,
+          "y": 1.843
+        },
+        "lookApplied": {
+          "x": -0.59,
+          "y": 1.842
+        },
+        "cuts": 1,
+        "dip": 0.156,
+        "shakes": 1,
+        "shakeScale": 1,
+        "markers": [
+          {
+            "kind": "roarPing",
+            "id": "ping0",
+            "tx": 19.5,
+            "ty": 16.5,
+            "x": 941,
+            "y": 94,
+            "dir": -1.6124685020246687
+          },
+          {
+            "kind": "roarPing",
+            "id": "ping1",
+            "tx": 29.5,
+            "ty": 25.5,
+            "x": 1644,
+            "y": 480,
+            "dir": -0.08755128002182744
+          },
+          {
+            "kind": "point",
+            "id": "A",
+            "tx": 8,
+            "ty": 16,
+            "x": 446,
+            "y": 94,
+            "dir": -2.4265715229529707
+          }
+        ]
+      }
+    },
+    {
+      "file": "pc-1920x1080/spectate.png",
+      "device": "pc-1920x1080",
+      "scene": "spectate",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 32,
+          "y": 10.263,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p3",
+        "spectating": "p3",
+        "canSpectate": true,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "lookApplied": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": [
+          {
+            "kind": "teammate",
+            "id": "p4",
+            "tx": 9.5,
+            "ty": 16.5,
+            "x": 276,
+            "y": 587,
+            "dir": 3.125239165415449
+          },
+          {
+            "kind": "self",
+            "id": "p1",
+            "tx": 23.5,
+            "ty": 15.5,
+            "x": 276,
+            "y": 509,
+            "dir": 3.1135975288873965
+          },
+          {
+            "kind": "point",
+            "id": "A",
+            "tx": 8,
+            "ty": 16,
+            "x": 276,
+            "y": 548,
+            "dir": 3.1288362439817057
+          }
+        ]
+      }
+    },
+    {
+      "file": "pc-1920x1080/survivor-arrows.png",
+      "device": "pc-1920x1080",
+      "scene": "survivor-arrows",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 1.501,
+          "y": 11.664,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "lookApplied": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": [
+          {
+            "kind": "monster",
+            "id": "monster",
+            "tx": 37.6,
+            "ty": 18.4,
+            "x": 1644,
+            "y": 574,
+            "dir": 0.049882820755698276
+          },
+          {
+            "kind": "teammate",
+            "id": "p3",
+            "tx": 40.5,
+            "ty": 15.2,
+            "x": 1644,
+            "y": 489,
+            "dir": -0.05271612047485874
+          },
+          {
+            "kind": "teammate",
+            "id": "p4",
+            "tx": 25.5,
+            "ty": 4.5,
+            "x": 1531,
+            "y": 94,
+            "dir": -0.6631367350249704
+          },
+          {
+            "kind": "point",
+            "id": "B",
+            "tx": 40,
+            "ty": 16,
+            "x": 1644,
+            "y": 528,
+            "dir": -0.038004128217831834
+          }
+        ]
+      }
+    },
+    {
+      "file": "phone-640x360/guide.png",
+      "device": "phone-640x360",
+      "scene": "guide",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 15.491,
+          "y": 10.158,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "lookApplied": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 0,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": [
+          {
+            "kind": "teammate",
+            "id": "p3",
+            "tx": 39.73680000000053,
+            "ty": 12.580399999998845,
+            "x": 1640.0916666666667,
+            "y": 659.3333333333334,
+            "dir": -0.4265897808915735
+          },
+          {
+            "kind": "teammate",
+            "id": "p4",
+            "tx": 21.926200000003703,
+            "ty": 29.497800000000023,
+            "x": 943.6708333333333,
+            "y": 968.3958333333334,
+            "dir": 1.6820277801580108
+          },
+          {
+            "kind": "point",
+            "id": "A",
+            "tx": 8,
+            "ty": 16,
+            "x": 337.90833333333336,
+            "y": 576.9166666666667,
+            "dir": 3.108754287951383
+          },
+          {
+            "kind": "point",
+            "id": "B",
+            "tx": 40,
+            "ty": 16,
+            "x": 1640.0916666666667,
+            "y": 576.9166666666667,
+            "dir": 0.03081337741397938
+          }
+        ]
+      }
+    },
+    {
+      "file": "phone-640x360/monster-arrows.png",
+      "device": "phone-640x360",
+      "scene": "monster-arrows",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 11.889,
+          "y": 21.008,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": -0.599,
+          "y": 1.843
+        },
+        "lookApplied": {
+          "x": -0.611,
+          "y": 1.842
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 1,
+        "shakeScale": 1,
+        "markers": [
+          {
+            "kind": "roarPing",
+            "id": "ping0",
+            "tx": 19.5,
+            "ty": 16.5,
+            "x": 972.5166666666668,
+            "y": 144.22916666666669,
+            "dir": -1.610326493190561
+          },
+          {
+            "kind": "roarPing",
+            "id": "ping1",
+            "tx": 29.5,
+            "ty": 25.5,
+            "x": 1640.0916666666667,
+            "y": 399.72083333333336,
+            "dir": 0.3770235871551719
+          },
+          {
+            "kind": "point",
+            "id": "A",
+            "tx": 8,
+            "ty": 16,
+            "x": 515.1041666666667,
+            "y": 144.22916666666669,
+            "dir": -2.425703744083421
+          }
+        ]
+      }
+    },
+    {
+      "file": "phone-640x360/spectate.png",
+      "device": "phone-640x360",
+      "scene": "spectate",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 31.997,
+          "y": 10.273,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p3",
+        "spectating": "p3",
+        "canSpectate": true,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "lookApplied": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": [
+          {
+            "kind": "teammate",
+            "id": "p4",
+            "tx": 9.5,
+            "ty": 16.5,
+            "x": 337.90833333333336,
+            "y": 397.66041666666666,
+            "dir": 3.027100378397245
+          },
+          {
+            "kind": "self",
+            "id": "p1",
+            "tx": 23.5,
+            "ty": 15.5,
+            "x": 337.90833333333336,
+            "y": 482.13750000000005,
+            "dir": 3.062822492368996
+          },
+          {
+            "kind": "point",
+            "id": "A",
+            "tx": 8,
+            "ty": 16,
+            "x": 337.90833333333336,
+            "y": 564.5541666666667,
+            "dir": 3.129124369119843
+          }
+        ]
+      }
+    },
+    {
+      "file": "phone-640x360/survivor-arrows.png",
+      "device": "phone-640x360",
+      "scene": "survivor-arrows",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 1.501,
+          "y": 11.658,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "lookApplied": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": [
+          {
+            "kind": "monster",
+            "id": "monster",
+            "tx": 37.6,
+            "ty": 18.4,
+            "x": 1640.0916666666667,
+            "y": 630.4875000000001,
+            "dir": 0.028232962660801775
+          },
+          {
+            "kind": "teammate",
+            "id": "p3",
+            "tx": 40.5,
+            "ty": 15.2,
+            "x": 1640.0916666666667,
+            "y": 712.9041666666667,
+            "dir": -0.1488228357893142
+          },
+          {
+            "kind": "teammate",
+            "id": "p4",
+            "tx": 25.5,
+            "ty": 4.5,
+            "x": 1386.6604166666668,
+            "y": 144.22916666666669,
+            "dir": -0.5977258740344293
+          },
+          {
+            "kind": "point",
+            "id": "B",
+            "tx": 40,
+            "ty": 16,
+            "x": 1640.0916666666667,
+            "y": 548.0708333333333,
+            "dir": -0.038505189922101835
+          }
+        ]
+      }
+    },
+    {
+      "file": "phone-800x360/guide.png",
+      "device": "phone-800x360",
+      "scene": "guide",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 15.509,
+          "y": 10.175,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "lookApplied": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 0,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": [
+          {
+            "kind": "teammate",
+            "id": "p3",
+            "tx": 40.86766865671515,
+            "ty": 13.82781791044641,
+            "x": 1717.4866666666667,
+            "y": 412.62,
+            "dir": -0.0965115915349557
+          },
+          {
+            "kind": "teammate",
+            "id": "p4",
+            "tx": 23.84671343283397,
+            "ty": 29.5,
+            "x": 1068.5800000000002,
+            "y": 897.5366666666667,
+            "dir": 1.5466950434494926
+          },
+          {
+            "kind": "point",
+            "id": "A",
+            "tx": 8,
+            "ty": 16,
+            "x": 398.5133333333334,
+            "y": 497.26000000000005,
+            "dir": 3.1099006204812127
+          },
+          {
+            "kind": "point",
+            "id": "B",
+            "tx": 40,
+            "ty": 16,
+            "x": 1717.4866666666667,
+            "y": 495.49666666666667,
+            "dir": 0.029807604752198458
+          }
+        ]
+      }
+    },
+    {
+      "file": "phone-800x360/monster-arrows.png",
+      "device": "phone-800x360",
+      "scene": "monster-arrows",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 11.894,
+          "y": 21.002,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": -0.599,
+          "y": 1.843
+        },
+        "lookApplied": {
+          "x": -0.606,
+          "y": 1.835
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 1,
+        "shakeScale": 1,
+        "markers": [
+          {
+            "kind": "roarPing",
+            "id": "ping0",
+            "tx": 19.5,
+            "ty": 16.5,
+            "x": 1040.3666666666668,
+            "y": 54.663333333333334,
+            "dir": -1.6108202062913213
+          },
+          {
+            "kind": "roarPing",
+            "id": "ping1",
+            "tx": 29.5,
+            "ty": 25.5,
+            "x": 1717.4866666666667,
+            "y": 342.0866666666667,
+            "dir": 0.28985763782003815
+          },
+          {
+            "kind": "point",
+            "id": "A",
+            "tx": 8,
+            "ty": 16,
+            "x": 573.0833333333334,
+            "y": 54.663333333333334,
+            "dir": -2.42619426761316
+          }
+        ]
+      }
+    },
+    {
+      "file": "phone-800x360/spectate.png",
+      "device": "phone-800x360",
+      "scene": "spectate",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 31.987,
+          "y": 10.274,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p3",
+        "spectating": "p3",
+        "canSpectate": true,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "lookApplied": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": [
+          {
+            "kind": "teammate",
+            "id": "p4",
+            "tx": 9.5,
+            "ty": 16.5,
+            "x": 398.5133333333334,
+            "y": 342.0866666666667,
+            "dir": 3.038200749716246
+          },
+          {
+            "kind": "self",
+            "id": "p1",
+            "tx": 23.5,
+            "ty": 15.5,
+            "x": 398.5133333333334,
+            "y": 414.3833333333333,
+            "dir": 3.0765445997880096
+          },
+          {
+            "kind": "point",
+            "id": "A",
+            "tx": 8,
+            "ty": 16,
+            "x": 398.5133333333334,
+            "y": 483.15333333333336,
+            "dir": 3.12913218921819
+          }
+        ]
+      }
+    },
+    {
+      "file": "phone-800x360/survivor-arrows.png",
+      "device": "phone-800x360",
+      "scene": "survivor-arrows",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 1.502,
+          "y": 11.677,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "lookApplied": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": [
+          {
+            "kind": "monster",
+            "id": "monster",
+            "tx": 37.6,
+            "ty": 18.4,
+            "x": 1717.4866666666667,
+            "y": 536.0533333333334,
+            "dir": 0.03418275992156694
+          },
+          {
+            "kind": "teammate",
+            "id": "p3",
+            "tx": 40.5,
+            "ty": 15.2,
+            "x": 1717.4866666666667,
+            "y": 396.75,
+            "dir": -0.038979133528890486
+          },
+          {
+            "kind": "teammate",
+            "id": "p4",
+            "tx": 25.5,
+            "ty": 4.5,
+            "x": 1597.5800000000002,
+            "y": 54.663333333333334,
+            "dir": -0.6636325650960444
+          },
+          {
+            "kind": "point",
+            "id": "B",
+            "tx": 40,
+            "ty": 16,
+            "x": 1717.4866666666667,
+            "y": 467.28333333333336,
+            "dir": -0.039207207115090625
+          }
+        ]
+      }
+    },
+    {
+      "file": "phone-915x412/guide.png",
+      "device": "phone-915x412",
+      "scene": "guide",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 15.503,
+          "y": 10.169,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "lookApplied": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 0,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": [
+          {
+            "kind": "teammate",
+            "id": "p3",
+            "tx": 37.91672575757429,
+            "ty": 14.974681818183004,
+            "x": 1724.1734693877552,
+            "y": 443.7551020408163,
+            "dir": -0.023051231324293653
+          },
+          {
+            "kind": "teammate",
+            "id": "p4",
+            "tx": 18.74649545454361,
+            "ty": 29.353430303029942,
+            "x": 909.0816326530612,
+            "y": 904.4591836734694,
+            "dir": 1.9015787180026784
+          },
+          {
+            "kind": "point",
+            "id": "A",
+            "tx": 8,
+            "ty": 16,
+            "x": 389.8265306122449,
+            "y": 497.68367346938777,
+            "dir": 3.109471962515583
+          },
+          {
+            "kind": "point",
+            "id": "B",
+            "tx": 40,
+            "ty": 16,
+            "x": 1724.1734693877552,
+            "y": 503.84693877551024,
+            "dir": 0.01979473940787635
+          }
+        ]
+      }
+    },
+    {
+      "file": "phone-915x412/monster-arrows.png",
+      "device": "phone-915x412",
+      "scene": "monster-arrows",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 12.499,
+          "y": 20.907,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 1.75
+        },
+        "lookApplied": {
+          "x": -0.001,
+          "y": 1.74
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 1,
+        "shakeScale": 1,
+        "markers": [
+          {
+            "kind": "roarPing",
+            "id": "ping0",
+            "tx": 19.5,
+            "ty": 16.5,
+            "x": 1012.3163265306123,
+            "y": 47.76530612244898,
+            "dir": -1.6730220326101026
+          },
+          {
+            "kind": "roarPing",
+            "id": "ping1",
+            "tx": 29.5,
+            "ty": 25.5,
+            "x": 1724.1734693877552,
+            "y": 372.8775510204082,
+            "dir": 0.263265659460755
+          },
+          {
+            "kind": "point",
+            "id": "A",
+            "tx": 8,
+            "ty": 16,
+            "x": 533.1224489795918,
+            "y": 47.76530612244898,
+            "dir": -2.4552164394422196
+          }
+        ]
+      }
+    },
+    {
+      "file": "phone-915x412/spectate.png",
+      "device": "phone-915x412",
+      "scene": "spectate",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 31.99,
+          "y": 10.272,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p3",
+        "spectating": "p3",
+        "canSpectate": true,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "lookApplied": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": [
+          {
+            "kind": "teammate",
+            "id": "p4",
+            "tx": 9.5,
+            "ty": 16.5,
+            "x": 389.8265306122449,
+            "y": 360.55102040816325,
+            "dir": 3.0470937527182667
+          },
+          {
+            "kind": "self",
+            "id": "p1",
+            "tx": 23.5,
+            "ty": 15.5,
+            "x": 389.8265306122449,
+            "y": 422.18367346938777,
+            "dir": 3.0869486735999594
+          },
+          {
+            "kind": "point",
+            "id": "A",
+            "tx": 8,
+            "ty": 16,
+            "x": 389.8265306122449,
+            "y": 483.81632653061223,
+            "dir": 3.1290846602636933
+          }
+        ]
+      }
+    },
+    {
+      "file": "phone-915x412/survivor-arrows.png",
+      "device": "phone-915x412",
+      "scene": "survivor-arrows",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 1.502,
+          "y": 11.67,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "lookApplied": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": [
+          {
+            "kind": "monster",
+            "id": "monster",
+            "tx": 37.6,
+            "ty": 18.4,
+            "x": 1724.1734693877552,
+            "y": 528.5,
+            "dir": 0.03938207174959629
+          },
+          {
+            "kind": "teammate",
+            "id": "p3",
+            "tx": 40.5,
+            "ty": 15.2,
+            "x": 1724.1734693877552,
+            "y": 405.234693877551,
+            "dir": -0.04307739780557185
+          },
+          {
+            "kind": "teammate",
+            "id": "p4",
+            "tx": 25.5,
+            "ty": 4.5,
+            "x": 1605.530612244898,
+            "y": 47.76530612244898,
+            "dir": -0.6634114365400094
+          },
+          {
+            "kind": "point",
+            "id": "B",
+            "tx": 40,
+            "ty": 16,
+            "x": 1724.1734693877552,
+            "y": 466.86734693877554,
+            "dir": -0.03909536798862767
+          }
+        ]
+      }
+    },
+    {
+      "file": "tablet-1024x768/guide.png",
+      "device": "tablet-1024x768",
+      "scene": "guide",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 15.502,
+          "y": 10.168,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "lookApplied": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 0,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": [
+          {
+            "kind": "teammate",
+            "id": "p3",
+            "tx": 42.36881940298638,
+            "ty": 17.762504477619235,
+            "x": 1402.2578125000002,
+            "y": 619.90625,
+            "dir": 0.11930636328302668
+          },
+          {
+            "kind": "teammate",
+            "id": "p4",
+            "tx": 28.220929850753677,
+            "ty": 29.5,
+            "x": 868.2421875000001,
+            "y": 984.9414062500001,
+            "dir": 1.2456941545395264
+          },
+          {
+            "kind": "point",
+            "id": "A",
+            "tx": 8,
+            "ty": 16,
+            "x": 31.742187500000004,
+            "y": 559.22265625,
+            "dir": 3.1094070910311444
+          },
+          {
+            "kind": "point",
+            "id": "B",
+            "tx": 40,
+            "ty": 16,
+            "x": 1402.2578125000002,
+            "y": 558.2890625,
+            "dir": 0.03024508661961889
+          }
+        ]
+      }
+    },
+    {
+      "file": "tablet-1024x768/monster-arrows.png",
+      "device": "tablet-1024x768",
+      "scene": "monster-arrows",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 11.894,
+          "y": 21.015,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": -0.599,
+          "y": 1.843
+        },
+        "lookApplied": {
+          "x": -0.606,
+          "y": 1.848
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 1,
+        "shakeScale": 1,
+        "markers": [
+          {
+            "kind": "roarPing",
+            "id": "ping0",
+            "tx": 19.5,
+            "ty": 16.5,
+            "x": 699.2617187500001,
+            "y": 90.55859375000001,
+            "dir": -1.6107324181762968
+          },
+          {
+            "kind": "roarPing",
+            "id": "ping1",
+            "tx": 29.5,
+            "ty": 25.5,
+            "x": 1402.2578125000002,
+            "y": 477.06640625000006,
+            "dir": -0.08808116911383124
+          },
+          {
+            "kind": "point",
+            "id": "A",
+            "tx": 8,
+            "ty": 16,
+            "x": 202.58984375000003,
+            "y": 90.55859375000001,
+            "dir": -2.4255542248162474
+          }
+        ]
+      }
+    },
+    {
+      "file": "tablet-1024x768/spectate.png",
+      "device": "tablet-1024x768",
+      "scene": "spectate",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 31.998,
+          "y": 10.262,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p3",
+        "spectating": "p3",
+        "canSpectate": true,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "lookApplied": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": [
+          {
+            "kind": "teammate",
+            "id": "p4",
+            "tx": 9.5,
+            "ty": 16.5,
+            "x": 31.742187500000004,
+            "y": 583.49609375,
+            "dir": 3.1242679992881452
+          },
+          {
+            "kind": "self",
+            "id": "p1",
+            "tx": 23.5,
+            "ty": 15.5,
+            "x": 31.742187500000004,
+            "y": 508.80859375000006,
+            "dir": 3.115815923883968
+          },
+          {
+            "kind": "point",
+            "id": "A",
+            "tx": 8,
+            "ty": 16,
+            "x": 31.742187500000004,
+            "y": 546.15234375,
+            "dir": 3.1287898481676883
+          }
+        ]
+      }
+    },
+    {
+      "file": "tablet-1024x768/survivor-arrows.png",
+      "device": "tablet-1024x768",
+      "scene": "survivor-arrows",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 1.496,
+          "y": 11.663,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "lookApplied": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": [
+          {
+            "kind": "monster",
+            "id": "monster",
+            "tx": 37.6,
+            "ty": 18.4,
+            "x": 1402.2578125000002,
+            "y": 571.359375,
+            "dir": 0.049890059290378375
+          },
+          {
+            "kind": "teammate",
+            "id": "p3",
+            "tx": 40.5,
+            "ty": 15.2,
+            "x": 1402.2578125000002,
+            "y": 488.26953125000006,
+            "dir": -0.05314432480120601
+          },
+          {
+            "kind": "teammate",
+            "id": "p4",
+            "tx": 25.5,
+            "ty": 4.5,
+            "x": 1113.77734375,
+            "y": 90.55859375000001,
+            "dir": -0.5746798393789945
+          },
+          {
+            "kind": "point",
+            "id": "B",
+            "tx": 40,
+            "ty": 16,
+            "x": 1402.2578125000002,
+            "y": 524.6796875,
+            "dir": -0.037517830914257644
+          }
+        ]
+      }
+    }
+  ],
+  "problems": [],
+  "gif": {
+    "file": "phone-800x360/walk-spectate.gif",
+    "seconds": 9.5,
+    "fps": 12,
+    "scene": "러너 걷기(따라가기 · 화면 밖 화살표 · 공유 시야 괴물) → 수감(잘라 옮기기) → 가드 카드 탭 관전"
+  }
+}

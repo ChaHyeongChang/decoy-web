@@ -17,7 +17,9 @@ import { installVirtualClock } from '../helpers/virtualClock';
 import { newPlayerPage } from './helpers';
 
 /** 품질 높음: 장식(발먼지 · 빛 속 먼지 · 걷기 위상 끊지 않음)까지 비교한다 */
-const QUERY = '/?debug=hook&renderer=canvas&quality=high';
+// 따라가는 카메라: 마우스 조준은 커서가 움직인 순간의 화면(창 자리)에 달려 있어 확대 화면에서는 프레임 속도마다 조금 다를 수
+// 있다(따라가기 감쇠의 프레임 시각). 이 시험은 같은 입력이면 시뮬레이션 · 연출이 같은지를 보므로 맵 전체 고정 화면(?cam=1)
+const QUERY = '/?debug=hook&renderer=canvas&quality=high&cam=1';
 const SEED = 20_261_013;
 /** 두 페이지를 맞추는 가상 시각 (50ms 배수 = 60 · 120Hz 공통 프레임). 로딩(펌프)이 이보다 먼저 끝나야 한다 */
 const SYNC_AT = 30_000;

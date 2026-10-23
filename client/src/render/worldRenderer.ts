@@ -72,7 +72,7 @@ import { CONE, DANGER, NEON, ROLE, WARN } from '../art/palette';
 import { effectivePreset, type QualityPreset, type RendererKind } from '../gfx/presets';
 import { currentCharStyle } from '../gfx/charStyle';
 import { gfxNow, gfxState, onGfxChange } from '../gfx/state';
-import { MAP_PX_H, MAP_PX_W, MAP_SCALE, MAP_X, MAP_Y } from '../ui/layout';
+import { MAP_PX_H, MAP_PX_W, MAP_X, MAP_Y, WORLD_SCALE, worldLine } from '../ui/layout';
 import {
   MonsterRig,
   SurvivorRig,
@@ -94,14 +94,13 @@ import {
 } from './characters';
 import { STUN_VEIL, WorldPostFx } from './effects';
 import { ALPHA, FOG } from './colors';
-import { createFogLayer, type FogLayer } from './baseLayer';
+import { chunkAtlasFor, createFogLayer, fogArtParams, stepFogArt, type FogLayer } from './baseLayer';
+import type { ViewRect } from './camera';
 import {
   ConeRedTrack,
   PhaseClock,
   PolyCache,
   ambientRgb,
-  compositeScaleFor,
-  fogPathFor,
   opponentFxAllowed,
   rgbCss,
   unionOutline,
@@ -156,6 +155,8 @@ export interface FrameView {
   localDashAt: number | null;
   /** 보간 엔티티의 프레임 사이 경로 · 상태 경계 (없으면 프레임 사이 직선 · 프레임 시각을 쓴다) */
   motion: MotionSource | null;
+  /** 카메라: 보이는 창 (타일, 기기 픽셀 격자에 맞춘 왼쪽 위 — ui/layout CAM과 같은 값) */
+  view: ViewRect;
 }
 
 /**
@@ -189,6 +190,8 @@ export interface WorldAnimDebug {
  * 정해진 시각에 위상을 고정해 갱신한다(fogMath PhaseClock): 60fps에서는 예전처럼 3 · 2프레임마다, 120fps는 6 · 4프레임마다.
  * 괴물 주기는 예전 '33ms 넘게 지나면'이 60fps에서 실제로 두 프레임(33.3ms)마다였던 것을 그대로 1/30초로 적는다
  */
+/** 판 중 품질 · 해상도가 바뀌어 맵 그림을 다시 구울 때 한 프레임에 쓰는 시간 (ms, 로비 미리 굽기 main.ts PREBAKE_STEP_MS와 같다) */
+const FOG_REBAKE_STEP_MS = 8;
 const SURVIVOR_FOG_MS = 50;
 const MONSTER_FOG_MS = 1000 / 30;
 
@@ -508,7 +511,7 @@ export class WorldRenderer {
     this.fogClock.anchor(0);
     this.post = new WorldPostFx(scene, this.fogRoot);
     this.post.apply(this.preset, this.fog.shader);
-    this.container = scene.add.container(MAP_X, MAP_Y).setScale(MAP_SCALE);
+    this.container = scene.add.container(MAP_X, MAP_Y).setScale(WORLD_SCALE);
     // 배지(바닥 문양 · 라벨)는 캐릭터보다 먼저 넣어 아래에 그린다 (정보 우선 R15: 배지가 캐릭터를 덮지 않음)
     this.badges = new Badges(scene, this.container);
     // 기절 채도 감소 막: 맵 바로 위, 배지 · 캐릭터 · 범위 · 마커 아래 (맨 앞에 끼운다)
@@ -676,16 +679,17 @@ export class WorldRenderer {
 
   private buildFog(): FogLayer {
     const renderer: RendererKind = this.scene.game.renderer.type === Phaser.WEBGL ? 'webgl' : 'canvas';
-    const preset = effectivePreset(gfxState.quality, renderer, gfxState.touch);
-    const path = fogPathFor(preset, renderer);
-    const compositeScale = compositeScaleFor(gfxState.zoom, preset.compositeCap);
-    const fog = createFogLayer(this.scene, this.fogRoot, path.mode, {
+    const p = fogArtParams(renderer);
+    const compositeScale = p.compositeScale;
+    const fog = createFogLayer(this.scene, this.fogRoot, p.mode, {
       fog: this.useFog,
       compositeScale,
-      lightPxPerTile: preset.lightPxPerTile,
+      lightPxPerTile: p.lightPxPerTile,
       zoom: gfxState.zoom,
       ambientCss: rgbCss(ambientRgb(FOG.ambient, FOG.tint)),
-      shader: path.shader,
+      shader: p.shader,
+      // 조각 아틀라스는 GPU 합성만 쓴다 (Canvas 합성은 맵 전체 그림에서 영역을 바로 잘라 복사한다)
+      chunks: p.mode === 'gpu' ? chunkAtlasFor(p.k, p.margin) : undefined,
     });
     gfxState.fogMode = fog.mode;
     gfxState.ambient = this.useFog ? FOG.ambient : 1;
@@ -694,7 +698,30 @@ export class WorldRenderer {
     return fog;
   }
 
+  /** 지난 프레임에 놓은 창 (같으면 옮기지 않는다) */
+  private viewAt = { x: NaN, y: NaN };
+
+  /**
+   * 카메라 창을 월드에 건다: 안개 레이어 · 캐릭터 컨테이너 · 배지 글자를 창 왼쪽 위만큼 옮긴다. 창 자리는 부르는 쪽이 기기 픽셀
+   * 격자에 맞춰 두어(render/camera.ts snapView) 1텍셀 = 1기기 px로 구운 그림이 흐려지지 않는다
+   */
+  private applyView(view: ViewRect): void {
+    if (view.x === this.viewAt.x && view.y === this.viewAt.y) return;
+    this.viewAt.x = view.x;
+    this.viewAt.y = view.y;
+    const k = TILE_PX * WORLD_SCALE;
+    const dx = -view.x * k;
+    const dy = -view.y * k;
+    this.fogRoot.setPosition(dx, dy);
+    this.container.setPosition(MAP_X + dx, MAP_Y + dy);
+    this.post.follow(dx, dy);
+    this.badges.follow(dx, dy);
+  }
+
   private rebuildFog(): void {
+    // 새 배율 맵 그림을 프레임마다 조금씩 굽고 다 구운 뒤에 바꾼다 (그동안 지난 안개 레이어를 그대로 그린다)
+    const renderer: RendererKind = this.scene.game.renderer.type === Phaser.WEBGL ? 'webgl' : 'canvas';
+    if (!stepFogArt(renderer, FOG_REBAKE_STEP_MS)) return;
     this.fogDirty = false;
     this.post.clear();
     this.fog.destroy();
@@ -702,6 +729,7 @@ export class WorldRenderer {
     this.fog = this.buildFog();
     this.post.apply(this.preset, this.fog.shader);
     this.post.raise();
+    this.post.follow(this.fogRoot.x, this.fogRoot.y);
     this.fogClock.reset();
   }
 
@@ -709,6 +737,8 @@ export class WorldRenderer {
   private ensureArt(balance: Balance): AtlasBuild {
     const a = ensureAtlas(this.scene.textures, {
       zoom: gfxState.zoom,
+      texCap: this.preset.charTexelCap,
+      worldScale: WORLD_SCALE,
       survivorR: balance.survivor.radius,
       monsterR: balance.monster.radius,
       style: currentCharStyle(),
@@ -895,6 +925,9 @@ export class WorldRenderer {
     this.gfxCount.arcs = 0;
     this.gfxCount.fills = 0;
     if (this.fogDirty) this.rebuildFog();
+    // 카메라: 월드(안개 레이어 · 캐릭터 컨테이너)를 보이는 창만큼 옮긴다. 창이 합성한 영역 밖이면 안개 주기를 앞당긴다
+    this.applyView(v.view);
+    const fogStale = this.fog.setView(v.view);
     const half = this.preset.halfFrameAnims;
     // 장식 시계 (품질 낮음은 프레임 절반 = 15Hz로 끊는다)
     const animMs = half ? Math.floor(clockMs / 66.667) * 66.667 : clockMs;
@@ -910,7 +943,8 @@ export class WorldRenderer {
 
     // 1~6. 바닥 · 거점 · 탈출구 영역 · 시야 채움 · 안개 — 갱신 주기마다 합성
     // (그림이 지난 주기와 같으면 안개 레이어가 합성 · 업로드를 건너뛰고, 미니맵도 다시 그리지 않는다)
-    const fogDue = this.fogClock.due(v.nowMs, isMonster ? MONSTER_FOG_MS : SURVIVOR_FOG_MS, frameMs);
+    const fogDue =
+      this.fogClock.due(v.nowMs, isMonster ? MONSTER_FOG_MS : SURVIVOR_FOG_MS, frameMs) || fogStale;
     this.baseRefreshed = false;
     this.gaitDrawn.clear();
     if (fogDue) {
@@ -1365,7 +1399,7 @@ export class WorldRenderer {
     for (const e of eyes) {
       if (!e.role) continue;
       const color = ROLE[e.role];
-      g.lineStyle(CONE_LOOK.rimWidth / MAP_SCALE, color, CONE_LOOK.rimAlpha);
+      g.lineStyle(worldLine(CONE_LOOK.rimWidth), color, CONE_LOOK.rimAlpha);
       g.beginPath();
       traceRim(g, e.poly, e.center, e.r, this.webgl);
       g.strokePath();
@@ -1381,7 +1415,7 @@ export class WorldRenderer {
     if (d.key === this.outline) return;
     this.coneEdge.clear();
     if (this.outline.length > 0)
-      strokeSegments(this.coneEdge, this.outline, CONE.idle, FOG.outlineAlpha, FOG.outlineWidth / MAP_SCALE);
+      strokeSegments(this.coneEdge, this.outline, CONE.idle, FOG.outlineAlpha, worldLine(FOG.outlineWidth));
     d.key = this.outline;
   }
 
@@ -1451,7 +1485,7 @@ export class WorldRenderer {
         continue;
       }
       // 장식 입자 상한: 알파 0.2 · 반지름 2 논리 px
-      const r = Math.min(FX_LIMITS.decorSizeMaxPx, m.size) / MAP_SCALE;
+      const r = Math.min(FX_LIMITS.decorSizeMaxPx, m.size) / WORLD_SCALE;
       const k = r / baked / tpw;
       img
         .setPosition(m.x * TILE_PX, m.y * TILE_PX)

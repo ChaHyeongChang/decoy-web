@@ -3,10 +3,9 @@
 // 시드 고정이라 같은 배율이면 언제나 같은 그림이다. 한 번 구워 캐시하고(getStaticMap), 판 시작 때 끊기지 않게
 // 로비에서 미리 구울 수 있다(render/baseLayer.ts prebakeFogArt). 매 프레임에는 이 이미지만 그린다.
 //
-// 발광(네온 · 철창 · 단말 화면의 번짐)은 낮은 해상도 캔버스 하나(getGlowMap)에 굽는다.
-//  - 품질 높음 · 중간(GPU 합성, presets glow = 'sprite'): 따로 ADD 이미지로 빛 지도 곱하기 앞에 더한다
-//  - 품질 낮음 · Canvas(glow = 'static') · 미니맵: 같은 그림을 정적 맵에 구워 넣는다
-// 둘 다 빛 지도에 곱해지므로 발광은 어둠 속에서 약 30%(하한), 빛 속에서 100%다. 시간 · 상대 위치와 무관한 정적 그림이다.
+// 발광(네온 · 철창 · 단말 화면의 번짐)은 낮은 해상도 캔버스 하나(getGlowMap)에 굽고, 모든 경로(GPU 조각 · Canvas · 미니맵)에서
+// 정적 맵에 구워 넣는다(따라가는 카메라: 발광을 따로 올리는 큰 텍스처를 없앴다 — DECISIONS 9절). 빛 지도에 곱해지므로 발광은
+// 어둠 속에서 약 30%(하한), 빛 속에서 100%다. 시간 · 상대 위치와 무관한 정적 그림이다.
 // 시야 밖 구조 대비(테두리 ↔ 바닥 2.5:1)는 곱하기 뒤에 더하는 테두리 리프트(render/fogPaint.ts)가 맡는다.
 import {
   CAPTURE_POINTS,
@@ -20,7 +19,7 @@ import {
   type Vec2,
 } from '@decoy/shared';
 import { gfxState } from '../gfx/state';
-import { MAP_SCALE } from '../ui/layout';
+import { MAP_SCALE, WORLD_SCALE } from '../ui/layout';
 import {
   FLOOR_JITTER,
   MAP_ART,
@@ -58,6 +57,30 @@ function shade(c: number, d: number): number {
   return out;
 }
 
+/** 정적 맵 기하 (맵이 고정이라 한 번만 계산한다: 조각 굽기가 조각마다 다시 세지 않게) */
+let geomCache: {
+  walls: { i: number; j: number }[];
+  shadows: ReturnType<typeof contactShadows>;
+  pillars: TileRect[];
+  neon: NeonRun[];
+} | null = null;
+
+function geomOf(): NonNullable<typeof geomCache> {
+  geomCache ??= { walls: wallCells(), shadows: contactShadows(), pillars: pillarBlocks(), neon: allNeon() };
+  return geomCache;
+}
+
+const decalCache = new Map<number, Decal[]>();
+
+function decalsOf(seed: number): Decal[] {
+  let d = decalCache.get(seed);
+  if (!d) {
+    d = floorDecals(seed);
+    decalCache.set(seed, d);
+  }
+  return d;
+}
+
 /** 배율 scale로 그린 정적 맵 캔버스 크기 (px) */
 export function staticMapSize(scale: number): { w: number; h: number } {
   return {
@@ -66,20 +89,68 @@ export function staticMapSize(scale: number): { w: number; h: number } {
   };
 }
 
-/** 타일 좌표로 그리고 사각형은 기기 픽셀 정수 경계에 맞추는 붓. k = px / 타일 */
+/** 맵 전체 그림 좌표(px)의 사각형 */
+export interface PxBox {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+/**
+ * 타일 좌표로 그리고 사각형은 기기 픽셀 정수 경계에 맞추는 붓. k = px / 타일.
+ * cull이 있으면 그 사각형(맵 전체 그림 px, 바깥 몇 px 여유 포함)과 겹치지 않는 사각형 · 다각형 · 선은 그리지 않는다
+ * (조각 굽기: 그리는 쪽이 정수 이동 + 자르기를 건 컨텍스트라 겹치는 것만 칠해도 같은 화소다)
+ */
 class Painter {
   /** 가는 선 한 줄 두께 (기기 px) */
   readonly d: number;
+  /** 맵 전체 그림 크기 (px) */
+  readonly W: number;
+  readonly H: number;
 
   constructor(
     readonly c: CanvasRenderingContext2D,
     readonly k: number,
+    readonly cull: PxBox | null = null,
   ) {
     this.d = Math.max(1, Math.round(k / 28));
+    this.W = Math.max(1, Math.round(MAP_W * k));
+    this.H = Math.max(1, Math.round(MAP_H * k));
   }
 
   X(t: number): number {
     return Math.round(t * this.k);
+  }
+
+  /** 타일 사각형(여유 1타일 — 그림자 · 테두리 · 선 굵기)이 그릴 범위와 겹치는가 (반복문을 칸 단위로 건너뛴다) */
+  tileHits(x0: number, y0: number, x1: number, y1: number): boolean {
+    if (this.cull === null) return true;
+    const k = this.k;
+    return this.hits((x0 - 1) * k, (y0 - 1) * k, (x1 + 1) * k, (y1 + 1) * k);
+  }
+
+  /** 맵 px 사각형이 그릴 범위와 겹치는가 */
+  hits(x0: number, y0: number, x1: number, y1: number): boolean {
+    const q = this.cull;
+    return q === null || (x1 >= q.x0 && x0 <= q.x1 && y1 >= q.y0 && y0 <= q.y1);
+  }
+
+  /** 점 목록(타일)의 외접 사각형 + 두께 pad(px)가 그릴 범위와 겹치는가 */
+  hitsPts(points: readonly Vec2[], pad: number): boolean {
+    if (this.cull === null) return true;
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
+    for (const p of points) {
+      x0 = Math.min(x0, p.x);
+      y0 = Math.min(y0, p.y);
+      x1 = Math.max(x1, p.x);
+      y1 = Math.max(y1, p.y);
+    }
+    const k = this.k;
+    return this.hits(x0 * k - pad, y0 * k - pad, x1 * k + pad, y1 * k + pad);
   }
 
   rect(x0: number, y0: number, x1: number, y1: number, color: number, alpha = 1): void {
@@ -94,7 +165,7 @@ class Painter {
 
   /** 기기 px 사각형 */
   dev(x: number, y: number, w: number, h: number, color: number, alpha = 1): void {
-    if (w <= 0 || h <= 0) return;
+    if (w <= 0 || h <= 0 || !this.hits(x, y, x + w, y + h)) return;
     this.c.fillStyle = rgba(color, alpha);
     this.c.fillRect(x, y, w, h);
   }
@@ -110,7 +181,7 @@ class Painter {
   }
 
   poly(points: readonly Vec2[], color: number | CanvasGradient, alpha = 1): void {
-    if (points.length < 3) return;
+    if (points.length < 3 || !this.hitsPts(points, 2)) return;
     this.path(points);
     this.c.fillStyle = typeof color === 'number' ? rgba(color, alpha) : color;
     this.c.fill();
@@ -125,7 +196,7 @@ class Painter {
     alpha = 1,
     cap: CanvasLineCap = 'butt',
   ): void {
-    if (points.length < 2) return;
+    if (points.length < 2 || !this.hitsPts(points, width + 2)) return;
     const c = this.c;
     this.path(points, close);
     c.lineWidth = width;
@@ -154,11 +225,13 @@ class Painter {
 function paintFloor(P: Painter, seed: number): void {
   const { c, d } = P;
   c.fillStyle = rgba(MC.floor);
-  c.fillRect(0, 0, c.canvas.width, c.canvas.height);
+  c.fillRect(0, 0, P.W, P.H);
   const tread: { i: number; j: number }[] = [];
   for (let j = 0; j < MAP_H; j += 1) {
     for (let i = 0; i < MAP_W; i += 1) {
       if (tileAt(i, j) !== 'floor') continue;
+      // 줄무늬 강판 고르기(해시)는 그릴 범위 밖 칸도 같은 값이라 건너뛰어도 그림이 같다
+      if (!P.tileHits(i, j, i + 1, j + 1)) continue;
       const x0 = P.X(i);
       const x1 = P.X(i + 1);
       const y0 = P.X(j);
@@ -269,8 +342,44 @@ function paintNoise(P: Painter, seed: number): void {
   c.save();
   c.globalCompositeOperation = 'overlay';
   c.imageSmoothingEnabled = true;
-  c.drawImage(noiseMap(seed), 0, 0, c.canvas.width, c.canvas.height);
+  drawStretched(c, noiseMap(seed), P.W, P.H, P.cull);
   c.restore();
+}
+
+/**
+ * 작은 그림(잡음 · 발광 지도)을 맵 전체 W × H에 늘려 그린다. 자르는 상자가 있으면 거기 드는 원본 조각만 (띠 · 조각 굽기마다
+ * 큰 그림 전체를 늘려 그리지 않게). 둘레 2 원본 px를 더 읽어 선형 보간의 가장자리 처리가 자르기 밖에서 일어나게 한다:
+ * 한 번에 그린 것과 같은 화소
+ */
+function drawStretched(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLCanvasElement,
+  W: number,
+  H: number,
+  cull: PxBox | null,
+): void {
+  if (!cull) {
+    ctx.drawImage(img, 0, 0, W, H);
+    return;
+  }
+  const fx = img.width / W;
+  const fy = img.height / H;
+  const sx0 = Math.max(0, Math.floor(cull.x0 * fx) - 2);
+  const sy0 = Math.max(0, Math.floor(cull.y0 * fy) - 2);
+  const sx1 = Math.min(img.width, Math.ceil(cull.x1 * fx) + 2);
+  const sy1 = Math.min(img.height, Math.ceil(cull.y1 * fy) + 2);
+  if (sx1 > sx0 && sy1 > sy0)
+    ctx.drawImage(
+      img,
+      sx0,
+      sy0,
+      sx1 - sx0,
+      sy1 - sy0,
+      sx0 / fx,
+      sy0 / fy,
+      (sx1 - sx0) / fx,
+      (sy1 - sy0) / fy,
+    );
 }
 
 function paintDecal(P: Painter, dc: Decal): void {
@@ -347,11 +456,12 @@ function paintDecal(P: Painter, dc: Decal): void {
 function paintShadows(P: Painter): void {
   const c = P.c;
   const a = MAP_ART.shadowAlpha;
-  for (const s of contactShadows()) {
+  for (const s of geomOf().shadows) {
     const x0 = P.X(s.x0);
     const y0 = P.X(s.y0);
     const x1 = P.X(s.x1);
     const y1 = P.X(s.y1);
+    if (!P.hits(x0, y0, x1, y1)) continue;
     let g: CanvasGradient;
     if (s.side === 'n') g = c.createLinearGradient(0, y0, 0, y1);
     else if (s.side === 's') g = c.createLinearGradient(0, y1, 0, y0);
@@ -600,7 +710,7 @@ function paintWalls(P: Painter): void {
     return g;
   };
   const bev = MAP_ART.wallBevel;
-  const cells = wallCells();
+  const cells = geomOf().walls.filter(({ i, j }) => P.tileHits(i, j, i + 1, j + 1));
   for (const { i, j } of cells) {
     const f = wallFaces(i, j);
     P.r(f.top, MC.wallTop);
@@ -619,8 +729,10 @@ function paintWalls(P: Painter): void {
       const y1 = P.X(f.front.y1);
       const x0 = P.X(i);
       const x1 = P.X(i + 1);
-      c.fillStyle = gradFor(y0, y1);
-      c.fillRect(x0, y0, x1 - x0, y1 - y0);
+      if (P.hits(x0, y0, x1, y1)) {
+        c.fillStyle = gradFor(y0, y1);
+        c.fillRect(x0, y0, x1 - x0, y1 - y0);
+      }
       // 앞면: 세로 골 · 2칸마다 판 이음 · 입술 아래 그늘 · 밑둥
       for (const t of [0.25, 0.75]) P.dev(P.X(i + t), y0 + d, d, y1 - y0 - d, MC.wallRib);
       if (i % 2 === 0) P.dev(x0, y0, 2 * d, y1 - y0, 0x05080c, 0.8);
@@ -668,7 +780,8 @@ function paintWalls(P: Painter): void {
 
 function paintPillars(P: Painter): void {
   const { c, d } = P;
-  for (const b of pillarBlocks()) {
+  for (const b of geomOf().pillars) {
+    if (!P.tileHits(b.x0, b.y0, b.x1, b.y1)) continue;
     const s = pillarShape(b);
     // 받침 = 판정 칸 전체
     P.r(s.base, MC.pillarBase);
@@ -745,6 +858,14 @@ export function allNeon(): NeonRun[] {
 /** 발광 캔버스 배율 (출력 px / 월드 px): 논리 0.5배. 번짐은 부드러워서 낮은 해상도면 충분하다 */
 export const GLOW_SCALE = MAP_SCALE * 0.5;
 
+/**
+ * 지금 확대 수준의 발광 캔버스 배율: 따라가는 카메라는 맵을 크게 그리므로 2배까지 따라 키운다(번짐이 계단지지 않게).
+ * 발광은 조각 굽기(art/mapChunks.ts)가 정적 맵에 구워 넣어 GPU에 따로 올리지 않는다
+ */
+export function glowScale(): number {
+  return GLOW_SCALE * Math.min(2, Math.max(1, WORLD_SCALE / MAP_SCALE));
+}
+
 /** 굽는 시간을 그래픽 상태에 기록한다 (디버그 · 측정) */
 function record(kind: 'static' | 'glow', scale: number, ms: number): void {
   const r = Math.round(ms * 10) / 10;
@@ -801,30 +922,43 @@ export function bakeGlow(scale = GLOW_SCALE): HTMLCanvasElement {
   return canvas;
 }
 
-/** 정적 맵을 굽는다. withGlow면 발광 번짐을 구워 넣는다 (Canvas 합성 · 미니맵) */
-export function bakeStaticMap(scale: number, withGlow: boolean): HTMLCanvasElement {
-  const t0 = performance.now();
-  const size = staticMapSize(scale);
-  const { canvas, ctx } = newCanvas(size.w, size.h);
-  const P = new Painter(ctx, TILE_PX * scale);
+/**
+ * 정적 맵을 컨텍스트에 그린다 (맵 전체 그림 좌표, k = px / 타일). withGlow면 발광 번짐을 구워 넣는다.
+ * cull이 있으면 그 사각형과 겹치는 것만 칠한다 — 부르는 쪽이 정수 이동 + 자르기를 건 조각 굽기(art/mapChunks.ts)
+ */
+export function paintStaticMap(
+  ctx: CanvasRenderingContext2D,
+  k: number,
+  withGlow: boolean,
+  cull: PxBox | null,
+): void {
+  const P = new Painter(ctx, k, cull);
   const seed = MAP_ART.seed;
   paintFloor(P, seed);
   paintNoise(P, seed);
-  for (const dc of floorDecals(seed)) paintDecal(P, dc);
+  for (const dc of decalsOf(seed)) if (P.tileHits(dc.x0, dc.y0, dc.x1, dc.y1)) paintDecal(P, dc);
   paintPadsStatic(P);
   paintShadows(P);
   paintPrison(P);
   paintWalls(P);
   paintPillars(P);
   paintExitsStatic(P);
-  paintNeonCore(P, allNeon());
+  paintNeonCore(P, geomOf().neon);
   if (withGlow) {
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(getGlowMap(), 0, 0, size.w, size.h);
+    drawStretched(ctx, getGlowMap(), P.W, P.H, cull);
     ctx.restore();
   }
+}
+
+/** 정적 맵을 굽는다. withGlow면 발광 번짐을 구워 넣는다 (Canvas 합성 · 미니맵) */
+export function bakeStaticMap(scale: number, withGlow: boolean): HTMLCanvasElement {
+  const t0 = performance.now();
+  const size = staticMapSize(scale);
+  const { canvas, ctx } = newCanvas(size.w, size.h);
+  paintStaticMap(ctx, TILE_PX * scale, withGlow, null);
   record('static', scale, performance.now() - t0);
   return canvas;
 }
@@ -835,8 +969,10 @@ export function bakeStaticMap(scale: number, withGlow: boolean): HTMLCanvasEleme
  * 바뀐 뒤 옛 배율의 큰 캔버스(배율 2에서 약 22MB)를 붙잡지 않는다. keepStaticMaps 전에도 두 장을 넘기지 않는다
  */
 const cache = new Map<string, HTMLCanvasElement>();
+/** 캐시 장 수: 따라가는 카메라는 판 배율 큰 맵 + 미니맵 작은 맵 두 장을 함께 쓴다 */
 const CACHE_MAX = 2;
 let glowCanvas: HTMLCanvasElement | null = null;
+let glowCanvasScale = 0;
 
 function cacheKey(scale: number, withGlow: boolean): string {
   return `${scale.toFixed(5)}|${withGlow ? 'g' : '-'}`;
@@ -851,7 +987,126 @@ function recordCache(): void {
   gfxState.features.mapCacheCount = cache.size + (glowCanvas ? 1 : 0);
 }
 
-/** 같은 배율이면 다시 굽지 않는다 */
+// ───────────── 나눠 굽기 (따라가는 카메라: 판 전에 큰 정적 맵을 여러 번에 걸쳐 굽는다) ─────────────
+
+/** 나눠 굽는 띠 높이 (타일): 배율 3 PC(타일 89px)에서 띠 하나 약 4285 × 178px */
+export const BAKE_BAND_TILES = 2;
+
+/** 굽는 중인 정적 맵 (한 번에 하나: 판에 쓸 배율) */
+interface StaticJob {
+  key: string;
+  scale: number;
+  withGlow: boolean;
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  /** 다음에 구울 띠 번호 */
+  band: number;
+  bands: number;
+  /** 합계 · 가장 긴 띠 하나 (한 번에 막는 시간) */
+  ms: number;
+  maxBandMs: number;
+  /** 띠를 굽기 전 공통 준비 중 마친 수 (도형 · 바닥 무늬 → 잡음 지도 → 발광 지도): 첫 띠에 몰리지 않게 한 걸음씩 */
+  warm: number;
+}
+
+let job: StaticJob | null = null;
+
+/** 띠 하나를 굽는다 (정수 px 띠에 자르기 + 겹치는 것만 칠하기: 한 번에 구운 것과 같은 화소) */
+function bakeBand(j: StaticJob): void {
+  const t0 = performance.now();
+  const k = TILE_PX * j.scale;
+  const H = j.canvas.height;
+  const y0 = Math.min(H, Math.round(j.band * BAKE_BAND_TILES * k));
+  const y1 = j.band === j.bands - 1 ? H : Math.min(H, Math.round((j.band + 1) * BAKE_BAND_TILES * k));
+  const c = j.ctx;
+  c.save();
+  c.beginPath();
+  c.rect(0, y0, j.canvas.width, y1 - y0);
+  c.clip();
+  paintStaticMap(c, k, j.withGlow, { x0: -4, y0: y0 - 4, x1: j.canvas.width + 4, y1: y1 + 4 });
+  c.restore();
+  j.band += 1;
+  const ms = performance.now() - t0;
+  j.ms += ms;
+  j.maxBandMs = Math.max(j.maxBandMs, ms);
+}
+
+function finishJob(j: StaticJob): HTMLCanvasElement {
+  job = null;
+  cache.set(j.key, j.canvas);
+  while (cache.size > CACHE_MAX) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined || oldest === j.key) break;
+    cache.delete(oldest);
+  }
+  // 굽는 시간 기록: 한 번에 막는 시간(가장 긴 띠)과 합계
+  record('static', j.scale, j.maxBandMs);
+  gfxState.features.mapBakeTotalMs = Math.round(j.ms * 10) / 10;
+  recordCache();
+  return j.canvas;
+}
+
+/**
+ * 정적 맵을 budgetMs 안에서 띠 몇 개씩 굽는다 (로비 대기 · 첫 화면의 남는 시간에 여러 번 부른다 — 판 시작 전에 다 굽게).
+ * 다 구웠거나 이미 캐시에 있으면 true. 다른 배율을 굽던 중이면 그 일은 버린다
+ */
+export function bakeStaticMapStep(scale: number, withGlow: boolean, budgetMs: number): boolean {
+  const key = cacheKey(scale, withGlow);
+  if (cache.has(key)) return true;
+  if (!job || job.key !== key) {
+    const size = staticMapSize(scale);
+    const { canvas, ctx } = newCanvas(size.w, size.h);
+    job = {
+      key,
+      scale,
+      withGlow,
+      canvas,
+      ctx,
+      band: 0,
+      bands: Math.max(1, Math.ceil(MAP_H / BAKE_BAND_TILES)),
+      ms: 0,
+      maxBandMs: 0,
+      warm: 0,
+    };
+  }
+  const j = job;
+  const t0 = performance.now();
+  // 공통 준비: 하나씩 하고 예산을 넘으면 다음 걸음으로 (잡음 · 발광 지도는 각각 약 15~20ms)
+  const warmups: (() => void)[] = [
+    () => {
+      geomOf();
+      decalsOf(MAP_ART.seed);
+    },
+    () => noiseMap(MAP_ART.seed),
+    () => {
+      if (j.withGlow) getGlowMap();
+    },
+  ];
+  while (j.warm < warmups.length) {
+    warmups[j.warm]?.();
+    j.warm += 1;
+    const ms = performance.now() - t0;
+    if (ms >= budgetMs) {
+      j.ms += ms;
+      return false;
+    }
+  }
+  j.ms += performance.now() - t0;
+  do {
+    bakeBand(j);
+  } while (j.band < j.bands && performance.now() - t0 < budgetMs);
+  gfxState.features.mapBakeBands = j.band;
+  if (j.band < j.bands) return false;
+  finishJob(j);
+  return true;
+}
+
+/** 다 구운 정적 맵 (없으면 null — 굽지 않는다) */
+export function staticMapIfReady(scale: number, withGlow: boolean): HTMLCanvasElement | null {
+  return cache.get(cacheKey(scale, withGlow)) ?? null;
+}
+
+/** 같은 배율이면 다시 굽지 않는다 (나눠 굽던 중이면 남은 띠를 마저 굽는다) */
 export function getStaticMap(scale: number, withGlow: boolean): HTMLCanvasElement {
   const key = cacheKey(scale, withGlow);
   const hit = cache.get(key);
@@ -860,6 +1115,11 @@ export function getStaticMap(scale: number, withGlow: boolean): HTMLCanvasElemen
     cache.delete(key);
     cache.set(key, hit);
     return hit;
+  }
+  if (job && job.key === key) {
+    const j = job;
+    while (j.band < j.bands) bakeBand(j);
+    return finishJob(j);
   }
   const canvas = bakeStaticMap(scale, withGlow);
   cache.set(key, canvas);
@@ -874,8 +1134,10 @@ export function getStaticMap(scale: number, withGlow: boolean): HTMLCanvasElemen
 
 /** 발광 번짐 (배율 고정이라 한 번만, 쓰지 않는 경로로 바뀌면 keepStaticMaps가 버린다) */
 export function getGlowMap(): HTMLCanvasElement {
-  if (!glowCanvas) {
-    glowCanvas = bakeGlow(GLOW_SCALE);
+  const scale = glowScale();
+  if (!glowCanvas || glowCanvasScale !== scale) {
+    glowCanvas = bakeGlow(scale);
+    glowCanvasScale = scale;
     recordCache();
   }
   return glowCanvas;
@@ -890,6 +1152,7 @@ export interface StaticMapNeed {
 export function keepStaticMaps(needs: readonly StaticMapNeed[], glow: boolean): void {
   const keep = new Set(needs.map((n) => cacheKey(n.scale, n.withGlow)));
   for (const key of [...cache.keys()]) if (!keep.has(key)) cache.delete(key);
+  if (job && !keep.has(job.key)) job = null;
   if (!glow) glowCanvas = null;
   recordCache();
 }

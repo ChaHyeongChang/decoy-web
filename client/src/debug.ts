@@ -80,6 +80,7 @@ function hudLayout(app: App): HudLayout | null {
       ...box(i),
       ...(i.fontPx !== undefined ? { fontPx: r1(i.fontPx * k) } : {}),
     })),
+    minimapInset: scene.minimapInset,
   };
 }
 
@@ -92,6 +93,9 @@ export function installDebug(app: App, overlay: boolean): void {
     injectFps: (fps) => setFpsOverride(fps),
     getFrameStats: () => frameStatsInfo(),
     getAnimState: () => gameScene(app)?.animDebug ?? null,
+    getCamera: () => gameScene(app)?.cameraDebug ?? null,
+    getSpectateCards: () => gameScene(app)?.spectateCards ?? [],
+    setCameraShake: (scale) => gameScene(app)?.setShakeScale(scale),
     setFrameLimit: (limit) => pacingHooks.setLimit?.(limit),
     setCharStyle: (style) => void setCharStyle(style, false),
     probeText: (text, x, y, px) => probeSlot.draw?.(text, x, y, px),

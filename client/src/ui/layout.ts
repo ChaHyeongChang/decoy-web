@@ -84,6 +84,35 @@ export const TOUCH_UI = {
   minimapMin: 72,
 } as const;
 
+/**
+ * 맵 창 안 미니맵 (따라가는 카메라, CSS px): 맵 가로의 frac · maxCss 이하, 맵 끝에서 margin. 엄지 버튼 무리는 화면 오른쪽
+ * 절반 안에 있다고 보고(가장 왼쪽 포효 버튼도 그 안) 그 위 끝 위에서 멈춘다
+ */
+export const MINIMAP_INSET = { frac: 0.22, maxCss: 200, margin: 6, min: 60 } as const;
+
+/**
+ * 판 중 창이 낮아져 엄지 버튼이 옆 칸 미니맵을 덮었을 때 미니맵 틀을 옮길 자리 (논리 px, 틀 왼쪽 위). 확대 화면에서는 맵
+ * 전체가 보이지 않아 미니맵이 필수라 숨기지 않고 맵 창 안 오른쪽 위 구석으로 옮긴다(검토 반영): 틀이 맵 안이고 피할 사각형
+ * (엄지 버튼 · 시스템 버튼, 간격 gap)과 겹치지 않으면 그 자리, 아니면 null (그때는 예전처럼 숨긴다). 왼쪽은 이동 영역(화면 왼쪽
+ * 40%)이 그 아래까지 올라와 있어 쓰지 않는다
+ */
+export function minimapFallback(
+  map: { x: number; y: number; w: number; h: number },
+  frame: { w: number; h: number },
+  avoid: readonly { x: number; y: number; w: number; h: number }[],
+  margin: number,
+  gap: number,
+): { x: number; y: number } | null {
+  if (frame.w + margin * 2 > map.w || frame.h + margin * 2 > map.h) return null;
+  const y = map.y + margin;
+  const x = map.x + map.w - margin - frame.w;
+  const free = avoid.every(
+    (b) =>
+      x >= b.x + b.w + gap || b.x >= x + frame.w + gap || y >= b.y + b.h + gap || b.y >= y + frame.h + gap,
+  );
+  return free ? { x, y } : null;
+}
+
 /** 터치 HUD 부품 크기 (그림 단위: × uiScale = 논리 px) */
 export const TOUCH_PART = {
   /** 팀 카드 한 장 (실루엣 · 상태 아이콘 · 체력 칸 · 수감 눈금) */
@@ -145,13 +174,34 @@ export function thumbReserve(
   w: number,
   h: number,
   monster: boolean,
-): { clusterTop: number; sysLeft: number; sysBottom: number; moveTop: number; zoneBottom: number } {
+): {
+  clusterTop: number;
+  sysLeft: number;
+  sysBottom: number;
+  moveTop: number;
+  zoneBottom: number;
+  /** 오른쪽 아래 버튼 무리의 버튼 · 조준 스틱 사각형 (touchControls.touchLayout과 같은 식) */
+  cluster: Box[];
+} {
   const t = thumbMetrics(h);
   const right = w - EDGE_BAND.side - t.pad;
   const bottom = h - EDGE_BAND.bottom - t.pad;
-  const clusterTop = monster
-    ? bottom - t.aimR * 2 - t.rowGap - t.btn
-    : bottom - t.ability / 2 - t.rescue / 2 - Math.round(t.ability * 0.3);
+  const sq = (x: number, y: number, s: number): Box => ({ x, y, w: s, h: s });
+  const cluster: Box[] = [];
+  if (monster) {
+    const r = t.aimR;
+    const aim = sq(right - r * 2, bottom - r * 2, r * 2);
+    const top = aim.y - t.rowGap - t.btn;
+    const mode = sq(aim.x + r - t.btn / 2, top, t.btn);
+    cluster.push(aim, sq(aim.x - t.gap - t.btn, aim.y + r - t.btn / 2, t.btn), mode);
+    cluster.push(sq(mode.x - t.gap - t.btn, top, t.btn));
+  } else {
+    const a = t.ability;
+    const rs = t.rescue;
+    cluster.push(sq(right - a, bottom - a, a));
+    cluster.push(sq(right - a - t.gap - rs, bottom - a / 2 - rs / 2 - Math.round(a * 0.3), rs));
+  }
+  const clusterTop = Math.min(...cluster.map((b) => b.y));
   const zoneBottom = h - EDGE_BAND.bottom;
   return {
     clusterTop,
@@ -159,6 +209,7 @@ export function thumbReserve(
     sysBottom: t.pad + 2 + t.sysH,
     moveTop: zoneBottom - t.moveR * 2 - 16,
     zoneBottom,
+    cluster,
   };
 }
 
@@ -225,14 +276,58 @@ export function layout(): Readonly<LayoutInfo> {
   return current;
 }
 
-/** 타일 좌표 → 화면 좌표 */
-export function tileToScreen(x: number, y: number): { x: number; y: number } {
-  return { x: MAP_X + x * TILE_PX * MAP_SCALE, y: MAP_Y + y * TILE_PX * MAP_SCALE };
+// ───────────────────────── 카메라 (따라가는 카메라) ─────────────────────────
+// 보이는 창은 맵 사각형(MAP_RECT, 모든 배치에서 같은 3:2 크기) 그대로이고, 그 안에 맵의 1/CAM_ZOOM(가로 · 세로)을
+// 확대해 보인다. 그래서 보이는 타일 수는 기기 · 화면비와 상관없이 같다(넓은 화면이 더 보지 않는다). 확대 수준은 판 내내
+// 고정이고 플레이어가 바꿀 수 없다(공정성, DECISIONS 9절). CAM은 카메라가 프레임마다 쓴다(render/camera.ts)
+
+/** 기본 확대 수준 (맵 전체가 보이던 배율 대비, 1 = 맵 전체): ② 중간 — 창 16 × 10.7타일. 사용자가 고른 값 (DECISIONS 9절) */
+export const DEFAULT_CAM_ZOOM = 3;
+
+/** 카메라 확대 (맵 전체가 보이던 배율 대비). 1이면 맵 전체 (옛 고정 화면) */
+export let CAM_ZOOM = 1;
+/** 월드 그림 배율 (논리 px / 월드 px) = MAP_SCALE × CAM_ZOOM */
+export let WORLD_SCALE = MAP_SCALE;
+/**
+ * 월드 위 선 굵기 배율 (논리 px 굵기에 곱한다) = √CAM_ZOOM. 확대한 만큼 그대로 굵히면(4배) 무겁고, 그대로 두면 큰 그림에서
+ * 가늘어 보여 그 사이로 둔다. 판정 범위의 크기 · 모양과는 무관하다(선은 판정 경계 위에 그린다)
+ */
+export let WORLD_LINE = 1;
+/** 보이는 범위 (타일) */
+export let VIEW_TILES_W = MAP_W;
+export let VIEW_TILES_H = MAP_H;
+/** 카메라: 보이는 창 왼쪽 위의 맵 자리 (타일, 기기 픽셀 격자에 맞춘 값). 확대 1이면 늘 0 */
+export const CAM = { x: 0, y: 0 };
+
+/** 확대 수준을 정한다 (판 장면 · 그림 굽기가 읽기 전에). 확대 1이면 카메라를 맵 왼쪽 위에 둔다 */
+export function setCamZoom(z: number): void {
+  const zoom = Number.isFinite(z) && z >= 1 ? z : 1;
+  CAM_ZOOM = zoom;
+  WORLD_SCALE = MAP_SCALE * zoom;
+  WORLD_LINE = Math.sqrt(zoom);
+  VIEW_TILES_W = MAP_W / zoom;
+  VIEW_TILES_H = MAP_H / zoom;
+  if (zoom === 1) {
+    CAM.x = 0;
+    CAM.y = 0;
+  }
 }
 
-/** 화면 좌표 → 타일 좌표 */
+/** 월드 위 선 굵기: 논리 px 굵기 → 월드 컨테이너 단위 (확대 선 배율 WORLD_LINE을 곱한다) */
+export function worldLine(px: number): number {
+  return (px * WORLD_LINE) / WORLD_SCALE;
+}
+
+/** 타일 좌표 → 화면 좌표 (카메라 반영) */
+export function tileToScreen(x: number, y: number): { x: number; y: number } {
+  const k = TILE_PX * WORLD_SCALE;
+  return { x: MAP_X + (x - CAM.x) * k, y: MAP_Y + (y - CAM.y) * k };
+}
+
+/** 화면 좌표 → 타일 좌표 (카메라 반영) */
 export function screenToTile(x: number, y: number): { x: number; y: number } {
-  return { x: (x - MAP_X) / (TILE_PX * MAP_SCALE), y: (y - MAP_Y) / (TILE_PX * MAP_SCALE) };
+  const k = TILE_PX * WORLD_SCALE;
+  return { x: CAM.x + (x - MAP_X) / k, y: CAM.y + (y - MAP_Y) / k };
 }
 
 /** HUD 영역 (맵과 겹치지 않는다. touchWide는 위 · 아래 띠가 0 높이) */
@@ -290,6 +385,12 @@ export interface TouchHudPlan {
   cards: { x: number; y: number; w: number; h: number; cols: number; gap: number };
   /** 미니맵 그림 왼쪽 위 · 폭 (틀 · 제목은 바깥). 자리가 없으면 null */
   minimap: { x: number; y: number; w: number } | null;
+  /**
+   * 옆 칸에 자리가 없을 때 맵 창 안 오른쪽 위에 둘 미니맵 (그림 왼쪽 위 · 폭, 틀 · 제목은 바깥 — 틀까지 맵 창 안).
+   * 따라가는 카메라(확대 화면)에서만 쓴다(minimap.ts): 확대 1이면 맵 전체가 보여 필요 없다. 엄지 버튼 · 시스템 버튼과
+   * 겹치지 않는다. rects에는 넣지 않는다(맵 밖 부품 목록 — 이동 영역 시작 · 덮임 판단에 쓰지 않는다)
+   */
+  minimapInset: { x: number; y: number; w: number } | null;
   /** 늘 떠 있는 부품 사각형 (맵 · 엄지 영역과 겹치지 않는다, 터치 화면이 이동 영역을 이 아래에서 시작한다) */
   rects: { id: string; rect: Rect }[];
 }
@@ -327,12 +428,14 @@ function planCss(
   band: number,
   mapLeft: number,
   monster: boolean,
+  map: Box,
 ): {
   timer: Box & { label: boolean };
   gaugeA: Box;
   gaugeB: Box;
   cards: Box & { cols: number; cw: number; ch: number };
   minimap: Box | null;
+  inset: Box | null;
 } {
   const U = TOUCH_UI;
   const P = TOUCH_PART;
@@ -363,7 +466,7 @@ function planCss(
     const leftX = timer.x - U.gap * 2 - pairW;
     const gx = leftX >= cards.x + cards.w + U.gap * 2 ? leftX : timer.x + timer.w + U.gap * 2;
     const [ga, gb] = pairAt(gx, cy - g / 2);
-    return { timer, gaugeA: ga, gaugeB: gb, cards, minimap: null };
+    return { timer, gaugeA: ga, gaugeB: gb, cards, minimap: null, inset: insetCss(map, r) };
   }
 
   const cw = mapLeft;
@@ -444,7 +547,57 @@ function planCss(
           h: (mmW * MAP_H) / MAP_W,
         }
       : null;
-  return { timer: timerBox, gaugeA: ga, gaugeB: gb, cards, minimap };
+  return {
+    timer: timerBox,
+    gaugeA: ga,
+    gaugeB: gb,
+    cards,
+    minimap,
+    inset: minimap ? null : insetCss(map, r),
+  };
+}
+
+/**
+ * 맵 창 안 미니맵 자리 (CSS px, 그림 사각형 — 틀 · 제목은 바깥). 후보 둘: ① 맵 오른쪽 위 구석(시스템 버튼이 맵에 걸치면 그
+ * 아래) ② 시스템 버튼 왼쪽의 맵 위 끝. 틀이 엄지 버튼(실제 버튼 사각형 + 최소 간격)과 겹치지 않는 가장 큰 폭으로 줄이고, 더 큰
+ * 쪽을 고른다(같으면 ①). 최소 폭(MINIMAP_INSET.min — 확대 화면에서는 미니맵이 필수라 옆 칸 미니맵보다 작게 허용)보다 작으면 null.
+ * 버튼과 가로로 겹치지 않으면 그 버튼 높이와 상관없다 (검토 반영: 예전에는 오른쪽 절반이면 무리 맨 위 끝에서 멈춰, 낮은 16:9
+ * 화면의 괴물이 옆 칸 · 안쪽 미니맵을 둘 다 못 받았다)
+ */
+function insetCss(map: Box, r: { sysLeft: number; sysBottom: number; cluster: readonly Box[] }): Box | null {
+  const a = TOUCH_UI.art;
+  const mm = TOUCH_PART.minimap;
+  const pad = mm.pad * a;
+  const title = mm.title * a;
+  const M = MINIMAP_INSET.margin;
+  const full = Math.min(map.w * MINIMAP_INSET.frac, MINIMAP_INSET.maxCss);
+  const ratio = MAP_H / MAP_W;
+  const clear = (f: Box): boolean =>
+    r.cluster.every(
+      (b) =>
+        f.x >= b.x + b.w + MIN_GAP ||
+        b.x >= f.x + f.w + MIN_GAP ||
+        f.y >= b.y + b.h + MIN_GAP ||
+        b.y >= f.y + f.h + MIN_GAP,
+    );
+  const fit = (right: number, top: number): Box | null => {
+    // 맵 아래 끝 안
+    let w = Math.min(full, (map.y + map.h - M - top - title - pad) / ratio);
+    // 엄지 버튼과 겹치지 않을 때까지 1 CSS px씩 줄인다 (배치를 정할 때 한 번, 200번 안)
+    while (w >= MINIMAP_INSET.min) {
+      const frame = { x: right - w - pad * 2, y: top, w: w + pad * 2, h: title + w * ratio + pad };
+      if (clear(frame)) break;
+      w -= 1;
+    }
+    if (w < MINIMAP_INSET.min) return null;
+    return { x: right - pad - w, y: top + title, w, h: w * ratio };
+  };
+  const mapRight = map.x + map.w;
+  const intrude = r.sysLeft < mapRight;
+  const a1 = fit(mapRight - M, intrude ? Math.max(map.y + M, r.sysBottom + MIN_GAP) : map.y + M);
+  const a2 = intrude ? fit(Math.min(mapRight - M, r.sysLeft - MIN_GAP), map.y + M) : null;
+  if (a1 && a2) return a2.w > a1.w + 0.5 ? a2 : a1;
+  return a1 ?? a2;
 }
 
 /**
@@ -462,8 +615,9 @@ export function touchHudPlan(l: LayoutInfo): TouchHud | null {
   const mapH = MAP_DRAW_H / L;
   const mode: TouchHudMode = l.kind === 'touchWide' ? 'wide' : mapLeft >= U.minSide - 0.5 ? 'column' : 'band';
   const toL = (b: Box): Rect => ({ x: b.x * L, y: b.y * L, w: b.w * L, h: b.h * L });
+  const mapCss: Box = { x: mapLeft, y: l.mapY / L, w: MAP_DRAW_W / L, h: mapH };
   const plan = (monster: boolean): TouchHudPlan => {
-    const p = planCss(W, H, mode, band, mapLeft, monster);
+    const p = planCss(W, H, mode, band, mapLeft, monster, mapCss);
     const rects: { id: string; rect: Rect }[] = [
       { id: 'timer', rect: toL(p.timer) },
       { id: 'gaugeA', rect: toL(p.gaugeA) },
@@ -509,6 +663,7 @@ export function touchHudPlan(l: LayoutInfo): TouchHud | null {
         gap: U.gap * L,
       },
       minimap: p.minimap ? { x: p.minimap.x * L, y: p.minimap.y * L, w: p.minimap.w * L } : null,
+      minimapInset: p.inset ? { x: p.inset.x * L, y: p.inset.y * L, w: p.inset.w * L } : null,
       rects,
     };
   };

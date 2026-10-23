@@ -76,6 +76,7 @@ vi.mock('../../client/src/art/mapArt', () => ({
   },
   getGlowMap: (): unknown => document.createElement('canvas'),
   keepStaticMaps: () => undefined,
+  paintStaticMap: () => undefined,
 }));
 
 /** 어떤 메서드를 불러도 자신을 돌려주는 가짜 Phaser 객체 (extra의 값은 그대로) */
@@ -116,15 +117,19 @@ async function makeFog() {
     zoom: 1,
     ambientCss: '#101010',
     shader: false,
-    glow: 'static',
   });
-  const miniStatic = h.statics.find((s) => s.scale === LPT / TILE_PX)?.canvas;
-  expect(miniStatic).toBeDefined();
+  // 미니맵 정적 맵은 미니맵을 처음 읽을 때 가져온다 (따라가는 카메라: 미니맵 합성이 화면 합성과 따로다)
+  const ministatic = (): unknown => h.statics.find((s) => s.scale === LPT / TILE_PX)?.canvas;
   /** 미니맵 합성 횟수 (미니맵 정적 맵을 그린 횟수) */
-  const composites = (): number =>
-    h.canvases.flatMap((c) => c.calls).filter((c) => c.fn === 'drawImage' && c.args[0] === miniStatic).length;
+  const composites = (): number => {
+    const miniStatic = ministatic();
+    if (miniStatic === undefined) return 0;
+    return h.canvases.flatMap((c) => c.calls).filter((c) => c.fn === 'drawImage' && c.args[0] === miniStatic)
+      .length;
+  };
   /** 미니맵 캔버스의 마지막 합성 호출 */
   const lastComposite = (): Call[] => {
+    const miniStatic = ministatic();
     const mini = h.canvases.find((c) =>
       c.calls.some((k) => k.fn === 'drawImage' && k.args[0] === miniStatic),
     );
@@ -167,10 +172,12 @@ describe('GPU 안개 미니맵 합성 (읽을 때만)', () => {
     }
     expect(composites()).toBe(0);
     expect(h.canvases.length).toBe(made);
-    // 처음 읽으면 그때 만들고 한 번 합성한다
+    // 판 배율 맵 전체 그림(조각 복사용)은 레이어를 만들 때 가져온다. 미니맵 배율은 아직 없다
+    expect(h.statics.filter((x) => x.scale === LPT / TILE_PX).length).toBe(0);
+    // 처음 읽으면 그때 정적 맵을 가져오고 캔버스를 만들어 한 번 합성한다
     expect(fog.miniSource).toBeDefined();
     expect(composites()).toBe(1);
-    expect(h.canvases.length).toBe(made + 1);
+    expect(h.canvases.length).toBe(made + 2);
   });
 
   it('읽으면 마지막 commit 그림을 한 번만 합성한다: 정적 맵 → 채움 → 빛 곱하기 → 테두리 리프트', async () => {

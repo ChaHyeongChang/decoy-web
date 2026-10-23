@@ -109,6 +109,17 @@ export const HUD_TEXT_PAIRS: readonly ContrastPair[] = [
     min: 4.5,
   },
   { name: '정지 칩 아이콘 / 패널', fg: WARN, bg: UI.panel, min: 3 },
+  // 화면 밖 화살표: 배지(패널) 위 문양 · 아이콘 · 테두리 (그래픽 3:1)
+  { name: '화살표 러너 / 배지', fg: ROLE.runner, bg: UI.panel, min: 3 },
+  { name: '화살표 가드 / 배지', fg: ROLE.guard, bg: UI.panel, min: 3 },
+  { name: '화살표 스카우트 · 탐지 / 배지', fg: ROLE.scout, bg: UI.panel, min: 3 },
+  { name: '화살표 괴물 / 배지', fg: ROLE.monster, bg: UI.panel, min: 3 },
+  { name: '화살표 포효 · 정지 / 배지', fg: WARN, bg: UI.panel, min: 3 },
+  { name: '화살표 포효 핑 · 나 / 배지', fg: HIDDEN_SURVIVOR, bg: UI.panel, min: 3 },
+  { name: '화살표 감옥 / 배지', fg: PRISON_RED, bg: UI.panel, min: 3 },
+  { name: '화살표 탈출구 / 배지', fg: EXIT_GO, bg: UI.panel, min: 3 },
+  { name: '화살표 거점 / 배지', fg: NEON, bg: UI.panel, min: 3 },
+  { name: '화살표 거점 대기 / 배지', fg: UI.textDim, bg: UI.panel, min: 3 },
 ];
 
 // ───────────────────────── 값 (순수 함수) ─────────────────────────
@@ -726,6 +737,8 @@ const RING_NAMES = new Map<Accent | 'off', string>(
 /** 아이콘 이름: 아이콘별 (색 × 1024 + 크기) → 이름. 크기 · 색이 정수가 아니거나 범위 밖이면 기억하지 않고 만든다 */
 const ICON_NAMES = new Map<IconId, Map<number, string>>();
 const MM_NAMES = new Map<string, string>();
+/** 화면 밖 화살표 이름: 부품 → 색 → 이름 */
+const EDGE_NAMES = new Map<string, Map<number, string>>();
 const SIL_NAMES = new Map<SurvivorShapeId, readonly [string, string]>();
 
 function iconName(id: IconId, color: number, size: number): string {
@@ -761,6 +774,20 @@ export const FR = {
   },
   /** 정면 문양 (점수판 · 조작 안내) */
   glyph: (g: RoleId | 'monster' | 'hidden', size: number): string => `g:${g}:${size}`,
+  /** 화면 밖 화살표: 배지(테두리 색) · 셰브론(색) */
+  edge: (part: 'badge' | 'chev', color: number): string => {
+    let byColor = EDGE_NAMES.get(part);
+    if (!byColor) {
+      byColor = new Map();
+      EDGE_NAMES.set(part, byColor);
+    }
+    let name = byColor.get(color);
+    if (name === undefined) {
+      name = `e:${part}:${color.toString(16)}`;
+      byColor.set(color, name);
+    }
+    return name;
+  },
   /** 미니맵 그림 */
   mm: (k: string): string => {
     let name = MM_NAMES.get(k);
@@ -810,6 +837,46 @@ export const DIAL = { well: 17, body: 10.5, rot: -Math.PI / 3 } as const;
 /** 미니맵 그림 몸 반지름 (지도 1타일 ≈ 4.6px, 실제보다 크게) */
 export const MM_BODY = 4.6;
 
+/**
+ * 화면 밖 화살표 (따라가는 카메라, 그림 단위 — × HUD.s = 논리 px): 배지(어두운 원판 + 강조색 테두리) 안에 문양 · 아이콘,
+ * 배지 바깥에 대상 쪽을 가리키는 셰브론. 창 가장자리에서 배지 가운데까지 inset, 배지 사이 틈 gap
+ */
+export const EDGE_ART = {
+  r: 17,
+  ring: 2.5,
+  chevGap: 2.5,
+  chevLen: 10,
+  chevHalf: 8,
+  inset: 30,
+  gap: 5,
+} as const;
+/** 화살표 강조색 (셰브론 · 배지 테두리를 굽는 색) */
+export const EDGE_COLORS: readonly number[] = [
+  ROLE.runner,
+  ROLE.guard,
+  ROLE.scout,
+  ROLE.monster,
+  WARN,
+  HIDDEN_SURVIVOR,
+  PRISON_RED,
+  EXIT_GO,
+  NEON,
+  UI.textDim,
+];
+/** 배지 안 문양 크기 · 아이콘 크기 (그림 단위) */
+export const EDGE_GLYPH = 22;
+export const EDGE_ICON = 18;
+/** 배지 안 아이콘 (아이콘 · 색) */
+export const EDGE_ICONS: readonly (readonly [IconId, number])[] = [
+  ['track', ROLE.scout],
+  ['roar', WARN],
+  ['prison', PRISON_RED],
+  ['exit', EXIT_GO],
+  ['point', NEON],
+  ['point', WARN],
+  ['point', UI.textDim],
+];
+
 /** HUD가 쓰는 모든 그림 (아틀라스 한 장). 이름이 겹치지 않는다 */
 /** 행동 칸 아이콘 프레임 이름: 쓸 수 있거나 효과 중이면 강조색, 아니면 꺼진 색 (hud.ts가 그리고, hud.test.ts가 아틀라스에 있는지 본다) */
 export function slotIconFrame(s: ActionSlot): string {
@@ -831,6 +898,12 @@ export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
 
   // ── 패널 (9조각) ──
   add(kit('card', { l: 18, r: 12, t: 16 }, (c, w, h, z) => paintPlate(c, w, h, z, PANEL)));
+  // 관전 중인 동료 카드 (따라가는 카메라): 청록 테두리 + PC '보는 중' 태그 · 터치 눈 아이콘
+  add(
+    kit('card:watch', { l: 18, r: 12, t: 16 }, (c, w, h, z) =>
+      paintPlate(c, w, h, z, { ...PANEL, edge: NEON, edgeA: 1, edgeW: 2, accent: NEON, accentA: 1 }),
+    ),
+  );
   for (const r of ['runner', 'guard', 'scout'] as const)
     add(
       kit(`card:${r}`, { l: 18, r: 12, t: 16 }, (c, w, h, z) =>
@@ -1156,6 +1229,7 @@ export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
   for (const [id, col] of BANNER_ICONS) icon(id, col, 24);
   icon('prison', HC.red, 20);
   icon('eye', UI.textDim, 20);
+  icon('eye', NEON, 16);
   icon('timer', WARN, 20);
   icon('note', NEON_DIM, 20);
   icon('map', NEON, 18);
@@ -1248,6 +1322,19 @@ export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
   diamond('track', 4, ROLE.scout, OUTLINE);
   diamond('roarPing', 3.4, 0xffffff, OUTLINE);
   diamond('point', 4.5, null, NEON);
+  // 거점 상태 (따라가는 카메라: 미니맵이 상단 게이지와 같은 상태를 보인다 — 채움 · 색 · 모양)
+  diamond('point:capturing', 4.5, NEON, OUTLINE);
+  diamond('point:blocked', 4.5, WARN, OUTLINE);
+  diamond('point:done', 3.6, NEON_DIM, NEON);
+  // 관전 중인 동료 고리 (청록, 나 고리 · 흰색과 다른 색 + 굵기)
+  add(
+    square(FR.mm('watch'), 9.5, (c) => {
+      circle(c, 7.8);
+      c.lineWidth = 2.2;
+      c.strokeStyle = rgba(NEON);
+      c.stroke();
+    }),
+  );
   add(
     square(FR.mm('roarSelf'), 6, (c) => {
       circle(c, 4.5);
@@ -1264,18 +1351,72 @@ export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
       c.fillRect(-1, -1.5, 2, 3);
     }),
   );
-  add({
-    kind: 'frame',
-    name: FR.mm('exit'),
-    x0: -6,
-    y0: -3.5,
-    x1: 6,
-    y1: 3.5,
-    paint: (c) => {
-      c.fillStyle = rgba(EXIT_GO);
-      c.fillRect(-4.5, -2, 9, 4);
-    },
-  });
+  // 탈출구: 열림 = 채운 초록, 활성(열 수 있음) = 초록 테두리, 꺼짐 = 흐린 회색
+  for (const [name, fill, edge] of [
+    ['exit', EXIT_GO, null],
+    ['exit:active', null, EXIT_GO],
+    ['exit:off', HC.off, null],
+  ] as const)
+    add({
+      kind: 'frame',
+      name: FR.mm(name),
+      x0: -6,
+      y0: -3.5,
+      x1: 6,
+      y1: 3.5,
+      paint: (c) => {
+        if (fill !== null) {
+          c.fillStyle = rgba(fill);
+          c.fillRect(-4.5, -2, 9, 4);
+        }
+        if (edge !== null) {
+          c.lineWidth = 1.3;
+          c.strokeStyle = rgba(edge);
+          c.strokeRect(-4.5, -2, 9, 4);
+        }
+      },
+    });
+
+  // ── 화면 밖 화살표: 배지 · 셰브론 (강조색별), 배지 안 아이콘 ──
+  const E = EDGE_ART;
+  for (const col of EDGE_COLORS) {
+    add(
+      square(FR.edge('badge', col), E.r + 1.5, (c) => {
+        circle(c, E.r);
+        c.fillStyle = rgba(UI.panel, UI.panelAlpha);
+        c.fill();
+        circle(c, E.r - E.ring / 2);
+        c.lineWidth = E.ring;
+        c.strokeStyle = rgba(col);
+        c.stroke();
+      }),
+    );
+    // 셰브론: 기준점(배지 가운데)에서 오른쪽(+x)을 가리킨다. 돌리면 배지 둘레를 돈다
+    const x0 = E.r + E.chevGap;
+    add({
+      kind: 'frame',
+      name: FR.edge('chev', col),
+      x0: x0 - 1.5,
+      y0: -E.chevHalf - 1.5,
+      x1: x0 + E.chevLen + 1.5,
+      y1: E.chevHalf + 1.5,
+      paint: (c) => {
+        c.beginPath();
+        c.moveTo(x0, -E.chevHalf);
+        c.lineTo(x0 + E.chevLen, 0);
+        c.lineTo(x0, E.chevHalf);
+        c.lineTo(x0 + E.chevLen * 0.3, 0);
+        c.closePath();
+        c.lineJoin = 'round';
+        c.lineWidth = 1.5;
+        c.strokeStyle = rgba(OUTLINE);
+        c.stroke();
+        c.fillStyle = rgba(col);
+        c.fill();
+      },
+    });
+  }
+  for (const [id, col] of EDGE_ICONS) icon(id, col, id === 'point' ? EDGE_ICON + 4 : EDGE_ICON);
 
   // ── 배너 리본 (3조각): 지속 배너 높이 · 알림 줄 높이 ──
   const B = h.banner;

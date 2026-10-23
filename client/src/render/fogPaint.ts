@@ -182,6 +182,64 @@ const OP_STROKE_ARC = 2;
 const OP_FILL_POLY = 3;
 const OP_LINE = 4;
 
+/** 타일 좌표 사각형 (PenRecord.replay 자르기) */
+export interface TileClip {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+/**
+ * 기록 명령 하나(o[i]부터)가 자르기 사각형 밖이면 그 명령 길이(건너뛸 칸 수), 걸치거나 안이면 0. 원 · 호는 가운데 ± 반지름
+ * (호의 inset은 반지름을 줄이기만 한다), 다각형은 꼭짓점 상자, 선은 두 끝점 상자. 선 굵기 · 안티에일리어싱 여유는 부르는 쪽이
+ * 사각형을 넓혀 둔다. NaN 좌표는 어느 비교도 참이 아니라 건너뛰지 않는다(예전처럼 그린다)
+ */
+function skipOutside(o: readonly number[], i: number, clip: TileClip): number {
+  const op = o[i] ?? 0;
+  let x0: number;
+  let y0: number;
+  let x1: number;
+  let y1: number;
+  let step: number;
+  if (op === OP_FILL_CIRCLE || op === OP_STROKE_CIRCLE || op === OP_STROKE_ARC) {
+    const x = o[i + 1] ?? 0;
+    const y = o[i + 2] ?? 0;
+    const r = Math.abs(o[i + 3] ?? 0);
+    x0 = x - r;
+    x1 = x + r;
+    y0 = y - r;
+    y1 = y + r;
+    step = op === OP_FILL_CIRCLE ? 6 : op === OP_STROKE_CIRCLE ? 7 : 10;
+  } else if (op === OP_FILL_POLY) {
+    const n = o[i + 1] ?? 0;
+    x0 = Infinity;
+    y0 = Infinity;
+    x1 = -Infinity;
+    y1 = -Infinity;
+    for (let j = i + 2; j < i + 2 + n * 2; j += 2) {
+      const x = o[j] ?? 0;
+      const y = o[j + 1] ?? 0;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+    step = 4 + n * 2;
+  } else {
+    const ax = o[i + 1] ?? 0;
+    const ay = o[i + 2] ?? 0;
+    const bx = o[i + 3] ?? 0;
+    const by = o[i + 4] ?? 0;
+    x0 = Math.min(ax, bx);
+    x1 = Math.max(ax, bx);
+    y0 = Math.min(ay, by);
+    y1 = Math.max(ay, by);
+    step = 8;
+  }
+  return x1 < clip.x0 || x0 > clip.x1 || y1 < clip.y0 || y0 > clip.y1 ? step : 0;
+}
+
 /**
  * 그리기 명령을 숫자 배열로 기록하는 펜 (GPU 합성의 공개 동적 레이어). 안개 주기마다 기록해 지난번과 같으면 캔버스를
  * 다시 그리지도 올리지도 않고, 다르면 replay로 캔버스 펜(조각 · 미니맵)에 그대로 다시 그린다
@@ -330,9 +388,11 @@ export class PenRecord implements FogPen {
 
   /**
    * 기록한 명령을 다른 펜에 같은 순서로 그린다. 다각형은 기록한 평평한 배열 그대로 넘긴다(fillPolyFlat):
-   * 안개 주기마다 꼭짓점 객체 · 배열 · 접근 함수를 새로 만들지 않는다 (렌더링 최적화 2)
+   * 안개 주기마다 꼭짓점 객체 · 배열 · 접근 함수를 새로 만들지 않는다 (렌더링 최적화 2).
+   * clip(타일)이 있으면 그 밖에 통째로 있는 명령은 건너뛴다: 따라가는 카메라의 Canvas 합성은 창 둘레 영역 캔버스에만 칠하므로
+   * 영역 밖 명령은 화소를 하나도 바꾸지 않는다(같은 화소, 명령 수만 준다). 기록 펜에 옮길 때는 자르지 않는다
    */
-  replay(pen: FogPen): void {
+  replay(pen: FogPen, clip: TileClip | null = null): void {
     if (pen instanceof PenRecord) {
       pen.append(this);
       return;
@@ -341,6 +401,13 @@ export class PenRecord implements FogPen {
     const len = this.n;
     let i = 0;
     while (i < len) {
+      if (clip) {
+        const skip = skipOutside(o, i, clip);
+        if (skip > 0) {
+          i += skip;
+          continue;
+        }
+      }
       const op = o[i] ?? 0;
       if (op === OP_FILL_CIRCLE) {
         pen.fillCircle(o[i + 1] ?? 0, o[i + 2] ?? 0, o[i + 3] ?? 0, o[i + 4] ?? 0, o[i + 5] ?? 0);

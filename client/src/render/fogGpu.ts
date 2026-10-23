@@ -14,7 +14,7 @@
 //
 // 텍스처는 getImageData 사본을 만드는 addCanvas(CanvasTexture) 대신 fogPaint.createCanvasTexture로 올린다.
 //
-// 레이어 순서 (fogRoot 안): 정적 맵 → 발광 번짐(ADD, presets glow = 'sprite') → 공개 동적 레이어(조각 → 시야 채움)
+// 레이어 순서 (fogRoot 안): 정적 맵 조각(발광 번짐을 구워 넣음) → 공개 동적 레이어(조각 → 시야 채움)
 // → 빛 지도(MULTIPLY) → 테두리 리프트(ADD, 정적 아틀라스 + 블리터). 발광은 곱하기 앞이라 어둠 속 약 30%,
 // 테두리 리프트는 곱하기 뒤라 시야 밖에서도 구조가 보인다.
 import Phaser from 'phaser';
@@ -29,10 +29,13 @@ import {
   type PointView,
   type Vec2,
 } from '@decoy/shared';
-import { getGlowMap, getStaticMap, GLOW_SCALE, keepStaticMaps } from '../art/mapArt';
+import { getStaticMap, keepStaticMaps } from '../art/mapArt';
+import { ChunkAtlas, chunkBox, chunkRange } from '../art/mapChunks';
+import type { ViewRect } from './camera';
+import { MiniComposite } from './fogMini';
 import type { TileRect } from '../art/mapArtGeom';
-import { currentPreset, gfxNow, gfxState } from '../gfx/state';
-import { MAP_SCALE, MAP_X, MAP_Y } from '../ui/layout';
+import { gfxNow, gfxState } from '../gfx/state';
+import { MAP_X, MAP_Y, VIEW_TILES_H, VIEW_TILES_W, WORLD_LINE, WORLD_SCALE } from '../ui/layout';
 import { FOG } from './colors';
 import type { FogLayer, FogLayerOptions } from './baseLayer';
 import { FOG_EDGE_FRAG, snapToDevice } from './fogMath';
@@ -41,7 +44,6 @@ import {
   LightMap,
   LightRecord,
   PenRecord,
-  addRimLift,
   countGraphicsCmds,
   createCanvasTexture,
   domLightSurface,
@@ -57,7 +59,7 @@ import {
   removeCanvasTexture,
   resetExitTracking,
   resizeCanvasTexture,
-  rimLiftPath,
+  uploadCanvasSubTexture,
   uploadCanvasTexture,
   type SoftLight,
 } from './fogPaint';
@@ -163,7 +165,7 @@ class DynPatch {
     ox: number,
     oy: number,
   ) {
-    const k = TILE_PX * MAP_SCALE * s;
+    const k = TILE_PX * WORLD_SCALE * s;
     this.x0 = Math.floor(bounds.x0 * k);
     this.y0 = Math.floor(bounds.y0 * k);
     const w = Math.ceil(bounds.x1 * k) - this.x0;
@@ -171,7 +173,7 @@ class DynPatch {
     this.layer = new CanvasLayer(scene, 'fog-dyn', w, h, ox + this.x0 / s, oy + this.y0 / s);
     this.layer.image.setScale(1 / s);
     box.add(this.layer.image);
-    this.pen = new CanvasPen(this.layer.ctx, k, s);
+    this.pen = new CanvasPen(this.layer.ctx, k, s * WORLD_LINE);
   }
 
   /** 이번 기록이 마지막으로 그린 것과 다르면 다시 그려 올린다 (기록은 맞바꾼다: 다음 주기에 rec을 다시 비워 쓴다) */
@@ -227,9 +229,9 @@ class TintPatch {
     private readonly lpt: number,
   ) {
     this.layer = new CanvasLayer(scene, 'fog-tint', 64, 64, MAP_X, MAP_Y);
-    this.layer.image.setScale((TILE_PX * MAP_SCALE) / lpt);
+    this.layer.image.setScale((TILE_PX * WORLD_SCALE) / lpt);
     box.add(this.layer.image);
-    this.pen = new CanvasPen(this.layer.ctx, lpt, lpt / (TILE_PX * MAP_SCALE));
+    this.pen = new CanvasPen(this.layer.ctx, lpt, (lpt / (TILE_PX * WORLD_SCALE)) * WORLD_LINE);
   }
 
   /** 이번 주기에 그릴 다각형 (꼭짓점 3개 이상) */
@@ -292,7 +294,7 @@ class TintPatch {
     this.layer.ctx.setTransform(1, 0, 0, 1, -x0, -y0);
     this.pen.fillPoly(this.poly, this.color, this.alpha);
     this.layer.upload();
-    const s = (TILE_PX * MAP_SCALE) / k;
+    const s = (TILE_PX * WORLD_SCALE) / k;
     img.setPosition(MAP_X + x0 * s, MAP_Y + y0 * s);
     const l = this.last;
     const poly = this.poly;
@@ -330,14 +332,22 @@ const EXIT_KEY: Readonly<Record<ExitId, string>> = { N: 'exit-N', S: 'exit-S' };
 const ONE_POINT: PointView[] = [];
 const ONE_EXIT: ExitView[] = [];
 
+/** 조각을 미리 옮겨 두는 여유 (타일): 창 둘레 이만큼 안의 조각은 프레임마다 PREFETCH_BUDGET_MS 안에서 미리 옮긴다 */
+export const PREFETCH_MARGIN = 2;
+/** 프레임마다 둘레 조각을 미리 옮기는 시간 (ms). 조각 하나 = 맵 전체 그림에서 복사 + 일부 업로드 (약 0.1~0.3ms) */
+const PREFETCH_BUDGET_MS = 1.5;
+
 export class GpuFog implements FogLayer {
   readonly mode = 'gpu' as const;
   readonly shader: boolean;
-  private readonly staticKey: string;
-  private readonly staticImage: Phaser.GameObjects.Image;
-  /** 발광 번짐 (ADD, 곱하기 앞). glow = 'static'이면 정적 맵에 구워 없음 */
-  private readonly glowKey: string | null = null;
-  private readonly glowImage: Phaser.GameObjects.Image | null = null;
+  /** 정적 맵 조각 (보이는 창 근처만, 원환 칸 아틀라스 텍스처 한 장 — 그리기 한 번에 묶인다) */
+  private readonly chunks: ChunkAtlas;
+  private readonly chunkKey: string;
+  private readonly chunkTex: Phaser.Textures.Texture;
+  private readonly chunkBox: Phaser.GameObjects.Container;
+  private readonly chunkImgs: Phaser.GameObjects.Image[] = [];
+  /** 칸 일부 올리기를 못 해(컨텍스트 · Canvas) 다음 setView에서 통째로 올린다 */
+  private chunkFull = false;
   /** 공개 동적 레이어: 거점 · 탈출구 조각 (빛 지도 · 시야 채움보다 아래) */
   private readonly dynBox: Phaser.GameObjects.Container;
   private readonly patches = new Map<string, DynPatch>();
@@ -351,10 +361,9 @@ export class GpuFog implements FogLayer {
   private readonly lightRec = new LightRecord();
   /** 이번 주기의 미니맵 합성 명령 (시야 채움 · 조각, 그린 순서대로) */
   private miniRec = new PenRecord();
-  /** 마지막으로 바뀐 주기의 미니맵 명령 (null = 아직 없음 — 첫 주기는 늘 바뀐 것으로 본다). miniSource가 이것으로 합성한다 */
+  /** 마지막으로 바뀐 주기의 미니맵 명령 (null = 아직 없음 — 첫 주기는 늘 바뀐 것으로 본다) */
   private miniLast: PenRecord | null = null;
-  /** 미니맵 캔버스가 마지막 commit보다 낡았는가 (합성은 miniSource를 읽을 때) */
-  private miniDirty = true;
+  private readonly mini: MiniComposite;
   /** 마지막 commit에서 화면 · 미니맵 그림이 바뀌었는가 (안 바뀌었으면 미니맵도 다시 그릴 필요가 없다) */
   changed = true;
   private readonly lightKey: string | null = null;
@@ -363,10 +372,20 @@ export class GpuFog implements FogLayer {
   /** 테두리 리프트 (ADD, 곱하기 뒤): 작은 아틀라스 + 블리터 (합성 배율 px 좌표라 1/s 컨테이너에 담는다) */
   private readonly liftKey: string;
   private readonly liftBox: Phaser.GameObjects.Container;
-  private readonly miniLift: Path2D;
-  /** 미니맵용 작은 합성 (빛 지도와 같은 해상도). 처음 읽을 때 만든다 (미니맵이 없는 터치 배치는 만들지 않는다) */
-  private mini: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; pen: CanvasPen } | null = null;
-  private readonly miniStatic: HTMLCanvasElement;
+  /**
+   * 테두리 리프트 조각과 그 합성 px 사각형: 창 밖 조각은 그리지 않는다(블리터는 창 거르기를 하지 않아 맵 전체 조각을 매 프레임
+   * 싣는다 — 확대 3에서 버퍼의 약 20%). 창이 움직일 때만 다시 고른다
+   */
+  private readonly liftBobs: {
+    bob: Phaser.GameObjects.Bob;
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+  }[] = [];
+  private readonly liftAt = { x: Number.NaN, y: Number.NaN, w: Number.NaN, h: Number.NaN };
+  /** 합성 px / 타일 */
+  private readonly k: number;
   private readonly s: number;
   private readonly ox: number;
   private readonly oy: number;
@@ -381,33 +400,27 @@ export class GpuFog implements FogLayer {
   ) {
     const s = opts.compositeScale;
     this.s = s;
-    const sprite = (opts.glow ?? currentPreset().glow) === 'sprite';
     const ox = snapToDevice(MAP_X, opts.zoom);
     const oy = snapToDevice(MAP_Y, opts.zoom);
     this.ox = ox;
     this.oy = oy;
     const lpt = opts.lightPxPerTile;
-    const mainScale = MAP_SCALE * s;
-    const miniScale = lpt / TILE_PX;
-    this.staticKey = nextFogKey('fog-static');
-    // 정적 맵은 한 번만 올린다 (사본 없이, 같은 배율이면 캐시한 그림)
-    createCanvasTexture(scene.textures, this.staticKey, getStaticMap(mainScale, !sprite));
-    this.staticImage = scene.make
-      .image({ x: ox, y: oy, key: this.staticKey }, false)
-      .setOrigin(0, 0)
-      .setScale(1 / s);
-    root.add(this.staticImage);
-    if (sprite) {
-      this.glowKey = nextFogKey('fog-glow');
-      createCanvasTexture(scene.textures, this.glowKey, getGlowMap());
-      this.glowImage = scene.make
-        .image({ x: ox, y: oy, key: this.glowKey }, false)
-        .setOrigin(0, 0)
-        .setScale(MAP_SCALE / GLOW_SCALE)
-        .setBlendMode(Phaser.BlendModes.ADD);
-      root.add(this.glowImage);
-    }
-    gfxState.features.glowLayer = sprite ? 'sprite' : 'static';
+    const k = TILE_PX * WORLD_SCALE * s;
+    this.k = k;
+    // 정적 맵: 조각 아틀라스 (발광을 구워 넣는다 — 따라가는 카메라에서는 발광을 따로 올리지 않는다). 조각은 판 전에 구운
+    // 맵 전체 그림에서 복사만 한다: 로비에서 덜 구웠으면(연습 바로 시작) 여기서 끝까지 굽는다 — 판 중에는 칠하지 않는다
+    getStaticMap(k / TILE_PX, true);
+    this.chunks = opts.chunks ?? new ChunkAtlas(k, VIEW_TILES_W, VIEW_TILES_H, PREFETCH_MARGIN, true);
+    this.chunkKey = nextFogKey('fog-chunks');
+    this.chunkTex = createCanvasTexture(scene.textures, this.chunkKey, this.chunks.canvas);
+    this.chunks.onBaked = (src, x, y) => {
+      if (!this.chunkFull && !uploadCanvasSubTexture(scene.game.renderer, this.chunkTex.source[0], src, x, y))
+        this.chunkFull = true;
+      gfxState.features.chunkUploadPx = Number(gfxState.features.chunkUploadPx ?? 0) + src.width * src.height;
+    };
+    this.chunkBox = scene.make.container({ x: 0, y: 0 }, false);
+    root.add(this.chunkBox);
+    gfxState.features.glowLayer = 'static';
     resetExitTracking();
     // make로 만든 컨테이너는 혼합 모드가 NORMAL로 잡혀 자식의 혼합 모드(ADD 등)를 덮는다 → SKIP_CHECK로 자식 것을 쓴다
     this.dynBox = scene.make.container({ x: 0, y: 0 }, false).setBlendMode(Phaser.BlendModes.SKIP_CHECK);
@@ -416,8 +429,8 @@ export class GpuFog implements FogLayer {
     this.lpt = lpt;
     this.tintBox = scene.make.container({ x: 0, y: 0 }, false).setBlendMode(Phaser.BlendModes.SKIP_CHECK);
     root.add(this.tintBox);
-    const mapW = MAP_W * TILE_PX * MAP_SCALE;
-    const mapH = MAP_H * TILE_PX * MAP_SCALE;
+    const mapW = MAP_W * TILE_PX * WORLD_SCALE;
+    const mapH = MAP_H * TILE_PX * WORLD_SCALE;
     this.light = opts.fog ? new LightMap(lpt, opts.ambientCss, domLightSurface) : null;
     if (this.light) {
       this.lightKey = nextFogKey('fog-light');
@@ -432,14 +445,19 @@ export class GpuFog implements FogLayer {
     this.shader = opts.shader && this.lightImage !== null && ensureFogEdgePipeline(scene.game);
     if (this.shader) this.lightImage?.setPipeline(FOG_EDGE_PIPELINE);
     // 테두리 리프트: 정적 조각을 한 번 구운 아틀라스를 블리터로 찍는다 (정적 맵 텍셀 경계에 맞춤)
-    const atlas = layoutRimLift(TILE_PX * MAP_SCALE * s);
+    const atlas = layoutRimLift(k);
     const lift = makeCanvas(atlas.width, atlas.height);
     paintRimLiftAtlas(lift.ctx, atlas);
     this.liftKey = nextFogKey('fog-lift');
     const liftTex = createCanvasTexture(scene.textures, this.liftKey, lift.canvas);
     for (const f of atlas.frames) liftTex.add(f.name, 0, f.ax, f.ay, f.w, f.h);
     const blit = scene.make.blitter({ key: this.liftKey }, false).setBlendMode(Phaser.BlendModes.ADD);
-    for (const b of atlas.bobs) blit.create(b.x, b.y, b.frame);
+    const frameOf = new Map(atlas.frames.map((f) => [f.name, f]));
+    for (const b of atlas.bobs) {
+      const f = frameOf.get(b.frame);
+      const bob = blit.create(b.x, b.y, b.frame);
+      this.liftBobs.push({ bob, x0: b.x, y0: b.y, x1: b.x + (f?.w ?? 0), y1: b.y + (f?.h ?? 0) });
+    }
     this.liftBox = scene.make
       .container({ x: ox, y: oy }, false)
       .setScale(1 / s)
@@ -448,44 +466,97 @@ export class GpuFog implements FogLayer {
     root.add(this.liftBox);
     gfxState.features.liftPieces = atlas.bobs.length;
 
-    this.miniStatic = getStaticMap(miniScale, true);
-    // 정적 맵 캐시는 이 레이어가 쓰는 두 장(메인 · 미니맵)만 남긴다 (옛 배율 · 다른 경로의 큰 캔버스를 붙잡지 않게)
+    this.mini = new MiniComposite(lpt, this.light);
+    // 정적 맵 캐시는 조각을 복사할 맵 전체 그림과 미니맵 두 장만 남긴다 (옛 배율 · 다른 경로의 큰 캔버스를 붙잡지 않게)
     keepStaticMaps(
       [
-        { scale: mainScale, withGlow: !sprite },
-        { scale: miniScale, withGlow: true },
+        { scale: k / TILE_PX, withGlow: true },
+        { scale: lpt / TILE_PX, withGlow: true },
       ],
-      sprite,
+      true,
     );
-    this.miniLift = rimLiftPath(lpt);
     this.begin();
     this.commit();
   }
 
-  /**
-   * 미니맵 합성: 정적 맵 → 채움 · 조각 → 빛 곱하기 → 테두리 리프트. 마지막 commit 뒤 처음 읽을 때만 합성한다
-   * (미니맵을 숨긴 터치 배치는 읽지 않으므로 안개 주기마다 하던 합성이 없다). 빛 지도는 commit에서만 바뀌어 결과는 같다
-   */
+  /** 미니맵 합성 (마지막 commit 뒤 처음 읽을 때만 합성한다) */
   get miniSource(): HTMLCanvasElement {
-    if (!this.mini) {
-      const m = makeCanvas(this.miniStatic.width, this.miniStatic.height);
-      this.mini = { ...m, pen: new CanvasPen(m.ctx, this.lpt, this.lpt / (TILE_PX * MAP_SCALE)) };
+    return this.mini.canvas;
+  }
+
+  /**
+   * 창 밖 테두리 리프트 조각을 숨긴다 (창이 움직였을 때만): 조각 사각형(합성 px)이 창(합성 px ± 2)과 겹치지 않으면 그리지
+   * 않는다. 창 밖은 가리개 밑이라 같은 화소다. 흔들림은 창 자리에 이미 들어 있다
+   */
+  private cullLift(view: ViewRect): void {
+    const at = this.liftAt;
+    if (view.x === at.x && view.y === at.y && view.w === at.w && view.h === at.h) return;
+    at.x = view.x;
+    at.y = view.y;
+    at.w = view.w;
+    at.h = view.h;
+    const k = this.k;
+    const m = 2;
+    const x0 = view.x * k - m;
+    const y0 = view.y * k - m;
+    const x1 = (view.x + view.w) * k + m;
+    const y1 = (view.y + view.h) * k + m;
+    let shown = 0;
+    for (const b of this.liftBobs) {
+      const on = b.x1 > x0 && b.x0 < x1 && b.y1 > y0 && b.y0 < y1;
+      if (b.bob.visible !== on) b.bob.setVisible(on);
+      if (on) shown += 1;
     }
-    const { canvas, ctx: c, pen } = this.mini;
-    if (this.miniDirty) {
-      this.miniDirty = false;
-      c.globalCompositeOperation = 'source-over';
-      c.drawImage(this.miniStatic, 0, 0);
-      this.miniLast?.replay(pen);
-      if (this.light) {
-        c.save();
-        c.globalCompositeOperation = 'multiply';
-        c.drawImage(this.light.canvas, 0, 0, canvas.width, canvas.height);
-        c.restore();
+    gfxState.features.liftShown = shown;
+  }
+
+  /**
+   * 보이는 창(타일)에 맞춰 조각 그림을 놓는다. 창 안 조각은 없으면 바로 옮기고(맵 전체 그림에서 복사), 둘레 여유 안 조각은
+   * 프레임마다 시간 예산 안에서 미리 옮긴다. 프레임마다 부른다(그림 자리만 바꾼다). 늘 false (화면 합성이 따로 없어 안개 주기를 앞당길 일이 없다)
+   */
+  setView(view: ViewRect): boolean {
+    const a = this.chunks;
+    const r = chunkRange(view, 0, a.tiles);
+    const tex = this.chunkTex;
+    let n = 0;
+    for (let cy = r.cy0; cy <= r.cy1; cy += 1) {
+      for (let cx = r.cx0; cx <= r.cx1; cx += 1) {
+        a.ensure(cx, cy);
+        const slot = a.slot(cx, cy);
+        if (slot.w <= 0 || slot.h <= 0) continue;
+        const name = `c${a.slotIndex(cx, cy)}`;
+        if (tex.has(name)) tex.get(name).setSize(slot.w, slot.h, slot.x, slot.y);
+        else tex.add(name, 0, slot.x, slot.y, slot.w, slot.h);
+        let img = this.chunkImgs[n];
+        if (!img) {
+          img = this.scene.make.image({ x: 0, y: 0, key: this.chunkKey, frame: name }, false).setOrigin(0, 0);
+          this.chunkBox.add(img);
+          this.chunkImgs.push(img);
+        }
+        const b = chunkBox(cx, cy, a.tiles, a.k);
+        img
+          .setFrame(name)
+          .setPosition(this.ox + b.x0 / this.s, this.oy + b.y0 / this.s)
+          .setScale(1 / this.s)
+          .setVisible(true);
+        n += 1;
       }
-      addRimLift(c, this.miniLift);
     }
-    return canvas;
+    for (let i = n; i < this.chunkImgs.length; i += 1) this.chunkImgs[i]?.setVisible(false);
+    // 둘레 미리 옮기기 (창 안은 위에서 다 옮겼다): 시간 예산 안에서만
+    const p = chunkRange(view, PREFETCH_MARGIN, a.tiles);
+    const until = performance.now() + PREFETCH_BUDGET_MS;
+    let over = false;
+    for (let cy = p.cy0; cy <= p.cy1 && !over; cy += 1)
+      for (let cx = p.cx0; cx <= p.cx1 && !over; cx += 1)
+        if (a.ensure(cx, cy)) over = performance.now() > until;
+    if (this.chunkFull) {
+      this.chunkFull = false;
+      uploadCanvasTexture(tex);
+    }
+    gfxState.features.chunkImages = n;
+    this.cullLift(view);
+    return false;
   }
 
   /**
@@ -580,7 +651,7 @@ export class GpuFog implements FogLayer {
     if (miniChanged) {
       this.miniLast = this.miniRec;
       this.miniRec = last ?? new PenRecord();
-      this.miniDirty = true;
+      this.mini.take(this.miniLast);
     }
     // 화면 쪽 시야 채움 · 조각 · 빛은 모두 미니맵 기록에도 들어가므로, 미니맵이 그대로면 화면도 그대로다
     this.changed = miniChanged;
@@ -593,8 +664,9 @@ export class GpuFog implements FogLayer {
   }
 
   destroy(): void {
-    this.staticImage.destroy();
-    this.glowImage?.destroy();
+    this.chunks.onBaked = null;
+    this.chunkBox.destroy();
+    this.chunkImgs.length = 0;
     for (const p of this.patches.values()) p.destroy();
     this.patches.clear();
     this.dynBox.destroy();
@@ -602,8 +674,7 @@ export class GpuFog implements FogLayer {
     this.tintBox.destroy();
     this.lightImage?.destroy();
     this.liftBox.destroy();
-    removeCanvasTexture(this.scene.textures, this.staticKey);
-    if (this.glowKey) removeCanvasTexture(this.scene.textures, this.glowKey);
+    removeCanvasTexture(this.scene.textures, this.chunkKey);
     if (this.lightKey) removeCanvasTexture(this.scene.textures, this.lightKey);
     removeCanvasTexture(this.scene.textures, this.liftKey);
   }

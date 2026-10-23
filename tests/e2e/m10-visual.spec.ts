@@ -1,6 +1,6 @@
 // M10b 캐릭터 · 효과 (Canvas 렌더러 · 소프트웨어 합성 · 1920×1080 배율 1). VISUAL_SPEC 0장 불변 항목을 픽셀로 지킨다:
 //  - 괴물 화면 흰색 위장: 부채꼴 · 근접 원 · 공격 범위 안에서도 생존자 몸 원판은 무채색 · 밝음, 역할 4색과 멀다.
-//    그림 키는 모두 'survivor-hidden'이고 세 몸의 흰 폭 · 그림자 폭 · 평균색이 같다(±1px · ΔE ≤ 1).
+//    그림 키는 모두 'survivor-hidden'이고 세 몸의 흰 폭 · 그림자 폭 · 평균색이 같다(±1px · ΔE ≤ 1, 그림자 폭은 확대 배율만큼 — 부드러운 가장자리).
 //    능력 노출 중인 한 명만 1초 동안(0.8초 시점에도) 역할색 테두리 + 머리 위 문양.
 //    캐릭터 스타일(기존 / 새 캐릭터, 캐릭터 리디자인 2단계)과 무관하게 같다: 새 스타일에서 같은 검사 + 판 중 기존으로 바꿔 다시
 //  - 노출 문양 · 기절 별 · 기절 채도 감소가 다른 캐릭터 몸 · 노출 링을 덮지 않는다
@@ -21,7 +21,7 @@ import {
   type InfoItem,
   type Role,
 } from '@decoy/shared';
-import { closeAll, lastSnapshot, sendTest, startFourPlayerMatch, type Player } from './helpers';
+import { aimMonsterAt, closeAll, lastSnapshot, sendTest, startFourPlayerMatch, type Player } from './helpers';
 import {
   captureBodies,
   captureSweep,
@@ -53,10 +53,8 @@ async function settle(p: Player): Promise<void> {
   });
 }
 
-async function aimAt(page: Page, x: number, y: number): Promise<void> {
-  const c = await page.evaluate(([tx, ty]) => window.__DECOY__?.tileToClient(tx!, ty!) ?? null, [x, y]);
-  await page.mouse.move(c!.x, c!.y);
-}
+/** 괴물 조준 (따라가는 카메라: 창이 멈춘 뒤 커서를 옮기고 서버 조준이 그 방향인지 확인 — helpers.aimMonsterAt) */
+const aimAt = aimMonsterAt;
 
 async function place(
   host: Page,
@@ -119,6 +117,12 @@ function inSector(it: InfoItem, p: { x: number; y: number }): boolean {
   return d <= (it.r ?? 0) && Math.abs(a) <= (it.arc ?? 0) / 2;
 }
 
+/**
+ * 그림자 폭 허용치 (px): 확대 1의 ±1px와 같은 비율. 그림자는 부드러운 가장자리라 문턱 폭이 그 밑 바닥 밝기에 따라 흔들리고,
+ * 그 흔들림은 화면 px로 확대 배율만큼 커진다(확대 ② 3에서 그림자 약 99px, 세 몸 차 실측 1.2px). 흰 폭은 단단한 가장자리라 ±1px 그대로
+ */
+const shadowTol = (c: Capture): number => Math.max(1, c.camZoom);
+
 /** 세 숨은 몸이 같은 크기 · 같은 그림자 · 같은 색인가 (흰색 위장 '같은 실루엣') */
 function expectSameHidden(c: Capture, label: string): void {
   const [a, ...rest] = c.stats;
@@ -131,7 +135,9 @@ function expectSameHidden(c: Capture, label: string): void {
       expect(Math.abs(w - a!.widths[i]!), `${label} ${s.name} 흰 폭 ${i}`).toBeLessThanOrEqual(1),
     );
     expect(s.shadowW, `${label} ${s.name} 그림자`).not.toBeNull();
-    expect(Math.abs(s.shadowW! - a!.shadowW!), `${label} ${s.name} 그림자 폭`).toBeLessThanOrEqual(1);
+    expect(Math.abs(s.shadowW! - a!.shadowW!), `${label} ${s.name} 그림자 폭`).toBeLessThanOrEqual(
+      shadowTol(c),
+    );
     expect(deltaE(s.mean, a!.mean), `${label} ${s.name} 몸 평균색`).toBeLessThanOrEqual(1);
   }
 }
@@ -152,7 +158,9 @@ function expectSameShape(c: Capture, label: string): void {
       expect(Math.abs(w - a!.outerWidths[i]!), `${label} ${s.name} 바깥 폭 ${i}`).toBeLessThanOrEqual(1),
     );
     expect(s.shadowW, `${label} ${s.name} 그림자`).not.toBeNull();
-    expect(Math.abs(s.shadowW! - a!.shadowW!), `${label} ${s.name} 그림자 폭`).toBeLessThanOrEqual(1);
+    expect(Math.abs(s.shadowW! - a!.shadowW!), `${label} ${s.name} 그림자 폭`).toBeLessThanOrEqual(
+      shadowTol(c),
+    );
     expect(deltaE(s.mean, a!.mean), `${label} ${s.name} 몸 평균색`).toBeLessThanOrEqual(1);
   }
 }
@@ -464,15 +472,18 @@ test('생존자 화면 역할색 유지: 빛 바닥 · 빨강 · 노랑 부채�
   // 생존자 화면 범위 경계 = 판정값 (팀원이 없는 쪽으로 친다)
   await place(host, { guard: [p.guard.id, 37.6, 11.6, 0.5], scout: [p.scout.id, 36.2, 12.7, 2.2] });
   await place(host, { monster: [p.monster.id, 38.5, 10.6, -Math.PI / 2] }, false);
-  await aimAt(host, 38.5, 4);
+  // 북쪽 3.6타일 (확대 창 안: 창 위쪽 끝 근처를 누르면 HUD 띠 · 창 밖에 떨어질 수 있다)
+  await aimAt(host, 38.5, 7);
   await view.waitForTimeout(700);
   const mon = (await lastSnapshot(view))!.monster!;
-  await host.mouse.down({ button: 'left' });
-  await host.mouse.up({ button: 'left' });
-  const rc = await captureBodies(view, [], {
+  // 재기를 먼저 시작하고 누른다 (확대 화면은 프레임이 느려 누른 뒤 시작하면 0.4초 준비 프레임이 지나간다)
+  const capturing = captureBodies(view, [], {
     waitEffect: 'attackRange',
     range: { x: mon.x, y: mon.y, dir: mon.aim, tiles: balance.monster.attack.range },
   });
+  await host.mouse.down({ button: 'left' });
+  await host.mouse.up({ button: 'left' });
+  const rc = await capturing;
   console.log(
     `[m10-visual] 러너 화면 범위 경계 ${rc.rangePx?.toFixed(2)}px (판정 ${rc.rangeExpectPx?.toFixed(2)}px)`,
   );
@@ -486,7 +497,8 @@ test('생존자 화면 역할색 유지: 빛 바닥 · 빨강 · 노랑 부채�
   await place(host, {
     guard: [p.guard.id, 23.5, 15.5, 0.6],
     scout: [p.scout.id, 24.5, 16.4, -2.4],
-    runner: [p.runner.id, 24, 23.6, -Math.PI / 2],
+    // 러너는 감옥 서쪽: 확대 창(16 × 10.7타일)에 감옥 안 두 팀원이 들어오고, 괴물 부채꼴(북쪽 ±55°, 5타일) · 근접 원 밖
+    runner: [p.runner.id, 18.5, 16, 0],
   });
   // 괴물은 (24,19.6): 두 팀원이 부채꼴 호(5타일)에서 0.8타일 넘게 안쪽이라 경계 선이 바깥 링을 지나지 않는다
   await place(host, { monster: [p.monster.id, 24, 19.6, -Math.PI / 2] }, false);
@@ -517,7 +529,7 @@ async function qualityRun(
   quality: 'high' | 'medium' | 'low',
 ): Promise<{
   drawn: string[];
-  info: InfoItem[];
+  info: (Omit<InfoItem, 'dir'> & { dir: string | null })[];
   stats: Awaited<ReturnType<typeof captureBodies>>['stats'];
   fxTargets: { layer: string; effects: string[] }[];
   features: Record<string, unknown>;
@@ -566,12 +578,21 @@ async function qualityRun(
   });
   const roleOf: Record<string, string> = Object.fromEntries(players.map((pl) => [pl.id, pl.role]));
   const r3 = (v: number): number => Math.round(v * 1000) / 1000;
+  // 괴물 방향은 이 시험의 입력(마우스 조준)이다: mousemove는 정수 px라 커서 아래 월드 자리에 반올림 찌꺼기가 남고, 확대 화면의
+  // 창은 품질(백버퍼)마다 기기 px 격자에 맞춰 놓여 그 찌꺼기가 판마다 다르다(CI 전체 검사에서 서쪽 조준 ±0.002rad). 정보가 아니라
+  // 입력 차이라 괴물 방향만 0.01 단위로 견준다 — 위 조준 대기(π ± 0.005)보다 거칠다. 나머지는 그대로 0.001 단위
+  const r2 = (v: number): number => Math.round(v * 100) / 100 + 0;
   const drawn = c.drawn
-    .map(
-      (d) =>
-        `${d.kind}:${d.tag ?? roleOf[d.id] ?? d.id}:${r3(d.x)},${r3(d.y)},${r3(Math.cos(d.face))},${r3(Math.sin(d.face))}`,
-    )
+    .map((d) => {
+      const r = d.kind === 'monster' ? r2 : r3;
+      return `${d.kind}:${d.tag ?? roleOf[d.id] ?? d.id}:${r3(d.x)},${r3(d.y)},${r(Math.cos(d.face))},${r(Math.sin(d.face))}`;
+    })
     .sort();
+  const info = c.info.map((i) =>
+    i.kind === 'cone' && i.dir !== null
+      ? { ...i, dir: `${r2(Math.cos(i.dir))},${r2(Math.sin(i.dir))}` }
+      : { ...i, dir: i.dir === null ? null : String(i.dir) },
+  );
   const fxTargets = await view.evaluate(() => window.__DECOY__?.getFxTargets() ?? []);
   const features = await view.evaluate(() => ({ ...window.__DECOY__!.gfx.features }));
   console.log(
@@ -579,7 +600,7 @@ async function qualityRun(
   );
   const problems = players.flatMap((pl) => pl.problems);
   await closeAll(players);
-  return { drawn, info: c.info, stats: c.stats, fxTargets, features, problems };
+  return { drawn, info, stats: c.stats, fxTargets, features, problems };
 }
 
 test('품질 높음 · 중간 · 낮음: 정보 레이어 · 그린 엔티티가 같고, 효과가 몸 · 링을 바꾸지 않으며, 후처리는 구조 레이어에만', async ({

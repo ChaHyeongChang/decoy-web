@@ -2,10 +2,17 @@
 // 터치 글자 크기(CSS 12px 이상, 주요 14 이상 — 높이 293 · 320 · 360), 터치 HUD 부품이 맵 · 서로 · 엄지 영역(터치 화면 대상 ·
 // 이동 스틱 그림)과 겹치지 않음, 배너 자리 · 맨 아래 안내 줄이 터치 대상과 겹치지 않음. PC는 언제나 1920×1080 그대로.
 // 판 중 창이 낮아지면(M12 검토) 엄지 버튼이 덮는 HUD 부품을 찾는다(hudCovered → 미니맵을 숨긴다)
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { computeRenderSize } from '../../client/src/render/resolution';
 import * as L from '../../client/src/ui/layout';
-import { hudCovered, touchLayout, type Box } from '../../client/src/ui/touchControls';
+import {
+  CAP_BELOW,
+  hudCovered,
+  thumbAvoidBoxes,
+  touchLayout,
+  type Box,
+} from '../../client/src/ui/touchControls';
 
 afterEach(() => L.applyLayout(L.pcLayout()));
 
@@ -231,6 +238,58 @@ describe('터치 HUD 자리 touchHudPlan', () => {
     for (const r of L.HUD.touch!.monster.rects) expect(r.rect.y + r.rect.h).toBeLessThanOrEqual(L.MAP_RECT.y);
   });
 
+  it('따라가는 카메라: 옆 칸에 미니맵 자리가 없으면 맵 창 안 미니맵 자리가 있다 — 틀까지 맵 안, 터치 버튼 · 다른 HUD 부품과 안 겹침', () => {
+    const art = L.TOUCH_UI.art;
+    const pad = L.TOUCH_PART.minimap.pad * art;
+    const title = L.TOUCH_PART.minimap.title * art;
+    let insets = 0;
+    // 낮은 16:9 브라우저 크기 (검토 반영: 괴물이 옆 칸 · 안쪽 미니맵을 둘 다 못 받던 크기)
+    const LOW_16_9: [string, number, number][] = [
+      ['16:9 낮음 592×280', 592, 280],
+      ['16:9 낮음 568×270', 568, 270],
+      ['16:9 낮음 600×300', 600, 300],
+      ['534×300', 534, 300],
+    ];
+    for (const [name, w, h] of [...SCREENS, ...LOW_16_9]) {
+      L.applyLayout(L.layoutFor(w, h, true));
+      const t = L.HUD.touch!;
+      const k = t.L;
+      const map = { x: L.MAP_RECT.x / k, y: L.MAP_RECT.y / k, w: L.MAP_RECT.w / k, h: L.MAP_RECT.h / k };
+      for (const monster of [true, false]) {
+        const p = monster ? t.monster : t.survivor;
+        const label = `${name} ${monster ? '괴물' : '생존자'}`;
+        // 옆 칸 미니맵이 있으면 안쪽 미니맵은 없다. 16:9 · 태블릿처럼 옆 칸이 없으면 반드시 있다
+        if (p.minimap) {
+          expect(p.minimapInset, label).toBeNull();
+          continue;
+        }
+        expect(p.minimapInset, label).not.toBeNull();
+        insets += 1;
+        const i = p.minimapInset!;
+        const f = {
+          x: i.x / k - pad,
+          y: i.y / k - title,
+          w: i.w / k + pad * 2,
+          h: ((i.w / k) * 2) / 3 + title + pad,
+        };
+        expect(i.w / k, label).toBeGreaterThanOrEqual(L.MINIMAP_INSET.min);
+        expect(f.x, label).toBeGreaterThanOrEqual(map.x - 0.01);
+        expect(f.y, label).toBeGreaterThanOrEqual(map.y - 0.01);
+        expect(f.x + f.w, label).toBeLessThanOrEqual(map.x + map.w + 0.01);
+        expect(f.y + f.h, label).toBeLessThanOrEqual(map.y + map.h + 0.01);
+        const lay = touchLayout(w, h, { l: 0, r: 0, t: 0, b: 0 }, monster, true);
+        for (const b of [lay.aim, ...Object.values(lay.buttons)])
+          if (b) expect(overlaps(f, b), `${label} ↔ 버튼`).toBe(false);
+        for (const r of p.rects)
+          expect(
+            overlaps(f, { x: r.rect.x / k, y: r.rect.y / k, w: r.rect.w / k, h: r.rect.h / k }),
+            `${label} ↔ ${r.id}`,
+          ).toBe(false);
+      }
+    }
+    expect(insets).toBeGreaterThan(8);
+  });
+
   it('HUD를 넘기지 않으면 터치 화면 배치는 M11 그대로 (이동 영역 = 왼쪽 40% 전체 높이)', () => {
     const a = touchLayout(863, 360, { l: 0, r: 0, t: 0, b: 0 }, true, true);
     const b = touchLayout(863, 360, { l: 0, r: 0, t: 0, b: 0 }, true, true, []);
@@ -287,6 +346,104 @@ describe('판 중 창이 낮아지면 엄지 버튼이 덮는 HUD 부품 hudCove
     expect(covered(802, 293, 250, false)).toEqual(['minimap']);
     // 조금 낮아진 정도면 그대로 (자리 여유 8px 안)
     expect(covered(915, 412, 405, true)).toEqual([]);
+  });
+
+  it('따라가는 카메라: 덮인 미니맵은 숨기지 않고 맵 창 안 빈 구석으로 옮길 자리가 있다 — 맵 안, 그 창의 엄지 · 시스템 버튼과 안 겹침 (검토 반영)', () => {
+    for (const [w, h, nh, monster] of [
+      [915, 412, 356, true],
+      [915, 412, 330, true],
+      [863, 360, 304, true],
+      [802, 293, 250, false],
+    ] as const) {
+      const l = L.layoutFor(w, h, true);
+      L.applyLayout(l);
+      const plan = monster ? L.HUD.touch!.monster : L.HUD.touch!.survivor;
+      const mm = plan.minimap!;
+      const k0 = L.HUD.s;
+      const frame = {
+        w: mm.w + L.HUD.minimap.pad * k0 * 2,
+        h: (mm.w * 2) / 3 + L.HUD.minimap.title * k0 + L.HUD.minimap.pad * k0,
+      };
+      const r = computeRenderSize({
+        cssW: w,
+        cssH: nh,
+        dpr: 1,
+        logicalW: l.viewW,
+        logicalH: l.viewH,
+        preset: { dprCap: 1, maxPixels: 1e12 },
+        scaleOverride: null,
+      });
+      const k = r.dispH / l.viewH;
+      const T = touchLayout(w, nh, { l: 0, r: 0, t: 0, b: 0 }, monster, true);
+      // touchControls.onThumbs와 같은 식: 엄지 대상(이름표 · 이동 스틱 고리까지) 창 CSS px → 논리 px
+      const thumbs = thumbAvoidBoxes(T).map((b) => ({
+        x: (b.x - r.left) / k,
+        y: (b.y - r.top) / k,
+        w: b.w / k,
+        h: b.h / k,
+      }));
+      const Lk = L.HUD.touch!.L;
+      const spot = L.minimapFallback(L.MAP_RECT, frame, thumbs, L.MINIMAP_INSET.margin * Lk, L.MIN_GAP * Lk);
+      const label = `${w}×${h} → ${nh} ${monster ? '괴물' : '생존자'}`;
+      expect(spot, label).not.toBeNull();
+      const f = { x: spot!.x, y: spot!.y, w: frame.w, h: frame.h };
+      const m = L.MAP_RECT;
+      expect(f.x, label).toBeGreaterThanOrEqual(m.x);
+      expect(f.y, label).toBeGreaterThanOrEqual(m.y);
+      expect(f.x + f.w, label).toBeLessThanOrEqual(m.x + m.w + 1e-6);
+      expect(f.y + f.h, label).toBeLessThanOrEqual(m.y + m.h + 1e-6);
+      for (const b of thumbs) expect(overlaps(f, b), `${label} ↔ 버튼`).toBe(false);
+    }
+  });
+
+  it('thumbAvoidBoxes: 조준 · 버튼은 아래 이름표까지(CAP_BELOW), 시스템 버튼은 그대로, 이동 스틱 쉬는 고리도 (최종 촬영: 화살표가 구조 이름표에 가려짐)', () => {
+    for (const monster of [false, true]) {
+      const T = touchLayout(800, 360, { l: 0, r: 0, t: 0, b: 0 }, monster, true);
+      const got = thumbAvoidBoxes(T);
+      const want: Box[] = [];
+      if (T.aim) want.push({ ...T.aim, h: T.aim.h + CAP_BELOW });
+      for (const [id, b] of Object.entries(T.buttons))
+        if (b) want.push({ ...b, h: b.h + (id === 'scoreboard' || id === 'fullscreen' ? 0 : CAP_BELOW) });
+      const r = T.moveR;
+      want.push({ x: T.moveHome.x - r, y: T.moveHome.y - r, w: 2 * r, h: 2 * r + CAP_BELOW });
+      expect(got).toEqual(want);
+      // 생존자 구조 · 괴물 조준은 이름표가 있는 버튼이다
+      expect(got.length).toBe(Object.values(T.buttons).filter(Boolean).length + (T.aim ? 1 : 0) + 1);
+    }
+  });
+
+  it('CAP_BELOW = style.css 이름표가 버튼 아래로 나오는 길이 (top · line-height · padding)', () => {
+    const css = readFileSync('client/src/style.css', 'utf8');
+    const block = (sel: string): string => {
+      const i = css.indexOf(`${sel} {`);
+      if (i < 0) throw new Error(`${sel} 없음`);
+      return css.slice(i, css.indexOf('}', i));
+    };
+    const cap = block('.tc-cap');
+    const top = /top: calc\(100% - (\d+(?:\.\d+)?)px\)/.exec(cap);
+    const lh = /line-height: (\d+(?:\.\d+)?)px/.exec(cap);
+    const pad = /padding: (\d+)px \d+px (\d+)px;/.exec(cap);
+    expect(top && lh && pad).toBeTruthy();
+    const below = Number(lh?.[1]) + Number(pad?.[1]) + Number(pad?.[2]) - Number(top?.[1]);
+    expect(below).toBe(CAP_BELOW);
+    // 이동 스틱 이름표: 고리 아래 끝(var(--mr))에서 같은 만큼 위로 올려 둔다
+    expect(block('.tc-move > .tc-cap')).toContain(`top: calc(var(--mr) - ${top?.[1]}px)`);
+    // 시스템 버튼 이름표는 버튼 안 (아래에서 띄움)
+    expect(block('.tc-sys > .tc-cap')).toMatch(/top: auto;[\s\S]*bottom: \d+px;/);
+  });
+
+  it('minimapFallback: 맵 창 안 오른쪽 위, 엄지 · 시스템 버튼에 막히거나 맵보다 크면 null', () => {
+    const map = { x: 100, y: 50, w: 900, h: 600 };
+    const frame = { w: 200, h: 150 };
+    expect(L.minimapFallback(map, frame, [], 10, 8)).toEqual({ x: 790, y: 60 });
+    const tr = { x: 760, y: 40, w: 100, h: 100 };
+    expect(L.minimapFallback(map, frame, [tr], 10, 8)).toBeNull();
+    // 간격(gap) 밖이면 상관없다
+    expect(L.minimapFallback(map, frame, [{ x: 600, y: 300, w: 100, h: 100 }], 10, 8)).toEqual({
+      x: 790,
+      y: 60,
+    });
+    expect(L.minimapFallback(map, { w: 900, h: 100 }, [], 10, 8)).toBeNull();
   });
 
   it('닿기만 하면 덮은 것이 아니다', () => {

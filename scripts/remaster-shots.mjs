@@ -19,6 +19,8 @@
 //   --server-dir=<경로>                서버를 띄울 checkout (기본 현재 폴더), --port=<포트> (기본 8193)
 //   --out=<폴더>                       기본 artifacts/remaster
 //   --quality=high|medium|low          주소에 &quality=를 붙이고, 하위 폴더를 <label>/<quality>로 (옛 빌드는 무시)
+//   --skip-hidpi                       1440×900 배율 2 판(@2x · 확대 자른 그림)을 건너뛴다 (artifacts/final은 @1x만 쓴다 —
+//                                      확대 화면 WebGL 배율 2는 SwiftShader에서 초당 몇 프레임이라 카메라가 늦게 자리 잡는다)
 //   --renderer=canvas|webgl            찍는 탭의 렌더러 (기본 canvas). webgl이면 찍을 역할 탭만 WebGL(SwiftShader)
 //                                      브라우저로 열고 나머지 탭은 Canvas로 판을 진행한다(헤드리스 WebGL 4탭은 1~3fps)
 //
@@ -38,7 +40,7 @@
 // 시계: 디버그 훅에 freezeClock이 있으면(M10~) 장식 시계를 고정하고 찍는다. 옛 빌드에는 없어서 건너뛴다.
 // 품질: WebGL 탭은 injectFps(60)이 있으면(M10~) 판 중 자동 하향을 막고 찍는다 (manifest의 gfx.downgrades = 0).
 // 끝나면 띄운 브라우저와 (직접 띄웠다면) 서버를 그 핸들로만 끈다.
-/* global window, document, Image, HTMLButtonElement */
+/* global window, document, Image, HTMLButtonElement, requestAnimationFrame */
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -77,6 +79,7 @@ function parseArgs(argv) {
     out: 'artifacts/remaster',
     quality: null,
     renderer: 'canvas',
+    skipHidpi: false,
   };
   const keys = {
     '--label': 'label',
@@ -91,6 +94,10 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === 'before' || a === 'after') {
       opts.label = a;
+      continue;
+    }
+    if (a === '--skip-hidpi') {
+      opts.skipHidpi = true;
       continue;
     }
     const eq = a.indexOf('=');
@@ -328,19 +335,86 @@ async function setupScene(players) {
     if (p.role !== 'monster') await sendTest(host, { kind: 'freeze', target: p.id, frozen: true });
   }
   await sendTest(host, { kind: 'setPoint', point: 'B', progress: 0.45 });
-  const aim = await host.evaluate(() => window.__DECOY__?.tileToClient(24, 19) ?? null);
-  if (!aim) throw new Error('tileToClient가 없습니다');
-  await host.mouse.move(aim.x, aim.y);
-  await host.mouse.down({ button: 'right' });
-  await host.mouse.up({ button: 'right' });
+  // 거점 A 점령 시작 알림(괴물 화면, 2초)은 러너를 A에 놓자마자 뜬다 — 카메라 · 조준을 기다리기 전에 본다
   await host.waitForFunction(
     () => (window.__DECOY__?.getBanners() ?? []).some((t) => t.includes('무언가 움직인다')),
     undefined,
     { timeout: 10_000 },
   );
+  // 괴물(26, 25)에서 (24, 19) 방향을 겨눈다 — 확대 화면에서는 (24, 19)가 창 밖이라 같은 방향의 창 안 자리(25, 22).
+  // 따라가는 카메라: 창이 자리 잡은 뒤 화면 자리를 재고, 조준이 서버에 닿았는지 확인한다(조준이 돌면 앞당김이 창을 옮기므로
+  // 닿지 않았으면 다시 재어 옮긴다 — tests/e2e/helpers.ts aimMonsterAt과 같은 방식). 옛 빌드(getCamera 없음)는 한 번에 닿는다
+  let aimed = false;
+  let last = '';
+  for (let i = 0; i < 6 && !aimed; i += 1) {
+    await settleCamera(host);
+    const aim = await host.evaluate(() => window.__DECOY__?.tileToClient(25, 22) ?? null);
+    if (!aim) throw new Error('tileToClient가 없습니다');
+    const cx = Math.round(aim.x);
+    const cy = Math.round(aim.y);
+    await host.mouse.move(cx + 1, cy);
+    await host.mouse.move(cx, cy);
+    // 기대 방향은 서버가 둔 괴물 자리에서 잰다 (순간 이동 자리가 벽에 걸리면 서버가 밀어낸다)
+    aimed = await host
+      .waitForFunction(
+        () => {
+          const m = window.__DECOY__?.getLastSnapshot()?.you.move;
+          if (!m) return false;
+          const want = Math.atan2(22 - m.y, 25 - m.x);
+          return Math.abs(Math.atan2(Math.sin(m.face - want), Math.cos(m.face - want))) < 0.05;
+        },
+        undefined,
+        { timeout: 3_000 },
+      )
+      .then(() => true)
+      .catch(() => false);
+    if (!aimed) {
+      const m = await host.evaluate(() => window.__DECOY__?.getLastSnapshot()?.you.move ?? null);
+      last = `서버 ${m?.x}, ${m?.y} · face ${m?.face} · 커서 ${cx}, ${cy}`;
+    }
+  }
+  if (!aimed) throw new Error(`괴물 조준이 서버에 닿지 않는다 (${last})`);
+  await settleCamera(host);
+  await host.mouse.down({ button: 'right' });
+  await host.mouse.up({ button: 'right' });
   await by.guard.page.waitForFunction(() => window.__DECOY__?.getLastSnapshot()?.you.surv?.spotted === true);
   await host.waitForTimeout(600);
   return by;
+}
+
+/**
+ * 따라가는 카메라가 자리 잡을 때까지 (흔들림 끔, 그린 프레임 세 장 사이에 창이 그대로). 카메라 훅이 없는 옛 빌드는 바로 돌아온다
+ */
+async function settleCamera(page) {
+  // 확대 화면 WebGL 배율 2는 SwiftShader에서 초당 몇 프레임이라 창이 멈출 때까지 오래 걸린다
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    const still = await page.evaluate(async () => {
+      const d = window.__DECOY__;
+      if (!d || typeof d.getCamera !== 'function') return true;
+      if (typeof d.setCameraShake === 'function') d.setCameraShake(0);
+      const read = () => {
+        const c = d.getCamera();
+        return c && c.dip === 0 && c.shakes === 0 ? `${c.view.x},${c.view.y}` : null;
+      };
+      const a = read();
+      for (let i = 0; i < 3; i += 1) await new Promise((r) => requestAnimationFrame(() => r()));
+      return a !== null && a === read();
+    });
+    if (still) return;
+  }
+  throw new Error('카메라가 자리 잡지 않는다');
+}
+
+/** 이 타일 자리가 지금 카메라 창 안인가 (옛 빌드 · 맵 전체 화면이면 늘 참) */
+async function inCameraView(page, x, y) {
+  return page.evaluate(
+    ([tx, ty]) => {
+      const v = window.__DECOY__?.getCamera?.()?.view;
+      return !v || (tx >= v.x && tx <= v.x + v.w && ty >= v.y && ty <= v.y + v.h);
+    },
+    [x, y],
+  );
 }
 
 /** 확대 비교: 스크린샷 버퍼에서 기기 픽셀 영역을 잘라 최근접으로 k배 (브라우저 canvas로 합성) */
@@ -382,8 +456,14 @@ async function shootMatch(browsers, composer, base, res, plan) {
       const page = by[role].page;
       await steady(host, pages);
       const meta = { scene: `role-${role}`, ...res, ...(await pageMeta(page)) };
+      await settleCamera(page);
       const spots = {};
       for (const [name, t] of Object.entries(ZOOM_SPOTS)) {
+        // 따라가는 카메라: 창 밖 자리는 확대 비교를 만들지 않는다 (창 밖은 가리개 색뿐)
+        if (!(await inCameraView(page, t.x, t.y))) {
+          log(`확대 비교 ${name}: ${role} 카메라 창 밖이라 건너뜀`);
+          continue;
+        }
         spots[name] = await page.evaluate(
           ([x, y]) => window.__DECOY__?.tileToClient(x, y) ?? null,
           [t.x, t.y],
@@ -460,13 +540,14 @@ async function main() {
         lobby: true,
         extras: true,
       });
-      await shootMatch(browsers, composer, server.base, HIDPI, {
-        glRoles: [],
-        roles: ROLES,
-        zoomRoles: ['runner', 'monster'],
-        lobby: false,
-        extras: false,
-      });
+      if (!opts.skipHidpi)
+        await shootMatch(browsers, composer, server.base, HIDPI, {
+          glRoles: [],
+          roles: ROLES,
+          zoomRoles: ['runner', 'monster'],
+          lobby: false,
+          extras: false,
+        });
     } else {
       // WebGL: 찍을 역할 탭만 WebGL로 연 판을 역할 · 해상도마다 따로 (나머지 탭은 Canvas)
       for (const role of ROLES) {
@@ -477,13 +558,14 @@ async function main() {
           lobby: role === 'monster',
           extras: role === 'runner',
         });
-        await shootMatch(browsers, composer, server.base, HIDPI, {
-          glRoles: [role],
-          roles: [role],
-          zoomRoles: role === 'runner' || role === 'monster' ? [role] : [],
-          lobby: false,
-          extras: false,
-        });
+        if (!opts.skipHidpi)
+          await shootMatch(browsers, composer, server.base, HIDPI, {
+            glRoles: [role],
+            roles: [role],
+            zoomRoles: role === 'runner' || role === 'monster' ? [role] : [],
+            lobby: false,
+            extras: false,
+          });
       }
     }
     await composerContext.close();

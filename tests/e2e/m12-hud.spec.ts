@@ -60,12 +60,17 @@ async function soloMatch(
   browser: Browser,
   device: DeviceOptions,
   role: Role,
-  opts: { safeArea?: { left?: number; right?: number }; beforeStart?: (p: Page) => Promise<void> } = {},
+  opts: {
+    safeArea?: { left?: number; right?: number };
+    beforeStart?: (p: Page) => Promise<void>;
+    /** 주소에 더 붙일 값 (예: &cam=1) */
+    query?: string;
+  } = {},
 ): Promise<Solo> {
   const { context, page, problems } = await newPlayerPage(browser, device);
   await context.addInitScript(stubFullscreen);
   if (opts.safeArea) await emulateSafeArea(page, opts.safeArea);
-  const code = await createRoom(page, '&bots=1');
+  const code = await createRoom(page, `&bots=1${opts.query ?? ''}`);
   await pickRoleAndReady(page, role);
   if (opts.beforeStart) await opts.beforeStart(page);
   await press(page.getByTestId('start-button'));
@@ -125,39 +130,88 @@ async function resizeTo(page: Page, width: number, height: number): Promise<void
 
 // ───────────── ⑦ 판 중 창이 낮아짐 ─────────────
 
-test('판 중 창이 낮아지면 엄지 버튼과 겹치는 미니맵을 숨기고, 크기가 돌아오면 다시 보인다 (HUD 부품 ↔ 터치 대상 겹침 없음)', async ({
+/** 미니맵 틀 (HUD 배치의 미니맵 부품을 모두 덮는 사각형) */
+function minimapBox(l: HudLayout): { x: number; y: number; w: number; h: number } | null {
+  const items = l.items.filter((i) => i.id === 'minimap');
+  if (items.length === 0) return null;
+  const x0 = Math.min(...items.map((i) => i.x));
+  const y0 = Math.min(...items.map((i) => i.y));
+  const x1 = Math.max(...items.map((i) => i.x + i.w));
+  const y1 = Math.max(...items.map((i) => i.y + i.h));
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+test('판 중 창이 낮아져 엄지 버튼이 미니맵을 덮으면: 확대 화면은 맵 창 안 빈 구석으로 옮기고(확대 1은 숨기고), 크기가 돌아오면 처음 자리 (HUD 부품 ↔ 터치 대상 겹침 없음)', async ({
   browser,
 }) => {
-  test.setTimeout(150_000);
+  test.setTimeout(200_000);
   const report: string[] = [];
-  // 안드로이드 전체 화면이 꺼져 주소창만큼 낮아짐(괴물) · 가장 낮은 휴대폰에서 도구 막대가 나옴(생존자)
-  const cases: { name: string; device: DeviceOptions; role: Role; low: number }[] = [
-    { name: 'Pixel 7 915×412 → 330', device: dpr1(PHONE_LANDSCAPE), role: 'monster', low: 330 },
-    { name: 'Pixel 5 802×293 → 250', device: dpr1(PHONE_SMALL), role: 'runner', low: 250 },
+  // 안드로이드 전체 화면이 꺼져 주소창만큼 낮아짐(괴물) · 가장 낮은 휴대폰에서 도구 막대가 나옴(생존자). 마지막은 확대 1(맵 전체 화면)
+  const cases: { name: string; device: DeviceOptions; role: Role; low: number; query: string }[] = [
+    { name: 'Pixel 7 915×412 → 330', device: dpr1(PHONE_LANDSCAPE), role: 'monster', low: 330, query: '' },
+    { name: 'Pixel 5 802×293 → 250', device: dpr1(PHONE_SMALL), role: 'runner', low: 250, query: '' },
+    {
+      name: 'Pixel 7 915×412 → 330 (확대 1)',
+      device: dpr1(PHONE_LANDSCAPE),
+      role: 'monster',
+      low: 330,
+      query: '&cam=1',
+    },
   ];
   for (const c of cases) {
-    const s = await soloMatch(browser, c.device, c.role);
+    const zoomed = c.query === '';
+    const s = await soloMatch(browser, c.device, c.role, { query: c.query });
     const { page } = s;
     const vp = page.viewportSize()!;
     const start = await hudLayout(page);
     expect(hasMinimap(start), `${c.name} 시작`).toBe(true);
     expect(coveredHud(start, await touchTargets(page)), `${c.name} 시작`).toEqual([]);
+    const home = minimapBox(start)!;
     const sizeAtStart = [start.viewW, start.viewH];
 
     await resizeTo(page, vp.width, c.low);
-    // 미니맵이 숨는다 (표시 목록에서 잰 HUD에 미니맵 그림 · 틀 · 제목이 없다)
-    await expect.poll(async () => hasMinimap(await hudLayout(page)), POLL).toBe(false);
+    if (zoomed) {
+      // 미니맵이 맵 창 안으로 옮겨진다 (처음 자리가 아니고, 틀까지 맵 사각형 안)
+      await expect
+        .poll(async () => {
+          const b = minimapBox(await hudLayout(page));
+          return b !== null && Math.abs(b.x - home.x) + Math.abs(b.y - home.y) > 1;
+        }, POLL)
+        .toBe(true);
+    } else {
+      // 확대 1: 미니맵이 숨는다 (표시 목록에서 잰 HUD에 미니맵 그림 · 틀 · 제목이 없다)
+      await expect.poll(async () => hasMinimap(await hudLayout(page)), POLL).toBe(false);
+    }
     const low = await hudLayout(page);
     const targets = await touchTargets(page);
     // 판 중에는 논리 크기가 그대로다 (글자는 캔버스와 같은 비율로 작아진다 — HUMAN_CHECKS)
     expect([low.viewW, low.viewH], c.name).toEqual(sizeAtStart);
     expect(coveredHud(low, targets), `${c.name} 낮아진 뒤`).toEqual([]);
     expect(touchLayoutProblems(await measureTouchLayout(page)), c.name).toEqual([]);
-    expect(await page.evaluate(() => window.__DECOY__?.getDrawnMinimap().length ?? -1), c.name).toBe(0);
-    report.push(`${c.name}: 숨김 뒤 가장 작은 글자 ${Math.min(...low.items.map((i) => i.fontPx ?? 99))}px`);
+    if (zoomed) {
+      const b = minimapBox(low)!;
+      const m = low.map;
+      expect(b.x, c.name).toBeGreaterThanOrEqual(m.x - 0.5);
+      expect(b.y, c.name).toBeGreaterThanOrEqual(m.y - 0.5);
+      expect(b.x + b.w, c.name).toBeLessThanOrEqual(m.x + m.w + 0.5);
+      expect(b.y + b.h, c.name).toBeLessThanOrEqual(m.y + m.h + 0.5);
+      // 옮긴 미니맵도 메인 화면 그림을 다시 찍는다 (같은 정보 규칙)
+      await expect
+        .poll(() => page.evaluate(() => window.__DECOY__?.getDrawnMinimap().length ?? -1), POLL)
+        .toBeGreaterThan(0);
+    } else
+      expect(await page.evaluate(() => window.__DECOY__?.getDrawnMinimap().length ?? -1), c.name).toBe(0);
+    report.push(
+      `${c.name}: ${zoomed ? '옮김' : '숨김'} 뒤 가장 작은 글자 ${Math.min(...low.items.map((i) => i.fontPx ?? 99))}px`,
+    );
 
     await resizeTo(page, vp.width, vp.height);
-    await expect.poll(async () => hasMinimap(await hudLayout(page)), POLL).toBe(true);
+    await expect
+      .poll(async () => {
+        const b = minimapBox(await hudLayout(page));
+        return b !== null && Math.abs(b.x - home.x) + Math.abs(b.y - home.y) < 1;
+      }, POLL)
+      .toBe(true);
     expect(coveredHud(await hudLayout(page), await touchTargets(page)), `${c.name} 돌아온 뒤`).toEqual([]);
     expect(s.problems, c.name).toEqual([]);
     await s.context.close();

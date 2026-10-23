@@ -34,7 +34,7 @@ import {
 } from '../art/mapArtBadges';
 import { UI } from '../art/palette';
 import { gfxState } from '../gfx/state';
-import { MAP_SCALE, MAP_X, MAP_Y, tileToScreen } from '../ui/layout';
+import { MAP_X, MAP_Y, WORLD_SCALE, tileToScreen } from '../ui/layout';
 import { makeText, type CrispText } from '../ui/text';
 import {
   countGraphicsCmds,
@@ -302,7 +302,7 @@ export interface BadgeRect {
 export function badgeRect(id: BadgeId, zoom: number): BadgeRect {
   const at = BADGE_AT[id];
   const box = BADGE_BOX[BADGE_KIND[id]];
-  const kd = MAP_SCALE * zoom;
+  const kd = WORLD_SCALE * zoom;
   const ex = zoom * MAP_X;
   const ey = zoom * MAP_Y;
   const dx0 = Math.floor(ex + (at[0] + box.x0) * kd);
@@ -337,7 +337,7 @@ const SLOT_GAP = 2;
  * 사각형(굽는 범위 × 기기 배율, 올림 + 1)이라 배지가 늘 칸 안에 들어간다. 칸 사이 · 가장자리는 투명 테
  */
 export function layoutBadgeAtlas(zoom: number): BadgeAtlasLayout {
-  const kd = MAP_SCALE * zoom;
+  const kd = WORLD_SCALE * zoom;
   let x = SLOT_GAP;
   let height = 0;
   const slots = {} as Record<BadgeId, BadgeSlot>;
@@ -408,7 +408,7 @@ class BadgeAtlas {
   bake(id: BadgeId, zoom: number, paint: (c: BadgeCtx, x: number, y: number) => void): BadgeRect {
     const slot = this.layout?.slots[id] ?? { x: 0, y: 0, w: 0, h: 0 };
     const r = badgeRect(id, zoom);
-    const kd = MAP_SCALE * zoom;
+    const kd = WORLD_SCALE * zoom;
     // 1) 새 작업 캔버스 = 예전 배지 캔버스 (같은 크기 · 같은 변환)
     const { canvas: wc, ctx: w } = makeCanvas(r.w, r.h);
     w.setTransform(kd, 0, 0, kd, zoom * MAP_X - r.dx0, zoom * MAP_Y - r.dy0);
@@ -475,7 +475,7 @@ export class Badges {
       const p = tileToScreen(c.x, c.y + BADGE.pointDy);
       const t = makeText(scene, p.x, p.y, id, {
         fontFamily: 'sans-serif',
-        fontSize: `${17 * MAP_SCALE}px`,
+        fontSize: `${17 * WORLD_SCALE}px`,
         fontStyle: 'bold',
         color: '#E2E8F0',
       }).setOrigin(0.5);
@@ -488,6 +488,15 @@ export class Badges {
       this.images.clear();
       this.atlas.destroy();
     });
+  }
+
+  /** 카메라 창만큼 옮겨진 월드에 맞춰 A · B 글자를 옮긴다 (글자는 맵 컨테이너 밖 화면 좌표에 있다) */
+  follow(dx: number, dy: number): void {
+    for (const [id, t] of this.labels) {
+      const c = CAPTURE_POINTS[id];
+      const k = TILE_PX * WORLD_SCALE;
+      t.setPosition(MAP_X + dx + c.x * k, MAP_Y + dy + (c.y + BADGE.pointDy) * k);
+    }
   }
 
   /** 지난 draw의 정보 레이어 항목 (배지 · 진행). 품질과 상관없이 같은 값 */
@@ -522,10 +531,10 @@ export class Badges {
       this.images.set(id, img);
       gfxState.features.badgeGfxCmds = countGraphicsCmds(this.box.list).cmds;
     }
-    const kd = MAP_SCALE * zoom;
+    const kd = WORLD_SCALE * zoom;
     img
       .setFrame(id)
-      .setPosition((r.dx0 / zoom - MAP_X) / MAP_SCALE, (r.dy0 / zoom - MAP_Y) / MAP_SCALE)
+      .setPosition((r.dx0 / zoom - MAP_X) / WORLD_SCALE, (r.dy0 / zoom - MAP_Y) / WORLD_SCALE)
       .setScale(1 / kd)
       .setVisible(true);
     gfxState.features.badgeBakes = Number(gfxState.features.badgeBakes ?? 0) + 1;

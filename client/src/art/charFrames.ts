@@ -59,8 +59,8 @@ export interface FrameBox {
  * 생존자 · 괴물 그림이 들어가는 상자 (모든 자세 · 역할). 앞이 길고(얼굴 · 방패 · 망원경) 뒤 · 옆이 짧아 직사각 칸으로 굽는다.
  * 모든 프레임이 이 상자 안인지 단위 시험이 그림 경로를 표본으로 재서 본다(tests/unit/char-frames.test.ts)
  */
-export const SURVIVOR_BOX: FrameBox = { x0: -1.08, y0: -1.26, x1: 1.6, y1: 1.26 };
-export const MONSTER_BOX: FrameBox = { x0: -1.32, y0: -1.2, x1: 1.32, y1: 1.2 };
+export const SURVIVOR_BOX: FrameBox = { x0: -1.08, y0: -1.12, x1: 1.22, y1: 1.12 };
+export const MONSTER_BOX: FrameBox = { x0: -1.22, y0: -1.2, x1: 1.22, y1: 1.2 };
 
 /** 프레임 하나: 이름 · 단위(s = 생존자 반지름, m = 괴물 반지름) · 상자 · 그림 (w = 외곽선 두께, 그림 단위) */
 export interface CharFrameSpec {

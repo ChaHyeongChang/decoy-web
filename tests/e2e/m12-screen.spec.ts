@@ -159,7 +159,7 @@ function overlap(a: { x: number; y: number; w: number; h: number }, b: TouchTarg
 
 /**
  * 글자 크기 · 겹침 · 화면 안 문제 (빈 배열이면 통과). 점수판(score)은 손으로 여는 덮개라 겹침에서 뺀다.
- * 늘 떠 있는 부품은 맵 사각형과도 겹치지 않는다
+ * 늘 떠 있는 부품은 맵 사각형과도 겹치지 않는다 (맵 안 미니맵만 예외: 맵 사각형 안에 다 들어간다)
  */
 function hudProblems(l: HudLayout, targets: TouchTarget[], vw: number, vh: number): string[] {
   const out: string[] = [];
@@ -176,8 +176,14 @@ function hudProblems(l: HudLayout, targets: TouchTarget[], vw: number, vh: numbe
       const o = overlap(i, t);
       if (o > 0) out.push(`${label(i)} ↔ ${t.id} ${f(o)}px`);
     }
+    const m = l.map;
+    if (i.id === 'minimap' && l.minimapInset) {
+      // 따라가는 카메라: 옆 자리가 없는 배치(16:9 · 태블릿)는 미니맵을 맵 사각형 안 구석에 넣는다 — 맵 안에 다 들어가야 한다
+      if (i.x < m.x - 0.5 || i.y < m.y - 0.5 || i.x + i.w > m.x + m.w + 0.5 || i.y + i.h > m.y + m.h + 0.5)
+        out.push(`${label(i)} 맵 안 미니맵이 맵 밖으로`);
+      continue;
+    }
     if (persistent && i.id !== 'hint') {
-      const m = l.map;
       const ox = Math.min(i.x + i.w, m.x + m.w) - Math.max(i.x, m.x);
       const oy = Math.min(i.y + i.h, m.y + m.h) - Math.max(i.y, m.y);
       if (ox > 0.5 && oy > 0.5) out.push(`${label(i)} ↔ 맵`);
@@ -231,18 +237,16 @@ test('글자 · 겹침: 휴대폰 높이 293 · 320 · 360 · 16:9 두 가지에
     );
 
     if (role === 'runner') {
-      // 수감: 아래 안내 줄(터치 문구)이 가장자리 띠 안에서 버튼과 겹치지 않는다
+      // 수감: 아래 안내 줄(터치 문구)이 가장자리 띠 안에서 버튼과 겹치지 않는다. 따라가는 카메라에서는 수감 중 관전을 알리는
+      // 더 긴 문구다(팀 카드를 누르면 동료 화면, STORY_TEXT imprisonedWatchHintTouch)
+      const jailText = '수감 중 — 동료가 구조해 주면 풀려난다 · 팀 카드를 누르면 동료 화면';
       await sendTest(page, { kind: 'setSurvivor', target: s.id, status: 'imprisoned', imprisonCount: 1 });
-      await page.waitForFunction(
-        () => String(window.__DECOY__?.getHud().hint ?? '').includes('구조 버튼'),
-        null,
-        {
-          polling: 150,
-        },
-      );
+      await page.waitForFunction((want) => String(window.__DECOY__?.getHud().hint ?? '') === want, jailText, {
+        polling: 150,
+      });
       const jailed = await checkScreen(page, `${label} 수감`);
       const hint = jailed.layout.items.find((i) => i.id === 'hint' && i.kind === 'text');
-      expect(hint?.text, label).toBe('수감 중 — 동료가 감옥 문 앞에서 구조 버튼을 누르고 있으면 풀려난다');
+      expect(hint?.text, label).toBe(jailText);
     }
     // 점수판: 터치 문구 · 닫기 안내, 글자 12px 이상 · 화면 안, 화면 어디를 눌러도 닫힌다
     const board = centerOf(await waitForTouchTarget(page, 'scoreboard'));

@@ -254,7 +254,7 @@ describe('새 캐릭터 프레임: 굽기 상자 · 크기 기준', () => {
     }
   });
 
-  it('굽는 모든 자세가 크기 기준 안 (생존자 앞 1.55r · 옆 1.05r · 뒤 1.0r, 괴물 1.12r · 돌진 1.35r)', () => {
+  it('굽는 모든 자세가 크기 기준 안 (생존자 앞 1.15r · 옆 1.05r · 뒤 1.0r, 괴물 1.12r · 돌진 1.15r)', () => {
     for (const s of specs) {
       const d = drawingOf(s.name);
       const over = s.unit === 's' ? survivorOver(d) : monsterOver(d, s.name === MONSTER_FRAME_NAMES.dash);

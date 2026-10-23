@@ -602,3 +602,66 @@ export function drawToCanvas(ctx: CanvasSink, drawing: Drawing, k: number): void
   }
   ctx.restore();
 }
+
+// ───────────────────────── 크기 다듬기 (따라가는 카메라 3단계) ─────────────────────────
+
+/**
+ * 반지름 다듬기: knee 안은 그대로, 밖은 기울기 1로 이어져 limit에 부드럽게 다가간다(넘지 않는다). 확대 화면에서 캐릭터가
+ * 판정 범위보다 눈에 띄게 커 보이지 않게(최대 1.15배) 앞 돌출(후드 · 방패 · 망원경 · 발톱 · 돌진 자락)을 몸 쪽으로 당긴다
+ */
+export function squeezeRadius(r: number, knee: number, limit: number): number {
+  if (r <= knee) return r;
+  const span = limit - knee;
+  return knee + span * (1 - Math.exp(-(r - knee) / span));
+}
+
+function squeezePt(x: number, y: number, knee: number, limit: number): [number, number] {
+  const r = Math.hypot(x, y);
+  if (r <= knee) return [x, y];
+  const k = squeezeRadius(r, knee, limit) / r;
+  return [x * k, y * k];
+}
+
+function squeezeD(d: string, knee: number, limit: number): string {
+  const tokens = d.match(/[MLCZ]|-?\d*\.?\d+(?:e[-+]?\d+)?/g) ?? [];
+  const out: string[] = [];
+  let i = 0;
+  const pt = (): string => {
+    const [x, y] = squeezePt(Number(tokens[i]), Number(tokens[i + 1]), knee, limit);
+    i += 2;
+    return `${round(x, 3)} ${round(y, 3)}`;
+  };
+  while (i < tokens.length) {
+    const t = tokens[i++];
+    if (t === 'M' || t === 'L') out.push(`${t}${pt()}`);
+    else if (t === 'C') out.push(`C${pt()} ${pt()} ${pt()}`);
+    else if (t === 'Z') out.push('Z');
+    else throw new Error(`모르는 경로 토큰: ${t}`);
+  }
+  return out.join('');
+}
+
+function squeezePaint(p: Paint, knee: number, limit: number): Paint {
+  if (p.kind === 'solid') return p;
+  if (p.kind === 'linear') {
+    const [x0, y0] = squeezePt(p.x0, p.y0, knee, limit);
+    const [x1, y1] = squeezePt(p.x1, p.y1, knee, limit);
+    return { ...p, x0, y0, x1, y1 };
+  }
+  const c = Math.hypot(p.cx, p.cy);
+  const [cx, cy] = squeezePt(p.cx, p.cy, knee, limit);
+  const k = c > 1e-6 ? squeezeRadius(c, knee, limit) / c : 1;
+  return { ...p, cx, cy, r: p.r * k };
+}
+
+/** 그림 전체를 반지름 다듬기 (경로 점 · 그라디언트 자리. 선 두께는 그대로) */
+export function squeezeDrawing(dr: Drawing, knee: number, limit: number): Drawing {
+  return {
+    ops: dr.ops.map((op) => ({
+      ...op,
+      d: squeezeD(op.d, knee, limit),
+      ...(op.fill ? { fill: squeezePaint(op.fill, knee, limit) } : {}),
+      ...(op.stroke ? { stroke: { ...op.stroke, paint: squeezePaint(op.stroke.paint, knee, limit) } } : {}),
+    })),
+  };
+}

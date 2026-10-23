@@ -13,7 +13,7 @@
 import type { AnonStatus, Balance, MatchInfo, PointView, Snapshot } from '@decoy/shared';
 import { gfxNow } from '../gfx/state';
 import { HUD_TEXT, ROLE_CARDS, UI_TEXT } from '../data/storyText';
-import { UI, WARN } from '../art/palette';
+import { NEON, UI, WARN } from '../art/palette';
 import {
   ABILITY_ICON,
   ACCENT,
@@ -407,13 +407,32 @@ export class Hud {
 
   private persistentHint(snap: Snapshot): { text: string; icon: string } | null {
     const st = snap.you.surv?.status;
-    if (st === 'imprisoned')
-      return {
-        text: this.touchMode ? HUD_TEXT.imprisonedHintTouch : HUD_TEXT.imprisonedHint,
-        icon: FR.icon('prison', HC.red, 20),
-      };
+    // 관전 안내는 확대 화면(따라가는 카메라)에서만: 확대 1이면 맵 전체가 보여 옮겨 볼 것이 없다
+    const watch = this.watchable;
+    if (st === 'imprisoned') {
+      if (watch && this.watching !== null)
+        return {
+          text: this.touchMode ? HUD_TEXT.watchingMateTouch : HUD_TEXT.watchingMate,
+          icon: FR.icon('eye', UI.textDim, 20),
+        };
+      const text = watch
+        ? this.touchMode
+          ? HUD_TEXT.imprisonedWatchHintTouch
+          : HUD_TEXT.imprisonedWatchHint
+        : this.touchMode
+          ? HUD_TEXT.imprisonedHintTouch
+          : HUD_TEXT.imprisonedHint;
+      return { text, icon: FR.icon('prison', HC.red, 20) };
+    }
     if (st === 'dead' || st === 'escaped')
-      return { text: HUD_TEXT.spectating, icon: FR.icon('eye', UI.textDim, 20) };
+      return {
+        text: !watch
+          ? HUD_TEXT.spectatingPlain
+          : this.touchMode
+            ? HUD_TEXT.spectatingTouch
+            : HUD_TEXT.spectating,
+        icon: FR.icon('eye', UI.textDim, 20),
+      };
     if (this.isMonster && snap.world.monsterWait > 0)
       return {
         text: `${UI_TEXT.monsterWait} ${Math.ceil(snap.world.monsterWait)}초`,
@@ -449,8 +468,45 @@ export class Hud {
     this.digits.set(v.text, x0 + icon + gap + labelW, T.y, look.text);
   }
 
+  /** 팀 카드 id (카드 순서, 생존자 화면에서 drawTeam이 채운다. 괴물 화면 · 빈 칸은 null) */
+  readonly cardIds: (string | null)[] = [null, null, null];
+  /** 관전 중인 동료 (그 카드를 청록 테두리 · '보는 중'으로) */
+  private watching: string | null = null;
+  /** 관전 할 수 있는 상태 (안내 줄 문구) */
+  private watchable = false;
+
+  /** 관전 중인 동료 · 관전할 수 있는가를 알린다 (바뀌면 다음 프레임에 다시 그린다) */
+  setWatching(id: string | null, canSpectate: boolean): void {
+    if (id === this.watching && canSpectate === this.watchable) return;
+    this.watching = id;
+    this.watchable = canSpectate;
+    this.gate.reset();
+  }
+
+  /** 팀 카드 i의 사각형 (논리 px, 그린 자리와 같다): 관전 카드 고르기 판정. 그리지 않는 칸 · 괴물 화면이면 null */
+  cardRect(i: number): { x: number; y: number; w: number; h: number } | null {
+    if (this.isMonster || (this.cardIds[i] ?? null) === null) return null;
+    if (this.plan) {
+      const C = this.plan.cards;
+      return {
+        x: C.x + (i % C.cols) * (C.w + C.gap),
+        y: C.y + Math.floor(i / C.cols) * (C.h + C.gap),
+        w: C.w,
+        h: C.h,
+      };
+    }
+    const c = HUD.leftCards;
+    return { x: c.x, y: c.y + i * (c.h + c.gap), w: c.w, h: c.h };
+  }
+
+  /** 카드 사이 간격 (논리 px): 판정 사각형을 반씩 넓혀 칸 사이 빈틈이 없게 */
+  get cardGap(): number {
+    return this.plan ? this.plan.cards.gap : HUD.leftCards.gap;
+  }
+
   private drawTeam(snap: Snapshot): void {
     const list = teamCards(snap, this.info.roster, this.balance);
+    for (let i = 0; i < 3; i += 1) this.cardIds[i] = list[i]?.id ?? null;
     if (this.plan) {
       this.cards.forEach((p, i) => this.drawTouchCard(p, i, list[i] ?? null, null));
       return;
@@ -466,7 +522,8 @@ export class Hud {
       const x = c.x;
       const y = c.y + i * (c.h + c.gap);
       const alive = s.status === 'normal' || s.status === 'injured' || s.status === 'imprisoned';
-      p.panel.set(s.me ? `card:${s.role}` : 'card', x, y, c.w, c.h);
+      const watched = !s.me && s.id === this.watching;
+      p.panel.set(s.me ? `card:${s.role}` : watched ? 'card:watch' : 'card', x, y, c.w, c.h);
       const dx = x + 34;
       const dy = y + 44;
       p.well.set('well', dx, dy);
@@ -477,8 +534,8 @@ export class Hud {
       p.ring.set(s.role, !free ? 0 : s.cd > 0 ? litTicks(1 - s.cd / total) : TICKS, dx, dy);
       setText(p.name, ROLE_CARDS[s.role].name, ACCENT[s.role].text);
       p.name.setPosition(x + 68, y + 11);
-      if (s.me) {
-        setText(p.tagText, HUD_TEXT.me);
+      if (s.me || watched) {
+        setText(p.tagText, s.me ? HUD_TEXT.me : HUD_TEXT.watchTag);
         const tw = Math.ceil(p.tagText.width) + 12;
         p.tag.set('tag', x + c.w - 10 - tw, y + 12, tw, 20);
         p.tagText.setPosition(x + c.w - 10 - tw / 2, y + 22).setVisible(true);
@@ -545,7 +602,8 @@ export class Hud {
     const maxJail = this.balance.survivor.maxImprisonments;
     const status = s ? s.status : (anon?.state ?? 'normal');
     const alive = status === 'normal' || status === 'injured' || status === 'imprisoned';
-    p.panel.set(s?.me ? `card:${s.role}` : 'card', x, y, C.w, C.h);
+    const watched = s !== null && !s.me && s.id === this.watching;
+    p.panel.set(s?.me ? `card:${s.role}` : watched ? 'card:watch' : 'card', x, y, C.w, C.h);
     p.well.set('well', x + 22 * k, cy);
     p.sil.set(FR.sil(s ? s.role : 'hidden', alive), x + 22 * k, cy);
     const look = STATUS_LOOK[status];
@@ -569,7 +627,9 @@ export class Hud {
     p.ring.show(false);
     p.tag.show(false);
     p.hr.show(false);
-    p.abIcon.show(false);
+    // 관전 중인 동료: 우물 왼쪽 위에 눈 아이콘 (색만으로 구분하지 않게 — 테두리 색 + 모양)
+    if (watched) p.abIcon.set(FR.icon('eye', NEON, 16), x + 8 * k, y + 8 * k).show(true);
+    else p.abIcon.show(false);
     for (const t of [p.name, p.tagText, p.sub, p.stText, p.abText, p.jailText]) t.setVisible(false);
   }
 
@@ -629,6 +689,11 @@ export class Hud {
       p.abText.setVisible(false);
       this.drawJail(p, x, y + 74, s.imprisonCount, maxJail, x + 68);
     });
+  }
+
+  /** 보이는 안내 줄 패널 사각형 (논리 px, 없으면 null): 화면 밖 화살표가 그 아래로 숨지 않게 피한다 (넓은 터치 배치는 맵이 화면 높이 가득) */
+  get hintRect(): { x: number; y: number; w: number; h: number } | null {
+    return this.hintText === '' ? null : this.hint.panel.bounds;
   }
 
   /** 안내 줄: PC는 아래 띠 가운데(행동 칸 자리), 터치는 맨 아래 가장자리 띠(터치 대상이 없는 곳) */

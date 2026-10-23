@@ -354,3 +354,92 @@ export async function recordInputs(page: Page, pollMs = 150): Promise<InputRecor
     }, stop);
   return { entries: () => read(false), stop: () => read(true) };
 }
+
+/** 따라가는 카메라와 무관한 픽셀 · 조준 시험: 맵 전체 고정 화면(확대 1, 로컬 주소에서만 받는다) */
+export const CAM1 = '&cam=1';
+
+/**
+ * 괴물 탭에서 마우스로 (x, y) 타일을 조준하고, 서버가 받은 조준(내 괴물 face)이 그 타일 쪽이 될 때까지 확인한다.
+ * 조준 붙잡기(client/src/aimHold.ts)는 커서가 움직일 때 커서 아래 월드 자리를 잰다: 순간 이동이 아직 이 탭에 닿지 않았거나
+ * 창이 따라오는 중에 커서를 옮기면 지난 창 기준의 화면 자리라 엉뚱한 타일이 붙잡힌다. 그러면 창이 멈춘 뒤 화면 자리를 다시 재어
+ * 옮긴다. 확인은 서버 자리 → 목표 타일의 화면 방향과 커서 반올림(1.5px) 안이면 맞다 — 커서 px 쪽을 보는지만 보면 지난 창 기준으로
+ * 놓인 커서도 통과한다(CI 전체 검사의 m8-effects 공격이 빗나감, CPU 6배 느림으로 재현). 이 탭이 보내는 목표 조준(마지막 입력
+ * 프레임 aim)도 같은 방향이어야 한다.
+ * 괴물이 아니면 확인하지 않는다. 끝나면 앞당김으로 다시 움직인 창이 멈출 때까지 기다린다
+ */
+export async function aimMonsterAt(page: Page, x: number, y: number): Promise<void> {
+  await page.evaluate(() => window.__DECOY__?.setCameraShake(0));
+  let miss = '';
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    await waitCamera(page);
+    const c = await page.evaluate(([tx, ty]) => window.__DECOY__?.tileToClient(tx!, ty!) ?? null, [x, y]);
+    if (!c) throw new Error('tileToClient 없음');
+    const cx = Math.round(c.x);
+    const cy = Math.round(c.y);
+    await page.mouse.move(cx + 1, cy);
+    await page.mouse.move(cx, cy);
+    const ok = await page
+      .waitForFunction(
+        ([tx, ty]) => {
+          const d = window.__DECOY__;
+          const s = d?.getLastSnapshot();
+          if (!d || !s || s.you.role !== 'monster') return true;
+          const m = s.you.move;
+          const b = d.tileToClient(m.x, m.y);
+          const t = d.tileToClient(tx!, ty!);
+          if (!b || !t) return false;
+          const dist = Math.hypot(t.x - b.x, t.y - b.y);
+          const want = Math.atan2(t.y - b.y, t.x - b.x);
+          const tol = Math.max(0.002, 1.5 / Math.max(1, dist));
+          const near = (a: number): boolean => {
+            let e = a - want;
+            while (e > Math.PI) e -= 2 * Math.PI;
+            while (e < -Math.PI) e += 2 * Math.PI;
+            return Math.abs(e) <= tol;
+          };
+          // 이 탭이 지금 보내는 목표 조준도 그쪽이어야 한다: 순간 이동의 face가 우연히 목표 방향이면 서버 face만으로는
+          // 엉뚱한 커서로 돌기 전에 통과한다 (m8-effects: teleport face 0 = 동쪽 목표)
+          const f = d.getLastInput();
+          return f !== null && Number.isFinite(f.aim) && near(f.aim) && near(m.face);
+        },
+        [x, y],
+        { timeout: 3000 },
+      )
+      .then(
+        () => true,
+        () => false,
+      );
+    if (ok) {
+      // 조준이 바뀌면 괴물 앞당김으로 창이 다시 움직인다: 멈출 때까지 (화면 비네트 · 표본 자리가 측정 사이에 같게)
+      await waitCamera(page);
+      return;
+    }
+    const last = await page.evaluate(() => window.__DECOY__?.getLastSnapshot()?.you.move ?? null);
+    miss = `서버 자리 ${last?.x}, ${last?.y} · face ${last?.face} · 커서 ${cx}, ${cy}`;
+  }
+  throw new Error(`괴물 조준을 (${x}, ${y})로 맞추지 못했다 (${miss})`);
+}
+
+/**
+ * 따라가는 카메라가 자리 잡을 때까지: 그린 프레임 세 장 사이에 창이 그대로고 어두워짐 · 흔들림이 없다 (순간 이동 뒤 화면 좌표를
+ * 읽기 전에). 시간 간격이 아니라 프레임으로 잰다: 확대 화면의 소프트웨어 렌더러(SwiftShader)는 프레임이 약 250ms라, 120ms
+ * 간격으로 두 번 읽으면 같은 프레임을 두 번 읽어 아직 움직이는 창을 멈췄다고 본다
+ */
+export async function waitCamera(page: Page, timeout = 15_000): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(async () => {
+          const read = (): string | null => {
+            const c = window.__DECOY__?.getCamera() ?? null;
+            return c && c.dip === 0 && c.shakes === 0 ? `${c.view.x},${c.view.y}` : null;
+          };
+          const a = read();
+          for (let i = 0; i < 3; i += 1) await new Promise<void>((r) => requestAnimationFrame(() => r()));
+          const b = read();
+          return a !== null && a === b;
+        }),
+      { intervals: [50], timeout },
+    )
+    .toBe(true);
+}

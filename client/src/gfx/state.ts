@@ -36,6 +36,7 @@ export const gfxState: GfxState = {
   targetHz: 60,
   upgrades: 0,
   charStyle: 'classic',
+  camZoom: 1,
 };
 
 /** 지금 품질 · 렌더러 · 기기에 맞춘 설정 */
