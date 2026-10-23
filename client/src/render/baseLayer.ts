@@ -64,7 +64,7 @@ export interface FogLayerOptions {
   ambientCss: string;
   /** 경계 셰이더 (GPU 경로에서만) */
   shader: boolean;
-  /** 미리 구운 정적 맵 조각 아틀라스 (같은 배율 · 창일 때, prebakeFogArt) */
+  /** 미리 구운 정적 맵 조각 아틀라스 (GPU 합성만, 같은 배율 · 창일 때, prebakeFogArt) */
   chunks?: ChunkAtlas;
 }
 

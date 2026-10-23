@@ -296,19 +296,27 @@ test('새 캐릭터 스타일 · 품질 높음 1920×1080@2: 자세별 캐릭터
   const info = await gfxInfo(page);
   const extra = await page.evaluate(() => {
     const g = window.__DECOY__!.gfx;
-    return { style: g.charStyle, zoom: g.zoom, atlasBytes: Number(g.features.atlasBytes ?? 0) };
+    return {
+      style: g.charStyle,
+      baked: String(g.features.atlasStyle ?? ''),
+      zoom: g.zoom,
+      atlasBytes: Number(g.features.atlasBytes ?? 0),
+    };
   });
   await context.close();
   console.log(
     `[m10-fog.webgl] 새 스타일 높음 1920×1080@2 텍스처 바이트 ${info.textureBytes} (${(info.textureBytes / MB).toFixed(2)}MiB), 캐릭터 아틀라스 ${(extra.atlasBytes / MB).toFixed(2)}MiB`,
   );
   expect(extra.style).toBe('new');
+  // 실제로 구운 아틀라스도 새 스타일 (설정값이 아니라 굽기 기록)
+  expect(extra.baked).toBe('new');
   expect(extra.zoom).toBe(2);
   expect(info.renderer).toBe('webgl');
   expect(info.quality).toBe('high');
   expect(info.downgrades).toBe(0);
-  // 빈 통과가 아님: 새 스타일 아틀라스(자세 프레임 100여 장)는 기존(배율 2에서 약 1MiB)보다 크다
-  expect(extra.atlasBytes).toBeGreaterThan(1.5 * MB);
+  // 빈 통과가 아님: 새 스타일 아틀라스(자세 프레임 100여 장)는 기존보다 크다 — 확대 3 품질 높음(텍셀 상한 4)에서 새 약 7.3MiB,
+  // 기존 약 3.9MiB (PERF 4.4)
+  expect(extra.atlasBytes).toBeGreaterThan(5 * MB);
   expect(info.textureBytes).toBeGreaterThan(20 * MB);
   expect(info.textureBytes).toBeLessThanOrEqual(TEXTURE_BUDGET.high);
   expect(problems).toEqual([]);

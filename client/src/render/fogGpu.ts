@@ -14,7 +14,7 @@
 //
 // 텍스처는 getImageData 사본을 만드는 addCanvas(CanvasTexture) 대신 fogPaint.createCanvasTexture로 올린다.
 //
-// 레이어 순서 (fogRoot 안): 정적 맵 → 발광 번짐(ADD, presets glow = 'sprite') → 공개 동적 레이어(조각 → 시야 채움)
+// 레이어 순서 (fogRoot 안): 정적 맵 조각(발광 번짐을 구워 넣음) → 공개 동적 레이어(조각 → 시야 채움)
 // → 빛 지도(MULTIPLY) → 테두리 리프트(ADD, 정적 아틀라스 + 블리터). 발광은 곱하기 앞이라 어둠 속 약 30%,
 // 테두리 리프트는 곱하기 뒤라 시야 밖에서도 구조가 보인다.
 import Phaser from 'phaser';
