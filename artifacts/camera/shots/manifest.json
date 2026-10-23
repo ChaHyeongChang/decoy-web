@@ -1,0 +1,762 @@
+{
+  "createdAt": "2026-10-23T09:03:16.661Z",
+  "shots": [
+    {
+      "file": "pc-1920x1080/z1-monster-hunt.png",
+      "device": "pc-1920x1080",
+      "zoom": 1,
+      "scene": "monster-hunt",
+      "camera": {
+        "zoom": 1,
+        "view": {
+          "x": 0,
+          "y": 0,
+          "w": 48,
+          "h": 32
+        },
+        "follow": null,
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 0,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "pc-1920x1080/z1-monster-search.png",
+      "device": "pc-1920x1080",
+      "zoom": 1,
+      "scene": "monster-search",
+      "camera": {
+        "zoom": 1,
+        "view": {
+          "x": 0,
+          "y": 0,
+          "w": 48,
+          "h": 32
+        },
+        "follow": null,
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 0,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "pc-1920x1080/z1-survivor.png",
+      "device": "pc-1920x1080",
+      "zoom": 1,
+      "scene": "survivor",
+      "camera": {
+        "zoom": 1,
+        "view": {
+          "x": 0,
+          "y": 0,
+          "w": 48,
+          "h": 32
+        },
+        "follow": null,
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 0,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "pc-1920x1080/z2-monster-hunt.png",
+      "device": "pc-1920x1080",
+      "zoom": 2,
+      "scene": "monster-hunt",
+      "camera": {
+        "zoom": 2,
+        "view": {
+          "x": 24,
+          "y": 8.992,
+          "w": 24,
+          "h": 16
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": -3.75
+        },
+        "cuts": 0,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "pc-1920x1080/z2-monster-search.png",
+      "device": "pc-1920x1080",
+      "zoom": 2,
+      "scene": "monster-search",
+      "camera": {
+        "zoom": 2,
+        "view": {
+          "x": 24,
+          "y": 10.756,
+          "w": 24,
+          "h": 16
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": -1.75
+        },
+        "cuts": 0,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "pc-1920x1080/z2-survivor.png",
+      "device": "pc-1920x1080",
+      "zoom": 2,
+      "scene": "survivor",
+      "camera": {
+        "zoom": 2,
+        "view": {
+          "x": 24,
+          "y": 8.504,
+          "w": 24,
+          "h": 16
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "pc-1920x1080/z3-monster-hunt.png",
+      "device": "pc-1920x1080",
+      "zoom": 3,
+      "scene": "monster-hunt",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 32,
+          "y": 11.541,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": -3.733
+        },
+        "cuts": 0,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "pc-1920x1080/z3-monster-search.png",
+      "device": "pc-1920x1080",
+      "zoom": 3,
+      "scene": "monster-search",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 32,
+          "y": 13.412,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": -1.75
+        },
+        "cuts": 0,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "pc-1920x1080/z3-survivor.png",
+      "device": "pc-1920x1080",
+      "zoom": 3,
+      "scene": "survivor",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 30.006,
+          "y": 11.171,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "pc-1920x1080/z4-monster-hunt.png",
+      "device": "pc-1920x1080",
+      "zoom": 4,
+      "scene": "monster-hunt",
+      "camera": {
+        "zoom": 4,
+        "view": {
+          "x": 34.319,
+          "y": 14.168,
+          "w": 12,
+          "h": 8
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0.535,
+          "y": -2.4
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "pc-1920x1080/z4-monster-search.png",
+      "device": "pc-1920x1080",
+      "zoom": 4,
+      "scene": "monster-search",
+      "camera": {
+        "zoom": 4,
+        "view": {
+          "x": 33.773,
+          "y": 14.748,
+          "w": 12,
+          "h": 8
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": -0.262,
+          "y": -1.75
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "pc-1920x1080/z4-survivor.png",
+      "device": "pc-1920x1080",
+      "zoom": 4,
+      "scene": "survivor",
+      "camera": {
+        "zoom": 4,
+        "view": {
+          "x": 32,
+          "y": 12.504,
+          "w": 12,
+          "h": 8
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "phone-800x360/z1-monster-hunt.png",
+      "device": "phone-800x360",
+      "zoom": 1,
+      "scene": "monster-hunt",
+      "camera": {
+        "zoom": 1,
+        "view": {
+          "x": 0,
+          "y": 0,
+          "w": 48,
+          "h": 32
+        },
+        "follow": null,
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 0,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "phone-800x360/z1-monster-search.png",
+      "device": "phone-800x360",
+      "zoom": 1,
+      "scene": "monster-search",
+      "camera": {
+        "zoom": 1,
+        "view": {
+          "x": 0,
+          "y": 0,
+          "w": 48,
+          "h": 32
+        },
+        "follow": null,
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 0,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "phone-800x360/z2-monster-hunt.png",
+      "device": "phone-800x360",
+      "zoom": 2,
+      "scene": "monster-hunt",
+      "camera": {
+        "zoom": 2,
+        "view": {
+          "x": 24.005,
+          "y": 8.802,
+          "w": 24,
+          "h": 16
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": -3.75
+        },
+        "cuts": 0,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "phone-800x360/z2-monster-search.png",
+      "device": "phone-800x360",
+      "zoom": 2,
+      "scene": "monster-search",
+      "camera": {
+        "zoom": 2,
+        "view": {
+          "x": 24.005,
+          "y": 10.758,
+          "w": 24,
+          "h": 16
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": -1.75
+        },
+        "cuts": 0,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "phone-915x412/z1-monster-hunt.png",
+      "device": "phone-915x412",
+      "zoom": 1,
+      "scene": "monster-hunt",
+      "camera": {
+        "zoom": 1,
+        "view": {
+          "x": 0,
+          "y": 0,
+          "w": 48,
+          "h": 32
+        },
+        "follow": null,
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 0,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "phone-915x412/z1-monster-search.png",
+      "device": "phone-915x412",
+      "zoom": 1,
+      "scene": "monster-search",
+      "camera": {
+        "zoom": 1,
+        "view": {
+          "x": 0,
+          "y": 0,
+          "w": 48,
+          "h": 32
+        },
+        "follow": null,
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 0,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "phone-915x412/z1-survivor.png",
+      "device": "phone-915x412",
+      "zoom": 1,
+      "scene": "survivor",
+      "camera": {
+        "zoom": 1,
+        "view": {
+          "x": 0,
+          "y": 0,
+          "w": 48,
+          "h": 32
+        },
+        "follow": null,
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 0,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "phone-915x412/z2-monster-hunt.png",
+      "device": "phone-915x412",
+      "zoom": 2,
+      "scene": "monster-hunt",
+      "camera": {
+        "zoom": 2,
+        "view": {
+          "x": 24.006,
+          "y": 8.805,
+          "w": 24,
+          "h": 16
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": -3.75
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "phone-915x412/z2-monster-search.png",
+      "device": "phone-915x412",
+      "zoom": 2,
+      "scene": "monster-search",
+      "camera": {
+        "zoom": 2,
+        "view": {
+          "x": 24.006,
+          "y": 10.747,
+          "w": 24,
+          "h": 16
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": -1.75
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "phone-915x412/z2-survivor.png",
+      "device": "phone-915x412",
+      "zoom": 2,
+      "scene": "survivor",
+      "camera": {
+        "zoom": 2,
+        "view": {
+          "x": 24.006,
+          "y": 8.494,
+          "w": 24,
+          "h": 16
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "phone-915x412/z3-monster-hunt.png",
+      "device": "phone-915x412",
+      "zoom": 3,
+      "scene": "monster-hunt",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 32.008,
+          "y": 11.463,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": -3.733
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "phone-915x412/z3-monster-search.png",
+      "device": "phone-915x412",
+      "zoom": 3,
+      "scene": "monster-search",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 32.008,
+          "y": 13.414,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": -1.75
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "phone-915x412/z3-survivor.png",
+      "device": "phone-915x412",
+      "zoom": 3,
+      "scene": "survivor",
+      "camera": {
+        "zoom": 3,
+        "view": {
+          "x": 30.005,
+          "y": 11.17,
+          "w": 16,
+          "h": 10.667
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "phone-915x412/z4-monster-hunt.png",
+      "device": "phone-915x412",
+      "zoom": 4,
+      "scene": "monster-hunt",
+      "camera": {
+        "zoom": 4,
+        "view": {
+          "x": 34.002,
+          "y": 14.282,
+          "w": 12,
+          "h": 8
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": -2.4
+        },
+        "cuts": 2,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "phone-915x412/z4-monster-search.png",
+      "device": "phone-915x412",
+      "zoom": 4,
+      "scene": "monster-search",
+      "camera": {
+        "zoom": 4,
+        "view": {
+          "x": 34.002,
+          "y": 14.748,
+          "w": 12,
+          "h": 8
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": -1.75
+        },
+        "cuts": 2,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    },
+    {
+      "file": "phone-915x412/z4-survivor.png",
+      "device": "phone-915x412",
+      "zoom": 4,
+      "scene": "survivor",
+      "camera": {
+        "zoom": 4,
+        "view": {
+          "x": 31.995,
+          "y": 12.495,
+          "w": 12,
+          "h": 8
+        },
+        "follow": "p1",
+        "spectating": null,
+        "canSpectate": false,
+        "look": {
+          "x": 0,
+          "y": 0
+        },
+        "cuts": 1,
+        "dip": 0,
+        "shakes": 0,
+        "shakeScale": 1,
+        "markers": []
+      }
+    }
+  ],
+  "problems": []
+}

@@ -10,9 +10,9 @@
 import Phaser from 'phaser';
 import { TILE_PX } from '@decoy/shared';
 import { currentCharStyle, type CharStyle } from '../gfx/charStyle';
-import { gfxState } from '../gfx/state';
+import { currentPreset, gfxState } from '../gfx/state';
 import { createCanvasTexture, removeCanvasTexture } from '../render/fogPaint';
-import { MAP_SCALE } from '../ui/layout';
+import { WORLD_SCALE } from '../ui/layout';
 import { cloakPoseFor, ANIM } from './anim';
 import { DrawingMemo, EMPTY_ALIASES, SHARED_FRAMES, newStyleFrameSpecs, type FrameBox } from './charFrames';
 import { clearPathCache, drawToCanvas } from './chars/kit';
@@ -71,6 +71,13 @@ const MOTE_COLOR = 0xd6dde6;
 
 export interface AtlasParams {
   zoom: number;
+  /**
+   * 텍셀 / 월드 px 상한 (품질 charTexelCap). 따라가는 카메라는 캐릭터를 크게 그려 기기 픽셀 1:1이면 텍스처가 커진다 —
+   * 넘으면 조금 늘려 그린다. 없으면 상한 없음
+   */
+  texCap?: number;
+  /** 월드 그림 배율 (논리 px / 월드 px, 확대 수준). 없으면 지금 값 */
+  worldScale?: number;
   /** 생존자 · 괴물 판정 반지름 (타일, balance) */
   survivorR: number;
   monsterR: number;
@@ -650,12 +657,24 @@ function classicFrameDefs(): FrameDef[] {
 
 /** 지금 그래픽 상태의 굽기 값 (캐릭터 스타일 포함) */
 export function atlasParamsFor(survivorR: number, monsterR: number): AtlasParams {
-  return { zoom: gfxState.zoom, survivorR, monsterR, style: currentCharStyle() };
+  return {
+    zoom: gfxState.zoom,
+    texCap: currentPreset().charTexelCap,
+    worldScale: WORLD_SCALE,
+    survivorR,
+    monsterR,
+    style: currentCharStyle(),
+  };
 }
 
-/** 텍셀 / 월드 px (= 화면 기기 px / 월드 px) */
-export function texelsPerWorldPx(zoom: number): number {
-  return Math.max(0.25, zoom) * MAP_SCALE;
+/** 텍셀 / 월드 px (= 화면 기기 px / 월드 px, 확대 수준 반영), 상한 cap */
+export function texelsPerWorldPx(zoom: number, cap = Infinity, worldScale = WORLD_SCALE): number {
+  return Math.min(Math.max(0.25, zoom) * worldScale, cap > 0 ? cap : Infinity);
+}
+
+/** 굽기 값의 텍셀 / 월드 px */
+export function paramsTexels(p: AtlasParams): number {
+  return texelsPerWorldPx(p.zoom, p.texCap, p.worldScale);
 }
 
 /** 칸 크기 · 그림 중심 (텍셀). 정사각 칸은 가운데, 직사각 칸은 상자 원점 자리 */
@@ -689,7 +708,7 @@ function cellOf(d: FrameDef, unitPx: { s: number; m: number }, w: number): Cell 
 /** 모든 프레임을 한 캔버스에 그린다 (선반 채우기, 프레임 사이 2px 틈). 고른 스타일 하나만 굽는다 */
 export function bakeAtlas(params: AtlasParams): AtlasBuild {
   const t0 = performance.now();
-  const tpw = texelsPerWorldPx(params.zoom);
+  const tpw = paramsTexels(params);
   const unitPx = { s: params.survivorR * TILE_PX * tpw, m: params.monsterR * TILE_PX * tpw };
   const w = ART.outlineWorldPx * tpw;
   const isNew = params.style === 'new';
@@ -749,7 +768,7 @@ let keySeq = 0;
 
 function sameParams(a: AtlasParams, b: AtlasParams): boolean {
   return (
-    Math.abs(a.zoom - b.zoom) < 1e-6 &&
+    Math.abs(paramsTexels(a) - paramsTexels(b)) < 1e-6 &&
     a.survivorR === b.survivorR &&
     a.monsterR === b.monsterR &&
     (a.style ?? 'classic') === (b.style ?? 'classic')

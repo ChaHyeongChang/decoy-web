@@ -114,6 +114,46 @@ export interface GfxDebugInfo {
   upgrades: number;
   /** 캐릭터 스타일 (캐릭터 리디자인 2단계): 기존 도형 · 새 캐릭터. 그림만 바꾼다 */
   charStyle: 'classic' | 'new';
+  /** 카메라 확대 수준 (따라가는 카메라: 맵 전체가 보이던 배율 대비, 1 = 맵 전체) */
+  camZoom: number;
+}
+
+/** 화면 밖 표시 하나 (따라가는 카메라: 보이는 창 밖 대상을 가장자리 화살표로) */
+export interface OffscreenMarkerDebug {
+  /** 무엇 (teammate · monster · track · point · prison · exit · roar) */
+  kind: string;
+  /** 대상 id (팀원 id · 거점 A/B · 탈출구 N/S · 포효 핑 번호) */
+  id: string;
+  /** 대상 자리 (타일) */
+  tx: number;
+  ty: number;
+  /** 화살표 자리 (논리 px, 창 가장자리 안쪽) · 가리키는 방향 (라디안) */
+  x: number;
+  y: number;
+  dir: number;
+}
+
+/** 카메라 상태 (따라가는 카메라, 디버그 getCamera) */
+export interface CameraDebug {
+  zoom: number;
+  /** 보이는 창 (타일) */
+  view: { x: number; y: number; w: number; h: number };
+  /** 따라가는 대상 (내 캐릭터 · 관전 중인 동료 id, 없으면 null) */
+  follow: string | null;
+  /** 관전 중이면 그 동료 id (내 시점이면 null) */
+  spectating: string | null;
+  /** 시점을 돌려볼 수 있는 상태인가 (수감 · 사망 · 탈출) */
+  canSpectate: boolean;
+  /** 괴물 앞당김 (창 가운데 − 괴물, 타일) */
+  look: { x: number; y: number };
+  /** 잘라 옮긴 횟수 · 지금 어두워짐 알파 */
+  cuts: number;
+  dip: number;
+  /** 지금 흔들림 수 · 세기 배율 */
+  shakes: number;
+  shakeScale: number;
+  /** 화면 밖 표시 */
+  markers: OffscreenMarkerDebug[];
 }
 
 /** 프레임 측정 (렌더링 최적화, ?debug=1 오버레이 · 적응형 품질 · E2E). 최근 렌더 프레임들의 요약 */
@@ -232,6 +272,8 @@ export interface DecoyDebug {
   getFrameStats(): FrameStatsInfo | null;
   /** 프레임 독립성 시험용 연출 상태 (판 장면이 없으면 null) */
   getAnimState(): AnimDebug | null;
+  /** 카메라 상태 (판 장면이 없으면 null) */
+  getCamera(): CameraDebug | null;
   /** 프레임 제한을 바꾼다 (로비 선택과 같은 경로, 저장하지 않음) */
   setFrameLimit(limit: 'auto' | '60' | '120'): void;
   /** 캐릭터 스타일을 바꾼다 (설정과 같은 경로, 저장하지 않음). 판 중이면 다음 프레임에 그림을 다시 굽는다 */

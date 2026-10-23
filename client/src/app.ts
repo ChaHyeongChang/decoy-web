@@ -88,6 +88,23 @@ export interface AppParams {
   fpsLimit: FrameLimit | null;
   /** ?chars=new|classic: 이번 접속의 캐릭터 스타일 (시험 · 촬영용. 저장한 선택보다 우선, 저장하지 않음). 그 밖에는 null */
   chars: CharStyle | null;
+  /**
+   * ?cam=1~6: 카메라 확대 수준 (시험 · 촬영용, 1 = 맵 전체). 로컬 주소(localhost · 127.0.0.1 · [::1])에서만 쓴다 —
+   * 배포 주소에서는 무시한다(확대 수준은 플레이어가 바꿀 수 없다, 공정성). 그 밖에는 null
+   */
+  cam: number | null;
+}
+
+/** ?cam 값 해석: 1~6 사이 수만 (소수 허용), 그 밖에는 null */
+export function parseCamZoom(raw: string | null): number | null {
+  if (raw === null || raw.trim() === '') return null;
+  const v = Number(raw);
+  return Number.isFinite(v) && v >= 1 && v <= 6 ? v : null;
+}
+
+/** ?cam을 받아 주는 주소인가 (개발 · 시험 서버만) */
+export function camOverrideAllowed(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]' || hostname === '::1';
 }
 
 export function readParams(search: string): AppParams {
@@ -110,6 +127,7 @@ export function readParams(search: string): AppParams {
     touch: p.get('touch'),
     fpsLimit: isFrameLimit(fpsLimit) ? fpsLimit : null,
     chars: parseCharStyle(p.get('chars')),
+    cam: parseCamZoom(p.get('cam')),
   };
 }
 

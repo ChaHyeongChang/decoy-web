@@ -228,6 +228,16 @@ export class WorldPostFx {
     if (this.overlay) this.root.bringToTop(this.overlay);
   }
 
+  /** 구조 레이어가 카메라 창만큼 옮겨졌을 때(dx, dy 논리 px): 구운 비네트는 화면의 맵 사각형에 그대로 둔다 */
+  private dx = 0;
+  private dy = 0;
+
+  follow(dx: number, dy: number): void {
+    this.dx = dx;
+    this.dy = dy;
+    this.overlay?.setPosition(MAP_RECT.x - dx, MAP_RECT.y - dy);
+  }
+
   private makeOverlay(): void {
     // 맵 사각형 1/4 해상도 (부드러운 그라디언트라 늘려도 티가 안 난다)
     const w = Math.round(MAP_RECT.w / 4);
@@ -249,7 +259,7 @@ export class WorldPostFx {
     this.overlayKey = `decoy-vignette-${overlaySeq}`;
     createCanvasTexture(this.scene.textures, this.overlayKey, c);
     this.overlay = this.scene.make
-      .image({ x: MAP_RECT.x, y: MAP_RECT.y, key: this.overlayKey }, false)
+      .image({ x: MAP_RECT.x - this.dx, y: MAP_RECT.y - this.dy, key: this.overlayKey }, false)
       .setOrigin(0, 0)
       .setDisplaySize(MAP_RECT.w, MAP_RECT.h)
       .setName(`${FX_TAG}vignetteOverlay`);

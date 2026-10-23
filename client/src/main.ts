@@ -1,6 +1,7 @@
 // DECOY 클라이언트 진입점
 import Phaser from 'phaser';
-import { App, readParams } from './app';
+import { App, camOverrideAllowed, readParams } from './app';
+import { MONSTER_SPAWN, PRISON_CENTER } from '@decoy/shared';
 import { PRACTICE_BALANCE } from './localServer';
 import { sfx } from './audio';
 import { installDebug } from './debug';
@@ -37,12 +38,15 @@ import { GameScene } from './scenes/GameScene';
 import { fontState, loadUiFonts, onUiFontsLate, uiFontsReady } from './ui/fonts';
 import { prebakeHud } from './ui/hudKit';
 import {
+  CAM_ZOOM,
+  DEFAULT_CAM_ZOOM,
   RENDER_SCALE,
   VIEW_H,
   VIEW_W,
   configureLayout,
   fitCamera,
   layout,
+  setCamZoom,
   setRenderScale,
 } from './ui/layout';
 import { drawProbeText, relayoutAll, retextAll } from './ui/text';
@@ -51,6 +55,11 @@ import { drawProbeText, relayoutAll, retextAll } from './ui/text';
 const RESIZE_DEBOUNCE_MS = 150;
 
 const params = readParams(window.location.search);
+// 카메라 확대 수준 (판 내내 고정, 플레이어가 바꿀 수 없다). ?cam은 로컬 주소에서만(시험 · 촬영): 그림 굽기가 읽기 전에 정한다
+setCamZoom(
+  params.cam !== null && camOverrideAllowed(window.location.hostname) ? params.cam : DEFAULT_CAM_ZOOM,
+);
+gfxState.camZoom = CAM_ZOOM;
 // 터치 모드 · 세로 · 브라우저 안 (M11). 로비가 전체 화면 버튼을 그리기 전에 정한다
 initDevice(params.touch);
 const uiRoot = document.getElementById('ui-root') ?? document.body;
@@ -547,7 +556,9 @@ function schedulePrebake(): void {
     if (!game.isBooted || game.scene.isActive('game')) return;
     // 터치: 판 배치(논리 크기 → 배율 · HUD 서명)로 굽는다. 아니면 첫 판 시작 때 맵 · 캐릭터 · HUD를 모두 다시 굽는다
     if (device.touch) applyMatchLayout();
-    prebakeFogArt();
+    // 따라가는 카메라: 내가 고른 역할의 시작 자리 둘레 맵 조각까지 미리 굽는다 (모르면 감옥 = 생존자 시작)
+    const mine = app.lobby?.players.find((p) => p.id === app.you)?.role ?? null;
+    prebakeFogArt(gfxState.renderer, mine === 'monster' ? MONSTER_SPAWN : PRISON_CENTER);
     // welcome 전(첫 화면 · 봇과 연습 고르기)에는 빌드에 넣은 수치의 반지름으로 굽는다: 연습은 고르자마자 판이 시작돼
     // 로비 대기가 없다. 온라인 서버 수치가 다르면 로비에서 다시 굽는다
     const b = app.balance ?? PRACTICE_BALANCE;
@@ -566,6 +577,15 @@ onCharStyleChange(schedulePrebake);
 // 부팅 직후(첫 화면 · 봇과 연습 고르기)에도 한 번 굽는다: Phaser가 생성자 안에서 바로 부팅하면 부팅 때의 그래픽 변경 알림이
 // 위 구독보다 먼저 지나간다. 연습은 고르자마자 판이 시작돼 로비 대기가 없다 (새 캐릭터 아틀라스는 약 90ms)
 schedulePrebake();
+// 로비에서 역할을 바꾸면 그 역할 시작 자리 둘레 맵 조각을 미리 굽는다 (괴물 시작 자리와 감옥은 멀다)
+let prebakeRole: string | null = null;
+app.subscribe((e) => {
+  if (e.kind !== 'lobby' || e.lobby.phase !== 'lobby') return;
+  const role = e.lobby.players.find((p) => p.id === app.you)?.role ?? null;
+  if (role === prebakeRole) return;
+  prebakeRole = role;
+  schedulePrebake();
+});
 
 // UI 폰트를 부팅 때부터 받는다. Phaser 글자는 만들 때의 글꼴로 굳으므로, 다 받으면 이미 있는 글자를 다시 그린다
 const relayoutScenes = (): void => {

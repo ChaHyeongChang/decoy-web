@@ -6,7 +6,7 @@ import { TILE_PX, blocksStrike, raycast, segmentBlocked, type InfoItem, type Vec
 import { ANIM, hatchPulse } from '../art/anim';
 import { OUTLINE, ROLE, WARN } from '../art/palette';
 import { penArc, roundRectPath, type FanPen, type LinePen, type PathPen } from '../art/shapes';
-import { MAP_SCALE } from '../ui/layout';
+import { worldLine } from '../ui/layout';
 
 export type { FanPen, PathPen } from '../art/shapes';
 
@@ -245,7 +245,7 @@ export function drawConeHatch(
     lo = Math.min(lo, c);
     hi = Math.max(hi, c);
   }
-  g.lineStyle(CONE_LOOK.hatchWidth / MAP_SCALE, color, a);
+  g.lineStyle(worldLine(CONE_LOOK.hatchWidth), color, a);
   g.beginPath();
   // 흐름 방향: n이 조준 방향과 같은 쪽을 향하면 +, 아니면 −
   const sign = nx * Math.cos(aim) + ny * Math.sin(aim) >= 0 ? 1 : -1;
@@ -272,7 +272,7 @@ export function drawConeHatch(
 
 /** 부채꼴 가장자리 선 (판정 경계 그대로). 캐릭터 그림자 위 레이어에 그려 몸 둘레에서 끊기지 않는다 */
 export function drawConeEdge(g: PathPen, cone: readonly Vec2[], color: number): void {
-  strokePolygon(g, cone, color, CONE_LOOK.edgeAlpha, CONE_LOOK.edgeWidth / MAP_SCALE);
+  strokePolygon(g, cone, color, CONE_LOOK.edgeAlpha, worldLine(CONE_LOOK.edgeWidth));
 }
 
 /** 부채꼴 경로 (꼭짓점 → 호 → 꼭짓점) */

@@ -76,6 +76,26 @@ export function compositeScaleFor(zoom: number, cap: number): number {
   return Math.max(MIN_COMPOSITE_SCALE, Math.min(z, c));
 }
 
+/**
+ * 따라가는 카메라의 바닥 합성 배율 (텍셀 / 논리 px). compositeScaleFor에 더해, 보이는 창 + 여유 + 조각 경계 한 줄(타일)을
+ * 담는 텍셀 수가 품질 예산(texels)을 넘지 않게 자른다. worldScale = 논리 px / 월드 px, camZoom ≤ 1(맵 전체)이면 예산 없음
+ */
+export function cameraCompositeScale(
+  zoom: number,
+  cap: number,
+  worldScale: number,
+  camZoom: number,
+  view: { w: number; h: number },
+  margin: number,
+  texels: number,
+): number {
+  const base = compositeScaleFor(zoom, cap);
+  if (!(camZoom > 1)) return base;
+  const area = (view.w + margin * 2 + 2) * (view.h + margin * 2 + 2);
+  const perWorldPx = Math.sqrt(finitePositive(texels, 1) / area) / 32;
+  return Math.max(MIN_COMPOSITE_SCALE, Math.min(base, perWorldPx / finitePositive(worldScale, 1)));
+}
+
 /** 미니맵 캔버스 배율: 백버퍼 배율과 1:1 (작아서 품질 상한 없이 고정 상한만) */
 export function minimapScaleFor(zoom: number): number {
   return Math.max(MIN_COMPOSITE_SCALE, Math.min(finitePositive(zoom, 1), MAX_MINIMAP_SCALE));

@@ -3,7 +3,9 @@ import Phaser from 'phaser';
 import {
   BTN,
   type AnimDebug,
+  type CameraDebug,
   type DrawnEntity,
+  type SurvivorView,
   type FxTarget,
   type GameEvent,
   type HudLayoutItem,
@@ -26,6 +28,8 @@ import { haptics } from '../haptics';
 import { InputLog, InputSampler } from '../input';
 import { applyDashStart, applyWindupLock, predictMonsterPress, type LocalWindup } from '../localActions';
 import { COLOR } from '../render/colors';
+import { CameraDirector, devPerTile } from '../render/cameraDirector';
+import { UI } from '../art/palette';
 import { ScreenEffects, collectFxTargets } from '../render/effects';
 import { WorldRenderer, type MotionSource } from '../render/worldRenderer';
 import { TouchInput, type TouchFrameCtx } from '../touchInput';
@@ -35,7 +39,19 @@ import { Banners, type BannerLine } from '../ui/banners';
 import { Hud } from '../ui/hud';
 import type { Tone } from '../ui/hudArt';
 import { HudKit, type Slice } from '../ui/hudKit';
-import { HUD, VIEW_H, VIEW_W, fitCamera, screenToTile } from '../ui/layout';
+import {
+  CAM,
+  CAM_ZOOM,
+  HUD,
+  MAP_RECT,
+  VIEW_H,
+  VIEW_TILES_H,
+  VIEW_TILES_W,
+  VIEW_W,
+  WORLD_SCALE,
+  fitCamera,
+  screenToTile,
+} from '../ui/layout';
 import { Minimap } from '../ui/minimap';
 import { Scoreboard, TutorialOverlay } from '../ui/overlays';
 import { PROBE_DEPTH, drawProbeText } from '../ui/text';
@@ -115,6 +131,10 @@ export class GameScene extends Phaser.Scene {
   private blendRamp: LinearRamp | null = null;
   /** 판 장면을 만든 뒤 그린 프레임 수 (디버그 animDebug: 120Hz로 정말 그렸는지 시험이 본다) */
   private renderedFrames = 0;
+  /** 따라가는 카메라 (판 장면마다 새로) · 창 밖 가리개 · 잘라 옮김 어두워짐 */
+  private director: CameraDirector | null = null;
+  private frameCovers: Phaser.GameObjects.Rectangle[] = [];
+  private dipCover: Phaser.GameObjects.Rectangle | null = null;
   /** 괴물: 예측한 돌진을 누른 마지막 시각 (입력 틱, 돌진 잔상 격자의 시작) */
   private localDashAt: number | null = null;
   /** 지난 프레임의 렌더 시각 (보간 경로 조각 · 상태 경계를 잴 구간 시작) */
@@ -307,6 +327,7 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor(COLOR.background);
     fitCamera(this.cameras.main);
     this.world = new WorldRenderer(this, FOG_ENABLED);
+    this.makeCameraFrame();
     this.myBlend = 0;
     this.blendRamp = null;
     this.renderedFrames = 0;
@@ -415,6 +436,78 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * 따라가는 카메라: 감독 · 창 밖 가리개(맵 사각형 둘레 네 장, 월드 위 · HUD 아래 — 확대한 월드가 HUD 띠 · 여백으로 비치지
+   * 않게) · 잘라 옮김 어두워짐(맵 사각형). 확대 1(맵 전체)이면 가리개가 필요 없다
+   */
+  private makeCameraFrame(): void {
+    this.director = new CameraDirector(VIEW_TILES_W, VIEW_TILES_H);
+    // 흔들림 세기: 동작 줄이기(OS 설정)면 0 — 나중에 '흔들림 줄이기' 설정이 같은 값을 정한다
+    let reduce = false;
+    try {
+      reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    } catch {
+      reduce = false;
+    }
+    this.director.shake.scale = reduce ? 0 : 1;
+    this.frameCovers = [];
+    this.dipCover = null;
+    if (CAM_ZOOM <= 1) return;
+    const m = MAP_RECT;
+    const W = VIEW_W;
+    const H = VIEW_H;
+    const rects: [number, number, number, number][] = [
+      [0, 0, W, m.y],
+      [0, m.y + m.h, W, H - m.y - m.h],
+      [0, m.y, m.x, m.h],
+      [m.x + m.w, m.y, W - m.x - m.w, m.h],
+    ];
+    for (const [x, y, w, h] of rects) {
+      if (w <= 0 || h <= 0) continue;
+      // 가장자리 반 픽셀 비침이 없게 1px 겹친다
+      const r = this.add
+        .rectangle(x - 0.5, y - 0.5, w + 1, h + 1, UI.background)
+        .setOrigin(0, 0)
+        .setDepth(37);
+      this.frameCovers.push(r);
+    }
+    this.dipCover = this.add
+      .rectangle(m.x, m.y, m.w, m.h, 0x000000)
+      .setOrigin(0, 0)
+      .setDepth(36)
+      .setAlpha(0)
+      .setVisible(false);
+  }
+
+  /** 카드 순서 생존자 id (러너 · 가드 · 스카우트, 생존자 화면 명단) */
+  private teamOrder(): string[] {
+    const order = ['runner', 'guard', 'scout'];
+    return [...(this.app.match?.roster ?? [])]
+      .filter((r) => r.role !== 'monster')
+      .sort((a, b) => order.indexOf(a.role) - order.indexOf(b.role))
+      .map((r) => r.id);
+  }
+
+  /** 디버그 · 시험: 카메라 상태 */
+  get cameraDebug(): CameraDebug | null {
+    const d = this.director;
+    if (!d) return null;
+    const r3 = (v: number): number => Math.round(v * 1000) / 1000;
+    return {
+      zoom: CAM_ZOOM,
+      view: { x: r3(d.view.x), y: r3(d.view.y), w: r3(d.view.w), h: r3(d.view.h) },
+      follow: d.follow,
+      spectating: d.spectating,
+      canSpectate: d.canSpectate,
+      look: { x: r3(d.look.x), y: r3(d.look.y) },
+      cuts: d.cuts,
+      dip: r3(d.dip(performance.now())),
+      shakes: d.shake.active,
+      shakeScale: d.shake.scale,
+      markers: [],
+    };
+  }
+
   /** 서버 이벤트 → 배너 · 메모 · 효과 · 소리 */
   private onEvent(ev: GameEvent): void {
     const now = performance.now();
@@ -430,10 +523,17 @@ export class GameScene extends Phaser.Scene {
         return;
       }
       case 'attackHit':
-        if (isMonster && ev.hits > 0) sfx.play('hit', 0.7);
+        if (isMonster && ev.hits > 0) {
+          sfx.play('hit', 0.7);
+          this.director?.shake.add('strike', now);
+        }
+        return;
+      case 'stunned':
+        if (isMonster) this.director?.shake.add('stunMe', now);
         return;
       case 'hit':
         if (ev.you) {
+          this.director?.shake.add('hitMe', now);
           this.screenFx.hit(now);
           sfx.play('hit', 1);
           if (device.touch) haptics.hit(this.eventAgeMs);
@@ -463,6 +563,7 @@ export class GameScene extends Phaser.Scene {
       }
       case 'roarPings': {
         sfx.play('roar');
+        this.director?.shake.add('roar', now);
         const dur = (this.app.balance?.monster.roar.revealDuration ?? 1.5) * 1000;
         for (const p of ev.pts) this.roarPings.push({ x: p.x, y: p.y, start: now, until: now + dur });
         return;
@@ -725,6 +826,46 @@ export class GameScene extends Phaser.Scene {
     if (action) qualityHooks.auto?.(action);
   }
 
+  /**
+   * 카메라를 한 걸음: 따라갈 대상(내 캐릭터 · 관전 중인 동료) · 괴물 앞당김 · 흔들림 → 기기 픽셀 격자의 창. 화면 좌표 변환
+   * (ui/layout CAM)도 여기서 바꾼다 — 같은 프레임의 그리기 · 조준 · 디버그가 같은 창을 본다
+   */
+  private updateCamera(
+    now: number,
+    delta: number,
+    me: { x: number; y: number; face: number } | null,
+    survivors: ReadonlyMap<string, SurvivorView>,
+  ): { x: number; y: number; w: number; h: number } {
+    const d = this.director;
+    const snap = this.app.lastSnap;
+    const balance = this.app.balance;
+    if (!d || !snap || !balance || CAM_ZOOM <= 1) {
+      CAM.x = 0;
+      CAM.y = 0;
+      return { x: 0, y: 0, w: VIEW_TILES_W, h: VIEW_TILES_H };
+    }
+    const view = d.update({
+      nowMs: now,
+      dtMs: delta,
+      role: snap.you.role,
+      selfId: snap.you.id,
+      me,
+      myStatus: snap.you.surv?.status ?? null,
+      survivors,
+      team: this.teamOrder(),
+      balance,
+      blend: this.myBlend,
+      viewW: VIEW_TILES_W,
+      viewH: VIEW_TILES_H,
+      devPerTile: devPerTile(WORLD_SCALE, gfxState.zoom),
+    });
+    CAM.x = view.x;
+    CAM.y = view.y;
+    const dip = d.dip(now);
+    this.dipCover?.setVisible(dip > 0).setAlpha(dip);
+    return view;
+  }
+
   private renderFrame(delta: number): void {
     const app = this.app;
     const snap = app.lastSnap;
@@ -751,6 +892,8 @@ export class GameScene extends Phaser.Scene {
       this.myBlend = this.blendRamp?.valueAt(now) ?? this.myBlend;
     }
     const lw = this.localWindup;
+    const survivors = app.survivorsInterp.sample(renderTime);
+    const view = this.updateCamera(now, delta, me, survivors);
     this.world.draw(
       {
         balance: app.balance,
@@ -758,7 +901,7 @@ export class GameScene extends Phaser.Scene {
         role: snap.you.role,
         selfId: snap.you.id,
         me,
-        survivors: app.survivorsInterp.sample(renderTime),
+        survivors,
         monster:
           snap.you.role === 'monster' ? null : (app.monsterInterp.sample(renderTime).get('monster') ?? null),
         myBlend: this.myBlend,
@@ -772,6 +915,7 @@ export class GameScene extends Phaser.Scene {
         localWindupAt: windup.dir !== null && lw ? lw.until - app.balance.monster.attack.windup * 1000 : null,
         localDashAt: this.localDashAt,
         motion: this.motion,
+        view,
       },
       delta,
     );

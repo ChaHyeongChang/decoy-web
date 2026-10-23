@@ -225,14 +225,58 @@ export function layout(): Readonly<LayoutInfo> {
   return current;
 }
 
-/** 타일 좌표 → 화면 좌표 */
-export function tileToScreen(x: number, y: number): { x: number; y: number } {
-  return { x: MAP_X + x * TILE_PX * MAP_SCALE, y: MAP_Y + y * TILE_PX * MAP_SCALE };
+// ───────────────────────── 카메라 (따라가는 카메라) ─────────────────────────
+// 보이는 창은 맵 사각형(MAP_RECT, 모든 배치에서 같은 3:2 크기) 그대로이고, 그 안에 맵의 1/CAM_ZOOM(가로 · 세로)을
+// 확대해 보인다. 그래서 보이는 타일 수는 기기 · 화면비와 상관없이 같다(넓은 화면이 더 보지 않는다). 확대 수준은 판 내내
+// 고정이고 플레이어가 바꿀 수 없다(공정성, DECISIONS 9절). CAM은 카메라가 프레임마다 쓴다(render/camera.ts)
+
+/** 기본 확대 수준 (맵 전체가 보이던 배율 대비, 1 = 맵 전체). 사용자가 고른 값 (DECISIONS 9절) */
+export const DEFAULT_CAM_ZOOM = 1;
+
+/** 카메라 확대 (맵 전체가 보이던 배율 대비). 1이면 맵 전체 (옛 고정 화면) */
+export let CAM_ZOOM = 1;
+/** 월드 그림 배율 (논리 px / 월드 px) = MAP_SCALE × CAM_ZOOM */
+export let WORLD_SCALE = MAP_SCALE;
+/**
+ * 월드 위 선 굵기 배율 (논리 px 굵기에 곱한다) = √CAM_ZOOM. 확대한 만큼 그대로 굵히면(4배) 무겁고, 그대로 두면 큰 그림에서
+ * 가늘어 보여 그 사이로 둔다. 판정 범위의 크기 · 모양과는 무관하다(선은 판정 경계 위에 그린다)
+ */
+export let WORLD_LINE = 1;
+/** 보이는 범위 (타일) */
+export let VIEW_TILES_W = MAP_W;
+export let VIEW_TILES_H = MAP_H;
+/** 카메라: 보이는 창 왼쪽 위의 맵 자리 (타일, 기기 픽셀 격자에 맞춘 값). 확대 1이면 늘 0 */
+export const CAM = { x: 0, y: 0 };
+
+/** 확대 수준을 정한다 (판 장면 · 그림 굽기가 읽기 전에). 확대 1이면 카메라를 맵 왼쪽 위에 둔다 */
+export function setCamZoom(z: number): void {
+  const zoom = Number.isFinite(z) && z >= 1 ? z : 1;
+  CAM_ZOOM = zoom;
+  WORLD_SCALE = MAP_SCALE * zoom;
+  WORLD_LINE = Math.sqrt(zoom);
+  VIEW_TILES_W = MAP_W / zoom;
+  VIEW_TILES_H = MAP_H / zoom;
+  if (zoom === 1) {
+    CAM.x = 0;
+    CAM.y = 0;
+  }
 }
 
-/** 화면 좌표 → 타일 좌표 */
+/** 월드 위 선 굵기: 논리 px 굵기 → 월드 컨테이너 단위 (확대 선 배율 WORLD_LINE을 곱한다) */
+export function worldLine(px: number): number {
+  return (px * WORLD_LINE) / WORLD_SCALE;
+}
+
+/** 타일 좌표 → 화면 좌표 (카메라 반영) */
+export function tileToScreen(x: number, y: number): { x: number; y: number } {
+  const k = TILE_PX * WORLD_SCALE;
+  return { x: MAP_X + (x - CAM.x) * k, y: MAP_Y + (y - CAM.y) * k };
+}
+
+/** 화면 좌표 → 타일 좌표 (카메라 반영) */
 export function screenToTile(x: number, y: number): { x: number; y: number } {
-  return { x: (x - MAP_X) / (TILE_PX * MAP_SCALE), y: (y - MAP_Y) / (TILE_PX * MAP_SCALE) };
+  const k = TILE_PX * WORLD_SCALE;
+  return { x: CAM.x + (x - MAP_X) / k, y: CAM.y + (y - MAP_Y) / k };
 }
 
 /** HUD 영역 (맵과 겹치지 않는다. touchWide는 위 · 아래 띠가 0 높이) */

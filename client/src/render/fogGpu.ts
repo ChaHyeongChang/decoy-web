@@ -29,10 +29,13 @@ import {
   type PointView,
   type Vec2,
 } from '@decoy/shared';
-import { getGlowMap, getStaticMap, GLOW_SCALE, keepStaticMaps } from '../art/mapArt';
+import { keepStaticMaps } from '../art/mapArt';
+import { ChunkAtlas, chunkBox, chunkRange } from '../art/mapChunks';
+import type { ViewRect } from './camera';
+import { MiniComposite } from './fogMini';
 import type { TileRect } from '../art/mapArtGeom';
-import { currentPreset, gfxNow, gfxState } from '../gfx/state';
-import { MAP_SCALE, MAP_X, MAP_Y } from '../ui/layout';
+import { gfxNow, gfxState } from '../gfx/state';
+import { MAP_X, MAP_Y, VIEW_TILES_H, VIEW_TILES_W, WORLD_LINE, WORLD_SCALE } from '../ui/layout';
 import { FOG } from './colors';
 import type { FogLayer, FogLayerOptions } from './baseLayer';
 import { FOG_EDGE_FRAG, snapToDevice } from './fogMath';
@@ -41,7 +44,6 @@ import {
   LightMap,
   LightRecord,
   PenRecord,
-  addRimLift,
   countGraphicsCmds,
   createCanvasTexture,
   domLightSurface,
@@ -57,7 +59,7 @@ import {
   removeCanvasTexture,
   resetExitTracking,
   resizeCanvasTexture,
-  rimLiftPath,
+  uploadCanvasSubTexture,
   uploadCanvasTexture,
   type SoftLight,
 } from './fogPaint';
@@ -163,7 +165,7 @@ class DynPatch {
     ox: number,
     oy: number,
   ) {
-    const k = TILE_PX * MAP_SCALE * s;
+    const k = TILE_PX * WORLD_SCALE * s;
     this.x0 = Math.floor(bounds.x0 * k);
     this.y0 = Math.floor(bounds.y0 * k);
     const w = Math.ceil(bounds.x1 * k) - this.x0;
@@ -171,7 +173,7 @@ class DynPatch {
     this.layer = new CanvasLayer(scene, 'fog-dyn', w, h, ox + this.x0 / s, oy + this.y0 / s);
     this.layer.image.setScale(1 / s);
     box.add(this.layer.image);
-    this.pen = new CanvasPen(this.layer.ctx, k, s);
+    this.pen = new CanvasPen(this.layer.ctx, k, s * WORLD_LINE);
   }
 
   /** 이번 기록이 마지막으로 그린 것과 다르면 다시 그려 올린다 (기록은 맞바꾼다: 다음 주기에 rec을 다시 비워 쓴다) */
@@ -227,9 +229,9 @@ class TintPatch {
     private readonly lpt: number,
   ) {
     this.layer = new CanvasLayer(scene, 'fog-tint', 64, 64, MAP_X, MAP_Y);
-    this.layer.image.setScale((TILE_PX * MAP_SCALE) / lpt);
+    this.layer.image.setScale((TILE_PX * WORLD_SCALE) / lpt);
     box.add(this.layer.image);
-    this.pen = new CanvasPen(this.layer.ctx, lpt, lpt / (TILE_PX * MAP_SCALE));
+    this.pen = new CanvasPen(this.layer.ctx, lpt, (lpt / (TILE_PX * WORLD_SCALE)) * WORLD_LINE);
   }
 
   /** 이번 주기에 그릴 다각형 (꼭짓점 3개 이상) */
@@ -292,7 +294,7 @@ class TintPatch {
     this.layer.ctx.setTransform(1, 0, 0, 1, -x0, -y0);
     this.pen.fillPoly(this.poly, this.color, this.alpha);
     this.layer.upload();
-    const s = (TILE_PX * MAP_SCALE) / k;
+    const s = (TILE_PX * WORLD_SCALE) / k;
     img.setPosition(MAP_X + x0 * s, MAP_Y + y0 * s);
     const l = this.last;
     const poly = this.poly;
@@ -330,14 +332,21 @@ const EXIT_KEY: Readonly<Record<ExitId, string>> = { N: 'exit-N', S: 'exit-S' };
 const ONE_POINT: PointView[] = [];
 const ONE_EXIT: ExitView[] = [];
 
+/** 조각을 미리 굽는 여유 (타일): 창 둘레 이만큼 안의 조각은 프레임마다 PREFETCH_PER_FRAME개까지 미리 굽는다 */
+export const PREFETCH_MARGIN = 2;
+const PREFETCH_PER_FRAME = 2;
+
 export class GpuFog implements FogLayer {
   readonly mode = 'gpu' as const;
   readonly shader: boolean;
-  private readonly staticKey: string;
-  private readonly staticImage: Phaser.GameObjects.Image;
-  /** 발광 번짐 (ADD, 곱하기 앞). glow = 'static'이면 정적 맵에 구워 없음 */
-  private readonly glowKey: string | null = null;
-  private readonly glowImage: Phaser.GameObjects.Image | null = null;
+  /** 정적 맵 조각 (보이는 창 근처만, 원환 칸 아틀라스 텍스처 한 장 — 그리기 한 번에 묶인다) */
+  private readonly chunks: ChunkAtlas;
+  private readonly chunkKey: string;
+  private readonly chunkTex: Phaser.Textures.Texture;
+  private readonly chunkBox: Phaser.GameObjects.Container;
+  private readonly chunkImgs: Phaser.GameObjects.Image[] = [];
+  /** 칸 일부 올리기를 못 해(컨텍스트 · Canvas) 다음 setView에서 통째로 올린다 */
+  private chunkFull = false;
   /** 공개 동적 레이어: 거점 · 탈출구 조각 (빛 지도 · 시야 채움보다 아래) */
   private readonly dynBox: Phaser.GameObjects.Container;
   private readonly patches = new Map<string, DynPatch>();
@@ -351,10 +360,9 @@ export class GpuFog implements FogLayer {
   private readonly lightRec = new LightRecord();
   /** 이번 주기의 미니맵 합성 명령 (시야 채움 · 조각, 그린 순서대로) */
   private miniRec = new PenRecord();
-  /** 마지막으로 바뀐 주기의 미니맵 명령 (null = 아직 없음 — 첫 주기는 늘 바뀐 것으로 본다). miniSource가 이것으로 합성한다 */
+  /** 마지막으로 바뀐 주기의 미니맵 명령 (null = 아직 없음 — 첫 주기는 늘 바뀐 것으로 본다) */
   private miniLast: PenRecord | null = null;
-  /** 미니맵 캔버스가 마지막 commit보다 낡았는가 (합성은 miniSource를 읽을 때) */
-  private miniDirty = true;
+  private readonly mini: MiniComposite;
   /** 마지막 commit에서 화면 · 미니맵 그림이 바뀌었는가 (안 바뀌었으면 미니맵도 다시 그릴 필요가 없다) */
   changed = true;
   private readonly lightKey: string | null = null;
@@ -363,10 +371,6 @@ export class GpuFog implements FogLayer {
   /** 테두리 리프트 (ADD, 곱하기 뒤): 작은 아틀라스 + 블리터 (합성 배율 px 좌표라 1/s 컨테이너에 담는다) */
   private readonly liftKey: string;
   private readonly liftBox: Phaser.GameObjects.Container;
-  private readonly miniLift: Path2D;
-  /** 미니맵용 작은 합성 (빛 지도와 같은 해상도). 처음 읽을 때 만든다 (미니맵이 없는 터치 배치는 만들지 않는다) */
-  private mini: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; pen: CanvasPen } | null = null;
-  private readonly miniStatic: HTMLCanvasElement;
   private readonly s: number;
   private readonly ox: number;
   private readonly oy: number;
@@ -381,33 +385,24 @@ export class GpuFog implements FogLayer {
   ) {
     const s = opts.compositeScale;
     this.s = s;
-    const sprite = (opts.glow ?? currentPreset().glow) === 'sprite';
     const ox = snapToDevice(MAP_X, opts.zoom);
     const oy = snapToDevice(MAP_Y, opts.zoom);
     this.ox = ox;
     this.oy = oy;
     const lpt = opts.lightPxPerTile;
-    const mainScale = MAP_SCALE * s;
-    const miniScale = lpt / TILE_PX;
-    this.staticKey = nextFogKey('fog-static');
-    // 정적 맵은 한 번만 올린다 (사본 없이, 같은 배율이면 캐시한 그림)
-    createCanvasTexture(scene.textures, this.staticKey, getStaticMap(mainScale, !sprite));
-    this.staticImage = scene.make
-      .image({ x: ox, y: oy, key: this.staticKey }, false)
-      .setOrigin(0, 0)
-      .setScale(1 / s);
-    root.add(this.staticImage);
-    if (sprite) {
-      this.glowKey = nextFogKey('fog-glow');
-      createCanvasTexture(scene.textures, this.glowKey, getGlowMap());
-      this.glowImage = scene.make
-        .image({ x: ox, y: oy, key: this.glowKey }, false)
-        .setOrigin(0, 0)
-        .setScale(MAP_SCALE / GLOW_SCALE)
-        .setBlendMode(Phaser.BlendModes.ADD);
-      root.add(this.glowImage);
-    }
-    gfxState.features.glowLayer = sprite ? 'sprite' : 'static';
+    const k = TILE_PX * WORLD_SCALE * s;
+    // 정적 맵: 조각 아틀라스 (발광을 구워 넣는다 — 따라가는 카메라에서는 발광을 따로 올리지 않는다)
+    this.chunks = opts.chunks ?? new ChunkAtlas(k, VIEW_TILES_W, VIEW_TILES_H, PREFETCH_MARGIN, true);
+    this.chunkKey = nextFogKey('fog-chunks');
+    this.chunkTex = createCanvasTexture(scene.textures, this.chunkKey, this.chunks.canvas);
+    this.chunks.onBaked = (src, x, y) => {
+      if (!this.chunkFull && !uploadCanvasSubTexture(scene.game.renderer, this.chunkTex.source[0], src, x, y))
+        this.chunkFull = true;
+      gfxState.features.chunkUploadPx = Number(gfxState.features.chunkUploadPx ?? 0) + src.width * src.height;
+    };
+    this.chunkBox = scene.make.container({ x: 0, y: 0 }, false);
+    root.add(this.chunkBox);
+    gfxState.features.glowLayer = 'static';
     resetExitTracking();
     // make로 만든 컨테이너는 혼합 모드가 NORMAL로 잡혀 자식의 혼합 모드(ADD 등)를 덮는다 → SKIP_CHECK로 자식 것을 쓴다
     this.dynBox = scene.make.container({ x: 0, y: 0 }, false).setBlendMode(Phaser.BlendModes.SKIP_CHECK);
@@ -416,8 +411,8 @@ export class GpuFog implements FogLayer {
     this.lpt = lpt;
     this.tintBox = scene.make.container({ x: 0, y: 0 }, false).setBlendMode(Phaser.BlendModes.SKIP_CHECK);
     root.add(this.tintBox);
-    const mapW = MAP_W * TILE_PX * MAP_SCALE;
-    const mapH = MAP_H * TILE_PX * MAP_SCALE;
+    const mapW = MAP_W * TILE_PX * WORLD_SCALE;
+    const mapH = MAP_H * TILE_PX * WORLD_SCALE;
     this.light = opts.fog ? new LightMap(lpt, opts.ambientCss, domLightSurface) : null;
     if (this.light) {
       this.lightKey = nextFogKey('fog-light');
@@ -432,7 +427,7 @@ export class GpuFog implements FogLayer {
     this.shader = opts.shader && this.lightImage !== null && ensureFogEdgePipeline(scene.game);
     if (this.shader) this.lightImage?.setPipeline(FOG_EDGE_PIPELINE);
     // 테두리 리프트: 정적 조각을 한 번 구운 아틀라스를 블리터로 찍는다 (정적 맵 텍셀 경계에 맞춤)
-    const atlas = layoutRimLift(TILE_PX * MAP_SCALE * s);
+    const atlas = layoutRimLift(k);
     const lift = makeCanvas(atlas.width, atlas.height);
     paintRimLiftAtlas(lift.ctx, atlas);
     this.liftKey = nextFogKey('fog-lift');
@@ -448,44 +443,62 @@ export class GpuFog implements FogLayer {
     root.add(this.liftBox);
     gfxState.features.liftPieces = atlas.bobs.length;
 
-    this.miniStatic = getStaticMap(miniScale, true);
-    // 정적 맵 캐시는 이 레이어가 쓰는 두 장(메인 · 미니맵)만 남긴다 (옛 배율 · 다른 경로의 큰 캔버스를 붙잡지 않게)
-    keepStaticMaps(
-      [
-        { scale: mainScale, withGlow: !sprite },
-        { scale: miniScale, withGlow: true },
-      ],
-      sprite,
-    );
-    this.miniLift = rimLiftPath(lpt);
+    this.mini = new MiniComposite(lpt, this.light);
+    // 정적 맵 캐시는 미니맵 한 장만 남긴다 (옛 배율 · 다른 경로의 큰 캔버스를 붙잡지 않게). 발광은 조각 굽기가 쓴다
+    keepStaticMaps([{ scale: lpt / TILE_PX, withGlow: true }], true);
     this.begin();
     this.commit();
   }
 
-  /**
-   * 미니맵 합성: 정적 맵 → 채움 · 조각 → 빛 곱하기 → 테두리 리프트. 마지막 commit 뒤 처음 읽을 때만 합성한다
-   * (미니맵을 숨긴 터치 배치는 읽지 않으므로 안개 주기마다 하던 합성이 없다). 빛 지도는 commit에서만 바뀌어 결과는 같다
-   */
+  /** 미니맵 합성 (마지막 commit 뒤 처음 읽을 때만 합성한다) */
   get miniSource(): HTMLCanvasElement {
-    if (!this.mini) {
-      const m = makeCanvas(this.miniStatic.width, this.miniStatic.height);
-      this.mini = { ...m, pen: new CanvasPen(m.ctx, this.lpt, this.lpt / (TILE_PX * MAP_SCALE)) };
-    }
-    const { canvas, ctx: c, pen } = this.mini;
-    if (this.miniDirty) {
-      this.miniDirty = false;
-      c.globalCompositeOperation = 'source-over';
-      c.drawImage(this.miniStatic, 0, 0);
-      this.miniLast?.replay(pen);
-      if (this.light) {
-        c.save();
-        c.globalCompositeOperation = 'multiply';
-        c.drawImage(this.light.canvas, 0, 0, canvas.width, canvas.height);
-        c.restore();
+    return this.mini.canvas;
+  }
+
+  /**
+   * 보이는 창(타일)에 맞춰 조각 그림을 놓는다. 창 안 조각은 없으면 바로 굽고, 둘레 여유 안 조각은 프레임마다 몇 개씩 미리
+   * 굽는다. 프레임마다 부른다(그림 자리만 바꾼다). 늘 false (화면 합성이 따로 없어 안개 주기를 앞당길 일이 없다)
+   */
+  setView(view: ViewRect): boolean {
+    const a = this.chunks;
+    const r = chunkRange(view, 0, a.tiles);
+    const tex = this.chunkTex;
+    let n = 0;
+    for (let cy = r.cy0; cy <= r.cy1; cy += 1) {
+      for (let cx = r.cx0; cx <= r.cx1; cx += 1) {
+        a.ensure(cx, cy);
+        const slot = a.slot(cx, cy);
+        if (slot.w <= 0 || slot.h <= 0) continue;
+        const name = `c${a.slotIndex(cx, cy)}`;
+        if (tex.has(name)) tex.get(name).setSize(slot.w, slot.h, slot.x, slot.y);
+        else tex.add(name, 0, slot.x, slot.y, slot.w, slot.h);
+        let img = this.chunkImgs[n];
+        if (!img) {
+          img = this.scene.make.image({ x: 0, y: 0, key: this.chunkKey, frame: name }, false).setOrigin(0, 0);
+          this.chunkBox.add(img);
+          this.chunkImgs.push(img);
+        }
+        const b = chunkBox(cx, cy, a.tiles, a.k);
+        img
+          .setFrame(name)
+          .setPosition(this.ox + b.x0 / this.s, this.oy + b.y0 / this.s)
+          .setScale(1 / this.s)
+          .setVisible(true);
+        n += 1;
       }
-      addRimLift(c, this.miniLift);
     }
-    return canvas;
+    for (let i = n; i < this.chunkImgs.length; i += 1) this.chunkImgs[i]?.setVisible(false);
+    // 둘레 미리 굽기 (창 안은 위에서 다 구웠다)
+    const p = chunkRange(view, PREFETCH_MARGIN, a.tiles);
+    let budget = PREFETCH_PER_FRAME;
+    for (let cy = p.cy0; cy <= p.cy1 && budget > 0; cy += 1)
+      for (let cx = p.cx0; cx <= p.cx1 && budget > 0; cx += 1) if (a.ensure(cx, cy)) budget -= 1;
+    if (this.chunkFull) {
+      this.chunkFull = false;
+      uploadCanvasTexture(tex);
+    }
+    gfxState.features.chunkImages = n;
+    return false;
   }
 
   /**
@@ -580,7 +593,7 @@ export class GpuFog implements FogLayer {
     if (miniChanged) {
       this.miniLast = this.miniRec;
       this.miniRec = last ?? new PenRecord();
-      this.miniDirty = true;
+      this.mini.take(this.miniLast);
     }
     // 화면 쪽 시야 채움 · 조각 · 빛은 모두 미니맵 기록에도 들어가므로, 미니맵이 그대로면 화면도 그대로다
     this.changed = miniChanged;
@@ -593,8 +606,9 @@ export class GpuFog implements FogLayer {
   }
 
   destroy(): void {
-    this.staticImage.destroy();
-    this.glowImage?.destroy();
+    this.chunks.onBaked = null;
+    this.chunkBox.destroy();
+    this.chunkImgs.length = 0;
     for (const p of this.patches.values()) p.destroy();
     this.patches.clear();
     this.dynBox.destroy();
@@ -602,8 +616,7 @@ export class GpuFog implements FogLayer {
     this.tintBox.destroy();
     this.lightImage?.destroy();
     this.liftBox.destroy();
-    removeCanvasTexture(this.scene.textures, this.staticKey);
-    if (this.glowKey) removeCanvasTexture(this.scene.textures, this.glowKey);
+    removeCanvasTexture(this.scene.textures, this.chunkKey);
     if (this.lightKey) removeCanvasTexture(this.scene.textures, this.lightKey);
     removeCanvasTexture(this.scene.textures, this.liftKey);
   }

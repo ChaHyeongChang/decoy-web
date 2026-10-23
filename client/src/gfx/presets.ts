@@ -38,6 +38,13 @@ export interface QualityPreset {
    * 둘 다 정적 그림이라 시간 · 상대 위치에 따라 바뀌지 않는다
    */
   readonly glow: 'sprite' | 'static';
+  /**
+   * 따라가는 카메라: 보이는 창 + 여유를 담는 정적 맵 조각 · 바닥 합성의 텍셀 수 예산. 확대한 맵을 기기 픽셀 1:1로 굽다가
+   * 넘으면 텍셀 / 월드 px를 낮춘다(조금 늘려 그린다). 텍스처 메모리 · Canvas 합성 비용이 텍셀 수에 비례한다 (PERF.md 5절)
+   */
+  readonly mapTexels: number;
+  /** 캐릭터 그림 아틀라스의 텍셀 / 월드 px 상한 (따라가는 카메라로 캐릭터가 커져도 텍스처 예산 안에 두게) */
+  readonly charTexelCap: number;
   /** 동시 파티클 상한 */
   readonly particleCap: number;
   /** 프레임 애니메이션을 절반 프레임으로 */
@@ -61,6 +68,8 @@ export const PRESETS: Readonly<Record<QualityTier, QualityPreset>> = {
     vignette: 'postfx',
     colorGrade: true,
     glow: 'sprite',
+    mapTexels: 3_000_000,
+    charTexelCap: 4,
     particleCap: 400,
     halfFrameAnims: false,
   },
@@ -78,6 +87,8 @@ export const PRESETS: Readonly<Record<QualityTier, QualityPreset>> = {
     vignette: 'overlay',
     colorGrade: true,
     glow: 'sprite',
+    mapTexels: 1_600_000,
+    charTexelCap: 3,
     particleCap: 150,
     halfFrameAnims: false,
   },
@@ -95,6 +106,8 @@ export const PRESETS: Readonly<Record<QualityTier, QualityPreset>> = {
     vignette: 'none',
     colorGrade: false,
     glow: 'static',
+    mapTexels: 800_000,
+    charTexelCap: 2,
     particleCap: 40,
     halfFrameAnims: true,
   },
@@ -125,6 +138,7 @@ export function effectivePreset(tier: QualityTier, renderer: RendererKind, touch
     p = {
       ...p,
       compositeCap: Math.min(p.compositeCap, 1),
+      mapTexels: Math.min(p.mapTexels, PRESETS.low.mapTexels),
       fog: 'canvas',
       fogShader: false,
       bloom: false,
