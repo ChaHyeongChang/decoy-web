@@ -361,7 +361,8 @@ export const CAM1 = '&cam=1';
 /**
  * 괴물 탭에서 마우스로 (x, y) 타일을 조준하고, 서버가 받은 조준(내 괴물 face)이 그 방향이 될 때까지 확인한다.
  * 조준 붙잡기(client/src/aimHold.ts)는 커서가 움직일 때만 그려진 괴물 → 커서 방향을 다시 잰다: 순간 이동 직후 그려진 괴물이
- * 아직 따라오는 중에 커서를 옮기면 틀린 방향이 붙잡힌다. 그러면 1px 비켰다 돌아와 다시 재게 한다. 괴물이 아니면 확인하지 않는다
+ * 아직 따라오는 중에 커서를 옮기면 틀린 방향이 붙잡힌다. 그러면 1px 비켰다 돌아와 다시 재게 한다. 괴물이 아니면 확인하지 않는다.
+ * 끝나면 앞당김으로 다시 움직인 창이 멈출 때까지 기다린다
  */
 export async function aimMonsterAt(page: Page, x: number, y: number): Promise<void> {
   await page.evaluate(() => window.__DECOY__?.setCameraShake(0));
@@ -389,7 +390,11 @@ export async function aimMonsterAt(page: Page, x: number, y: number): Promise<vo
         () => true,
         () => false,
       );
-    if (ok) return;
+    if (ok) {
+      // 조준이 바뀌면 괴물 앞당김으로 창이 다시 움직인다: 멈출 때까지 (화면 비네트 · 표본 자리가 측정 사이에 같게)
+      await waitCamera(page);
+      return;
+    }
   }
   throw new Error(`괴물 조준을 (${x}, ${y})로 맞추지 못했다`);
 }
