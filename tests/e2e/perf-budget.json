@@ -14,12 +14,12 @@
       "readbackPerSec": 0.8
     },
     "canvas-high-monster": {
-      "pathMainPerFrame": 272.83,
+      "pathMainPerFrame": 272.87,
       "paintMainPerFrame": 168.07,
       "stateMainPerFrame": 503.99,
       "drawImagePerFrame": 160.57,
-      "pathOffPerFrame": 90.49,
-      "paintOffPerFrame": 8.71,
+      "pathOffPerFrame": 90.1,
+      "paintOffPerFrame": 8.7,
       "textPerSec": 4.1,
       "resizePerSec": 16.8,
       "readbackPerSec": 0.8
@@ -49,12 +49,12 @@
       "readbackPerSec": 0.8
     },
     "canvas-high-monster-new": {
-      "pathMainPerFrame": 272.83,
+      "pathMainPerFrame": 272.87,
       "paintMainPerFrame": 164.11,
       "stateMainPerFrame": 492.11,
       "drawImagePerFrame": 156.6,
-      "pathOffPerFrame": 90.49,
-      "paintOffPerFrame": 8.71,
+      "pathOffPerFrame": 90.1,
+      "paintOffPerFrame": 8.7,
       "textPerSec": 4.1,
       "resizePerSec": 16.8,
       "readbackPerSec": 0.8
