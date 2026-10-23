@@ -97,6 +97,30 @@ async function startPractice(page: Page, query: string): Promise<void> {
   await page.waitForFunction(() => (window.__DECOY__?.getLastSnapshot() ?? null) !== null, null, {
     timeout: 30_000,
   });
+  // 봇을 모두 묶는다(기기 안 테스트 훅 freeze — 연습 봇은 묶이면 아무것도 하지 않는다): 사람(러너)이 가만히 있으면 연습 괴물 봇이
+  // 약 50초 만에 이겨 판이 끝나고, 판이 끝나면 판 중 측정이 멈춘다. 첫 시험은 판 시작부터 약 70초가 필요하다(하향 16초 · 조용한
+  // 20초 · 여유 15초 · 올린 뒤 확인 13초). 묶어도 그리기 · 측정 경로는 같다(FPS는 injectFps로 준다)
+  await expect
+    .poll(() => page.evaluate(() => (window.__DECOY__?.getTruth()?.players ?? []).length), { timeout: 5_000 })
+    .toBe(4);
+  const bots = (): Promise<string> =>
+    page.evaluate(() => {
+      const d = window.__DECOY__;
+      return (d?.getTruth()?.players ?? [])
+        .filter((p) => p.id !== d?.you)
+        .map((p) => `${p.id}:${p.x.toFixed(3)},${p.y.toFixed(3)}`)
+        .join(' ');
+    });
+  await page.evaluate(() => {
+    const d = window.__DECOY__;
+    for (const p of d?.getTruth()?.players ?? [])
+      if (p.id !== d?.you) d?.sendTest({ kind: 'freeze', target: p.id, frozen: true });
+  });
+  // 묶였는지: 봇 자리가 1초 동안 그대로다
+  await page.waitForTimeout(200);
+  const held = await bots();
+  await page.waitForTimeout(1000);
+  expect(await bots()).toBe(held);
 }
 
 test('자동 제한 · 120Hz 화면: 느리면 목표를 60으로(제한기가 실제로 반만 그림), 여유가 이어지면 120으로 되돌린다', async ({
