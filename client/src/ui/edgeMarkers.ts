@@ -22,7 +22,6 @@ interface Item {
   badge: Spr;
   chev: Spr;
   icon: Spr;
-  text: CrispText;
 }
 
 /** 화살표 하나의 그림 (강조색 · 배지 안 그림 · 글자) */
@@ -96,7 +95,21 @@ export class EdgeMarkers {
   /** 이번 프레임에 놓은 화살표 (디버그는 그림 자리를 읽는다) */
   private readonly shown: { m: EdgeMarker; item: Item }[] = [];
 
-  constructor(private readonly kit: HudKit) {}
+  /**
+   * 거점 글자 A · B (거점 화살표는 둘뿐이라 글자도 둘을 만들 때 한 번 만들어 둔다: 풀 칸마다 글자를 바꿔 쓰면 글자
+   * 캔버스를 프레임마다 다시 그리고 크기를 바꾼다)
+   */
+  private readonly labels: Readonly<Record<'A' | 'B', CrispText>>;
+
+  constructor(private readonly kit: HudKit) {
+    const make = (ch: string): CrispText =>
+      kit.named('edge', () => {
+        const t = kit.text(0, 0, Math.round(12 * HUD.s), UI.text, DEPTH.text, true).setOrigin(0.5, 0.5);
+        setText(t, ch);
+        return t.setVisible(false);
+      });
+    this.labels = { A: make('A'), B: make('B') };
+  }
 
   private item(i: number): Item {
     let it = this.items[i];
@@ -106,7 +119,6 @@ export class EdgeMarkers {
         badge: k.spr(DEPTH.badge),
         chev: k.spr(DEPTH.badge, false),
         icon: k.spr(DEPTH.icon),
-        text: k.text(0, 0, Math.round(12 * HUD.s), UI.text, DEPTH.text, true).setOrigin(0.5, 0.5),
       }));
       this.items[i] = it;
     }
@@ -118,6 +130,8 @@ export class EdgeMarkers {
     this.used = 0;
     this.shown.length = 0;
     const blinkOff = Math.floor(nowMs / BLINK_MS) % 2 === 1;
+    let showA = false;
+    let showB = false;
     for (const m of markers) {
       const it = this.item(this.used);
       this.used += 1;
@@ -131,13 +145,19 @@ export class EdgeMarkers {
       it.badge.img.setAlpha(alpha);
       it.chev.img.setAlpha(alpha);
       it.icon.img.setAlpha(alpha);
-      setText(it.text, look.label, look.labelColor);
-      it.text
-        .setPosition(m.x, m.y + 0.5 * HUD.s)
-        .setAlpha(alpha)
-        .setVisible(look.label !== '');
+      if (look.label === 'A' || look.label === 'B') {
+        const t = this.labels[look.label];
+        setText(t, look.label, look.labelColor);
+        t.setPosition(m.x, m.y + 0.5 * HUD.s)
+          .setAlpha(alpha)
+          .setVisible(true);
+        if (look.label === 'A') showA = true;
+        else showB = true;
+      }
       this.shown.push({ m, item: it });
     }
+    if (!showA) this.labels.A.setVisible(false);
+    if (!showB) this.labels.B.setVisible(false);
     for (let i = this.used; i < this.items.length; i += 1) this.hideItem(this.items[i]);
   }
 
@@ -146,13 +166,14 @@ export class EdgeMarkers {
     it.badge.show(false);
     it.chev.show(false);
     it.icon.show(false);
-    it.text.setVisible(false);
   }
 
   hide(): void {
     this.used = 0;
     this.shown.length = 0;
     for (const it of this.items) this.hideItem(it);
+    this.labels.A.setVisible(false);
+    this.labels.B.setVisible(false);
   }
 
   /** 디버그 · 시험: 실제로 보이는 화살표 (그림의 자리 · 회전을 읽는다) */

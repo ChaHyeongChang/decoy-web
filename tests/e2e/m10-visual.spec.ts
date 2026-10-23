@@ -1,6 +1,6 @@
 // M10b 캐릭터 · 효과 (Canvas 렌더러 · 소프트웨어 합성 · 1920×1080 배율 1). VISUAL_SPEC 0장 불변 항목을 픽셀로 지킨다:
 //  - 괴물 화면 흰색 위장: 부채꼴 · 근접 원 · 공격 범위 안에서도 생존자 몸 원판은 무채색 · 밝음, 역할 4색과 멀다.
-//    그림 키는 모두 'survivor-hidden'이고 세 몸의 흰 폭 · 그림자 폭 · 평균색이 같다(±1px · ΔE ≤ 1).
+//    그림 키는 모두 'survivor-hidden'이고 세 몸의 흰 폭 · 그림자 폭 · 평균색이 같다(±1px · ΔE ≤ 1, 그림자 폭은 확대 배율만큼 — 부드러운 가장자리).
 //    능력 노출 중인 한 명만 1초 동안(0.8초 시점에도) 역할색 테두리 + 머리 위 문양.
 //    캐릭터 스타일(기존 / 새 캐릭터, 캐릭터 리디자인 2단계)과 무관하게 같다: 새 스타일에서 같은 검사 + 판 중 기존으로 바꿔 다시
 //  - 노출 문양 · 기절 별 · 기절 채도 감소가 다른 캐릭터 몸 · 노출 링을 덮지 않는다
@@ -21,7 +21,7 @@ import {
   type InfoItem,
   type Role,
 } from '@decoy/shared';
-import { closeAll, lastSnapshot, sendTest, startFourPlayerMatch, type Player } from './helpers';
+import { closeAll, lastSnapshot, sendTest, startFourPlayerMatch, waitCamera, type Player } from './helpers';
 import {
   captureBodies,
   captureSweep,
@@ -53,7 +53,10 @@ async function settle(p: Player): Promise<void> {
   });
 }
 
+/** 따라가는 카메라: 순간이동 뒤 창이 멈춘 다음 커서를 옮긴다(흔들림 끔 — 표본 · 조준이 창 움직임에 흔들리지 않게) */
 async function aimAt(page: Page, x: number, y: number): Promise<void> {
+  await page.evaluate(() => window.__DECOY__?.setCameraShake(0));
+  await waitCamera(page);
   const c = await page.evaluate(([tx, ty]) => window.__DECOY__?.tileToClient(tx!, ty!) ?? null, [x, y]);
   await page.mouse.move(c!.x, c!.y);
 }
@@ -119,6 +122,12 @@ function inSector(it: InfoItem, p: { x: number; y: number }): boolean {
   return d <= (it.r ?? 0) && Math.abs(a) <= (it.arc ?? 0) / 2;
 }
 
+/**
+ * 그림자 폭 허용치 (px): 확대 1의 ±1px와 같은 비율. 그림자는 부드러운 가장자리라 문턱 폭이 그 밑 바닥 밝기에 따라 흔들리고,
+ * 그 흔들림은 화면 px로 확대 배율만큼 커진다(확대 ② 3에서 그림자 약 99px, 세 몸 차 실측 1.2px). 흰 폭은 단단한 가장자리라 ±1px 그대로
+ */
+const shadowTol = (c: Capture): number => Math.max(1, c.camZoom);
+
 /** 세 숨은 몸이 같은 크기 · 같은 그림자 · 같은 색인가 (흰색 위장 '같은 실루엣') */
 function expectSameHidden(c: Capture, label: string): void {
   const [a, ...rest] = c.stats;
@@ -131,7 +140,9 @@ function expectSameHidden(c: Capture, label: string): void {
       expect(Math.abs(w - a!.widths[i]!), `${label} ${s.name} 흰 폭 ${i}`).toBeLessThanOrEqual(1),
     );
     expect(s.shadowW, `${label} ${s.name} 그림자`).not.toBeNull();
-    expect(Math.abs(s.shadowW! - a!.shadowW!), `${label} ${s.name} 그림자 폭`).toBeLessThanOrEqual(1);
+    expect(Math.abs(s.shadowW! - a!.shadowW!), `${label} ${s.name} 그림자 폭`).toBeLessThanOrEqual(
+      shadowTol(c),
+    );
     expect(deltaE(s.mean, a!.mean), `${label} ${s.name} 몸 평균색`).toBeLessThanOrEqual(1);
   }
 }
@@ -152,7 +163,9 @@ function expectSameShape(c: Capture, label: string): void {
       expect(Math.abs(w - a!.outerWidths[i]!), `${label} ${s.name} 바깥 폭 ${i}`).toBeLessThanOrEqual(1),
     );
     expect(s.shadowW, `${label} ${s.name} 그림자`).not.toBeNull();
-    expect(Math.abs(s.shadowW! - a!.shadowW!), `${label} ${s.name} 그림자 폭`).toBeLessThanOrEqual(1);
+    expect(Math.abs(s.shadowW! - a!.shadowW!), `${label} ${s.name} 그림자 폭`).toBeLessThanOrEqual(
+      shadowTol(c),
+    );
     expect(deltaE(s.mean, a!.mean), `${label} ${s.name} 몸 평균색`).toBeLessThanOrEqual(1);
   }
 }
@@ -467,12 +480,14 @@ test('생존자 화면 역할색 유지: 빛 바닥 · 빨강 · 노랑 부채�
   await aimAt(host, 38.5, 4);
   await view.waitForTimeout(700);
   const mon = (await lastSnapshot(view))!.monster!;
-  await host.mouse.down({ button: 'left' });
-  await host.mouse.up({ button: 'left' });
-  const rc = await captureBodies(view, [], {
+  // 재기를 먼저 시작하고 누른다 (확대 화면은 프레임이 느려 누른 뒤 시작하면 0.4초 준비 프레임이 지나간다)
+  const capturing = captureBodies(view, [], {
     waitEffect: 'attackRange',
     range: { x: mon.x, y: mon.y, dir: mon.aim, tiles: balance.monster.attack.range },
   });
+  await host.mouse.down({ button: 'left' });
+  await host.mouse.up({ button: 'left' });
+  const rc = await capturing;
   console.log(
     `[m10-visual] 러너 화면 범위 경계 ${rc.rangePx?.toFixed(2)}px (판정 ${rc.rangeExpectPx?.toFixed(2)}px)`,
   );

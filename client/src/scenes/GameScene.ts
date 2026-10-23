@@ -1109,7 +1109,7 @@ export class GameScene extends Phaser.Scene {
     this.screenFx.update(now, snap.you.role === 'monster' && (app.predictor?.state?.stun ?? 0) > 0);
     this.kit.sync();
     // 미니맵 바닥: 안개 그림이 바뀐 다음 프레임에 줄여 그린다 (없거나 숨었으면 읽지 않는다. 다시 보이면 그 프레임에 한 번)
-    this.minimap.syncBase(this.world.baseRefreshed, this.world);
+    this.minimap.syncBase(this.world.baseRefreshed, this.world, now);
     const d = this.director;
     this.minimap.setWorld(
       snap.world.points,

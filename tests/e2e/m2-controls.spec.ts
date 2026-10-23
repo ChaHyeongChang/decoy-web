@@ -1,6 +1,7 @@
 // M2: 괴물 조준 각도가 네 클라이언트에서 같다 (서로 보이게 배치한 뒤 비교)
+// 따라가는 카메라: 타일 자리로 마우스를 옮겨 조준을 재는 시험이라 맵 전체 고정 화면(?cam=1). 확대 화면 조준은 camera.spec.ts
 import { expect, test } from '@playwright/test';
-import { closeAll, sendTest, startFourPlayerMatch, truth, truthLogSize, truthSince } from './helpers';
+import { CAM1, closeAll, sendTest, startFourPlayerMatch, truth, truthLogSize, truthSince } from './helpers';
 
 function angDiff(a: number, b: number): number {
   let d = (b - a) % (Math.PI * 2);
@@ -10,7 +11,7 @@ function angDiff(a: number, b: number): number {
 }
 
 test('괴물 조준 각도가 네 클라이언트에서 같다', async ({ browser }) => {
-  const { code, players } = await startFourPlayerMatch(browser);
+  const { code, players } = await startFourPlayerMatch(browser, undefined, [CAM1, CAM1, CAM1, CAM1]);
   const monster = players.find((p) => p.role === 'monster')!;
   // 괴물을 감옥 문 앞(생존자 시야 안)으로 옮기고 대기 해제
   await sendTest(monster.page, { kind: 'teleport', target: monster.id, x: 24, y: 21, face: 0 });
@@ -43,7 +44,7 @@ test('괴물 조준 각도가 네 클라이언트에서 같다', async ({ browse
 });
 
 test('우클릭으로 시야 모드가 바뀌고 0.4초에 걸쳐 모양이 바뀐다', async ({ browser }) => {
-  const { code, players } = await startFourPlayerMatch(browser);
+  const { code, players } = await startFourPlayerMatch(browser, undefined, [CAM1, CAM1, CAM1, CAM1]);
   const monster = players.find((p) => p.role === 'monster')!;
   await sendTest(monster.page, { kind: 'teleport', target: monster.id, x: 24, y: 21, face: 0 });
   await monster.page.waitForTimeout(300);

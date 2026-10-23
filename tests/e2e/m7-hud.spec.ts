@@ -1,7 +1,7 @@
 // M7: 역할별 HUD · 미니맵 · 배너 · 안내. 역할별 스크린샷 4장을 artifacts/에 저장한다
 import { mkdirSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
-import { closeAll, lastSnapshot, sendTest, startFourPlayerMatch, type Player } from './helpers';
+import { closeAll, lastSnapshot, sendTest, startFourPlayerMatch, waitCamera, type Player } from './helpers';
 
 const OUT = 'artifacts/screens';
 
@@ -51,6 +51,9 @@ test('역할별 스크린샷 4장 + 미니맵도 같은 정보 규칙', async ({
   await sendTest(host, { kind: 'teleport', target: scout.id, x: 37, y: 14 });
   await sendTest(host, { kind: 'teleport', target: monster.id, x: 26, y: 25, face: -1.9 });
   await sendTest(host, { kind: 'setPoint', point: 'B', progress: 0.45 });
+  // 따라가는 카메라: 순간이동 뒤 창이 멈춘 다음 화면 자리를 잰다 (멈추기 전 자리를 누르면 다른 곳을 조준한다)
+  await host.evaluate(() => window.__DECOY__?.setCameraShake(0));
+  await waitCamera(host);
   const aim = await host.evaluate(() => window.__DECOY__?.tileToClient(24, 19) ?? null);
   await host.mouse.move(aim!.x, aim!.y);
   await host.mouse.down({ button: 'right' });

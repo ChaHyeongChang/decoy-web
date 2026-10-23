@@ -128,6 +128,8 @@ export interface Capture {
   zoom: number;
   /** 화면 px / 타일 */
   pxPerTile: number;
+  /** 따라가는 카메라 확대 수준 (1 = 맵 전체가 보이던 배율): 부드러운 가장자리 폭처럼 화면 px에 비례하는 허용치를 맞춘다 */
+  camZoom: number;
   /** 조건을 처음 만난 시각 · 잰 시각 (페이지 performance.now, ms) */
   tMet: number;
   tCapture: number;
@@ -251,6 +253,7 @@ export async function captureSweep(
       const rect = canvas.getBoundingClientRect();
       const k = canvas.width / rect.width;
       const zoom = canvas.width / 1920;
+      const camZoom = d.gfx.camZoom;
       const toPx = (x: number, y: number): [number, number] => {
         const p = d.tileToClient(x, y);
         if (!p) throw new Error('tileToClient 없음');
@@ -331,6 +334,7 @@ export async function captureSweep(
             lines: [],
             zoom,
             pxPerTile,
+            camZoom,
             tMet,
             tCapture,
             ok: false,
@@ -643,6 +647,7 @@ export async function captureSweep(
           lines,
           zoom,
           pxPerTile,
+          camZoom,
           tMet,
           tCapture,
           ok: true,

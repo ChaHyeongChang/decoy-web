@@ -1,0 +1,102 @@
+{
+  "createdAt": "2026-10-23T18:42:53.637Z",
+  "records": [
+    {
+      "file": "phone-medium-survivor-classic.png",
+      "device": "phone-medium",
+      "scene": "survivor",
+      "style": "classic",
+      "atlasBytes": 831488,
+      "tpw": 1.582
+    },
+    {
+      "file": "phone-medium-survivor-new.png",
+      "device": "phone-medium",
+      "scene": "survivor",
+      "style": "new",
+      "atlasBytes": 1368064,
+      "tpw": 1.582
+    },
+    {
+      "file": "phone-medium-monster-classic.png",
+      "device": "phone-medium",
+      "scene": "monster",
+      "style": "classic",
+      "atlasBytes": 831488,
+      "tpw": 1.582
+    },
+    {
+      "file": "phone-medium-monster-new.png",
+      "device": "phone-medium",
+      "scene": "monster",
+      "style": "new",
+      "atlasBytes": 1368064,
+      "tpw": 1.582
+    },
+    {
+      "file": "phone-low-survivor-classic.png",
+      "device": "phone-low",
+      "scene": "survivor",
+      "style": "classic",
+      "atlasBytes": 565248,
+      "tpw": 1.318
+    },
+    {
+      "file": "phone-low-survivor-new.png",
+      "device": "phone-low",
+      "scene": "survivor",
+      "style": "new",
+      "atlasBytes": 1034240,
+      "tpw": 1.318
+    },
+    {
+      "file": "phone-low-monster-classic.png",
+      "device": "phone-low",
+      "scene": "monster",
+      "style": "classic",
+      "atlasBytes": 565248,
+      "tpw": 1.318
+    },
+    {
+      "file": "phone-low-monster-new.png",
+      "device": "phone-low",
+      "scene": "monster",
+      "style": "new",
+      "atlasBytes": 1034240,
+      "tpw": 1.318
+    },
+    {
+      "file": "pc-high-survivor-classic.png",
+      "device": "pc-high",
+      "scene": "survivor",
+      "style": "classic",
+      "atlasBytes": 2248704,
+      "tpw": 2.789
+    },
+    {
+      "file": "pc-high-survivor-new.png",
+      "device": "pc-high",
+      "scene": "survivor",
+      "style": "new",
+      "atlasBytes": 4063232,
+      "tpw": 2.789
+    },
+    {
+      "file": "pc-high-monster-classic.png",
+      "device": "pc-high",
+      "scene": "monster",
+      "style": "classic",
+      "atlasBytes": 2248704,
+      "tpw": 2.789
+    },
+    {
+      "file": "pc-high-monster-new.png",
+      "device": "pc-high",
+      "scene": "monster",
+      "style": "new",
+      "atlasBytes": 4063232,
+      "tpw": 2.789
+    }
+  ],
+  "problems": []
+}

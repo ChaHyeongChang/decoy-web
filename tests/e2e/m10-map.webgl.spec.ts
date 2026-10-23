@@ -5,6 +5,7 @@
 // 다 열린 그림이다(R6), 페이지를 다시 열어도 맵 그림이 같다(T7 시드 결정성).
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
+import { CAM1 } from './helpers';
 import { validateBalance } from '@decoy/shared';
 import {
   bodiesOverBadges,
@@ -20,7 +21,8 @@ import {
   startBotRoom,
 } from './m10-map.shared';
 
-const QUERY = '&renderer=webgl&quality=high';
+// 따라가는 카메라: 맵 곳곳의 고정 자리(배지 · 거점 · 탈출구 · 어둠 속 벽)를 한 화면에서 재는 그림 시험이라 맵 전체 고정 화면(?cam=1)
+const QUERY = `&renderer=webgl&quality=high${CAM1}`;
 const HIGH_TEXTURE_BUDGET = 32 * 1024 * 1024;
 const WARN = 0xf59e0b;
 const balance = validateBalance(JSON.parse(readFileSync('config/balance.json', 'utf8')));

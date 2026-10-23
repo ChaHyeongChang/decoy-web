@@ -23,7 +23,7 @@ import {
   type Role,
 } from '@decoy/shared';
 import { HUD_TEXT } from '../data/storyText';
-import { NEON } from '../art/palette';
+import { NEON, UI } from '../art/palette';
 import { gfxState, onGfxChange } from '../gfx/state';
 import { minimapScaleFor } from '../render/fogMath';
 import { createCanvasTexture, resizeCanvasTexture, uploadCanvasTexture } from '../render/fogPaint';
@@ -56,6 +56,11 @@ function placeFor(monster: boolean): (Place & { inset: boolean }) | null {
 }
 
 const MINIMAP_KEY = 'minimap';
+/**
+ * 확대 화면에서 바닥을 다시 그리는 최소 간격 (ms): 미니맵 바닥은 맵 전체 작은 합성(안개)을 따로 만들어야 해서(fogMini.ts)
+ * 안개 주기마다 그리면 화면 밖 그리기 일이 두 배가 된다. 엔티티 · 창 사각형은 매 프레임 그대로
+ */
+export const MINIMAP_BASE_MS = 200;
 /** 미니맵 그림 프레임 이름 (프레임마다 만들지 않는다) */
 const MM = {
   track: FR.mm('track'),
@@ -92,8 +97,8 @@ export class Minimap {
   /** 거점 A · B, 탈출구 N · S 그림 (상태별 프레임) */
   private readonly pointMarks: Spr[] = [];
   private readonly exitMarks: Spr[] = [];
-  /** 보이는 창 사각형 (확대 화면) · 관전 중인 동료 고리 */
-  private viewBox: Slice | null = null;
+  /** 보이는 창 사각형 (확대 화면: 선 사각형 하나 — 9조각 8장보다 그리기가 적다) · 관전 중인 동료 고리 */
+  private viewBox: Phaser.GameObjects.Rectangle | null = null;
   private watchRing: Spr | null = null;
   /** 엔티티 그림 (재사용) */
   private readonly pool: Spr[] = [];
@@ -110,7 +115,7 @@ export class Minimap {
   /** 백버퍼 배율이 바뀌어 다음 갱신 때 캔버스 크기를 다시 잡는다 */
   private resizePending = false;
   /** 틀 · 제목 · 늘 표시 위치 (숨길 때 함께) */
-  private readonly chrome: (Slice | Spr | CrispText)[] = [];
+  private readonly chrome: (Slice | Spr | CrispText | Phaser.GameObjects.Rectangle)[] = [];
   /** 엄지 버튼이 덮어 숨겼다 (판 중 창이 낮아짐) */
   private hidden = false;
   /** 숨긴 동안 바닥을 갱신하지 않았다: 다시 보이면 바로 한 번 그린다 */
@@ -164,14 +169,18 @@ export class Minimap {
       for (const id of ['N', 'S'] as const)
         this.exitMarks.push(mark(MM_EXIT.inactive, EXITS[id].center.x, EXITS[id].center.y));
       // 보이는 창 (확대 화면에서만, 엔티티 아래) · 관전 중인 동료 고리 (엔티티 위)
-      if (CAM_ZOOM > 1) {
-        const vb = kit.slice(41.5);
-        vb.hollow = true;
-        this.viewBox = vb;
-        c.push(vb);
-        this.watchRing = kit.spr(42.5, false);
-      }
+      if (CAM_ZOOM > 1) this.watchRing = kit.spr(42.5, false);
     });
+    if (CAM_ZOOM > 1) {
+      // 보이는 창: 흰 선 사각형 (논리 px, 미니맵 그림 위 · 엔티티 아래)
+      this.viewBox = scene.add
+        .rectangle(M.x, M.y, 1, 1)
+        .setOrigin(0, 0)
+        .setStrokeStyle(Math.max(1, 1.5 * HUD.s), UI.white, 0.85)
+        .setDepth(41.5)
+        .setName('minimap');
+      this.chrome.push(this.viewBox);
+    }
     this.insetRect = M.inset
       ? { x: M.x - M.pad, y: M.y - M.title, w: this.w + M.pad * 2, h: this.h + M.title + M.pad }
       : null;
@@ -238,14 +247,24 @@ export class Minimap {
    * 안개 합성 · 업로드와 한 프레임에 겹치지 않게 한다(BaseRefreshPacer). 숨겼다가 다시 보이면 바로 그린다.
    * 미니맵이 없거나 숨었으면 축소 합성 원본(baseCanvas)을 읽지 않는다 — 읽을 때 합성되므로 그 비용도 없다
    */
-  syncBase(changed: boolean, world: { readonly baseCanvas: HTMLCanvasElement }): void {
+  syncBase(changed: boolean, world: { readonly baseCanvas: HTMLCanvasElement }, nowMs = 0): void {
     if (!this.shown) return;
-    if (this.pacer.frame(changed, this.stale)) this.refreshBase(world.baseCanvas);
+    // 그릴 차례(안개가 바뀐 다음 프레임)가 오면 갱신 대기로 두고, 확대 화면에서는 지난 갱신에서 MINIMAP_BASE_MS가 지난 뒤 그린다
+    if (this.pacer.frame(changed, this.stale)) this.deferred = true;
+    if (!this.deferred) return;
+    if (CAM_ZOOM > 1 && !this.stale && nowMs - this.baseAt < MINIMAP_BASE_MS) return;
+    this.deferred = false;
+    this.baseAt = nowMs;
+    this.refreshBase(world.baseCanvas);
   }
+
+  /** 마지막 바닥 갱신 시각 · 간격 때문에 미룬 갱신이 있다 */
+  private baseAt = Number.NEGATIVE_INFINITY;
+  private deferred = false;
 
   /** 디버그 · 테스트: 안개 그림이 바뀌었는데 아직 미니맵 바닥에 그리지 않았다 */
   get basePending(): boolean {
-    return this.pacer.waiting;
+    return this.pacer.waiting || this.deferred;
   }
 
   /** 메인 바닥 합성을 줄여 그린다 */
@@ -314,8 +333,10 @@ export class Minimap {
       if (view) {
         const x0 = this.px(view.x);
         const y0 = this.py(view.y);
-        vb.set('mmview', x0, y0, this.px(view.x + view.w) - x0, this.py(view.y + view.h) - y0).show(true);
-      } else vb.show(false);
+        vb.setPosition(x0, y0)
+          .setSize(this.px(view.x + view.w) - x0, this.py(view.y + view.h) - y0)
+          .setVisible(true);
+      } else vb.setVisible(false);
     }
   }
 

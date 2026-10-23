@@ -178,19 +178,22 @@ export function prebakeFogStep(
   const mini = p.lightPxPerTile / TILE_PX;
   const whole = p.mode === 'canvas' && wholeRegion();
   // 판에 쓸 두 장만 남긴다 (옛 배율 · 다른 경로의 큰 캔버스를 붙잡지 않게). 발광은 맵 전체 그림이 다 구워질 때까지 쓴다
-  keepStaticMaps(
-    whole
-      ? [{ scale: big, withGlow: true }]
-      : [
-          { scale: big, withGlow: true },
-          { scale: mini, withGlow: true },
-        ],
-    true,
-  );
+  const needs = whole
+    ? [{ scale: big, withGlow: true }]
+    : [
+        { scale: big, withGlow: true },
+        { scale: mini, withGlow: true },
+      ];
+  keepStaticMaps(needs, true);
   if (!bakeStaticMapStep(big, true, budgetMs)) return false;
-  if (whole) return true;
-  getStaticMap(mini, true);
-  if (p.mode !== 'gpu' || !at) return true;
+  if (!whole) getStaticMap(mini, true);
+  // 다 구웠으면 판 합성이 남길 것과 같게: Canvas 합성은 발광 캔버스를 버린다(CanvasFog와 같은 keep — 판 시작 때 캐시가 바뀌지 않게).
+  // GPU는 조각을 칠해야 할 때를 위해 발광을 남긴다(fogGpu와 같다)
+  if (p.mode !== 'gpu') {
+    keepStaticMaps(needs, false);
+    return true;
+  }
+  if (!at) return true;
   const atlas = chunkAtlasFor(p.k, p.margin);
   const w = VIEW_TILES_W;
   const h = VIEW_TILES_H;

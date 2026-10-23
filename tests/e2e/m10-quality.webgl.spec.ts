@@ -8,7 +8,8 @@ import type { GfxDebugInfo, TextAudit } from '@decoy/shared';
 import { DOWNGRADE_CHECK, FPS_WATCH } from '../../client/src/gfx/quality';
 import { pickRoleAndReady, truth, waitForSnapshots, watchConsole } from './helpers';
 
-const QUERY = '?bots=1&debug=hook&renderer=webgl&quality=high';
+// 따라가는 카메라: 고정 마우스 조준을 하향 전후로 재므로 맵 전체 고정 화면(?cam=1)
+const QUERY = '?bots=1&debug=hook&renderer=webgl&quality=high&cam=1';
 /** 괴물을 둘 곳과 조준할 곳 (타일). (24,21)에서 아래로 3타일은 바닥 */
 const SPOT = { x: 24, y: 21 };
 const AIM = { x: 18, y: 25 };

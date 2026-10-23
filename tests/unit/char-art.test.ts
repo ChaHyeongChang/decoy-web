@@ -99,7 +99,7 @@ function hiddenGrid(): HiddenPose[] {
 
 // 크기 기준 (사용자 결정: 기존 시각 명세를 지킨다, client/src/art/chars/measure.ts SIZE_RULE)
 describe('새 캐릭터 그림: 크기 기준 (판정보다 커 보이지 않게)', () => {
-  it('역할 생존자 셋: 모든 자세에서 앞 ±60° 1.55r · 옆 1.05r · 뒤 1.0r 안', () => {
+  it('역할 생존자 셋: 모든 자세에서 앞 ±60° 1.15r · 옆 1.05r · 뒤 1.0r 안', () => {
     for (const id of ROLES)
       for (const p of survivorGrid()) {
         const over = survivorOver(SURVIVOR_ART[id].top(p, { w: W }));
@@ -114,7 +114,7 @@ describe('새 캐릭터 그림: 크기 기준 (판정보다 커 보이지 않게
     }
   });
 
-  it('괴물: 모든 자세 1.12r 안 (발톱 · 팔 · 자락 모두), 돌진만 1.35r', () => {
+  it('괴물: 모든 자세 1.12r 안 (발톱 · 팔 · 자락 모두), 돌진만 1.15r', () => {
     for (const p of monsterGrid()) {
       const over = monsterOver(MONSTER_ART.top(p, { w: W }), p.dash > 0);
       expect(over, JSON.stringify(p)).toBeNull();

@@ -17,6 +17,7 @@ import {
   waitCamera,
   waitForSnapshots,
 } from './helpers';
+import { expectHiddenOpponentHasNoPixels } from './camera.shared';
 import { startBotRoom, settle } from './m10-map.shared';
 import { touchTargets, waitForTouchTarget } from './touch';
 
@@ -314,4 +315,52 @@ test('관전 (터치): 수감 · 탈출 중 팀 카드를 탭하면 동료 화�
   void code;
   expect(problems).toEqual([]);
   await context.close();
+});
+
+test('확대 화면 숨은 상대 (Canvas 낮음): 창 안 · 팀 시야 밖에서 걷는 괴물 자리 픽셀 = 빈 바닥, 텍스처 예산 8MiB', async ({
+  browser,
+}) => {
+  const s = await startBotRoom(browser, QUERY, 'runner');
+  await expectHiddenOpponentHasNoPixels(s, 'Canvas 낮음');
+  const g = await s.page.evaluate(() => window.__DECOY__!.gfx);
+  expect(g.quality).toBe('low');
+  expect(Number(g.features.textureBytes ?? 0)).toBeGreaterThan(0);
+  expect(Number(g.features.textureBytes ?? 0)).toBeLessThanOrEqual(8 * 1024 * 1024);
+  expect(s.problems).toEqual([]);
+  await s.context.close();
+});
+
+test('괴물 조준 (확대 화면): 창이 자리 잡은 뒤 보이는 타일을 가리키면 그 방향, 앞당김으로 창이 움직여도 그대로', async ({
+  browser,
+}) => {
+  const s = await startBotRoom(browser, QUERY, 'monster');
+  const { page } = s;
+  const you = (await page.evaluate(() => window.__DECOY__!.you)) ?? '';
+  await s.send({ kind: 'teleport', target: you, x: 18, y: 16, face: 0 });
+  await s.send({ kind: 'freeze', target: you, frozen: true });
+  await settle(page);
+  await page.evaluate(() => window.__DECOY__?.setCameraShake(0));
+  await waitCamera(page);
+  const target: [number, number] = [21, 13.5];
+  const expected = Math.atan2(target[1] - 16, target[0] - 18);
+  const at = (await page.evaluate(([x, y]) => window.__DECOY__!.tileToClient(x!, y!), target))!;
+  await page.mouse.move(at.x - 6, at.y + 4);
+  await page.mouse.move(at.x, at.y);
+  await page.waitForTimeout(300);
+  const aim0 = await page.evaluate(() => window.__DECOY__!.getLastInput()?.aim ?? Number.NaN);
+  // 앞당김으로 창이 조준 쪽으로 움직인다 (빈 통과가 아님)
+  await expect
+    .poll(async () => {
+      const c = (await page.evaluate(() => window.__DECOY__!.getCamera()))!;
+      return Math.hypot(c.lookApplied.x, c.lookApplied.y);
+    })
+    .toBeGreaterThan(0.5);
+  await page.waitForTimeout(600);
+  const aim1 = await page.evaluate(() => window.__DECOY__!.getLastInput()?.aim ?? Number.NaN);
+  const d = (a: number, b: number): number => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+  console.log(`[camera] 조준 목표 ${expected.toFixed(4)}, 보낸 조준 ${aim0.toFixed(4)} → ${aim1.toFixed(4)}`);
+  expect(d(aim0, expected)).toBeLessThan((2 * Math.PI) / 180);
+  expect(aim1).toBe(aim0);
+  expect(s.problems).toEqual([]);
+  await s.context.close();
 });

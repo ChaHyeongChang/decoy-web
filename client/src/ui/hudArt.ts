@@ -1335,14 +1335,6 @@ export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
       c.stroke();
     }),
   );
-  // 보이는 창 사각형 (가운데가 빈 9조각)
-  add(
-    kit('mmview', { l: 3, r: 3, t: 3 }, (c, w, h) => {
-      c.lineWidth = 1.5;
-      c.strokeStyle = rgba(UI.white, 0.85);
-      c.strokeRect(0.75, 0.75, w - 1.5, h - 1.5);
-    }),
-  );
   add(
     square(FR.mm('roarSelf'), 6, (c) => {
       circle(c, 4.5);

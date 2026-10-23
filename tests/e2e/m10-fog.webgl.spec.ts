@@ -3,8 +3,11 @@
 // SwiftShader는 GPU가 아니라서 FPS는 기록만 한다. 판 중 자동 하향(FPS 40 미만)은 SwiftShader에서 거의 반드시
 // 일어나므로 페이지를 열자마자 FPS를 60으로 덮어써 막고, 고른 품질 그대로 쟀는지(하향 0회) 단언한다.
 // 하향 자체는 m10-quality.spec.ts가 검사한다. 텍스처 메모리(안개 · 미니맵 텍스처 source 바이트)도 기록 · 단언한다.
+// 따라가는 카메라: 밝기 비교 · 숨은 상대 픽셀 시험은 맵 곳곳의 고정 탐침을 한 화면에서 재므로 맵 전체 고정 화면(?cam=1)에서
+// 돈다(카메라와 무관한 안개 · 그림 성질). 확대 화면의 숨은 상대 픽셀은 camera.webgl.spec.ts, 텍스처 예산은 기본 확대(②)로 잰다.
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { CAPTURE_POINTS, type TestCommand } from '@decoy/shared';
+import { CAM1 } from './helpers';
 import { pillarBlocks, pillarNeon } from '../../client/src/art/mapArtGeom';
 
 interface Probe {
@@ -204,7 +207,7 @@ async function measure(browser: Browser, query: string): Promise<Run> {
 test('GPU 안개(품질 높음 · 중간)가 Canvas 합성과 같은 밝기를 내고 콘솔이 깨끗하다', async ({ browser }) => {
   // SwiftShader에서 1920×1080 봇 판 세 개(canvas 낮음 · webgl 높음 · 중간)를 연다 (CI 러너에서 판 하나 최대 약 50초)
   test.setTimeout(300_000);
-  const canvas = await measure(browser, '&renderer=canvas&quality=low');
+  const canvas = await measure(browser, `&renderer=canvas&quality=low${CAM1}`);
   expect(canvas.renderer).toBe('canvas');
   expect(canvas.fogMode).toBe('canvas');
   expect(canvas.fogShader).toBe(false);
@@ -216,7 +219,7 @@ test('GPU 안개(품질 높음 · 중간)가 Canvas 합성과 같은 밝기를 �
   expect(canvas.haloLit).toBeGreaterThanOrEqual(canvas.haloDark * 2);
   expect(canvas.neonDark).toBeGreaterThan(canvas.wall + 3);
   for (const q of ['high', 'medium'] as const) {
-    const gl = await measure(browser, `&renderer=webgl&quality=${q}`);
+    const gl = await measure(browser, `&renderer=webgl&quality=${q}${CAM1}`);
     console.log(`[m10-fog.webgl] ${q}: ${JSON.stringify(gl)} / canvas: ${JSON.stringify(canvas)}`);
     expect(gl.renderer).toBe('webgl');
     expect(gl.fogMode).toBe('gpu');
@@ -253,7 +256,13 @@ test('품질 높음 1920×1080@2: 안개 · 미니맵 텍스처 메모리가 예
   const info = await gfxInfo(page);
   const res = await page.evaluate(() => {
     const g = window.__DECOY__!.gfx;
-    return { zoom: g.zoom, backingW: g.backingW, backingH: g.backingH, compositeScale: g.compositeScale };
+    return {
+      zoom: g.zoom,
+      backingW: g.backingW,
+      backingH: g.backingH,
+      compositeScale: g.compositeScale,
+      chunkAtlasBytes: Number(g.features.chunkAtlasBytes ?? 0),
+    };
   });
   await context.close();
   console.log(
@@ -263,8 +272,17 @@ test('품질 높음 1920×1080@2: 안개 · 미니맵 텍스처 메모리가 예
   expect(info.quality).toBe('high');
   expect(info.fogMode).toBe('gpu');
   expect(info.downgrades).toBe(0);
-  expect(res).toEqual({ zoom: 2, backingW: 3840, backingH: 2160, compositeScale: 2 });
-  // 빈 통과가 아님: 합성 배율 2 정적 맵(2856×1904×4 ≈ 20.7MiB)이 실제로 들어 있다
+  expect({ zoom: res.zoom, backingW: res.backingW, backingH: res.backingH }).toEqual({
+    zoom: 2,
+    backingW: 3840,
+    backingH: 2160,
+  });
+  // 따라가는 카메라: 정적 맵은 창 둘레 조각 아틀라스로 올리고, 합성 배율은 맵 그림 텍셀 상한(presets.mapTexels)이 자른다
+  // (배율 2 그대로면 창 + 여유 조각만으로 예산을 넘는다)
+  expect(res.compositeScale).toBeGreaterThan(1);
+  expect(res.compositeScale).toBeLessThan(2);
+  // 빈 통과가 아님: 조각 아틀라스(약 12.8MiB)가 실제로 들어 있다
+  expect(res.chunkAtlasBytes).toBeGreaterThan(10 * MB);
   expect(info.textureBytes).toBeGreaterThan(20 * MB);
   expect(info.textureBytes).toBeLessThanOrEqual(TEXTURE_BUDGET.high);
   expect(problems).toEqual([]);
@@ -387,7 +405,7 @@ for (const q of ['high', 'medium'] as const) {
   }) => {
     // SwiftShader에서 판 두 개(러너 · 괴물 화면)를 연다. CI 러너에서 한 번에 2.7~4.2분이 들어 그 두 배 남짓
     test.setTimeout(600_000);
-    const query = `&renderer=webgl&quality=${q}`;
+    const query = `&renderer=webgl&quality=${q}${CAM1}`;
     // 러너 화면: 괴물이 팀 시야 밖에서 걷는다
     const r = await startRunner(browser, query);
     await r.send({ kind: 'teleport', target: r.id('scout'), x: 45, y: 2 });

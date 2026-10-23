@@ -395,7 +395,9 @@ test('창 크기 · DPR 변경 뒤 백버퍼가 따라가고 괴물 조준이 �
   // 4K 높음 단계가 CI 러너(SwiftShader)에서 느리다
   test.setTimeout(480_000);
   const { page, problems, close } = await newScreen(browser, { width: 1440, height: 900 }, 2);
-  const code = await startSolo(page, '&quality=high', 'monster');
+  // 따라가는 카메라: 창 크기 · DPR이 바뀔 때 화면 좌표 → 타일 변환을 재는 시험이라 맵 전체 고정 화면(?cam=1).
+  // 확대 화면 조준은 camera.spec.ts
+  const code = await startSolo(page, '&quality=high&cam=1', 'monster');
   const me = await page.evaluate(() => window.__DECOY__?.you ?? '');
   // 괴물 대기 시간에도 조준(목표 각도)은 서버가 받는다
   await page.evaluate(

@@ -3,6 +3,7 @@
 //  - 따라가기: 창이 내 캐릭터를 따라가고 맵 밖을 보이지 않는다, 먼 순간 이동은 잘라 옮긴다
 import { expect, test } from '@playwright/test';
 import { MAP_H, MAP_W } from '@decoy/shared';
+import { expectHiddenOpponentHasNoPixels } from './camera.shared';
 import { startBotRoom } from './m10-map.shared';
 
 const QUERY = '&renderer=webgl&quality=high';
@@ -63,6 +64,17 @@ test('맵 조각은 판 중에 칠하지 않는다: 로비에서 나눠 구운 �
   expect(cam.view.y).toBeGreaterThanOrEqual(0);
   expect(cam.view.x + cam.view.w).toBeLessThanOrEqual(MAP_W + 1e-6);
   expect(cam.view.y + cam.view.h).toBeLessThanOrEqual(MAP_H + 1e-6);
+  expect(s.problems).toEqual([]);
+  await s.context.close();
+});
+
+test('확대 화면 숨은 상대 (WebGL 높음): 창 안 · 팀 시야 밖에서 걷는 괴물 자리 픽셀 = 빈 바닥', async ({
+  browser,
+}) => {
+  test.setTimeout(240_000);
+  const s = await startBotRoom(browser, QUERY, 'runner');
+  await expectHiddenOpponentHasNoPixels(s, 'WebGL 높음');
+  expect((await s.page.evaluate(() => window.__DECOY__!.gfx)).fogMode).toBe('gpu');
   expect(s.problems).toEqual([]);
   await s.context.close();
 });

@@ -359,20 +359,25 @@ export async function recordInputs(page: Page, pollMs = 150): Promise<InputRecor
 export const CAM1 = '&cam=1';
 
 /**
- * 따라가는 카메라가 자리 잡을 때까지: 창이 두 번 연속 같고 어두워짐 · 흔들림이 없다 (순간 이동 뒤 화면 좌표를 읽기 전에)
+ * 따라가는 카메라가 자리 잡을 때까지: 그린 프레임 세 장 사이에 창이 그대로고 어두워짐 · 흔들림이 없다 (순간 이동 뒤 화면 좌표를
+ * 읽기 전에). 시간 간격이 아니라 프레임으로 잰다: 확대 화면의 소프트웨어 렌더러(SwiftShader)는 프레임이 약 250ms라, 120ms
+ * 간격으로 두 번 읽으면 같은 프레임을 두 번 읽어 아직 움직이는 창을 멈췄다고 본다
  */
 export async function waitCamera(page: Page, timeout = 15_000): Promise<void> {
-  let prev = '';
   await expect
     .poll(
-      async () => {
-        const c = await page.evaluate(() => window.__DECOY__?.getCamera() ?? null);
-        const key = c ? `${c.view.x},${c.view.y}` : '';
-        const still = c !== null && key === prev && c.dip === 0 && c.shakes === 0;
-        prev = key;
-        return still;
-      },
-      { intervals: [120], timeout },
+      () =>
+        page.evaluate(async () => {
+          const read = (): string | null => {
+            const c = window.__DECOY__?.getCamera() ?? null;
+            return c && c.dip === 0 && c.shakes === 0 ? `${c.view.x},${c.view.y}` : null;
+          };
+          const a = read();
+          for (let i = 0; i < 3; i += 1) await new Promise<void>((r) => requestAnimationFrame(() => r()));
+          const b = read();
+          return a !== null && a === b;
+        }),
+      { intervals: [50], timeout },
     )
     .toBe(true);
 }

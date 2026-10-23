@@ -1,7 +1,7 @@
 // 따라가는 카메라 최종 확인 촬영 (npx playwright test --config tests/camera/playwright.config.ts final-shots)
 //  - 기기: 휴대폰 가로 800×360(배율 3) · 915×412(배율 2.625) · 16:9 640×360(배율 3), 태블릿 1024×768(배율 2), PC 1920×1080
-//  - 장면: 생존자 화면 화면 밖 화살표(팀원 · 공유 시야 괴물 · 점령 중 거점), 괴물 화면(점령 알림 · 포효로 드러난 자리),
-//    수감 중 관전(동료 화면으로 옮겨 보기)
+//  - 장면: 판 시작 직후(PC 첫 판 조작 안내 · 터치 처음 위치 표시), 생존자 화면 화면 밖 화살표(팀원 · 공유 시야 괴물 ·
+//    점령 중 거점), 괴물 화면(점령 알림 · 포효로 드러난 자리), 수감 중 관전(동료 화면으로 옮겨 보기)
 //  - 결과: artifacts/camera/final/<기기>/<장면>.png + manifest.json(카메라 창 · 화살표 · 콘솔 문제)
 // 확대는 기본값(② 3), 캐릭터 스타일은 새 캐릭터(?chars=new)
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -30,7 +30,7 @@ export const FINAL_DEVICES: { name: string; ctx: BrowserContextOptions; quality:
   },
 ];
 const ONLY = process.env.DECOY_CAMERA_DEVICE ?? '';
-const SCENES = (process.env.DECOY_CAMERA_SCENES ?? 'survivor,monster,spectate').split(',');
+const SCENES = (process.env.DECOY_CAMERA_SCENES ?? 'guide,survivor,monster,spectate').split(',');
 const CLOCK_MS = 12_000;
 
 interface Shot {
@@ -88,6 +88,16 @@ test.afterAll(() => {
 for (const dev of FINAL_DEVICES) {
   if (ONLY && !dev.name.includes(ONLY)) continue;
   const touch = dev.ctx.hasTouch === true;
+
+  if (SCENES.includes('guide'))
+    test(`${dev.name}: 첫 판 조작 안내 · 처음 위치 표시`, async ({ browser }) => {
+      const tab = await openTab(browser, dev.ctx, `${dev.name} 안내`, problems);
+      const { page } = tab;
+      await startMatch(page, 'runner', dev.quality);
+      // 판 시작 직후: PC는 첫 판 조작 안내(5초), 터치는 처음 10초 내 위치 표시 · 시작 알림
+      await shoot(page, dev.name, 'guide', 900);
+      await tab.close();
+    });
 
   if (SCENES.includes('survivor'))
     test(`${dev.name}: 생존자 화면 화면 밖 화살표`, async ({ browser }) => {

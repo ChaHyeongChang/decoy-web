@@ -159,7 +159,7 @@ function overlap(a: { x: number; y: number; w: number; h: number }, b: TouchTarg
 
 /**
  * 글자 크기 · 겹침 · 화면 안 문제 (빈 배열이면 통과). 점수판(score)은 손으로 여는 덮개라 겹침에서 뺀다.
- * 늘 떠 있는 부품은 맵 사각형과도 겹치지 않는다
+ * 늘 떠 있는 부품은 맵 사각형과도 겹치지 않는다 (맵 안 미니맵만 예외: 맵 사각형 안에 다 들어간다)
  */
 function hudProblems(l: HudLayout, targets: TouchTarget[], vw: number, vh: number): string[] {
   const out: string[] = [];
@@ -176,8 +176,14 @@ function hudProblems(l: HudLayout, targets: TouchTarget[], vw: number, vh: numbe
       const o = overlap(i, t);
       if (o > 0) out.push(`${label(i)} ↔ ${t.id} ${f(o)}px`);
     }
+    const m = l.map;
+    if (i.id === 'minimap' && l.minimapInset) {
+      // 따라가는 카메라: 옆 자리가 없는 배치(16:9 · 태블릿)는 미니맵을 맵 사각형 안 구석에 넣는다 — 맵 안에 다 들어가야 한다
+      if (i.x < m.x - 0.5 || i.y < m.y - 0.5 || i.x + i.w > m.x + m.w + 0.5 || i.y + i.h > m.y + m.h + 0.5)
+        out.push(`${label(i)} 맵 안 미니맵이 맵 밖으로`);
+      continue;
+    }
     if (persistent && i.id !== 'hint') {
-      const m = l.map;
       const ox = Math.min(i.x + i.w, m.x + m.w) - Math.max(i.x, m.x);
       const oy = Math.min(i.y + i.h, m.y + m.h) - Math.max(i.y, m.y);
       if (ox > 0.5 && oy > 0.5) out.push(`${label(i)} ↔ 맵`);

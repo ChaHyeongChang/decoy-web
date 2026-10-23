@@ -1,12 +1,12 @@
 // M10b 캐릭터 · 효과 (WebGL · SwiftShader · 봇 방 · 품질 높음 위주): 셰이더 비네트 · 색보정 · 눈빛 · 먼지가 켜진 상태에서도
 //  - 괴물 화면 생존자는 흰 공통 실루엣 (몸 원판 90% 이상 무채색 · 밝음, 역할 4색과 ΔE 40 이상, 그림 키 'survivor-hidden',
-//    세 몸의 흰 폭 · 그림자 폭 ±1px · 평균색 ΔE ≤ 1)
+//    세 몸의 흰 폭 ±1px · 그림자 폭 ±1px × 확대 배율 · 평균색 ΔE ≤ 1)
 //  - 공격 준비 범위 경계 = attack.range × 타일 화면 크기 ±2px
 //  - 후처리는 구조 레이어(map)에만: 장면 표시 목록 · 카메라에서 직접 모은 getFxTargets에 entities · markers · hud · 카메라가 없다
 //  - 생존자 화면 팀원 몸 역할색 · 몸/링 대비가 Canvas 낮음과 같은 수준(몸 평균색 Lab ΔE ≤ 10), 먼지는 원호 테셀레이션 없이,
 //    후처리 렌더 타깃 바이트를 기록
 //  - 기절 채도 감소는 맵 위 · 캐릭터 아래 (숨은 생존자 흰색 · 몸/링 대비 · 가드 노출 링 그대로)
-//  - 품질 WebGL 높음 · 중간 · Canvas 낮음에서 범위가 있는 장면(공격 준비 · 캠핑 · 근접 원 · 포효 · 구조 구역 · 밀치기)의
+//  - (맵 전체 고정 화면 cam=1) 품질 WebGL 높음 · 중간 · Canvas 낮음에서 범위가 있는 장면(공격 준비 · 캠핑 · 근접 원 · 포효 · 구조 구역 · 밀치기)의
 //    그린 엔티티 · 정보 레이어가 같고, 각 범위의 화면 반지름 · 각도가 판정값 ±2px
 // 헤드리스 SwiftShader는 판 중 자동 하향이 거의 반드시 일어나므로 injectFps(60)으로 막고 downgrades = 0을 단언한다.
 // 이 검사는 콘솔을 거르지 않는다 (셰이더 컴파일 경고도 문제로 센다).
@@ -24,6 +24,7 @@ import {
   type CaptureOptions,
   type RayResult,
 } from './visualProbe';
+import { CAM1, waitCamera } from './helpers';
 
 const balance = validateBalance(JSON.parse(readFileSync('config/balance.json', 'utf8')));
 const ROLE_HEX = { runner: 0x3b82f6, guard: 0xa855f7, scout: 0x22c55e } as const;
@@ -136,7 +137,10 @@ async function startRoom(
   };
 }
 
+/** 따라가는 카메라: 순간이동 뒤 창이 멈춘 다음 커서를 옮긴다(흔들림 끔 — 표본 · 조준이 창 움직임에 흔들리지 않게) */
 async function aimAt(page: Page, x: number, y: number): Promise<void> {
+  await page.evaluate(() => window.__DECOY__?.setCameraShake(0));
+  await waitCamera(page);
   const c = await page.evaluate(([tx, ty]) => window.__DECOY__?.tileToClient(tx!, ty!) ?? null, [x, y]);
   await page.mouse.move(c!.x, c!.y);
 }
@@ -195,7 +199,7 @@ test('괴물 화면 흰색 위장 (WebGL 높음: 셰이더 비네트 · 색보�
     expect(b.whiteFrac, `${b.name} 흰 비율`).toBeGreaterThanOrEqual(0.9);
     expect(b.minRoleDeltaE, `${b.name} 역할색 ΔE`).toBeGreaterThanOrEqual(40);
   }
-  // 같은 실루엣: 흰 폭 · 그림자 폭 ±1px, 평균색 ΔE ≤ 1
+  // 같은 실루엣: 흰 폭 ±1px · 그림자 폭 ±1px(확대 1 기준, 확대 배율만큼), 평균색 ΔE ≤ 1
   const [a0, ...rest] = still.stats;
   console.log(
     `[m10-visual.webgl] 흰 폭 ${still.stats.map((b) => b.widths.map((w) => w.toFixed(1)).join('/')).join(' | ')} · 그림자 ${still.stats.map((b) => b.shadowW?.toFixed(1)).join(' | ')}`,
@@ -205,7 +209,10 @@ test('괴물 화면 흰색 위장 (WebGL 높음: 셰이더 비네트 · 색보�
       expect(Math.abs(w - a0!.widths[i]!), `${b.name} 흰 폭 ${i}`).toBeLessThanOrEqual(1),
     );
     expect(b.shadowW).not.toBeNull();
-    expect(Math.abs(b.shadowW! - a0!.shadowW!), `${b.name} 그림자 폭`).toBeLessThanOrEqual(1);
+    // 그림자는 부드러운 가장자리: 확대 1의 ±1px와 같은 비율 (m10-visual.spec.ts shadowTol)
+    expect(Math.abs(b.shadowW! - a0!.shadowW!), `${b.name} 그림자 폭`).toBeLessThanOrEqual(
+      Math.max(1, still.camZoom),
+    );
     expect(deltaE(b.mean, a0!.mean), `${b.name} 몸 평균색`).toBeLessThanOrEqual(1);
   }
   // 공격 준비 (누른 순간부터 예측). SwiftShader는 프레임이 몰아서 와(0.6~1초 멈춤) 0.4초 준비를 통째로 놓치거나,
@@ -224,9 +231,12 @@ test('괴물 화면 흰색 위장 (WebGL 높음: 셰이더 비네트 · 색보�
       // (괴물 화면에는 체력이 오지 않고 흰 실루엣에 체력 인자가 없어 그림은 같다)
       await send({ kind: 'setSurvivor', target: id('runner'), hp: 2 });
     }
+    // 재기를 먼저 시작하고 누른다: 확대 화면(② 3)은 SwiftShader 프레임이 약 250ms라 0.4초 준비가 한두 프레임뿐이고,
+    // 누른 뒤 재기를 시작하면 그 사이에 지나간다
+    const capturing = captureBodies(page, bodies, atkOpts);
     await page.mouse.down({ button: 'left' });
     await page.mouse.up({ button: 'left' });
-    atk = await captureBodies(page, bodies, atkOpts);
+    atk = await capturing;
     if (atk.ok && !frontArcNearProbe(atk, atkOpts)) break;
     console.log(
       `[m10-visual.webgl] 공격 준비 ${attempt + 1}번째: ok ${String(atk.ok)} · 채움 ${String(atk.effects.attackFill)} — 다시`,
@@ -453,10 +463,15 @@ test('기절 채도 감소 (WebGL 높음): 맵 위 · 캐릭터 아래라 숨은
 
 // ───────────────────────── 품질별 정보 동일성 · 범위 반지름 (WebGL 높음 · 중간 · Canvas 낮음) ─────────────────────────
 
+/**
+ * 품질 사이 범위 비교는 맵 전체 고정 화면(확대 1)에서: 캠핑 링(철창 둘레 4타일 = 12 × 12타일) · 구조 구역 · 밀치기를 한 화면에서
+ * 재야 하는데 확대 ② 3 창(16 × 10.7타일)에는 캠핑 링이 다 들어오지 않는다. 범위 그림은 배율에 비례하는 같은 코드라, 확대 3의
+ * '범위 = 판정값'은 첫 시험(괴물 화면 공격 준비 범위)과 m10-visual.spec.ts(생존자 화면 공격 범위)가 본다
+ */
 const CONFIGS = [
-  { name: 'webgl-high', q: '&renderer=webgl&quality=high' },
-  { name: 'webgl-medium', q: '&renderer=webgl&quality=medium' },
-  { name: 'canvas-low', q: '&renderer=canvas&quality=low' },
+  { name: 'webgl-high', q: `&renderer=webgl&quality=high${CAM1}` },
+  { name: 'webgl-medium', q: `&renderer=webgl&quality=medium${CAM1}` },
+  { name: 'canvas-low', q: `&renderer=canvas&quality=low${CAM1}` },
 ] as const;
 
 const DEG = Math.PI / 180;
@@ -517,16 +532,18 @@ function frontArcNearProbe(cap: Capture, opts: CaptureOptions): boolean {
 }
 
 /**
- * 괴물이 공격을 누르고 보는 화면에서 공격 준비 첫 프레임을 잰다. SwiftShader가 느려(4~10FPS) 0.4초 준비 동안 그린 프레임을
+ * 괴물이 공격을 누르고 보는 화면에서 공격 준비 첫 프레임을 잰다. SwiftShader가 느려(4~10FPS, 확대 화면은 약 4FPS) 0.4초 준비 동안 그린 프레임을
  * 놓칠 수 있으므로 놓치면 쿨타임(1.5초) 뒤 다시 누른다(여섯 번까지, 같은 자리 · 같은 조준이라 정보는 같다).
  * 앞머리 호가 변을 재는 원에 걸친 프레임도 다시 잰다
  */
 async function windupCapture(view: Page, clicker: Page, opts: CaptureOptions): Promise<Capture> {
   let cap: Capture | null = null;
   for (let attempt = 0; attempt < 6; attempt += 1) {
+    // 재기를 먼저 시작하고 누른다 (확대 화면은 프레임이 느려 누른 뒤 시작하면 준비 프레임이 지나간다)
+    const capturing = captureBodies(view, [], { ...opts, waitInfo: 'attack', timeoutMs: 2500 });
     await clicker.mouse.down({ button: 'left' });
     await clicker.mouse.up({ button: 'left' });
-    cap = await captureBodies(view, [], { ...opts, waitInfo: 'attack', timeoutMs: 2500 });
+    cap = await capturing;
     if (cap.ok && !frontArcNearProbe(cap, opts)) return cap;
     if (cap.ok)
       console.log(
@@ -655,7 +672,7 @@ interface GuardScenes {
 
 /** 가드 화면 (탭 하나 = 품질 cfg, 괴물은 Canvas 낮음 손님): 수감자 → 구조 구역, 밀치기 사거리, 괴물 부채꼴 → 공격 준비 */
 async function guardRun(browser: Browser, cfg: (typeof CONFIGS)[number]): Promise<GuardScenes> {
-  const s = await startRoom(browser, 'guard', cfg.q, 'monster');
+  const s = await startRoom(browser, 'guard', cfg.q, 'monster', `&renderer=canvas&quality=low${CAM1}`);
   const { send, id } = s;
   const page = s.host.page;
   const mon = s.guest!.page;

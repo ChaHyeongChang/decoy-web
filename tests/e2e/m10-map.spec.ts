@@ -9,6 +9,7 @@
 //  - 굽는 시간 · 텍스처 바이트 기록(낮음 예산 8MiB), 콘솔 에러 · 경고 0
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
+import { CAM1 } from './helpers';
 import { validateBalance } from '@decoy/shared';
 import {
   bodiesOverBadges,
@@ -22,7 +23,8 @@ import {
   startBotRoom,
 } from './m10-map.shared';
 
-const QUERY = '&renderer=canvas&quality=low';
+// 따라가는 카메라: 맵 곳곳의 고정 자리(배지 · 거점 · 탈출구 · 어둠 속 벽)를 한 화면에서 재는 그림 시험이라 맵 전체 고정 화면(?cam=1)
+const QUERY = `&renderer=canvas&quality=low${CAM1}`;
 const LOW_TEXTURE_BUDGET = 8 * 1024 * 1024;
 const WARN = 0xf59e0b;
 const balance = validateBalance(JSON.parse(readFileSync('config/balance.json', 'utf8')));
