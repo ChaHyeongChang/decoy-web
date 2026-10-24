@@ -1,12 +1,12 @@
 {
-  "createdAt": "2026-10-23T21:34:22.522Z",
+  "createdAt": "2026-10-24T13:05:49.718Z",
   "shots": [
     {
       "file": "feature-graphic.png",
       "scene": "feature",
       "width": 1024,
       "height": 500,
-      "bytes": 367061,
+      "bytes": 350677,
       "touchTargets": [],
       "renderer": "webgl",
       "quality": "high",
@@ -17,7 +17,7 @@
       "scene": "lobby",
       "width": 1920,
       "height": 1080,
-      "bytes": 762349,
+      "bytes": 746828,
       "touchTargets": [],
       "renderer": "webgl",
       "quality": "high",
@@ -28,14 +28,15 @@
       "scene": "monster",
       "width": 1920,
       "height": 1080,
-      "bytes": 598014,
+      "bytes": 585122,
       "touchTargets": [
         "move-zone",
         "aim-stick",
         "dash",
         "roar",
         "mode",
-        "scoreboard"
+        "scoreboard",
+        "menu"
       ],
       "renderer": "webgl",
       "quality": "high",
@@ -46,12 +47,13 @@
       "scene": "survivor",
       "width": 1920,
       "height": 1080,
-      "bytes": 571620,
+      "bytes": 598660,
       "touchTargets": [
         "move-zone",
         "ability",
         "rescue",
-        "scoreboard"
+        "scoreboard",
+        "menu"
       ],
       "renderer": "webgl",
       "quality": "high",
@@ -62,12 +64,13 @@
       "scene": "rescue",
       "width": 1920,
       "height": 1080,
-      "bytes": 552242,
+      "bytes": 634678,
       "touchTargets": [
         "move-zone",
         "ability",
         "rescue",
-        "scoreboard"
+        "scoreboard",
+        "menu"
       ],
       "renderer": "webgl",
       "quality": "high",
@@ -78,7 +81,7 @@
       "scene": "result",
       "width": 1920,
       "height": 1080,
-      "bytes": 245725,
+      "bytes": 246766,
       "touchTargets": [],
       "renderer": "webgl",
       "quality": "high",

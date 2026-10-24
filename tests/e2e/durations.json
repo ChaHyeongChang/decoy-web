@@ -49,7 +49,7 @@
   "perf-budget.spec.ts": 60,
   "perf-budget.webgl.spec.ts": 80,
   "play-settings.spec.ts": 50,
-  "settings-match.spec.ts": 25,
+  "settings-match.spec.ts": 55,
   "settings.spec.ts": 35,
   "smoke.spec.ts": 1,
   "smooth-motion.spec.ts": 15
