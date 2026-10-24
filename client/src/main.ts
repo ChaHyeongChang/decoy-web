@@ -6,6 +6,7 @@ import { PRACTICE_BALANCE } from './localServer';
 import { sfx } from './audio';
 import { installDebug } from './debug';
 import { canOfferFullscreen, device, enterFullscreen, initDevice, onDeviceChange } from './device';
+import { matchTuning } from './controlLayout';
 import { initCharStyle, onCharStyleChange } from './gfx/charStyle';
 import { Pacer, loadFrameLimit, pacingHooks, patchTimeStep, targetHzFor } from './gfx/framePacing';
 import { sessionFrameStats } from './gfx/frameStats';
@@ -637,12 +638,16 @@ function settleViewport(): Promise<void> {
 
 /**
  * 판 배치를 정하고(PC는 언제나 1920×1080) 논리 크기가 바뀌었으면 백버퍼 · 카메라를 다시 맞춘다.
- * 판 장면을 만들기 직전과 터치 로비의 미리 굽기 앞에서만 부른다(판 중 크기 변화는 논리 크기를 두고 zoom만 다시 맞춘다)
+ * 판 장면을 만들기 직전과 터치 로비의 미리 굽기 앞에서만 부른다(판 중 크기 변화는 논리 크기를 두고 zoom만 다시 맞춘다).
+ * 터치는 내 역할 팀(판 중이면 판 역할, 로비면 고른 역할, 모르면 생존자)의 배치 조정: 조이스틱 크기 · UI 크기 설정, 저장한 조작
+ * 배치의 좌우 반전, 판 중 설정 버튼 자리(시스템 버튼 세 칸)
  */
 function applyMatchLayout(force = false): void {
   const r = gameRoot.getBoundingClientRect();
   const before = layout();
-  const next = configureLayout(r.width, r.height, device.touch);
+  const role = app.match?.role ?? app.lobby?.players.find((p) => p.id === app.you)?.role ?? null;
+  const tuning = device.touch ? matchTuning(role === 'monster' ? 'monster' : 'survivor') : undefined;
+  const next = configureLayout(r.width, r.height, device.touch, tuning);
   gfxState.layout = next.kind;
   gfxState.viewW = next.viewW;
   gfxState.viewH = next.viewH;

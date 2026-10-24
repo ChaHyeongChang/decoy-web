@@ -2220,17 +2220,18 @@ select {
   transition: none;
 }
 
-/* 이동 스틱: 손가락이 없으면 왼쪽 아래에 흐리게, 누르면 그 자리에 */
+/* 이동 스틱: 손가락이 없으면 왼쪽 아래에 흐리게, 누르면 그 자리에. 조이스틱 투명도(설정 조작 탭)는 --stick-a를 곱한다
+   (touchControls.ts가 .touch-layer에 쓴다, 없으면 1 = 그대로) */
 .tc-move {
   position: absolute;
   left: 0;
   top: 0;
   transform: translate(var(--hx), var(--hy));
-  opacity: 0.4;
+  opacity: calc(0.4 * var(--stick-a, 1));
   pointer-events: none;
 }
 .tc-move.live {
-  opacity: 1;
+  opacity: var(--stick-a, 1);
 }
 .tc-move > * {
   position: absolute;
@@ -2283,7 +2284,10 @@ select {
   visibility: hidden;
 }
 
-/* 조준 스틱 (괴물): 바닥 = 공격 쿨타임 눈금, 손잡이 = 공격 아이콘 · 남은 초. 끌면 방향 표시 */
+/* 조준 스틱 (괴물): 바닥 = 공격 쿨타임 눈금, 손잡이 = 공격 아이콘 · 남은 초. 끌면 방향 표시. 조이스틱 투명도 --stick-a */
+.tc-aim {
+  opacity: var(--stick-a, 1);
+}
 .tc-aim > .tc-base {
   position: absolute;
   inset: 0;
