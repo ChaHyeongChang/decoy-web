@@ -82,6 +82,17 @@ export const WORK_SCENES: WorkScene[] = [
     chars: 'new',
     budget: true,
   },
+  // 품질 중간(터치 기기 자동 기본값) WebGL: 빛 지도 셰이더(내 빛 따라가기 FOG_FOLLOW_FRAG)의 프로그램 바꾸기 · 그리기 · 버퍼를 막는다.
+  // 기준값은 이 장면을 처음 넣은 빌드(내 빛 따라가기 검토 반영)에서 쟀다 — 따라가기 전 빌드 값은 DECISIONS · PERF
+  {
+    name: 'webgl-medium-runner-s25',
+    project: 'webgl',
+    quality: 'medium',
+    role: 'runner',
+    scale: 0.25,
+    chars: 'classic',
+    budget: true,
+  },
 ];
 
 const HZ = 120;

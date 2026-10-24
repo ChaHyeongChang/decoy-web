@@ -26,8 +26,8 @@ export interface PacingFrame {
   /** 안개 갱신 시각 (getAnimState().fogAt) */
   fogAt: number | null;
   /**
-   * 잔렉 고치기 뒤 빌드만: 안개 주기의 내 눈 자리 · 이번 프레임에 내 자리를 따라 옮긴 양(타일) · 무엇이 따라가는가
-   * ('gpu' = 빛 반경 띠 · 테두리 · 틴트 · 먼지, 'rims' = 테두리 · 먼지만 — Canvas 경로, 'off'). 없으면(고치기 전 빌드) fogAt로 눈을 잡는다
+   * 내 빛 따라가기 (getAnimState, 옛 빌드면 없음): 안개 주기 내 눈 자리 · 이번 프레임에 실제로 옮긴 Δ · 따라가기 방식('gpu' ·
+   * 'fixed' · 'off'). 그린 빛 · 테두리 중심 = fogEye + fogShift (GPU 경로는 셰이더에 넘긴 값 — 화소는 fog-follow.webgl 시험이 잰다)
    */
   fogEye?: { x: number; y: number } | null;
   fogShift?: { x: number; y: number };
@@ -121,7 +121,7 @@ export interface WalkSummary {
   /** ③ 화면 위 내 자리: 프레임당 변화 · 구간 폭 (기기 px) */
   d3: Dist;
   range3: number;
-  /** ⑤ 시야 빛(안개 눈) − 내 몸 화면 어긋남 (기기 px): 프레임별 · 폭 */
+  /** ⑤ 시야 빛(이 렌더러가 그린 빛 중심: fogEye + 실제로 옮긴 fogShift) − 내 몸 화면 어긋남 (기기 px): 프레임별 · 폭 */
   fog: Dist;
   fogRange: number;
   /** 안개 갱신 간격 (ms) */
@@ -152,6 +152,39 @@ export interface DisplaySummary {
   fogErr: Dist;
 }
 
+type EyeOf = ReadonlyMap<number, { x: number; y: number }>;
+
+/**
+ * 프레임마다 이 렌더러가 그린 빛 중심 (타일): fogEye + 실제로 옮긴 fogShift(따라가지 않는 경로는 0).
+ * 옛 빌드(fogEye 기록 없음)는 안개를 다시 그린 프레임의 예측 그린 자리 (worldRenderer는 v.me로 시야를 잰다)
+ */
+function lightEyes(frames: readonly PacingFrame[]): { light: EyeOf; times: number[] } {
+  const light = new Map<number, { x: number; y: number }>();
+  const times: number[] = [];
+  let eye: { x: number; y: number } | null = null;
+  let lastFog: number | null = null;
+  for (const f of frames) {
+    if (f.fogAt !== lastFog) {
+      eye = { x: f.mx, y: f.my };
+      lastFog = f.fogAt;
+      times.push(f.t);
+    }
+    if (f.fogEye !== undefined) {
+      const e = f.fogEye;
+      if (!e) continue;
+      light.set(f.n, { x: e.x + (f.fogShift?.x ?? 0), y: e.y + (f.fogShift?.y ?? 0) });
+    } else if (eye) {
+      light.set(f.n, eye);
+    }
+  }
+  return { light, times };
+}
+
+/** 빛 중심 e(타일)와 그린 내 몸의 화면 어긋남 (기기 px) */
+function eyeOffset(e: { x: number; y: number }, f: PacingFrame, devPerCss: number): number {
+  return ((e.x - f.mx) * f.k + (f.cx + f.mx * f.k - f.px)) * devPerCss;
+}
+
 /**
  * 걷기 요약: 키를 누른 뒤 settleMs부터 뗄 때까지(같은 빠르기로 걷고 카메라 따라가기 늦음이 가라앉은 구간)만 본다.
  * frames는 그린 프레임만(프레임 제한기가 건너뛴 rAF 없음), logs는 가상 시계 작업 시간 모형 기록(없으면 빈 배열)
@@ -167,13 +200,8 @@ export function walkSummary(
   const down = keys.find((k) => k.type === 'down');
   const up = down ? keys.find((k) => k.type === 'up' && k.t > down.t) : undefined;
   if (!down || !up) throw new Error('걷기 키 기록 없음');
-  const eyeOf = lightCenters(frames);
-  const fogTimes: number[] = [];
-  let lastFog: number | null | undefined;
-  for (const f of frames) {
-    if (f.fogAt !== lastFog) fogTimes.push(f.t);
-    lastFog = f.fogAt;
-  }
+  // 빛 중심: 이 렌더러가 그린 것 (lightEyes)
+  const { light: eyeOf, times: fogTimes } = lightEyes(frames);
   const fr = frames.filter((f) => f.t >= down.t + settleMs && f.t <= up.t);
   const first = fr[0];
   const last = fr[fr.length - 1];
@@ -195,7 +223,7 @@ export function walkSummary(
     startLag.push(b.start - b.t);
     const e = eyeOf.get(b.n);
     // 화면 위 빛(눈) 자리 − 내 몸 자리: 빛은 맵에 붙어 카메라와 같이 움직이고, 몸은 격자 나머지만큼 옮겨 그린 자리
-    if (e) fog.push(((e.x - b.mx) * k + (b.cx + b.mx * k - b.px)) * devPerCss);
+    if (e) fog.push(eyeOffset(e, b, devPerCss));
     const sx = (b.px - first.px) * devPerCss;
     lo3 = Math.min(lo3, sx);
     hi3 = Math.max(hi3, sx);
@@ -240,38 +268,11 @@ export function walkSummary(
   };
 }
 
-/**
- * 프레임마다 화면에 그린 내 시야 빛(반경 띠)의 중심 (타일). 고치기 뒤 빌드는 디버그 값으로: 'gpu'면 안개 주기 눈 + 따라 옮긴 양,
- * 그 밖(Canvas 경로 — 빛은 합성에 구워 주기 눈 그대로)이면 주기 눈. 고치기 전 빌드는 안개를 다시 그린 프레임(fogAt가 바뀜)의
- * 예측 그린 자리(worldRenderer는 v.me로 시야를 잰다)
- */
-export function lightCenters(frames: readonly PacingFrame[]): Map<number, { x: number; y: number }> {
-  const out = new Map<number, { x: number; y: number }>();
-  let eye: { x: number; y: number } | null = null;
-  let lastFog: number | null | undefined;
-  for (const f of frames) {
-    if (f.fogEye !== undefined) {
-      if (f.fogEye) {
-        const s = f.fogFollow === 'gpu' && f.fogShift ? f.fogShift : { x: 0, y: 0 };
-        out.set(f.n, { x: f.fogEye.x + s.x, y: f.fogEye.y + s.y });
-      }
-      continue;
-    }
-    if (f.fogAt !== lastFog) {
-      // 기록 첫 프레임은 주기 중간일 수 있어 그다음 변화부터 쓴다
-      if (lastFog !== undefined) eye = { x: f.mx, y: f.my };
-      lastFog = f.fogAt;
-    }
-    if (eye) out.set(f.n, eye);
-  }
-  return out;
-}
-
 /** 화면 표시 시각(vsync)마다 보이는 프레임을 골라 고른 움직임에서 벗어난 양을 잰다 */
 function displaySummary(
   fr: readonly PacingFrame[],
   logs: readonly PacingLog[],
-  eyeOf: ReadonlyMap<number, { x: number; y: number }>,
+  eyeOf: EyeOf,
   devPerCss: number,
   P: number,
 ): DisplaySummary {
@@ -315,7 +316,7 @@ function displaySummary(
     mapX.push({ r, v: -f.cx * devPerCss });
     self.push(f.px * devPerCss);
     const e = eyeOf.get(f.n);
-    if (e) fog.push(((e.x - f.mx) * f.k + (f.cx + f.mx * f.k - f.px)) * devPerCss);
+    if (e) fog.push(eyeOffset(e, f, devPerCss));
   }
   // 맵 스크롤: 표시 시각에 대한 직선(최소 제곱)에서 벗어난 양
   const n = mapX.length;

@@ -54,18 +54,20 @@ if (excerptOf) {
     const mid = Math.max(1, Math.floor(fr.length / 2) - 12);
     let eye = null;
     let lastFog = null;
+    // 빛 중심 x: 고친 뒤 빌드는 안개 주기 눈 + 실제로 옮긴 양, 고치기 전 빌드는 안개를 다시 그린 프레임의 내 자리
     const eyes = fr.map((f) => {
       if (f.fogAt !== lastFog) {
         eye = f.mx;
         lastFog = f.fogAt;
       }
+      if (f.fogEye !== undefined) return f.fogEye ? f.fogEye.x + (f.fogShift?.x ?? 0) : null;
       return eye;
     });
     const p0 = fr[mid].px;
     for (let j = mid; j < Math.min(fr.length, mid + 24); j += 1) {
       const a = fr[j - 1];
       const b = fr[j];
-      const light = (b.cx + eyes[j] * b.k - b.px) * dpc;
+      const light = eyes[j] === null ? NaN : (b.cx + eyes[j] * b.k - b.px) * dpc;
       console.log(
         `| ${f1(b.t)} | ${f2(b.t - a.t)} | ${f1(b.start - b.t)} | ${b.disp === null ? '-' : f1(b.disp)} | ${b.disp === null ? '-' : f1(b.disp - b.t)} | ${f2(Math.abs(b.mx - a.mx) * k)} | ${f2(Math.abs(b.cx - a.cx) * dpc)} | ${f2((b.px - p0) * dpc)} | ${f2(light)} |`,
       );

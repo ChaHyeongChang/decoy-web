@@ -81,6 +81,17 @@ export function getFpsOverride(): number | null {
   return fpsOverride;
 }
 
+let followOff = false;
+
+/** 내 빛 따라가기를 끈다 (디버그 훅 · 측정: Δ = 0 — 안개 주기 자리에 고정된 예전 그림과 견준다) */
+export function setFogFollowDisabled(off: boolean): void {
+  followOff = off;
+}
+
+export function fogFollowDisabled(): boolean {
+  return followOff;
+}
+
 /** 선명도 검사용 글자를 HUD에 그리는 함수. 해상도 작업이 장면을 만들 때 채운다 */
 export const probeSlot: { draw: ((text: string, x: number, y: number, px: number) => void) | null } = {
   draw: null,
