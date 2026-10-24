@@ -11,9 +11,10 @@ const BEFORE_M10 = 346_679;
 /**
  * 늘 지키는 상한 (휴대폰 첫 접속): M10 전 값 + 2KiB (DECISIONS 8절 '번들 예산'). 캐릭터 리디자인(PR #21)에서 처음 M10 전 값을
  * 넘었다(실측 347,785B = M10 전 +1.1KiB, 새 캐릭터 그림 명령 gzip 약 21.6KB). 따라가는 카메라에서 M10 전 + 18KiB로 올린다
- * (카메라 · 맵 조각 굽기 · 화면 밖 표시 · 관전 · 미니맵, DECISIONS 9절 '번들 예산')
+ * (카메라 · 맵 조각 굽기 · 화면 밖 표시 · 관전 · 미니맵, DECISIONS 9절 '번들 예산'). 설정 화면 통합에서 M10 전 + 36KiB로 올린다
+ * (설정 화면 · 조작 배치 편집 · 판 중 설정 효과, DECISIONS 11절 '번들 예산')
  */
-const CAP = BEFORE_M10 + 18 * 1024;
+const CAP = BEFORE_M10 + 36 * 1024;
 /**
  * 마일스톤마다의 예산: 직전 마일스톤 병합 값에서 이번 마일스톤이 더 쓸 수 있는 양 (DECISIONS M11 "번들 예산").
  * M10c는 Phaser 사용자 빌드 직후 243,281B에서 +25KiB였다. 다음 마일스톤에서 기준을 그 병합 값으로 옮긴다
@@ -26,9 +27,11 @@ const CAP = BEFORE_M10 + 18 * 1024;
 // 캐릭터 리디자인(PR #21): 새 캐릭터 그림 명령(art/chars · charFrames, gzip 약 21.6KB) · 스타일 설정 · 아틀라스 자세 프레임 ·
 // 정면 그림 UI (DECISIONS 8절 '번들 예산')
 // 따라가는 카메라: 카메라 · 감독(관전) · 맵 조각 아틀라스 · 화면 영역 합성 · 화면 밖 표시 · 미니맵 (DECISIONS 9절 '번들 예산')
-const MILESTONE = { name: '따라가는 카메라', base: 347_785, baseName: 'PR #21 병합', budget: 16 * 1024 };
+// 설정 화면 통합: 탭 넷 설정 화면 · 설정 저장소 · 조작 배치(비율 좌표 · 겹침 막기 · 좌우 반전) 편집 화면 · 판 중 메뉴 · 흔들림 ·
+// 번쩍임 줄이기 · FPS 칩 · 지도 크게 보기 · 소리 묶음 (DECISIONS 11절 '번들 예산') — PR #23 병합 363,451B에서
+const MILESTONE = { name: '설정 화면 통합', base: 363_451, baseName: 'PR #23 병합', budget: 18 * 1024 };
 
-test('JS 번들 gzip: 마일스톤 예산 이하, 상한(리마스터 전 + 18KiB) 아래', { tag: '@core' }, () => {
+test('JS 번들 gzip: 마일스톤 예산 이하, 상한(리마스터 전 + 36KiB) 아래', { tag: '@core' }, () => {
   const dir = join(process.cwd(), 'client/dist/assets');
   let total = 0;
   for (const f of readdirSync(dir))
