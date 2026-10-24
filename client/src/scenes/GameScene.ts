@@ -169,6 +169,9 @@ export class GameScene extends Phaser.Scene {
   private readonly aimHold = new AimHold();
   private readonly aimPointer = { x: 0, y: 0 };
   private readonly aimCursor = new Phaser.Math.Vector2();
+  /** 지난 조준 때 백버퍼 크기 (바뀌었으면 포인터 좌표만 옮겨진 것: AimHold.rebase) */
+  private aimBackingW = 0;
+  private aimBackingH = 0;
   /** 화면 밖 화살표가 피할 사각형 (프레임마다 다시 채운다) */
   private readonly edgeAvoid: { x: number; y: number; w: number; h: number }[] = [];
 
@@ -827,6 +830,13 @@ export class GameScene extends Phaser.Scene {
     // (앞당김 · 따라가기 지연 없이 괴물 가운데, 맵 안으로 자름)를 따라 옮긴 곳을 겨눈다 (aimHold.ts: 앞당김이 조준을 끌지 않고,
     // 맵 끝에 막힌 화면에서는 커서 쪽으로 돈다). 괴물 자리는 이 입력 틱의 예측 상태(me)다 — 그리는 자리(localPos)는 프레임마다
     // 보간해 주사율에 따라 달라, 마우스를 두고 걸을 때 다시 재는 조준이 60Hz · 120Hz에서 달라졌다(frame-independence 시험)
+    // 백버퍼 크기가 바뀌었으면(창 크기 · DPR) 포인터는 같은 게임 자리로 옮겨졌을 뿐 마우스가 움직인 것이 아니다 (aimHold.rebase).
+    // 렌더 프레임에서도 입력 틱을 처리하므로(catchUpInput) 크기 변경 직후 · 카메라 행렬을 다시 맞추기 전에 잴 수 있다
+    if (this.scale.width !== this.aimBackingW || this.scale.height !== this.aimBackingH) {
+      this.aimBackingW = this.scale.width;
+      this.aimBackingH = this.scale.height;
+      this.aimHold.rebase(p);
+    }
     const w = this.cameras.main.getWorldPoint(p.x, p.y, this.aimCursor);
     const body = tileToScreen(me.x, me.y);
     const a = aimAnchor(me.x, me.y, VIEW_TILES_W, VIEW_TILES_H, MAP_W, MAP_H, this.aimAnchorTile);

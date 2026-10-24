@@ -71,6 +71,20 @@ describe('AimHold', () => {
     expect(a.update({ x: 3, y: 3 }, { x: 401, y: 300 }, o, o, 2, 0.7)).toBeCloseTo(-Math.PI / 2, 9);
   });
 
+  it('rebase: 백버퍼 크기 변경으로 포인터 좌표만 옮겨지면 다시 재지 않고 붙잡은 자리를 겨눈다 (첫 재기 전이면 아무 일 없음)', () => {
+    const a = new AimHold();
+    const o = { x: 400, y: 300 };
+    a.rebase({ x: 10, y: 10 });
+    // 아직 잰 적이 없으면 rebase는 무시: 첫 update가 커서 자리를 잰다
+    expect(a.update({ x: 10, y: 10 }, { x: 600, y: 300 }, o, o, 2, 1)).toBeCloseTo(0, 9);
+    // 옛 배율(1.5) → 새 배율(1.04): 포인터 좌표가 바뀌고, 그 틱에는 카메라 행렬이 옛 배율이라 커서 아래 자리가 엉뚱하다
+    a.rebase({ x: 6.94, y: 6.94 });
+    expect(a.update({ x: 6.94, y: 6.94 }, { x: 400, y: 100 }, o, o, 2, 1)).toBeCloseTo(0, 9);
+    expect(a.held).toBe(1);
+    // 그 뒤 실제로 움직이면 다시 잰다
+    expect(a.update({ x: 7, y: 7 }, { x: 400, y: 100 }, o, o, 2, 1)).toBeCloseTo(-Math.PI / 2, 9);
+  });
+
   it('reset 뒤에는 커서 자리가 같아도 다시 잰다 (새 판)', () => {
     const a = new AimHold();
     const pointer = { x: 500, y: 300 };

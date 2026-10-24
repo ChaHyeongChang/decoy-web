@@ -56,6 +56,17 @@ export class AimHold {
     return this.angle;
   }
 
+  /**
+   * 커서는 그대로인데 포인터 좌표만 바뀌었다 (백버퍼 크기가 바뀌어 main.ts rescalePointers가 같은 게임 자리로 옮김):
+   * 다시 재지 않고 붙잡은 자리를 그대로 쓴다. 그 직후 첫 렌더 전에는 카메라 행렬이 아직 옛 배율이라 다시 재면 엉뚱한 월드 자리가
+   * 잡혀 마우스를 움직일 때까지 그 방향으로 붙잡혔다 (내 움직임 고르기 PR 전체 검사: 크기 변경 뒤 조준 50.8° 어긋남)
+   */
+  rebase(pointer: Vec2): void {
+    if (this.angle === null) return;
+    this.px = pointer.x;
+    this.py = pointer.y;
+  }
+
   /** 판 시작 · 조준 준비 전: 지난 판 값을 버린다 */
   reset(): void {
     this.px = Number.NaN;
