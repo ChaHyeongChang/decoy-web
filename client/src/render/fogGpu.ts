@@ -144,12 +144,14 @@ export class FogEdgePipeline extends Phaser.Renderer.WebGL.Pipelines.SinglePipel
     this.applyFollow();
   }
 
-  override onPreRender(): void {
+  /**
+   * 빛 지도 이미지를 그리려고 이 파이프라인을 묶은 뒤 (프로그램이 이미 쓰이는 중): 장식 시계 · 따라가기 값을 올린다.
+   * 예전에는 시계를 onPreRender(프레임 시작)에서 올렸다 — 바뀐 uniform을 올리면 그 프로그램으로 바꾸므로(useProgram) 프레임마다
+   * 프로그램 바꾸기가 둘(이 파이프라인 → 기본) 늘었고, 등록만 되고 쓰이지 않는 파이프라인(품질을 바꾼 뒤)도 그랬다
+   */
+  override onBind(): void {
     // 장식 시계 (테스트에서 멈출 수 있다). 큰 값에서 float 정밀도가 떨어지지 않게 한 시간 주기로 접는다
     this.set1f('uTime', (gfxNow() / 1000) % 3600);
-  }
-
-  override onBind(): void {
     this.applyFollow();
   }
 
