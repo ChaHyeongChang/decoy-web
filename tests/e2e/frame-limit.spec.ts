@@ -248,7 +248,7 @@ test('터치: 진동이 없는 기기에도 프레임 제한이 있고(진동 �
   // 본문은 카드 안에서 스크롤한다: 아래 줄 단추도 닿는다
   for (const id of ['char-style-classic', 'char-style-new', 'reset-char-style']) {
     await page.getByTestId(id).scrollIntoViewIfNeeded();
-    await expect(page.getByTestId(id), id).toBeInViewport({ ratio: 1 });
+    await expect(page.getByTestId(id), id).toBeInViewport({ ratio: 0.98 });
   }
   await openSettings(page, 'controls');
   await expect(page.getByTestId('haptics-on')).toHaveCount(0);
@@ -259,13 +259,14 @@ test('터치: 진동이 없는 기기에도 프레임 제한이 있고(진동 �
   await openSettings(vib.page, 'controls');
   for (const id of ['haptics-on', 'haptics-off', 'tutorial-replay', 'layout-edit']) {
     await vib.page.getByTestId(id).scrollIntoViewIfNeeded();
-    await expect(vib.page.getByTestId(id), `진동 있음 ${id}`).toBeInViewport({ ratio: 1 });
+    // 본문 스크롤 상자 안: 스크롤 위치의 소수점 반올림으로 1px 미만 잘릴 수 있다
+    await expect(vib.page.getByTestId(id), `진동 있음 ${id}`).toBeInViewport({ ratio: 0.98 });
   }
   await press(vib.page.getByTestId('tutorial-replay'));
   const done = vib.page.getByTestId('settings-panel').locator('.life-done');
   await expect(done).toBeVisible();
   await done.scrollIntoViewIfNeeded();
-  await expect(done).toBeInViewport({ ratio: 1 });
+  await expect(done).toBeInViewport({ ratio: 0.98 });
   await expect(vib.page.getByTestId('settings-panel')).toBeInViewport({ ratio: 1 });
   expect([...problems, ...vib.problems]).toEqual([]);
   await vib.context.close();
