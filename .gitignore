@@ -16,6 +16,7 @@ artifacts/characters/_preview/
 test-results/
 playwright-report/
 tests/e2e/.results/
+tests/e2e/.results-*/
 tests/store/.results/
 tests/perf/.results/
 tests/char-art/.results/
