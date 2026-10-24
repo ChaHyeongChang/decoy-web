@@ -949,6 +949,25 @@ describe('내 움직임 고르기 · 잔렉 고치기: 고르게 못 버티면 �
     }
   });
 
+  it('판 중에 잰 화면 주사율이 오르면(120 → 144 · 240) 낮춘 목표는 새 화면의 약수가 되고, 여유가 생기면 새 화면의 사다리를 한 칸씩 끝까지 올린다', () => {
+    for (const [display, steps] of [
+      [144, [144]],
+      [240, [80, 120, 240]],
+    ] as const) {
+      const s = new AdaptiveSession('high', new AutoDowngrade(), 'auto', 120);
+      // 120에서 고르지 않아 60으로
+      s.play(30_000, (_tier, hz) => (hz > 60 ? uneven(110, 0.2) : { fps: hz, workP95: 1, late: 0 }));
+      expect(s.targetHz).toBe(60);
+      // 화면 주사율을 다시 재니 더 높았다 (Pacer.heldHz는 오르기만 한다): 낮춘 60은 새 화면의 가장 가까운 약수
+      s.displayHz = display;
+      expect(s.targetHz).toBe(display === 144 ? 72 : 60);
+      s.play(200_000, (_tier, hz) => ({ fps: hz, workP95: 1, late: 0 }));
+      const ups = s.log.filter((l) => l.action.kind === 'rateUp').map((l) => (l.action as { to: number }).to);
+      expect(ups, `${display}Hz`).toEqual(steps);
+      expect(s.targetHz).toBe(display);
+    }
+  });
+
   it('늦은 프레임이 기준 미만이거나 잠깐뿐이면 120을 그대로 둔다', () => {
     const few = new AdaptiveSession('high', new AutoDowngrade(TOUCH_FPS_WATCH), 'auto', 120);
     expect(few.play(60_000, () => uneven(117, 0.03))).toEqual([]);

@@ -6,7 +6,7 @@
 // 렌더링 최적화: 하향 기준은 목표 FPS에 비례하고(60Hz 기준값 × 기준 목표 / 60, 기준 목표는 120까지), 자동 프레임 제한에서는
 // 품질보다 목표 FPS(60)를 먼저 낮추며, 자동으로 내린 단계는 여유가 이어지면 하나씩 되돌린다(AutoDowngrade).
 import { STORAGE_KEYS, browserStorage, readKey, removeKey, writeKey, type StorageLike } from '../storageKeys';
-import { lowerRate } from './framePacing';
+import { higherRate, lowerRate } from './framePacing';
 import { QUALITY_TIERS, isQualityTier, lowerTier, type QualityTier, type RendererKind } from './presets';
 
 // 저장소 접근은 storageKeys.ts에서만 (M12). 기존 import 경로를 지키려고 다시 내보낸다
@@ -1138,15 +1138,10 @@ export class AutoDowngrade {
       }
       budgetHz = ctx.targetHz;
     } else {
-      // 목표 FPS는 자동 제한이고 화면이 지금 목표보다 빠를 때만 되돌릴 수 있다. 그사이 목표가 다른 이유로 바뀌었으면(화면 주사율이
-      // 오름 등) 이 칸은 되돌릴 대상이 아니다. 한 칸씩 올린다(예산도 그 칸)
+      // 목표 FPS는 자동 제한이고 화면이 지금 목표보다 빠를 때만 되돌릴 수 있다. 지금 목표의 사다리 한 칸 위로 올린다(예산도 그 칸) —
+      // 그사이 잰 화면 주사율이 올라(120 → 144) 쌓아 둔 칸과 지금 목표가 달라도 지금 화면의 사다리로
       if (!ctx.canRateFallback || ctx.displayHz <= ctx.targetHz) return null;
-      if (Math.abs(top.to - ctx.targetHz) > 1e-6) {
-        this.stack.pop();
-        this.up.reset();
-        return null;
-      }
-      budgetHz = Math.min(ctx.displayHz, top.from);
+      budgetHz = higherRate(ctx.displayHz, ctx.targetHz) ?? ctx.displayHz;
     }
     const openAt = Math.max(
       this.matchStartMs + this.watchCfg.warmupMs,
@@ -1161,7 +1156,15 @@ export class AutoDowngrade {
       this.queued = { step: top, fps, workP95: s.workP95 };
       return null;
     }
-    this.probing = top;
+    // 목표 FPS: 실제로 올리는 칸(지금 목표 → 한 칸 위)을 확인한다(되돌리면 지금 목표로). 쌓아 둔 칸을 다 썼는데 아직 화면 주사율
+    // 아래면(판 중 잰 화면 주사율이 올라 사다리가 길어짐) 남은 칸을 하나 쌓는다
+    if (budgetHz < ctx.displayHz - 1e-6 && !this.stack.some((st) => st.kind === 'rate'))
+      this.stack.push({
+        kind: 'rate',
+        from: higherRate(ctx.displayHz, budgetHz) ?? ctx.displayHz,
+        to: budgetHz,
+      });
+    this.probing = { kind: 'rate', from: budgetHz, to: ctx.targetHz };
     this.probation = new UpProbation(
       nowMs,
       this.probationCfg.settleMs,
