@@ -7,7 +7,14 @@ import { sfx } from './audio';
 import { device } from './device';
 import { setCharStyle } from './gfx/charStyle';
 import { pacingHooks } from './gfx/framePacing';
-import { frameStatsInfo, installDrawCounter, sessionFrameStats } from './gfx/frameStats';
+import {
+  FPS_WINDOW_MS,
+  frameStatsInfo,
+  installDrawCounter,
+  sessionFrameStats,
+  type FrameWindow,
+} from './gfx/frameStats';
+import { PACING_WATCH } from './gfx/quality';
 import { freezeGfxClock, gfxState, probeSlot, setFpsOverride } from './gfx/state';
 import type { GameScene } from './scenes/GameScene';
 import { installDebugOverlay, type DebugOverlayData, type OverlayAnchor } from './ui/debugOverlay';
@@ -217,10 +224,22 @@ function overlayAnchor(app: App): OverlayAnchor | null {
   return { left: rect.left + MAP_RECT.x * k + OVERLAY_MAP_INSET, top: rect.top + OVERLAY_TOP_INSET };
 }
 
+/** 오버레이 늦은 프레임 비율 그릇 (4Hz로 다시 쓴다) */
+const LATE_WINDOW: FrameWindow = { fps: 0, intervalAvg: 0, workP95: 0, frames: 0, late: 0 };
+const LATE_AT = { periodMs: 1000 / 60, factor: PACING_WATCH.lateFactor };
+
+/** 최근 1초 늦은 프레임 비율 (지금 목표 주기 기준, 렌더한 프레임이 없으면 null) */
+function lateRatio(): number | null {
+  LATE_AT.periodMs = 1000 / Math.max(1, gfxState.targetHz);
+  const w = sessionFrameStats.window(FPS_WINDOW_MS, LATE_WINDOW, LATE_AT);
+  return w.frames > 1 ? w.late : null;
+}
+
 function overlayData(app: App, hook: DecoyDebug): DebugOverlayData {
   const renderer = hook.renderer;
   return {
     stats: frameStatsInfo(),
+    late: lateRatio(),
     targetHz: gfxState.targetHz,
     displayHz: gfxState.displayHz,
     frameLimit: gfxState.frameLimit,

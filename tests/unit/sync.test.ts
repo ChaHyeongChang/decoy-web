@@ -332,3 +332,156 @@ describe('보간 경로 조각 · 상태 경계 (프레임 독립성)', () => {
     expect(interp.edgeAt('a', 95, 105)).toBe(100);
   });
 });
+
+// ───────────── 내 움직임 고르기 (2026-10-24) ─────────────
+
+describe('내 움직임 고르기: 그린 자리는 입력 틱의 명목 시각부터 보간하고 보정에 튀지 않는다', () => {
+  const dtMs = dt * 1000;
+  /** 열린 바닥에서 오른쪽으로 걷는 생존자 (서버 게임 · 예측기 같은 자리) */
+  const setup = () => {
+    const game = newGame();
+    const me = game.survivors[0]!;
+    me.move.x = 28.5;
+    me.move.y = 16.5;
+    let clock = 0;
+    const pred = new Predictor(balance, dt, () => clock);
+    pred.reconcile(me.move, 0, game.moveEnvFor(me));
+    return { game, me, pred, setClock: (t: number) => (clock = t) };
+  };
+  /** 프레임 사이 그린 자리 이동 ÷ (틱 걸음 × 간격 / 틱 길이) — 1이면 고르다 */
+  const ratios = (xs: { t: number; x: number }[], step: number, from: number): number[] => {
+    const out: number[] = [];
+    for (let i = 1; i < xs.length; i += 1) {
+      const a = xs[i - 1]!;
+      const b = xs[i]!;
+      if (a.t < from) continue;
+      out.push((b.x - a.x) / ((step * (b.t - a.t)) / dtMs));
+    }
+    return out;
+  };
+  /** 늦게 깨는 타이머 (틱 k마다 0~7ms, 시드) */
+  const late = (k: number): number => ((k * 7919) % 71) / 10;
+
+  it('타이머가 늦게 깨도(120Hz 프레임이 막음) 명목 시각으로 보간하면 프레임마다 같은 거리. 처리 시각으로 재면 멈칫 · 튐', () => {
+    const run = (nominal: boolean): { xs: { t: number; x: number }[]; step: number } => {
+      const { game, me, pred, setClock } = setup();
+      const env = game.moveEnvFor(me);
+      const xs: { t: number; x: number }[] = [];
+      let k = 1;
+      let processedAt = 0;
+      let step = 0;
+      for (let f = 1; f <= 120; f += 1) {
+        const t = (f * 1000) / 120;
+        for (;;) {
+          const due = k * dtMs;
+          const fired = due + late(k);
+          // 고친 뒤: 이 프레임 전에 깬 타이머 또는 이 프레임의 따라잡기(GameScene.catchUpInput). 전: 타이머가 깬 뒤에만
+          if (nominal ? due > t : fired > t) break;
+          pred.applyLocal(frame(k, 1, 0), env, nominal ? due : undefined);
+          processedAt = Math.min(fired, t);
+          step = pred.stepDistance;
+          k += 1;
+        }
+        setClock(t);
+        const p = pred.renderPos(1000 / 120, nominal ? undefined : (t - processedAt) / dtMs, t)!;
+        xs.push({ t, x: p.x });
+      }
+      return { xs, step };
+    };
+    const fixed = run(true);
+    const r = ratios(fixed.xs, fixed.step, 3 * dtMs);
+    expect(Math.min(...r)).toBeGreaterThan(0.999);
+    expect(Math.max(...r)).toBeLessThan(1.001);
+    const before = run(false);
+    const rb = ratios(before.xs, before.step, 3 * dtMs);
+    console.log(
+      `[sync] 처리 시각 기준 보간: 프레임 이동 비율 ${Math.min(...rb).toFixed(3)} ~ ${Math.max(...rb).toFixed(3)}`,
+    );
+    expect(Math.min(...rb)).toBeLessThan(0.8);
+    expect(Math.max(...rb)).toBeGreaterThan(1.2);
+  });
+
+  it('타이머가 프레임 vsync 뒤 · 콜백 앞에 깨어 마지막 틱의 명목 시각이 그리는 시각보다 늦어도 앞 구간에서 그려 고르다 (느린 기기)', () => {
+    const { game, me, pred, setClock } = setup();
+    const env = game.moveEnvFor(me);
+    const xs: { t: number; x: number }[] = [];
+    let k = 1;
+    for (let f = 1; f <= 120; f += 1) {
+      const t = (f * 1000) / 120;
+      // 이 프레임 콜백이 vsync보다 4ms 늦게 시작해, 그 사이 명목 시각 t+4ms까지의 틱이 이미 처리됐다
+      while (k * dtMs <= t + 4) {
+        pred.applyLocal(frame(k, 1, 0), env, k * dtMs);
+        k += 1;
+      }
+      setClock(t + 4);
+      xs.push({ t, x: pred.renderPos(1000 / 120, undefined, t)!.x });
+    }
+    const r = ratios(xs, pred.stepDistance, 3 * dtMs);
+    expect(Math.min(...r)).toBeGreaterThan(0.999);
+    expect(Math.max(...r)).toBeLessThan(1.001);
+  });
+
+  it('서버가 마지막 입력까지 처리한 스냅샷(다시 적용할 입력 없음 — 기기 안 연습)에도 보간 구간이 이어져 튀지 않는다', () => {
+    const { game, me, pred, setClock } = setup();
+    const xs: { t: number; x: number }[] = [];
+    let k = 1;
+    let reconciles = 0;
+    let nextSnap = 50;
+    for (let f = 1; f <= 120; f += 1) {
+      const t = (f * 1000) / 120;
+      while (k * dtMs <= t) {
+        const fr = frame(k, 1, 0);
+        pred.applyLocal(fr, game.moveEnvFor(me), k * dtMs);
+        // 서버(기기 안 판)가 바로 그 입력을 처리한다
+        game.queueInput(me.id, [fr]);
+        game.step();
+        k += 1;
+      }
+      setClock(t);
+      if (t >= nextSnap) {
+        nextSnap += 50;
+        const shown = pred.renderPos(0, undefined, t)!.x;
+        pred.reconcile(me.move, me.ack, game.moveEnvFor(me));
+        expect(pred.pendingCount).toBe(0);
+        // 보정 전후 같은 순간의 그린 자리가 같다 (예전: prev = state가 되어 남은 구간만큼 앞으로 튀었다)
+        expect(pred.renderPos(0, undefined, t)!.x).toBeCloseTo(shown, 9);
+        reconciles += 1;
+      }
+      xs.push({ t, x: pred.renderPos(1000 / 120, undefined, t)!.x });
+    }
+    expect(reconciles).toBeGreaterThan(15);
+    const r = ratios(xs, pred.stepDistance, 3 * dtMs);
+    expect(Math.min(...r)).toBeGreaterThan(0.999);
+    expect(Math.max(...r)).toBeLessThan(1.001);
+  });
+
+  it('작은 보정은 그 순간 한 번에 튀지 않고 correctionSmoothMs 안에 서버 경로로 줄어든다', () => {
+    const { game, me, pred, setClock } = setup();
+    const env = game.moveEnvFor(me);
+    for (let k = 1; k <= 3; k += 1) pred.applyLocal(frame(k, 1, 0), env, k * dtMs);
+    const t = 3 * dtMs + 10;
+    setClock(t);
+    const shown = pred.renderPos(0, undefined, t)!.x;
+    // 서버는 세 입력을 처리했는데 0.2타일 더 앞 (밀림 등)
+    const server = { ...pred.state!, x: pred.state!.x + 0.2 };
+    pred.reconcile(server, 3, env);
+    expect(pred.renderPos(0, undefined, t)!.x).toBeCloseTo(shown, 9);
+    const tau = balance.network.correctionSmoothMs;
+    setClock(t + tau);
+    const later = pred.renderPos(0, undefined, t + tau)!.x;
+    // τ 뒤 남은 어긋남은 e^-3 (5%) 아래
+    expect(Math.abs(later - pred.state!.x)).toBeLessThan(0.2 * Math.exp(-3) + 1e-9);
+  });
+
+  it('명목 시각을 모르면(옛 호출) 넘겨준 비율 · 1을 쓴다', () => {
+    const { game, me, pred } = setup();
+    pred.applyLocal(frame(1, 1, 0), game.moveEnvFor(me));
+    expect(pred.lastStepAt).toBeNull();
+    expect(pred.alphaAt(123)).toBe(1);
+    expect(pred.renderPos(16)!.x).toBeCloseTo(pred.state!.x, 12);
+    pred.applyLocal(frame(2, 1, 0), game.moveEnvFor(me), 100);
+    expect(pred.alphaAt(100 + dtMs / 2)).toBeCloseTo(0.5, 12);
+    expect(pred.alphaAt(50)).toBe(0);
+    expect(pred.alphaAt(1000)).toBe(1);
+  });
+});

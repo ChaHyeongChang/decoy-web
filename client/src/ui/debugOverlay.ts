@@ -20,6 +20,11 @@ export const DEBUG_OVERLAY_UPDATE_MS = 250;
 export interface DebugOverlayData {
   /** 프레임 측정 요약 (아직 렌더한 프레임이 없으면 null) */
   stats: FrameStatsInfo | null;
+  /**
+   * 최근 1초 늦은 프레임 비율 (0~1, 간격 ≥ 목표 주기 × 1.5 — vsync를 놓친 프레임, 적응형 목표 FPS의 고르지 않은 프레임 기준).
+   * 모르면 null
+   */
+  late: number | null;
   targetHz: number;
   displayHz: number;
   frameLimit: FrameLimit;
@@ -65,7 +70,7 @@ function drawText(s: FrameStatsInfo | null, renderer: DebugOverlayData['renderer
 /**
  * 펼친 표 (8줄).
  *   FPS 119.8 · 목표 120 · 화면 120Hz · 제한 자동
- *   프레임 8.33ms · p95 8.90ms
+ *   프레임 8.33ms · p95 8.90ms · 늦음 3%
  *   작업 4.10ms · p95 6.02ms
  *   그리기 12회 · 건너뜀 0 · 렌더러 webgl        ← Canvas: 그리기 객체 230개
  *   핑 42ms · 지연설정 0ms · 서버 틱 1234 · 스냅샷 567
@@ -78,7 +83,9 @@ export function formatDebugPanel(d: DebugOverlayData): string {
   return [
     `FPS ${s ? s.fps.toFixed(1) : NONE} · 목표 ${Math.round(d.targetHz)} · 화면 ${Math.round(d.displayHz)}Hz · ` +
       `제한 ${LIMIT_LABEL[d.frameLimit]}`,
-    `프레임 ${ms(s?.intervalAvg)} · p95 ${ms(s?.intervalP95)}`,
+    `프레임 ${ms(s?.intervalAvg)} · p95 ${ms(s?.intervalP95)} · 늦음 ${
+      d.late === null || s === null ? NONE : `${Math.round(d.late * 100)}%`
+    }`,
     `작업 ${ms(s?.workAvg)} · p95 ${ms(s?.workP95)}`,
     `그리기 ${drawText(s, d.renderer)} · 건너뜀 ${s ? s.skipped : NONE} · 렌더러 ${d.renderer}`,
     `핑 ${d.ping.toFixed(0)}ms · 지연설정 ${d.lag}ms · 서버 틱 ${d.tick ?? NONE} · 스냅샷 ${d.snapCount}`,

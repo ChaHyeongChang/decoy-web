@@ -2,11 +2,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   FRAME_MS_TAU,
+  FRAME_TIME_MAX_LAG_MS,
   MAX_FRAME_DELTA_MS,
   STALE_EVENT_FRAMES,
   STALE_EVENT_MS,
   STALL_FRAME_MS,
   frameDeltaMs,
+  frameTimeOf,
   staleEventLimitMs,
   trackFrameMs,
 } from '../../client/src/scenes/staleEvents';
@@ -92,5 +94,18 @@ describe('프레임 간격 (렌더링 최적화: 프레임 독립성)', () => {
     expect(frameDeltaMs(10_000)).toBe(MAX_FRAME_DELTA_MS);
     expect(frameDeltaMs(-3)).toBe(0);
     expect(frameDeltaMs(Number.NaN)).toBe(0);
+  });
+});
+
+describe('내 움직임 고르기: 내 캐릭터 · 카메라를 재는 프레임 시각 (frameTimeOf)', () => {
+  it('rAF 시각(vsync)을 쓴다: 콜백이 늦게 시작한 만큼의 흔들림이 없다', () => {
+    expect(frameTimeOf(1000, 1001.7)).toBe(1000);
+    expect(frameTimeOf(1000, 1000)).toBe(1000);
+  });
+  it('지금보다 뒤 · 이상한 값 · FRAME_TIME_MAX_LAG_MS 넘게 지난 시각이면 지금', () => {
+    expect(frameTimeOf(1002, 1000)).toBe(1000);
+    expect(frameTimeOf(Number.NaN, 1000)).toBe(1000);
+    expect(frameTimeOf(1000 - FRAME_TIME_MAX_LAG_MS - 1, 1000)).toBe(1000);
+    expect(frameTimeOf(1000 - FRAME_TIME_MAX_LAG_MS, 1000)).toBe(1000 - FRAME_TIME_MAX_LAG_MS);
   });
 });

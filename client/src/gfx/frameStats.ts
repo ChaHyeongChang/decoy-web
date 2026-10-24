@@ -28,6 +28,11 @@ export interface FrameWindow {
   workP95: number;
   /** 구간 안 렌더 프레임 수 */
   frames: number;
+  /**
+   * 구간 안 늦은 프레임 비율 (0~1, 내 움직임 고르기): 간격이 목표 주기 × lateFactor 이상인 간격 수 ÷ 간격 수.
+   * 목표 주기를 주지 않았거나 FPS를 덮어썼으면 0
+   */
+  late: number;
 }
 
 /** 덮어쓴 FPS로 쓸 수 있는 값인가 (유한한 양수) */
@@ -210,10 +215,16 @@ export class FrameStats {
    * 최근 ms 구간 요약: rAF 시각이 (가장 최근 − ms, 가장 최근]인 렌더 프레임들. out을 주면 거기에 채워 돌려준다
    * (적응형 품질이 프레임마다 불러도 할당하지 않게)
    */
-  window(ms: number, out: FrameWindow = { fps: 0, intervalAvg: 0, workP95: 0, frames: 0 }): FrameWindow {
+  window(
+    ms: number,
+    out: FrameWindow = { fps: 0, intervalAvg: 0, workP95: 0, frames: 0, late: 0 },
+    late?: { periodMs: number; factor: number },
+  ): FrameWindow {
     let frames = 0;
     let nInt = 0;
     let sumInt = 0;
+    let nLate = 0;
+    const lateMs = late && late.periodMs > 0 ? late.periodMs * late.factor : Infinity;
     if (this.count > 0) {
       const newest = this.times[this.slot(0)] ?? 0;
       const from = newest - ms;
@@ -226,6 +237,7 @@ export class FrameStats {
         if (!Number.isNaN(iv)) {
           nInt++;
           sumInt += iv;
+          if (iv >= lateMs) nLate++;
         }
       }
     }
@@ -235,8 +247,10 @@ export class FrameStats {
       out.fps = f;
       out.intervalAvg = 1000 / f;
       out.workP95 = 1000 / f;
+      out.late = 0;
       return out;
     }
+    out.late = nInt > 0 ? nLate / nInt : 0;
     out.fps = sumInt > 0 ? (nInt * 1000) / sumInt : 0;
     out.intervalAvg = nInt > 0 ? sumInt / nInt : 0;
     out.workP95 = percentileInPlace(this.scratch, frames, P95);

@@ -1,6 +1,6 @@
 // 따라가는 카메라 (순수, Phaser를 import하지 않는다). 단위는 타일.
 // - 보이는 창 크기(viewW × viewH 타일)는 확대 수준만으로 정해진다(ui/layout.ts setCamZoom): 기기와 상관없이 같은 타일 수
-// - 플레이어를 부드럽게 따라간다(시간 상수 τ의 지수 감쇠 — 프레임 수와 무관). 맵 밖은 보이지 않게 창을 맵 안으로 자른다
+// - 플레이어를 부드럽게 따라간다(시간 상수 τ의 지수 감쇠 — 프레임 수 · 간격과 무관, followLinear). 맵 밖은 보이지 않게 창을 맵 안으로 자른다
 // - 괴물은 조준 방향으로 화면을 앞당긴다: 지금 시야 부채꼴 ∪ 근접 원의 외접 사각형이 창 안에 들어오게 가운데를 옮기되,
 //   괴물 몸은 가장자리에서 lookMargin 안쪽에 남긴다. 앞당김은 따로 천천히(lookTauS) 따라가 조준을 빨리 돌려도 화면이
 //   휘둘리지 않는다
@@ -157,6 +157,21 @@ export function follow(dtMs: number, tauS: number): number {
   return 1 - Math.exp(-dtMs / 1000 / tauS);
 }
 
+/**
+ * 따라가기 한 걸음 (내 움직임 고르기): 목표가 지난 프레임 x0에서 이번 프레임 x1까지 곧게 움직였다고 보고 지수 감쇠
+ * (dp/dt = (x − p) / τ)를 정확히 푼 값. 같은 빠르기로 걸으면 따라가기 늦음이 프레임 간격과 상관없이 늘 빠르기 × τ라,
+ * 8.3 · 16.7ms가 섞인 프레임에서도 화면 위 내 자리가 흔들리지 않는다(예전 식은 늦음이 빠르기 × (τ − 간격 / 2) 남짓이라 간격마다
+ * 달랐다). 목표가 서 있으면 예전 식(follow)과 같다. 간격이 아주 짧으면 예전 식(빠르기 나눗셈의 자리 잃음을 피한다)
+ */
+export function followLinear(p0: number, x0: number, x1: number, dtMs: number, tauS: number): number {
+  if (!(dtMs > 0)) return p0;
+  if (!(tauS > 0)) return x1;
+  if (dtMs < 0.05) return p0 + (x1 - p0) * follow(dtMs, tauS);
+  const a = Math.exp(-dtMs / 1000 / tauS);
+  const vTau = ((x1 - x0) * tauS * 1000) / dtMs;
+  return x1 - vTau + (p0 - x0 + vTau) * a;
+}
+
 export interface CameraTarget {
   /** 따라갈 자리 (타일) */
   x: number;
@@ -185,6 +200,9 @@ export class CameraRig {
   private readonly pos: Vec2 = { x: 0, y: 0 };
   private hasPos = false;
   private readonly look: Vec2 = { x: 0, y: 0 };
+  /** 지난 프레임 목표 · 앞당김 목표 (followLinear: 그 사이 곧게 움직였다고 본다) */
+  private readonly lastTarget: Vec2 = { x: 0, y: 0 };
+  private readonly lastLook: Vec2 = { x: 0, y: 0 };
   /** 마지막 가운데 (타일) */
   readonly center: Vec2 = { x: MAP_W / 2, y: MAP_H / 2 };
   /** 돌려주는 프레임 (그릇 하나를 다시 쓴다) */
@@ -230,13 +248,15 @@ export class CameraRig {
       this.look.x = lx;
       this.look.y = ly;
     } else {
-      const a = follow(dtMs, t.tauS);
-      this.pos.x += (t.x - this.pos.x) * a;
-      this.pos.y += (t.y - this.pos.y) * a;
-      const b = follow(dtMs, CAMERA.lookTauS);
-      this.look.x += (lx - this.look.x) * b;
-      this.look.y += (ly - this.look.y) * b;
+      this.pos.x = followLinear(this.pos.x, this.lastTarget.x, t.x, dtMs, t.tauS);
+      this.pos.y = followLinear(this.pos.y, this.lastTarget.y, t.y, dtMs, t.tauS);
+      this.look.x = followLinear(this.look.x, this.lastLook.x, lx, dtMs, CAMERA.lookTauS);
+      this.look.y = followLinear(this.look.y, this.lastLook.y, ly, dtMs, CAMERA.lookTauS);
     }
+    this.lastTarget.x = t.x;
+    this.lastTarget.y = t.y;
+    this.lastLook.x = lx;
+    this.lastLook.y = ly;
     let cx = this.pos.x + this.look.x;
     let cy = this.pos.y + this.look.y;
     if (t.keepInside) {

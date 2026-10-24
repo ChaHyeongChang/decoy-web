@@ -1,0 +1,5267 @@
+{
+  "webgl-phone-medium-runner": {
+    "scene": {
+      "name": "webgl-phone-medium-runner",
+      "project": "webgl",
+      "mode": "practice",
+      "role": "runner",
+      "hz": null,
+      "phone": true,
+      "quality": "medium",
+      "scale": 0.4
+    },
+    "walk": {
+      "segments": 6,
+      "pairs": 359,
+      "fps": 57.9,
+      "interval": {
+        "mean": 17.269,
+        "p5": 16.6,
+        "p50": 16.7,
+        "p95": 16.8,
+        "max": 33.4,
+        "min": 16.5
+      },
+      "work": {
+        "mean": 1.901,
+        "p5": 0.6,
+        "p50": 1.6,
+        "p95": 4.8,
+        "max": 9.9,
+        "min": 0.4
+      },
+      "devPerTile": 101.4,
+      "speedPer60": 8.45,
+      "d1": {
+        "mean": 8.756,
+        "p5": 8.417,
+        "p50": 8.467,
+        "p95": 8.518,
+        "max": 16.934,
+        "min": 8.366
+      },
+      "r1": {
+        "mean": 1,
+        "p5": 1,
+        "p50": 1,
+        "p95": 1,
+        "max": 1,
+        "min": 1
+      },
+      "stall1": 0,
+      "jump1": 0,
+      "err1": {
+        "mean": 0,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0,
+        "min": 0
+      },
+      "cv1": 0.18,
+      "d2": {
+        "mean": 9.055,
+        "p5": 4.375,
+        "p50": 8.75,
+        "p95": 13.125,
+        "max": 43.75,
+        "min": 4.375
+      },
+      "r2": {
+        "mean": 1.03,
+        "p5": 0.52,
+        "p50": 1.033,
+        "p95": 1.04,
+        "max": 2.599,
+        "min": 0.517
+      },
+      "stall2": 0,
+      "jump2": 13,
+      "err2": {
+        "mean": 0.861,
+        "p5": 0.283,
+        "p50": 0.283,
+        "p95": 4.092,
+        "max": 26.866,
+        "min": 0.232
+      },
+      "d3": {
+        "mean": 0.333,
+        "p5": 0,
+        "p50": 0.001,
+        "p95": 1.104,
+        "max": 28.801,
+        "min": 0
+      },
+      "range3": 19.94,
+      "behindMs": {
+        "mean": 17.418,
+        "p5": 5.533,
+        "p50": 22.233,
+        "p95": 39.1,
+        "max": 39.4,
+        "min": 5.433
+      },
+      "pending": 0.92
+    },
+    "latency": {
+      "trials": 32,
+      "move": {
+        "mean": 32.709,
+        "p5": 13.2,
+        "p50": 29.8,
+        "p95": 55.6,
+        "max": 63.5,
+        "min": 13.1
+      },
+      "camera": {
+        "mean": 61.806,
+        "p5": 31.2,
+        "p50": 65.5,
+        "p95": 89,
+        "max": 100.1,
+        "min": 25.4
+      },
+      "visible": {
+        "mean": 32.709,
+        "p5": 13.2,
+        "p50": 29.8,
+        "p95": 55.6,
+        "max": 63.5,
+        "min": 13.1
+      }
+    },
+    "excerpt": [
+      {
+        "dt": 16.7,
+        "d1": 8.47,
+        "d2": 8.75,
+        "s3": 0.02,
+        "pend": 2
+      },
+      {
+        "dt": 16.6,
+        "d1": 8.42,
+        "d2": 8.75,
+        "s3": 0.05,
+        "pend": 1
+      },
+      {
+        "dt": 16.7,
+        "d1": 8.47,
+        "d2": 8.75,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 16.6,
+        "d1": 8.42,
+        "d2": 4.37,
+        "s3": 0.08,
+        "pend": 0
+      },
+      {
+        "dt": 16.7,
+        "d1": 8.47,
+        "d2": 8.75,
+        "s3": 0.09,
+        "pend": 1
+      },
+      {
+        "dt": 33.4,
+        "d1": 16.93,
+        "d2": 17.5,
+        "s3": 0.12,
+        "pend": 2
+      },
+      {
+        "dt": 16.6,
+        "d1": 8.42,
+        "d2": 8.75,
+        "s3": 0.12,
+        "pend": 0
+      },
+      {
+        "dt": 16.7,
+        "d1": 8.47,
+        "d2": 8.75,
+        "s3": 0.13,
+        "pend": 0
+      },
+      {
+        "dt": 16.7,
+        "d1": 8.47,
+        "d2": 8.75,
+        "s3": 0.14,
+        "pend": 0
+      },
+      {
+        "dt": 16.6,
+        "d1": 8.42,
+        "d2": 8.75,
+        "s3": 0.15,
+        "pend": 1
+      },
+      {
+        "dt": 16.7,
+        "d1": 8.47,
+        "d2": 8.75,
+        "s3": 0.15,
+        "pend": 1
+      },
+      {
+        "dt": 16.7,
+        "d1": 8.47,
+        "d2": 8.75,
+        "s3": 0.16,
+        "pend": 2
+      },
+      {
+        "dt": 16.7,
+        "d1": 8.47,
+        "d2": 8.75,
+        "s3": 0.16,
+        "pend": 0
+      },
+      {
+        "dt": 16.6,
+        "d1": 8.42,
+        "d2": 8.75,
+        "s3": 0.16,
+        "pend": 1
+      },
+      {
+        "dt": 33.3,
+        "d1": 16.88,
+        "d2": 17.5,
+        "s3": 0.17,
+        "pend": 1
+      },
+      {
+        "dt": 16.7,
+        "d1": 8.47,
+        "d2": 4.37,
+        "s3": 0.17,
+        "pend": 1
+      },
+      {
+        "dt": 16.7,
+        "d1": 8.47,
+        "d2": 8.75,
+        "s3": 0.17,
+        "pend": 2
+      },
+      {
+        "dt": 16.7,
+        "d1": 8.47,
+        "d2": 8.75,
+        "s3": 0.17,
+        "pend": 0
+      },
+      {
+        "dt": 16.6,
+        "d1": 8.42,
+        "d2": 8.75,
+        "s3": 0.18,
+        "pend": 1
+      },
+      {
+        "dt": 16.7,
+        "d1": 8.47,
+        "d2": 8.75,
+        "s3": 0.18,
+        "pend": 0
+      },
+      {
+        "dt": 16.6,
+        "d1": 8.42,
+        "d2": 8.75,
+        "s3": 0.18,
+        "pend": 1
+      },
+      {
+        "dt": 16.6,
+        "d1": 8.42,
+        "d2": 8.75,
+        "s3": 0.18,
+        "pend": 1
+      },
+      {
+        "dt": 16.7,
+        "d1": 8.47,
+        "d2": 8.75,
+        "s3": 0.18,
+        "pend": 2
+      },
+      {
+        "dt": 16.7,
+        "d1": 8.47,
+        "d2": 8.75,
+        "s3": 0.18,
+        "pend": 0
+      }
+    ],
+    "heavyFrames": 0,
+    "gfx": {
+      "quality": "medium",
+      "qualitySource": "url",
+      "renderer": "webgl",
+      "touch": true,
+      "layout": "touchWide",
+      "viewW": 2114,
+      "viewH": 952,
+      "dpr": 2.625,
+      "cssW": 915,
+      "cssH": 411.671875,
+      "backingW": 549,
+      "backingH": 247,
+      "zoom": 0.2596972563859981,
+      "scaleOverride": 0.4,
+      "textRes": 0.2596972563859981,
+      "compositeScale": 0.2596972563859981,
+      "minimapScale": 0.2596972563859981,
+      "fogMode": "gpu",
+      "ambient": 0.45,
+      "features": {
+        "perfTier": "none",
+        "dprCap": 1.5,
+        "maxPixels": 3686400,
+        "minBackingH": 0,
+        "floorDprCap": 1.5,
+        "compositeCap": 1.5,
+        "lightPxPerTile": 12,
+        "fog": "gpu",
+        "fogShader": false,
+        "bloom": false,
+        "vignette": "overlay",
+        "colorGrade": true,
+        "particleCap": 150,
+        "halfFrameAnims": false,
+        "autoDowngrade": "on",
+        "autoMinFps": 50,
+        "msaaBytes": 4339296,
+        "textureBytes": 4337888,
+        "atlasBakeMs": 7.4,
+        "atlasBytes": 210944,
+        "atlasTexPerWorld": 0.724,
+        "atlasStyle": "classic",
+        "atlasZoom": 0.2596972563859981,
+        "atlasDrawingsMade": 0,
+        "hudBakes": 1,
+        "hudBakeMs": 33.8,
+        "mapCacheBytes": 9625944,
+        "mapCacheCount": 3,
+        "glowBakeMs": 13,
+        "mapBakeBands": 16,
+        "mapBakeMs": 11.3,
+        "mapBakeScale": 0.724,
+        "mapBakeTotalMs": 99.6,
+        "miniBakeMs": 11.6,
+        "chunkAtlasBytes": 1714608,
+        "chunkTiles": 8,
+        "chunkBakes": 10,
+        "chunkBakeMs": 6.5,
+        "chunkBakeMsMax": 3.8,
+        "glowLayer": "static",
+        "liftPieces": 168,
+        "fogSkips": 498,
+        "mapGfxCmds": 0,
+        "mapLayerObjects": 20,
+        "fogCommitMs": 0.23,
+        "postFxBytes": 542412,
+        "badgeGfxCmds": 0,
+        "chunkUploadPx": 214326,
+        "chunkImages": 6,
+        "liftShown": 12,
+        "particles": 150,
+        "dust": 15,
+        "fogDynUploads": 411,
+        "badgeUploadPx": 46669,
+        "badgeBakes": 45,
+        "charGfxArcs": 0,
+        "charGfxFills": 0,
+        "culledObjects": 23
+      },
+      "downgrades": 0,
+      "measuredFps": 60,
+      "frameLimit": "auto",
+      "displayHz": 60,
+      "targetHz": 60,
+      "upgrades": 0,
+      "charStyle": "classic",
+      "camZoom": 3
+    }
+  },
+  "p60-runner": {
+    "scene": {
+      "name": "p60-runner",
+      "project": "canvas",
+      "mode": "practice",
+      "role": "runner",
+      "hz": null
+    },
+    "walk": {
+      "segments": 6,
+      "pairs": 392,
+      "fps": 60,
+      "interval": {
+        "mean": 16.666,
+        "p5": 16.6,
+        "p50": 16.7,
+        "p95": 16.7,
+        "max": 16.8,
+        "min": 16.5
+      },
+      "work": {
+        "mean": 2.967,
+        "p5": 0.8,
+        "p50": 1.3,
+        "p95": 7.3,
+        "max": 13.7,
+        "min": 0.7
+      },
+      "devPerTile": 44.63,
+      "speedPer60": 3.719,
+      "d1": {
+        "mean": 3.719,
+        "p5": 3.704,
+        "p50": 3.726,
+        "p95": 3.726,
+        "max": 3.749,
+        "min": 3.682
+      },
+      "r1": {
+        "mean": 1,
+        "p5": 1,
+        "p50": 1,
+        "p95": 1,
+        "max": 1,
+        "min": 1
+      },
+      "stall1": 0,
+      "jump1": 0,
+      "err1": {
+        "mean": 0,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0,
+        "min": 0
+      },
+      "cv1": 0.003,
+      "d2": {
+        "mean": 3.717,
+        "p5": 3,
+        "p50": 4,
+        "p95": 4,
+        "max": 4,
+        "min": 3
+      },
+      "r2": {
+        "mean": 1,
+        "p5": 0.805,
+        "p50": 1.073,
+        "p95": 1.08,
+        "max": 1.08,
+        "min": 0.8
+      },
+      "stall2": 0,
+      "jump2": 0,
+      "err2": {
+        "mean": 0.405,
+        "p5": 0.274,
+        "p50": 0.296,
+        "p95": 0.726,
+        "max": 0.749,
+        "min": 0.251
+      },
+      "d3": {
+        "mean": 0.001,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0.008,
+        "max": 0.013,
+        "min": 0
+      },
+      "range3": 0.09,
+      "behindMs": {
+        "mean": 17.655,
+        "p5": 0.1,
+        "p50": 16.8,
+        "p95": 33.5,
+        "max": 33.733,
+        "min": 0.033
+      },
+      "pending": 1.1
+    },
+    "latency": {
+      "trials": 32,
+      "move": {
+        "mean": 31.594,
+        "p5": 14.6,
+        "p50": 31.2,
+        "p95": 47.6,
+        "max": 50.7,
+        "min": 14.3
+      },
+      "camera": {
+        "mean": 46.125,
+        "p5": 22.2,
+        "p50": 46.1,
+        "p95": 66.9,
+        "max": 72.7,
+        "min": 6.6
+      },
+      "visible": {
+        "mean": 31.594,
+        "p5": 14.6,
+        "p50": 31.2,
+        "p95": 47.6,
+        "max": 50.7,
+        "min": 14.3
+      }
+    },
+    "excerpt": [
+      {
+        "dt": 16.7,
+        "d1": 3.73,
+        "d2": 4,
+        "s3": 0.01,
+        "pend": 1
+      },
+      {
+        "dt": 16.6,
+        "d1": 3.7,
+        "d2": 3,
+        "s3": 0.02,
+        "pend": 1
+      },
+      {
+        "dt": 16.6,
+        "d1": 3.7,
+        "d2": 4,
+        "s3": 0.02,
+        "pend": 1
+      },
+      {
+        "dt": 16.7,
+        "d1": 3.73,
+        "d2": 4,
+        "s3": 0.03,
+        "pend": 1
+      },
+      {
+        "dt": 16.7,
+        "d1": 3.73,
+        "d2": 4,
+        "s3": 0.03,
+        "pend": 2
+      },
+      {
+        "dt": 16.6,
+        "d1": 3.7,
+        "d2": 3,
+        "s3": 0.04,
+        "pend": 2
+      },
+      {
+        "dt": 16.7,
+        "d1": 3.73,
+        "d2": 4,
+        "s3": 0.04,
+        "pend": 1
+      },
+      {
+        "dt": 16.7,
+        "d1": 3.73,
+        "d2": 4,
+        "s3": 0.05,
+        "pend": 1
+      },
+      {
+        "dt": 16.6,
+        "d1": 3.7,
+        "d2": 3,
+        "s3": 0.05,
+        "pend": 1
+      },
+      {
+        "dt": 16.7,
+        "d1": 3.73,
+        "d2": 4,
+        "s3": 0.05,
+        "pend": 1
+      },
+      {
+        "dt": 16.7,
+        "d1": 3.73,
+        "d2": 4,
+        "s3": 0.05,
+        "pend": 2
+      },
+      {
+        "dt": 16.7,
+        "d1": 3.73,
+        "d2": 4,
+        "s3": 0.05,
+        "pend": 2
+      },
+      {
+        "dt": 16.6,
+        "d1": 3.7,
+        "d2": 3,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 16.7,
+        "d1": 3.73,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 16.6,
+        "d1": 3.7,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 16.8,
+        "d1": 3.75,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 16.6,
+        "d1": 3.7,
+        "d2": 3,
+        "s3": 0.06,
+        "pend": 2
+      },
+      {
+        "dt": 16.6,
+        "d1": 3.7,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 2
+      },
+      {
+        "dt": 16.8,
+        "d1": 3.75,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 16.6,
+        "d1": 3.7,
+        "d2": 3,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 16.7,
+        "d1": 3.73,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 16.6,
+        "d1": 3.7,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 16.7,
+        "d1": 3.73,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 2
+      },
+      {
+        "dt": 16.6,
+        "d1": 3.7,
+        "d2": 3,
+        "s3": 0.07,
+        "pend": 2
+      }
+    ],
+    "heavyFrames": 0,
+    "gfx": {
+      "quality": "low",
+      "qualitySource": "url",
+      "renderer": "canvas",
+      "touch": false,
+      "layout": "pc",
+      "viewW": 1920,
+      "viewH": 1080,
+      "dpr": 1,
+      "cssW": 960,
+      "cssH": 540,
+      "backingW": 960,
+      "backingH": 540,
+      "zoom": 0.5,
+      "scaleOverride": null,
+      "textRes": 0.5,
+      "compositeScale": 0.5,
+      "minimapScale": 0.5,
+      "fogMode": "canvas",
+      "ambient": 0.45,
+      "features": {
+        "perfTier": "none",
+        "dprCap": 1,
+        "maxPixels": 2073600,
+        "minBackingH": 0,
+        "floorDprCap": 1,
+        "compositeCap": 1,
+        "lightPxPerTile": 8,
+        "fog": "canvas",
+        "fogShader": false,
+        "bloom": false,
+        "vignette": "none",
+        "colorGrade": false,
+        "particleCap": 40,
+        "halfFrameAnims": true,
+        "autoDowngrade": "on",
+        "autoMinFps": 40,
+        "msaaBytes": 0,
+        "textureBytes": 3152616,
+        "atlasBakeMs": 9.6,
+        "atlasBytes": 593920,
+        "atlasTexPerWorld": 1.395,
+        "atlasStyle": "classic",
+        "atlasZoom": 0.5,
+        "atlasDrawingsMade": 0,
+        "hudBakes": 1,
+        "hudBakeMs": 26.9,
+        "mapCacheBytes": 12628320,
+        "mapCacheCount": 2,
+        "glowBakeMs": 4.3,
+        "mapBakeBands": 16,
+        "mapBakeMs": 14.1,
+        "mapBakeScale": 1.395,
+        "mapBakeTotalMs": 65.9,
+        "miniBakeMs": 8.3,
+        "glowLayer": "static",
+        "mapGfxCmds": 0,
+        "mapLayerObjects": 1,
+        "fogCommitMs": 0.21,
+        "postFxBytes": 0,
+        "badgeGfxCmds": 0,
+        "particles": 40,
+        "dust": 0,
+        "badgeUploadPx": 614754,
+        "badgeBakes": 45,
+        "charGfxArcs": 0,
+        "charGfxFills": 0,
+        "culledObjects": 15,
+        "fogSkips": 504
+      },
+      "downgrades": 0,
+      "measuredFps": 60,
+      "frameLimit": "auto",
+      "displayHz": 60,
+      "targetHz": 60,
+      "upgrades": 0,
+      "charStyle": "classic",
+      "camZoom": 3
+    }
+  },
+  "p120-runner": {
+    "scene": {
+      "name": "p120-runner",
+      "project": "canvas",
+      "mode": "practice",
+      "role": "runner",
+      "hz": 120
+    },
+    "walk": {
+      "segments": 6,
+      "pairs": 789,
+      "fps": 119.5,
+      "interval": {
+        "mean": 8.365,
+        "p5": 8.333,
+        "p50": 8.333,
+        "p95": 8.333,
+        "max": 16.667,
+        "min": 8.333
+      },
+      "work": {
+        "mean": 1.879,
+        "p5": 0.7,
+        "p50": 1,
+        "p95": 6.4,
+        "max": 7.8,
+        "min": 0.5
+      },
+      "devPerTile": 44.63,
+      "speedPer60": 3.719,
+      "d1": {
+        "mean": 1.866,
+        "p5": 1.859,
+        "p50": 1.859,
+        "p95": 1.859,
+        "max": 3.719,
+        "min": 1.859
+      },
+      "r1": {
+        "mean": 1,
+        "p5": 1,
+        "p50": 1,
+        "p95": 1,
+        "max": 1,
+        "min": 1
+      },
+      "stall1": 0,
+      "jump1": 0,
+      "err1": {
+        "mean": 0,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0,
+        "min": 0
+      },
+      "cv1": 0.061,
+      "d2": {
+        "mean": 1.863,
+        "p5": 1,
+        "p50": 2,
+        "p95": 2,
+        "max": 4,
+        "min": 1
+      },
+      "r2": {
+        "mean": 0.998,
+        "p5": 0.538,
+        "p50": 1.076,
+        "p95": 1.076,
+        "max": 1.076,
+        "min": 0.538
+      },
+      "stall2": 0,
+      "jump2": 0,
+      "err2": {
+        "mean": 0.245,
+        "p5": 0.141,
+        "p50": 0.141,
+        "p95": 0.859,
+        "max": 0.859,
+        "min": 0.141
+      },
+      "d3": {
+        "mean": 0.001,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0.004,
+        "max": 0.007,
+        "min": 0
+      },
+      "range3": 0.09,
+      "behindMs": {
+        "mean": 17.749,
+        "p5": 5.233,
+        "p50": 21.9,
+        "p95": 30.233,
+        "max": 30.233,
+        "min": 5.233
+      },
+      "pending": 0.64
+    },
+    "latency": {
+      "trials": 32,
+      "move": {
+        "mean": 18.716,
+        "p5": 6.1,
+        "p50": 18.9,
+        "p95": 34.7,
+        "max": 35.7,
+        "min": 4.8
+      },
+      "camera": {
+        "mean": 42.194,
+        "p5": 20.9,
+        "p50": 41.4,
+        "p95": 64.4,
+        "max": 69.5,
+        "min": 19.7
+      },
+      "visible": {
+        "mean": 29.034,
+        "p5": 14.5,
+        "p50": 28.3,
+        "p95": 44.3,
+        "max": 45.3,
+        "min": 13.4
+      }
+    },
+    "excerpt": [
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.01,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.01,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.01,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 1,
+        "s3": 0.02,
+        "pend": 2
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.02,
+        "pend": 0
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.03,
+        "pend": 0
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.03,
+        "pend": 0
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.03,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.04,
+        "pend": 0
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.04,
+        "pend": 0
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 1,
+        "s3": 0.04,
+        "pend": 0
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.04,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.05,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.05,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.05,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.05,
+        "pend": 2
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.05,
+        "pend": 2
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 1,
+        "s3": 0.05,
+        "pend": 0
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.06,
+        "pend": 0
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.06,
+        "pend": 0
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.06,
+        "pend": 0
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.06,
+        "pend": 0
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.06,
+        "pend": 1
+      }
+    ],
+    "heavyFrames": 0,
+    "gfx": {
+      "quality": "low",
+      "qualitySource": "url",
+      "renderer": "canvas",
+      "touch": false,
+      "layout": "pc",
+      "viewW": 1920,
+      "viewH": 1080,
+      "dpr": 1,
+      "cssW": 960,
+      "cssH": 540,
+      "backingW": 960,
+      "backingH": 540,
+      "zoom": 0.5,
+      "scaleOverride": null,
+      "textRes": 0.5,
+      "compositeScale": 0.5,
+      "minimapScale": 0.5,
+      "fogMode": "canvas",
+      "ambient": 0.45,
+      "features": {
+        "perfTier": "none",
+        "dprCap": 1,
+        "maxPixels": 2073600,
+        "minBackingH": 0,
+        "floorDprCap": 1,
+        "compositeCap": 1,
+        "lightPxPerTile": 8,
+        "fog": "canvas",
+        "fogShader": false,
+        "bloom": false,
+        "vignette": "none",
+        "colorGrade": false,
+        "particleCap": 40,
+        "halfFrameAnims": true,
+        "autoDowngrade": "on",
+        "autoMinFps": 40,
+        "msaaBytes": 0,
+        "textureBytes": 3152616,
+        "atlasBakeMs": 7.7,
+        "atlasBytes": 593920,
+        "atlasTexPerWorld": 1.395,
+        "atlasStyle": "classic",
+        "atlasZoom": 0.5,
+        "atlasDrawingsMade": 0,
+        "hudBakes": 1,
+        "hudBakeMs": 42.3,
+        "mapCacheBytes": 12628320,
+        "mapCacheCount": 2,
+        "glowBakeMs": 4.5,
+        "mapBakeBands": 16,
+        "mapBakeMs": 15.6,
+        "mapBakeScale": 1.395,
+        "mapBakeTotalMs": 72.4,
+        "miniBakeMs": 7.5,
+        "glowLayer": "static",
+        "mapGfxCmds": 0,
+        "mapLayerObjects": 1,
+        "fogCommitMs": 0.12,
+        "postFxBytes": 0,
+        "badgeGfxCmds": 0,
+        "particles": 40,
+        "dust": 0,
+        "badgeUploadPx": 254898,
+        "badgeBakes": 21,
+        "charGfxArcs": 0,
+        "charGfxFills": 0,
+        "culledObjects": 9,
+        "fogSkips": 476
+      },
+      "downgrades": 0,
+      "measuredFps": 120,
+      "frameLimit": "auto",
+      "displayHz": 120,
+      "targetHz": 120,
+      "upgrades": 0,
+      "charStyle": "classic",
+      "camZoom": 3
+    }
+  },
+  "p90-runner": {
+    "scene": {
+      "name": "p90-runner",
+      "project": "canvas",
+      "mode": "practice",
+      "role": "runner",
+      "hz": 120,
+      "heavy": {
+        "prob": 0.3,
+        "ms": 9
+      }
+    },
+    "walk": {
+      "segments": 6,
+      "pairs": 646,
+      "fps": 98.9,
+      "interval": {
+        "mean": 10.114,
+        "p5": 8.333,
+        "p50": 8.333,
+        "p95": 16.667,
+        "max": 25,
+        "min": 8.333
+      },
+      "work": {
+        "mean": 1.587,
+        "p5": 0.7,
+        "p50": 0.9,
+        "p95": 5.9,
+        "max": 7.9,
+        "min": 0.5
+      },
+      "devPerTile": 44.63,
+      "speedPer60": 3.719,
+      "d1": {
+        "mean": 2.257,
+        "p5": 1.859,
+        "p50": 1.859,
+        "p95": 3.719,
+        "max": 5.578,
+        "min": 1.859
+      },
+      "r1": {
+        "mean": 1,
+        "p5": 1,
+        "p50": 1,
+        "p95": 1,
+        "max": 1,
+        "min": 1
+      },
+      "stall1": 0,
+      "jump1": 0,
+      "err1": {
+        "mean": 0,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0,
+        "min": 0
+      },
+      "cv1": 0.37,
+      "d2": {
+        "mean": 2.254,
+        "p5": 1,
+        "p50": 2,
+        "p95": 4,
+        "max": 6,
+        "min": 1
+      },
+      "r2": {
+        "mean": 1.001,
+        "p5": 0.538,
+        "p50": 1.076,
+        "p95": 1.076,
+        "max": 1.076,
+        "min": 0.538
+      },
+      "stall2": 0,
+      "jump2": 0,
+      "err2": {
+        "mean": 0.274,
+        "p5": 0.141,
+        "p50": 0.141,
+        "p95": 0.859,
+        "max": 0.859,
+        "min": 0.141
+      },
+      "d3": {
+        "mean": 0.001,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0.004,
+        "max": 0.011,
+        "min": 0
+      },
+      "range3": 0.08,
+      "behindMs": {
+        "mean": 14.305,
+        "p5": 1.767,
+        "p50": 18.433,
+        "p95": 26.767,
+        "max": 26.767,
+        "min": 1.767
+      },
+      "pending": 0.85
+    },
+    "latency": {
+      "trials": 32,
+      "move": {
+        "mean": 22.644,
+        "p5": 3.6,
+        "p50": 22.7,
+        "p95": 42.8,
+        "max": 42.9,
+        "min": 2
+      },
+      "camera": {
+        "mean": 40.206,
+        "p5": 12.6,
+        "p50": 40.5,
+        "p95": 66,
+        "max": 71.2,
+        "min": 4.8
+      },
+      "visible": {
+        "mean": 22.644,
+        "p5": 3.6,
+        "p50": 22.7,
+        "p95": 42.8,
+        "max": 42.9,
+        "min": 2
+      }
+    },
+    "excerpt": [
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 3,
+        "s3": 0.01,
+        "pend": 0
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.01,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.02,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.02,
+        "pend": 0
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.02,
+        "pend": 0
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.03,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 1,
+        "s3": 0.03,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.03,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.03,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.04,
+        "pend": 2
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.04,
+        "pend": 2
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.04,
+        "pend": 0
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 3,
+        "s3": 0.04,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.05,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.05,
+        "pend": 0
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.05,
+        "pend": 0
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.05,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 3,
+        "s3": 0.05,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.05,
+        "pend": 2
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.06,
+        "pend": 2
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.06,
+        "pend": 0
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 2,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 1.86,
+        "d2": 1,
+        "s3": 0.06,
+        "pend": 0
+      }
+    ],
+    "heavyFrames": 537,
+    "gfx": {
+      "quality": "low",
+      "qualitySource": "url",
+      "renderer": "canvas",
+      "touch": false,
+      "layout": "pc",
+      "viewW": 1920,
+      "viewH": 1080,
+      "dpr": 1,
+      "cssW": 960,
+      "cssH": 540,
+      "backingW": 960,
+      "backingH": 540,
+      "zoom": 0.5,
+      "scaleOverride": null,
+      "textRes": 0.5,
+      "compositeScale": 0.5,
+      "minimapScale": 0.5,
+      "fogMode": "canvas",
+      "ambient": 0.45,
+      "features": {
+        "perfTier": "none",
+        "dprCap": 1,
+        "maxPixels": 2073600,
+        "minBackingH": 0,
+        "floorDprCap": 1,
+        "compositeCap": 1,
+        "lightPxPerTile": 8,
+        "fog": "canvas",
+        "fogShader": false,
+        "bloom": false,
+        "vignette": "none",
+        "colorGrade": false,
+        "particleCap": 40,
+        "halfFrameAnims": true,
+        "autoDowngrade": "on",
+        "autoMinFps": 40,
+        "msaaBytes": 0,
+        "textureBytes": 3152616,
+        "atlasBakeMs": 8.6,
+        "atlasBytes": 593920,
+        "atlasTexPerWorld": 1.395,
+        "atlasStyle": "classic",
+        "atlasZoom": 0.5,
+        "atlasDrawingsMade": 0,
+        "hudBakes": 1,
+        "hudBakeMs": 31,
+        "mapCacheBytes": 12628320,
+        "mapCacheCount": 2,
+        "glowBakeMs": 3.6,
+        "mapBakeBands": 16,
+        "mapBakeMs": 9.8,
+        "mapBakeScale": 1.395,
+        "mapBakeTotalMs": 63.7,
+        "miniBakeMs": 7.6,
+        "glowLayer": "static",
+        "mapGfxCmds": 0,
+        "mapLayerObjects": 1,
+        "fogCommitMs": 0.12,
+        "postFxBytes": 0,
+        "badgeGfxCmds": 0,
+        "particles": 40,
+        "dust": 0,
+        "badgeUploadPx": 434826,
+        "badgeBakes": 33,
+        "charGfxArcs": 0,
+        "charGfxFills": 0,
+        "culledObjects": 15,
+        "fogSkips": 516
+      },
+      "downgrades": 0,
+      "measuredFps": 120,
+      "frameLimit": "auto",
+      "displayHz": 120,
+      "targetHz": 120,
+      "upgrades": 0,
+      "charStyle": "classic",
+      "camZoom": 3
+    }
+  },
+  "p120-limit60-runner": {
+    "scene": {
+      "name": "p120-limit60-runner",
+      "project": "canvas",
+      "mode": "practice",
+      "role": "runner",
+      "hz": 120,
+      "limit": "60"
+    },
+    "walk": {
+      "segments": 6,
+      "pairs": 392,
+      "fps": 60.1,
+      "interval": {
+        "mean": 16.645,
+        "p5": 16.667,
+        "p50": 16.667,
+        "p95": 16.667,
+        "max": 25,
+        "min": 8.333
+      },
+      "work": {
+        "mean": 2.779,
+        "p5": 0.7,
+        "p50": 1.2,
+        "p95": 7.2,
+        "max": 8.1,
+        "min": 0
+      },
+      "devPerTile": 44.63,
+      "speedPer60": 3.723,
+      "d1": {
+        "mean": 3.719,
+        "p5": 3.719,
+        "p50": 3.719,
+        "p95": 3.719,
+        "max": 3.719,
+        "min": 3.719
+      },
+      "r1": {
+        "mean": 1.008,
+        "p5": 0.992,
+        "p50": 1,
+        "p95": 1,
+        "max": 2,
+        "min": 0.662
+      },
+      "stall1": 0,
+      "jump1": 5,
+      "err1": {
+        "mean": 0.047,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0.029,
+        "max": 1.903,
+        "min": 0
+      },
+      "cv1": 0,
+      "d2": {
+        "mean": 3.709,
+        "p5": 3,
+        "p50": 4,
+        "p95": 4,
+        "max": 4,
+        "min": 3
+      },
+      "r2": {
+        "mean": 1.006,
+        "p5": 0.801,
+        "p50": 1.076,
+        "p95": 1.076,
+        "max": 2.151,
+        "min": 0.534
+      },
+      "stall2": 0,
+      "jump2": 5,
+      "err2": {
+        "mean": 0.443,
+        "p5": 0.252,
+        "p50": 0.281,
+        "p95": 0.748,
+        "max": 2.621,
+        "min": 0.252
+      },
+      "d3": {
+        "mean": 0.001,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0.008,
+        "max": 0.014,
+        "min": 0
+      },
+      "range3": 0.09,
+      "behindMs": {
+        "mean": 24.079,
+        "p5": 15.612,
+        "p50": 32.151,
+        "p95": 32.4,
+        "max": 32.4,
+        "min": 15.612
+      },
+      "pending": 0.86
+    },
+    "latency": {
+      "trials": 32,
+      "move": {
+        "mean": 19.134,
+        "p5": 2.5,
+        "p50": 15,
+        "p95": 40.2,
+        "max": 40.2,
+        "min": 1.8
+      },
+      "camera": {
+        "mean": 48.934,
+        "p5": 29.4,
+        "p50": 48.5,
+        "p95": 69,
+        "max": 75.2,
+        "min": 15.2
+      },
+      "visible": {
+        "mean": 35.838,
+        "p5": 21,
+        "p50": 34.2,
+        "p95": 53,
+        "max": 54.5,
+        "min": 18.6
+      }
+    },
+    "excerpt": [
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.01,
+        "pend": 2
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 3,
+        "s3": 0.02,
+        "pend": 0
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.03,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.04,
+        "pend": 0
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 3,
+        "s3": 0.04,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.05,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 2
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 3,
+        "s3": 0.06,
+        "pend": 0
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.07,
+        "pend": 0
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.07,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 3,
+        "s3": 0.07,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.07,
+        "pend": 2
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 0
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 3,
+        "s3": 0.08,
+        "pend": 0
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 3,
+        "s3": 0.08,
+        "pend": 2
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 0
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 0
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 3,
+        "s3": 0.09,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.09,
+        "pend": 1
+      }
+    ],
+    "heavyFrames": 0,
+    "gfx": {
+      "quality": "low",
+      "qualitySource": "url",
+      "renderer": "canvas",
+      "touch": false,
+      "layout": "pc",
+      "viewW": 1920,
+      "viewH": 1080,
+      "dpr": 1,
+      "cssW": 960,
+      "cssH": 540,
+      "backingW": 960,
+      "backingH": 540,
+      "zoom": 0.5,
+      "scaleOverride": null,
+      "textRes": 0.5,
+      "compositeScale": 0.5,
+      "minimapScale": 0.5,
+      "fogMode": "canvas",
+      "ambient": 0.45,
+      "features": {
+        "perfTier": "none",
+        "dprCap": 1,
+        "maxPixels": 2073600,
+        "minBackingH": 0,
+        "floorDprCap": 1,
+        "compositeCap": 1,
+        "lightPxPerTile": 8,
+        "fog": "canvas",
+        "fogShader": false,
+        "bloom": false,
+        "vignette": "none",
+        "colorGrade": false,
+        "particleCap": 40,
+        "halfFrameAnims": true,
+        "autoDowngrade": "on",
+        "autoMinFps": 40,
+        "msaaBytes": 0,
+        "textureBytes": 3152616,
+        "atlasBakeMs": 7.6,
+        "atlasBytes": 593920,
+        "atlasTexPerWorld": 1.395,
+        "atlasStyle": "classic",
+        "atlasZoom": 0.5,
+        "atlasDrawingsMade": 0,
+        "hudBakes": 1,
+        "hudBakeMs": 28.8,
+        "mapCacheBytes": 12628320,
+        "mapCacheCount": 2,
+        "glowBakeMs": 6.2,
+        "mapBakeBands": 16,
+        "mapBakeMs": 15.8,
+        "mapBakeScale": 1.395,
+        "mapBakeTotalMs": 66.7,
+        "miniBakeMs": 16.4,
+        "glowLayer": "static",
+        "mapGfxCmds": 0,
+        "mapLayerObjects": 1,
+        "fogCommitMs": 0.15,
+        "postFxBytes": 0,
+        "badgeGfxCmds": 0,
+        "particles": 40,
+        "dust": 0,
+        "badgeUploadPx": 434826,
+        "badgeBakes": 33,
+        "charGfxArcs": 0,
+        "charGfxFills": 0,
+        "culledObjects": 15,
+        "fogSkips": 506
+      },
+      "downgrades": 0,
+      "measuredFps": 60,
+      "frameLimit": "60",
+      "displayHz": 120,
+      "targetHz": 60,
+      "upgrades": 0,
+      "charStyle": "classic",
+      "camZoom": 3
+    }
+  },
+  "p90-limit60-runner": {
+    "scene": {
+      "name": "p90-limit60-runner",
+      "project": "canvas",
+      "mode": "practice",
+      "role": "runner",
+      "hz": 120,
+      "heavy": {
+        "prob": 0.3,
+        "ms": 9
+      },
+      "limit": "60"
+    },
+    "walk": {
+      "segments": 6,
+      "pairs": 389,
+      "fps": 59.7,
+      "interval": {
+        "mean": 16.752,
+        "p5": 8.333,
+        "p50": 16.667,
+        "p95": 25,
+        "max": 33.333,
+        "min": 8.333
+      },
+      "work": {
+        "mean": 2.447,
+        "p5": 0.1,
+        "p50": 1.1,
+        "p95": 6.5,
+        "max": 7.7,
+        "min": 0
+      },
+      "devPerTile": 44.63,
+      "speedPer60": 3.719,
+      "d1": {
+        "mean": 3.738,
+        "p5": 3.719,
+        "p50": 3.719,
+        "p95": 3.719,
+        "max": 7.438,
+        "min": 1.859
+      },
+      "r1": {
+        "mean": 1.031,
+        "p5": 0.672,
+        "p50": 1,
+        "p95": 1.333,
+        "max": 2.015,
+        "min": 0.667
+      },
+      "stall1": 0,
+      "jump1": 18,
+      "err1": {
+        "mean": 0.209,
+        "p5": 0,
+        "p50": 0,
+        "p95": 1.859,
+        "max": 1.874,
+        "min": 0
+      },
+      "cv1": 0.101,
+      "d2": {
+        "mean": 3.735,
+        "p5": 3,
+        "p50": 4,
+        "p95": 4,
+        "max": 8,
+        "min": 2
+      },
+      "r2": {
+        "mean": 1.028,
+        "p5": 0.723,
+        "p50": 1.076,
+        "p95": 1.434,
+        "max": 2.151,
+        "min": 0.538
+      },
+      "stall2": 0,
+      "jump2": 19,
+      "err2": {
+        "mean": 0.549,
+        "p5": 0.253,
+        "p50": 0.281,
+        "p95": 1.578,
+        "max": 2.578,
+        "min": 0.126
+      },
+      "d3": {
+        "mean": 0.001,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0.007,
+        "max": 0.021,
+        "min": 0
+      },
+      "range3": 0.08,
+      "behindMs": {
+        "mean": 19.726,
+        "p5": 11.413,
+        "p50": 11.588,
+        "p95": 28.383,
+        "max": 28.383,
+        "min": 3.143
+      },
+      "pending": 0.86
+    },
+    "latency": {
+      "trials": 32,
+      "move": {
+        "mean": 20.131,
+        "p5": 1.2,
+        "p50": 21.9,
+        "p95": 39.7,
+        "max": 40.6,
+        "min": 0.9
+      },
+      "camera": {
+        "mean": 48.613,
+        "p5": 6,
+        "p50": 52,
+        "p95": 70.5,
+        "max": 72.5,
+        "min": 1.7
+      },
+      "visible": {
+        "mean": 20.131,
+        "p5": 1.2,
+        "p50": 21.9,
+        "p95": 39.7,
+        "max": 40.6,
+        "min": 0.9
+      }
+    },
+    "excerpt": [
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.01,
+        "pend": 0
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.02,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.03,
+        "pend": 0
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 3,
+        "s3": 0.03,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.04,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.04,
+        "pend": 2
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 3,
+        "s3": 0.05,
+        "pend": 0
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.05,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.05,
+        "pend": 0
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 3,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 2
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 0
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 3,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.07,
+        "pend": 0
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.07,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.07,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 3,
+        "s3": 0.07,
+        "pend": 2
+      },
+      {
+        "dt": 25,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.07,
+        "pend": 0
+      },
+      {
+        "dt": 8.33,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.07,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 3,
+        "s3": 0.07,
+        "pend": 0
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.07,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.07,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 3.72,
+        "d2": 4,
+        "s3": 0.07,
+        "pend": 2
+      }
+    ],
+    "heavyFrames": 546,
+    "gfx": {
+      "quality": "low",
+      "qualitySource": "url",
+      "renderer": "canvas",
+      "touch": false,
+      "layout": "pc",
+      "viewW": 1920,
+      "viewH": 1080,
+      "dpr": 1,
+      "cssW": 960,
+      "cssH": 540,
+      "backingW": 960,
+      "backingH": 540,
+      "zoom": 0.5,
+      "scaleOverride": null,
+      "textRes": 0.5,
+      "compositeScale": 0.5,
+      "minimapScale": 0.5,
+      "fogMode": "canvas",
+      "ambient": 0.45,
+      "features": {
+        "perfTier": "none",
+        "dprCap": 1,
+        "maxPixels": 2073600,
+        "minBackingH": 0,
+        "floorDprCap": 1,
+        "compositeCap": 1,
+        "lightPxPerTile": 8,
+        "fog": "canvas",
+        "fogShader": false,
+        "bloom": false,
+        "vignette": "none",
+        "colorGrade": false,
+        "particleCap": 40,
+        "halfFrameAnims": true,
+        "autoDowngrade": "on",
+        "autoMinFps": 40,
+        "msaaBytes": 0,
+        "textureBytes": 3152616,
+        "atlasBakeMs": 4.4,
+        "atlasBytes": 593920,
+        "atlasTexPerWorld": 1.395,
+        "atlasStyle": "classic",
+        "atlasZoom": 0.5,
+        "atlasDrawingsMade": 0,
+        "hudBakes": 1,
+        "hudBakeMs": 33.2,
+        "mapCacheBytes": 12628320,
+        "mapCacheCount": 2,
+        "glowBakeMs": 3.8,
+        "mapBakeBands": 16,
+        "mapBakeMs": 15.5,
+        "mapBakeScale": 1.395,
+        "mapBakeTotalMs": 63.2,
+        "miniBakeMs": 7.3,
+        "glowLayer": "static",
+        "mapGfxCmds": 0,
+        "mapLayerObjects": 1,
+        "fogCommitMs": 0.14,
+        "postFxBytes": 0,
+        "badgeGfxCmds": 0,
+        "particles": 40,
+        "dust": 0,
+        "badgeUploadPx": 584766,
+        "badgeBakes": 43,
+        "charGfxArcs": 0,
+        "charGfxFills": 0,
+        "culledObjects": 15,
+        "fogSkips": 510
+      },
+      "downgrades": 0,
+      "measuredFps": 60,
+      "frameLimit": "60",
+      "displayHz": 120,
+      "targetHz": 60,
+      "upgrades": 0,
+      "charStyle": "classic",
+      "camZoom": 3
+    }
+  },
+  "p60-runner-cpu4": {
+    "scene": {
+      "name": "p60-runner-cpu4",
+      "project": "canvas",
+      "mode": "practice",
+      "role": "runner",
+      "hz": null,
+      "cpu": 4
+    },
+    "walk": {
+      "segments": 6,
+      "pairs": 214,
+      "fps": 33.2,
+      "interval": {
+        "mean": 30.139,
+        "p5": 16.6,
+        "p50": 33.3,
+        "p95": 50.1,
+        "max": 83.3,
+        "min": 16.5
+      },
+      "work": {
+        "mean": 18.432,
+        "p5": 3.6,
+        "p50": 21.7,
+        "p95": 38.2,
+        "max": 56.6,
+        "min": 2.8
+      },
+      "devPerTile": 44.63,
+      "speedPer60": 3.719,
+      "d1": {
+        "mean": 6.725,
+        "p5": 3.704,
+        "p50": 7.43,
+        "p95": 11.179,
+        "max": 18.586,
+        "min": 3.682
+      },
+      "r1": {
+        "mean": 1,
+        "p5": 1,
+        "p50": 1,
+        "p95": 1,
+        "max": 1,
+        "min": 1
+      },
+      "stall1": 0,
+      "jump1": 0,
+      "err1": {
+        "mean": 0,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0,
+        "min": 0
+      },
+      "cv1": 0.468,
+      "d2": {
+        "mean": 6.724,
+        "p5": 3,
+        "p50": 7,
+        "p95": 12,
+        "max": 19,
+        "min": 3
+      },
+      "r2": {
+        "mean": 1.007,
+        "p5": 0.81,
+        "p50": 1.022,
+        "p95": 1.08,
+        "max": 1.086,
+        "min": 0.805
+      },
+      "stall2": 0,
+      "jump2": 0,
+      "err2": {
+        "mean": 0.384,
+        "p5": 0.156,
+        "p50": 0.408,
+        "p95": 0.726,
+        "max": 0.882,
+        "min": 0.118
+      },
+      "d3": {
+        "mean": 0.002,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0.012,
+        "max": 0.021,
+        "min": 0
+      },
+      "range3": 0.07,
+      "behindMs": {
+        "mean": 20.733,
+        "p5": 2.167,
+        "p50": 19.1,
+        "p95": 35.9,
+        "max": 52.267,
+        "min": 2.1
+      },
+      "pending": 0.98
+    },
+    "latency": {
+      "trials": 32,
+      "move": {
+        "mean": 24.797,
+        "p5": 5.3,
+        "p50": 23.9,
+        "p95": 51,
+        "max": 51.5,
+        "min": 5.2
+      },
+      "camera": {
+        "mean": 59.031,
+        "p5": 22.8,
+        "p50": 61.4,
+        "p95": 89.9,
+        "max": 90.1,
+        "min": 21.8
+      },
+      "visible": {
+        "mean": 24.797,
+        "p5": 5.3,
+        "p50": 23.9,
+        "p95": 51,
+        "max": 51.5,
+        "min": 5.2
+      }
+    },
+    "excerpt": [
+      {
+        "dt": 16.7,
+        "d1": 3.73,
+        "d2": 4,
+        "s3": 0.01,
+        "pend": 1
+      },
+      {
+        "dt": 33.3,
+        "d1": 7.43,
+        "d2": 7,
+        "s3": 0.02,
+        "pend": 0
+      },
+      {
+        "dt": 33.4,
+        "d1": 7.45,
+        "d2": 8,
+        "s3": 0.03,
+        "pend": 1
+      },
+      {
+        "dt": 33.3,
+        "d1": 7.43,
+        "d2": 7,
+        "s3": 0.04,
+        "pend": 0
+      },
+      {
+        "dt": 16.6,
+        "d1": 3.7,
+        "d2": 4,
+        "s3": 0.04,
+        "pend": 0
+      },
+      {
+        "dt": 50,
+        "d1": 11.16,
+        "d2": 11,
+        "s3": 0.05,
+        "pend": 1
+      },
+      {
+        "dt": 16.7,
+        "d1": 3.73,
+        "d2": 4,
+        "s3": 0.05,
+        "pend": 2
+      },
+      {
+        "dt": 33.3,
+        "d1": 7.43,
+        "d2": 7,
+        "s3": 0.05,
+        "pend": 2
+      },
+      {
+        "dt": 16.7,
+        "d1": 3.73,
+        "d2": 4,
+        "s3": 0.05,
+        "pend": 1
+      },
+      {
+        "dt": 50,
+        "d1": 11.16,
+        "d2": 11,
+        "s3": 0.06,
+        "pend": 0
+      },
+      {
+        "dt": 50,
+        "d1": 11.16,
+        "d2": 11,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 16.7,
+        "d1": 3.73,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 50,
+        "d1": 11.16,
+        "d2": 11,
+        "s3": 0.06,
+        "pend": 2
+      },
+      {
+        "dt": 16.6,
+        "d1": 3.7,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 0
+      },
+      {
+        "dt": 33.4,
+        "d1": 7.45,
+        "d2": 7,
+        "s3": 0.06,
+        "pend": 0
+      },
+      {
+        "dt": 16.6,
+        "d1": 3.7,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 0
+      },
+      {
+        "dt": 33.3,
+        "d1": 7.43,
+        "d2": 7,
+        "s3": 0.06,
+        "pend": 0
+      },
+      {
+        "dt": 16.7,
+        "d1": 3.73,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 0
+      },
+      {
+        "dt": 33.3,
+        "d1": 7.43,
+        "d2": 8,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 16.7,
+        "d1": 3.73,
+        "d2": 3,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 50,
+        "d1": 11.16,
+        "d2": 12,
+        "s3": 0.06,
+        "pend": 0
+      },
+      {
+        "dt": 33.4,
+        "d1": 7.45,
+        "d2": 7,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 83.3,
+        "d1": 18.59,
+        "d2": 19,
+        "s3": 0.06,
+        "pend": 3
+      },
+      {
+        "dt": 66.7,
+        "d1": 14.88,
+        "d2": 14,
+        "s3": 0.06,
+        "pend": 2
+      }
+    ],
+    "heavyFrames": 0,
+    "gfx": {
+      "quality": "low",
+      "qualitySource": "url",
+      "renderer": "canvas",
+      "touch": false,
+      "layout": "pc",
+      "viewW": 1920,
+      "viewH": 1080,
+      "dpr": 1,
+      "cssW": 960,
+      "cssH": 540,
+      "backingW": 960,
+      "backingH": 540,
+      "zoom": 0.5,
+      "scaleOverride": null,
+      "textRes": 0.5,
+      "compositeScale": 0.5,
+      "minimapScale": 0.5,
+      "fogMode": "canvas",
+      "ambient": 0.45,
+      "features": {
+        "perfTier": "none",
+        "dprCap": 1,
+        "maxPixels": 2073600,
+        "minBackingH": 0,
+        "floorDprCap": 1,
+        "compositeCap": 1,
+        "lightPxPerTile": 8,
+        "fog": "canvas",
+        "fogShader": false,
+        "bloom": false,
+        "vignette": "none",
+        "colorGrade": false,
+        "particleCap": 40,
+        "halfFrameAnims": true,
+        "autoDowngrade": "on",
+        "autoMinFps": 40,
+        "msaaBytes": 0,
+        "textureBytes": 3152616,
+        "atlasBakeMs": 7.4,
+        "atlasBytes": 593920,
+        "atlasTexPerWorld": 1.395,
+        "atlasStyle": "classic",
+        "atlasZoom": 0.5,
+        "atlasDrawingsMade": 0,
+        "hudBakes": 1,
+        "hudBakeMs": 33.1,
+        "mapCacheBytes": 12628320,
+        "mapCacheCount": 2,
+        "glowBakeMs": 4.5,
+        "mapBakeBands": 16,
+        "mapBakeMs": 16.4,
+        "mapBakeScale": 1.395,
+        "mapBakeTotalMs": 70.6,
+        "miniBakeMs": 12,
+        "glowLayer": "static",
+        "mapGfxCmds": 0,
+        "mapLayerObjects": 1,
+        "fogCommitMs": 0.87,
+        "postFxBytes": 0,
+        "badgeGfxCmds": 0,
+        "particles": 40,
+        "dust": 0,
+        "badgeUploadPx": 374850,
+        "badgeBakes": 29,
+        "charGfxArcs": 0,
+        "charGfxFills": 0,
+        "culledObjects": 11,
+        "fogSkips": 498
+      },
+      "downgrades": 0,
+      "measuredFps": 60,
+      "frameLimit": "auto",
+      "displayHz": 60,
+      "targetHz": 60,
+      "upgrades": 0,
+      "charStyle": "classic",
+      "camZoom": 3
+    }
+  },
+  "p60-runner-cpu6": {
+    "scene": {
+      "name": "p60-runner-cpu6",
+      "project": "canvas",
+      "mode": "practice",
+      "role": "runner",
+      "hz": null,
+      "cpu": 6
+    },
+    "walk": {
+      "segments": 6,
+      "pairs": 100,
+      "fps": 15.9,
+      "interval": {
+        "mean": 62.831,
+        "p5": 16.7,
+        "p50": 66.6,
+        "p95": 100,
+        "max": 116.6,
+        "min": 16.6
+      },
+      "work": {
+        "mean": 43.182,
+        "p5": 6.4,
+        "p50": 43.5,
+        "p95": 62.9,
+        "max": 79.6,
+        "min": 5.3
+      },
+      "devPerTile": 44.63,
+      "speedPer60": 3.719,
+      "d1": {
+        "mean": 14.019,
+        "p5": 3.726,
+        "p50": 14.86,
+        "p95": 22.312,
+        "max": 26.016,
+        "min": 3.704
+      },
+      "r1": {
+        "mean": 1,
+        "p5": 1,
+        "p50": 1,
+        "p95": 1,
+        "max": 1,
+        "min": 0.999
+      },
+      "stall1": 0,
+      "jump1": 0,
+      "err1": {
+        "mean": 0,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0.001,
+        "max": 0.011,
+        "min": 0
+      },
+      "cv1": 0.331,
+      "d2": {
+        "mean": 14.02,
+        "p5": 4,
+        "p50": 15,
+        "p95": 22,
+        "max": 26,
+        "min": 3
+      },
+      "r2": {
+        "mean": 1.002,
+        "p5": 0.941,
+        "p50": 1.008,
+        "p95": 1.076,
+        "max": 1.08,
+        "min": 0.805
+      },
+      "stall2": 0,
+      "jump2": 0,
+      "err2": {
+        "mean": 0.299,
+        "p5": 0.095,
+        "p50": 0.156,
+        "p95": 0.882,
+        "max": 0.882,
+        "min": 0.016
+      },
+      "d3": {
+        "mean": 0.012,
+        "p5": 0,
+        "p50": 0.001,
+        "p95": 0.033,
+        "max": 0.385,
+        "min": 0
+      },
+      "range3": 0.2,
+      "behindMs": {
+        "mean": 21.625,
+        "p5": 8.433,
+        "p50": 25.168,
+        "p95": 42.1,
+        "max": 58.4,
+        "min": 8.367
+      },
+      "pending": 3.86
+    },
+    "latency": {
+      "trials": 32,
+      "move": {
+        "mean": 33.287,
+        "p5": 7.4,
+        "p50": 28.4,
+        "p95": 75,
+        "max": 110,
+        "min": 6.8
+      },
+      "camera": {
+        "mean": 58.987,
+        "p5": 7.7,
+        "p50": 56.6,
+        "p95": 141.2,
+        "max": 150.1,
+        "min": 7.4
+      },
+      "visible": {
+        "mean": 33.287,
+        "p5": 7.4,
+        "p50": 28.4,
+        "p95": 75,
+        "max": 110,
+        "min": 6.8
+      }
+    },
+    "excerpt": [
+      {
+        "dt": 116.6,
+        "d1": 26.02,
+        "d2": 26,
+        "s3": 0.02,
+        "pend": 3
+      },
+      {
+        "dt": 116.6,
+        "d1": 26.02,
+        "d2": 26,
+        "s3": 0.03,
+        "pend": 6
+      },
+      {
+        "dt": 66.7,
+        "d1": 14.88,
+        "d2": 15,
+        "s3": 0.03,
+        "pend": 2
+      },
+      {
+        "dt": 83.4,
+        "d1": 18.61,
+        "d2": 18,
+        "s3": 0.04,
+        "pend": 0
+      },
+      {
+        "dt": 83.3,
+        "d1": 18.59,
+        "d2": 19,
+        "s3": 0.04,
+        "pend": 2
+      },
+      {
+        "dt": 66.7,
+        "d1": 14.88,
+        "d2": 15,
+        "s3": 0.04,
+        "pend": 3
+      },
+      {
+        "dt": 66.6,
+        "d1": 14.86,
+        "d2": 15,
+        "s3": 0.04,
+        "pend": 4
+      },
+      {
+        "dt": 83.4,
+        "d1": 18.61,
+        "d2": 18,
+        "s3": 0.04,
+        "pend": 3
+      },
+      {
+        "dt": 83.3,
+        "d1": 18.59,
+        "d2": 19,
+        "s3": 0.04,
+        "pend": 3
+      },
+      {
+        "dt": 83.3,
+        "d1": 18.59,
+        "d2": 18,
+        "s3": 0.04,
+        "pend": 5
+      },
+      {
+        "dt": 66.7,
+        "d1": 14.88,
+        "d2": 15,
+        "s3": 0.04,
+        "pend": 2
+      },
+      {
+        "dt": 100,
+        "d1": 22.31,
+        "d2": 23,
+        "s3": 0.04,
+        "pend": 5
+      }
+    ],
+    "heavyFrames": 0,
+    "gfx": {
+      "quality": "low",
+      "qualitySource": "url",
+      "renderer": "canvas",
+      "touch": false,
+      "layout": "pc",
+      "viewW": 1920,
+      "viewH": 1080,
+      "dpr": 1,
+      "cssW": 960,
+      "cssH": 540,
+      "backingW": 960,
+      "backingH": 540,
+      "zoom": 0.5,
+      "scaleOverride": null,
+      "textRes": 0.5,
+      "compositeScale": 0.5,
+      "minimapScale": 0.5,
+      "fogMode": "canvas",
+      "ambient": 0.45,
+      "features": {
+        "perfTier": "none",
+        "dprCap": 1,
+        "maxPixels": 2073600,
+        "minBackingH": 0,
+        "floorDprCap": 1,
+        "compositeCap": 1,
+        "lightPxPerTile": 8,
+        "fog": "canvas",
+        "fogShader": false,
+        "bloom": false,
+        "vignette": "none",
+        "colorGrade": false,
+        "particleCap": 40,
+        "halfFrameAnims": true,
+        "autoDowngrade": "on",
+        "autoMinFps": 40,
+        "msaaBytes": 0,
+        "textureBytes": 3152616,
+        "atlasBakeMs": 12.1,
+        "atlasBytes": 593920,
+        "atlasTexPerWorld": 1.395,
+        "atlasStyle": "classic",
+        "atlasZoom": 0.5,
+        "atlasDrawingsMade": 0,
+        "hudBakes": 1,
+        "hudBakeMs": 36.7,
+        "mapCacheBytes": 12628320,
+        "mapCacheCount": 2,
+        "glowBakeMs": 7.6,
+        "mapBakeBands": 16,
+        "mapBakeMs": 17.9,
+        "mapBakeScale": 1.395,
+        "mapBakeTotalMs": 85.7,
+        "miniBakeMs": 8.2,
+        "glowLayer": "static",
+        "mapGfxCmds": 0,
+        "mapLayerObjects": 1,
+        "fogCommitMs": 0.98,
+        "postFxBytes": 0,
+        "badgeGfxCmds": 0,
+        "particles": 40,
+        "dust": 0,
+        "badgeUploadPx": 104958,
+        "badgeBakes": 11,
+        "charGfxArcs": 0,
+        "charGfxFills": 0,
+        "culledObjects": 4,
+        "fogSkips": 342
+      },
+      "downgrades": 0,
+      "measuredFps": 60,
+      "frameLimit": "auto",
+      "displayHz": 60,
+      "targetHz": 60,
+      "upgrades": 0,
+      "charStyle": "classic",
+      "camZoom": 3
+    }
+  },
+  "p60-monster": {
+    "scene": {
+      "name": "p60-monster",
+      "project": "canvas",
+      "mode": "practice",
+      "role": "monster",
+      "hz": null
+    },
+    "walk": {
+      "segments": 6,
+      "pairs": 394,
+      "fps": 60,
+      "interval": {
+        "mean": 16.666,
+        "p5": 16.6,
+        "p50": 16.7,
+        "p95": 16.7,
+        "max": 16.8,
+        "min": 16.5
+      },
+      "work": {
+        "mean": 3.399,
+        "p5": 0.7,
+        "p50": 2.8,
+        "p95": 6.9,
+        "max": 11.6,
+        "min": 0.5
+      },
+      "devPerTile": 44.63,
+      "speedPer60": 4.091,
+      "d1": {
+        "mean": 4.09,
+        "p5": 4.074,
+        "p50": 4.099,
+        "p95": 4.099,
+        "max": 4.123,
+        "min": 4.05
+      },
+      "r1": {
+        "mean": 1,
+        "p5": 1,
+        "p50": 1,
+        "p95": 1,
+        "max": 1,
+        "min": 1
+      },
+      "stall1": 0,
+      "jump1": 0,
+      "err1": {
+        "mean": 0,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0,
+        "min": 0
+      },
+      "cv1": 0.003,
+      "d2": {
+        "mean": 4.081,
+        "p5": 4,
+        "p50": 4,
+        "p95": 5,
+        "max": 5,
+        "min": 4
+      },
+      "r2": {
+        "mean": 0.998,
+        "p5": 0.976,
+        "p50": 0.976,
+        "p95": 1.22,
+        "max": 1.227,
+        "min": 0.97
+      },
+      "stall2": 0,
+      "jump2": 0,
+      "err2": {
+        "mean": 0.156,
+        "p5": 0.074,
+        "p50": 0.099,
+        "p95": 0.901,
+        "max": 0.926,
+        "min": 0.05
+      },
+      "d3": {
+        "mean": 0.001,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0.008,
+        "max": 0.014,
+        "min": 0
+      },
+      "range3": 0.09,
+      "behindMs": {
+        "mean": 18.762,
+        "p5": 0.1,
+        "p50": 16.767,
+        "p95": 33.433,
+        "max": 33.633,
+        "min": 0.033
+      },
+      "pending": 0.65
+    },
+    "latency": {
+      "trials": 32,
+      "move": {
+        "mean": 33.359,
+        "p5": 15.7,
+        "p50": 31.6,
+        "p95": 45.7,
+        "max": 48.2,
+        "min": 14.5
+      },
+      "camera": {
+        "mean": 51.916,
+        "p5": 34.7,
+        "p50": 50.5,
+        "p95": 68.7,
+        "max": 72.3,
+        "min": 30.8
+      },
+      "visible": {
+        "mean": 33.359,
+        "p5": 15.7,
+        "p50": 31.6,
+        "p95": 45.7,
+        "max": 48.2,
+        "min": 14.5
+      }
+    },
+    "excerpt": [
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.01,
+        "pend": 0
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.02,
+        "pend": 1
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.03,
+        "pend": 1
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.04,
+        "pend": 2
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.04,
+        "pend": 0
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.05,
+        "pend": 1
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.05,
+        "pend": 0
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 2
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 5,
+        "s3": 0.07,
+        "pend": 0
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.07,
+        "pend": 1
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.07,
+        "pend": 0
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.07,
+        "pend": 1
+      },
+      {
+        "dt": 16.8,
+        "d1": 4.12,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 1
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 2
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 0
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 1
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 0
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 1
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 1
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 2
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 5,
+        "s3": 0.08,
+        "pend": 0
+      },
+      {
+        "dt": 16.8,
+        "d1": 4.12,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 1
+      }
+    ],
+    "heavyFrames": 0,
+    "gfx": {
+      "quality": "low",
+      "qualitySource": "url",
+      "renderer": "canvas",
+      "touch": false,
+      "layout": "pc",
+      "viewW": 1920,
+      "viewH": 1080,
+      "dpr": 1,
+      "cssW": 960,
+      "cssH": 540,
+      "backingW": 960,
+      "backingH": 540,
+      "zoom": 0.5,
+      "scaleOverride": null,
+      "textRes": 0.5,
+      "compositeScale": 0.5,
+      "minimapScale": 0.5,
+      "fogMode": "canvas",
+      "ambient": 0.45,
+      "features": {
+        "perfTier": "none",
+        "dprCap": 1,
+        "maxPixels": 2073600,
+        "minBackingH": 0,
+        "floorDprCap": 1,
+        "compositeCap": 1,
+        "lightPxPerTile": 8,
+        "fog": "canvas",
+        "fogShader": false,
+        "bloom": false,
+        "vignette": "none",
+        "colorGrade": false,
+        "particleCap": 40,
+        "halfFrameAnims": true,
+        "autoDowngrade": "on",
+        "autoMinFps": 40,
+        "msaaBytes": 0,
+        "textureBytes": 3152616,
+        "atlasBakeMs": 9,
+        "atlasBytes": 593920,
+        "atlasTexPerWorld": 1.395,
+        "atlasStyle": "classic",
+        "atlasZoom": 0.5,
+        "atlasDrawingsMade": 0,
+        "hudBakes": 1,
+        "hudBakeMs": 28.7,
+        "mapCacheBytes": 12628320,
+        "mapCacheCount": 2,
+        "glowBakeMs": 4.8,
+        "mapBakeBands": 16,
+        "mapBakeMs": 18.2,
+        "mapBakeScale": 1.395,
+        "mapBakeTotalMs": 86.1,
+        "miniBakeMs": 7.4,
+        "glowLayer": "static",
+        "mapGfxCmds": 0,
+        "mapLayerObjects": 1,
+        "fogCommitMs": 0.06,
+        "postFxBytes": 0,
+        "badgeGfxCmds": 0,
+        "particles": 40,
+        "dust": 0,
+        "badgeUploadPx": 14994,
+        "badgeBakes": 5,
+        "charGfxArcs": 0,
+        "charGfxFills": 0,
+        "culledObjects": 5,
+        "fogSkips": 784
+      },
+      "downgrades": 0,
+      "measuredFps": 60,
+      "frameLimit": "auto",
+      "displayHz": 60,
+      "targetHz": 60,
+      "upgrades": 0,
+      "charStyle": "classic",
+      "camZoom": 3
+    }
+  },
+  "p120-monster": {
+    "scene": {
+      "name": "p120-monster",
+      "project": "canvas",
+      "mode": "practice",
+      "role": "monster",
+      "hz": 120
+    },
+    "walk": {
+      "segments": 6,
+      "pairs": 785,
+      "fps": 119.4,
+      "interval": {
+        "mean": 8.376,
+        "p5": 8.333,
+        "p50": 8.333,
+        "p95": 8.333,
+        "max": 16.667,
+        "min": 8.333
+      },
+      "work": {
+        "mean": 1.978,
+        "p5": 0.6,
+        "p50": 0.9,
+        "p95": 6,
+        "max": 8.4,
+        "min": 0.4
+      },
+      "devPerTile": 44.63,
+      "speedPer60": 4.091,
+      "d1": {
+        "mean": 2.056,
+        "p5": 2.045,
+        "p50": 2.045,
+        "p95": 2.045,
+        "max": 4.091,
+        "min": 2.045
+      },
+      "r1": {
+        "mean": 1,
+        "p5": 1,
+        "p50": 1,
+        "p95": 1,
+        "max": 1,
+        "min": 1
+      },
+      "stall1": 0,
+      "jump1": 0,
+      "err1": {
+        "mean": 0,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0,
+        "min": 0
+      },
+      "cv1": 0.071,
+      "d2": {
+        "mean": 2.057,
+        "p5": 2,
+        "p50": 2,
+        "p95": 3,
+        "max": 4,
+        "min": 2
+      },
+      "r2": {
+        "mean": 1.001,
+        "p5": 0.978,
+        "p50": 0.978,
+        "p95": 0.978,
+        "max": 1.467,
+        "min": 0.978
+      },
+      "stall2": 0,
+      "jump2": 0,
+      "err2": {
+        "mean": 0.088,
+        "p5": 0.045,
+        "p50": 0.045,
+        "p95": 0.091,
+        "max": 0.955,
+        "min": 0.045
+      },
+      "d3": {
+        "mean": 0.001,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0.004,
+        "max": 0.012,
+        "min": 0
+      },
+      "range3": 0.11,
+      "behindMs": {
+        "mean": 15.808,
+        "p5": 3.367,
+        "p50": 11.7,
+        "p95": 28.367,
+        "max": 28.367,
+        "min": 3.367
+      },
+      "pending": 1.25
+    },
+    "latency": {
+      "trials": 32,
+      "move": {
+        "mean": 22.003,
+        "p5": 9.3,
+        "p50": 21.5,
+        "p95": 37.8,
+        "max": 38.6,
+        "min": 8.3
+      },
+      "camera": {
+        "mean": 41.3,
+        "p5": 18.1,
+        "p50": 37.7,
+        "p95": 71.9,
+        "max": 72.8,
+        "min": 16.7
+      },
+      "visible": {
+        "mean": 22.003,
+        "p5": 9.3,
+        "p50": 21.5,
+        "p95": 37.8,
+        "max": 38.6,
+        "min": 8.3
+      }
+    },
+    "excerpt": [
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.01,
+        "pend": 2
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.01,
+        "pend": 2
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.02,
+        "pend": 2
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.02,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 3,
+        "s3": 0.02,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.03,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.03,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.04,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.04,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.04,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.04,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.05,
+        "pend": 2
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.05,
+        "pend": 2
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.05,
+        "pend": 2
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.05,
+        "pend": 2
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.06,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.07,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.07,
+        "pend": 2
+      }
+    ],
+    "heavyFrames": 0,
+    "gfx": {
+      "quality": "low",
+      "qualitySource": "url",
+      "renderer": "canvas",
+      "touch": false,
+      "layout": "pc",
+      "viewW": 1920,
+      "viewH": 1080,
+      "dpr": 1,
+      "cssW": 960,
+      "cssH": 540,
+      "backingW": 960,
+      "backingH": 540,
+      "zoom": 0.5,
+      "scaleOverride": null,
+      "textRes": 0.5,
+      "compositeScale": 0.5,
+      "minimapScale": 0.5,
+      "fogMode": "canvas",
+      "ambient": 0.45,
+      "features": {
+        "perfTier": "none",
+        "dprCap": 1,
+        "maxPixels": 2073600,
+        "minBackingH": 0,
+        "floorDprCap": 1,
+        "compositeCap": 1,
+        "lightPxPerTile": 8,
+        "fog": "canvas",
+        "fogShader": false,
+        "bloom": false,
+        "vignette": "none",
+        "colorGrade": false,
+        "particleCap": 40,
+        "halfFrameAnims": true,
+        "autoDowngrade": "on",
+        "autoMinFps": 40,
+        "msaaBytes": 0,
+        "textureBytes": 3152616,
+        "atlasBakeMs": 11,
+        "atlasBytes": 593920,
+        "atlasTexPerWorld": 1.395,
+        "atlasStyle": "classic",
+        "atlasZoom": 0.5,
+        "atlasDrawingsMade": 0,
+        "hudBakes": 1,
+        "hudBakeMs": 33,
+        "mapCacheBytes": 12628320,
+        "mapCacheCount": 2,
+        "glowBakeMs": 4,
+        "mapBakeBands": 16,
+        "mapBakeMs": 13.8,
+        "mapBakeScale": 1.395,
+        "mapBakeTotalMs": 61.6,
+        "miniBakeMs": 18.4,
+        "glowLayer": "static",
+        "mapGfxCmds": 0,
+        "mapLayerObjects": 1,
+        "fogCommitMs": 0.06,
+        "postFxBytes": 0,
+        "badgeGfxCmds": 0,
+        "particles": 40,
+        "dust": 0,
+        "badgeUploadPx": 74970,
+        "badgeBakes": 9,
+        "charGfxArcs": 0,
+        "charGfxFills": 0,
+        "culledObjects": 5,
+        "fogSkips": 772
+      },
+      "downgrades": 0,
+      "measuredFps": 120,
+      "frameLimit": "auto",
+      "displayHz": 120,
+      "targetHz": 120,
+      "upgrades": 0,
+      "charStyle": "classic",
+      "camZoom": 3
+    }
+  },
+  "p120-runner-phone": {
+    "scene": {
+      "name": "p120-runner-phone",
+      "project": "canvas",
+      "mode": "practice",
+      "role": "runner",
+      "hz": 120,
+      "phone": true
+    },
+    "walk": {
+      "segments": 6,
+      "pairs": 773,
+      "fps": 117.6,
+      "interval": {
+        "mean": 8.506,
+        "p5": 8.333,
+        "p50": 8.333,
+        "p95": 8.333,
+        "max": 33.333,
+        "min": 8.333
+      },
+      "work": {
+        "mean": 1.699,
+        "p5": 0.5,
+        "p50": 0.7,
+        "p95": 6.7,
+        "max": 8.4,
+        "min": 0.4
+      },
+      "devPerTile": 101.43,
+      "speedPer60": 8.452,
+      "d1": {
+        "mean": 4.314,
+        "p5": 4.226,
+        "p50": 4.226,
+        "p95": 4.226,
+        "max": 16.904,
+        "min": 4.226
+      },
+      "r1": {
+        "mean": 1,
+        "p5": 1,
+        "p50": 1,
+        "p95": 1,
+        "max": 1,
+        "min": 1
+      },
+      "stall1": 0,
+      "jump1": 0,
+      "err1": {
+        "mean": 0,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0,
+        "min": 0
+      },
+      "cv1": 0.171,
+      "d2": {
+        "mean": 4.32,
+        "p5": 4.2,
+        "p50": 4.2,
+        "p95": 4.2,
+        "max": 16.8,
+        "min": 4.2
+      },
+      "r2": {
+        "mean": 1.001,
+        "p5": 0.994,
+        "p50": 0.994,
+        "p95": 0.994,
+        "max": 1.491,
+        "min": 0.994
+      },
+      "stall2": 0,
+      "jump2": 0,
+      "err2": {
+        "mean": 0.058,
+        "p5": 0.026,
+        "p50": 0.026,
+        "p95": 0.026,
+        "max": 2.074,
+        "min": 0.026
+      },
+      "d3": {
+        "mean": 0.002,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0.009,
+        "max": 0.016,
+        "min": 0
+      },
+      "range3": 0.21,
+      "behindMs": {
+        "mean": 20.252,
+        "p5": 7.833,
+        "p50": 16.167,
+        "p95": 32.833,
+        "max": 32.833,
+        "min": 7.833
+      },
+      "pending": 0.75
+    },
+    "latency": {
+      "trials": 32,
+      "move": {
+        "mean": 17.453,
+        "p5": 1.9,
+        "p50": 14.9,
+        "p95": 32.5,
+        "max": 33.4,
+        "min": 0.8
+      },
+      "camera": {
+        "mean": 35.422,
+        "p5": 13.6,
+        "p50": 35.1,
+        "p95": 55.5,
+        "max": 67.3,
+        "min": 12.4
+      },
+      "visible": {
+        "mean": 24.3,
+        "p5": 10.1,
+        "p50": 23.3,
+        "p95": 39.7,
+        "max": 39.8,
+        "min": 8.3
+      }
+    },
+    "excerpt": [
+      {
+        "dt": 8.33,
+        "d1": 4.23,
+        "d2": 4.2,
+        "s3": 0.01,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 4.23,
+        "d2": 4.2,
+        "s3": 0.02,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 4.23,
+        "d2": 4.2,
+        "s3": 0.03,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 4.23,
+        "d2": 4.2,
+        "s3": 0.04,
+        "pend": 2
+      },
+      {
+        "dt": 8.33,
+        "d1": 4.23,
+        "d2": 4.2,
+        "s3": 0.05,
+        "pend": 2
+      },
+      {
+        "dt": 8.33,
+        "d1": 4.23,
+        "d2": 4.2,
+        "s3": 0.06,
+        "pend": 0
+      },
+      {
+        "dt": 8.33,
+        "d1": 4.23,
+        "d2": 4.2,
+        "s3": 0.07,
+        "pend": 0
+      },
+      {
+        "dt": 8.33,
+        "d1": 4.23,
+        "d2": 4.2,
+        "s3": 0.08,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 4.23,
+        "d2": 4.2,
+        "s3": 0.08,
+        "pend": 1
+      },
+      {
+        "dt": 16.67,
+        "d1": 8.45,
+        "d2": 8.4,
+        "s3": 0.09,
+        "pend": 0
+      },
+      {
+        "dt": 8.33,
+        "d1": 4.23,
+        "d2": 4.2,
+        "s3": 0.1,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 4.23,
+        "d2": 4.2,
+        "s3": 0.1,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 4.23,
+        "d2": 4.2,
+        "s3": 0.11,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 4.23,
+        "d2": 6.3,
+        "s3": 0.11,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 4.23,
+        "d2": 4.2,
+        "s3": 0.12,
+        "pend": 2
+      },
+      {
+        "dt": 8.33,
+        "d1": 4.23,
+        "d2": 4.2,
+        "s3": 0.12,
+        "pend": 2
+      },
+      {
+        "dt": 8.33,
+        "d1": 4.23,
+        "d2": 4.2,
+        "s3": 0.13,
+        "pend": 0
+      },
+      {
+        "dt": 8.33,
+        "d1": 4.23,
+        "d2": 4.2,
+        "s3": 0.13,
+        "pend": 0
+      },
+      {
+        "dt": 8.33,
+        "d1": 4.23,
+        "d2": 4.2,
+        "s3": 0.13,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 4.23,
+        "d2": 4.2,
+        "s3": 0.14,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 4.23,
+        "d2": 4.2,
+        "s3": 0.14,
+        "pend": 0
+      },
+      {
+        "dt": 8.33,
+        "d1": 4.23,
+        "d2": 4.2,
+        "s3": 0.14,
+        "pend": 0
+      },
+      {
+        "dt": 8.33,
+        "d1": 4.23,
+        "d2": 4.2,
+        "s3": 0.14,
+        "pend": 1
+      },
+      {
+        "dt": 8.33,
+        "d1": 4.23,
+        "d2": 4.2,
+        "s3": 0.15,
+        "pend": 1
+      }
+    ],
+    "heavyFrames": 0,
+    "gfx": {
+      "quality": "low",
+      "qualitySource": "url",
+      "renderer": "canvas",
+      "touch": true,
+      "layout": "touchWide",
+      "viewW": 2114,
+      "viewH": 952,
+      "dpr": 2.625,
+      "cssW": 915.203125,
+      "cssH": 412,
+      "backingW": 1144,
+      "backingH": 515,
+      "zoom": 0.5411542100283823,
+      "scaleOverride": null,
+      "textRes": 0.5411542100283823,
+      "compositeScale": 0.5411542100283823,
+      "minimapScale": 0.5411542100283823,
+      "fogMode": "canvas",
+      "ambient": 0.45,
+      "features": {
+        "perfTier": "none",
+        "dprCap": 1.25,
+        "maxPixels": 1200000,
+        "minBackingH": 450,
+        "floorDprCap": 1.5,
+        "compositeCap": 1,
+        "lightPxPerTile": 8,
+        "fog": "canvas",
+        "fogShader": false,
+        "bloom": false,
+        "vignette": "none",
+        "colorGrade": false,
+        "particleCap": 40,
+        "halfFrameAnims": true,
+        "autoDowngrade": "on",
+        "autoMinFps": 50,
+        "msaaBytes": 0,
+        "textureBytes": 4139444,
+        "atlasBakeMs": 6.8,
+        "atlasBytes": 798720,
+        "atlasTexPerWorld": 1.509,
+        "atlasStyle": "classic",
+        "atlasZoom": 0.5411542100283823,
+        "atlasDrawingsMade": 0,
+        "hudBakes": 1,
+        "hudBakeMs": 29.7,
+        "mapCacheBytes": 14727728,
+        "mapCacheCount": 2,
+        "glowBakeMs": 5.4,
+        "mapBakeBands": 16,
+        "mapBakeMs": 19.3,
+        "mapBakeScale": 1.509,
+        "mapBakeTotalMs": 85.8,
+        "miniBakeMs": 7.4,
+        "glowLayer": "static",
+        "mapGfxCmds": 0,
+        "mapLayerObjects": 1,
+        "fogCommitMs": 0.13,
+        "postFxBytes": 0,
+        "badgeGfxCmds": 0,
+        "particles": 40,
+        "dust": 0,
+        "badgeUploadPx": 294525,
+        "badgeBakes": 21,
+        "charGfxArcs": 0,
+        "charGfxFills": 0,
+        "culledObjects": 14,
+        "fogSkips": 490
+      },
+      "downgrades": 0,
+      "measuredFps": 120,
+      "frameLimit": "auto",
+      "displayHz": 120,
+      "targetHz": 120,
+      "upgrades": 0,
+      "charStyle": "classic",
+      "camZoom": 3
+    }
+  },
+  "o60-monster-lag100": {
+    "scene": {
+      "name": "o60-monster-lag100",
+      "project": "canvas",
+      "mode": "online",
+      "role": "monster",
+      "hz": null,
+      "lag": 100
+    },
+    "walk": {
+      "segments": 6,
+      "pairs": 390,
+      "fps": 60,
+      "interval": {
+        "mean": 16.666,
+        "p5": 16.6,
+        "p50": 16.7,
+        "p95": 16.8,
+        "max": 16.8,
+        "min": 16.5
+      },
+      "work": {
+        "mean": 3.283,
+        "p5": 0.8,
+        "p50": 3.1,
+        "p95": 6.8,
+        "max": 16.7,
+        "min": 0.6
+      },
+      "devPerTile": 44.62,
+      "speedPer60": 4.091,
+      "d1": {
+        "mean": 4.09,
+        "p5": 4.074,
+        "p50": 4.099,
+        "p95": 4.123,
+        "max": 4.123,
+        "min": 4.05
+      },
+      "r1": {
+        "mean": 1,
+        "p5": 1,
+        "p50": 1,
+        "p95": 1,
+        "max": 1,
+        "min": 1
+      },
+      "stall1": 0,
+      "jump1": 0,
+      "err1": {
+        "mean": 0,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0,
+        "min": 0
+      },
+      "cv1": 0.004,
+      "d2": {
+        "mean": 4.092,
+        "p5": 4,
+        "p50": 4,
+        "p95": 5,
+        "max": 5,
+        "min": 4
+      },
+      "r2": {
+        "mean": 1,
+        "p5": 0.976,
+        "p50": 0.976,
+        "p95": 1.22,
+        "max": 1.227,
+        "min": 0.97
+      },
+      "stall2": 0,
+      "jump2": 0,
+      "err2": {
+        "mean": 0.166,
+        "p5": 0.074,
+        "p50": 0.099,
+        "p95": 0.901,
+        "max": 0.926,
+        "min": 0.05
+      },
+      "d3": {
+        "mean": 0.001,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0.008,
+        "max": 0.013,
+        "min": 0
+      },
+      "range3": 0.09,
+      "behindMs": {
+        "mean": 19.559,
+        "p5": 11.033,
+        "p50": 11.6,
+        "p95": 28.167,
+        "max": 28.267,
+        "min": 10.933
+      },
+      "pending": 4.1
+    },
+    "latency": {
+      "trials": 32,
+      "move": {
+        "mean": 17.631,
+        "p5": 3.8,
+        "p50": 18.2,
+        "p95": 34.1,
+        "max": 36,
+        "min": 3.4
+      },
+      "camera": {
+        "mean": 43.591,
+        "p5": 12.1,
+        "p50": 42.1,
+        "p95": 60.7,
+        "max": 64.1,
+        "min": 3.8
+      },
+      "visible": {
+        "mean": 20.397,
+        "p5": 4,
+        "p50": 22.6,
+        "p95": 41,
+        "max": 47.2,
+        "min": 3.8
+      }
+    },
+    "excerpt": [
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.01,
+        "pend": 4
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 5,
+        "s3": 0.02,
+        "pend": 5
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.03,
+        "pend": 5
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.04,
+        "pend": 6
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.04,
+        "pend": 3
+      },
+      {
+        "dt": 16.8,
+        "d1": 4.12,
+        "d2": 4,
+        "s3": 0.05,
+        "pend": 4
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.05,
+        "pend": 4
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 5
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 5
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 4
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 2
+      },
+      {
+        "dt": 16.8,
+        "d1": 4.12,
+        "d2": 4,
+        "s3": 0.07,
+        "pend": 3
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 5,
+        "s3": 0.07,
+        "pend": 3
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.07,
+        "pend": 4
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.07,
+        "pend": 4
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.07,
+        "pend": 4
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.07,
+        "pend": 4
+      },
+      {
+        "dt": 16.8,
+        "d1": 4.12,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 4
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 4
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 5
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 5
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 6
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 4
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 5,
+        "s3": 0.08,
+        "pend": 4
+      }
+    ],
+    "heavyFrames": 0,
+    "gfx": {
+      "quality": "low",
+      "qualitySource": "url",
+      "renderer": "canvas",
+      "touch": false,
+      "layout": "pc",
+      "viewW": 1920,
+      "viewH": 1080,
+      "dpr": 1,
+      "cssW": 960,
+      "cssH": 540,
+      "backingW": 960,
+      "backingH": 540,
+      "zoom": 0.5,
+      "scaleOverride": null,
+      "textRes": 0.5,
+      "compositeScale": 0.5,
+      "minimapScale": 0.5,
+      "fogMode": "canvas",
+      "ambient": 0.45,
+      "features": {
+        "perfTier": "none",
+        "dprCap": 1,
+        "maxPixels": 2073600,
+        "minBackingH": 0,
+        "floorDprCap": 1,
+        "compositeCap": 1,
+        "lightPxPerTile": 8,
+        "fog": "canvas",
+        "fogShader": false,
+        "bloom": false,
+        "vignette": "none",
+        "colorGrade": false,
+        "particleCap": 40,
+        "halfFrameAnims": true,
+        "autoDowngrade": "on",
+        "autoMinFps": 40,
+        "msaaBytes": 0,
+        "textureBytes": 3152616,
+        "atlasBakeMs": 9.5,
+        "atlasBytes": 593920,
+        "atlasTexPerWorld": 1.395,
+        "atlasStyle": "classic",
+        "atlasZoom": 0.5,
+        "atlasDrawingsMade": 0,
+        "hudBakes": 1,
+        "hudBakeMs": 34.1,
+        "mapCacheBytes": 12628320,
+        "mapCacheCount": 2,
+        "glowBakeMs": 3.8,
+        "mapBakeBands": 16,
+        "mapBakeMs": 13.9,
+        "mapBakeScale": 1.395,
+        "mapBakeTotalMs": 69.7,
+        "miniBakeMs": 6.9,
+        "glowLayer": "static",
+        "mapGfxCmds": 0,
+        "mapLayerObjects": 1,
+        "fogCommitMs": 0.19,
+        "postFxBytes": 0,
+        "badgeGfxCmds": 0,
+        "particles": 40,
+        "dust": 0,
+        "badgeUploadPx": 1409436,
+        "badgeBakes": 123,
+        "charGfxArcs": 0,
+        "charGfxFills": 0,
+        "culledObjects": 6,
+        "fogSkips": 103
+      },
+      "downgrades": 0,
+      "measuredFps": 60,
+      "frameLimit": "auto",
+      "displayHz": 60,
+      "targetHz": 60,
+      "upgrades": 0,
+      "charStyle": "classic",
+      "camZoom": 3
+    }
+  },
+  "o60-monster-lag200": {
+    "scene": {
+      "name": "o60-monster-lag200",
+      "project": "canvas",
+      "mode": "online",
+      "role": "monster",
+      "hz": null,
+      "lag": 200
+    },
+    "walk": {
+      "segments": 6,
+      "pairs": 388,
+      "fps": 59.7,
+      "interval": {
+        "mean": 16.752,
+        "p5": 16.6,
+        "p50": 16.7,
+        "p95": 16.7,
+        "max": 33.3,
+        "min": 16.5
+      },
+      "work": {
+        "mean": 3.35,
+        "p5": 0.8,
+        "p50": 2.7,
+        "p95": 6.8,
+        "max": 10.8,
+        "min": 0.5
+      },
+      "devPerTile": 44.63,
+      "speedPer60": 4.091,
+      "d1": {
+        "mean": 4.112,
+        "p5": 4.074,
+        "p50": 4.099,
+        "p95": 4.099,
+        "max": 8.173,
+        "min": 4.05
+      },
+      "r1": {
+        "mean": 1,
+        "p5": 1,
+        "p50": 1,
+        "p95": 1,
+        "max": 1,
+        "min": 1
+      },
+      "stall1": 0,
+      "jump1": 0,
+      "err1": {
+        "mean": 0,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0,
+        "min": 0
+      },
+      "cv1": 0.071,
+      "d2": {
+        "mean": 4.111,
+        "p5": 4,
+        "p50": 4,
+        "p95": 5,
+        "max": 8,
+        "min": 4
+      },
+      "r2": {
+        "mean": 1,
+        "p5": 0.976,
+        "p50": 0.976,
+        "p95": 1.22,
+        "max": 1.227,
+        "min": 0.97
+      },
+      "stall2": 0,
+      "jump2": 0,
+      "err2": {
+        "mean": 0.164,
+        "p5": 0.074,
+        "p50": 0.099,
+        "p95": 0.901,
+        "max": 0.926,
+        "min": 0.05
+      },
+      "d3": {
+        "mean": 0.001,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0.008,
+        "max": 0.013,
+        "min": 0
+      },
+      "range3": 0.09,
+      "behindMs": {
+        "mean": 11.12,
+        "p5": 2.433,
+        "p50": 19,
+        "p95": 19.567,
+        "max": 35.833,
+        "min": 2.333
+      },
+      "pending": 6.99
+    },
+    "latency": {
+      "trials": 32,
+      "move": {
+        "mean": 27.781,
+        "p5": 9.5,
+        "p50": 29,
+        "p95": 42.3,
+        "max": 42.5,
+        "min": 4.4
+      },
+      "camera": {
+        "mean": 43.138,
+        "p5": 18.2,
+        "p50": 39.7,
+        "p95": 76,
+        "max": 77.4,
+        "min": 9.5
+      },
+      "visible": {
+        "mean": 27.781,
+        "p5": 9.5,
+        "p50": 29,
+        "p95": 42.3,
+        "max": 42.5,
+        "min": 4.4
+      }
+    },
+    "excerpt": [
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 5,
+        "s3": 0.01,
+        "pend": 7
+      },
+      {
+        "dt": 16.8,
+        "d1": 4.12,
+        "d2": 4,
+        "s3": 0.02,
+        "pend": 7
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.03,
+        "pend": 8
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.04,
+        "pend": 8
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.04,
+        "pend": 6
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.05,
+        "pend": 6
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.05,
+        "pend": 7
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 7
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.06,
+        "pend": 6
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.07,
+        "pend": 6
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.07,
+        "pend": 7
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.07,
+        "pend": 6
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 5,
+        "s3": 0.07,
+        "pend": 7
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 7
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 8
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 7
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 8
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 6
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 7
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 7
+      },
+      {
+        "dt": 16.7,
+        "d1": 4.1,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 8
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 8
+      },
+      {
+        "dt": 16.8,
+        "d1": 4.12,
+        "d2": 4,
+        "s3": 0.08,
+        "pend": 8
+      },
+      {
+        "dt": 16.6,
+        "d1": 4.07,
+        "d2": 5,
+        "s3": 0.08,
+        "pend": 7
+      }
+    ],
+    "heavyFrames": 0,
+    "gfx": {
+      "quality": "low",
+      "qualitySource": "url",
+      "renderer": "canvas",
+      "touch": false,
+      "layout": "pc",
+      "viewW": 1920,
+      "viewH": 1080,
+      "dpr": 1,
+      "cssW": 960,
+      "cssH": 540,
+      "backingW": 960,
+      "backingH": 540,
+      "zoom": 0.5,
+      "scaleOverride": null,
+      "textRes": 0.5,
+      "compositeScale": 0.5,
+      "minimapScale": 0.5,
+      "fogMode": "canvas",
+      "ambient": 0.45,
+      "features": {
+        "perfTier": "none",
+        "dprCap": 1,
+        "maxPixels": 2073600,
+        "minBackingH": 0,
+        "floorDprCap": 1,
+        "compositeCap": 1,
+        "lightPxPerTile": 8,
+        "fog": "canvas",
+        "fogShader": false,
+        "bloom": false,
+        "vignette": "none",
+        "colorGrade": false,
+        "particleCap": 40,
+        "halfFrameAnims": true,
+        "autoDowngrade": "on",
+        "autoMinFps": 40,
+        "msaaBytes": 0,
+        "textureBytes": 3152616,
+        "atlasBakeMs": 5.6,
+        "atlasBytes": 593920,
+        "atlasTexPerWorld": 1.395,
+        "atlasStyle": "classic",
+        "atlasZoom": 0.5,
+        "atlasDrawingsMade": 0,
+        "hudBakes": 1,
+        "hudBakeMs": 30.6,
+        "mapCacheBytes": 12628320,
+        "mapCacheCount": 2,
+        "glowBakeMs": 5.1,
+        "mapBakeBands": 16,
+        "mapBakeMs": 14.6,
+        "mapBakeScale": 1.395,
+        "mapBakeTotalMs": 75.6,
+        "miniBakeMs": 8.1,
+        "glowLayer": "static",
+        "mapGfxCmds": 0,
+        "mapLayerObjects": 1,
+        "fogCommitMs": 0.14,
+        "postFxBytes": 0,
+        "badgeGfxCmds": 0,
+        "particles": 40,
+        "dust": 0,
+        "badgeUploadPx": 1484406,
+        "badgeBakes": 151,
+        "charGfxArcs": 0,
+        "charGfxFills": 0,
+        "culledObjects": 6,
+        "fogSkips": 137
+      },
+      "downgrades": 0,
+      "measuredFps": 60,
+      "frameLimit": "auto",
+      "displayHz": 60,
+      "targetHz": 60,
+      "upgrades": 0,
+      "charStyle": "classic",
+      "camZoom": 3
+    }
+  },
+  "o120-monster-lag100": {
+    "scene": {
+      "name": "o120-monster-lag100",
+      "project": "canvas",
+      "mode": "online",
+      "role": "monster",
+      "hz": 120,
+      "lag": 100
+    },
+    "walk": {
+      "segments": 6,
+      "pairs": 777,
+      "fps": 118.2,
+      "interval": {
+        "mean": 8.462,
+        "p5": 8.333,
+        "p50": 8.333,
+        "p95": 8.333,
+        "max": 25,
+        "min": 8.333
+      },
+      "work": {
+        "mean": 2.029,
+        "p5": 0.6,
+        "p50": 1,
+        "p95": 6.2,
+        "max": 8,
+        "min": 0.5
+      },
+      "devPerTile": 44.63,
+      "speedPer60": 4.091,
+      "d1": {
+        "mean": 2.077,
+        "p5": 2.045,
+        "p50": 2.045,
+        "p95": 2.045,
+        "max": 6.136,
+        "min": 2.045
+      },
+      "r1": {
+        "mean": 1,
+        "p5": 1,
+        "p50": 1,
+        "p95": 1,
+        "max": 1,
+        "min": 1
+      },
+      "stall1": 0,
+      "jump1": 0,
+      "err1": {
+        "mean": 0,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0,
+        "min": 0
+      },
+      "cv1": 0.131,
+      "d2": {
+        "mean": 2.076,
+        "p5": 2,
+        "p50": 2,
+        "p95": 3,
+        "max": 7,
+        "min": 2
+      },
+      "r2": {
+        "mean": 0.999,
+        "p5": 0.978,
+        "p50": 0.978,
+        "p95": 0.978,
+        "max": 1.467,
+        "min": 0.978
+      },
+      "stall2": 0,
+      "jump2": 0,
+      "err2": {
+        "mean": 0.087,
+        "p5": 0.045,
+        "p50": 0.045,
+        "p95": 0.091,
+        "max": 0.955,
+        "min": 0.045
+      },
+      "d3": {
+        "mean": 0.001,
+        "p5": 0,
+        "p50": 0,
+        "p95": 0.005,
+        "max": 0.009,
+        "min": 0
+      },
+      "range3": 0.1,
+      "behindMs": {
+        "mean": 17.945,
+        "p5": 5.3,
+        "p50": 21.967,
+        "p95": 30.3,
+        "max": 30.3,
+        "min": 5.3
+      },
+      "pending": 4.04
+    },
+    "latency": {
+      "trials": 32,
+      "move": {
+        "mean": 22.859,
+        "p5": 3.8,
+        "p50": 26,
+        "p95": 35.4,
+        "max": 35.9,
+        "min": 1.5
+      },
+      "camera": {
+        "mean": 47.897,
+        "p5": 20.5,
+        "p50": 47.7,
+        "p95": 65.2,
+        "max": 65.2,
+        "min": 17.2
+      },
+      "visible": {
+        "mean": 35.4,
+        "p5": 16.3,
+        "p50": 38.4,
+        "p95": 48.5,
+        "max": 48.6,
+        "min": 14.2
+      }
+    },
+    "excerpt": [
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.01,
+        "pend": 4
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.01,
+        "pend": 4
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.02,
+        "pend": 5
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.03,
+        "pend": 5
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.03,
+        "pend": 5
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.04,
+        "pend": 3
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.04,
+        "pend": 4
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.04,
+        "pend": 4
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.05,
+        "pend": 4
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.05,
+        "pend": 4
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.06,
+        "pend": 5
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.06,
+        "pend": 4
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.06,
+        "pend": 4
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.06,
+        "pend": 4
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.07,
+        "pend": 5
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.07,
+        "pend": 5
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.07,
+        "pend": 3
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.07,
+        "pend": 3
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.08,
+        "pend": 4
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.08,
+        "pend": 4
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 3,
+        "s3": 0.08,
+        "pend": 2
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.08,
+        "pend": 2
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.08,
+        "pend": 3
+      },
+      {
+        "dt": 8.33,
+        "d1": 2.05,
+        "d2": 2,
+        "s3": 0.08,
+        "pend": 3
+      }
+    ],
+    "heavyFrames": 0,
+    "gfx": {
+      "quality": "low",
+      "qualitySource": "url",
+      "renderer": "canvas",
+      "touch": false,
+      "layout": "pc",
+      "viewW": 1920,
+      "viewH": 1080,
+      "dpr": 1,
+      "cssW": 960,
+      "cssH": 540,
+      "backingW": 960,
+      "backingH": 540,
+      "zoom": 0.5,
+      "scaleOverride": null,
+      "textRes": 0.5,
+      "compositeScale": 0.5,
+      "minimapScale": 0.5,
+      "fogMode": "canvas",
+      "ambient": 0.45,
+      "features": {
+        "perfTier": "none",
+        "dprCap": 1,
+        "maxPixels": 2073600,
+        "minBackingH": 0,
+        "floorDprCap": 1,
+        "compositeCap": 1,
+        "lightPxPerTile": 8,
+        "fog": "canvas",
+        "fogShader": false,
+        "bloom": false,
+        "vignette": "none",
+        "colorGrade": false,
+        "particleCap": 40,
+        "halfFrameAnims": true,
+        "autoDowngrade": "on",
+        "autoMinFps": 40,
+        "msaaBytes": 0,
+        "textureBytes": 3152616,
+        "atlasBakeMs": 6.9,
+        "atlasBytes": 593920,
+        "atlasTexPerWorld": 1.395,
+        "atlasStyle": "classic",
+        "atlasZoom": 0.5,
+        "atlasDrawingsMade": 0,
+        "hudBakes": 1,
+        "hudBakeMs": 29.4,
+        "mapCacheBytes": 12628320,
+        "mapCacheCount": 2,
+        "glowBakeMs": 4.5,
+        "mapBakeBands": 16,
+        "mapBakeMs": 15.5,
+        "mapBakeScale": 1.395,
+        "mapBakeTotalMs": 73.7,
+        "miniBakeMs": 21.4,
+        "glowLayer": "static",
+        "mapGfxCmds": 0,
+        "mapLayerObjects": 1,
+        "fogCommitMs": 0.14,
+        "postFxBytes": 0,
+        "badgeGfxCmds": 0,
+        "particles": 40,
+        "dust": 0,
+        "badgeUploadPx": 1454418,
+        "badgeBakes": 127,
+        "charGfxArcs": 0,
+        "charGfxFills": 0,
+        "culledObjects": 6,
+        "fogSkips": 116
+      },
+      "downgrades": 0,
+      "measuredFps": 120,
+      "frameLimit": "auto",
+      "displayHz": 120,
+      "targetHz": 120,
+      "upgrades": 0,
+      "charStyle": "classic",
+      "camZoom": 3
+    }
+  }
+}

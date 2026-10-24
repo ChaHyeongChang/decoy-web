@@ -27,6 +27,7 @@ const STATS: FrameStatsInfo = {
 
 const DATA: DebugOverlayData = {
   stats: STATS,
+  late: 0.03,
   targetHz: 120,
   displayHz: 120,
   frameLimit: 'auto',
@@ -53,7 +54,7 @@ describe('formatDebugPanel (펼친 표)', () => {
     expect(formatDebugPanel(DATA)).toBe(
       [
         'FPS 119.8 · 목표 120 · 화면 120Hz · 제한 자동',
-        '프레임 8.33ms · p95 8.90ms',
+        '프레임 8.33ms · p95 8.90ms · 늦음 3%',
         '작업 4.10ms · p95 6.02ms',
         '그리기 12회 · 건너뜀 0 · 렌더러 webgl',
         '핑 42ms · 지연설정 0ms · 서버 틱 1234 · 스냅샷 567',
@@ -130,7 +131,7 @@ describe('formatDebugPanel (펼친 표)', () => {
     const lines = formatDebugPanel({ ...DATA, stats: null, tick: null }).split('\n');
     expect(lines.slice(0, 5)).toEqual([
       'FPS - · 목표 120 · 화면 120Hz · 제한 자동',
-      '프레임 - · p95 -',
+      '프레임 - · p95 - · 늦음 -',
       '작업 - · p95 -',
       '그리기 - · 건너뜀 - · 렌더러 webgl',
       '핑 42ms · 지연설정 0ms · 서버 틱 - · 스냅샷 567',

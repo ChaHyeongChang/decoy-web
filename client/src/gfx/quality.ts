@@ -70,6 +70,24 @@ export const THRESHOLD_CAP_HZ = 120;
 export const RATE_FALLBACK_HZ = 60;
 
 /**
+ * 고르지 않은 프레임 (내 움직임 고르기 2026-10-24, DECISIONS 10절). 늦은 프레임 = 간격이 목표 주기의 lateFactor배 이상(vsync를
+ * 놓쳐 한 번 더 보인 프레임). 자동 프레임 제한 · 목표가 RATE_FALLBACK_HZ보다 높을 때, 평균 FPS가 하향 기준 위여도 최근 1초의
+ * 늦은 프레임 비율 평균이 maxLateRatio 이상인 상태가 하향과 같은 시간(예열 5초 · 지속 10초)을 넘게 이어지면 목표를 60으로
+ * 낮춘다(rateDown, 품질 그대로). 되돌려 올린 뒤 확인(UpProbation)에서 이 비율이 넘어도 다시 내리고 이번 세션에서는 올리지 않는다.
+ * 120Hz에서 늦은 비율 m이면 FPS ≈ 120 / (1 + m): 0.15는 약 104fps — 휴대폰 하향 기준 100(m 0.2)보다 조금 이르고, PC 기준 80
+ * (m 0.5)보다 훨씬 이르다. 품질 하향 · 고정 제한(60 · 120)에는 쓰지 않는다
+ */
+export const PACING_WATCH = {
+  lateFactor: 1.5,
+  maxLateRatio: 0.15,
+} as const;
+
+/** 이 목표 · 제한에서 고르지 않은 프레임을 목표 FPS 낮춤 이유로 보는가 (아니면 Infinity — 보지 않음) */
+export function maxLateFor(ctx: { targetHz: number; canRateFallback: boolean }): number {
+  return ctx.canRateFallback && ctx.targetHz > RATE_FALLBACK_HZ ? PACING_WATCH.maxLateRatio : Infinity;
+}
+
+/**
  * 목표 FPS에 맞춘 하향 기준: 60Hz 기준값 × min(목표, 120) / 60.
  * PC 40 → 기준 목표의 2/3(120Hz 80), 터치 50 → 5/6(120Hz 100). 목표가 이상한 값이면 60으로 본다
  */
@@ -397,6 +415,8 @@ export class SlidingAverage {
  */
 export class FpsWatch {
   private readonly win: SlidingAverage;
+  /** 최근 1초 늦은 프레임 비율 (PACING_WATCH, 고르지 않은 프레임) */
+  private readonly lateWin: SlidingAverage;
   private lowSince: number | null = null;
   /** 느린 상태가 이어지는 동안의 샘플 합 · 개수 (하향 전 평균) */
   private lowSum = 0;
@@ -409,6 +429,7 @@ export class FpsWatch {
     private cfg: FpsWatchConfig = FPS_WATCH,
   ) {
     this.win = new SlidingAverage(cfg.windowMs);
+    this.lateWin = new SlidingAverage(cfg.windowMs);
   }
 
   /** 이미 알렸는가 (판당 1번) */
@@ -431,20 +452,32 @@ export class FpsWatch {
     this.startMs = startMs;
     this.cfg = cfg;
     this.win.windowMs = cfg.windowMs;
+    this.lateWin.windowMs = cfg.windowMs;
     this.lastAt = null;
     this.done = false;
     this.reset();
   }
 
-  /** 프레임마다 부른다. minFps = 지금 목표의 하향 기준(minFpsFor). 지금 한 단계 내려야 하면 true (판당 한 번만) */
-  sample(nowMs: number, fps: number, minFps: number = this.cfg.minFps): boolean {
+  /**
+   * 프레임마다 부른다. minFps = 지금 목표의 하향 기준(minFpsFor). late = 최근 1초 늦은 프레임 비율, maxLate = 그 기준
+   * (maxLateFor — 보지 않으면 Infinity): 1초 평균이 하향 기준 미만이거나 늦은 비율 평균이 기준 이상이면 느린 상태.
+   * 지금 한 단계 내려야 하면 true (판당 한 번만)
+   */
+  sample(
+    nowMs: number,
+    fps: number,
+    minFps: number = this.cfg.minFps,
+    late = 0,
+    maxLate: number = Infinity,
+  ): boolean {
     if (this.done) return false;
     if (this.lastAt !== null && nowMs - this.lastAt > this.cfg.gapMs) this.reset();
     this.lastAt = nowMs;
     if (nowMs - this.startMs < this.cfg.warmupMs) return false;
     if (!Number.isFinite(fps) || fps < 0) return false;
     this.win.push(nowMs, fps);
-    if (this.win.average >= minFps) {
+    this.lateWin.push(nowMs, Number.isFinite(late) && late > 0 ? late : 0);
+    if (this.win.average >= minFps && !(this.lateWin.average >= maxLate)) {
       this.clearLow();
       return false;
     }
@@ -466,6 +499,7 @@ export class FpsWatch {
 
   private reset(): void {
     this.win.clear();
+    this.lateWin.clear();
     this.clearLow();
   }
 }
@@ -640,6 +674,8 @@ export type UpProbationVerdict = 'pass' | 'fail';
 /** 올린 뒤 확인 한 번: 가라앉을 시간 뒤 정해진 시간 동안 평균을 내서 하향 기준과 견준다 */
 export class UpProbation {
   private readonly mean: SettledMean;
+  /** 같은 구간의 늦은 프레임 비율 평균 (PACING_WATCH) */
+  private readonly lateMean: SettledMean;
 
   constructor(
     startMs: number,
@@ -648,25 +684,45 @@ export class UpProbation {
     gapMs: number = FPS_WATCH.gapMs,
   ) {
     this.mean = new SettledMean(startMs, settleMs, measureMs, gapMs);
+    this.lateMean = new SettledMean(startMs, settleMs, measureMs, gapMs);
   }
 
   get average(): number {
     return this.mean.average;
   }
 
-  /** 프레임마다 부른다. minFps = 지금 목표의 하향 기준. 판단이 나면 결과(평균 < 기준이면 fail), 아직이면 null */
-  sample(nowMs: number, fps: number, minFps: number): UpProbationVerdict | null {
+  /** 늦은 프레임 비율 평균 (디버그 · 시험) */
+  get lateAverage(): number {
+    return this.lateMean.average;
+  }
+
+  /**
+   * 프레임마다 부른다. minFps = 지금 목표의 하향 기준, maxLate = 늦은 프레임 비율 기준(보지 않으면 Infinity).
+   * 판단이 나면 결과(평균 < 기준이거나 늦은 비율 ≥ 기준이면 fail), 아직이면 null
+   */
+  sample(
+    nowMs: number,
+    fps: number,
+    minFps: number,
+    late = 0,
+    maxLate: number = Infinity,
+  ): UpProbationVerdict | null {
+    this.lateMean.add(nowMs, Number.isFinite(late) && late > 0 ? late : 0);
     if (!this.mean.add(nowMs, fps)) return null;
-    return this.mean.average < minFps ? 'fail' : 'pass';
+    return this.mean.average < minFps || this.lateMean.average >= maxLate ? 'fail' : 'pass';
   }
 }
 
 // ───────────── 판 중 적응형 품질 (세션) ─────────────
 
-/** 프레임 측정 한 번 (frameStats 최근 1초): 렌더 FPS와 작업 시간 p95(ms). injectFps(f)면 fps = f, workP95 = 1000 / f */
+/**
+ * 프레임 측정 한 번 (frameStats 최근 1초): 렌더 FPS와 작업 시간 p95(ms), 늦은 프레임 비율(PACING_WATCH, 없으면 0).
+ * injectFps(f)면 fps = f, workP95 = 1000 / f, late = 0
+ */
 export interface FrameSample {
   fps: number;
   workP95: number;
+  late?: number;
 }
 
 /** 프레임 페이싱 상태 (framePacing Pacer에서) */
@@ -909,8 +965,9 @@ export class AutoDowngrade {
     this.observe(nowMs, tier, ctx);
     const minFps = minFpsFor(this.watchCfg, ctx.targetHz);
     if (this.pending) return this.samplePending(nowMs, s.fps);
-    if (this.probation) return this.sampleProbation(nowMs, s.fps, minFps, tier, ctx);
-    if (this.watchOn && this.watch.sample(nowMs, s.fps, minFps)) return this.stepDown(nowMs, tier, ctx);
+    if (this.probation) return this.sampleProbation(nowMs, s, minFps, tier, ctx);
+    if (this.watchOn && this.watch.sample(nowMs, s.fps, minFps, s.late ?? 0, maxLateFor(ctx)))
+      return this.stepDown(nowMs, tier, ctx);
     return this.sampleUp(nowMs, s, tier, ctx);
   }
 
@@ -997,7 +1054,7 @@ export class AutoDowngrade {
 
   private sampleProbation(
     nowMs: number,
-    fps: number,
+    s: FrameSample,
     minFps: number,
     tier: QualityTier,
     ctx: AdaptContext,
@@ -1011,7 +1068,9 @@ export class AutoDowngrade {
       this.probing = null;
       return null;
     }
-    const verdict = probation.sample(nowMs, fps, minFps);
+    // 목표 FPS를 되돌린 확인은 고르지 않은 프레임도 본다 (품질 확인은 보지 않는다: 60에서는 maxLateFor가 Infinity)
+    const maxLate = step.kind === 'rate' ? maxLateFor(ctx) : Infinity;
+    const verdict = probation.sample(nowMs, s.fps, minFps, s.late ?? 0, maxLate);
     if (verdict === null) return null;
     const fpsAfter = probation.average;
     this.probation = null;

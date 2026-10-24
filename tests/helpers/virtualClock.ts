@@ -37,6 +37,13 @@ declare global {
 export interface VirtualClockConfig {
   seed: number;
   hz: number;
+  /**
+   * 바쁜 기기 흉내 (내 움직임 고르기 시험, 없으면 0): 타이머가 정한 시각보다 0 ~ 이 값(ms)만큼 늦게 깬다(시드 난수, 게임 난수와
+   * 따로 흐른다). 120Hz에서 프레임 작업이 입력 타이머 · 기기 안 서버 틱을 막는 것
+   */
+  timerLateMs?: number;
+  /** 이 확률로 프레임(vsync)을 건너뛴다 (없으면 0): 120Hz를 고르게 못 버텨 8.3 · 16.7ms가 섞이는 기기 */
+  dropFrames?: number;
 }
 
 export function installVirtualClock(cfg: VirtualClockConfig): void {
@@ -84,6 +91,10 @@ export function installVirtualClock(cfg: VirtualClockConfig): void {
   };
   let randMath = mulberry(cfg.seed);
   let randCrypto = mulberry(cfg.seed ^ 0x9e3779b9);
+  /** 바쁜 기기 흉내 난수 (타이머 늦음 · 프레임 건너뛰기, reseed와 상관없다) */
+  const randBusy = mulberry(cfg.seed ^ 0x51ed270b);
+  const timerLateMs = Math.max(0, cfg.timerLateMs ?? 0);
+  const dropFrames = Math.max(0, Math.min(0.9, cfg.dropFrames ?? 0));
   Math.random = () => randMath();
   const fillRandom = <T extends ArrayBufferView | null>(arr: T): T => {
     if (arr) {
@@ -126,7 +137,7 @@ export function installVirtualClock(cfg: VirtualClockConfig): void {
     seq += 1;
     timers.set(id, {
       id,
-      due: now + delay,
+      due: now + delay + (timerLateMs > 0 ? randBusy() * timerLateMs : 0),
       seq,
       cb: cb as Cb,
       args,
@@ -210,6 +221,8 @@ export function installVirtualClock(cfg: VirtualClockConfig): void {
       if (ft <= target) {
         now = ft;
         frameIndex += 1;
+        // 건너뛴 vsync: 콜백은 다음 프레임까지 기다린다
+        if (dropFrames > 0 && randBusy() < dropFrames) continue;
         frames += 1;
         const list = rafs;
         rafs = new Map();
