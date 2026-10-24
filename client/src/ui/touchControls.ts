@@ -11,17 +11,52 @@
 // 판 배치(HUD 자리 · 글자 px)는 판 시작 크기로 정해지고 판 중에는 캔버스만 줄지만, 버튼은 지금 창 가장자리에 붙는다: 창이 낮아져
 // 버튼 · 조준 스틱이 HUD 부품을 덮으면 onCovered로 알린다(GameScene이 미니맵을 숨긴다 — 판 화면 전체가 늘 보여 같은 정보다).
 // 가로 180° 뒤집기는 창 크기가 그대로라 resize가 없고 안전 영역만 바뀐다: 방향 change에서도 다시 잰다
-import { BTN, type Role } from '@decoy/shared';
+// 설정 화면 통합: 오른쪽 위 시스템 버튼 '설정'(onMenu, 점수판 왼쪽), 조이스틱 크기 · 투명도(설정 조작 탭), 조작 배치 편집에서
+// 저장한 자리(controlLayout — 좌우 반전 · 옮긴 조작)를 판 시작 때 읽어 배치에 덮는다. 모두 화면 표시만 바꾼다
+import { BTN, type Role, type Team } from '@decoy/shared';
 import { iconSvg, type IconId } from '../art/icons';
 import { hexCss } from '../art/palette';
+import {
+  CAP_BELOW,
+  isDefaultLayout,
+  isSysControl,
+  loadControlLayout,
+  matchTuning,
+  moveRange,
+  resolveLayout,
+  sideOf,
+  type ControlBoxes,
+  type PlaceRules,
+  type Side,
+  type TeamLayout,
+} from '../controlLayout';
 import { HUD_TEXT, TOUCH_TEXT } from '../data/storyText';
 import { canOfferFullscreen, device, enterFullscreen, onDeviceChange } from '../device';
+import { stickAlphaOf, stickScaleOf } from '../prefs';
 import { TOUCH, type StickKind, type TouchFeed } from '../touchInput';
 import { ABILITY_ICON, ACCENT, TICKS, abilityName, litTicks, type ActionSlot, type SlotId } from './hudArt';
-import { EDGE_BAND, MIN_GAP, MIN_TARGET, VIEW_H, VIEW_W, thumbMetrics } from './layout';
+import {
+  CAM_ZOOM,
+  EDGE_BAND,
+  HUD,
+  MIN_GAP,
+  MIN_TARGET,
+  MOVE_ZONE_RATIO,
+  VIEW_H,
+  VIEW_W,
+  layout,
+  layoutFor,
+  minimapInsetFrame,
+  thumbMetrics,
+  touchHudPlan,
+  tuningOf,
+  type LayoutInfo,
+  type LayoutTuning,
+  type TouchHud,
+} from './layout';
 import { h } from './uiArt';
 
-export { EDGE_BAND, MIN_GAP, MIN_TARGET };
+export { CAP_BELOW, EDGE_BAND, MIN_GAP, MIN_TARGET, MOVE_ZONE_RATIO };
 
 /** 프레임마다 GameScene이 넘기는 값. 바뀐 것만 DOM에 반영한다 */
 export interface TouchView {
@@ -67,14 +102,20 @@ export interface Insets {
   b: number;
 }
 
-export type TouchButtonId = 'dash' | 'roar' | 'mode' | 'ability' | 'rescue' | 'scoreboard' | 'fullscreen';
+export type TouchButtonId =
+  'dash' | 'roar' | 'mode' | 'ability' | 'rescue' | 'scoreboard' | 'menu' | 'fullscreen';
 
-/**
- * 버튼 이름표(`.tc-cap`)가 버튼 상자 아래로 나오는 길이 (CSS px): style.css `.tc-cap` top = 100% − 9px, 높이 = line-height 15 +
- * padding 1 + 2 = 18 → 9px 아래로 나온다. 이동 스틱 이름표도 고리 아래로 같은 만큼(`.tc-move > .tc-cap`). 시스템 버튼(점수판 · 전체
- * 화면) 이름표는 버튼 안이다(`.tc-sys > .tc-cap`). touch-hud 단위 시험이 CSS와 대조한다
- */
-export const CAP_BELOW = 9;
+/** 버튼 칸 (조작 배치의 조작 id 중 이동 · 조준 스틱을 뺀 것, 정해진 순서) */
+const BUTTON_IDS: readonly TouchButtonId[] = [
+  'dash',
+  'roar',
+  'mode',
+  'ability',
+  'rescue',
+  'scoreboard',
+  'menu',
+  'fullscreen',
+];
 
 /**
  * 판 위 그림(화면 밖 화살표 · 옮긴 미니맵)이 피할 엄지 대상 (CSS px): 조준 스틱 · 버튼 상자와 이동 스틱이 쉬는 고리, 아래로 이름표까지.
@@ -85,16 +126,15 @@ export function thumbAvoidBoxes(L: TouchLayout): Box[] {
   const below = (b: Box, sys: boolean): Box => ({ x: b.x, y: b.y, w: b.w, h: b.h + (sys ? 0 : CAP_BELOW) });
   if (L.aim) out.push(below(L.aim, false));
   for (const [id, b] of Object.entries(L.buttons) as [TouchButtonId, Box | undefined][])
-    if (b) out.push(below(b, id === 'scoreboard' || id === 'fullscreen'));
+    if (b) out.push(below(b, isSysControl(id)));
   const r = L.moveR;
   out.push(below({ x: L.moveHome.x - r, y: L.moveHome.y - r, w: 2 * r, h: 2 * r }, false));
   return out;
 }
 
 // 화면 가장자리 제스처 띠(EDGE_BAND: 좌우 안전 영역 + 32px, 아래 + 24px — 이 띠에서 시작한 터치는 무시한다) ·
-// 터치 대상 최소 크기 · 간격(MIN_TARGET · MIN_GAP, CSS px = dp)은 layout.ts에 있다 (HUD 배치가 같은 수치로 엄지 자리를 비운다)
-/** 이동 스틱이 생기는 영역: 화면 왼쪽 이 비율 안 */
-export const MOVE_ZONE_RATIO = 0.4;
+// 터치 대상 최소 크기 · 간격(MIN_TARGET · MIN_GAP, CSS px = dp) · 이동 영역 비율(MOVE_ZONE_RATIO, 화면 40%)은 layout.ts에 있다
+// (HUD 배치가 같은 수치로 엄지 자리를 비운다)
 
 export interface TouchLayout {
   /** 터치가 시작될 수 있는 사각형 (가장자리 띠 안쪽) */
@@ -110,6 +150,27 @@ export interface TouchLayout {
   /** 돌진 버튼을 끌어 만드는 작은 스틱의 반지름 */
   dashR: number;
   buttons: Partial<Record<TouchButtonId, Box>>;
+  /** 저장한 조작 배치를 놓을 자리가 없어 기본 배치(반전이면 뒤집은 것)로 돌아갔다 (그때만 true) */
+  fallback?: true;
+}
+
+/** touchLayout 추가 선택 (설정 화면 통합). 모두 빠지면 예전 배치 그대로 */
+export interface TouchLayoutOptions {
+  /** 조이스틱 크기 배율 (이동 · 조준 스틱 반지름, 버튼은 그대로). 기본 1 */
+  stickScale?: number;
+  /** 판 중 설정 시스템 버튼 (점수판 바로 왼쪽) */
+  menu?: boolean;
+  /** 저장한 조작 배치 (좌우 반전 · 옮긴 조작). 없거나 기본이면 기본 배치 */
+  custom?: TeamLayout | null;
+  /** 옮긴 조작 · 반대쪽 이동 영역이 더 피할 사각형 (창 CSS px — 맵 창 안 미니맵처럼 avoid에 없는 HUD) */
+  obstacles?: readonly Box[];
+  /** 판 화면 논리 폭 / 높이 (전체 화면 버튼 세로 줄 판단). 없으면 지금 배치(VIEW_W / VIEW_H) */
+  viewRatio?: number;
+  /**
+   * 시스템 버튼 줄 수 (판 HUD 배치 TouchHudPlan.sysRows): 2면 전체 화면 버튼을 점수판 아래에 (설정 버튼까지 세 칸이 맵에 걸치는
+   * 낮은 넓은 화면). 없으면 1
+   */
+  sysRows?: 1 | 2;
 }
 
 /**
@@ -119,7 +180,9 @@ export interface TouchLayout {
  * 괴물 = 조준 스틱(큰 원) + 왼쪽 돌진 · 위 시야 모드 · 그 왼쪽 포효, 생존자 = 능력(큰 버튼) + 왼쪽 위 구조.
  * 오른쪽 위에 점수판 · 전체 화면(브라우저 안일 때만).
  * avoid(M12) = 판 HUD 부품 사각형(창 CSS px): 이동 영역은 그와 가로로 겹치는 부품 아래에서 시작한다(이동 스틱 그림이 들어갈
- * 높이는 남긴다). 버튼 무리 · 시스템 버튼 자리는 판 HUD 배치(layout.touchHudPlan)가 같은 식으로 비워 두었다
+ * 높이는 남긴다). 버튼 무리 · 시스템 버튼 자리는 판 HUD 배치(layout.touchHudPlan)가 같은 식으로 비워 두었다.
+ * opts(설정 화면 통합): 조이스틱 크기 · 판 중 설정 버튼 · 저장한 조작 배치. 배치를 바꿨으면 기본 배치 위에 덮어(controlLayout
+ * resolveLayout — 범위 안, 다른 조작 · HUD(avoid + obstacles)와 안 겹침) 이동 영역은 이동 스틱 고리가 있는 쪽 40% 띠가 된다
  */
 export function touchLayout(
   w: number,
@@ -128,8 +191,9 @@ export function touchLayout(
   monster: boolean,
   fullscreen: boolean,
   avoid: readonly Box[] = [],
+  opts: TouchLayoutOptions = {},
 ): TouchLayout {
-  const t = thumbMetrics(h - inset.t - inset.b);
+  const t = thumbMetrics(h - inset.t - inset.b, opts.stickScale ?? 1);
   const pad = t.pad;
   const gap = t.gap;
   const rowGap = t.rowGap;
@@ -159,37 +223,29 @@ export function touchLayout(
     const rs = t.rescue;
     buttons.rescue = sq(right - a - gap - rs, bottom - a / 2 - rs / 2 - Math.round(a * 0.3), rs);
   }
-  // 오른쪽 위: 점수판(맨 오른쪽 위) · 전체 화면. 전체 화면은 판 화면 옆 빈 띠에 자리가 있으면 점수판 아래(세로 줄),
-  // 아니면 점수판 왼쪽
+  // 오른쪽 위: 점수판(맨 오른쪽 위) · 설정(판 중, 점수판 왼쪽) · 전체 화면. 전체 화면은 판 화면 옆 빈 띠에 자리가 있으면 점수판
+  // 아래(세로 줄), 아니면 줄 맨 왼쪽
   const sysH = t.sysH;
   const sysW = t.sysW;
   const sysY = safe.y + pad + 2;
   buttons.scoreboard = { x: right - sysW, y: sysY, w: sysW, h: sysH };
+  if (opts.menu) buttons.menu = { x: right - sysW * 2 - gap, y: sysY, w: sysW, h: sysH };
+  const rowLeft = (buttons.menu ?? buttons.scoreboard).x;
   if (fullscreen) {
     const below = sysY + sysH + gap;
     // 엄지 자리 맨 윗줄 (괴물: 포효 · 시야 모드, 생존자: 구조)
     const thumbTop = (buttons.mode ?? buttons.rescue)?.y ?? bottom;
     // 16:9 판 화면 옆 빈 띠(긴 휴대폰 브라우저)에 세로 줄이 들어가면 미니맵을 가리지 않는다
-    const pillar = (w - (h * VIEW_W) / VIEW_H) / 2;
+    const pillar = (w - h * (opts.viewRatio ?? VIEW_W / VIEW_H)) / 2;
     buttons.fullscreen =
-      pillar >= w - buttons.scoreboard.x && below + sysH + rowGap <= thumbTop
+      (pillar >= w - buttons.scoreboard.x || opts.sysRows === 2) && below + sysH + rowGap <= thumbTop
         ? { x: right - sysW, y: below, w: sysW, h: sysH }
-        : { x: right - sysW * 2 - gap, y: sysY, w: sysW, h: sysH };
+        : { x: rowLeft - gap - sysW, y: sysY, w: sysW, h: sysH };
   }
   const moveR = t.moveR;
-  const zone: Box = { x: safe.x, y: safe.y, w: Math.round(w * MOVE_ZONE_RATIO) - safe.x, h: safe.h };
-  // 판 HUD 아래에서 시작 (이동 스틱 그림 + 위 8px은 남긴다)
-  const safeBottom = safe.y + safe.h;
-  let top = zone.y;
-  for (const r of avoid)
-    if (r.x < zone.x + zone.w && r.x + r.w > zone.x && r.y < safeBottom)
-      top = Math.max(top, r.y + r.h + MIN_GAP);
-  top = Math.min(top, safeBottom - moveR * 2 - 24);
-  if (top > zone.y) {
-    zone.h = safeBottom - top;
-    zone.y = top;
-  }
-  return {
+  const zoneAt = (side: Side, r: number, list: readonly Box[]): Box => moveZone(w, safe, side, r, list);
+  const zone = zoneAt('left', moveR, avoid);
+  const def: TouchLayout = {
     safe,
     zone,
     moveR,
@@ -198,6 +254,155 @@ export function touchLayout(
     dashR: Math.round(btn * 0.9),
     buttons,
   };
+  const custom = opts.custom ?? null;
+  if (isDefaultLayout(custom)) return def;
+  // 조작 배치: 기본 배치 위에 덮는다. 피할 것 = 판 HUD + 맵 창 안 미니맵
+  const hud = [...avoid, ...(opts.obstacles ?? [])];
+  const rules: PlaceRules = {
+    range: moveRange(safe, pad),
+    hud,
+    zone: (side, r) => zoneAt(side, r, hud),
+    midX: safe.x + safe.w / 2,
+  };
+  const res = resolveLayout(controlBoxes(def), custom, safe, rules);
+  const b = res.boxes;
+  const ring = b.move ?? ringOf(def);
+  const R = ring.w / 2;
+  const out: Partial<Record<TouchButtonId, Box>> = {};
+  for (const id of BUTTON_IDS) {
+    const box = b[id];
+    if (box) out[id] = box;
+  }
+  return {
+    safe,
+    zone: rules.zone(sideOf(ring, rules.midX), R),
+    moveR: R,
+    moveHome: { x: ring.x + R, y: ring.y + R },
+    aim: b.attack ?? null,
+    dashR: def.dashR,
+    buttons: out,
+    ...(res.fallback ? { fallback: true as const } : {}),
+  };
+}
+
+/**
+ * 이동 영역 (창 CSS px): side 쪽 화면 40% 띠(MOVE_ZONE_RATIO, 안전 사각형 안). 판 HUD(list)와 가로로 겹치면 그 아래에서 시작하되
+ * 이동 스틱 그림(반지름 r) + 위 24px 높이는 남긴다 (M12 — 왼쪽이 기본, 좌우 반전 · 옮긴 이동 스틱이면 오른쪽)
+ */
+export function moveZone(w: number, safe: Box, side: Side, r: number, list: readonly Box[]): Box {
+  const band = Math.round(w * MOVE_ZONE_RATIO);
+  const safeBottom = safe.y + safe.h;
+  const zone: Box =
+    side === 'left'
+      ? { x: safe.x, y: safe.y, w: band - safe.x, h: safe.h }
+      : { x: w - band, y: safe.y, w: safe.x + safe.w - (w - band), h: safe.h };
+  let top = zone.y;
+  for (const b of list)
+    if (b.x < zone.x + zone.w && b.x + b.w > zone.x && b.y < safeBottom)
+      top = Math.max(top, b.y + b.h + MIN_GAP);
+  top = Math.min(top, safeBottom - r * 2 - 24);
+  if (top > zone.y) {
+    zone.h = safeBottom - top;
+    zone.y = top;
+  }
+  return zone;
+}
+
+/** 이동 스틱이 쉬는 고리 사각형 */
+function ringOf(L: TouchLayout): Box {
+  const r = L.moveR;
+  return { x: L.moveHome.x - r, y: L.moveHome.y - r, w: r * 2, h: r * 2 };
+}
+
+/** 배치 → 조작마다 사각형 (이동 = 쉬는 고리, 공격 = 조준 스틱) */
+export function controlBoxes(L: TouchLayout): ControlBoxes {
+  const out: ControlBoxes = { move: ringOf(L) };
+  if (L.aim) out.attack = L.aim;
+  for (const id of BUTTON_IDS) {
+    const b = L.buttons[id];
+    if (b) out[id] = b;
+  }
+  return out;
+}
+
+/** 판 HUD 미리보기 (창 CSS px): 판 시작 크기 · 안전 영역 · 조정 값으로 정한 이 역할 HUD (편집 화면 · 판 직전 안내 그림) */
+export interface HudPreview {
+  layout: LayoutInfo;
+  plan: TouchHud | null;
+  /** 늘 떠 있는 부품 (timer · gaugeA · gaugeB · card0~2 · minimap) */
+  rects: { id: string; box: Box }[];
+  /** 맵 창 안 미니맵 틀 (따라가는 카메라에서 옆 칸에 자리가 없을 때, 없으면 null) */
+  inset: Box | null;
+  /** 맵 사각형 */
+  map: Box;
+  /** 시스템 버튼 줄 수 (touchLayout opts.sysRows) */
+  sysRows: 1 | 2;
+}
+
+/**
+ * 판 HUD 미리보기: 창 w × h(CSS px) · 안전 영역 inset의 판 화면(#game-root = 안전 영역 안)을 tuning으로 배치한 HUD 자리.
+ * 판 장면의 캔버스가 #game-root를 가득 채운다고 본다 (논리 크기가 화면비 그대로)
+ */
+export function hudPreview(
+  team: Team,
+  w: number,
+  h: number,
+  inset: Insets,
+  tuning: LayoutTuning,
+): HudPreview {
+  const gw = Math.max(1, w - inset.l - inset.r);
+  const gh = Math.max(1, h - inset.t - inset.b);
+  const l = layoutFor(gw, gh, true, tuning);
+  const plan = touchHudPlan(l);
+  const k = plan ? 1 / plan.L : gh / l.viewH;
+  const css = (r: Box): Box => ({ x: inset.l + r.x * k, y: inset.t + r.y * k, w: r.w * k, h: r.h * k });
+  const p = plan ? (team === 'monster' ? plan.monster : plan.survivor) : null;
+  const MAP = { x: l.mapX, y: l.mapY, w: l.viewW - l.mapX * 2, h: l.viewH - l.mapY * 2 };
+  return {
+    layout: l,
+    plan,
+    rects: p ? p.rects.map((r) => ({ id: r.id, box: css(r.rect) })) : [],
+    inset: p?.minimapInset && CAM_ZOOM > 1 ? css(minimapInsetFrame(p.minimapInset, l.uiScale)) : null,
+    map: css(MAP),
+    sysRows: p?.sysRows ?? 1,
+  };
+}
+
+/**
+ * 이 역할의 실제 터치 배치 (창 CSS px): 판을 지금 창 w × h · 안전 영역 inset에서 시작하면 보일 자리 — 지금 설정(조이스틱 크기 ·
+ * UI 크기)과 저장한 조작 배치(좌우 반전 · 옮긴 조작), 판 HUD를 피한 것. 판 직전 터치 안내 그림 · 편집 화면이 쓴다.
+ * menu = 판 중 설정 버튼이 있다 (판 중에는 늘 있다). 세로로 받은 크기는 긴 변을 폭으로 본다 (판은 가로에서만 한다 — layoutFor와 같다)
+ */
+export function effectiveTouchLayout(
+  team: Team,
+  w: number,
+  h: number,
+  inset: Insets,
+  fullscreen: boolean,
+  menu = true,
+): TouchLayout {
+  const W = Math.max(w, h);
+  const H = Math.min(w, h);
+  const hud = hudPreview(team, W, H, inset, matchTuning(team, menu));
+  // 판 배치가 실제로 적용한 값 (낮은 화면에서는 조이스틱 크기가 들어가는 만큼만)
+  const tuning = tuningOf(hud.layout);
+  const saved = loadControlLayout(team);
+  return touchLayout(
+    W,
+    H,
+    inset,
+    team === 'monster',
+    fullscreen,
+    hud.rects.map((r) => r.box),
+    {
+      stickScale: tuning.stickScale,
+      menu,
+      custom: { mirror: tuning.mirror, items: saved?.items ?? {} },
+      obstacles: hud.inset ? [hud.inset] : [],
+      viewRatio: hud.layout.viewW / hud.layout.viewH,
+      sysRows: hud.sysRows,
+    },
+  );
 }
 
 /**
@@ -236,7 +441,21 @@ export function stickVector(dx: number, dy: number, r: number): { x: number; y: 
 
 // ───────────────────────── 화면 ─────────────────────────
 
-type PartId = SlotId | 'scoreboard' | 'fullscreen';
+type PartId = SlotId | 'scoreboard' | 'menu' | 'fullscreen';
+
+/** 판 중 터치 화면 (디버그 훅 getControlLayout · 하나만 있다) */
+const live: { controls: TouchControls | null } = { controls: null };
+
+/** 디버그 · 시험: 판 중 터치 화면의 조작 배치 (창 CSS px, 없으면 null) */
+export function liveControlLayout(): {
+  team: Team;
+  mirror: boolean;
+  fallback: boolean;
+  layout: TouchLayout;
+  hud: { id: string; b: Box }[];
+} | null {
+  return live.controls?.debugLayout() ?? null;
+}
 
 /** 버튼 하나 (행동 칸 · 점수판 · 전체 화면) 또는 조준 스틱 */
 interface Part {
@@ -305,13 +524,29 @@ export class TouchControls {
   private hintIdleTimer: number | null = null;
   /** 지난번 update의 행동 칸 배열 (같은 객체면 건너뛴다) */
   private seenSlots: readonly ActionSlot[] | null = null;
+  /** 역할 팀 (조작 배치는 생존자 · 괴물 따로) */
+  private readonly team: Team;
+  /** 조이스틱 크기 배율 (판 시작 때 값 — 판 HUD가 같은 값으로 엄지 자리를 비웠다) */
+  private readonly stickScale: number;
+  /** 저장한 조작 배치 (판 시작 때 읽는다. 좌우 반전은 판 HUD 배치와 같은 값) */
+  private readonly custom: TeamLayout;
 
   constructor(
     readonly root: HTMLElement,
     readonly opts: TouchControlsOptions,
   ) {
     const role = opts.role;
+    this.team = role === 'monster' ? 'monster' : 'survivor';
+    // 판 배치 조정은 판 시작 직전 configureLayout이 정한 값(main.ts applyMatchLayout — 같은 설정 · 저장값)을 그대로 쓴다.
+    // 터치 HUD 배치가 없으면(시험) 지금 설정 · 저장값
+    const tune = HUD.touch ? tuningOf(layout()) : null;
+    this.stickScale = tune ? tune.stickScale : stickScaleOf();
+    const saved = loadControlLayout(this.team);
+    this.custom = { mirror: tune ? tune.mirror : saved?.mirror === true, items: saved?.items ?? {} };
     this.layer = h('div', { class: `touch-layer tc-${role === 'monster' ? 'monster' : 'survivor'}` });
+    // 조이스틱 투명도 (설정 조작 탭): 이동 · 조준 스틱 불투명도에 곱한다 (style.css --stick-a)
+    const alpha = stickAlphaOf();
+    if (alpha < 1) this.layer.style.setProperty('--stick-a', String(alpha));
     this.probe = h('div', { class: 'tc-probe' });
     this.zone = h('div', { class: 'tc-zone', 'data-touch-target': 'move-zone', 'data-touch-kind': 'zone' });
     this.moveKnob = h('div', { class: 'tc-knob' });
@@ -346,6 +581,14 @@ export class TouchControls {
       if (!this.grab(e, 'tap', board.el)) return;
       this.setBoard(!this.scoreboard);
     });
+    // 판 중 설정 (점수판 왼쪽): 점수판을 켜고 끄지 않는다. 점수판이 열려 있으면 아래 문서 캡처가 먼저 닫고 설정을 연다
+    const onMenu = opts.onMenu;
+    if (onMenu) {
+      const menu = this.part('menu', 'menu', 'sliders', TOUCH_TEXT.menu, 'tc-btn tc-sys');
+      menu.el.addEventListener('pointerdown', (e) => {
+        if (this.grab(e, 'tap', menu.el)) onMenu();
+      });
+    }
     if (canOfferFullscreen()) {
       const fs = this.part(
         'fullscreen',
@@ -400,8 +643,34 @@ export class TouchControls {
     this.cleanup.push(() => window.clearTimeout(again));
     this.cleanup.push(onDeviceChange(() => this.apply()));
     root.appendChild(this.layer);
+    live.controls = this;
     this.relayout();
     this.apply();
+  }
+
+  /** 맵 창 안 미니맵 틀 (창 CSS px): 옮긴 조작이 피한다 (판 HUD rects에는 없다). 따라가는 카메라에서 옆 칸에 자리가 없을 때만 */
+  private insetBoxes(): Box[] {
+    const plan = HUD.touch ? (this.team === 'monster' ? HUD.touch.monster : HUD.touch.survivor) : null;
+    const c = this.opts.hud?.canvas();
+    const i = plan?.minimapInset;
+    if (!i || !c || CAM_ZOOM <= 1) return [];
+    const f = minimapInsetFrame(i, HUD.s);
+    return [{ x: c.left + f.x * c.k, y: c.top + f.y * c.k, w: f.w * c.k, h: f.h * c.k }];
+  }
+
+  /** 디버그 · 시험: 지금 배치 (getControlLayout) */
+  debugLayout(): {
+    team: Team;
+    mirror: boolean;
+    fallback: boolean;
+    layout: TouchLayout;
+    hud: { id: string; b: Box }[];
+  } | null {
+    const L = this.layout;
+    if (!L) return null;
+    const hud = this.hudBoxes();
+    for (const b of this.insetBoxes()) hud.push({ id: 'minimapInset', b });
+    return { team: this.team, mirror: this.custom.mirror, fallback: L.fallback === true, layout: L, hud };
   }
 
   /** 버튼 · 조준 스틱 요소 하나: 면(눈금 링 + 아이콘 + 남은 초) + 이름표 */
@@ -618,6 +887,13 @@ export class TouchControls {
       this.opts.role === 'monster',
       this.parts.has('fullscreen'),
       boxes.map((x) => x.b),
+      {
+        stickScale: this.stickScale,
+        menu: this.parts.has('menu'),
+        custom: this.custom,
+        obstacles: isDefaultLayout(this.custom) ? [] : this.insetBoxes(),
+        sysRows: HUD.touch ? HUD.touch[this.team].sysRows : 1,
+      },
     );
     this.layout = L;
     this.opts.hud?.onCovered?.(hudCovered(L, boxes));
@@ -763,6 +1039,7 @@ export class TouchControls {
   }
 
   destroy(): void {
+    if (live.controls === this) live.controls = null;
     if (this.hintTimer !== null) window.clearTimeout(this.hintTimer);
     if (this.hintIdleTimer !== null) window.clearTimeout(this.hintIdleTimer);
     this.cancelAll();

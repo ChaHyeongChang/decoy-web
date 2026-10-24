@@ -422,4 +422,6 @@ export const EDITOR_TEXT = {
   minimap: '지도',
   move: '이동 스틱',
   menu: '설정',
+  /** 생존자 능력 버튼 (편집 화면은 역할이 아니라 팀 배치라 능력 이름 대신) */
+  ability: '능력',
 } as const;

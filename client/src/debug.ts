@@ -1,7 +1,7 @@
 // window.__DECOY__ 디버그 훅과 ?debug=1 오버레이 (FPS · 프레임 시간 · 그리기 호출 · 핑 · 서버 틱 · 예측 오차 · 품질 …,
 // 표시는 ui/debugOverlay.ts). 오버레이는 배포 빌드에서도 ?debug=1이면 뜨고, 그때만 그리기 호출을 센다
 import Phaser from 'phaser';
-import type { DecoyDebug, HudLayout, TouchTarget } from '@decoy/shared';
+import type { ControlLayoutInfo, DecoyDebug, HudLayout, TouchTarget } from '@decoy/shared';
 import type { App } from './app';
 import { sfx } from './audio';
 import { device } from './device';
@@ -21,11 +21,41 @@ import { installDebugOverlay, type DebugOverlayData, type OverlayAnchor } from '
 import { MAP_RECT, VIEW_H, VIEW_W, layout, tileToScreen } from './ui/layout';
 import { fontState, uiFontsReady } from './ui/fonts';
 import { auditTexts } from './ui/text';
+import { editorControlLayout, openLayoutEditor } from './ui/layoutEditor';
+import { liveControlLayout } from './ui/touchControls';
 
 declare global {
   interface Window {
     __DECOY__?: DecoyDebug;
   }
+}
+
+/** 판 중 터치 화면의 조작 배치 (조작 배치 편집 시험, 없으면 null) */
+function matchControlLayout(): ControlLayoutInfo | null {
+  const live = liveControlLayout();
+  if (!live) return null;
+  const L = live.layout;
+  const r = (b: { x: number; y: number; w: number; h: number }) => ({ x: b.x, y: b.y, w: b.w, h: b.h });
+  const controls: ControlLayoutInfo['controls'] = [
+    {
+      id: 'move',
+      ...r({ x: L.moveHome.x - L.moveR, y: L.moveHome.y - L.moveR, w: L.moveR * 2, h: L.moveR * 2 }),
+    },
+  ];
+  if (L.aim) controls.push({ id: 'attack', ...r(L.aim) });
+  for (const [id, b] of Object.entries(L.buttons)) if (b) controls.push({ id, ...r(b) });
+  const pad = 6;
+  return {
+    source: 'match',
+    team: live.team,
+    mirror: live.mirror,
+    fallback: live.fallback,
+    safe: r(L.safe),
+    range: { x: L.safe.x + pad, y: L.safe.y + pad, w: L.safe.w - pad * 2, h: L.safe.h - pad * 2 },
+    zone: r(L.zone),
+    controls,
+    hud: live.hud.map((x) => ({ id: x.id, ...r(x.b) })),
+  };
 }
 
 function gameScene(app: App): GameScene | null {
@@ -191,6 +221,15 @@ export function installDebug(app: App, overlay: boolean): void {
       const p = tileToScreen(x, y);
       return { x: rect.left + (p.x / VIEW_W) * rect.width, y: rect.top + (p.y / VIEW_H) * rect.height };
     },
+    // ── 조작 배치 편집 ──
+    openLayoutEditor: (team) => {
+      openLayoutEditor({
+        host: document.getElementById('ui-root') ?? document.body,
+        role: team,
+        onClose: () => undefined,
+      });
+    },
+    getControlLayout: () => editorControlLayout() ?? matchControlLayout(),
   };
   window.__DECOY__ = hook;
   if (!overlay) return;

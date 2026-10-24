@@ -265,6 +265,25 @@ export interface HudLayout {
   minimapInset: boolean;
 }
 
+/** 조작 배치 (설정 화면 통합 · 조작 배치 편집, CSS px · 창 기준): 편집 화면 또는 판 중 터치 화면의 실제 자리 */
+export interface ControlLayoutInfo {
+  source: 'editor' | 'match';
+  team: 'survivor' | 'monster';
+  mirror: boolean;
+  /** 저장한 배치를 놓을 자리가 없어 기본 배치로 돌아갔다 */
+  fallback: boolean;
+  /** 안전 사각형 (가장자리 띠 안쪽) · 조작을 움직일 수 있는 범위 (그 안쪽 pad) · 이동 영역 */
+  safe: { x: number; y: number; w: number; h: number };
+  range: { x: number; y: number; w: number; h: number };
+  zone: { x: number; y: number; w: number; h: number };
+  /** 조작마다 사각형 (move = 이동 스틱 쉬는 고리, attack = 조준 스틱) */
+  controls: { id: string; x: number; y: number; w: number; h: number }[];
+  /** 피하는 판 HUD 부품 (timer · gaugeA · gaugeB · card0~2 · minimap · minimapInset) */
+  hud: { id: string; x: number; y: number; w: number; h: number }[];
+  /** 편집 화면: 고른 조작 (없으면 null) */
+  selected?: string | null;
+}
+
 export interface DecoyDebug {
   /** 그래픽 상태 (M10) */
   readonly gfx: Readonly<GfxDebugInfo>;
@@ -345,4 +364,9 @@ export interface DecoyDebug {
   getTruth(): TruthFrame | null;
   /** 타일 좌표 → 브라우저 창 좌표 (E2E에서 마우스를 옮길 때) */
   tileToClient(x: number, y: number): { x: number; y: number } | null;
+  // ── 조작 배치 편집 ──
+  /** 조작 배치 편집 화면을 연다 (터치 로비 — 설정 화면 단추와 같은 화면, 시험용) */
+  openLayoutEditor(team: 'survivor' | 'monster'): void;
+  /** 지금 조작 배치: 편집 화면이 열려 있으면 그것, 아니면 판 중 터치 화면 (둘 다 없으면 null) */
+  getControlLayout(): ControlLayoutInfo | null;
 }
