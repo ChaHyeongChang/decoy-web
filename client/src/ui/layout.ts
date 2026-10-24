@@ -153,8 +153,10 @@ export const MINIMAP_INSET = { frac: 0.22, maxCss: 200, margin: 6, min: 60 } as 
 /**
  * 판 중 창이 낮아져 엄지 버튼이 옆 칸 미니맵을 덮었을 때 미니맵 틀을 옮길 자리 (논리 px, 틀 왼쪽 위). 확대 화면에서는 맵
  * 전체가 보이지 않아 미니맵이 필수라 숨기지 않고 맵 창 안 오른쪽 위 구석으로 옮긴다(검토 반영): 틀이 맵 안이고 피할 사각형
- * (엄지 버튼 · 시스템 버튼, 간격 gap)과 겹치지 않으면 그 자리, 아니면 null (그때는 예전처럼 숨긴다). 왼쪽은 이동 영역(화면 왼쪽
- * 40%)이 그 아래까지 올라와 있어 쓰지 않는다
+ * (엄지 버튼 · 시스템 버튼, 간격 gap)과 겹치지 않으면 그 자리. 오른쪽 위 구석에 시스템 버튼이 걸치면(판 중 설정 버튼까지 세 칸이라
+ * 전체 화면 버튼이 맵에 걸친다 — 설정 화면 통합) 그 아래, 그다음 그 왼쪽(맵 위 끝)을 본다(판 시작 배치의 맵 안 미니맵과 같은 순서,
+ * VISUAL_SPEC 12.6). 모두 막히면 null (그때는 예전처럼 숨긴다). 왼쪽 절반은 이동 영역(화면 왼쪽 40%)이 그 아래까지 올라와 있어
+ * 쓰지 않는다
  */
 export function minimapFallback(
   map: { x: number; y: number; w: number; h: number },
@@ -164,13 +166,36 @@ export function minimapFallback(
   gap: number,
 ): { x: number; y: number } | null {
   if (frame.w + margin * 2 > map.w || frame.h + margin * 2 > map.h) return null;
-  const y = map.y + margin;
-  const x = map.x + map.w - margin - frame.w;
-  const free = avoid.every(
+  const free = (x: number, y: number): boolean =>
+    x >= map.x + margin &&
+    y >= map.y + margin &&
+    x + frame.w <= map.x + map.w - margin + 1e-6 &&
+    y + frame.h <= map.y + map.h - margin + 1e-6 &&
+    avoid.every(
+      (b) =>
+        x >= b.x + b.w + gap || b.x >= x + frame.w + gap || y >= b.y + b.h + gap || b.y >= y + frame.h + gap,
+    );
+  const top = map.y + margin;
+  const right = map.x + map.w - margin - frame.w;
+  if (free(right, top)) return { x: right, y: top };
+  // 오른쪽 위 구석을 막은 것들 (틀 자리와 간격 안에서 겹친다)
+  const blockers = avoid.filter(
     (b) =>
-      x >= b.x + b.w + gap || b.x >= x + frame.w + gap || y >= b.y + b.h + gap || b.y >= y + frame.h + gap,
+      !(
+        right >= b.x + b.w + gap ||
+        b.x >= right + frame.w + gap ||
+        top >= b.y + b.h + gap ||
+        b.y >= top + frame.h + gap
+      ),
   );
-  return free ? { x, y } : null;
+  if (blockers.length === 0) return null;
+  // 그 아래 (오른쪽 끝 그대로)
+  const below = Math.max(...blockers.map((b) => b.y + b.h)) + gap;
+  if (free(right, below)) return { x: right, y: below };
+  // 그 왼쪽 (맵 위 끝 그대로)
+  const left = Math.min(...blockers.map((b) => b.x)) - gap - frame.w;
+  if (left >= map.x + map.w / 2 && free(left, top)) return { x: left, y: top };
+  return null;
 }
 
 /**
