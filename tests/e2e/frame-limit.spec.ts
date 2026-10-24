@@ -166,7 +166,7 @@ test('주소 ?fpsLimit이 우선: 저장값보다 먼저이고 설정 화면 줄
   await expect(page.getByTestId('lock-quality')).toBeHidden();
   await expect(page.getByTestId('quality-auto')).toHaveAttribute('aria-disabled', 'false');
   // 잠긴 줄은 눌러도 바뀌지 않는다
-  await press(page.getByTestId('frame-limit-120'));
+  await page.getByTestId('frame-limit-120').click({ force: true });
   expect(await appliedLimit(page)).toBe('60');
   expect(await stored(page)).toBe('120');
   // 기본값: 저장값만 지우고 이번 접속은 주소 값

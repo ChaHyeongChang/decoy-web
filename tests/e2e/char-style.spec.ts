@@ -192,7 +192,7 @@ test('주소 ?chars가 저장값보다 먼저이고(설정 화면 줄이 잠기�
   await expect(page.getByTestId('lock-char-style')).toContainText('?chars=new');
   await expect(page.getByTestId('char-style-classic')).toHaveAttribute('aria-disabled', 'true');
   // 잠긴 줄은 눌러도 바뀌지 않는다
-  await press(page.getByTestId('char-style-classic'));
+  await page.getByTestId('char-style-classic').click({ force: true });
   expect(await applied(page)).toBe('new');
   expect(await stored(page)).toBe('classic');
   // 주소 값 없이 다시 열면 저장값
@@ -256,7 +256,8 @@ test('방 역할 카드 · 빠른 매칭 대기: 새 캐릭터면 정면 그림(
   await expect(page.getByTestId('role-runner')).toHaveClass(/mine/);
   await expect(page.getByTestId('role-runner').locator('.rc-tag')).toBeVisible();
   await expect(page.getByTestId('role-guard')).toBeFocused();
-  expect(await stored(page)).toBe('new');
+  // 디버그 훅은 저장하지 않는다 (기본값이라 처음부터 저장값 없음)
+  expect(await stored(page)).toBeNull();
   await page.evaluate(() => window.__DECOY__?.setCharStyle('new'));
   expect(await expectFigures(figures, true, '방 카드 (다시 새 캐릭터)')).toBe(4);
 

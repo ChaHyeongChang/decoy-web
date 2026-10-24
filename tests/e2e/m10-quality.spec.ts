@@ -174,7 +174,7 @@ test('주소 ?quality가 이번 접속에 우선한다: 설정 화면 품질 줄
   await expect(page.getByTestId('quality-medium')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('lock-quality')).toBeVisible();
   await expect(page.getByTestId('lock-quality')).toContainText('?quality=medium');
-  await press(page.getByTestId('quality-low'));
+  await page.getByTestId('quality-low').click({ force: true });
   expect([(await gfx(page)).quality, (await gfx(page)).qualitySource]).toEqual(['medium', 'url']);
   expect(await page.evaluate((k) => localStorage.getItem(k), QUALITY_STORAGE_KEY)).toBe('high');
   // 모두 기본값으로 (두 번 눌러 확인): 저장값은 지우지만 주소 값은 그대로
