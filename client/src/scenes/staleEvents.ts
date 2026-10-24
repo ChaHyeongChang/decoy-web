@@ -43,3 +43,16 @@ export function frameDeltaMs(rawDelta: number): number {
   if (!(rawDelta > 0)) return 0;
   return Math.min(MAX_FRAME_DELTA_MS, rawDelta);
 }
+
+/** 이 프레임 rAF 시각이 지금보다 이만큼 넘게 지났으면 쓰지 않는다 (ms): 아주 늦게 시작한 콜백은 화면에 나가는 시각도 늦다 */
+export const FRAME_TIME_MAX_LAG_MS = 50;
+
+/**
+ * 내 캐릭터 · 카메라를 잴 이 프레임 시각 (내 움직임 고르기): rAF 시각(vsync — 화면에 나가는 간격과 같은 격자). 콜백 안의
+ * performance.now는 콜백이 늦게 시작한 만큼(입력 이벤트 · 다른 콜백) 프레임마다 흔들린다. 값이 이상하거나 지금보다 뒤거나
+ * FRAME_TIME_MAX_LAG_MS 넘게 지났으면 지금 시각
+ */
+export function frameTimeOf(rafTime: number, nowMs: number): number {
+  if (!Number.isFinite(rafTime) || nowMs - rafTime > FRAME_TIME_MAX_LAG_MS) return nowMs;
+  return Math.min(rafTime, nowMs);
+}

@@ -14,6 +14,7 @@ import {
   coneBox,
   dipAlpha,
   follow,
+  followLinear,
   lookAhead,
   snapView,
   viewTiles,
@@ -340,5 +341,101 @@ describe('창 밖 컬링 (cullable)', () => {
   it('좌표가 숫자가 아니면 거르지 않는다', () => {
     expect(cullable(r(Number.NaN, 0, 10, 10), map, 1, view)).toBe(false);
     expect(cullable(r(0, 0, Number.POSITIVE_INFINITY, 10), map, 1, view)).toBe(false);
+  });
+});
+
+// ───────────── 내 움직임 고르기 (2026-10-24) ─────────────
+
+/** 8.33 · 16.67ms가 섞인 프레임 간격 (시드, 120Hz에서 vsync를 30% 놓친 기기) */
+function unevenIntervals(n: number, seed = 7): number[] {
+  let s = seed;
+  return Array.from({ length: n }, () => {
+    s = (s * 16807) % 2147483647;
+    return s / 2147483647 < 0.3 ? 1000 / 60 : 1000 / 120;
+  });
+}
+
+describe('내 움직임 고르기: 따라가기는 프레임 간격과 상관없이 같은 늦음 (followLinear)', () => {
+  it('같은 빠르기로 걸으면 8.3 · 16.7ms가 섞여도 목표 − 카메라 = 빠르기 × τ (프레임마다 같다). 예전 식은 간격마다 달랐다', () => {
+    const v = 5 / 1000; // 타일/ms
+    const tau = CAMERA.followTauS;
+    let t = 0;
+    let target = 10;
+    let lin = target;
+    let old = target;
+    const linLag: number[] = [];
+    const oldLag: number[] = [];
+    for (const dt of unevenIntervals(400)) {
+      const prev = target;
+      t += dt;
+      target = 10 + v * t;
+      lin = followLinear(lin, prev, target, dt, tau);
+      old += (target - old) * follow(dt, tau);
+      // 시작 늦음이 가라앉은 뒤 (τ의 20배 남짓: e^-20)
+      if (t > 2500) {
+        linLag.push(target - lin);
+        oldLag.push(target - old);
+      }
+    }
+    for (const lag of linLag) expect(lag).toBeCloseTo(v * tau * 1000, 9);
+    const spread = Math.max(...oldLag) - Math.min(...oldLag);
+    // 예전 식: 늦음 ≈ 빠르기 × (τ − 간격 / 2)라 간격이 바뀔 때마다 0.01타일 넘게 출렁였다 (확대 3 휴대폰에서 약 1 기기 px)
+    expect(spread).toBeGreaterThan(0.01);
+  });
+
+  it('목표가 서 있으면 예전 식과 같고, 간격 0이면 그대로 · τ 0이면 목표', () => {
+    for (const dt of [1000 / 120, 1000 / 60, 33.3]) {
+      expect(followLinear(3, 8, 8, dt, 0.12)).toBeCloseTo(3 + 5 * follow(dt, 0.12), 12);
+    }
+    expect(followLinear(3, 8, 9, 0, 0.12)).toBe(3);
+    expect(followLinear(3, 8, 9, 16, 0)).toBe(9);
+    // 아주 짧은 간격: 빠르기 나눗셈 없이 예전 식
+    expect(followLinear(3, 8, 9, 0.01, 0.12)).toBeCloseTo(3 + 6 * follow(0.01, 0.12), 12);
+  });
+
+  it('점프(띠 안)도 한 프레임 안에 곧게 움직인 것으로 풀어 미끄러진다: 처음 걸음이 예전 식보다 작고 그 뒤는 같다', () => {
+    const dt = 1000 / 60;
+    const first = followLinear(10, 10, 12, dt, 0.12);
+    expect(first).toBeGreaterThan(10);
+    expect(first).toBeLessThan(10 + 2 * follow(dt, 0.12));
+    expect(followLinear(first, 12, 12, dt, 0.12)).toBeCloseTo(first + (12 - first) * follow(dt, 0.12), 12);
+  });
+
+  it('카메라 감독: 창은 기기 픽셀 격자에 맞추고, 그 나머지(snapResidual)만큼 옮겨 그린 내 자리는 화면에서 프레임마다 같은 자리다', () => {
+    const balance = loadTestBalance();
+    const k = 89.28 * 1.25; // 기기 px / 타일 (확대 3 휴대폰 어림)
+    const d = new CameraDirector(16, 10.67);
+    const v = 5 / 1000;
+    let t = 0;
+    const base = {
+      selfId: 's',
+      role: 'runner' as const,
+      myStatus: 'free' as const,
+      survivors: new Map<string, SurvivorView>(),
+      team: ['s'],
+      balance,
+      blend: 0,
+      viewW: 16,
+      viewH: 10.67,
+      devPerTile: k,
+    };
+    const drawnScreen: number[] = [];
+    const rawScreen: number[] = [];
+    for (const dt of unevenIntervals(400, 11)) {
+      t += dt;
+      const me = { x: 14 + v * t, y: 16.5, face: 0 };
+      const view = d.update({ ...base, nowMs: t, dtMs: dt, me });
+      // 창은 격자 위
+      expect(Math.abs(view.x * k - Math.round(view.x * k))).toBeLessThan(1e-6);
+      expect(Math.abs(d.snapResidual.x) * k).toBeLessThanOrEqual(0.5 + 1e-9);
+      if (t > 2500) {
+        drawnScreen.push((me.x + d.snapResidual.x - view.x) * k);
+        rawScreen.push((me.x - view.x) * k);
+      }
+    }
+    const span = (a: number[]): number => Math.max(...a) - Math.min(...a);
+    expect(span(drawnScreen)).toBeLessThan(1e-6);
+    // 옮기지 않으면 반 픽셀씩 흔들린다 (격자 맞추기)
+    expect(span(rawScreen)).toBeGreaterThan(0.5);
   });
 });

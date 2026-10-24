@@ -26,7 +26,13 @@ import { sfx } from '../audio';
 import { STORY_TEXT, UI_TEXT, formatText } from '../data/storyText';
 import { device } from '../device';
 import { FPS_WINDOW_MS, sessionFrameStats, type FrameWindow } from '../gfx/frameStats';
-import { qualityHooks, sessionAutoDowngrade, type AdaptContext, type FrameSample } from '../gfx/quality';
+import {
+  PACING_WATCH,
+  qualityHooks,
+  sessionAutoDowngrade,
+  type AdaptContext,
+  type FrameSample,
+} from '../gfx/quality';
 import { getFpsOverride, gfxNow, gfxState, probeSlot } from '../gfx/state';
 import { haptics } from '../haptics';
 import { InputLog, InputSampler } from '../input';
@@ -67,12 +73,14 @@ import { edgeTargets, placeEdges, type EdgeMarker, type EdgeTarget } from '../re
 import { Scoreboard, TutorialOverlay } from '../ui/overlays';
 import { PROBE_DEPTH, drawProbeText } from '../ui/text';
 import { TouchControls, type TouchView } from '../ui/touchControls';
-import { frameDeltaMs, staleEventLimitMs, trackFrameMs } from './staleEvents';
+import { frameDeltaMs, frameTimeOf, staleEventLimitMs, trackFrameMs } from './staleEvents';
 
 /** 안개 (M3부터) */
 export const FOG_ENABLED = true;
 /** 입력이 밀렸을 때 한 번에 따라잡는 최대 스텝 */
 const MAX_CATCHUP_STEPS = 4;
+/** 입력 틱 경계 비교 여유 (ms): 쌓인 시간이 틱 길이에 부동소수 오차만큼 모자라도 그 틱으로 본다 */
+const STEP_EPS_MS = 1e-6;
 /** 첫 판 조작 안내 표시 시간 (VISUAL_SPEC 8.3) */
 const TUTORIAL_SECONDS = 5;
 const EXIT_NAMES = { N: '북', S: '남' } as const;
@@ -117,10 +125,9 @@ export class GameScene extends Phaser.Scene {
   private seq = 0;
   /** 최근 프레임 간격 (ms, 느려지면 바로 · 빨라지면 천천히): 느린 기기에서 오래된 이벤트 한도를 늘린다 */
   private frameMs = 0;
+  /** 입력 틱 시계: 쌓인 시간 (ms, 틱 길이가 되면 한 틱) · 마지막으로 쌓은 시각 */
   private acc = 0;
   private lastInputAt = 0;
-  /** 마지막으로 입력 틱을 처리한 시각 (틱 사이 보간 비율) */
-  private lastStepAt = 0;
   private inputTimer: number | null = null;
   private world!: WorldRenderer;
   /** HUD 아틀라스와 부품 (배율이 바뀔 때만 다시 굽는다) */
@@ -162,6 +169,9 @@ export class GameScene extends Phaser.Scene {
   private readonly aimHold = new AimHold();
   private readonly aimPointer = { x: 0, y: 0 };
   private readonly aimCursor = new Phaser.Math.Vector2();
+  /** 지난 조준 때 백버퍼 크기 (바뀌었으면 포인터 좌표만 옮겨진 것: AimHold.rebase) */
+  private aimBackingW = 0;
+  private aimBackingH = 0;
   /** 화면 밖 화살표가 피할 사각형 (프레임마다 다시 채운다) */
   private readonly edgeAvoid: { x: number; y: number; w: number; h: number }[] = [];
 
@@ -255,9 +265,11 @@ export class GameScene extends Phaser.Scene {
   /** 판 중 FPS 감시를 하는가 (세션 상태는 sessionAutoDowngrade: 느리면 한 단계 내리고 효과를 확인한다) */
   private watchingFps = false;
   /** 적응형 품질 입력 (프레임마다 새로 만들지 않는다). 최근 1초 측정은 ADAPT_WINDOW_EVERY_MS마다 다시 낸다 */
-  private readonly adaptSample: FrameSample = { fps: 0, workP95: 0 };
+  private readonly adaptSample: FrameSample = { fps: 0, workP95: 0, late: 0 };
   private readonly adaptCtx: AdaptContext = { targetHz: 60, displayHz: 60, canRateFallback: false };
-  private readonly adaptWindow: FrameWindow = { fps: 0, intervalAvg: 0, workP95: 0, frames: 0 };
+  private readonly adaptWindow: FrameWindow = { fps: 0, intervalAvg: 0, workP95: 0, frames: 0, late: 0 };
+  /** 늦은 프레임을 재는 목표 주기 (적응형 목표 FPS의 고르지 않은 프레임, PACING_WATCH) */
+  private readonly adaptLate = { periodMs: 1000 / 60, factor: PACING_WATCH.lateFactor };
   private nextAdaptWindowAt = 0;
   /** 지금 처리하는 스냅샷이 서버에서 만들어진 뒤 지난 시간 (ms, 진동: 오래된 일은 울리지 않는다) */
   private eventAgeMs = 0;
@@ -818,6 +830,13 @@ export class GameScene extends Phaser.Scene {
     // (앞당김 · 따라가기 지연 없이 괴물 가운데, 맵 안으로 자름)를 따라 옮긴 곳을 겨눈다 (aimHold.ts: 앞당김이 조준을 끌지 않고,
     // 맵 끝에 막힌 화면에서는 커서 쪽으로 돈다). 괴물 자리는 이 입력 틱의 예측 상태(me)다 — 그리는 자리(localPos)는 프레임마다
     // 보간해 주사율에 따라 달라, 마우스를 두고 걸을 때 다시 재는 조준이 60Hz · 120Hz에서 달라졌다(frame-independence 시험)
+    // 백버퍼 크기가 바뀌었으면(창 크기 · DPR) 포인터는 같은 게임 자리로 옮겨졌을 뿐 마우스가 움직인 것이 아니다 (aimHold.rebase).
+    // 렌더 프레임에서도 입력 틱을 처리하므로(catchUpInput) 크기 변경 직후 · 카메라 행렬을 다시 맞추기 전에 잴 수 있다
+    if (this.scale.width !== this.aimBackingW || this.scale.height !== this.aimBackingH) {
+      this.aimBackingW = this.scale.width;
+      this.aimBackingH = this.scale.height;
+      this.aimHold.rebase(p);
+    }
     const w = this.cameras.main.getWorldPoint(p.x, p.y, this.aimCursor);
     const body = tileToScreen(me.x, me.y);
     const a = aimAnchor(me.x, me.y, VIEW_TILES_W, VIEW_TILES_H, MAP_W, MAP_H, this.aimAnchorTile);
@@ -854,7 +873,8 @@ export class GameScene extends Phaser.Scene {
     };
   }
 
-  private stepInput(deltaMs: number): void {
+  /** 입력 틱: deltaMs = 지난번부터 흐른 시간, nowMs = 그 시각 (타이머 · 렌더 프레임이 같은 시계로 쌓는다) */
+  private stepInput(deltaMs: number, nowMs: number): void {
     const app = this.app;
     const env = app.moveEnv();
     if (!env || !app.predictor?.state) return;
@@ -876,18 +896,21 @@ export class GameScene extends Phaser.Scene {
     const dtMs = app.dt * 1000;
     this.acc = Math.min(this.acc + deltaMs, dtMs * MAX_CATCHUP_STEPS);
     const frames: InputFrame[] = [];
-    while (this.acc >= dtMs) {
-      this.acc -= dtMs;
+    while (this.acc >= dtMs - STEP_EPS_MS) {
+      this.acc = Math.max(0, this.acc - dtMs);
       this.seq += 1;
       const frame = this.sampler.sample(this.seq, this.aimTarget(), this.touchCtx());
       if (frame.pressed !== 0 && app.match?.role === 'monster') this.predictMonster(frame);
-      app.predictor.applyLocal(frame, env);
-      this.lastStepAt = performance.now();
+      // 명목 시각 (입력 틱 격자 위 = 쌓인 시간이 이 틱의 경계에 닿은 순간, 밀려서 한 번에 여러 틱이면 앞 틱일수록 이르다).
+      // 그린 자리는 이 시각부터 보간하고(Predictor.alphaAt) 내 걷기 기록도 이 시각으로 적는다. 늦게 깬 타이머가 처리한 시각을
+      // 쓰면 늦은 만큼 멈췄다 다음 틱에 튄다 (내 움직임 고르기)
+      const at = nowMs - this.acc;
+      app.predictor.applyLocal(frame, env, at);
       const moved = app.predictor.stepDistance;
-      this.noteSelfStep(this.lastStepAt, moved / dtMs, this.lastStepAt + dtMs, isWalking(moved, dtMs));
+      this.noteSelfStep(at, moved / dtMs, at + dtMs, isWalking(moved, dtMs));
       frames.push(frame);
       this.lastFrame = frame;
-      this.inputHistory.push(frame, this.lastStepAt, this.sampler.mode);
+      this.inputHistory.push(frame, performance.now(), this.sampler.mode);
     }
     if (frames.length > 0) app.link.send({ t: 'input', frames });
   }
@@ -930,17 +953,31 @@ export class GameScene extends Phaser.Scene {
     }, wait);
   }
 
-  private inputTick(): void {
-    const now = performance.now();
-    const delta = now - this.lastInputAt;
-    this.lastInputAt = now;
+  private inputTick(now: number = performance.now()): void {
+    const delta = Math.max(0, now - this.lastInputAt);
+    this.lastInputAt = Math.max(this.lastInputAt, now);
     if (document.hidden) {
       // 백그라운드 탭: 입력을 보내지 않는다 (서버는 입력이 끊기면 제자리에 세운다)
       this.acc = 0;
       this.stopSelfWalk();
       return;
     }
-    this.stepInput(delta);
+    this.stepInput(delta, now);
+  }
+
+  /**
+   * 렌더 프레임에서: 이 프레임 시각 frameAt까지 지난 입력 틱이 아직 처리되지 않았으면(타이머가 늦게 깸 — 120Hz에서 프레임 작업이
+   * 타이머를 막는다) 지금 처리하고 타이머를 다시 맞춘다. 그래야 이 프레임에 그리는 자리가 명목 시각 기준 보간 구간 안에 있다.
+   * 타이머가 제때 깨면(가상 시계 · 한가한 기기) 할 일이 없다. 입력을 더 일찍 읽을 뿐 늦추지 않는다
+   */
+  private catchUpInput(frameAt: number): void {
+    if (this.inputTimer === null || !(frameAt > this.lastInputAt)) return;
+    const dtMs = this.app.dt * 1000;
+    if (this.acc + (frameAt - this.lastInputAt) < dtMs - STEP_EPS_MS) return;
+    window.clearTimeout(this.inputTimer);
+    this.inputTimer = null;
+    this.inputTick(frameAt);
+    if (this.sys.isActive()) this.scheduleInput();
   }
 
   /**
@@ -1018,14 +1055,14 @@ export class GameScene extends Phaser.Scene {
     if (Math.abs(ramp.valueAt(t) - mon.blend) > 0.35) ramp.jump(mon.blend, t);
   }
 
-  override update(_time: number, _delta: number): void {
+  override update(time: number, _delta: number): void {
     // Phaser의 delta는 200ms(최소 5fps)를 넘으면 이전 값으로 바꿔 넣으므로 느린 기기의 실제 간격은 rawDelta로 잰다.
     // 시간으로 쌓는 연출(보정 어긋남 · 걷기 · 부채꼴 색)도 rawDelta를 쓴다: delta는 최근 10프레임 평균이고 시작 · 복귀 뒤
     // 120프레임은 16.67ms로 막혀 120fps에서 실제와 다르다 (렌더링 최적화, smoothStep을 끄든 켜든 같게)
     const raw = this.game.loop.rawDelta;
     this.renderedFrames += 1;
     this.frameMs = trackFrameMs(this.frameMs, raw);
-    this.renderFrame(frameDeltaMs(raw));
+    this.renderFrame(frameDeltaMs(raw), time);
     this.watchFps();
   }
 
@@ -1043,11 +1080,15 @@ export class GameScene extends Phaser.Scene {
     if (forced !== null) {
       sample.fps = forced;
       sample.workP95 = 1000 / forced;
+      sample.late = 0;
     } else if (now >= this.nextAdaptWindowAt) {
       this.nextAdaptWindowAt = now + ADAPT_WINDOW_EVERY_MS;
-      sessionFrameStats.window(FPS_WINDOW_MS, this.adaptWindow);
+      // 늦은 프레임은 지금 목표 주기로 잰다 (120Hz면 12.5ms 이상, 60이면 25ms 이상)
+      this.adaptLate.periodMs = 1000 / Math.max(1, gfxState.targetHz);
+      sessionFrameStats.window(FPS_WINDOW_MS, this.adaptWindow, this.adaptLate);
       sample.fps = this.adaptWindow.fps;
       sample.workP95 = this.adaptWindow.workP95;
+      sample.late = this.adaptWindow.late;
     }
     // 목표: 프레임 제한 · 잰 화면 주사율 (main.ts가 페이싱 상태를 gfxState에 옮겨 적는다)
     const ctx = this.adaptCtx;
@@ -1158,7 +1199,26 @@ export class GameScene extends Phaser.Scene {
     edges.update(this.edgePlaced, role === 'monster', now);
   }
 
-  private renderFrame(delta: number): void {
+  /** 그리는 내 자리 그릇 (프레임마다 다시 쓴다: world.draw는 이번 프레임 안에서만 읽는다) */
+  private readonly drawMeBuf = { x: 0, y: 0, face: 0 };
+
+  /**
+   * 내 몸을 그리는 자리 = 예측 자리 + 카메라 격자 맞추기 나머지 (확대 화면만, 기기 1px 미만). 맵 · HUD는 격자 그대로 선명하고,
+   * 화면에서 내 캐릭터는 맞추기 전 창 기준이라 따라가는 동안 반 픽셀씩 흔들리지 않는다(내 움직임 고르기). getRenderPos는 예측 자리 그대로
+   */
+  private drawSelfAt(
+    me: { x: number; y: number; face: number } | null,
+  ): { x: number; y: number; face: number } | null {
+    const d = this.director;
+    if (!me || !d || CAM_ZOOM <= 1) return me;
+    const out = this.drawMeBuf;
+    out.x = me.x + d.snapResidual.x;
+    out.y = me.y + d.snapResidual.y;
+    out.face = me.face;
+    return out;
+  }
+
+  private renderFrame(delta: number, rafTime: number): void {
     const app = this.app;
     const snap = app.lastSnap;
     if (!snap || !app.balance || !app.match) {
@@ -1166,6 +1226,10 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     const now = performance.now();
+    // 내 캐릭터 · 카메라는 이 프레임의 rAF 시각(vsync)으로 잰다: 화면에 나가는 간격과 같은 시계라 고르다. 콜백이 늦게 시작한
+    // 만큼(입력 이벤트 · 다른 콜백) 흔들리는 performance.now 대신. 따라가기 감쇠의 간격(rawDelta)도 이 시각들의 차이다
+    const frameAt = frameTimeOf(rafTime, now);
+    this.catchUpInput(frameAt);
     const renderTime = app.renderTime();
     const span = this.motionSpan;
     span.r0 = this.lastRenderTime ?? renderTime;
@@ -1173,9 +1237,9 @@ export class GameScene extends Phaser.Scene {
     span.prevNow = this.lastRenderTime === null ? null : span.now;
     span.now = now;
     this.lastRenderTime = renderTime;
-    const alpha = (now - this.lastStepAt) / (app.dt * 1000);
     const windup = this.windupView(snap.ack, now);
-    const me = app.predictor?.renderPos(delta, alpha, now) ?? null;
+    // 보간 비율은 예측기가 마지막 입력 틱의 명목 시각으로 잰다 (Predictor.alphaAt)
+    const me = app.predictor?.renderPos(delta, undefined, frameAt) ?? null;
     if (me) this.localPos = me;
     const mon = snap.you.mon;
     if (mon) {
@@ -1187,6 +1251,9 @@ export class GameScene extends Phaser.Scene {
     const survivors = app.survivorsInterp.sample(renderTime);
     this.applySpectatePick(snap);
     const view = this.updateCamera(now, delta, me, survivors);
+    // 내 몸을 그리는 자리: 카메라가 창을 기기 픽셀 격자에 맞추며 옮긴 만큼 같이 옮긴다(화면에서는 맞추기 전 창 기준 — 고르게
+    // 움직인다). 시야 · 부채꼴 · 범위 · 정보 레이어는 예측 자리 그대로(맵에 붙은 그림, 판정과 같은 자리)
+    const drawMe = this.drawSelfAt(me);
     this.world.draw(
       {
         balance: app.balance,
@@ -1194,6 +1261,7 @@ export class GameScene extends Phaser.Scene {
         role: snap.you.role,
         selfId: snap.you.id,
         me,
+        meBody: drawMe,
         survivors,
         monster:
           snap.you.role === 'monster' ? null : (app.monsterInterp.sample(renderTime).get('monster') ?? null),

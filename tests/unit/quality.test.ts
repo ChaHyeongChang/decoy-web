@@ -8,6 +8,7 @@ import {
   DowngradeCheck,
   FPS_WATCH,
   FpsWatch,
+  PACING_WATCH,
   QUALITY_STORAGE_KEY,
   RATE_FALLBACK_HZ,
   SAMPLE_RING_SIZE,
@@ -23,6 +24,7 @@ import {
   isSoftwareGl,
   isTouchDevice,
   loadSavedQuality,
+  maxLateFor,
   minFpsFor,
   parseQuality,
   parseQualityChoice,
@@ -851,6 +853,88 @@ describe('렌더링 최적화: 여유가 이어지면 자동으로 내린 단계
       { kind: 'tier', from: 'high', to: 'medium' },
       { kind: 'rate', from: 120, to: 60 },
     ]);
+  });
+});
+
+describe('내 움직임 고르기: 120Hz를 고르게 못 버티면 고른 60으로 (늦은 프레임, PACING_WATCH)', () => {
+  /** 평균 FPS fps, 그중 late 비율의 프레임이 vsync를 놓친 측정 */
+  const uneven = (fps: number, late: number): FrameSample => ({ fps, workP95: 6, late });
+  const steady60: FrameSample = { fps: 60, workP95: 6, late: 0 };
+
+  it('기준: 간격이 목표 주기의 1.5배 이상이면 늦은 프레임, 늦은 비율 0.15 이상이 이어지면. 자동 제한 · 목표 60 초과에서만 본다', () => {
+    expect(PACING_WATCH).toEqual({ lateFactor: 1.5, maxLateRatio: 0.15 });
+    expect(maxLateFor({ targetHz: 120, canRateFallback: true })).toBe(0.15);
+    expect(maxLateFor({ targetHz: 120, canRateFallback: false })).toBe(Infinity);
+    expect(maxLateFor({ targetHz: 60, canRateFallback: true })).toBe(Infinity);
+  });
+
+  it('자동 · 120Hz: 평균 FPS가 하향 기준(PC 80 · 터치 100) 위여도 늦은 프레임이 이어지면 목표를 60으로 (품질 그대로)', () => {
+    for (const cfg of [FPS_WATCH, TOUCH_FPS_WATCH]) {
+      const s = new AdaptiveSession('high', new AutoDowngrade(cfg), 'auto', 120);
+      // 120Hz에서 25%가 늦어 약 104fps (터치 기준 100 위), 60에서는 고르다
+      const acts = s.play(60_000, (_tier, hz) => (hz > 60 ? uneven(104, 0.25) : steady60));
+      expect(kinds(acts), `기준 ${cfg.minFps}`).toEqual(['rateDown']);
+      expect(acts[0]!.action).toEqual({
+        kind: 'rateDown',
+        mode: 'online',
+        from: 120,
+        to: 60,
+        fpsBefore: 104,
+      });
+      expect(acts[0]!.at).toBeGreaterThan(FPS_WATCH.warmupMs + FPS_WATCH.sustainMs);
+      expect(acts[0]!.at).toBeLessThan(FPS_WATCH.warmupMs + FPS_WATCH.sustainMs + 50);
+      expect([s.targetHz, s.tier]).toEqual([60, 'high']);
+    }
+  });
+
+  it('늦은 프레임이 기준 미만이거나 잠깐뿐이면 120을 그대로 둔다', () => {
+    const few = new AdaptiveSession('high', new AutoDowngrade(TOUCH_FPS_WATCH), 'auto', 120);
+    expect(few.play(60_000, () => uneven(110, 0.1))).toEqual([]);
+    // 9초마다 1초씩만 고르다: 지속 10초를 채우지 못한다
+    const bursts = new AdaptiveSession('high', new AutoDowngrade(TOUCH_FPS_WATCH), 'auto', 120);
+    expect(
+      bursts.play(60_000, (_t, _hz, e) => (e % 9000 < 8000 ? uneven(104, 0.3) : uneven(120, 0))),
+    ).toEqual([]);
+    expect(bursts.targetHz).toBe(120);
+  });
+
+  it('고정 제한 120 · 60Hz 목표에서는 늦은 프레임으로 목표 · 품질을 바꾸지 않는다 (FPS 기준만)', () => {
+    const fixed = new AdaptiveSession('high', new AutoDowngrade(), '120', 120);
+    expect(fixed.play(60_000, () => uneven(104, 0.3))).toEqual([]);
+    const at60 = new AdaptiveSession('high', new AutoDowngrade(), 'auto', 60);
+    expect(at60.play(60_000, () => uneven(55, 0.5))).toEqual([]);
+    expect([fixed.tier, at60.tier]).toEqual(['high', 'high']);
+  });
+
+  it('여유가 있어 120으로 되돌린 뒤에도 고르지 않으면 다시 60으로 내리고 이번 세션에서는 올리지 않는다', () => {
+    const s = new AdaptiveSession('high', new AutoDowngrade(), 'auto', 120);
+    // 120: PC 기준 80 위의 110fps지만 늦은 프레임 20%(GPU가 막는 기기 — 작업 시간은 짧다), 60: 고르고 여유
+    s.play(120_000, (_tier, hz) =>
+      hz > 60 ? { fps: 110, workP95: 3, late: 0.2 } : { fps: 60, workP95: 3, late: 0 },
+    );
+    expect(kinds(s.log)).toEqual(['rateDown', 'rateUp', 'upRevert']);
+    expect(s.log[2]!.action).toMatchObject({
+      kind: 'upRevert',
+      step: 'rate',
+      from: 120,
+      to: 60,
+      fpsAfter: 110,
+    });
+    expect([s.targetHz, s.auto.upgradesBlocked]).toEqual([60, true]);
+  });
+
+  it('올린 뒤 확인: 같은 구간의 늦은 비율 평균이 기준 이상이면 fail (FPS가 기준 위여도)', () => {
+    const p = new UpProbation(0, 0, 1000, 1000);
+    let v: ReturnType<UpProbation['sample']> = null;
+    for (let t = 0; t <= 1000 && v === null; t += 10)
+      v = p.sample(t, 115, 80, 0.2, PACING_WATCH.maxLateRatio);
+    expect(v).toBe('fail');
+    expect(p.lateAverage).toBeCloseTo(0.2, 9);
+    const q = new UpProbation(0, 0, 1000, 1000);
+    v = null;
+    for (let t = 0; t <= 1000 && v === null; t += 10)
+      v = q.sample(t, 115, 80, 0.05, PACING_WATCH.maxLateRatio);
+    expect(v).toBe('pass');
   });
 });
 

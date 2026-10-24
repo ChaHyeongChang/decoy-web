@@ -105,6 +105,11 @@ export class CameraDirector {
   private readonly shakeOut: Vec2 = { x: 0, y: 0 };
   /** 이번 프레임의 창 (기기 픽셀 격자) */
   readonly view: ViewRect = { x: 0, y: 0, w: MAP_W, h: MAP_H };
+  /**
+   * 격자에 맞추며 옮긴 양 (창 − 맞추기 전 창, 타일, 기기 1px 미만). 내 캐릭터는 이만큼 옮겨 그리면 화면에서 맞추기 전 창 기준
+   * 자리에 놓인다: 맵 · 글자는 기기 픽셀 격자 그대로 선명하고, 따라가는 내 캐릭터는 프레임마다 반 픽셀씩 흔들리지 않는다
+   */
+  readonly snapResidual: Vec2 = { x: 0, y: 0 };
 
   constructor(viewW: number, viewH: number) {
     this.rig = new CameraRig(viewW, viewH);
@@ -203,6 +208,8 @@ export class CameraDirector {
     const k = i.devPerTile;
     this.view.x = k > 0 ? Math.min(snapView(x, k), Math.floor(maxX * k + 1e-9) / k) : x;
     this.view.y = k > 0 ? Math.min(snapView(y, k), Math.floor(maxY * k + 1e-9) / k) : y;
+    this.snapResidual.x = this.view.x - x;
+    this.snapResidual.y = this.view.y - y;
     this.view.w = i.viewW;
     this.view.h = i.viewH;
     // 실제 앞당김 (창 가운데 − 괴물: 감쇠 · 가장자리 · 맵 자르기 · 흔들림 뒤)

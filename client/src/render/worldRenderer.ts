@@ -130,8 +130,13 @@ export interface FrameView {
   snap: Snapshot;
   role: Role;
   selfId: string;
-  /** 예측한 내 위치 */
+  /** 예측한 내 위치 (시야 · 부채꼴 · 범위 · 정보 레이어 · 걷기는 이 자리) */
   me: { x: number; y: number; face: number } | null;
+  /**
+   * 내 몸을 그리는 자리 (내 움직임 고르기): 예측 자리 + 카메라 격자 맞추기 나머지(기기 1px 미만, GameScene.drawSelfAt).
+   * 몸 · 붙은 그림(부상 · 속도선 · 발먼지 · 구조 고리 · 기절 별) · 그린 목록(drawn)의 내 자리. 없으면 me
+   */
+  meBody?: { x: number; y: number; face: number } | null;
   /** 보간한 다른 생존자들 (괴물 화면: 시야 안 생존자만, 임시 ID) */
   survivors: Map<string, SurvivorView>;
   /** 보간한 괴물 (생존자 화면: 보일 때만) */
@@ -1866,8 +1871,9 @@ export class WorldRenderer {
     }
     this.stunnedPending = isMonster ? this.stunnedPending : false;
 
-    // 나
+    // 나 (몸은 meBody 자리, 걷기 · 정보는 예측 자리)
     if (v.me) {
+      const body = v.meBody ?? v.me;
       const st = snap.you.surv?.status;
       if (isMonster) {
         const rig = this.monsterRig(v.selfId);
@@ -1877,8 +1883,8 @@ export class WorldRenderer {
         const hold = this.atlas?.params.style === 'new' && (snap.you.mon?.windup ?? 0) > 0;
         const raise = this.windupStart !== null || hold ? 1 : 0;
         const pose = this.monsterPose(
-          v.me.x,
-          v.me.y,
+          body.x,
+          body.y,
           v.me.face,
           v.myStunned,
           v.myDashing,
@@ -1889,7 +1895,7 @@ export class WorldRenderer {
         );
         drawMonsterRig(rig, pose, mR);
         if (v.myStunned) {
-          drawStunStars(this.starsG, v.me.x, v.me.y, tS, mR, this.pickStarDir(v.me.x, v.me.y, mR, v.selfId));
+          drawStunStars(this.starsG, body.x, body.y, tS, mR, this.pickStarDir(body.x, body.y, mR, v.selfId));
           starsDrawn = true;
           stunAny = true;
         }
@@ -1898,8 +1904,8 @@ export class WorldRenderer {
           if (!this.shoveSeen)
             this.fxs.ring(
               'impact',
-              v.me.x,
-              v.me.y,
+              body.x,
+              body.y,
               mR * 2.4,
               (clockMs - (realMs - this.stunnedAt)) / 1000,
               null,
@@ -1909,12 +1915,12 @@ export class WorldRenderer {
           this.shoveSeen = false;
         }
         if (footDust && g.footfall)
-          this.fxs.footDust(v.me.x, v.me.y, (clockMs - (realMs - g.footAt)) / 1000, null, false);
+          this.fxs.footDust(body.x, body.y, (clockMs - (realMs - g.footAt)) / 1000, null, false);
         drawn.push({
           id: v.selfId,
           kind: 'self',
-          x: v.me.x,
-          y: v.me.y,
+          x: body.x,
+          y: body.y,
           face: v.me.face,
           layer: 'main',
           sprite: rig.sprite,
@@ -1925,8 +1931,8 @@ export class WorldRenderer {
         this.transition(
           v.selfId,
           st ?? 'free',
-          v.me.x,
-          v.me.y,
+          body.x,
+          body.y,
           v.me.face,
           clockMs,
           realMs,
@@ -1943,8 +1949,8 @@ export class WorldRenderer {
           const appear = fade?.kind === 'appear' ? 1 - fadeOut(realMs - fade.t0, ANIM.imprisonAppearMs) : 1;
           const tp = this.teamPoseOf(
             role,
-            v.me.x,
-            v.me.y,
+            body.x,
+            body.y,
             v.me.face,
             this.phaseOf(g),
             g.stepping,
@@ -1963,14 +1969,14 @@ export class WorldRenderer {
           drawTeamSurvivor(rig, tp, sR);
           const s = snap.you.surv;
           if (s && s.hp < balance.survivor.maxHp && s.status === 'free')
-            drawInjury(this.attachG, v.me.x, v.me.y, v.me.face, sR);
+            drawInjury(this.attachG, body.x, body.y, v.me.face, sR);
           if (role === 'runner' && s && s.abilityActive > 0 && g.stepping > 0.3)
-            drawSpeedLines(this.fxUnder, v.me.x, v.me.y, v.me.face, sR, tS);
+            drawSpeedLines(this.fxUnder, body.x, body.y, v.me.face, sR, tS);
           if (footDust && g.footfall)
-            this.fxs.footDust(v.me.x, v.me.y, (clockMs - (realMs - g.footAt)) / 1000, null, false);
+            this.fxs.footDust(body.x, body.y, (clockMs - (realMs - g.footAt)) / 1000, null, false);
           const rescue = s?.rescue ?? 0;
           if (rescue > 0) {
-            drawRescueRing(this.attachG, v.me.x, v.me.y, rescue);
+            drawRescueRing(this.attachG, body.x, body.y, rescue);
             info.push({
               kind: 'progress',
               tag: 'rescue',
@@ -1987,15 +1993,15 @@ export class WorldRenderer {
           drawn.push({
             id: v.selfId,
             kind: 'self',
-            x: v.me.x,
-            y: v.me.y,
+            x: body.x,
+            y: body.y,
             face: v.me.face,
             layer: 'main',
             sprite: rig.sprite,
           });
         } else {
           if (fade) this.drawFade(v.selfId, role, fade, realMs, sR);
-          drawn.push({ id: v.selfId, kind: 'self', x: v.me.x, y: v.me.y, face: v.me.face, layer: 'main' });
+          drawn.push({ id: v.selfId, kind: 'self', x: body.x, y: body.y, face: v.me.face, layer: 'main' });
         }
       }
     }

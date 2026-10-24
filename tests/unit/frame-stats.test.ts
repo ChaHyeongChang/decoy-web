@@ -261,14 +261,14 @@ describe('FrameStats: 최근 구간 FPS (적응형 품질 · 표시)', () => {
   it('out을 주면 그 객체를 채워 돌려준다 (프레임마다 불러도 할당 없음)', () => {
     const s = new FrameStats();
     feed(s, 30, 60);
-    const out: FrameWindow = { fps: 0, intervalAvg: 0, workP95: 0, frames: 0 };
+    const out: FrameWindow = { fps: 0, intervalAvg: 0, workP95: 0, frames: 0, late: 0 };
     expect(s.window(1000, out)).toBe(out);
     expect(out.frames).toBe(30);
   });
 
   it('프레임이 없으면 0', () => {
     const s = new FrameStats();
-    expect(s.window(1000)).toEqual({ fps: 0, intervalAvg: 0, workP95: 0, frames: 0 });
+    expect(s.window(1000)).toEqual({ fps: 0, intervalAvg: 0, workP95: 0, frames: 0, late: 0 });
     const sum = s.summary();
     expect(sum).toMatchObject({ frames: 0, fps: 0, intervalAvg: 0, intervalP95: 0, workAvg: 0, workP95: 0 });
   });
@@ -314,7 +314,13 @@ describe('FrameStats: FPS 덮어쓰기 (디버그 injectFps)', () => {
       drawCalls: 9,
       skipped: 4,
     });
-    expect(s.window(1000)).toEqual({ fps: 60, intervalAvg: 1000 / 60, workP95: 1000 / 60, frames: 100 });
+    expect(s.window(1000)).toEqual({
+      fps: 60,
+      intervalAvg: 1000 / 60,
+      workP95: 1000 / 60,
+      frames: 100,
+      late: 0,
+    });
     s.setOverrideFps(null);
     expect(s.window(1000).fps).toBeCloseTo(120, 2);
   });

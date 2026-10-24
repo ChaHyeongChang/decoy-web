@@ -6,8 +6,12 @@ import { aimMonsterAt, closeAll, lastSnapshot, sendTest, startFourPlayerMatch, t
 const OUT = 'artifacts/screens';
 
 async function minimapSubsetOfMain(p: Player): Promise<void> {
-  const main = await p.page.evaluate(() => window.__DECOY__?.getDrawn() ?? []);
-  const mini = await p.page.evaluate(() => window.__DECOY__?.getDrawnMinimap() ?? []);
+  // 같은 프레임의 두 목록을 한 번에 읽는다: 따로 읽으면 사이에 프레임이 지나 비교가 프레임을 건넌다 (내 몸은 카메라 격자 나머지만큼
+  // 옮겨 그려 카메라가 가라앉는 동안 프레임마다 반 기기 px 안쪽으로 달라진다 — 내 움직임 고르기, DECISIONS 10절)
+  const { main, mini } = await p.page.evaluate(() => ({
+    main: window.__DECOY__?.getDrawn() ?? [],
+    mini: window.__DECOY__?.getDrawnMinimap() ?? [],
+  }));
   expect(mini.length).toBe(main.length);
   for (const m of mini) {
     expect(main.some((d) => d.id === m.id && Math.abs(d.x - m.x) < 1e-6 && Math.abs(d.y - m.y) < 1e-6)).toBe(

@@ -365,14 +365,40 @@ export const CAM1 = '&cam=1';
  * 옮긴다. 확인은 서버 자리 → 목표 타일의 화면 방향과 커서 반올림(1.5px) 안이면 맞다 — 커서 px 쪽을 보는지만 보면 지난 창 기준으로
  * 놓인 커서도 통과한다(CI 전체 검사의 m8-effects 공격이 빗나감, CPU 6배 느림으로 재현). 이 탭이 보내는 목표 조준(마지막 입력
  * 프레임 aim)도 같은 방향이어야 한다.
- * 괴물이 아니면 확인하지 않는다. 끝나면 앞당김으로 다시 움직인 창이 멈출 때까지 기다린다
+ * 괴물이 아니면 확인하지 않는다. 끝나면 앞당김으로 다시 움직인 창이 멈출 때까지 기다린다.
+ * 목표 타일이 지금 창 밖(캔버스 밖)이면 괴물 → 목표 같은 방향의 캔버스 안 점에 커서를 둔다(조준은 방향만 본다). 순간 이동의 face는
+ * 이미 보낸 입력의 조준(지난 방향)이 서버에서 덮어쓸 수 있어, 창이 지난 방향으로 앞당겨진 채 목표가 화면 밖에 있으면 캔버스 밖
+ * 커서가 조준을 바꾸지 못해 여섯 번 모두 빗나갔다(m10-visual 느린 기기 시험, 고치기 전 빌드에서도 6번 중 1번 — 내 움직임 고르기)
  */
 export async function aimMonsterAt(page: Page, x: number, y: number): Promise<void> {
   await page.evaluate(() => window.__DECOY__?.setCameraShake(0));
   let miss = '';
   for (let attempt = 0; attempt < 6; attempt += 1) {
     await waitCamera(page);
-    const c = await page.evaluate(([tx, ty]) => window.__DECOY__?.tileToClient(tx!, ty!) ?? null, [x, y]);
+    const c = await page.evaluate(
+      ([tx, ty]) => {
+        const d = window.__DECOY__;
+        const t = d?.tileToClient(tx!, ty!) ?? null;
+        const me = d?.getLocalState();
+        const r = document.querySelector('canvas')?.getBoundingClientRect();
+        const b = me ? (d?.tileToClient(me.x, me.y) ?? null) : null;
+        if (!t || !b || !r) return t;
+        const pad = 4;
+        const inside = (p: { x: number; y: number }): boolean =>
+          p.x >= r.left + pad && p.x <= r.right - pad && p.y >= r.top + pad && p.y <= r.bottom - pad;
+        if (inside(t) || !inside(b)) return t;
+        // 괴물 화면 자리 → 목표 반직선이 캔버스 안에 머무는 가장 먼 점
+        let s = 1;
+        const dx = t.x - b.x;
+        const dy = t.y - b.y;
+        if (dx > 0) s = Math.min(s, (r.right - pad - b.x) / dx);
+        if (dx < 0) s = Math.min(s, (r.left + pad - b.x) / dx);
+        if (dy > 0) s = Math.min(s, (r.bottom - pad - b.y) / dy);
+        if (dy < 0) s = Math.min(s, (r.top + pad - b.y) / dy);
+        return { x: b.x + dx * s, y: b.y + dy * s };
+      },
+      [x, y],
+    );
     if (!c) throw new Error('tileToClient 없음');
     const cx = Math.round(c.x);
     const cy = Math.round(c.y);
