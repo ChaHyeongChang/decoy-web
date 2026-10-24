@@ -81,6 +81,12 @@ interface Scene {
   size: Size;
   role: 'runner' | 'monster';
   limit?: string;
+  /** 렌더러 (기본 Canvas). WebGL은 GPU 안개 경로(빛 반경 따라가기)를 본다 — SwiftShader라 느려 서 있는 시간을 줄인다 */
+  renderer?: 'canvas' | 'webgl';
+  /** 판 시작 뒤 서 있는 시간 (ms, 기본 STAND_MS) */
+  standMs?: number;
+  /** false면 ?camSnap=0 (카메라 격자 맞춤 끄기 — 고치기 뒤 빌드의 진단 옵션, 격자 맞춤이 맵 스크롤에 남기는 걸음을 견준다) */
+  camSnap?: boolean;
 }
 
 const scenes: Scene[] = [];
@@ -115,6 +121,48 @@ for (const hz of [144, 165])
     role: 'runner',
     limit: '120',
   });
+// 마. 격자 맞춤 끄기 견주기 (진단 옵션, 고친 뒤 빌드만 뜻이 있다)
+scenes.push({
+  name: '144-steady-nosnap',
+  hz: 144,
+  load: 'steady',
+  size: PC1080,
+  role: 'runner',
+  camSnap: false,
+});
+// 라. GPU 안개 경로 (WebGL · 품질 높음 PC, 중간 휴대폰): 시야 빛 반경 띠가 내 몸을 따라가는가 — 적응형은 보지 않는다(고른 부하)
+const PHONE915 = SIZES.find((s) => s.name === 'phone915x412@2.625') ?? PC1080;
+scenes.push({
+  name: 'phone915x412@2.625-120-steady-nosnap',
+  hz: 120,
+  load: 'steady',
+  size: PHONE915,
+  role: 'runner',
+  camSnap: false,
+});
+for (const [hz, size] of [
+  [60, PC1080],
+  [144, PC1080],
+  [120, PHONE915],
+] as const)
+  scenes.push({
+    name: `webgl-${size.name}-${hz}-steady`,
+    hz,
+    load: 'steady',
+    size,
+    role: 'runner',
+    renderer: 'webgl',
+    standMs: 2000,
+  });
+scenes.push({
+  name: 'webgl-pc1920x1080@1-144-steady-monster',
+  hz: 144,
+  load: 'steady',
+  size: PC1080,
+  role: 'monster',
+  renderer: 'webgl',
+  standMs: 2000,
+});
 
 interface Store {
   on: boolean;
@@ -127,7 +175,13 @@ function installPacingTrace(): void {
   interface Hook {
     getRenderPos(): { x: number; y: number } | null;
     getDrawn(): { kind: string; x: number; y: number }[];
-    getAnimState(): { frames: number; fogAt: number | null } | null;
+    getAnimState(): {
+      frames: number;
+      fogAt: number | null;
+      fogEye?: { x: number; y: number } | null;
+      fogShift?: { x: number; y: number };
+      fogFollow?: string;
+    } | null;
     tileToClient(x: number, y: number): { x: number; y: number } | null;
     readonly gfx: { targetHz: number; displayHz: number };
   }
@@ -174,6 +228,13 @@ function installPacingTrace(): void {
         cy: c0.y,
         k: c1.x - c0.x,
         fogAt: anim.fogAt,
+        ...(anim.fogEye !== undefined
+          ? {
+              fogEye: anim.fogEye ? { ...anim.fogEye } : null,
+              fogShift: anim.fogShift ? { ...anim.fogShift } : { x: 0, y: 0 },
+              fogFollow: anim.fogFollow ?? 'off',
+            }
+          : {}),
         targetHz: g.targetHz,
         displayHz: g.displayHz,
       });
@@ -221,9 +282,10 @@ async function measure(browser: Browser, sc: Scene): Promise<unknown> {
   try {
     const q = [
       'debug=hook',
-      'renderer=canvas',
+      sc.renderer === 'webgl' ? '' : 'renderer=canvas',
       `quality=${size.quality}`,
       sc.limit ? `fpsLimit=${sc.limit}` : '',
+      sc.camSnap === false ? 'camSnap=0' : '',
     ];
     await page.goto(`/?${q.filter((s) => s !== '').join('&')}`);
     await expect(page.getByTestId('practice')).toBeVisible();
@@ -248,7 +310,7 @@ async function measure(browser: Browser, sc: Scene): Promise<unknown> {
       if (d?.you) d.sendTest({ kind: 'teleport', target: d.you, x: 28.5, y: 16.5, face: f });
     }, face);
     // 적응형 목표 FPS가 정할 시간 (작업 시간 모형이 그동안 돈다)
-    for (let left = STAND_MS; left > 0; left -= 2000) await advance(page, Math.min(2000, left));
+    for (let left = sc.standMs ?? STAND_MS; left > 0; left -= 2000) await advance(page, Math.min(2000, left));
     await page.evaluate((f) => {
       const d = window.__DECOY__;
       if (d?.you) d.sendTest({ kind: 'teleport', target: d.you, x: 28.5, y: 16.5, face: f });
@@ -339,7 +401,7 @@ async function measure(browser: Browser, sc: Scene): Promise<unknown> {
 const only = process.env.DECOY_PACING_ONLY ? new RegExp(process.env.DECOY_PACING_ONLY) : null;
 for (const sc of scenes) {
   if (only && !only.test(sc.name)) continue;
-  test(`[canvas] pacing ${sc.name}`, async ({ browser }) => {
+  test(`[${sc.renderer ?? 'canvas'}] pacing ${sc.name}`, async ({ browser }) => {
     test.setTimeout(900_000);
     const data = await measure(browser, sc);
     save(sc.name, data);

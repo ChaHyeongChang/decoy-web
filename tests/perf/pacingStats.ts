@@ -25,6 +25,13 @@ export interface PacingFrame {
   k: number;
   /** 안개 갱신 시각 (getAnimState().fogAt) */
   fogAt: number | null;
+  /**
+   * 잔렉 고치기 뒤 빌드만: 안개 주기의 내 눈 자리 · 이번 프레임에 내 자리를 따라 옮긴 양(타일) · 무엇이 따라가는가
+   * ('gpu' = 빛 반경 띠 · 테두리 · 틴트 · 먼지, 'rims' = 테두리 · 먼지만 — Canvas 경로, 'off'). 없으면(고치기 전 빌드) fogAt로 눈을 잡는다
+   */
+  fogEye?: { x: number; y: number } | null;
+  fogShift?: { x: number; y: number };
+  fogFollow?: string;
   /** 목표 FPS · 화면 주사율 (gfx) */
   targetHz: number;
   displayHz: number;
@@ -160,18 +167,12 @@ export function walkSummary(
   const down = keys.find((k) => k.type === 'down');
   const up = down ? keys.find((k) => k.type === 'up' && k.t > down.t) : undefined;
   if (!down || !up) throw new Error('걷기 키 기록 없음');
-  // 안개 눈 자리: 안개를 다시 그린 프레임의 예측 그린 자리 (worldRenderer는 v.me로 시야를 잰다)
-  const eyeOf = new Map<number, { x: number; y: number }>();
-  let eye: { x: number; y: number } | null = null;
-  let lastFog: number | null = null;
+  const eyeOf = lightCenters(frames);
   const fogTimes: number[] = [];
+  let lastFog: number | null | undefined;
   for (const f of frames) {
-    if (f.fogAt !== lastFog) {
-      eye = { x: f.mx, y: f.my };
-      lastFog = f.fogAt;
-      fogTimes.push(f.t);
-    }
-    if (eye) eyeOf.set(f.n, eye);
+    if (f.fogAt !== lastFog) fogTimes.push(f.t);
+    lastFog = f.fogAt;
   }
   const fr = frames.filter((f) => f.t >= down.t + settleMs && f.t <= up.t);
   const first = fr[0];
@@ -237,6 +238,33 @@ export function walkSummary(
     fogIv: dist(fogIv),
     display: logs.length > 0 ? displaySummary(fr, logs, eyeOf, devPerCss, periodMs) : null,
   };
+}
+
+/**
+ * 프레임마다 화면에 그린 내 시야 빛(반경 띠)의 중심 (타일). 고치기 뒤 빌드는 디버그 값으로: 'gpu'면 안개 주기 눈 + 따라 옮긴 양,
+ * 그 밖(Canvas 경로 — 빛은 합성에 구워 주기 눈 그대로)이면 주기 눈. 고치기 전 빌드는 안개를 다시 그린 프레임(fogAt가 바뀜)의
+ * 예측 그린 자리(worldRenderer는 v.me로 시야를 잰다)
+ */
+export function lightCenters(frames: readonly PacingFrame[]): Map<number, { x: number; y: number }> {
+  const out = new Map<number, { x: number; y: number }>();
+  let eye: { x: number; y: number } | null = null;
+  let lastFog: number | null | undefined;
+  for (const f of frames) {
+    if (f.fogEye !== undefined) {
+      if (f.fogEye) {
+        const s = f.fogFollow === 'gpu' && f.fogShift ? f.fogShift : { x: 0, y: 0 };
+        out.set(f.n, { x: f.fogEye.x + s.x, y: f.fogEye.y + s.y });
+      }
+      continue;
+    }
+    if (f.fogAt !== lastFog) {
+      // 기록 첫 프레임은 주기 중간일 수 있어 그다음 변화부터 쓴다
+      if (lastFog !== undefined) eye = { x: f.mx, y: f.my };
+      lastFog = f.fogAt;
+    }
+    if (eye) out.set(f.n, eye);
+  }
+  return out;
 }
 
 /** 화면 표시 시각(vsync)마다 보이는 프레임을 골라 고른 움직임에서 벗어난 양을 잰다 */

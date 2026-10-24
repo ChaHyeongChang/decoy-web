@@ -1510,7 +1510,8 @@ export class GameScene extends Phaser.Scene {
       blend: this.myBlend,
       viewW: VIEW_TILES_W,
       viewH: VIEW_TILES_H,
-      devPerTile: devPerTile(WORLD_SCALE, gfxState.zoom),
+      // ?camSnap=0이면 격자에 맞추지 않는다 (진단용 — 0이면 CameraDirector가 맞추지 않고 나머지도 0)
+      devPerTile: this.app.params.camSnap ? devPerTile(WORLD_SCALE, gfxState.zoom) : 0,
     });
     CAM.x = view.x;
     CAM.y = view.y;
