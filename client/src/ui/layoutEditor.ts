@@ -333,6 +333,7 @@ class LayoutEditor {
       stickScale: T.stickScale,
       menu: true,
       viewRatio: hud.layout.viewW / hud.layout.viewH,
+      sysRows: hud.sysRows,
     };
     const monster = team === 'monster';
     const fs = canOfferFullscreen();
@@ -680,6 +681,8 @@ class LayoutEditor {
   }
 
   private onKey(e: KeyboardEvent): void {
+    // 저장하고 닫히는 중에는 받지 않는다
+    if (this.closed || this.closeTimer) return;
     if (e.key === 'Escape') {
       e.preventDefault();
       this.close(false);

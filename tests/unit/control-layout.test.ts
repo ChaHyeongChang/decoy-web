@@ -172,12 +172,14 @@ describe('저장 형식 (decoy:controlLayout)', () => {
       uiScale: 1,
       mirror: true,
       sysSlots: 3,
+      team: 'monster',
     });
     expect(matchTuning('survivor', false, st)).toEqual({
       stickScale: 1,
       uiScale: 1,
       mirror: false,
       sysSlots: 2,
+      team: 'survivor',
     });
   });
 });

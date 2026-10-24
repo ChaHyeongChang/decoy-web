@@ -166,6 +166,11 @@ export interface TouchLayoutOptions {
   obstacles?: readonly Box[];
   /** 판 화면 논리 폭 / 높이 (전체 화면 버튼 세로 줄 판단). 없으면 지금 배치(VIEW_W / VIEW_H) */
   viewRatio?: number;
+  /**
+   * 시스템 버튼 줄 수 (판 HUD 배치 TouchHudPlan.sysRows): 2면 전체 화면 버튼을 점수판 아래에 (설정 버튼까지 세 칸이 맵에 걸치는
+   * 낮은 넓은 화면). 없으면 1
+   */
+  sysRows?: 1 | 2;
 }
 
 /**
@@ -233,7 +238,7 @@ export function touchLayout(
     // 16:9 판 화면 옆 빈 띠(긴 휴대폰 브라우저)에 세로 줄이 들어가면 미니맵을 가리지 않는다
     const pillar = (w - h * (opts.viewRatio ?? VIEW_W / VIEW_H)) / 2;
     buttons.fullscreen =
-      pillar >= w - buttons.scoreboard.x && below + sysH + rowGap <= thumbTop
+      (pillar >= w - buttons.scoreboard.x || opts.sysRows === 2) && below + sysH + rowGap <= thumbTop
         ? { x: right - sysW, y: below, w: sysW, h: sysH }
         : { x: rowLeft - gap - sysW, y: sysY, w: sysW, h: sysH };
   }
@@ -330,6 +335,8 @@ export interface HudPreview {
   inset: Box | null;
   /** 맵 사각형 */
   map: Box;
+  /** 시스템 버튼 줄 수 (touchLayout opts.sysRows) */
+  sysRows: 1 | 2;
 }
 
 /**
@@ -357,6 +364,7 @@ export function hudPreview(
     rects: p ? p.rects.map((r) => ({ id: r.id, box: css(r.rect) })) : [],
     inset: p?.minimapInset && CAM_ZOOM > 1 ? css(minimapInsetFrame(p.minimapInset, l.uiScale)) : null,
     map: css(MAP),
+    sysRows: p?.sysRows ?? 1,
   };
 }
 
@@ -392,6 +400,7 @@ export function effectiveTouchLayout(
       custom: { mirror: tuning.mirror, items: saved?.items ?? {} },
       obstacles: hud.inset ? [hud.inset] : [],
       viewRatio: hud.layout.viewW / hud.layout.viewH,
+      sysRows: hud.sysRows,
     },
   );
 }
@@ -883,6 +892,7 @@ export class TouchControls {
         menu: this.parts.has('menu'),
         custom: this.custom,
         obstacles: isDefaultLayout(this.custom) ? [] : this.insetBoxes(),
+        sysRows: HUD.touch ? HUD.touch[this.team].sysRows : 1,
       },
     );
     this.layout = L;

@@ -75,7 +75,8 @@ describe('판 배치 조정: 터치 HUD가 맵 · 서로 · 터치 대상과 겹
     for (const [name, w, h] of SCREENS)
       for (const monster of [true, false])
         it(`${tname} · ${name} ${w}×${h} ${monster ? '괴물' : '생존자'}`, () => {
-          const l = L.layoutFor(w, h, true, tuning);
+          // 내 팀을 같이 넘긴다 (배너 · 점수판이 피할 시스템 버튼 줄은 팀마다 다를 수 있다)
+          const l = L.layoutFor(w, h, true, { ...tuning, team: monster ? 'monster' : 'survivor' });
           L.applyLayout(l);
           const t = L.HUD.touch!;
           const T = L.tuningOf(l);
@@ -107,9 +108,12 @@ describe('판 배치 조정: 터치 HUD가 맵 · 서로 · 터치 대상과 겹
               stickScale: T.stickScale,
               menu: T.sysSlots >= L.SYS_SLOTS_MENU,
               custom: { mirror: T.mirror, items: {} },
+              sysRows: plan.sysRows,
             },
           );
           expect(TL.fallback).toBeUndefined();
+          // 시스템 버튼 둘째 줄: 전체 화면이 점수판 아래 (그때만)
+          expect(TL.buttons.fullscreen!.y > TL.buttons.scoreboard!.y).toBe(plan.sysRows === 2);
           if (T.sysSlots >= L.SYS_SLOTS_MENU) expect(TL.buttons.menu).toBeDefined();
           const ghost = {
             x: TL.moveHome.x - TL.moveR,
@@ -152,7 +156,39 @@ describe('판 배치 조정: 터치 HUD가 맵 · 서로 · 터치 대상과 겹
           if (T.mirror) expect(t.score.sysRight * k).toBeGreaterThanOrEqual(sysR - 0.01);
           else expect(t.score.sysLeft * k).toBeLessThanOrEqual(sysL + 0.01);
           expect(t.score.sysBottom * k).toBeGreaterThanOrEqual(Math.max(...sys.map((b) => b.y + b.h)) - 0.01);
+          // 배너 · 메모 자리는 맵 안, 시스템 버튼이 맵에 걸치면 그 아래 (touch-hud 시험과 같은 검사)
+          const band = {
+            x: t.overlay.x0 * k,
+            y: t.overlay.top * k,
+            w: (t.overlay.x1 - t.overlay.x0) * k,
+            h: 1,
+          };
+          for (const b of sys)
+            expect(
+              band.y >= b.y + b.h || !overlaps({ ...band, y: b.y, h: b.h }, b),
+              '배너 ↔ 시스템 버튼',
+            ).toBe(true);
         });
+});
+
+describe('시스템 버튼 둘째 줄 (sysRows)', () => {
+  it('설정 버튼까지 세 칸이 맵에 걸치고 두 칸이면 옆 칸에 들어가는 낮은 넓은 화면: 생존자는 전체 화면을 점수판 아래로 — 배너 자리가 설정 버튼 없을 때와 같다 (m12-hud 메모 ↔ 감옥)', () => {
+    const before = L.touchHudPlan(L.layoutFor(802, 293, true))!;
+    const after = L.touchHudPlan(L.layoutFor(802, 293, true, { sysSlots: 3, team: 'survivor' }))!;
+    expect(after.survivor.sysRows).toBe(2);
+    expect(after.overlay).toEqual(before.overlay);
+    // 괴물은 버튼 무리가 높아 둘째 줄 자리가 없다 → 한 줄 세 칸 (배너가 그 아래로)
+    expect(after.monster.sysRows).toBe(1);
+    // 기본(두 칸)은 늘 한 줄
+    for (const [w, h] of [
+      [802, 293],
+      [915, 412],
+      [658, 320],
+    ] as const) {
+      const p = L.touchHudPlan(L.layoutFor(w, h, true))!;
+      expect([p.monster.sysRows, p.survivor.sysRows]).toEqual([1, 1]);
+    }
+  });
 });
 
 describe('UI 크기 (uiScale)', () => {

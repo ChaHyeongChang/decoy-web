@@ -53,12 +53,15 @@ export interface LayoutInfo {
  * - mirror: 좌우 반전 (왼손잡이). 터치 HUD 배치를 좌우로 뒤집는다 — 터치 화면(이동 스틱 오른쪽 · 엄지 버튼 왼쪽 아래 · 시스템
  *   버튼 왼쪽 위)과 같이
  * - sysSlots: 오른쪽 위 시스템 버튼 칸 수 (점수판 · 전체 화면 = 2, 판 중 설정 버튼까지 3 — SYS_SLOTS_MENU)
+ * - team: 내 팀 (배너 자리 · 점수판이 피할 시스템 버튼 칸을 이 팀의 엄지 배치로 잰다 — 시스템 버튼 줄 수가 팀마다 다를 수 있다).
+ *   없으면 괴물 (예전과 같다)
  */
 export interface LayoutTuning {
   stickScale: number;
   uiScale: number;
   mirror: boolean;
   sysSlots: number;
+  team?: 'survivor' | 'monster';
 }
 
 export const DEFAULT_TUNING: Readonly<LayoutTuning> = Object.freeze({
@@ -80,6 +83,7 @@ export function cleanTuning(t: Partial<LayoutTuning> | null | undefined): Layout
     uiScale: num(t?.uiScale, 1, 1, 1.5),
     mirror: t?.mirror === true,
     sysSlots: Math.round(num(t?.sysSlots, 2, 1, 4)),
+    ...(t?.team === 'survivor' || t?.team === 'monster' ? { team: t.team } : {}),
   };
 }
 
@@ -241,17 +245,22 @@ export function thumbMetrics(
 /**
  * 엄지 자리 (안전 영역 안 화면 기준 CSS px, touchControls.touchLayout과 같은 식): 오른쪽 아래 버튼 무리의 위 끝,
  * 오른쪽 위 시스템 버튼(점수판 + 전체 화면, 판 중 설정까지 — tune.sysSlots 칸)의 왼쪽 끝 · 아래 끝, 이동 스틱 그림 위 끝 ·
- * 이동 영역 아래 끝. tune.stickScale = 조이스틱 크기 (조준 스틱 · 이동 스틱 반지름)
+ * 이동 영역 아래 끝. tune.stickScale = 조이스틱 크기 (조준 스틱 · 이동 스틱 반지름).
+ * 시스템 버튼 줄 수(sysRows): 세 칸 줄이 맵(mapRight = 맵 오른쪽 끝, 같은 좌표)에 걸치는데 두 칸이면 맵 옆 칸에 들어가고, 버튼 무리
+ * 위에 자리가 있으면 마지막 칸(전체 화면)을 점수판 아래 둘째 줄로 (낮은 넓은 화면 — 배너가 시스템 버튼 아래로 밀리지 않게)
  */
 export function thumbReserve(
   w: number,
   h: number,
   monster: boolean,
   tune: Partial<LayoutTuning> = DEFAULT_TUNING,
+  mapRight?: number,
 ): {
   clusterTop: number;
   sysLeft: number;
   sysBottom: number;
+  /** 시스템 버튼 줄 수 (1 = 한 줄, 2 = 전체 화면이 점수판 아래) */
+  sysRows: 1 | 2;
   moveTop: number;
   zoneBottom: number;
   /** 오른쪽 아래 버튼 무리의 버튼 · 조준 스틱 사각형 (touchControls.touchLayout과 같은 식) */
@@ -278,10 +287,18 @@ export function thumbReserve(
   }
   const clusterTop = Math.min(...cluster.map((b) => b.y));
   const zoneBottom = h - EDGE_BAND.bottom;
+  const rowLeft = (n: number): number => right - t.sysW * n - t.gap * (n - 1);
+  const two =
+    mapRight !== undefined &&
+    slots >= SYS_SLOTS_MENU &&
+    rowLeft(slots) < mapRight &&
+    rowLeft(slots - 1) >= mapRight &&
+    t.pad + 2 + t.sysH * 2 + t.gap + t.rowGap <= clusterTop;
   return {
     clusterTop,
-    sysLeft: right - t.sysW * slots - t.gap * (slots - 1),
-    sysBottom: t.pad + 2 + t.sysH,
+    sysLeft: rowLeft(two ? slots - 1 : slots),
+    sysBottom: t.pad + 2 + t.sysH + (two ? t.sysH + t.gap : 0),
+    sysRows: two ? 2 : 1,
     moveTop: zoneBottom - t.moveR * 2 - 16,
     zoneBottom,
     cluster,
@@ -497,6 +514,8 @@ export interface TouchHudPlan {
   minimapInset: { x: number; y: number; w: number } | null;
   /** 늘 떠 있는 부품 사각형 (맵 · 엄지 영역과 겹치지 않는다, 터치 화면이 이동 영역을 이 아래에서 시작한다) */
   rects: { id: string; rect: Rect }[];
+  /** 시스템 버튼 줄 수 (thumbReserve — 2면 전체 화면 버튼이 점수판 아래, 터치 화면 touchLayout opts.sysRows) */
+  sysRows: 1 | 2;
 }
 
 export interface TouchHud {
@@ -552,7 +571,7 @@ function planCss(
   // 그림 1단위 CSS px (UI 크기 배율). 타이머 틀 폭도 같은 배율 (숫자 글자가 같이 커진다)
   const a = U.art * T.uiScale;
   const timerCss = { plain: TIMER_CSS.plain * T.uiScale, label: TIMER_CSS.label * T.uiScale };
-  const r = thumbReserve(W, H, monster, T);
+  const r = thumbReserve(W, H, monster, T, map.x + map.w);
   const cardW = P.card.w * a;
   const cardH = P.card.h * a;
   const g = P.gauge * a;
@@ -804,7 +823,7 @@ function touchHudFits(l: LayoutInfo): boolean {
   if (TOUCH_BOARD_W * a + U.edge * 2 > W) return false;
   for (const monster of [true, false]) {
     const p = planCss(W, H, g.mode, g.band, g.mapLeft, monster, g.mapCss, g.T);
-    const r = thumbReserve(W, H, monster, g.T);
+    const r = thumbReserve(W, H, monster, g.T, g.mapCss.x + g.mapCss.w);
     const sys: Box = { x: r.sysLeft, y: 0, w: W - r.sysLeft, h: r.sysBottom };
     const boxes = planBoxes(p, a).map((b) => b.box);
     for (const [i, b] of boxes.entries()) {
@@ -865,11 +884,12 @@ export function touchHudPlan(l: LayoutInfo): TouchHud | null {
       minimap: minimap ? { x: minimap.x * L, y: minimap.y * L, w: minimap.w * L } : null,
       minimapInset: inset ? { x: inset.x * L, y: inset.y * L, w: inset.w * L } : null,
       rects,
+      sysRows: thumbReserve(W, H, monster, T, mapCss.x + mapCss.w).sysRows,
     };
   };
   // 배너 · 메모: 맵 안. 오른쪽 위 시스템 버튼(전체 화면까지)이 맵에 걸치면 그 아래에서 시작한다 (좌우 반전이면 왼쪽 위 — 같은 식)
   const mapRight = mapLeft + mapCss.w;
-  const r = thumbReserve(W, H, true, T);
+  const r = thumbReserve(W, H, T.team !== 'survivor', T, mapRight);
   const tile = mapH / MAP_H;
   const intrude = r.sysLeft < mapRight;
   const top = Math.max(band + tile * 3.1, intrude ? r.sysBottom + U.gap : 0);

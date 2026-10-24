@@ -196,7 +196,7 @@ export function saveControlLayouts(s: SavedLayouts, storage?: StorageLike | null
 
 /**
  * 판 배치 조정 (layout.configureLayout에 넘긴다): 지금 설정의 조이스틱 크기 · UI 크기, 그 역할 배치의 좌우 반전, 시스템 버튼 칸
- * (판 중 설정 버튼까지 = SYS_SLOTS_MENU)
+ * (판 중 설정 버튼까지 = SYS_SLOTS_MENU), 내 팀 (배너 · 점수판이 피할 시스템 버튼 줄)
  */
 export function matchTuning(team: Team, menu = true, storage?: StorageLike | null): LayoutTuning {
   return {
@@ -204,6 +204,7 @@ export function matchTuning(team: Team, menu = true, storage?: StorageLike | nul
     uiScale: uiScaleOf(),
     mirror: loadControlLayout(team, storage)?.mirror === true,
     sysSlots: menu ? SYS_SLOTS_MENU : 2,
+    team,
   };
 }
 
