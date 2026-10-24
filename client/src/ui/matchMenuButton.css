@@ -1,0 +1,22 @@
+/* 판 중 메뉴 버튼 (PC, 설정 화면 통합, matchMenuButton.ts): 위 띠 왼쪽의 깎은 모서리 버튼(.btn과 같은 모습) — 설정 아이콘 + '설정' +
+   키캡 Esc. 높이 44px. 자리는 스크립트가 캔버스 자리로 정한다. 색은 style.css 토큰 · .btn · .keycap 그대로 */
+#ui-root > .match-menu {
+  position: fixed;
+  z-index: 4;
+  min-height: 44px;
+  height: 44px;
+  padding: 0 12px;
+  gap: 6px;
+  font-size: 15px;
+  background-color: rgba(19, 36, 51, 0.9);
+}
+#ui-root > .match-menu[hidden] {
+  display: none;
+}
+#ui-root > .match-menu .ico {
+  display: inline-flex;
+  color: var(--neon-text);
+}
+#ui-root > .match-menu .keycap {
+  margin-left: 2px;
+}

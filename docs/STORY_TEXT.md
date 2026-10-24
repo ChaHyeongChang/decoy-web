@@ -250,6 +250,8 @@
 | 첫 판 안내 (PC) · 판 직전 안내 (터치) | 가장자리 화살표  점령 중인 거점 · 포효로 드러난 자리 쪽 | `edgeLineMonster` |
 | 지도 크게 보기 | 지도를 누르면 크게 보고, 다시 누르면 작게 · 눌러서 닫기 | `minimapTap` · `minimapClose` |
 | 판 중 FPS · 핑 칩 | 60 FPS · 핑 42ms | `perfChip` |
+| 판 중 FPS · 핑 칩 (아직 모르는 값: 연습 판 핑 · 시계를 맞추기 전) | - | `perfChipUnknown` |
+| 판 중 메뉴 버튼 (PC, 위 띠 왼쪽) 키캡 | Esc | `menuKey` |
 
 ### 조작 배치 편집 (`EDITOR_TEXT`, 터치 기기 · 로비에서만)
 

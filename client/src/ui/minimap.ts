@@ -10,6 +10,10 @@
 // 태블릿 band · 가장 낮은 휴대폰 괴물)는 맵 창 안 오른쪽 위에 둔다(layout minimapInset, R15의 예외: DECISIONS). 확대 1이면 맵 전체가
 // 보여 예전처럼 자리가 없으면 만들지 않는다. 보이는 창 사각형 · 거점 · 탈출구 상태(양쪽 화면에 같은 세계 상태) · 관전 중인 동료
 // 고리를 더 그린다 — 엔티티는 여전히 메인 화면에 그린 목록만이라 정보 규칙이 같다
+// 설정 화면 통합 — 지도 크게 보기: 판 중 지도를 누르면 같은 클래스의 두 번째 미니맵(big)을 맵 창 가운데에 크게 띄운다. 판 장면이
+// 작은 미니맵과 같은 값(메인 그림 목록 · 세계 상태 · 보이는 창 · 깜빡임)을 같은 프레임에 넘기고, 바닥은 작은 미니맵이 다시 그린
+// 그 프레임에 같은 합성 그림(이미 합성된 캔버스)을 그린다 — 큰 지도는 작은 지도보다 많은 것을 보일 수 없다. 큰 지도의 캔버스는
+// 바닥 합성과 같은 해상도(늘리는 것은 렌더러)라 다시 그릴 때 줄이기 · 늘리기가 없다. 처음 열 때 만들고 닫으면 숨긴다
 import Phaser from 'phaser';
 import {
   CAPTURE_POINTS,
@@ -26,15 +30,21 @@ import { HUD_TEXT } from '../data/storyText';
 import { NEON, UI } from '../art/palette';
 import { gfxState, onGfxChange } from '../gfx/state';
 import { minimapScaleFor } from '../render/fogMath';
-import { createCanvasTexture, resizeCanvasTexture, uploadCanvasTexture } from '../render/fogPaint';
+import {
+  createCanvasTexture,
+  removeCanvasTexture,
+  resizeCanvasTexture,
+  uploadCanvasTexture,
+} from '../render/fogPaint';
 import { FR } from './hudArt';
 import { BaseRefreshPacer } from './hudGate';
 import type { HudKit, Slice, Spr } from './hudKit';
 import type { CrispText } from './text';
 import { CAM_ZOOM, HUD } from './layout';
+import { MINIMAP_BIG } from '../render/prefsFx';
 
 /** 미니맵 자리 (논리 px): 그림 왼쪽 위 · 폭, 틀 여백 · 제목 줄 */
-interface Place {
+export interface Place {
   x: number;
   y: number;
   w: number;
@@ -56,6 +66,16 @@ function placeFor(monster: boolean): (Place & { inset: boolean }) | null {
 }
 
 const MINIMAP_KEY = 'minimap';
+/** 크게 본 지도의 텍스처 키 · 표시 이름 */
+const MINIMAP_BIG_KEY = 'minimap-big';
+const BIG_TAG = 'minimapBig';
+
+/** 지도 크게 보기 (판 중 지도를 누르면): 자리 · 제목 줄 오른쪽 덧말 (Minimap 생성자) */
+export interface MinimapBigOptions {
+  place: Place;
+  /** 제목 줄 오른쪽 덧말 ('눌러서 닫기') */
+  caption: string;
+}
 /**
  * 확대 화면에서 바닥을 다시 그리는 최소 간격 (ms): 미니맵 바닥은 맵 전체 작은 합성(안개)을 따로 만들어야 해서(fogMini.ts)
  * 안개 주기마다 그리면 화면 밖 그리기 일이 두 배가 된다. 엔티티 · 창 사각형은 매 프레임 그대로
@@ -132,43 +152,72 @@ export class Minimap {
   private titleIcon: Spr | null = null;
   private titleText: CrispText | null = null;
   private prisonMark: Spr | null = null;
+  /** 크게 본 지도인가 (big 옵션): 깊이 · 그림 배율 · 텍스처 키 · 이름이 다르고, 캔버스는 바닥 합성과 같은 해상도 */
+  private readonly big: boolean;
+  /** 깊이 올림 (크게 본 지도 MINIMAP_BIG.depthShift, 작은 지도 0) */
+  private readonly dz: number;
+  /** 엔티티 · 표시 그림 배율 (크게 본 지도 MINIMAP_BIG.iconScale, 작은 지도 1) */
+  private readonly iconScale: number;
+  private readonly texKey: string;
+  /** 이번 프레임 엔티티마다 몸 그림 이름 (src와 같은 순서, 디버그 drawnFrames — 괴물 화면 흰 공통 실루엣 검사) */
+  private readonly srcFrames: string[] = [];
+  /** 크게 본 지도: 제목 줄 오른쪽 덧말 */
+  private captionText: CrispText | null = null;
 
+  /** bigOpts = 지도 크게 보기 (판 장면이 처음 열 때 만든다). 없으면 판 배치의 미니맵 */
   constructor(
-    scene: Phaser.Scene,
+    private readonly scene: Phaser.Scene,
     private readonly kit: HudKit,
     monster = false,
+    bigOpts: MinimapBigOptions | null = null,
   ) {
-    const M = placeFor(monster);
+    const big = bigOpts !== null;
+    const M = bigOpts ? { ...bigOpts.place, inset: false } : placeFor(monster);
+    this.big = big;
+    this.dz = big ? MINIMAP_BIG.depthShift : 0;
+    this.iconScale = big ? MINIMAP_BIG.iconScale : 1;
+    this.texKey = big ? MINIMAP_BIG_KEY : MINIMAP_KEY;
+    const tag = big ? BIG_TAG : 'minimap';
+    const dz = this.dz;
     this.at = M;
     this.homeInset = M?.inset ?? false;
     this.w = M?.w ?? 0;
     this.h = Math.round((this.w * MAP_H) / MAP_W);
-    this.scale = minimapScaleFor(gfxState.zoom);
-    gfxState.minimapScale = this.scale;
+    this.scale = big ? 1 : minimapScaleFor(gfxState.zoom);
+    if (!big) gfxState.minimapScale = this.scale;
     this.canvas = document.createElement('canvas');
-    this.canvas.width = Math.max(1, Math.round(this.w * this.scale));
-    this.canvas.height = Math.max(1, Math.round(this.h * this.scale));
+    // 크게 본 지도: 처음 바닥을 그릴 때 바닥 합성 크기로 다시 잡는다 (refreshBase)
+    this.canvas.width = big ? 1 : Math.max(1, Math.round(this.w * this.scale));
+    this.canvas.height = big ? 1 : Math.max(1, Math.round(this.h * this.scale));
     const ctx = this.canvas.getContext('2d');
     if (!ctx) throw new Error('미니맵 캔버스를 만들 수 없습니다');
     this.ctx = ctx;
     if (!M) return;
     // 이전 판의 같은 키는 지우고, getImageData 사본을 만드는 addCanvas 대신 사본 없이 올린다
-    this.texture = createCanvasTexture(scene.textures, MINIMAP_KEY, this.canvas);
-    kit.named('minimap', () => {
+    this.texture = createCanvasTexture(scene.textures, this.texKey, this.canvas);
+    kit.named(tag, () => {
       const c = this.chrome;
       // 틀: 깎은 모서리 패널 + 제목 (지도 아이콘 + 글자)
-      this.frameSlice = kit.slice(39);
+      this.frameSlice = kit.slice(39 + dz);
       c.push(this.frameSlice);
-      this.titleIcon = kit.spr(41);
+      this.titleIcon = kit.spr(41 + dz);
       c.push(this.titleIcon);
       this.titleText = kit
-        .text(0, 0, HUD.font.mapTitle, NEON, 42, true)
+        .text(0, 0, HUD.font.mapTitle, NEON, 42 + dz, true)
         .setOrigin(0, 0.5)
         .setText(HUD_TEXT.minimap);
       c.push(this.titleText);
+      // 크게 본 지도: 제목 줄 오른쪽에 닫는 법
+      if (bigOpts) {
+        this.captionText = kit
+          .text(0, 0, HUD.font.mapTitle, UI.textDim, 42 + dz)
+          .setOrigin(1, 0.5)
+          .setText(bigOpts.caption);
+        c.push(this.captionText);
+      }
       // 늘 표시 위치: 거점 · 감옥 · 탈출구 (거점 · 탈출구는 상태에 따라 프레임만 바꾼다)
       const mark = (f: string, x: number, y: number): Spr => {
-        const sp = kit.spr(41).set(f, this.px(x), this.py(y));
+        const sp = kit.spr(41 + dz).set(f, this.px(x), this.py(y));
         c.push(sp);
         return sp;
       };
@@ -178,29 +227,49 @@ export class Minimap {
       for (const id of ['N', 'S'] as const)
         this.exitMarks.push(mark(MM_EXIT.inactive, EXITS[id].center.x, EXITS[id].center.y));
       // 보이는 창 (확대 화면에서만, 엔티티 아래) · 관전 중인 동료 고리 (엔티티 위)
-      if (CAM_ZOOM > 1) this.watchRing = kit.spr(42.5, false);
+      if (CAM_ZOOM > 1) this.watchRing = kit.spr(42.5 + dz, false);
     });
     if (CAM_ZOOM > 1) {
       // 보이는 창: 흰 선 사각형 (논리 px, 미니맵 그림 위 · 엔티티 아래)
       this.viewBox = scene.add
         .rectangle(M.x, M.y, 1, 1)
         .setOrigin(0, 0)
-        .setStrokeStyle(Math.max(1, 1.5 * HUD.s), UI.white, 0.85)
-        .setDepth(41.5)
-        .setName('minimap');
+        .setStrokeStyle(Math.max(1, 1.5 * HUD.s * (big ? MINIMAP_BIG.lineScale : 1)), UI.white, 0.85)
+        .setDepth(41.5 + dz)
+        .setName(tag);
       this.chrome.push(this.viewBox);
     }
     this.image = scene.add
-      .image(M.x, M.y, MINIMAP_KEY)
+      .image(M.x, M.y, this.texKey)
       .setOrigin(0, 0)
-      .setDepth(40)
+      .setDepth(40 + dz)
       .setScale(this.w / this.canvas.width, this.h / this.canvas.height)
-      .setName('minimap');
+      .setName(tag);
     this.placeChrome();
+    this.scaleMarks();
+    // 크게 본 지도의 캔버스는 바닥 합성 크기를 따른다 (백버퍼 배율과 무관)
+    if (big) return;
     const off = onGfxChange(() => {
       this.resizePending = true;
     });
     scene.events.once(Phaser.Scenes.Events.SHUTDOWN, off);
+  }
+
+  /** 크게 본 지도: 늘 표시 위치 그림(거점 · 감옥 · 탈출구)을 iconScale배로. HUD 아틀라스를 다시 구우면 apply가 되돌리므로 매 프레임 */
+  private scaleMarks(): void {
+    if (this.iconScale === 1) return;
+    const k = this.iconScale / this.kit.dev;
+    for (const sp of this.pointMarks) sp.img.setScale(k);
+    for (const sp of this.exitMarks) sp.img.setScale(k);
+    this.prisonMark?.img.setScale(k);
+  }
+
+  /** 틀 사각형 (논리 px, 제목 · 여백 포함 — 누르는 자리). 그리지 않으면 null */
+  get frameRect(): { x: number; y: number; w: number; h: number } | null {
+    const M = this.at;
+    if (!M || this.hidden) return null;
+    const f = this.frameSize!;
+    return { x: M.x + this.ox - M.pad, y: M.y + this.oy - M.title, w: f.w, h: f.h };
   }
 
   /** 틀 (제목 · 여백 포함) 크기 (논리 px). 자리가 없으면 null */
@@ -220,6 +289,7 @@ export class Minimap {
     this.frameSlice?.set('mm', x - M.pad, y - M.title, f.w, f.h);
     this.titleIcon?.set(FR.icon('map', NEON, 18), x + 11 * k, y - M.title / 2 - 1 * k);
     this.titleText?.setPosition(x + 26 * k, y - M.title / 2 - 1 * k);
+    this.captionText?.setPosition(x + this.w - 2 * k, y - M.title / 2 - 1 * k);
     this.prisonMark?.set(FR.mm('prison'), this.px(PRISON_CENTER.x), this.py(PRISON_CENTER.y));
     this.image?.setPosition(x, y);
     // 맵 창 안이면(처음부터 안쪽 자리 · 옮김) 화면 밖 화살표가 피한다
@@ -277,9 +347,15 @@ export class Minimap {
     return this.src.map((d) => ({ ...d, layer: 'minimap' }));
   }
 
+  /** 디버그 · 테스트: drawn과 같은 순서로 엔티티마다 그린 몸 그림 이름 (괴물 화면 생존자 = 흰 공통 실루엣 'm:hidden') */
+  get drawnFrames(): string[] {
+    return this.srcFrames.slice();
+  }
+
   /** 백버퍼 배율이 바뀌었으면 캔버스를 그 배율로 다시 잡는다 (다음 바닥 갱신 때 다시 그려진다) */
   private applyScale(): void {
     this.resizePending = false;
+    if (this.big) return;
     const s = minimapScaleFor(gfxState.zoom);
     gfxState.minimapScale = s;
     if (s === this.scale || !this.texture || !this.image) return;
@@ -300,15 +376,17 @@ export class Minimap {
    * 안개 합성 · 업로드와 한 프레임에 겹치지 않게 한다(BaseRefreshPacer). 숨겼다가 다시 보이면 바로 그린다.
    * 미니맵이 없거나 숨었으면 축소 합성 원본(baseCanvas)을 읽지 않는다 — 읽을 때 합성되므로 그 비용도 없다
    */
-  syncBase(changed: boolean, world: { readonly baseCanvas: HTMLCanvasElement }, nowMs = 0): void {
-    if (!this.shown) return;
+  syncBase(changed: boolean, world: { readonly baseCanvas: HTMLCanvasElement }, nowMs = 0): boolean {
+    if (!this.shown) return false;
     // 그릴 차례(안개가 바뀐 다음 프레임)가 오면 갱신 대기로 두고, 확대 화면에서는 지난 갱신에서 MINIMAP_BASE_MS가 지난 뒤 그린다
     if (this.pacer.frame(changed, this.stale)) this.deferred = true;
-    if (!this.deferred) return;
-    if (CAM_ZOOM > 1 && !this.stale && nowMs - this.baseAt < MINIMAP_BASE_MS) return;
+    if (!this.deferred) return false;
+    if (CAM_ZOOM > 1 && !this.stale && nowMs - this.baseAt < MINIMAP_BASE_MS) return false;
     this.deferred = false;
     this.baseAt = nowMs;
     this.refreshBase(world.baseCanvas);
+    // 이번 프레임에 바닥을 다시 그렸다 (크게 본 지도가 같은 합성 그림을 같은 프레임에 그린다)
+    return true;
   }
 
   /** 마지막 바닥 갱신 시각 · 간격 때문에 미룬 갱신이 있다 */
@@ -325,11 +403,21 @@ export class Minimap {
     if (!this.texture) return;
     this.stale = false;
     if (this.resizePending) this.applyScale();
+    // 크게 본 지도: 캔버스를 바닥 합성 크기로 (처음 · 품질이 바뀌어 합성 해상도가 달라졌을 때만) — 그대로 옮겨 그린다
+    if (this.big && this.image && (this.canvas.width !== base.width || this.canvas.height !== base.height)) {
+      resizeCanvasTexture(this.texKey, this.texture, this.canvas, base.width, base.height, false);
+      this.image.setSizeToFrame(this.texture.get());
+      this.image.setScale(this.w / this.canvas.width, this.h / this.canvas.height);
+    }
     this.ctx.imageSmoothingEnabled = true;
     this.ctx.imageSmoothingQuality = 'high';
     this.ctx.drawImage(base, 0, 0, this.canvas.width, this.canvas.height);
     uploadCanvasTexture(this.texture);
+    this.bakes += 1;
   }
+
+  /** 바닥을 다시 그린 횟수 (디버그 · 시험: 크게 본 지도가 작은 지도와 같은 때에만 다시 그리는지) */
+  bakes = 0;
 
   private px(x: number): number {
     return (this.at?.x ?? 0) + this.ox + (x / MAP_W) * this.w;
@@ -342,7 +430,7 @@ export class Minimap {
   private sprite(i: number): Spr {
     let s = this.pool[i];
     if (!s) {
-      s = this.kit.named('minimap', () => this.kit.spr(42, false));
+      s = this.kit.named(this.big ? BIG_TAG : 'minimap', () => this.kit.spr(42 + this.dz, false));
       this.pool[i] = s;
     }
     return s;
@@ -354,6 +442,7 @@ export class Minimap {
     this.used += 1;
     s.set(frame, x, y).show(true);
     s.img.setRotation(rot);
+    if (this.iconScale !== 1) s.img.setScale(this.iconScale / this.kit.dev);
   }
 
   /**
@@ -381,6 +470,7 @@ export class Minimap {
       const c = EXITS[e.id].center;
       sp?.set(MM_EXIT[e.state], this.px(c.x), this.py(c.y));
     }
+    this.scaleMarks();
     const vb = this.viewBox;
     if (vb) {
       if (view) {
@@ -402,26 +492,33 @@ export class Minimap {
     let ring = false;
     const src = this.src;
     src.length = 0;
+    this.srcFrames.length = 0;
     this.used = 0;
     for (const d of mainDrawn) {
       if (d.layer === 'minimap') continue;
       const x = this.px(d.x);
       const y = this.py(d.y);
+      let body: string;
       if (d.kind === 'mark') {
-        this.put(d.tag === 'track' ? MM.track : d.tag === 'roarSelf' ? MM.roarSelf : MM.roarPing, x, y, 0);
+        body = d.tag === 'track' ? MM.track : d.tag === 'roarSelf' ? MM.roarSelf : MM.roarPing;
+        this.put(body, x, y, 0);
       } else if (d.kind === 'monster' || (d.kind === 'self' && myRole === 'monster')) {
-        this.put(MM.monster, x, y, d.face);
+        body = MM.monster;
+        this.put(body, x, y, d.face);
       } else {
         // 생존자 화면: 역할 실루엣 (나는 흰 고리를 아래에). 괴물 화면: 흰 공통 실루엣 (역할 · 체력 없음)
         const role = d.kind === 'self' ? myRole : myRole === 'monster' ? null : roleOf(d.id);
         if (d.kind === 'self') this.put(MM.self, x, y, 0);
-        this.put(role && role !== 'monster' ? MM[role] : MM.hidden, x, y, d.face);
+        body = role && role !== 'monster' ? MM[role] : MM.hidden;
+        this.put(body, x, y, d.face);
         if (d.kind === 'survivor' && d.id === this.watching && this.watchRing) {
           this.watchRing.set(MM.watch, x, y).show(true);
+          if (this.iconScale !== 1) this.watchRing.img.setScale(this.iconScale / this.kit.dev);
           ring = true;
         }
       }
       src.push(d);
+      this.srcFrames.push(body);
     }
     if (!ring) this.watchRing?.show(false);
     for (let i = this.used; i < this.pool.length; i += 1) this.pool[i]?.show(false);
@@ -429,5 +526,7 @@ export class Minimap {
 
   destroy(): void {
     this.image?.destroy();
+    // 크게 본 지도는 판마다 처음 열 때 만든다: 판 장면이 끝나면 텍스처도 지운다 (작은 지도 키는 다음 판이 덮어쓴다)
+    if (this.big) removeCanvasTexture(this.scene.textures, this.texKey);
   }
 }

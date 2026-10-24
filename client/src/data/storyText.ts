@@ -397,6 +397,10 @@ export const HELP_TEXT = {
   minimapClose: '눌러서 닫기',
   /** 판 중 FPS · 핑 칩 ({fps} · {ping}) */
   perfChip: '{fps} FPS · 핑 {ping}ms',
+  /** FPS · 핑 칩: 아직 모르는 값 (연습 판 · 시계를 맞추기 전의 핑) */
+  perfChipUnknown: '-',
+  /** 판 중 메뉴 버튼 (PC) 키캡 */
+  menuKey: 'Esc',
 } as const;
 
 /** 조작 배치 편집 (터치 기기, 로비에서만, docs/STORY_TEXT.md 7절) */

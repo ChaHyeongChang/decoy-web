@@ -1,5 +1,5 @@
 // 화면 연출 (VISUAL_SPEC 6.2 · 7.2) 중 화면 좌표로 그리는 것과 월드 후처리 (M10b)
-//  - 피격: 화면 가장자리 붉은 플래시 0.2초 (맞은 생존자)
+//  - 피격: 화면 가장자리 붉은 플래시 0.2초 (맞은 생존자). 번쩍임 줄이기(설정)면 옅게 · 서서히 (prefsFx.hitFlashLevel)
 //  - 수감: 감옥으로 페이드 0.5초 (갇힌 생존자, 검정에서 밝아짐)
 //  - 기절: 괴물 화면 채도 감소 (기절 동안). 맵(구조 레이어) 바로 위 · 배지와 캐릭터 아래의 막(WorldRenderer.stunVeil)이라
 //    캐릭터 · 노출 링 · 범위 · 마커를 덮지 않는다. 두 렌더러가 같은 방식(보통 섞기 회색 막)이다
@@ -14,6 +14,7 @@ import { MAP_RECT, VIEW_H, VIEW_W } from '../ui/layout';
 import { POST, vignetteAt } from '../art/fx';
 import { createCanvasTexture, removeCanvasTexture } from './fogPaint';
 import { FOG_EDGE_PIPELINE } from './fogGpu';
+import { hitFlashLevel } from './prefsFx';
 
 export const HIT_FLASH_MS = 200;
 export const IMPRISON_FADE_MS = 500;
@@ -47,6 +48,8 @@ export class ScreenEffects {
   private hitAt = -1e9;
   private fadeAt = -1e9;
   private lastEdgeAlpha = -1;
+  /** 번쩍임 줄이기 (설정 화면 '화면' 탭): 피격 가장자리를 옅게 · 서서히 (판 장면이 설정을 따라 바꾼다) */
+  reduceFlash = false;
   state: ScreenEffectState = { hitFlash: 0, fade: 0, desaturate: false };
 
   /** veil = 맵 바로 위 · 배지와 캐릭터 아래의 채도 감소 막 */
@@ -72,8 +75,8 @@ export class ScreenEffects {
   }
 
   update(nowMs: number, desaturate: boolean): void {
-    // 피격: 0.2초 동안 선형으로 사라진다
-    const hk = Math.max(0, 1 - (nowMs - this.hitAt) / HIT_FLASH_MS);
+    // 피격: 0.2초 동안 선형으로 사라진다 (번쩍임 줄이기: 0.35배까지 서서히 올랐다가 같은 0.2초에 사라진다)
+    const hk = hitFlashLevel(nowMs - this.hitAt, HIT_FLASH_MS, this.reduceFlash);
     const edgeAlpha = Math.round(hk * 50) / 50;
     if (edgeAlpha !== this.lastEdgeAlpha) {
       this.lastEdgeAlpha = edgeAlpha;

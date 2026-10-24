@@ -1,6 +1,9 @@
 // 최소 효과음 (BUILD_PLAN M8): 외부 음원 없이 WebAudio로 합성한다.
 // 브라우저 자동 재생 규칙 때문에 AudioContext는 첫 사용자 입력(클릭 · 키 · 탭)에서 만든다.
 // 터치 · 펜의 pointerdown은 사용자 활성화가 아니다(크롬이 경고를 낸다): 마우스는 pointerdown, 터치 · 펜은 pointerup에서 연다 (M11)
+// 설정 화면 통합: 소리 묶음 — 전체 이득(MASTER_GAIN × 전체 음량) 아래에 효과음 묶음 · UI 묶음 이득을 둔다(소리 = 전체 × 묶음).
+// 판 효과음(play)은 효과음 묶음, 설정 화면 단추 소리(ui)는 UI 묶음으로 간다. 음량은 AudioContext를 만들기 전에 바꿔도
+// 기억했다가 만들 때 건다. 음소거 = 모두 0 (그동안은 소리 노드도 만들지 않는다)
 
 export type SfxName = 'windup' | 'hit' | 'captureStart' | 'captureDone' | 'doorOpen' | 'roar';
 /** UI 소리 (설정 화면 통합): 단추 누름 · 켜고 끔 · 화면 열기 · 닫기 */
@@ -15,6 +18,22 @@ export interface SfxLevels {
 const MASTER_GAIN = 0.32;
 /** 같은 소리가 너무 촘촘히 겹치지 않게 (ms) */
 const MIN_GAP_MS = 60;
+/** 음량을 바꿀 때 이득이 따라가는 시간 상수 (초): 딸깍 소리 없이 바로 (약 50ms면 다 바뀐다) */
+export const LEVEL_TAU_S = 0.015;
+
+/** 0~1로 (수가 아니면 1 — 음량 값이 깨져도 소리가 사라지지 않게. 음소거는 0이 온다) */
+function clampLevel(v: number): number {
+  return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1;
+}
+
+/** 묶음 이득 (순수): 전체 = MASTER_GAIN × 전체 음량, 효과음 · UI 묶음 = 그 음량 (전체 이득 아래에 이어진다) */
+export function busGains(levels: SfxLevels): SfxLevels {
+  return {
+    master: MASTER_GAIN * clampLevel(levels.master),
+    sfx: clampLevel(levels.sfx),
+    ui: clampLevel(levels.ui),
+  };
+}
 
 /**
  * 이 입력 이벤트에서 오디오를 열어도 되는가 (브라우저의 사용자 활성화 규칙): 키, 마우스 pointerdown,
@@ -36,10 +55,19 @@ function newAudioContext(): AudioContext | null {
 export class Sfx {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  /** 효과음 묶음 · UI 묶음 (전체 이득 아래) */
+  private sfxBus: GainNode | null = null;
+  private uiBus: GainNode | null = null;
   private noise: AudioBuffer | null = null;
   private lastAt = new Map<SfxName, number>();
+  private uiLastAt = new Map<UiSfxName, number>();
+  /** 지금 소리 세기 (setLevels, 0~1). 기본값은 예전과 같은 소리(모두 1) */
+  private levels: SfxLevels = { master: 1, sfx: 1, ui: 1 };
   /** 디버그 · 테스트: 재생 요청 기록 (최근 50개) */
   readonly log: { name: SfxName; at: number }[] = [];
+  /** 디버그 · 테스트: UI 소리 요청 기록 (최근 20개, 판 효과음 기록 log와 따로) */
+  readonly uiLog: { name: UiSfxName; at: number }[] = [];
+  /** 전체 음량 0 (음소거 포함) */
   muted = false;
 
   /** createContext: 테스트에서 바꿔 끼운다 */
@@ -80,9 +108,16 @@ export class Sfx {
     try {
       const ctx = this.createContext();
       if (!ctx) return;
+      const g = busGains(this.levels);
       const master = ctx.createGain();
-      master.gain.value = MASTER_GAIN;
+      master.gain.value = g.master;
       master.connect(ctx.destination);
+      const sfxBus = ctx.createGain();
+      sfxBus.gain.value = g.sfx;
+      sfxBus.connect(master);
+      const uiBus = ctx.createGain();
+      uiBus.gain.value = g.ui;
+      uiBus.connect(master);
       const len = Math.floor(ctx.sampleRate * 0.6);
       const noise = ctx.createBuffer(1, len, ctx.sampleRate);
       const data = noise.getChannelData(0);
@@ -94,20 +129,80 @@ export class Sfx {
       }
       this.ctx = ctx;
       this.master = master;
+      this.sfxBus = sfxBus;
+      this.uiBus = uiBus;
       this.noise = noise;
     } catch {
       this.ctx = null;
     }
   }
 
-  /** 소리 세기를 바꾼다 (설정 소리 탭). 계약 단계의 자리표시 — 갈래 G가 묶음 이득 노드로 채운다 */
+  /**
+   * 소리 세기를 바꾼다 (설정 소리 탭, prefs.audioLevelsOf). 바로 걸린다(이득이 LEVEL_TAU_S로 따라간다). AudioContext를
+   * 만들기 전이면 기억했다가 만들 때 건다. 전체 0(음소거)이면 재생 요청은 기록만 하고 소리 노드를 만들지 않는다
+   */
   setLevels(levels: SfxLevels): void {
-    this.muted = levels.master <= 0;
+    this.levels = {
+      master: clampLevel(levels.master),
+      sfx: clampLevel(levels.sfx),
+      ui: clampLevel(levels.ui),
+    };
+    this.muted = this.levels.master <= 0;
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const g = busGains(this.levels);
+    const t = ctx.currentTime;
+    this.master?.gain.setTargetAtTime(g.master, t, LEVEL_TAU_S);
+    this.sfxBus?.gain.setTargetAtTime(g.sfx, t, LEVEL_TAU_S);
+    this.uiBus?.gain.setTargetAtTime(g.ui, t, LEVEL_TAU_S);
   }
 
-  /** UI 소리 하나 (설정 화면 단추 등). 계약 단계의 자리표시 — 갈래 G가 채운다 */
+  /** 지금 소리 세기 (디버그 · 시험) */
+  get currentLevels(): Readonly<SfxLevels> {
+    return this.levels;
+  }
+
+  /**
+   * UI 소리 하나 (설정 화면 단추 · 판 중 메뉴 버튼): 30~110ms 짧고 작은 합성음, UI 묶음으로. 열기 규칙(attachUnlock)과
+   * 같은 소리 간격(MIN_GAP_MS — 같은 누르기에서 두 곳이 불러도 한 번)을 따른다. 오디오가 아직 열리지 않았으면 기록만 남는다
+   */
   ui(name: UiSfxName): void {
-    void name;
+    const now = performance.now();
+    const last = this.uiLastAt.get(name) ?? -1e9;
+    if (now - last < MIN_GAP_MS) return;
+    this.uiLastAt.set(name, now);
+    this.uiLog.push({ name, at: now });
+    if (this.uiLog.length > 20) this.uiLog.shift();
+    if (this.muted || this.levels.ui <= 0) return;
+    const ctx = this.ctx;
+    const bus = this.uiBus;
+    if (!ctx || !bus || ctx.state !== 'running') return;
+    const out = ctx.createGain();
+    out.gain.value = 1;
+    out.connect(bus);
+    const t = ctx.currentTime + 0.005;
+    switch (name) {
+      case 'tap':
+        // 짧고 부드러운 딸깍 (내려가는 삼각파 45ms)
+        this.tone(out, 'triangle', t, 0.045, 1320, 990, 0.16, 3200);
+        break;
+      case 'toggle':
+        // 두 음 (올라가는 짧은 사인 두 개)
+        this.tone(out, 'sine', t, 0.04, 880, 880, 0.14, 3600);
+        this.tone(out, 'sine', t + 0.045, 0.05, 1175, 1175, 0.12, 3600);
+        break;
+      case 'open':
+        // 화면 열기: 위로 미끄러지는 삼각파 110ms
+        this.tone(out, 'triangle', t, 0.11, 520, 780, 0.12, 2400);
+        break;
+      case 'close':
+        // 화면 닫기: 아래로 미끄러지는 삼각파 90ms
+        this.tone(out, 'triangle', t, 0.09, 700, 460, 0.12, 2200);
+        break;
+      default:
+        break;
+    }
+    window.setTimeout(() => out.disconnect(), 400);
   }
 
   /** volume: 0~1 (남의 일은 작게) */
@@ -118,13 +213,13 @@ export class Sfx {
     this.lastAt.set(name, now);
     this.log.push({ name, at: now });
     if (this.log.length > 50) this.log.shift();
-    if (this.muted) return;
+    if (this.muted || this.levels.sfx <= 0) return;
     const ctx = this.ctx;
-    const master = this.master;
-    if (!ctx || !master || ctx.state !== 'running') return;
+    const bus = this.sfxBus;
+    if (!ctx || !bus || ctx.state !== 'running') return;
     const out = ctx.createGain();
     out.gain.value = Math.max(0, Math.min(1, volume));
-    out.connect(master);
+    out.connect(bus);
     const t = ctx.currentTime + 0.005;
     switch (name) {
       case 'windup':
