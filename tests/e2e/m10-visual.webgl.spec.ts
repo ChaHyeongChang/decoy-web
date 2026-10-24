@@ -50,6 +50,8 @@ interface Session {
 }
 
 async function openTab(browser: Browser, url: string): Promise<Tab> {
+  // 기존 캐릭터 그림을 재는 시험이다(가운데에서 잰 흰 폭 · 몸 탐침): 기본값(설정 화면 통합부터 새 캐릭터)과 상관없이 기존 스타일로
+  if (!url.includes('chars=')) url += '&chars=classic';
   const context = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
   const page = await context.newPage();
   const problems: string[] = [];

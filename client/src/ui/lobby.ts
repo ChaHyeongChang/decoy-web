@@ -219,6 +219,11 @@ export class LobbyUI {
     if (this.lastLobby && this.atRoom) this.renderRoom(this.lastLobby);
   }
 
+  /** 조작 배치 편집을 닫은 뒤: 떠 있는 판 직전 터치 안내 그림을 바꾼 배치로 다시 그린다 */
+  refreshTutorial(): void {
+    this.tutorial.refresh();
+  }
+
   /** 첫 화면이 보이는 중인가 */
   get atHome(): boolean {
     return this.root.style.display !== 'none' && this.content.classList.contains('lobby-home');

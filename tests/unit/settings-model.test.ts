@@ -161,7 +161,7 @@ describe('설정 화면 값', () => {
     m.prefs.setPref('muted', true);
     m.prefs.setPref('stickSize', 120);
     store.data.set(STORAGE_KEYS.haptics.key, '0');
-    store.data.set(STORAGE_KEYS.controlLayout.key, '{"v":1}');
+    store.data.set(STORAGE_KEYS.controlLayout.key, '{"v":1,"survivor":{"mirror":true,"items":{}}}');
     expect(m.model.controlLayoutCustomized()).toBe(true);
     expect(m.model.resetAllSettings()).toBe(true);
     for (const k of ['quality', 'frameLimit', 'charStyle', 'settings', 'haptics', 'controlLayout'] as const)
@@ -169,6 +169,34 @@ describe('설정 화면 값', () => {
     expect(m.prefs.pref('uiSize')).toBe('normal');
     expect(m.model.charStyleNow()).toBe('new');
     expect(m.model.controlLayoutCustomized()).toBe(false);
+  });
+
+  it('모두 기본값으로: 이미 자동인 품질 · 프레임 제한은 다시 고르지 않는다 (판 중 측정 기억 · 자동 하향을 지우지 않게)', async () => {
+    const m = await fresh();
+    const applied: string[] = [];
+    m.quality.qualityHooks.choose = (c) => applied.push(`q:${c}`);
+    m.pacing.pacingHooks.setLimit = (l) => applied.push(`f:${l}`);
+    m.chars.initCharStyle(null);
+    m.prefs.setPref('muted', true);
+    expect(m.model.resetAllSettings()).toBe(true);
+    expect(applied).toEqual([]);
+    expect(m.prefs.pref('muted')).toBe(false);
+  });
+
+  it('조작 배치를 저장하지 못해 이번 접속에만 쓰던 것도 모두 기본값으로 비운다', async () => {
+    // 쓰기만 막힌 저장소 (지우기는 된다)
+    const s = memoryStorage();
+    s.setItem = () => {
+      throw new Error('가득 참');
+    };
+    vi.stubGlobal('localStorage', s);
+    const m = await fresh();
+    const layout = await import('../../client/src/controlLayout');
+    expect(layout.saveControlLayouts({ survivor: { mirror: true, items: {} }, monster: null })).toBe(false);
+    expect(m.model.controlLayoutCustomized()).toBe(true);
+    m.model.resetAllSettings();
+    expect(m.model.controlLayoutCustomized()).toBe(false);
+    expect(layout.loadControlLayout('survivor')).toBeNull();
   });
 
   it('저장소가 막혀도 고른 값은 이번 접속에 적용되고 false를 돌려준다', async () => {

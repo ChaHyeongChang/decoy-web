@@ -247,6 +247,28 @@ describe('판 중 메뉴: 입력 멈춤 (InputSampler.suspend)', () => {
     expect(r.sampler.sample(3, 0).my).toBe(1);
   });
 
+  it('닫은 뒤 계속 누르고 있던 키의 자동 반복은 새로 누른 것이 아니다 (능력이 저절로 나가지 않는다), 다시 누르면 받는다', () => {
+    const r = rig();
+    r.win.dispatchEvent(keyEv('keydown', 'Space'));
+    r.win.dispatchEvent(keyEv('keydown', 'KeyW'));
+    r.win.dispatchEvent(keyEv('keydown', 'Tab'));
+    r.sampler.sample(1, 0);
+    r.sampler.suspend(true);
+    r.sampler.suspend(false);
+    // 손을 떼지 않은 채 운영체제 자동 반복이 온다
+    for (const code of ['Space', 'KeyW', 'Tab']) r.win.dispatchEvent(keyEv('keydown', code, true));
+    expect(r.sampler.sample(2, 0)).toMatchObject({ mx: 0, my: 0, held: 0, pressed: 0 });
+    expect(r.sampler.tabHeld).toBe(false);
+    // 떼고 다시 누르면 받는다 · 받은 뒤의 자동 반복은 그대로 누르고 있는 것
+    r.win.dispatchEvent(keyEv('keyup', 'Space'));
+    r.win.dispatchEvent(keyEv('keydown', 'Space'));
+    r.win.dispatchEvent(keyEv('keydown', 'Space', true));
+    const f = r.sampler.sample(3, 0);
+    expect(f.pressed & BTN.ABILITY).toBe(BTN.ABILITY);
+    expect(f.held & BTN.ABILITY).toBe(BTN.ABILITY);
+    expect(r.sampler.sample(4, 0).pressed & BTN.ABILITY).toBe(0);
+  });
+
   it('떼어 내면(판 장면 끝) 멈춤도 풀린다', () => {
     const r = rig();
     r.sampler.suspend(true);

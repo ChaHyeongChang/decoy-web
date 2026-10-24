@@ -153,9 +153,15 @@ export class InputSampler {
 
     const onKeyDown = (e: KeyboardEvent): void => {
       if (isTyping(e) || this.suspended) return;
+      // 떼어 둔 키의 자동 반복(판 중 메뉴 · 창 전환 전부터 누르고 있던 키)은 새로 누른 것으로 보지 않는다 — 다시 눌러야 받는다
+      const stale = e.repeat && (e.code === 'Tab' ? !this.tabHeld : !this.keys.has(e.code));
       if (e.code === 'Tab') {
-        this.tabHeld = true;
         e.preventDefault();
+        if (!stale) this.tabHeld = true;
+        return;
+      }
+      if (stale) {
+        if (MOVE_KEYS[e.code] || BUTTON_KEYS[e.code] !== undefined) e.preventDefault();
         return;
       }
       this.anyKeyPressed = true;

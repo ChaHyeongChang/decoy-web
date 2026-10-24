@@ -8,6 +8,7 @@ import { APP_TEXT, HELP_TEXT, TOUCH_TEXT } from '../data/storyText';
 import { canOfferFullscreen } from '../device';
 import { currentCharStyle, type CharStyle } from '../gfx/charStyle';
 import type { LeaveKind } from '../lifecycle';
+import { pref } from '../prefs';
 import { effectiveTouchLayout, hudPreview } from './touchControls';
 import { frontFigureSvg, h, icon, roleVars, svgSpan } from './uiArt';
 import './lifecycle.css';
@@ -114,8 +115,12 @@ export class LeaveDialog {
       h('div', { class: 'life-buttons' }, go, this.stayBtn),
     );
     // Esc(키보드 · 일부 기기의 뒤로 가기 키) = 계속
+    // 처리한 Esc는 여기서 멈춘다 (판 장면이 같은 Esc로 판 중 설정을 열지 않게)
     this.box.card.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') actions.stay();
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      actions.stay();
     });
   }
 
@@ -343,6 +348,11 @@ export class TouchTutorialCard {
     parent.append(this.el);
   }
 
+  /** 보이는 중이면 지금 배치 · 설정으로 다시 그린다 (조작 배치 편집을 닫은 뒤) */
+  refresh(): void {
+    if (this.shown && this.role) this.render(this.role);
+  }
+
   hide(): void {
     this.shown = false;
     this.el.classList.remove('life-enter');
@@ -356,7 +366,11 @@ export class TouchTutorialCard {
   render(role: Role): HTMLElement {
     const team = teamOf(role);
     const style = currentCharStyle();
-    const layoutKey = JSON.stringify(loadControlLayout(team));
+    // 바꾼 배치의 그림은 조이스틱 크기 · UI 크기 · 창 크기에도 달라진다 (기본 배치는 손으로 다듬은 그림 하나)
+    const saved = loadControlLayout(team);
+    const layoutKey = isDefaultLayout(saved)
+      ? ''
+      : JSON.stringify([saved, pref('stickSize'), pref('uiSize'), window.innerWidth, window.innerHeight]);
     if (this.role === role && this.style === style && this.layoutKey === layoutKey) return this.el;
     const sameBody =
       this.team === team &&

@@ -65,7 +65,8 @@ export interface SettingsEnv {
   /** 터치 조작 안내 다시 보기 (조작 탭, 터치) */
   replayTutorial(): void;
   /** 조작 배치 편집 열기 (조작 탭, 터치 · 로비). 편집기가 닫히면 done */
-  openLayoutEditor(done: () => void): void;
+  /** 편집 화면을 연다. 돌려준 손잡이로 닫는다(판이 시작해 설정 화면을 닫을 때) — 닫히면 done */
+  openLayoutEditor(done: () => void): { close(): void };
   /** 닫힌 뒤 (판 중이면 판 장면이 입력을 다시 받는다) */
   onClose?(): void;
 }
@@ -130,6 +131,10 @@ export class SettingsPanel {
   private downSinceOpen = false;
   /** 편집기가 열려 있는 동안 (설정 화면은 숨긴다) */
   private editing = false;
+  /** 열린 편집 화면 손잡이 */
+  private editor: { close(): void } | null = null;
+  /** 편집 화면이 닫히면 설정 화면도 닫는다 (편집 중에 설정 화면을 닫았다 — 판 시작) */
+  private closeAfterEdit = false;
 
   constructor(
     host: HTMLElement,
@@ -312,9 +317,20 @@ export class SettingsPanel {
   }
 
   close(): void {
+    if (this.editing) {
+      // 조작 배치 편집 중(설정 화면은 숨어 있다): 편집 화면을 취소로 닫고, 그 done에서 설정 화면도 닫는다
+      this.closeAfterEdit = true;
+      this.editor?.close();
+      return;
+    }
     if (!this.isOpen) return;
     this.root.hidden = true;
     sfx.ui('close');
+    this.finishClose();
+  }
+
+  private finishClose(): void {
+    this.root.hidden = true;
     this.prevFocus?.focus({ preventScroll: true });
     this.prevFocus = null;
     this.env.onClose?.();
@@ -334,7 +350,8 @@ export class SettingsPanel {
     if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
-      this.close();
+      // 누르고 있는 Esc의 자동 반복은 닫지 않는다 (Esc로 연 판 중 설정이 바로 닫히지 않게)
+      if (!e.repeat) this.close();
       return;
     }
     // 탭 목록: 좌우 화살표로 옮긴다 (WAI-ARIA 탭)
@@ -690,9 +707,17 @@ export class SettingsPanel {
       if (this.ctx !== 'lobby' || this.editing) return;
       sfx.ui('open');
       this.editing = true;
+      this.closeAfterEdit = false;
       this.root.hidden = true;
-      this.env.openLayoutEditor(() => {
+      this.editor = this.env.openLayoutEditor(() => {
+        this.editor = null;
         this.editing = false;
+        if (this.closeAfterEdit) {
+          // 편집 중에 판이 시작했다: 설정 화면을 다시 보이지 않고 닫는다
+          this.closeAfterEdit = false;
+          this.finishClose();
+          return;
+        }
         this.root.hidden = false;
         this.syncAll();
         b.focus({ preventScroll: true });

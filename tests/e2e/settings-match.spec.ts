@@ -5,12 +5,22 @@
 //  - 터치: 판 중 '설정' 버튼이 같은 판 중 탭으로 열고, 닫으면 입력을 다시 받는다
 //  - 터치 로비: 조작 탭의 '조작 배치 편집'이 편집 화면을 열고, 취소하면 설정 화면 조작 탭으로 돌아온다
 //  - 터치 판 직전 안내: 조작 배치를 바꿨으면(좌우 반전) 그림이 바꾼 배치(이동 영역이 오른쪽)를 그리고 본문은 자리 말이 없다
+//  - 편집 화면을 연 채 판이 시작하면 편집 화면 · 설정 화면이 닫힌다, 관전 중에도 터치 '설정' 버튼, 나가기 확인 창(터치)의 Esc는 그 창만
 import { expect, test, type Page } from '@playwright/test';
 import type { MatchPrefsDebug } from '@decoy/shared';
 import { TOUCH_TEXT } from '../../client/src/data/storyText';
-import { PHONE_LANDSCAPE, dpr1, newPlayerPage, press, waitForSnapshots } from './helpers';
+import {
+  PHONE_LANDSCAPE,
+  createRoom,
+  dpr1,
+  joinRoom,
+  newPlayerPage,
+  pickRoleAndReady,
+  press,
+  waitForSnapshots,
+} from './helpers';
 import { startBotRoom } from './m10-map.shared';
-import { waitForTouchTarget } from './touch';
+import { touchTargets, waitForTouchTarget } from './touch';
 
 const QUERY = '&renderer=canvas&quality=low';
 const MATCH_TABS = ['graphics', 'screen', 'sound'];
@@ -219,6 +229,102 @@ test('터치 판 직전 안내: 좌우 반전한 배치면 그림의 이동 영�
   await expect(card).toBeVisible();
   await expect(page.getByTestId('touch-tutorial-custom')).toHaveCount(0);
   expect(await card.locator('li').allTextContents()).toEqual([...TOUCH_TEXT.tutorialSurvivor]);
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
+test('터치: 조작 배치 편집 중에 판이 시작하면 편집 화면 · 설정 화면이 닫히고 판 입력을 받는다', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  // PC 방장(봇 방) + 휴대폰 손님. 손님이 편집 화면을 연 채로 방장이 시작한다
+  const host = await newPlayerPage(browser);
+  const code = await createRoom(host.page, '&bots=1&quality=low');
+  const phone = await newPlayerPage(browser, dpr1(PHONE_LANDSCAPE));
+  await joinRoom(phone.page, code, '&quality=low');
+  await pickRoleAndReady(phone.page, 'runner');
+  const ok = phone.page.getByTestId('touch-tutorial-ok');
+  if (await ok.isVisible()) await press(ok);
+  await press(phone.page.getByTestId('settings-button').first());
+  await press(phone.page.getByTestId('settings-tab-controls'));
+  await press(phone.page.getByTestId('layout-edit'));
+  await expect(phone.page.getByTestId('layout-editor')).toBeVisible();
+  await pickRoleAndReady(host.page, 'monster');
+  await press(host.page.getByTestId('start-button'));
+  await waitForSnapshots(phone.page, 3);
+  await expect(phone.page.getByTestId('layout-editor')).toHaveCount(0);
+  await expect(phone.page.getByTestId('settings-panel')).toBeHidden();
+  await phone.page.waitForTimeout(600);
+  await expect(phone.page.getByTestId('settings-panel')).toBeHidden();
+  await waitForTouchTarget(phone.page, 'move-zone');
+  expect((await prefs(phone.page)).inputSuspended).toBe(false);
+  expect(await phone.page.evaluate(() => localStorage.getItem('decoy:controlLayout'))).toBeNull();
+  expect([...host.problems, ...phone.problems]).toEqual([]);
+  await host.context.close();
+  await phone.context.close();
+});
+
+test('터치: 탈출해 관전하는 동안에도 판 중 설정 버튼은 남아 열 수 있다 (터치 화면의 다른 조작은 꺼짐)', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const { context, page, problems } = await newPlayerPage(browser, dpr1(PHONE_LANDSCAPE));
+  await page.goto('/?bots=1&debug=hook&renderer=canvas&quality=low');
+  await press(page.getByTestId('create-room'));
+  await press(page.getByTestId('role-runner'));
+  await press(page.getByTestId('ready-button'));
+  const ok = page.getByTestId('touch-tutorial-ok');
+  if (await ok.isVisible()) await press(ok);
+  await press(page.getByTestId('start-button'));
+  await waitForSnapshots(page, 3);
+  await waitForTouchTarget(page, 'move-zone');
+  await page.evaluate(() => {
+    const d = window.__DECOY__!;
+    d.sendTest({ kind: 'setSurvivor', target: d.you ?? '', status: 'escaped' });
+  });
+  await expect.poll(async () => (await touchTargets(page)).map((t) => t.id)).toEqual(['menu']);
+  const menu = await waitForTouchTarget(page, 'menu');
+  await page.touchscreen.tap(menu.x + menu.w / 2, menu.y + menu.h / 2);
+  await expect(page.getByTestId('settings-panel')).toBeVisible();
+  expect(await tabIds(page)).toEqual(MATCH_TABS);
+  await press(page.getByTestId('settings-close'));
+  await expect(page.getByTestId('settings-panel')).toBeHidden();
+  await expect.poll(async () => (await touchTargets(page)).map((t) => t.id)).toEqual(['menu']);
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
+test('터치 (키보드를 단 태블릿 등): 판 중 나가기 확인 창의 Esc는 확인 창만 닫는다 (판 중 설정이 열리지 않는다)', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const { context, page, problems } = await newPlayerPage(browser, dpr1(PHONE_LANDSCAPE));
+  // 헤드리스에서 진짜 전체 화면이 되어 창 크기가 바뀌지 않게
+  await context.addInitScript(() => {
+    Element.prototype.requestFullscreen = () => Promise.resolve();
+  });
+  await page.goto('/?bots=1&debug=hook&renderer=canvas&quality=low');
+  await press(page.getByTestId('create-room'));
+  await press(page.getByTestId('role-runner'));
+  await press(page.getByTestId('ready-button'));
+  const ok = page.getByTestId('touch-tutorial-ok');
+  if (await ok.isVisible()) await press(ok);
+  await press(page.getByTestId('start-button'));
+  await waitForSnapshots(page, 3);
+  // 뒤로 가기 확인 항목은 판 중 첫 탭에서 넣는다 (터치 · 설치 앱만)
+  const n = await page.evaluate(() => history.length);
+  const zone = await waitForTouchTarget(page, 'move-zone');
+  await page.touchscreen.tap(zone.x + zone.w / 2, zone.y + zone.h / 2);
+  await expect.poll(() => page.evaluate(() => history.length)).toBeGreaterThan(n);
+  await page.goBack({ waitUntil: 'commit' });
+  const dialog = page.getByTestId('leave-dialog');
+  await expect(dialog).toBeVisible();
+  await page.getByTestId('leave-stay').focus();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await page.waitForTimeout(300);
+  await expect(page.getByTestId('settings-panel')).toBeHidden();
+  expect((await prefs(page)).inputSuspended).toBe(false);
   expect(problems).toEqual([]);
   await context.close();
 });

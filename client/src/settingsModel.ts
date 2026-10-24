@@ -17,9 +17,10 @@ import {
   urlCharStyle,
   type CharStyle,
 } from './gfx/charStyle';
+import { isDefaultLayout, loadControlLayouts, saveControlLayouts } from './controlLayout';
 import { haptics } from './haptics';
 import { resetPrefs } from './prefs';
-import { readKey, removeKey } from './storageKeys';
+import { readKey } from './storageKeys';
 
 export type TabId = 'graphics' | 'screen' | 'sound' | 'controls';
 /** 판 중 탭 (온라인 판이라 멈추지 않는다 — 조작 탭 · 배치 편집은 로비에서만) */
@@ -86,6 +87,8 @@ export function qualityIsDefault(): boolean {
 
 /** 기본값(자동)으로. 주소 값이 있으면 저장값만 지운다 */
 export function resetQuality(): boolean {
+  // 이미 자동이면 아무것도 하지 않는다 ('모두 기본값으로'가 판 중 측정 기억 · 자동 하향을 지우지 않게 — 줄의 '자동' 다시 누르기는 따로)
+  if (qualityIsDefault()) return true;
   if (url.quality) return saveQualityChoice('auto');
   return chooseQuality('auto');
 }
@@ -112,6 +115,7 @@ export function frameLimitIsDefault(): boolean {
 }
 
 export function resetFrameLimit(): boolean {
+  if (frameLimitIsDefault()) return true;
   if (url.fpsLimit) return saveFrameLimit('auto');
   return chooseFrameLimit('auto');
 }
@@ -153,12 +157,14 @@ export function resetHaptics(): boolean {
 
 /** 조작 배치를 바꿔 둔 팀이 있는가 */
 export function controlLayoutCustomized(): boolean {
-  return readKey('controlLayout') !== null;
+  const l = loadControlLayouts();
+  return !isDefaultLayout(l.survivor) || !isDefaultLayout(l.monster);
 }
 
 /** 조작 배치를 두 팀 모두 기본값으로 (저장값을 지운다) */
 export function resetControlLayout(): boolean {
-  return removeKey('controlLayout');
+  // 저장하지 못해 이번 접속에만 쓰던 배치도 비운다 (saveControlLayouts가 둘 다 기본이면 키를 지운다)
+  return saveControlLayouts({ survivor: null, monster: null });
 }
 
 /**

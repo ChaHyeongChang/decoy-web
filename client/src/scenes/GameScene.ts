@@ -830,6 +830,8 @@ export class GameScene extends Phaser.Scene {
   private onMenuKey(e: KeyboardEvent): void {
     if (e.code !== 'Escape' && e.key !== 'Escape') return;
     if (e.defaultPrevented || this.app.result !== null) return;
+    // 다른 대화상자(나가기 확인 등) 안에서 누른 Esc는 그 대화상자의 것이다
+    if (e.target instanceof Element && e.target.closest('[aria-modal="true"]') && !matchMenu.isOpen()) return;
     if (this.bigOpen) {
       this.closeBigMap();
     } else {
@@ -1017,11 +1019,20 @@ export class GameScene extends Phaser.Scene {
     if (this.chipDirty || this.debugChip !== null || !chip.shown || len !== this.chipLen) {
       const c = this.canvasBox();
       if (c) {
-        // 피할 것: ?debug=1 칩, 터치 시스템 버튼(좌우 반전이면 맵 왼쪽 위에 걸친다)
+        // 피할 것: ?debug=1 칩, 터치 시스템 버튼 · 맵 창 안 미니맵(좌우 반전이면 맵 왼쪽 위에 온다)
         const avoid: CssRect[] = [];
         if (this.debugChip) avoid.push(this.debugChip.getBoundingClientRect());
         if (this.touchControls)
-          for (const b of this.uiRoot.querySelectorAll<HTMLElement>('.tc-sys')) avoid.push(b.getBoundingClientRect());
+          for (const b of this.uiRoot.querySelectorAll<HTMLElement>('.tc-sys'))
+            avoid.push(b.getBoundingClientRect());
+        const inset = this.minimap?.insetRect;
+        if (inset)
+          avoid.push({
+            left: c.left + inset.x * c.k,
+            top: c.top + inset.y * c.k,
+            width: inset.w * c.k,
+            height: inset.h * c.k,
+          });
         const p = perfChipPlace(c, MAP_RECT, avoid);
         chip.place(p.left, p.top);
         chip.show(true);
@@ -1708,7 +1719,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * 터치 화면: 판 중이고 관전 · 결과 · 판 정지 · 세로 화면 · 판 중 메뉴가 아닐 때만 입력을 받는다. 끄는 순간 손가락 · 발사 대기를 비운다.
+   * 터치 화면: 판 중이고 관전 · 결과 · 판 정지 · 세로 화면 · 판 중 메뉴가 아닐 때만 입력을 받는다('설정' 버튼은 결과 전이면 늘). 끄는 순간 손가락 · 발사 대기를 비운다.
    * 행동 칸은 이번 프레임 캔버스 HUD가 계산한 actionSlots 결과를 그대로 쓴다 (쿨타임 게이지 · 못 씀 표시)
    */
   private updateTouch(snap: Snapshot): void {
@@ -1727,6 +1738,8 @@ export class GameScene extends Phaser.Scene {
       controls.setActive(active);
       if (!active) this.touch?.reset();
     }
+    // 판 중 '설정' 버튼: 관전 · 판 정지 중에도 (결과 전 · 메뉴가 닫혀 있을 때, PC 메뉴 버튼과 같다)
+    controls.setMenuAvailable(this.app.result === null && !this.menuOpen);
     if (active) {
       this.touchView.slots = this.hud.lastSlots;
       controls.update(this.touchView);

@@ -261,10 +261,14 @@ export class App {
       replayTutorial: () => this.lobbyUi.tutorialReset(),
       openLayoutEditor: (done) => {
         const role = this.lobby?.players.find((p) => p.id === this.you)?.role ?? null;
-        openLayoutEditor({
+        return openLayoutEditor({
           host: uiRoot,
           role: role === 'monster' ? 'monster' : 'survivor',
-          onClose: () => done(),
+          onClose: () => {
+            done();
+            // 판 직전 터치 안내 그림이 바꾼 배치를 따르게 방 화면을 다시 그린다
+            this.lobbyUi.refreshTutorial();
+          },
         });
       },
     });

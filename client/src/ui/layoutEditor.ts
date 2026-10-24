@@ -190,6 +190,10 @@ class LayoutEditor {
   private readonly cancelBtn: HTMLButtonElement;
   private readonly selLabel: HTMLSpanElement;
   private readonly drafts: Record<Team, TeamLayout>;
+  /** 연 때 저장돼 있던 배치 (고치지 않은 역할은 저장할 때 이 값 그대로 — 이 화면 크기로 다시 계산하지 않는다) */
+  private readonly loaded: SavedLayouts;
+  /** 이 편집 화면에서 손댄 역할 (옮기기 · 크기 · 반전 · 기본값) */
+  private readonly touched = new Set<Team>();
   private team: Team;
   private selected: ControlId | null = null;
   private geo: Geo | null = null;
@@ -206,6 +210,7 @@ class LayoutEditor {
   constructor(private readonly opts: LayoutEditorOptions) {
     this.team = opts.role;
     const saved = loadControlLayouts();
+    this.loaded = saved;
     const copy = (t: TeamLayout | null): TeamLayout => ({
       mirror: t?.mirror === true,
       items: { ...(t?.items ?? {}) },
@@ -633,6 +638,7 @@ class LayoutEditor {
     const draft = this.drafts[g.team];
     const place: ControlPlace = placeOf(box, this.scaleOf(g, id), g.rules.range);
     draft.items = { ...draft.items, [id]: place };
+    this.touched.add(g.team);
     this.render();
   }
 
@@ -652,6 +658,7 @@ class LayoutEditor {
     if (!next) return;
     const draft = this.drafts[g.team];
     draft.items = { ...draft.items, [id]: placeOf(next, s1, g.rules.range) };
+    this.touched.add(g.team);
     this.render();
   }
 
@@ -728,19 +735,25 @@ class LayoutEditor {
   private toggleMirror(): void {
     const d = this.drafts[this.team];
     this.drafts[this.team] = { mirror: !d.mirror, items: flipItems(d.items) };
+    this.touched.add(this.team);
     this.clearWarn();
     this.render();
   }
 
   private resetTeam(): void {
     this.drafts[this.team] = { mirror: false, items: {} };
+    this.touched.add(this.team);
     this.selected = null;
     this.clearWarn();
     this.render();
   }
 
-  /** 저장할 역할 배치: 지금 화면에 보이는 자리 그대로 (밀린 조작은 밀린 자리) */
+  /**
+   * 저장할 역할 배치: 손댄 역할은 지금 화면에 보이는 자리 그대로(밀린 조작은 밀린 자리), 손대지 않은 역할은 연 때 저장값 그대로
+   * (다른 크기 화면에서 만든 배치가 이 화면에서 밀리거나 기본으로 돌아간 모양으로 바뀌지 않게)
+   */
   private settled(team: Team): TeamLayout | null {
+    if (!this.touched.has(team)) return this.loaded[team];
     const draft = this.drafts[team];
     if (isDefaultLayout(draft)) return null;
     const g = this.compute(team);

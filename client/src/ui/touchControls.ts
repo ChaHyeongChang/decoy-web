@@ -515,6 +515,11 @@ export class TouchControls {
   private layout: TouchLayout | null = null;
   private active = true;
   private live = true;
+  /**
+   * 판 중 '설정' 버튼만은 터치 화면이 꺼져도(관전 · 사망 · 탈출 · 판 정지) 누를 수 있다 — 판이 끝나기 전 · 메뉴가 닫혀 있을 때
+   * (판 장면이 setMenuAvailable로 정한다, 세로 화면은 제외). PC 메뉴 버튼과 같다
+   */
+  private menuOn = false;
   /** 판 안 첫 탭에서 전체 화면을 한 번 요청했다 */
   private fsTried = false;
   /** 첫 판 위치 표시 (M12): 반투명 도형 + 이름표, 입력을 막지 않는다 */
@@ -586,7 +591,7 @@ export class TouchControls {
     if (onMenu) {
       const menu = this.part('menu', 'menu', 'sliders', TOUCH_TEXT.menu, 'tc-btn tc-sys');
       menu.el.addEventListener('pointerdown', (e) => {
-        if (this.grab(e, 'tap', menu.el)) onMenu();
+        if (this.live ? this.grab(e, 'tap', menu.el) : this.menuTap(e)) onMenu();
       });
     }
     if (canOfferFullscreen()) {
@@ -1026,8 +1031,23 @@ export class TouchControls {
     this.apply();
   }
 
+  /** 판 중 '설정' 버튼을 터치 화면이 꺼져 있어도 보이고 누를 수 있게 (판 장면: 결과 전 · 메뉴가 닫혀 있을 때) */
+  setMenuAvailable(on: boolean): void {
+    if (on === this.menuOn) return;
+    this.menuOn = on;
+    this.apply();
+  }
+
+  /** 꺼진 터치 화면에서 '설정' 버튼 누르기 (손가락은 따로 세지 않는다 — 다른 조작이 없다) */
+  private menuTap(e: PointerEvent): boolean {
+    if (!this.menuOn || device.portrait) return false;
+    e.preventDefault();
+    return true;
+  }
+
   /** 켜짐 = 바깥에서 켬 + 세로 화면이 아님 */
   private apply(): void {
+    this.layer.classList.toggle('menu-on', this.menuOn && !device.portrait);
     const live = this.active && !device.portrait;
     if (live === this.live) return;
     this.live = live;

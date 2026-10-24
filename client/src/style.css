@@ -2065,6 +2065,10 @@ select {
 .touch-layer.off {
   visibility: hidden;
 }
+/* 판 중 '설정' 버튼은 터치 화면이 꺼져도(관전 · 사망 · 탈출 · 판 정지) 보인다 (touchControls.setMenuAvailable) */
+.touch-layer.off.menu-on [data-touch-target='menu'] {
+  visibility: visible;
+}
 .tc-probe {
   position: absolute;
   top: env(safe-area-inset-top, 0px);

@@ -386,8 +386,10 @@ test('PC 괴물 · 휴대폰 러너 · PC 가드 · 휴대폰 스카우트: 스�
     expect(countPressed(runnerFrames, bit), `러너 pressed ${bit}`).toBe(0);
     expect(countPressed(guardFrames, bit), `가드 pressed ${bit}`).toBe(0);
   }
-  // 탈출한 러너는 관전: 터치 화면이 입력을 받지 않는다
-  await expect.poll(() => touchTargets(runner.page), { intervals: [POLL] }).toEqual([]);
+  // 탈출한 러너는 관전: 터치 화면이 입력을 받지 않는다 (판 중 '설정' 버튼만 남는다 — PC 메뉴 버튼과 같다)
+  await expect
+    .poll(async () => (await touchTargets(runner.page)).map((t) => t.id), { intervals: [POLL] })
+    .toEqual(['menu']);
 
   // ④ 남은 휴대폰 스카우트: 최후의 30초 안에 사망 처리
   await waitPage(scout.page, () => (window.__DECOY__?.getLastSnapshot()?.world.grace ?? null) !== null);
