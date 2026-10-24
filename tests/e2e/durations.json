@@ -47,6 +47,7 @@
   "m9-screens.spec.ts": 3,
   "perf-budget.spec.ts": 60,
   "perf-budget.webgl.spec.ts": 80,
+  "play-settings.spec.ts": 50,
   "smoke.spec.ts": 1,
   "smooth-motion.spec.ts": 15
 }

@@ -104,6 +104,8 @@ export function watchConsole(page: Page, problems: string[]): void {
     const text = msg.text();
     if (text.includes('[.WebGL-') || text.includes('GL Driver Message') || text.includes('GroupMarkerNotSet'))
       return;
+    // 새 크롬(153~)이 GPU 없는 컨테이너에서 Phaser의 WebGL 지원 확인(소프트웨어 대체)에 내는 지원 중단 경고 (브라우저 메시지)
+    if (text.includes('Automatic fallback to software WebGL')) return;
     problems.push(`${type}: ${text}`);
   });
   page.on('pageerror', (err) => problems.push(`pageerror: ${err.message}`));
