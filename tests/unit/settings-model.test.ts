@@ -2,6 +2,11 @@
 // 브라우저 저장소 대신 메모리 저장소를 globalThis.localStorage로 넣는다 (storageKeys가 읽는 곳)
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { STORAGE_KEYS } from '../../client/src/storageKeys';
+import type * as SettingsModel from '../../client/src/settingsModel';
+import type * as Quality from '../../client/src/gfx/quality';
+import type * as FramePacing from '../../client/src/gfx/framePacing';
+import type * as CharStyle from '../../client/src/gfx/charStyle';
+import type * as Prefs from '../../client/src/prefs';
 
 /** 메모리 localStorage (broken이면 쓰기가 예외) */
 function memoryStorage(broken = false): Storage & { data: Map<string, string> } {
@@ -29,11 +34,11 @@ let store: ReturnType<typeof memoryStorage>;
 
 /** 새 접속처럼 모듈을 처음부터 불러온다 (모듈 안 상태 · 한 번 읽은 저장값을 비운다) */
 async function fresh(): Promise<{
-  model: typeof import('../../client/src/settingsModel');
-  quality: typeof import('../../client/src/gfx/quality');
-  pacing: typeof import('../../client/src/gfx/framePacing');
-  chars: typeof import('../../client/src/gfx/charStyle');
-  prefs: typeof import('../../client/src/prefs');
+  model: typeof SettingsModel;
+  quality: typeof Quality;
+  pacing: typeof FramePacing;
+  chars: typeof CharStyle;
+  prefs: typeof Prefs;
 }> {
   vi.resetModules();
   const model = await import('../../client/src/settingsModel');
