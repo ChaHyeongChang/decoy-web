@@ -2,10 +2,13 @@
 // "여기서 계속하기" (설정은 설정 화면 통합에서 settingsPanel.ts로 옮겼다). 모양은 로비와 같은 깎은 패널 · 버튼
 // (lifecycle.css, style.css 토큰), 문구는 storyText.ts(APP_TEXT · TOUCH_TEXT · UI_TEXT)에서만. 판 중 매 프레임 건드리지 않는다
 // (열고 닫을 때만 DOM을 바꾼다)
-import { teamOf, type Role } from '@decoy/shared';
+import { teamOf, type Role, type Team } from '@decoy/shared';
+import { isDefaultLayout, loadControlLayout, matchTuning } from '../controlLayout';
 import { APP_TEXT, HELP_TEXT, TOUCH_TEXT } from '../data/storyText';
+import { canOfferFullscreen } from '../device';
 import { currentCharStyle, type CharStyle } from '../gfx/charStyle';
 import type { LeaveKind } from '../lifecycle';
+import { effectiveTouchLayout, hudPreview } from './touchControls';
 import { frontFigureSvg, h, icon, roleVars, svgSpan } from './uiArt';
 import './lifecycle.css';
 
@@ -230,6 +233,79 @@ function controlsDiagram(team: 'monster' | 'survivor'): string {
   return `<svg viewBox="0 0 100 50" width="100%" height="100%" aria-hidden="true">${parts.join('')}</svg>${badges.join('')}`;
 }
 
+/** 사각형 (창 CSS px) */
+interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+const NO_INSET = { l: 0, r: 0, t: 0, b: 0 } as const;
+
+/**
+ * 바꾼 조작 배치의 자리 그림 (설정 화면 통합): 지금 창 크기(가로로 본 것)에서 판이 쓸 배치(effectiveTouchLayout — 조이스틱 크기 ·
+ * UI 크기 · 좌우 반전 · 옮긴 조작 · HUD 피하기)를 100 × 50 단위로 줄여 그린다. 번호는 기본 그림과 같은 뜻(조작 위쪽에 붙인다).
+ * 기본 배치면 null (손으로 다듬은 기본 그림을 쓴다)
+ */
+function customDiagram(team: Team): string | null {
+  if (isDefaultLayout(loadControlLayout(team))) return null;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const W = Math.max(vw, vh);
+  const H = Math.min(vw, vh);
+  if (W <= 0 || H <= 0) return null;
+  const L = effectiveTouchLayout(team, W, H, NO_INSET, canOfferFullscreen());
+  const map = hudPreview(team, W, H, NO_INSET, matchTuning(team)).map;
+  const sx = 98 / W;
+  const sy = 48 / H;
+  const sr = (sx + sy) / 2;
+  const n = (v: number): string => v.toFixed(1);
+  const rect = (cls: string, b: Rect, rx: number): string =>
+    `<rect class="${cls}" x="${n(1 + b.x * sx)}" y="${n(1 + b.y * sy)}" width="${n(b.w * sx)}" height="${n(b.h * sy)}" rx="${rx}"/>`;
+  const circle = (cls: string, b: Rect): string =>
+    `<circle class="${cls}" cx="${n(1 + (b.x + b.w / 2) * sx)}" cy="${n(1 + (b.y + b.h / 2) * sy)}" r="${n((b.w / 2) * sr)}"/>`;
+  const ring: Rect = { x: L.moveHome.x - L.moveR, y: L.moveHome.y - L.moveR, w: L.moveR * 2, h: L.moveR * 2 };
+  const parts: string[] = [
+    '<rect class="tt-frame" x="1" y="1" width="98" height="48" rx="6"/>',
+    rect('tt-map', map, 1.5),
+    rect('tt-zone', L.zone, 3),
+    circle('tt-ctl', ring),
+  ];
+  const B = L.buttons;
+  if (B.scoreboard) parts.push(rect('tt-ctl', B.scoreboard, 1.2));
+  // 번호 배지: 조작 사각형 위 가운데 (배지 18px가 그림 밖으로 나가지 않게 기본 그림의 번호 범위 안으로 자른다)
+  const spots: Spot[] = [];
+  const spot = (num: number, b: Rect | null | undefined): void => {
+    if (!b) return;
+    const x = clampNum((b.x + b.w / 2) * sx + 1, 9, 91);
+    const y = clampNum(b.y * sy + 1 - 3.5, 9, 41.5);
+    spots.push({ n: num, x, y });
+  };
+  spot(1, ring);
+  if (team === 'monster') {
+    if (L.aim) parts.push(circle('tt-ctl tt-main', L.aim));
+    for (const id of ['dash', 'mode', 'roar'] as const) {
+      const b = B[id];
+      if (b) parts.push(circle('tt-ctl', b));
+    }
+    spot(2, L.aim);
+    spot(3, B.dash);
+    spot(4, B.mode ?? B.roar);
+  } else {
+    if (B.ability) parts.push(circle('tt-ctl tt-main', B.ability));
+    if (B.rescue) parts.push(circle('tt-ctl', B.rescue));
+    spot(2, B.ability);
+    spot(3, B.scoreboard);
+  }
+  const badges = spots.map(
+    (s) => `<span class="tt-badge" style="left:${n(s.x)}%;top:${n(s.y * 2)}%">${s.n}</span>`,
+  );
+  return `<svg viewBox="0 0 100 50" width="100%" height="100%" aria-hidden="true">${parts.join('')}</svg>${badges.join('')}`;
+}
+
+const clampNum = (v: number, a: number, b: number): number => Math.max(a, Math.min(b, v));
+
 /**
  * 판 직전 터치 안내 카드 (MOBILE_PLAN M12 5번): 제목 + 역할별 본문(번호 = 그림의 번호) + "알겠어요".
  * 로비 방 화면은 준비 뒤 명령 줄 바로 위에 띄운다(시작 · 준비 버튼을 가리지 않는다). 빠른 매칭 대기 · 연습 시작 전(M13)도
@@ -242,6 +318,8 @@ export class TouchTutorialCard {
   private role: Role | null = null;
   /** 그린 캐릭터 스타일 (바뀌면 다시 그린다) */
   private style: CharStyle | null = null;
+  /** 그린 조작 배치 (저장값 문자열, 바뀌면 다시 그린다) */
+  private layoutKey = '';
   /** 새 캐릭터 스타일의 내 역할 정면 그림 (기존 스타일이면 null) */
   private figure: HTMLSpanElement | null = null;
 
@@ -278,8 +356,14 @@ export class TouchTutorialCard {
   render(role: Role): HTMLElement {
     const team = teamOf(role);
     const style = currentCharStyle();
-    if (this.role === role && this.style === style) return this.el;
-    const sameBody = this.team === team && this.style === style && this.el.firstChild !== null;
+    const layoutKey = JSON.stringify(loadControlLayout(team));
+    if (this.role === role && this.style === style && this.layoutKey === layoutKey) return this.el;
+    const sameBody =
+      this.team === team &&
+      this.style === style &&
+      this.layoutKey === layoutKey &&
+      this.el.firstChild !== null;
+    this.layoutKey = layoutKey;
     this.role = role;
     this.style = style;
     this.el.setAttribute('style', roleVars(role));
@@ -294,7 +378,15 @@ export class TouchTutorialCard {
     this.team = team;
     this.figure = style === 'new' ? ttFigure(role) : null;
     const title = nextId('tt-title');
-    const lines = team === 'monster' ? TOUCH_TEXT.tutorialMonster : TOUCH_TEXT.tutorialSurvivor;
+    // 조작 배치를 바꿨으면 그림은 바꾼 배치, 본문은 자리 말이 없는 쪽
+    const custom = customDiagram(team);
+    const lines = custom
+      ? team === 'monster'
+        ? TOUCH_TEXT.tutorialMonsterCustom
+        : TOUCH_TEXT.tutorialSurvivorCustom
+      : team === 'monster'
+        ? TOUCH_TEXT.tutorialMonster
+        : TOUCH_TEXT.tutorialSurvivor;
     const ok = h(
       'button',
       { class: 'btn btn-primary', type: 'button', 'data-testid': 'touch-tutorial-ok' },
@@ -307,7 +399,21 @@ export class TouchTutorialCard {
     this.el.setAttribute('aria-labelledby', title);
     const heading = h('h2', { id: title, class: 'tt-title' }, TOUCH_TEXT.tutorialTitle);
     this.el.replaceChildren(
-      h('div', { class: 'tt-side' }, svgSpan('tt-art', controlsDiagram(team)), ok),
+      h(
+        'div',
+        { class: 'tt-side' },
+        svgSpan('tt-art', custom ?? controlsDiagram(team)),
+        ...(custom
+          ? [
+              h(
+                'p',
+                { class: 'tt-custom', 'data-testid': 'touch-tutorial-custom' },
+                TOUCH_TEXT.tutorialCustomNote,
+              ),
+            ]
+          : []),
+        ok,
+      ),
       h(
         'div',
         { class: 'tt-main-col' },

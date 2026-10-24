@@ -51,6 +51,9 @@ import { onCharStyleChange } from '../gfx/charStyle';
 import { h, icon } from './uiArt';
 import './settings.css';
 
+/** 연 손가락의 click을 버리는 시간 (ms, 연 뒤 설정 화면 안에서 누른 적 없는 포인터 click만 — ghostUntil) */
+const GHOST_CLICK_MS = 800;
+
 /** 설정 화면이 바깥에서 받는 것 */
 export interface SettingsEnv {
   /** 터치 모드 (조작 탭 내용 · UI 크기 안내가 다르다) */
@@ -117,6 +120,14 @@ export class SettingsPanel {
   private prevFocus: HTMLElement | null = null;
   /** '모두 기본값으로'를 한 번 눌렀다 (두 번째에 되돌린다) */
   private resetArmedUntil = 0;
+  /**
+   * 연 손가락의 click 버리기: 터치 판 중 '설정' 버튼은 손가락을 댈 때(pointerdown) 여는데, 손을 떼면 브라우저가 만드는 click이 그
+   * 자리에 새로 뜬 단추(오른쪽 위 닫기)에 떨어져 바로 닫혔다. 연 뒤 설정 화면 안에서 누른 적이 없는(pointerdown이 연 앞) 포인터
+   * click은 이때(performance.now)까지 버린다. 키보드 click(detail 0) · 연 뒤에 누른 click은 그대로
+   */
+  private ghostUntil = 0;
+  /** 연 뒤 설정 화면 안에서 포인터를 누른 적이 있다 */
+  private downSinceOpen = false;
   /** 편집기가 열려 있는 동안 (설정 화면은 숨긴다) */
   private editing = false;
 
@@ -193,6 +204,17 @@ export class SettingsPanel {
       if (e.target === this.root) this.close();
     });
     this.card.addEventListener('keydown', (e) => this.onKey(e));
+    this.root.addEventListener('pointerdown', () => (this.downSinceOpen = true), true);
+    this.root.addEventListener(
+      'click',
+      (e) => {
+        if (e.detail === 0 || this.downSinceOpen || performance.now() >= this.ghostUntil) return;
+        this.ghostUntil = 0;
+        e.preventDefault();
+        e.stopPropagation();
+      },
+      true,
+    );
 
     for (const t of ['graphics', 'screen', 'sound', 'controls'] as const) {
       const panelId = nextId(`settings-page-${t}`);
@@ -271,6 +293,8 @@ export class SettingsPanel {
       const active = document.activeElement;
       this.prevFocus = active instanceof HTMLElement ? active : null;
       sfx.ui('open');
+      this.ghostUntil = performance.now() + GHOST_CLICK_MS;
+      this.downSinceOpen = false;
     }
     this.ctx = ctx;
     this.card.classList.toggle('in-match', ctx === 'match');

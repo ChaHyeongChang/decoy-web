@@ -1,6 +1,6 @@
 // 판 중 설정 효과 (설정 화면 통합, Canvas 렌더러 · 봇 방 탭 하나):
-//  - PC 판 중 메뉴 버튼(위 띠 왼쪽) · Esc가 판 중 메뉴를 열고 닫고, 열린 동안 입력이 멈춘다(누르던 키를 떼고 판은 계속) — 진짜 설정 화면은
-//    진입점(main.ts)이 채우므로 디버그 fakeMatchMenu로 연결점을 가짜로 바꿔 본다. 첫 판 조작 안내에 화면 밖 화살표 · 지도 줄
+//  - PC 판 중 메뉴 버튼(위 띠 왼쪽) · Esc가 판 중 메뉴를 열고 닫고, 열린 동안 입력이 멈춘다(누르던 키를 떼고 판은 계속) — 연 · 닫은
+//    횟수를 세려고 디버그 fakeMatchMenu로 연결점을 가짜로 바꿔 본다(진짜 설정 화면과의 연결은 settings-match.spec.ts). 첫 판 조작 안내에 화면 밖 화살표 · 지도 줄
 //  - 지도 크게 보기: PC 클릭 · 터치 탭으로 열고 어디든 누르면 닫힘, 크게 본 지도의 엔티티 ⊆ 메인 화면(작은 지도와 같다), 괴물 화면은
 //    흰 공통 실루엣만, 지도를 눌러도 공격이 나가지 않음, 바닥은 작은 지도와 같은 때에만 다시 그림, 열 때 긴 작업(50ms 넘게) 없음
 //  - FPS · 핑 칩: 설정을 켜고 끄면 판 중에도 바로, 맵 왼쪽 위 · 누를 수 없음 · ?debug=1 칩과 겹치지 않음, 화면 밖 화살표가 피함
@@ -123,10 +123,11 @@ test('PC 판 중 메뉴: 위 띠 왼쪽 버튼 · Esc로 열고 닫고, 여는 �
     }
   } else console.log('[play-settings] 조작 안내가 이미 닫혔다 (느린 시작) — 안내 줄 검사는 건너뜀');
 
-  // 연결점이 없으면(설정 화면 전) 버튼을 보이지 않는다
-  expect((await prefs(page)).menuButton?.visible).toBe(false);
-  await page.evaluate(() => window.__DECOY__!.fakeMatchMenu(true));
+  // 진입점(main.ts)이 진짜 설정 화면을 연결했으므로 판 처음부터 버튼이 보인다. 여기서는 연 · 닫은 횟수를 세는 가짜로 바꿔 본다
+  // (진짜 설정 화면과의 연결은 settings-match.spec.ts)
   await expect.poll(async () => (await prefs(page)).menuButton?.visible).toBe(true);
+  await page.evaluate(() => window.__DECOY__!.fakeMatchMenu(true));
+  await expect.poll(async () => (await prefs(page)).menu.fake).toBe(true);
   const btn = (await prefs(page)).menuButton!;
   const canvas = await page.evaluate(() => {
     const r = document.querySelector('canvas')!.getBoundingClientRect();
@@ -198,9 +199,10 @@ test('PC 판 중 메뉴: 위 띠 왼쪽 버튼 · Esc로 열고 닫고, 여는 �
   const p3 = await prefs(page);
   expect([p3.menu.open, p3.menu.opens, p3.menu.closes]).toEqual([false, 2, 2]);
 
-  // 연결점을 되돌리면 버튼이 사라진다
+  // 가짜를 되돌리면 진짜 연결점으로 (버튼은 그대로)
   await page.evaluate(() => window.__DECOY__!.fakeMatchMenu(false));
-  await expect.poll(async () => (await prefs(page)).menuButton?.visible).toBe(false);
+  await expect.poll(async () => (await prefs(page)).menu.fake).toBe(false);
+  expect((await prefs(page)).menuButton?.visible).toBe(true);
   expect(s.problems).toEqual([]);
   await s.context.close();
 });
