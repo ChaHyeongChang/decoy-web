@@ -101,7 +101,8 @@ export interface FogLayer {
   commit(): void;
   /**
    * 내 빛 따라가기 (프레임마다, 안개 주기 뒤): 이번 주기에 칠한 내 시야를 (dx, dy) 타일만큼 옮겨 그린다 (fogMath followShift).
-   * Canvas 합성은 아무것도 하지 않는다(빛 · 틴트를 한 장에 구웠다 — 테두리 · 먼지는 worldRenderer가 옮긴다)
+   * Canvas 합성은 아무것도 하지 않는다(빛 · 틴트를 한 장에 구웠다 — selfFollow가 거짓이라 worldRenderer도 테두리 · 외곽선 · 먼지를
+   * 옮기지 않는다: 빛 경계와 같이 안개 주기 자리)
    */
   follow(dx: number, dy: number): void;
   destroy(): void;

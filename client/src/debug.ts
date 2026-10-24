@@ -15,7 +15,7 @@ import {
   type FrameWindow,
 } from './gfx/frameStats';
 import { PACING_WATCH } from './gfx/quality';
-import { freezeGfxClock, gfxState, probeSlot, setFpsOverride } from './gfx/state';
+import { freezeGfxClock, gfxState, probeSlot, setFogFollowDisabled, setFpsOverride } from './gfx/state';
 import { matchMenu } from './matchMenu';
 import { setPref } from './prefs';
 import type { GameScene } from './scenes/GameScene';
@@ -132,6 +132,7 @@ export function installDebug(app: App, overlay: boolean): void {
     injectFps: (fps) => setFpsOverride(fps),
     getFrameStats: () => frameStatsInfo(),
     getAnimState: () => gameScene(app)?.animDebug ?? null,
+    setFogFollowDisabled: (off) => setFogFollowDisabled(off),
     getCamera: () => gameScene(app)?.cameraDebug ?? null,
     getSpectateCards: () => gameScene(app)?.spectateCards ?? [],
     setCameraShake: (scale) => gameScene(app)?.setShakeScale(scale),

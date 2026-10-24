@@ -71,7 +71,7 @@ import {
 import { CONE, DANGER, NEON, ROLE, WARN } from '../art/palette';
 import { effectivePreset, type QualityPreset, type RendererKind } from '../gfx/presets';
 import { currentCharStyle } from '../gfx/charStyle';
-import { gfxNow, gfxState, onGfxChange } from '../gfx/state';
+import { fogFollowDisabled, gfxNow, gfxState, onGfxChange } from '../gfx/state';
 import { MAP_PX_H, MAP_PX_W, MAP_X, MAP_Y, WORLD_SCALE, worldLine } from '../ui/layout';
 import {
   MonsterRig,
@@ -99,10 +99,13 @@ import type { ViewRect } from './camera';
 import {
   ConeRedTrack,
   FOLLOW_MAX,
+  MONSTER_FOG_MS,
   PhaseClock,
   PolyCache,
+  SURVIVOR_FOG_MS,
   ambientRgb,
   followShift,
+  monsterFollowMax,
   opponentFxAllowed,
   rgbCss,
   unionOutline,
@@ -188,25 +191,21 @@ export interface WorldAnimDebug {
   fogAt: number | null;
   /** 안개 주기에 쓴 내 눈 자리 (타일, r3. 이번 주기에 내 눈이 없었으면 null) */
   fogEye: { x: number; y: number } | null;
-  /** 이번 프레임 내 빛 따라가기 Δ (타일, r3) — 실제로 그린 내 빛 중심 = fogEye + fogShift (fogFollow 'gpu'일 때) */
+  /** 이번 프레임에 실제로 옮긴 내 빛 따라가기 Δ (타일, r3, 옮기지 않으면 0) — 그린 내 빛 · 테두리 중심 = fogEye + fogShift */
   fogShift: { x: number; y: number };
-  /** Δ를 무엇에 쓰는가: 'gpu' 빛 · 틴트 · 테두리 · 먼지, 'rims' 테두리 · 외곽선 · 먼지만(Canvas 합성: 빛 · 틴트는 구웠다), 'off' 내 눈 없음 */
-  fogFollow: 'gpu' | 'rims' | 'off';
+  /**
+   * 'gpu' 빛 · 틴트 · 테두리 · 외곽선 · 먼지를 Δ만큼 옮긴다, 'fixed' 옮기지 않는다(Canvas 합성 · 셰이더 정밀도 부족 · 디버그로 끔 —
+   * 모두 안개 주기 자리), 'off' 이번 주기에 내 눈 없음
+   */
+  fogFollow: 'gpu' | 'fixed' | 'off';
   coneRed: number;
   dashGhosts: number;
   ghosts: { at: number; alpha: number }[];
   particles: number;
 }
 
-/**
- * 시야 원 · 안개 갱신 주기 (ms). 생존자 시야는 0.1초 이하, 괴물 부채꼴은 판정과 맞게 자주(1/30초).
- * 정해진 시각에 위상을 고정해 갱신한다(fogMath PhaseClock): 60fps에서는 예전처럼 3 · 2프레임마다, 120fps는 6 · 4프레임마다.
- * 괴물 주기는 예전 '33ms 넘게 지나면'이 60fps에서 실제로 두 프레임(33.3ms)마다였던 것을 그대로 1/30초로 적는다
- */
 /** 판 중 품질 · 해상도가 바뀌어 맵 그림을 다시 구울 때 한 프레임에 쓰는 시간 (ms, 로비 미리 굽기 main.ts PREBAKE_STEP_MS와 같다) */
 const FOG_REBAKE_STEP_MS = 8;
-const SURVIVOR_FOG_MS = 50;
-const MONSTER_FOG_MS = 1000 / 30;
 
 /** 포효 충격파 (괴물 화면, 범위 표시라 이벤트 효과 0.4초 한도 밖) */
 export const ROAR_WAVE_MS = 600;
@@ -329,8 +328,8 @@ export class WorldRenderer {
   private selfRimsOf: { poly: readonly Vec2[]; role: RoleId | null }[] = [];
   private readonly rims: Phaser.GameObjects.Graphics;
   /**
-   * 내 눈 림 (생존자): 안개 주기에 월드 좌표로 그리고 프레임마다 Δ만큼 옮긴다(내 빛 따라가기). rims 바로 앞(예전 한 Graphics 안에서
-   * 내 눈을 먼저 그은 순서) · 같은 색 · 같은 두께
+   * 내 눈 림 (생존자, GPU 경로만): 안개 주기에 월드 좌표로 그리고 프레임마다 Δ만큼 옮긴다(내 빛 따라가기). rims 바로 앞(예전 한
+   * Graphics 안에서 내 눈을 먼저 그은 순서) · 같은 색 · 같은 두께. 따라가지 않는 경로(Canvas 합성)는 비워 숨기고 rims에 모두 긋는다
    */
   private readonly selfRims: Phaser.GameObjects.Graphics;
   /**
@@ -732,6 +731,8 @@ export class WorldRenderer {
     gfxState.ambient = this.useFog ? FOG.ambient : 1;
     gfxState.compositeScale = compositeScale;
     gfxState.features.fogShader = fog.shader;
+    // 빛 지도 셰이더로 내 빛을 따라가는가 (품질 중간도 사용자 셰이더 파이프라인을 쓴다: fogShader는 높음 경계 셰이더만)
+    gfxState.features.fogFollow = fog.selfFollow;
     return fog;
   }
 
@@ -901,7 +902,7 @@ export class WorldRenderer {
       fogAt: this.fogClock.last,
       fogEye: on ? { x: r3(this.fogEyeAt.x), y: r3(this.fogEyeAt.y) } : null,
       fogShift: { x: r3(this.shift.x), y: r3(this.shift.y) },
-      fogFollow: !on ? 'off' : this.fog.selfFollow ? 'gpu' : 'rims',
+      fogFollow: !on ? 'off' : this.followOn() ? 'gpu' : 'fixed',
       coneRed: this.coneRed,
       dashGhosts: this.fx.dashGhosts,
       ghosts: this.lastGhosts.map(({ g, alpha }) => ({ at: g.at, alpha })),
@@ -967,12 +968,23 @@ export class WorldRenderer {
   }
 
   /**
+   * 내 빛을 따라가는가: GPU 경로(셰이더가 빛 지도의 내 빛만 옮긴다)만. Canvas 합성은 바닥 × 빛을 한 장에 구워 빛을 옮기지 못하므로
+   * 테두리 · 외곽선 · 먼지도 옮기지 않는다 — 빛 경계와 같은 주기 · 같은 다각형으로 계단을 밟아 둘이 벌어지지 않게(예전 그림)
+   */
+  private followOn(): boolean {
+    return this.fog.selfFollow && !fogFollowDisabled();
+  }
+
+  /**
    * 내 빛 따라가기 (프레임마다, 안개 주기 뒤): Δ = 지금 내 자리 − 안개 주기 내 눈 자리(fogMath followShift — 내 눈이 없었거나 역할 ·
-   * 상태가 바뀌었거나 FOLLOW_MAX를 넘으면 0). 안개 레이어(GPU 빛 · 틴트), 내 림, 괴물 화면 자기 시야 외곽선, 먼지 잘라내기에 건다
+   * 상태가 바뀌었거나 한도를 넘으면 0: 생존자 FOLLOW_MAX = 내 덮임 여유, 괴물 monsterFollowMax = 돌진 한 주기 거리 × 여유).
+   * 안개 레이어(GPU 빛 · 틴트), 내 림, 괴물 화면 자기 시야 외곽선, 먼지 잘라내기에 건다. 따라가지 않는 경로(followOn)는 0
    */
   private applyFollow(v: FrameView, isMonster: boolean): void {
     const same = v.role === this.fogRole && (v.snap.you.surv?.status ?? null) === this.fogStatus;
-    const d = followShift(v.me, this.fogEyeOn ? this.fogEyeAt : null, same, this.shift, FOLLOW_MAX);
+    const max = isMonster ? monsterFollowMax(v.balance) : FOLLOW_MAX;
+    const eye = this.fogEyeOn && this.followOn() ? this.fogEyeAt : null;
+    const d = followShift(v.me, eye, same, this.shift, max);
     this.fog.follow(d.x, d.y);
     const px = d.x * TILE_PX;
     const py = d.y * TILE_PX;
@@ -1486,8 +1498,9 @@ export class WorldRenderer {
    * Canvas는 이어 그으면 마이터 이음이 생겨 화소가 달라지므로 예전처럼 변마다 (vision.ts traceRim)
    */
   private drawRims(): void {
-    // 내 눈 림은 따로(selfRims: 프레임마다 Δ만큼 옮긴다), 팀원 림은 rims. 예전 한 Graphics의 순서(내 눈 먼저)와 같게 selfRims가 앞이다
-    const n = this.selfEyeN;
+    // 내 눈 림은 따로(selfRims: 프레임마다 Δ만큼 옮긴다), 팀원 림은 rims. 예전 한 Graphics의 순서(내 눈 먼저)와 같게 selfRims가 앞이다.
+    // 따라가지 않는 경로(Canvas 합성)는 예전처럼 한 Graphics에 모두 긋는다 (selfRims는 비워 숨긴다 — Canvas 렌더러 명령이 늘지 않게)
+    const n = this.fog.selfFollow ? this.selfEyeN : 0;
     this.rimsOf = this.rimsInto(this.rims, this.rimsOf, n, this.eyes.length);
     this.selfRimsOf = this.rimsInto(this.selfRims, this.selfRimsOf, 0, n);
     // 내 림이 없으면(괴물 · 관전 · 사망) 그리지 않는다: 빈 Graphics도 Canvas 렌더러에서 상태 · 경로 명령을 낸다

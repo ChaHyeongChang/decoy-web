@@ -231,12 +231,16 @@ export interface AnimDebug {
   /** 안개 주기에 쓴 내 눈 자리 (타일, 0.001 반올림. 그 주기에 내 눈이 없었으면 null — 사망 · 탈출 · 관전) */
   fogEye: { x: number; y: number } | null;
   /**
-   * 이번 프레임 내 빛 따라가기 Δ (타일, 0.001 반올림): 지금 내 예측 자리 − fogEye (내 눈이 없거나 역할 · 상태가 바뀌었거나 0.5타일을
-   * 넘으면 0). fogFollow가 'gpu'면 실제로 그린 내 빛 · 틴트 중심 = fogEye + fogShift, 'rims'면 테두리 · 외곽선 · 먼지만 옮긴다
+   * 이번 프레임에 실제로 옮긴 내 빛 따라가기 Δ (타일, 0.001 반올림): 지금 내 예측 자리 − fogEye (내 눈이 없거나 역할 · 상태가
+   * 바뀌었거나 한도를 넘거나 따라가지 않는 경로면 0). 그린 내 빛 · 틴트 · 테두리 중심 = fogEye + fogShift (셰이더에 넘긴 값 — 화소는
+   * fog-follow.webgl 시험이 잰다)
    */
   fogShift: { x: number; y: number };
-  /** Δ를 무엇에 쓰는가: 'gpu'(빛 · 틴트 · 테두리 · 먼지) · 'rims'(Canvas 합성: 테두리 · 외곽선 · 먼지만) · 'off'(내 눈 없음) */
-  fogFollow: 'gpu' | 'rims' | 'off';
+  /**
+   * 'gpu'(빛 지도 셰이더로 빛 · 틴트 · 테두리 · 외곽선 · 먼지를 옮김) · 'fixed'(옮기지 않음: Canvas 합성 · 셰이더 정밀도 부족 ·
+   * 디버그로 끔) · 'off'(이번 주기에 내 눈 없음)
+   */
+  fogFollow: 'gpu' | 'fixed' | 'off';
   /** 생존자 화면 괴물 부채꼴 빨강 정도 0~1 */
   coneRed: number;
   /** 돌진 잔상 수 */
@@ -348,6 +352,8 @@ export interface DecoyDebug {
   getFrameStats(): FrameStatsInfo | null;
   /** 프레임 독립성 시험용 연출 상태 (판 장면이 없으면 null) */
   getAnimState(): AnimDebug | null;
+  /** 내 빛 따라가기를 끈다(true) · 되돌린다(false) — 측정 · 시험에서 안개 주기 자리에 고정된 예전 그림과 견준다 */
+  setFogFollowDisabled(off: boolean): void;
   /** 카메라 상태 (판 장면이 없으면 null) */
   getCamera(): CameraDebug | null;
   /** 화면 흔들림 세기 배율 (0 = 끔, 시험의 픽셀 탐침용 — '흔들림 줄이기'와 같은 값) */
