@@ -281,6 +281,8 @@ export const TOUCH_TEXT = {
   move: '이동',
   rescue: '구조',
   fullscreen: '전체 화면',
+  /** 판 중 설정 열기 시스템 버튼 (설정 화면 통합) */
+  menu: '설정',
   rotateTitle: '가로로 돌려 주세요',
   rotateBody: 'DECOY는 가로 화면에서 합니다. 세로로 두는 동안에는 조작할 수 없고, 판은 계속 흘러가요.',
   // ── 첫 실행 터치 안내 (M12): 판 직전 본문 · 판 중 처음 10초 위치 표시 ──
@@ -296,6 +298,20 @@ export const TOUCH_TEXT = {
     '돌진 버튼은 끌어서 방향을 정하고, 짧게 탭하면 지금 방향으로',
     '포효 · 시야 버튼은 탭 · 오른쪽 위 점수판 버튼',
   ],
+  /** 조작 배치를 바꿨을 때 본문 (자리 말 없이 — 그림이 바꾼 배치를 보인다) */
+  tutorialSurvivorCustom: [
+    '이동 영역을 누르고 끌면 이동 — 누른 자리가 스틱 가운데',
+    '능력 버튼 · 감옥 문 앞에서는 구조 버튼을 누르고 있기',
+    '점수판 버튼으로 팀 상태 보기',
+  ],
+  tutorialMonsterCustom: [
+    '이동 영역을 누르고 끌면 이동 — 누른 자리가 스틱 가운데',
+    '조준 스틱을 끌어 조준하고, 놓으면 공격 · 가운데로 되돌리면 취소',
+    '돌진 버튼은 끌어서 방향을 정하고, 짧게 탭하면 지금 방향으로',
+    '포효 · 시야 버튼은 탭 · 점수판 버튼',
+  ],
+  /** 조작 배치를 바꿨을 때 그림 밑 한 줄 */
+  tutorialCustomNote: '그림은 내가 바꾼 조작 배치예요',
   tutorialOk: '알겠어요',
   /** 판 중 위치 표시의 이동 영역 이름 */
   hintMove: '여기를 누르고 끌어 이동',
@@ -321,4 +337,109 @@ export const APP_TEXT = {
   leaveBodyPractice: '이 연습 판은 여기서 끝나요. 봇과 연습은 첫 화면에서 언제든 다시 할 수 있어요.',
   leaveStay: '계속',
   leaveGo: '나가기',
+} as const;
+
+/**
+ * 설정 화면 (설정 화면 통합, docs/STORY_TEXT.md 7절): 첫 화면 · 방 화면 · 판 중 메뉴에서 여는 한 화면.
+ * 탭: 그래픽 · 화면 · 소리 · 조작 (판 중에는 조작 탭이 없다). 그래픽 탭의 선택지 이름은 UI_TEXT(품질 · 프레임 제한 · 캐릭터
+ * 스타일)를 그대로 쓴다
+ */
+export const SETTINGS_TEXT = {
+  title: '설정',
+  close: '닫기',
+  tabGraphics: '그래픽',
+  tabScreen: '화면',
+  tabSound: '소리',
+  tabControls: '조작',
+  /** 판 중에 열었을 때 맨 위 한 줄 (온라인 판이라 멈추지 않는다) */
+  inMatch: '판은 멈추지 않아요 — 설정을 여는 동안에도 판이 계속돼요',
+  /** 항목별 되돌리기 버튼 */
+  resetItem: '기본값',
+  resetAll: '모두 기본값으로',
+  /** 첫 번째 누름 (4초 안에 한 번 더 누르면 되돌린다) */
+  resetAllConfirm: '한 번 더 누르면 조작 배치까지 모두 되돌려요',
+  resetAllDone: '모두 기본값으로 되돌렸어요',
+  /** 주소 옵션(?quality · ?fpsLimit · ?chars)이 있으면 그 줄 아래 ({param} = 옵션 이름과 값) */
+  urlOverride: '주소 옵션({param})이 이번 접속에 우선해요 — 주소에서 빼면 여기서 고른 값을 써요',
+  on: '켜기',
+  off: '끄기',
+  percent: '{n}%',
+  // ── 그래픽 ──
+  quality: '품질',
+  qualityHint: '자동은 기기에 맞춰 고르고, 판 중에 느리면 한 단계 낮춰요',
+  charStyleHint: '그림만 바뀌어요 — 규칙 · 판정은 같아요',
+  // ── 화면 ──
+  uiSize: 'UI 크기',
+  uiSizeNormal: '보통',
+  uiSizeLarge: '크게',
+  uiSizeXlarge: '아주 크게',
+  uiSizeHint: '로비 · 메뉴 글자와 휴대폰 판 HUD 크기 (판 중에 바꾸면 다음 판부터)',
+  uiSizeHintPc: '로비 · 메뉴 글자 크기 (PC 판 HUD는 창 크기를 따라요)',
+  reduceShake: '화면 흔들림 줄이기',
+  reduceShakeHint: '맞거나 포효할 때 화면이 흔들리지 않아요',
+  reduceFlash: '번쩍임 줄이기',
+  reduceFlashHint: '피격 테두리를 옅게 하고, 화면이 옮겨 갈 때 어두워지지 않아요',
+  perfChip: 'FPS · 핑 표시',
+  perfChipHint: '판 화면 맵 왼쪽 위에 작게',
+  // ── 소리 ──
+  volMaster: '전체 음량',
+  volSfx: '효과음',
+  volUi: 'UI 소리',
+  muted: '음소거',
+  // ── 조작 ──
+  stickSize: '조이스틱 크기',
+  stickClear: '조이스틱 투명도',
+  stickHint: '다음 판부터 적용돼요',
+  layoutEdit: '조작 배치 편집',
+  layoutEditHint: '버튼 자리와 크기를 바꿔요 (생존자 · 괴물 따로, 로비에서만)',
+  controlsPc: '키보드 · 마우스 조작',
+  teamSurvivor: '생존자',
+  teamMonster: '괴물',
+} as const;
+
+/** 화면 밖 화살표 · 지도 설명 (설정 조작 탭 · PC 첫 판 안내 · 터치 판 직전 안내, 따라가는 카메라) */
+export const HELP_TEXT = {
+  edgeTitle: '화면 밖 화살표',
+  edgeSurvivor:
+    '화면 가장자리 화살표는 화면 밖에 있는 팀원 · 거점 · 탈출구 · 구조할 감옥 · 보이는 괴물 쪽을 가리켜요',
+  edgeMonster: '괴물 화면의 화살표는 점령 중인 거점과 포효로 드러난 자리만 가리켜요',
+  /** 첫 판 안내 한 줄 (키 칸 · 설명 칸, CONTROLS와 같은 형식) */
+  edgeLineSurvivor: '가장자리 화살표  화면 밖 팀원 · 거점 · 탈출구 쪽',
+  edgeLineMonster: '가장자리 화살표  점령 중인 거점 · 포효로 드러난 자리 쪽',
+  /** 지도(미니맵)를 누르면 크게 (판 중) */
+  minimapTap: '지도를 누르면 크게 보고, 다시 누르면 작게',
+  minimapClose: '눌러서 닫기',
+  /** 판 중 FPS · 핑 칩 ({fps} · {ping}) */
+  perfChip: '{fps} FPS · 핑 {ping}ms',
+  /** FPS · 핑 칩: 아직 모르는 값 (연습 판 · 시계를 맞추기 전의 핑) */
+  perfChipUnknown: '-',
+  /** 판 중 메뉴 버튼 (PC) 키캡 */
+  menuKey: 'Esc',
+} as const;
+
+/** 조작 배치 편집 (터치 기기, 로비에서만, docs/STORY_TEXT.md 7절) */
+export const EDITOR_TEXT = {
+  title: '조작 배치 편집',
+  survivor: '생존자',
+  monster: '괴물',
+  hint: '버튼을 끌어서 옮기고, 고른 버튼은 아래 크기로 키우거나 줄여요',
+  size: '크기',
+  smaller: '작게',
+  bigger: '크게',
+  mirror: '좌우 반전 (왼손잡이)',
+  reset: '기본값',
+  save: '저장',
+  cancel: '취소',
+  saved: '저장했어요',
+  blocked: '다른 버튼 · HUD와 겹치거나 화면 가장자리 밖이라 놓을 수 없어요',
+  hudPreview: '판 HUD 미리보기 (겹치지 않게 피해요)',
+  timer: '남은 시간',
+  gaugeA: '거점 A',
+  gaugeB: '거점 B',
+  cards: '팀 카드',
+  minimap: '지도',
+  move: '이동 스틱',
+  menu: '설정',
+  /** 생존자 능력 버튼 (편집 화면은 역할이 아니라 팀 배치라 능력 이름 대신) */
+  ability: '능력',
 } as const;

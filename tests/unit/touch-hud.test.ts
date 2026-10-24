@@ -349,16 +349,24 @@ describe('판 중 창이 낮아지면 엄지 버튼이 덮는 HUD 부품 hudCove
   });
 
   it('따라가는 카메라: 덮인 미니맵은 숨기지 않고 맵 창 안 빈 구석으로 옮길 자리가 있다 — 맵 안, 그 창의 엄지 · 시스템 버튼과 안 겹침 (검토 반영)', () => {
+    let checked = 0;
     for (const [w, h, nh, monster] of [
       [915, 412, 356, true],
       [915, 412, 330, true],
       [863, 360, 304, true],
       [802, 293, 250, false],
     ] as const) {
-      const l = L.layoutFor(w, h, true);
+      // 판과 같게: 판 중 설정 버튼까지 시스템 버튼 세 칸 (설정 화면 통합 — 전체 화면 버튼이 맵 오른쪽 위에 걸칠 수 있다)
+      const team = monster ? 'monster' : 'survivor';
+      const l = L.layoutFor(w, h, true, { ...L.DEFAULT_TUNING, sysSlots: L.SYS_SLOTS_MENU, team });
       L.applyLayout(l);
       const plan = monster ? L.HUD.touch!.monster : L.HUD.touch!.survivor;
-      const mm = plan.minimap!;
+      // 처음부터 맵 창 안 미니맵이면(옆 칸에 시스템 버튼 세 칸 아래 자리가 없다) 엄지 버튼이 옆 칸 미니맵을 덮을 일이 없다
+      if (!plan.minimap) {
+        expect(plan.minimapInset, `${w}×${h} ${team} 맵 안 미니맵`).not.toBeNull();
+        continue;
+      }
+      const mm = plan.minimap;
       const k0 = L.HUD.s;
       const frame = {
         w: mm.w + L.HUD.minimap.pad * k0 * 2,
@@ -374,7 +382,10 @@ describe('판 중 창이 낮아지면 엄지 버튼이 덮는 HUD 부품 hudCove
         scaleOverride: null,
       });
       const k = r.dispH / l.viewH;
-      const T = touchLayout(w, nh, { l: 0, r: 0, t: 0, b: 0 }, monster, true);
+      const T = touchLayout(w, nh, { l: 0, r: 0, t: 0, b: 0 }, monster, true, [], {
+        menu: true,
+        sysRows: plan.sysRows,
+      });
       // touchControls.onThumbs와 같은 식: 엄지 대상(이름표 · 이동 스틱 고리까지) 창 CSS px → 논리 px
       const thumbs = thumbAvoidBoxes(T).map((b) => ({
         x: (b.x - r.left) / k,
@@ -393,7 +404,10 @@ describe('판 중 창이 낮아지면 엄지 버튼이 덮는 HUD 부품 hudCove
       expect(f.x + f.w, label).toBeLessThanOrEqual(m.x + m.w + 1e-6);
       expect(f.y + f.h, label).toBeLessThanOrEqual(m.y + m.h + 1e-6);
       for (const b of thumbs) expect(overlaps(f, b), `${label} ↔ 버튼`).toBe(false);
+      checked += 1;
     }
+    console.log(`[touch-hud] 옮길 자리 확인 ${checked}곳`);
+    expect(checked).toBeGreaterThanOrEqual(2);
   });
 
   it('thumbAvoidBoxes: 조준 · 버튼은 아래 이름표까지(CAP_BELOW), 시스템 버튼은 그대로, 이동 스틱 쉬는 고리도 (최종 촬영: 화살표가 구조 이름표에 가려짐)', () => {
@@ -432,12 +446,19 @@ describe('판 중 창이 낮아지면 엄지 버튼이 덮는 HUD 부품 hudCove
     expect(block('.tc-sys > .tc-cap')).toMatch(/top: auto;[\s\S]*bottom: \d+px;/);
   });
 
-  it('minimapFallback: 맵 창 안 오른쪽 위, 엄지 · 시스템 버튼에 막히거나 맵보다 크면 null', () => {
+  it('minimapFallback: 맵 창 안 오른쪽 위, 시스템 버튼이 걸치면 그 아래 · 그 왼쪽, 모두 막히거나 맵보다 크면 null', () => {
     const map = { x: 100, y: 50, w: 900, h: 600 };
     const frame = { w: 200, h: 150 };
     expect(L.minimapFallback(map, frame, [], 10, 8)).toEqual({ x: 790, y: 60 });
+    // 오른쪽 위 구석에 걸친 시스템 버튼 → 그 아래 (오른쪽 끝 그대로)
     const tr = { x: 760, y: 40, w: 100, h: 100 };
-    expect(L.minimapFallback(map, frame, [tr], 10, 8)).toBeNull();
+    expect(L.minimapFallback(map, frame, [tr], 10, 8)).toEqual({ x: 790, y: 148 });
+    // 아래가 엄지 버튼으로 막히면 → 그 왼쪽 (맵 위 끝)
+    const thumb = { x: 760, y: 200, w: 200, h: 400 };
+    expect(L.minimapFallback(map, frame, [tr, thumb], 10, 8)).toEqual({ x: 552, y: 60 });
+    // 왼쪽도 막히면(또는 맵 왼쪽 절반까지 가야 하면) null
+    expect(L.minimapFallback(map, frame, [tr, thumb, { x: 500, y: 40, w: 60, h: 60 }], 10, 8)).toBeNull();
+    expect(L.minimapFallback(map, frame, [{ x: 600, y: 40, w: 400, h: 60 }, thumb], 10, 8)).toBeNull();
     // 간격(gap) 밖이면 상관없다
     expect(L.minimapFallback(map, frame, [{ x: 600, y: 300, w: 100, h: 100 }], 10, 8)).toEqual({
       x: 790,

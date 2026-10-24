@@ -96,6 +96,34 @@ export async function press(locator: Locator): Promise<void> {
   else await locator.click();
 }
 
+/** 설정 화면 탭 (설정 화면 통합) */
+export type SettingsTab = 'graphics' | 'screen' | 'sound' | 'controls';
+
+/**
+ * 설정 화면을 연다 (닫혀 있으면 지금 화면의 '설정' 단추로) 그리고 탭을 고른다. 판 중에는 메뉴 버튼이 연 뒤 탭만 고른다
+ * (판 중에는 조작 탭이 없다)
+ */
+export async function openSettings(page: Page, tab: SettingsTab = 'graphics'): Promise<void> {
+  const panel = page.getByTestId('settings-panel');
+  if (!(await panel.isVisible())) await press(page.getByTestId('settings-button').first());
+  await expect(panel).toBeVisible();
+  await press(page.getByTestId(`settings-tab-${tab}`));
+  await expect(page.getByTestId(`settings-tab-${tab}`)).toHaveAttribute('aria-selected', 'true');
+}
+
+/** 설정 화면을 닫는다 ('닫기') */
+export async function closeSettings(page: Page): Promise<void> {
+  await press(page.getByTestId('settings-close'));
+  await expect(page.getByTestId('settings-panel')).toBeHidden();
+}
+
+/** 설정 화면의 고르는 칸 하나를 누른다 (예: 'quality-low' · 'char-style-classic') */
+export async function chooseSetting(page: Page, tab: SettingsTab, seg: string): Promise<void> {
+  await openSettings(page, tab);
+  await press(page.getByTestId(seg));
+  await expect(page.getByTestId(seg)).toHaveAttribute('aria-pressed', 'true');
+}
+
 /** 앱 코드가 낸 콘솔 에러 · 경고를 모은다 (브라우저 내부 GL 메시지는 제외) */
 export function watchConsole(page: Page, problems: string[]): void {
   page.on('console', (msg) => {
@@ -104,6 +132,8 @@ export function watchConsole(page: Page, problems: string[]): void {
     const text = msg.text();
     if (text.includes('[.WebGL-') || text.includes('GL Driver Message') || text.includes('GroupMarkerNotSet'))
       return;
+    // 새 크롬(153~)이 GPU 없는 컨테이너에서 Phaser의 WebGL 지원 확인(소프트웨어 대체)에 내는 지원 중단 경고 (브라우저 메시지)
+    if (text.includes('Automatic fallback to software WebGL')) return;
     problems.push(`${type}: ${text}`);
   });
   page.on('pageerror', (err) => problems.push(`pageerror: ${err.message}`));

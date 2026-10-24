@@ -139,6 +139,8 @@ DECOY는 네 명이 함께 하는 온라인 비대칭 탈출 게임입니다. �
 | `decoy:quality` | 기기 저장소 | 그래픽 품질 선택 |
 | `decoy:frameLimit` | 기기 저장소 | 프레임 제한 선택 |
 | `decoy:charStyle` | 기기 저장소 | 캐릭터 스타일 선택 |
+| `decoy:settings` | 기기 저장소 | 화면 · 소리 · 조작 설정 |
+| `decoy:controlLayout` | 기기 저장소 | 터치 조작 배치 |
 | `decoy:name` | 기기 저장소 | 로비에 입력한 이름 |
 | `decoy:seat:`(방 코드) | 탭 저장소 | 방 자리 토큰 |
 | `decoy:seats` | 기기 저장소 | 최근 방 10개의 자리 토큰 |
@@ -165,7 +167,7 @@ DECOY는 네 명이 함께 하는 온라인 비대칭 탈출 게임입니다. �
 
 ## 3. 스토어 그림 (`artifacts/store/`)
 
-모두 실제 게임 화면이다(AI 컨셉 이미지를 쓰지 않는다). 만드는 법: `npm run shots:store`(그래픽 이미지 · 스크린샷), `npm run icons`(아이콘). 캐릭터 스타일은 '새 캐릭터'로 찍는다(설정에서 고를 수 있는 실제 화면, 게임 기본값은 '기존' — DECISIONS 8절).
+모두 실제 게임 화면이다(AI 컨셉 이미지를 쓰지 않는다). 만드는 법: `npm run shots:store`(그래픽 이미지 · 스크린샷), `npm run icons`(아이콘). 캐릭터 스타일은 '새 캐릭터'로 찍는다(게임 기본값과 같다 — DECISIONS 8절 · 11절).
 
 | 파일 | 크기 | Console 칸 | 장면 |
 |---|---|---|---|

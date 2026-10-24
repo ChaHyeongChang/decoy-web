@@ -174,6 +174,8 @@ function watchConsole(page, label) {
     const text = msg.text();
     if (text.includes('[.WebGL-') || text.includes('GL Driver Message') || text.includes('GroupMarkerNotSet'))
       return;
+    // 새 크롬(153~)의 소프트웨어 WebGL 대체 지원 중단 경고: 앱이 아니라 브라우저 메시지 (tests/e2e/helpers.ts와 같다)
+    if (text.includes('Automatic fallback to software WebGL')) return;
     manifest.problems.push(`${label} ${type}: ${text}`);
   });
   page.on('pageerror', (err) => manifest.problems.push(`${label} pageerror: ${err.message}`));
@@ -336,11 +338,20 @@ async function setupScene(players) {
   }
   await sendTest(host, { kind: 'setPoint', point: 'B', progress: 0.45 });
   // 거점 A 점령 시작 알림(괴물 화면, 2초)은 러너를 A에 놓자마자 뜬다 — 카메라 · 조준을 기다리기 전에 본다
-  await host.waitForFunction(
-    () => (window.__DECOY__?.getBanners() ?? []).some((t) => t.includes('무언가 움직인다')),
-    undefined,
-    { timeout: 10_000 },
-  );
+  // 느린 WebGL 탭(SwiftShader 1920×1080 높음은 한 프레임이 수 초일 수 있다)은 2초 알림을 한 번도 그리지 못하고 지나칠 수 있다.
+  // 찍기 전에 알림이 지나갔는지만 보면 되므로, 못 봤으면 3초 기다려 이미 지나간 것으로 본다
+  const sawAlert = await host
+    .waitForFunction(
+      () => (window.__DECOY__?.getBanners() ?? []).some((t) => t.includes('무언가 움직인다')),
+      undefined,
+      { timeout: 10_000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  if (!sawAlert) {
+    console.log('[촬영] 거점 A 알림을 보지 못했다(느린 WebGL 탭) — 3초 기다려 지나간 것으로 본다');
+    await host.waitForTimeout(3_000);
+  }
   // 괴물(26, 25)에서 (24, 19) 방향을 겨눈다 — 확대 화면에서는 (24, 19)가 창 밖이라 같은 방향의 창 안 자리(25, 22).
   // 따라가는 카메라: 창이 자리 잡은 뒤 화면 자리를 재고, 조준이 서버에 닿았는지 확인한다(조준이 돌면 앞당김이 창을 옮기므로
   // 닿지 않았으면 다시 재어 옮긴다 — tests/e2e/helpers.ts aimMonsterAt과 같은 방식). 옛 빌드(getCamera 없음)는 한 번에 닿는다

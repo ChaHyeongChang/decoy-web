@@ -20,6 +20,11 @@ import * as quality from '../../client/src/gfx/quality';
 import * as colors from '../../client/src/render/colors';
 import { ambientRgb } from '../../client/src/render/fogMath';
 import * as camera from '../../client/src/render/camera';
+import * as prefsFx from '../../client/src/render/prefsFx';
+import * as controlLayout from '../../client/src/controlLayout';
+import * as prefs from '../../client/src/prefs';
+import * as matchMenuButton from '../../client/src/ui/matchMenuButton';
+import * as perfChip from '../../client/src/ui/perfChip';
 import * as vision from '../../client/src/render/vision';
 import * as fonts from '../../client/src/ui/fonts';
 import * as hudArt from '../../client/src/ui/hudArt';
@@ -48,6 +53,11 @@ const MODULES: Readonly<Record<string, { file: string; mod: object }>> = {
   hudArt: { file: 'client/src/ui/hudArt.ts', mod: hudArt },
   layout: { file: 'client/src/ui/layout.ts', mod: layout },
   fonts: { file: 'client/src/ui/fonts.ts', mod: fonts },
+  prefs: { file: 'client/src/prefs.ts', mod: prefs },
+  prefsFx: { file: 'client/src/render/prefsFx.ts', mod: prefsFx },
+  perfChip: { file: 'client/src/ui/perfChip.ts', mod: perfChip },
+  matchMenuButton: { file: 'client/src/ui/matchMenuButton.ts', mod: matchMenuButton },
+  controlLayout: { file: 'client/src/controlLayout.ts', mod: controlLayout },
 };
 
 /** 0.1 고정 값 표에 반드시 있어야 하는 상수 (0장 ② · ③ · ⑥, 안개 하한) */

@@ -1,12 +1,15 @@
-// 앱 생명주기 화면 (M12, MOBILE_PLAN M12 5 · 6 · 8번): 판 직전 터치 안내 카드, 설정(진동 · 프레임 제한 · 캐릭터 스타일 ·
-// 터치 안내 다시 보기), 판 중 뒤로 가기 확인, 다른 탭 안내 + "여기서 계속하기". 모양은 로비와 같은 깎은 패널 · 버튼
+// 앱 생명주기 화면 (M12, MOBILE_PLAN M12 5 · 6 · 8번): 판 직전 터치 안내 카드, 판 중 뒤로 가기 확인, 다른 탭 안내 +
+// "여기서 계속하기" (설정은 설정 화면 통합에서 settingsPanel.ts로 옮겼다). 모양은 로비와 같은 깎은 패널 · 버튼
 // (lifecycle.css, style.css 토큰), 문구는 storyText.ts(APP_TEXT · TOUCH_TEXT · UI_TEXT)에서만. 판 중 매 프레임 건드리지 않는다
 // (열고 닫을 때만 DOM을 바꾼다)
-import { teamOf, type Role } from '@decoy/shared';
-import { APP_TEXT, TOUCH_TEXT, UI_TEXT } from '../data/storyText';
-import { CHAR_STYLES, currentCharStyle, setCharStyle, type CharStyle } from '../gfx/charStyle';
-import type { FrameLimit } from '../gfx/framePacing';
+import { teamOf, type Role, type Team } from '@decoy/shared';
+import { isDefaultLayout, loadControlLayout, matchTuning } from '../controlLayout';
+import { APP_TEXT, HELP_TEXT, TOUCH_TEXT } from '../data/storyText';
+import { canOfferFullscreen } from '../device';
+import { currentCharStyle, type CharStyle } from '../gfx/charStyle';
 import type { LeaveKind } from '../lifecycle';
+import { pref } from '../prefs';
+import { effectiveTouchLayout, hudPreview } from './touchControls';
 import { frontFigureSvg, h, icon, roleVars, svgSpan } from './uiArt';
 import './lifecycle.css';
 
@@ -112,8 +115,12 @@ export class LeaveDialog {
       h('div', { class: 'life-buttons' }, go, this.stayBtn),
     );
     // Esc(키보드 · 일부 기기의 뒤로 가기 키) = 계속
+    // 처리한 Esc는 여기서 멈춘다 (판 장면이 같은 Esc로 판 중 설정을 열지 않게)
     this.box.card.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') actions.stay();
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      actions.stay();
     });
   }
 
@@ -231,6 +238,79 @@ function controlsDiagram(team: 'monster' | 'survivor'): string {
   return `<svg viewBox="0 0 100 50" width="100%" height="100%" aria-hidden="true">${parts.join('')}</svg>${badges.join('')}`;
 }
 
+/** 사각형 (창 CSS px) */
+interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+const NO_INSET = { l: 0, r: 0, t: 0, b: 0 } as const;
+
+/**
+ * 바꾼 조작 배치의 자리 그림 (설정 화면 통합): 지금 창 크기(가로로 본 것)에서 판이 쓸 배치(effectiveTouchLayout — 조이스틱 크기 ·
+ * UI 크기 · 좌우 반전 · 옮긴 조작 · HUD 피하기)를 100 × 50 단위로 줄여 그린다. 번호는 기본 그림과 같은 뜻(조작 위쪽에 붙인다).
+ * 기본 배치면 null (손으로 다듬은 기본 그림을 쓴다)
+ */
+function customDiagram(team: Team): string | null {
+  if (isDefaultLayout(loadControlLayout(team))) return null;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const W = Math.max(vw, vh);
+  const H = Math.min(vw, vh);
+  if (W <= 0 || H <= 0) return null;
+  const L = effectiveTouchLayout(team, W, H, NO_INSET, canOfferFullscreen());
+  const map = hudPreview(team, W, H, NO_INSET, matchTuning(team)).map;
+  const sx = 98 / W;
+  const sy = 48 / H;
+  const sr = (sx + sy) / 2;
+  const n = (v: number): string => v.toFixed(1);
+  const rect = (cls: string, b: Rect, rx: number): string =>
+    `<rect class="${cls}" x="${n(1 + b.x * sx)}" y="${n(1 + b.y * sy)}" width="${n(b.w * sx)}" height="${n(b.h * sy)}" rx="${rx}"/>`;
+  const circle = (cls: string, b: Rect): string =>
+    `<circle class="${cls}" cx="${n(1 + (b.x + b.w / 2) * sx)}" cy="${n(1 + (b.y + b.h / 2) * sy)}" r="${n((b.w / 2) * sr)}"/>`;
+  const ring: Rect = { x: L.moveHome.x - L.moveR, y: L.moveHome.y - L.moveR, w: L.moveR * 2, h: L.moveR * 2 };
+  const parts: string[] = [
+    '<rect class="tt-frame" x="1" y="1" width="98" height="48" rx="6"/>',
+    rect('tt-map', map, 1.5),
+    rect('tt-zone', L.zone, 3),
+    circle('tt-ctl', ring),
+  ];
+  const B = L.buttons;
+  if (B.scoreboard) parts.push(rect('tt-ctl', B.scoreboard, 1.2));
+  // 번호 배지: 조작 사각형 위 가운데 (배지 18px가 그림 밖으로 나가지 않게 기본 그림의 번호 범위 안으로 자른다)
+  const spots: Spot[] = [];
+  const spot = (num: number, b: Rect | null | undefined): void => {
+    if (!b) return;
+    const x = clampNum((b.x + b.w / 2) * sx + 1, 9, 91);
+    const y = clampNum(b.y * sy + 1 - 3.5, 9, 41.5);
+    spots.push({ n: num, x, y });
+  };
+  spot(1, ring);
+  if (team === 'monster') {
+    if (L.aim) parts.push(circle('tt-ctl tt-main', L.aim));
+    for (const id of ['dash', 'mode', 'roar'] as const) {
+      const b = B[id];
+      if (b) parts.push(circle('tt-ctl', b));
+    }
+    spot(2, L.aim);
+    spot(3, B.dash);
+    spot(4, B.mode ?? B.roar);
+  } else {
+    if (B.ability) parts.push(circle('tt-ctl tt-main', B.ability));
+    if (B.rescue) parts.push(circle('tt-ctl', B.rescue));
+    spot(2, B.ability);
+    spot(3, B.scoreboard);
+  }
+  const badges = spots.map(
+    (s) => `<span class="tt-badge" style="left:${n(s.x)}%;top:${n(s.y * 2)}%">${s.n}</span>`,
+  );
+  return `<svg viewBox="0 0 100 50" width="100%" height="100%" aria-hidden="true">${parts.join('')}</svg>${badges.join('')}`;
+}
+
+const clampNum = (v: number, a: number, b: number): number => Math.max(a, Math.min(b, v));
+
 /**
  * 판 직전 터치 안내 카드 (MOBILE_PLAN M12 5번): 제목 + 역할별 본문(번호 = 그림의 번호) + "알겠어요".
  * 로비 방 화면은 준비 뒤 명령 줄 바로 위에 띄운다(시작 · 준비 버튼을 가리지 않는다). 빠른 매칭 대기 · 연습 시작 전(M13)도
@@ -243,6 +323,8 @@ export class TouchTutorialCard {
   private role: Role | null = null;
   /** 그린 캐릭터 스타일 (바뀌면 다시 그린다) */
   private style: CharStyle | null = null;
+  /** 그린 조작 배치 (저장값 문자열, 바뀌면 다시 그린다) */
+  private layoutKey = '';
   /** 새 캐릭터 스타일의 내 역할 정면 그림 (기존 스타일이면 null) */
   private figure: HTMLSpanElement | null = null;
 
@@ -266,6 +348,11 @@ export class TouchTutorialCard {
     parent.append(this.el);
   }
 
+  /** 보이는 중이면 지금 배치 · 설정으로 다시 그린다 (조작 배치 편집을 닫은 뒤) */
+  refresh(): void {
+    if (this.shown && this.role) this.render(this.role);
+  }
+
   hide(): void {
     this.shown = false;
     this.el.classList.remove('life-enter');
@@ -279,8 +366,18 @@ export class TouchTutorialCard {
   render(role: Role): HTMLElement {
     const team = teamOf(role);
     const style = currentCharStyle();
-    if (this.role === role && this.style === style) return this.el;
-    const sameBody = this.team === team && this.style === style && this.el.firstChild !== null;
+    // 바꾼 배치의 그림은 조이스틱 크기 · UI 크기 · 창 크기에도 달라진다 (기본 배치는 손으로 다듬은 그림 하나)
+    const saved = loadControlLayout(team);
+    const layoutKey = isDefaultLayout(saved)
+      ? ''
+      : JSON.stringify([saved, pref('stickSize'), pref('uiSize'), window.innerWidth, window.innerHeight]);
+    if (this.role === role && this.style === style && this.layoutKey === layoutKey) return this.el;
+    const sameBody =
+      this.team === team &&
+      this.style === style &&
+      this.layoutKey === layoutKey &&
+      this.el.firstChild !== null;
+    this.layoutKey = layoutKey;
     this.role = role;
     this.style = style;
     this.el.setAttribute('style', roleVars(role));
@@ -295,7 +392,15 @@ export class TouchTutorialCard {
     this.team = team;
     this.figure = style === 'new' ? ttFigure(role) : null;
     const title = nextId('tt-title');
-    const lines = team === 'monster' ? TOUCH_TEXT.tutorialMonster : TOUCH_TEXT.tutorialSurvivor;
+    // 조작 배치를 바꿨으면 그림은 바꾼 배치, 본문은 자리 말이 없는 쪽
+    const custom = customDiagram(team);
+    const lines = custom
+      ? team === 'monster'
+        ? TOUCH_TEXT.tutorialMonsterCustom
+        : TOUCH_TEXT.tutorialSurvivorCustom
+      : team === 'monster'
+        ? TOUCH_TEXT.tutorialMonster
+        : TOUCH_TEXT.tutorialSurvivor;
     const ok = h(
       'button',
       { class: 'btn btn-primary', type: 'button', 'data-testid': 'touch-tutorial-ok' },
@@ -308,13 +413,33 @@ export class TouchTutorialCard {
     this.el.setAttribute('aria-labelledby', title);
     const heading = h('h2', { id: title, class: 'tt-title' }, TOUCH_TEXT.tutorialTitle);
     this.el.replaceChildren(
-      h('div', { class: 'tt-side' }, svgSpan('tt-art', controlsDiagram(team)), ok),
+      h(
+        'div',
+        { class: 'tt-side' },
+        svgSpan('tt-art', custom ?? controlsDiagram(team)),
+        ...(custom
+          ? [
+              h(
+                'p',
+                { class: 'tt-custom', 'data-testid': 'touch-tutorial-custom' },
+                TOUCH_TEXT.tutorialCustomNote,
+              ),
+            ]
+          : []),
+        ok,
+      ),
       h(
         'div',
         { class: 'tt-main-col' },
         // 기존 스타일은 예전과 같은 구조 (제목 바로 아래 목록)
         this.figure ? h('div', { class: 'tt-head' }, this.figure, heading) : heading,
         list,
+        // 화면 밖 화살표 뜻 (따라가는 카메라 — 번호 없는 한 줄, 그림에 자리가 없다)
+        h(
+          'p',
+          { class: 'tt-edge', 'data-testid': 'touch-tutorial-edge' },
+          (team === 'monster' ? HELP_TEXT.edgeLineMonster : HELP_TEXT.edgeLineSurvivor).replace('  ', ' — '),
+        ),
       ),
     );
     return this.el;
@@ -326,317 +451,4 @@ function ttFigure(role: Role): HTMLSpanElement {
   const s = svgSpan('tt-figure', frontFigureSvg(role));
   s.dataset.testid = 'touch-tutorial-figure';
   return s;
-}
-
-// ───────────── 설정 (진동 · 프레임 제한 · 캐릭터 스타일 · 터치 안내 다시 보기) ─────────────
-
-export interface SettingsHooks {
-  /** 진동 줄을 보이는가 (터치 모드 + 진동 API가 있는 기기) */
-  haptics: boolean;
-  /** 프레임 제한 줄을 보이는가 (렌더링 최적화: 터치 모드. 진동이 없는 기기에도 있다. PC는 첫 화면 그래픽 줄 옆 선택 상자) */
-  frameLimit: boolean;
-  /** 터치 안내 다시 보기 줄을 보이는가 (터치 모드) */
-  tutorial: boolean;
-  /**
-   * 캐릭터 스타일 줄(기존 / 새 캐릭터)을 보이는가. 생략하면 보인다 (터치 모드 설정 판에는 늘 있다 — PC는 첫 화면 선택 상자).
-   * 값은 gfx/charStyle을 바로 읽고 쓴다 (그림만 바꾸고 서버로 보내지 않는다)
-   */
-  charStyle?: boolean;
-  hapticsOn(): boolean;
-  /** 진동 설정을 바꾼다. 저장하지 못하면 false (이번 접속에는 적용) */
-  setHaptics(on: boolean): boolean;
-  /** 지금 프레임 제한 (이번 접속에서 고른 값 > 저장값 > 자동) */
-  frameLimitNow(): FrameLimit;
-  /** 프레임 제한을 바꾼다 (저장 뒤 바로 적용). 저장하지 못하면 false (이번 접속에는 적용) */
-  setFrameLimit(limit: FrameLimit): boolean;
-  replayTutorial(): void;
-}
-
-/** 설정 판 캐릭터 스타일 이름 (기존 · 새 캐릭터) */
-const CHAR_STYLE_LABEL: Record<CharStyle, string> = {
-  classic: UI_TEXT.charStyleClassic,
-  new: UI_TEXT.charStyleNew,
-};
-
-/** 설정 판 프레임 제한 선택지 (자동 · 60 · 120) */
-const FRAME_LIMIT_SEGS: readonly { value: FrameLimit; label: string }[] = [
-  { value: 'auto', label: UI_TEXT.frameLimitAuto },
-  { value: '60', label: UI_TEXT.frameLimit60 },
-  { value: '120', label: UI_TEXT.frameLimit120 },
-];
-
-/**
- * 설정 단추 + 떠 있는 설정 판 (터치 모드에서만 만든다 — PC 로비는 그대로). 줄: 진동(있는 기기만) · 프레임 제한 · 캐릭터 스타일 ·
- * 저장 실패 안내 · 터치 안내 다시 보기. 고른 쪽 = ✓ + 바탕(색만으로 구분하지 않기). 단추를 다시 누르거나 바깥을 누르거나
- * Esc · 스크롤 · 창 크기 변화면 닫힌다. 판은 로비 루트에 고정 위치(창 기준)로 붙여 패널 모서리 깎기(clip-path)에 잘리지
- * 않게 하고, 열 때 한 번 단추 자리를 잰다. 줄은 두 묶음(진동 · 프레임 제한 / 캐릭터 스타일 · 안내 다시 보기)이라 낮은 가로
- * 화면에서는 두 열로 놓는다(lifecycle.css — 가장 낮은 휴대폰 802×293에서도 판이 화면 안)
- */
-export class SettingsMenu {
-  private readonly panel: HTMLDivElement;
-  private readonly note: HTMLDivElement;
-  private readonly done: HTMLDivElement;
-  private readonly onOn: HTMLButtonElement | null = null;
-  private readonly onOff: HTMLButtonElement | null = null;
-  /** 프레임 제한 단추 (줄이 없으면 비어 있다) */
-  private readonly frameSegs: { value: FrameLimit; button: HTMLButtonElement }[] = [];
-  /** 캐릭터 스타일 단추 (줄이 없으면 비어 있다) */
-  private readonly styleSegs: { value: CharStyle; button: HTMLButtonElement }[] = [];
-  private trigger: HTMLButtonElement | null = null;
-  private readonly outside = (e: Event): void => {
-    const t = e.target;
-    if (t instanceof Node && (this.panel.contains(t) || this.trigger?.contains(t))) return;
-    this.close();
-  };
-
-  constructor(
-    /** 판을 붙이는 곳 (로비 .lobby — 안전 영역 안으로 들어가 있다). 판 자리의 한계로도 쓴다 */
-    private readonly host: HTMLElement,
-    private readonly hooks: SettingsHooks,
-  ) {
-    const title = nextId('settings-title');
-    this.panel = h('div', {
-      class: 'panel life-settings',
-      role: 'dialog',
-      'aria-labelledby': title,
-      'data-testid': 'settings-panel',
-    });
-    this.panel.hidden = true;
-    this.note = h('div', { class: 'lobby-hint quality-note' }, UI_TEXT.qualityNotSaved);
-    this.note.hidden = true;
-    this.done = h(
-      'div',
-      { class: 'life-done', role: 'status' },
-      icon('check', 16),
-      APP_TEXT.tutorialReplayDone,
-    );
-    this.done.hidden = true;
-    // 두 묶음: 기기 설정(진동 · 프레임 제한) / 보기 설정(캐릭터 스타일 · 저장 실패 안내 · 터치 안내 다시 보기)
-    const rows: HTMLElement[] = [];
-    const more: HTMLElement[] = [];
-    const seg = (testid: string, label: string): HTMLButtonElement =>
-      h(
-        'button',
-        { class: 'seg', type: 'button', 'data-testid': testid },
-        icon('check', 16, 'seg-ico'),
-        label,
-      );
-    if (hooks.haptics) {
-      this.onOn = seg('haptics-on', APP_TEXT.hapticsOn);
-      this.onOff = seg('haptics-off', APP_TEXT.hapticsOff);
-      this.onOn.addEventListener('click', () => this.setHaptics(true));
-      this.onOff.addEventListener('click', () => this.setHaptics(false));
-      rows.push(
-        h(
-          'div',
-          { class: 'life-row', role: 'group', 'aria-label': APP_TEXT.haptics },
-          h('span', { class: 'field-label' }, APP_TEXT.haptics),
-          h('span', { class: 'segs' }, this.onOn, this.onOff),
-        ),
-      );
-    }
-    if (hooks.frameLimit) {
-      for (const o of FRAME_LIMIT_SEGS) {
-        const button = seg(`frame-limit-${o.value}`, o.label);
-        button.addEventListener('click', () => this.setFrameLimit(o.value));
-        this.frameSegs.push({ value: o.value, button });
-      }
-      const hint = nextId('frame-limit-hint');
-      rows.push(
-        h(
-          'div',
-          {
-            class: 'life-row life-frame',
-            role: 'group',
-            'aria-label': UI_TEXT.frameLimit,
-            'aria-describedby': hint,
-            'data-testid': 'frame-limit-row',
-          },
-          h('span', { class: 'field-label' }, UI_TEXT.frameLimit),
-          h('span', { class: 'segs' }, ...this.frameSegs.map((s) => s.button)),
-        ),
-        h(
-          'div',
-          { id: hint, class: 'life-frame-hint', 'data-testid': 'frame-limit-hint' },
-          UI_TEXT.frameLimitHint,
-        ),
-      );
-    }
-    if (hooks.charStyle !== false) {
-      for (const value of CHAR_STYLES) {
-        const button = seg(`char-style-${value}`, CHAR_STYLE_LABEL[value]);
-        button.addEventListener('click', () => this.setCharStyle(value));
-        this.styleSegs.push({ value, button });
-      }
-      more.push(
-        h(
-          'div',
-          {
-            class: 'life-row life-style',
-            role: 'group',
-            'aria-label': UI_TEXT.charStyle,
-            'data-testid': 'char-style-row',
-          },
-          h('span', { class: 'field-label' }, UI_TEXT.charStyle),
-          h('span', { class: 'segs' }, ...this.styleSegs.map((s) => s.button)),
-        ),
-      );
-    }
-    // 저장 실패 안내는 진동 · 프레임 제한 · 캐릭터 스타일 줄 아래 하나 (저장소가 막히면 셋 다 못 쓴다). 판 직속으로 두고
-    // 한 열이면 설정 줄 다음 · 안내 다시 보기 앞(CSS order), 두 열이면 두 열 아래 한 줄 전체(어느 열의 줄이 실패해도 같은 자리)
-    const note = hooks.haptics || hooks.frameLimit || this.styleSegs.length > 0 ? [this.note] : [];
-    if (hooks.tutorial) {
-      const replay = h(
-        'button',
-        { class: 'btn life-replay', type: 'button', 'data-testid': 'tutorial-replay' },
-        icon('replay', 18),
-        APP_TEXT.tutorialReplay,
-      );
-      replay.addEventListener('click', () => {
-        hooks.replayTutorial();
-        this.done.hidden = false;
-      });
-      more.push(replay, this.done);
-    }
-    // 묶음 상자는 보통 화면에서 display: contents(한 열 그대로), 낮은 가로 화면에서 두 열 (둘 다 있을 때만)
-    const cols = [rows, more].filter((c) => c.length > 0).map((c) => h('div', { class: 'life-col' }, ...c));
-    this.panel.classList.toggle('life-two', cols.length === 2);
-    this.panel.append(
-      h('h2', { id: title, class: 'life-settings-title' }, APP_TEXT.settings),
-      ...cols,
-      ...note,
-    );
-    this.panel.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        this.close();
-        this.trigger?.focus({ preventScroll: true });
-      }
-    });
-    host.appendChild(this.panel);
-  }
-
-  /** 설정에 보일 것이 있는가 */
-  get useful(): boolean {
-    return this.hooks.haptics || this.hooks.frameLimit || this.styleSegs.length > 0 || this.hooks.tutorial;
-  }
-
-  get isOpen(): boolean {
-    return !this.panel.hidden;
-  }
-
-  /**
-   * 설정 단추 (화면을 다시 그릴 때마다 새로 만든다). 판이 열려 있으면 닫지 않고 새 단추로 옮긴다 — 방 화면은 로비 상태가 올
-   * 때마다(다른 사람이 준비 등) 다시 그려지므로. 그린 뒤 한 번 자리를 다시 잰다
-   */
-  button(): HTMLButtonElement {
-    const b = h(
-      'button',
-      {
-        class: 'btn life-gear',
-        type: 'button',
-        'aria-haspopup': 'dialog',
-        'aria-expanded': String(this.isOpen),
-        'data-testid': 'settings-button',
-      },
-      icon('sliders', 18),
-      APP_TEXT.settings,
-    );
-    b.addEventListener('click', () => (this.isOpen && this.trigger === b ? this.close() : this.open(b)));
-    if (this.isOpen) {
-      this.trigger = b;
-      requestAnimationFrame(() => {
-        if (this.isOpen && this.trigger === b && b.isConnected) this.place(b);
-      });
-    }
-    return b;
-  }
-
-  open(trigger: HTMLButtonElement): void {
-    this.close();
-    this.trigger = trigger;
-    trigger.setAttribute('aria-expanded', 'true');
-    this.syncHaptics();
-    this.syncFrameLimit();
-    this.syncCharStyle();
-    this.done.hidden = true;
-    this.panel.hidden = false;
-    this.place(trigger);
-    document.addEventListener('pointerdown', this.outside, true);
-    document.addEventListener('scroll', this.closeSoon, true);
-    window.addEventListener('resize', this.closeSoon);
-    (
-      this.panel.querySelector<HTMLElement>('[aria-pressed="true"]') ?? this.panel.querySelector('button')
-    )?.focus({
-      preventScroll: true,
-    });
-  }
-
-  close(): void {
-    if (this.panel.hidden) return;
-    this.panel.hidden = true;
-    this.trigger?.setAttribute('aria-expanded', 'false');
-    document.removeEventListener('pointerdown', this.outside, true);
-    document.removeEventListener('scroll', this.closeSoon, true);
-    window.removeEventListener('resize', this.closeSoon);
-  }
-
-  private readonly closeSoon = (): void => this.close();
-
-  /**
-   * 단추 위(자리가 없으면 아래)에, 안전 영역 안쪽으로 (창 기준 고정 위치). 열 때 한 번만 잰다.
-   * 한계는 창이 아니라 host(.lobby, 안전 영역만큼 들어간 사각형)와 창이 겹치는 곳 — 노치 휴대폰 가로에서 넓은 두 열 판이
-   * 노치 쪽 띠로 밀려나지 않게 (M12 안전 영역 규칙). 안전 영역이 없으면(PC · 대부분의 휴대폰) 창과 같다
-   */
-  private place(trigger: HTMLElement): void {
-    const r = trigger.getBoundingClientRect();
-    const p = this.panel.getBoundingClientRect();
-    const box = this.host.getBoundingClientRect();
-    const margin = 8;
-    const minX = Math.max(0, box.left) + margin;
-    const maxX = Math.min(window.innerWidth, box.right) - margin;
-    const minY = Math.max(0, box.top) + margin;
-    const maxY = Math.min(window.innerHeight, box.bottom) - margin;
-    // 단추가 안전 영역 왼쪽 반이면 왼쪽 끝을, 오른쪽 반이면 오른쪽 끝을 맞춘다
-    let left = r.left + r.width / 2 < (minX + maxX) / 2 ? r.left : r.right - p.width;
-    left = Math.max(minX, Math.min(maxX - p.width, left));
-    let top = r.top - p.height - margin;
-    if (top < minY) top = Math.min(maxY - p.height, r.bottom + margin);
-    this.panel.style.left = `${Math.round(left)}px`;
-    this.panel.style.top = `${Math.round(Math.max(minY, top))}px`;
-  }
-
-  private setHaptics(on: boolean): void {
-    this.note.hidden = this.hooks.setHaptics(on);
-    this.syncHaptics();
-  }
-
-  private setFrameLimit(limit: FrameLimit): void {
-    this.note.hidden = this.hooks.setFrameLimit(limit);
-    this.syncFrameLimit();
-  }
-
-  /** 캐릭터 스타일을 고른다: 바로 적용(로비 그림은 onCharStyleChange 구독이 다시 그린다)하고 저장, 못 하면 안내 */
-  private setCharStyle(style: CharStyle): void {
-    this.note.hidden = setCharStyle(style);
-    this.syncCharStyle();
-  }
-
-  private syncCharStyle(): void {
-    if (this.styleSegs.length === 0) return;
-    const now = currentCharStyle();
-    for (const s of this.styleSegs) s.button.setAttribute('aria-pressed', String(s.value === now));
-  }
-
-  private syncFrameLimit(): void {
-    if (this.frameSegs.length === 0) return;
-    const now = this.hooks.frameLimitNow();
-    for (const s of this.frameSegs) s.button.setAttribute('aria-pressed', String(s.value === now));
-  }
-
-  private syncHaptics(): void {
-    if (!this.onOn || !this.onOff) return;
-    const on = this.hooks.hapticsOn();
-    this.onOn.setAttribute('aria-pressed', String(on));
-    this.onOff.setAttribute('aria-pressed', String(!on));
-  }
 }

@@ -8,7 +8,15 @@ import { expect, test, type Page } from '@playwright/test';
 import type { GfxDebugInfo } from '@decoy/shared';
 import { DOWNGRADE_CHECK, PERF_MEMORY_VERSION, TOUCH_FPS_WATCH } from '../../client/src/gfx/quality';
 import { STORAGE_KEYS } from '../../client/src/storageKeys';
-import { PHONE_LANDSCAPE, dpr1, newPlayerPage, pickRoleAndReady, press, waitForSnapshots } from './helpers';
+import {
+  PHONE_LANDSCAPE,
+  dpr1,
+  newPlayerPage,
+  openSettings,
+  pickRoleAndReady,
+  press,
+  waitForSnapshots,
+} from './helpers';
 
 const QUERY = '/?bots=1&debug=hook&renderer=webgl';
 const POLL = { polling: 200 } as const;
@@ -95,13 +103,14 @@ test('휴대폰 자동 중간 → 판 중 하향이 효과가 있으면 기억�
   // 지금 지워도 떠나는 페이지가 pagehide에서 다시 적는다(M12 마지막 방 복귀)
   await page.addInitScript((k) => localStorage.removeItem(k), STORAGE_KEYS.lastRoom.key);
   await page.goto(QUERY);
-  await expect(page.getByTestId('quality-select')).toHaveValue('auto');
+  await openSettings(page, 'graphics');
+  await expect(page.getByTestId('quality-auto')).toHaveAttribute('aria-pressed', 'true');
   g = await gfx(page);
   expect([g.quality, g.qualitySource]).toEqual(['low', 'auto']);
   expect(g.features.perfTier).toBe('low');
 
-  // 로비에서 '자동'을 직접 고르면 기억을 지우고 기기 자동(중간)부터 다시 잰다
-  await page.getByTestId('quality-select').selectOption('auto');
+  // 설정 화면에서 '자동'을 직접 누르면(이미 자동이어도) 기억을 지우고 기기 자동(중간)부터 다시 잰다
+  await press(page.getByTestId('quality-auto'));
   await expect.poll(async () => (await gfx(page)).quality, { intervals: [100, 200] }).toBe('medium');
   g = await gfx(page);
   expect([g.qualitySource, g.features.perfTier]).toEqual(['auto', 'none']);
@@ -111,7 +120,7 @@ test('휴대폰 자동 중간 → 판 중 하향이 효과가 있으면 기억�
     PERF_KEY,
     JSON.stringify({ v: PERF_MEMORY_VERSION, online: { tier: 'low', base: 'medium' } }),
   ] as const);
-  await page.getByTestId('quality-select').selectOption('high');
+  await press(page.getByTestId('quality-high'));
   await expect.poll(async () => (await gfx(page)).quality, { intervals: [100, 200] }).toBe('high');
   expect(await perfMemory(page)).toBeNull();
 

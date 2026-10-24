@@ -4,7 +4,15 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { TextAudit } from '@decoy/shared';
 import { DOWNGRADE_CHECK, FPS_WATCH, QUALITY_STORAGE_KEY } from '../../client/src/gfx/quality';
-import { BASE_QUERY, newPlayerPage, pickRoleAndReady, waitForSnapshots } from './helpers';
+import {
+  BASE_QUERY,
+  closeSettings,
+  newPlayerPage,
+  openSettings,
+  pickRoleAndReady,
+  press,
+  waitForSnapshots,
+} from './helpers';
 
 async function gfx(page: Page) {
   return page.evaluate(() => {
@@ -114,46 +122,77 @@ test('판 중 FPS가 낮으면 한 단계 내리고, 내려도 오르지 않으�
   await context.close();
 });
 
-test('로비에서 고른 품질을 저장하고 바로 적용한다. 자동이면 저장값을 지운다', async ({ browser }) => {
+test('설정 화면에서 고른 품질을 저장하고 바로 적용한다. 자동이면 저장값을 지운다', async ({ browser }) => {
   const { context, page, problems } = await newPlayerPage(browser);
   await page.goto(`/?${BASE_QUERY.slice(1)}`);
-  const select = page.getByTestId('quality-select');
-  await expect(select).toBeVisible();
-  await expect(select).toHaveValue('auto');
+  await openSettings(page, 'graphics');
+  await expect(page.getByTestId('quality-auto')).toHaveAttribute('aria-pressed', 'true');
   let g = await gfx(page);
   // Canvas 렌더러 자동 → 낮음
   expect([g.quality, g.qualitySource]).toEqual(['low', 'auto']);
 
-  await select.selectOption('high');
+  await press(page.getByTestId('quality-high'));
   await expect.poll(async () => (await gfx(page)).quality).toBe('high');
   g = await gfx(page);
   expect(g.qualitySource).toBe('saved');
   expect(await page.evaluate((k) => localStorage.getItem(k), QUALITY_STORAGE_KEY)).toBe('high');
 
-  await select.selectOption('low');
+  await press(page.getByTestId('quality-low'));
   await expect.poll(async () => (await gfx(page)).quality).toBe('low');
   expect(await page.evaluate((k) => localStorage.getItem(k), QUALITY_STORAGE_KEY)).toBe('low');
 
   // 새로고침 뒤에도 저장값
   await page.reload();
-  await expect(page.getByTestId('quality-select')).toHaveValue('low');
   g = await gfx(page);
   expect([g.quality, g.qualitySource]).toEqual(['low', 'saved']);
+  await openSettings(page, 'graphics');
+  await expect(page.getByTestId('quality-low')).toHaveAttribute('aria-pressed', 'true');
 
   // 자동: 저장값 삭제
-  await page.getByTestId('quality-select').selectOption('auto');
+  await press(page.getByTestId('quality-auto'));
   await expect.poll(async () => (await gfx(page)).qualitySource).toBe('auto');
   expect(await page.evaluate((k) => localStorage.getItem(k), QUALITY_STORAGE_KEY)).toBeNull();
   await page.reload();
-  await expect(page.getByTestId('quality-select')).toHaveValue('auto');
   expect((await gfx(page)).qualitySource).toBe('auto');
+  await openSettings(page, 'graphics');
+  await expect(page.getByTestId('quality-auto')).toHaveAttribute('aria-pressed', 'true');
   // 저장소가 정상이면 '저장되지 않음' 안내는 없다
   await expect(page.getByTestId('quality-note')).toBeHidden();
   expect(problems).toEqual([]);
   await context.close();
 });
 
-test('저장소가 막힌 브라우저에서도 로비에서 고른 품질이 이번 접속에 적용되고, 저장되지 않는다고 알린다', async ({
+test('주소 ?quality가 이번 접속에 우선한다: 설정 화면 품질 줄이 잠기고 그 사실을 보이며, 고른 값 · 저장값이 주소 값을 덮지 않는다', async ({
+  browser,
+}) => {
+  const { context, page, problems } = await newPlayerPage(browser);
+  await page.goto(`/?${BASE_QUERY.slice(1)}`);
+  await page.evaluate((k) => localStorage.setItem(k, 'high'), QUALITY_STORAGE_KEY);
+  await page.goto(`/?${BASE_QUERY.slice(1)}&quality=medium`);
+  expect([(await gfx(page)).quality, (await gfx(page)).qualitySource]).toEqual(['medium', 'url']);
+  await openSettings(page, 'graphics');
+  await expect(page.getByTestId('quality-medium')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('lock-quality')).toBeVisible();
+  await expect(page.getByTestId('lock-quality')).toContainText('?quality=medium');
+  await page.getByTestId('quality-low').click({ force: true });
+  expect([(await gfx(page)).quality, (await gfx(page)).qualitySource]).toEqual(['medium', 'url']);
+  expect(await page.evaluate((k) => localStorage.getItem(k), QUALITY_STORAGE_KEY)).toBe('high');
+  // 모두 기본값으로 (두 번 눌러 확인): 저장값은 지우지만 주소 값은 그대로
+  await press(page.getByTestId('settings-reset-all'));
+  await press(page.getByTestId('settings-reset-all'));
+  await expect(page.getByTestId('settings-reset-done')).toBeVisible();
+  expect(await page.evaluate((k) => localStorage.getItem(k), QUALITY_STORAGE_KEY)).toBeNull();
+  expect([(await gfx(page)).quality, (await gfx(page)).qualitySource]).toEqual(['medium', 'url']);
+  // 판 화면까지 주소 값 (고른 값이 아니라)
+  await closeSettings(page);
+  await page.getByTestId('create-room').click();
+  await expect(page.getByTestId('room-code')).toHaveText(/^[A-Z]{4}$/);
+  expect([(await gfx(page)).quality, (await gfx(page)).qualitySource]).toEqual(['medium', 'url']);
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
+test('저장소가 막힌 브라우저에서도 설정 화면에서 고른 품질이 이번 접속에 적용되고, 저장되지 않는다고 알린다', async ({
   browser,
 }) => {
   const { context, page, problems } = await newPlayerPage(browser);
@@ -166,31 +205,29 @@ test('저장소가 막힌 브라우저에서도 로비에서 고른 품질이 �
       },
     });
   });
-  // ?quality=low로 들어와 로비에서 '높음' → 주소 값이 아니라 고른 값
-  await page.goto(`/?${BASE_QUERY.slice(1)}&quality=low`);
-  const select = page.getByTestId('quality-select');
-  await expect(select).toBeVisible();
-  expect([(await gfx(page)).quality, (await gfx(page)).qualitySource]).toEqual(['low', 'url']);
+  await page.goto(`/?${BASE_QUERY.slice(1)}`);
+  expect([(await gfx(page)).quality, (await gfx(page)).qualitySource]).toEqual(['low', 'auto']);
+  await openSettings(page, 'graphics');
   await expect(page.getByTestId('quality-note')).toBeHidden();
 
-  await select.selectOption('high');
+  await press(page.getByTestId('quality-high'));
   await expect.poll(async () => (await gfx(page)).quality).toBe('high');
   expect((await gfx(page)).qualitySource).toBe('saved');
   await expect(page.getByTestId('quality-note')).toBeVisible();
-  // 문구 원본은 client/src/ui/lobby.ts QUALITY_NOT_SAVED (lobby.ts는 PNG를 import해서 여기서 불러올 수 없다)
   await expect(page.getByTestId('quality-note')).toContainText('설정이 저장되지 않아요');
 
-  await select.selectOption('medium');
+  await press(page.getByTestId('quality-medium'));
   await expect.poll(async () => (await gfx(page)).quality).toBe('medium');
 
-  // '자동': Canvas 렌더러 자동 = 낮음 (주소의 ?quality도 이번 세션에서는 쓰지 않는다)
-  await select.selectOption('auto');
+  // '자동': Canvas 렌더러 자동 = 낮음
+  await press(page.getByTestId('quality-auto'));
   await expect.poll(async () => (await gfx(page)).qualitySource).toBe('auto');
   expect((await gfx(page)).quality).toBe('low');
 
   // 판 화면까지 그대로 (고른 값으로 판을 연다)
-  await select.selectOption('high');
+  await press(page.getByTestId('quality-high'));
   await expect.poll(async () => (await gfx(page)).quality).toBe('high');
+  await closeSettings(page);
   await page.getByTestId('create-room').click();
   await expect(page.getByTestId('room-code')).toHaveText(/^[A-Z]{4}$/);
   expect([(await gfx(page)).quality, (await gfx(page)).qualitySource]).toEqual(['high', 'saved']);

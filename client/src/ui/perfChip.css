@@ -1,0 +1,23 @@
+/* 판 중 FPS · 핑 칩 (설정 화면 통합, perfChip.ts): 맵 창 왼쪽 위 안쪽의 작은 글자 한 줄. 누를 수 없다(판 입력 · 화면 밖 화살표
+   아래 캔버스로 그대로 간다). ?debug=1 오버레이(#debug-overlay, 초록 고정폭 글자)와 다른 모습: UI 글꼴 · 반투명 바탕 · 깎은 모서리
+   없는 둥근 칩. 색은 style.css 토큰만. 판 중 바뀌는 것은 글자(초당 2번까지)뿐이다 */
+#ui-root > .perf-chip {
+  position: fixed;
+  z-index: 4;
+  pointer-events: none;
+  padding: 2px 8px;
+  border-radius: 9px;
+  background: rgba(5, 8, 12, 0.72);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+}
+#ui-root > .perf-chip[hidden] {
+  display: none;
+}

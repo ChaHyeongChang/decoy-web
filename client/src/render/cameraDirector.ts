@@ -102,6 +102,11 @@ export class CameraDirector {
   readonly lookApplied: Vec2 = { x: 0, y: 0 };
   cuts = 0;
   private dipAt: number | null = null;
+  /**
+   * 번쩍임 줄이기 (설정 화면 '화면' 탭): 잘라 옮길 때 맵 창을 어둡게 했다 밝히지 않고 바로 옮긴다 (dip이 늘 0).
+   * 잘라 옮기기 자체(cuts · 창 자리)는 그대로다
+   */
+  noDip = false;
   private readonly shakeOut: Vec2 = { x: 0, y: 0 };
   /** 이번 프레임의 창 (기기 픽셀 격자) */
   readonly view: ViewRect = { x: 0, y: 0, w: MAP_W, h: MAP_H };
@@ -196,7 +201,7 @@ export class CameraDirector {
     const f = this.rig.update(i.dtMs, t);
     if (f.cut) {
       this.cuts += 1;
-      this.dipAt = i.nowMs;
+      this.dipAt = this.noDip ? null : i.nowMs;
     }
     // 2) 흔들림 (월드만) → 맵 안 → 기기 픽셀 격자
     const sh = this.shake.offset(i.nowMs, this.shakeOut);
@@ -223,8 +228,14 @@ export class CameraDirector {
     return this.view;
   }
 
+  /** 이번 프레임에 창에 더한 흔들림 크기 (타일, 디버그 · 시험: 흔들림 줄이기면 늘 0) */
+  get shakeNow(): number {
+    return Math.hypot(this.shakeOut.x, this.shakeOut.y);
+  }
+
   /** 잘라 옮긴 뒤 어두워짐 알파 (0이면 없음) */
   dip(nowMs: number): number {
+    if (this.noDip) this.dipAt = null;
     if (this.dipAt === null) return 0;
     const a = dipAlpha(nowMs - this.dipAt);
     if (a <= 0 && nowMs - this.dipAt > CAMERA.dipOutMs) this.dipAt = null;

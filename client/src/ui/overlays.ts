@@ -3,19 +3,21 @@
 // M12 터치: 점수판(점수판 버튼으로 켜고 끔)은 그림 HUD.s배 · 글자 CSS 12px 이상, 조작 안내는 터치 문구(controlsText 'touch'),
 // 아래에 닫기 안내(화면을 누르면 닫힘). 낮은 화면에서 다 들어가지 않으면 조작 안내 줄을 빼고 상태 표만 보인다.
 // 캐릭터 리디자인 2단계: 캐릭터 스타일이 새 캐릭터면 첫 판 조작 안내의 역할 문양 자리에 내 역할 정면 그림(상반신)을 둔다
+// 설정 화면 통합: 따라가는 카메라(확대 화면)면 첫 판 조작 안내 아래에 화면 밖 화살표 한 줄(팀별) · 지도 누르기 한 줄을 더한다.
+// 이 두 줄은 키 열 맞춤에 끼지 않는다(긴 '가장자리 화살표' 키캡이 위 줄들의 둘째 열을 밀지 않게)
 import Phaser from 'phaser';
 import type { AnonStatus, Balance, MatchInfo, Role, Snapshot } from '@decoy/shared';
-import { CONTROLS, HUD_TEXT, ROLE_CARDS, controlsText } from '../data/storyText';
+import { CONTROLS, HELP_TEXT, HUD_TEXT, ROLE_CARDS, controlsText } from '../data/storyText';
 import { MONSTER_ART, SURVIVOR_ART } from '../art/chars/index';
 import { clearPathCache, drawToCanvas, type Drawing } from '../art/chars/kit';
 import { FRONT_REST } from '../art/chars/types';
-import { ROLE, UI } from '../art/palette';
+import { NEON, ROLE, UI } from '../art/palette';
 import { currentCharStyle } from '../gfx/charStyle';
 import { createCanvasTexture, makeCanvas, nextFogKey, removeCanvasTexture, rgba } from '../render/fogPaint';
 import { ABILITY_ICON, ACCENT, FR, HC, STATUS_LOOK, parseControl, teamCards } from './hudArt';
 import { fontGeneration } from './fonts';
 import { Slice, Spr, fitText, setText, type HudKit } from './hudKit';
-import { HUD, VIEW_W } from './layout';
+import { CAM_ZOOM, HUD, MAP_RECT, VIEW_W } from './layout';
 import type { CrispText } from './text';
 
 const DEPTH = 70;
@@ -47,7 +49,18 @@ interface KeyPair {
   kw: number;
 }
 
-type ControlLine = { k: 'goal'; spr: Spr; text: CrispText } | { k: 'pairs'; pairs: KeyPair[] };
+/**
+ * 조작 안내 한 줄. free = 키 열 맞춤에 끼지 않는 덧붙인 줄(첫 판 안내의 화면 밖 화살표 · 지도 줄): 제 폭으로만 놓는다.
+ * icon = 목표 줄 아이콘 (없으면 블록 기본 goalIcon)
+ */
+type ControlLine =
+  { k: 'goal'; spr: Spr; text: CrispText; icon?: string } | { k: 'pairs'; pairs: KeyPair[]; free?: boolean };
+
+/** 덧붙이는 줄 (CONTROLS와 같은 형식의 글, 목표 줄 아이콘) */
+interface ExtraLine {
+  line: string;
+  icon?: string;
+}
 
 /**
  * 조작 안내 줄들 (키캡 + 덧말 + 설명, 목표 문장은 아이콘 + 글자). 글자 폭으로 열을 맞추고 place로 옮긴다.
@@ -63,18 +76,29 @@ class ControlsBlock {
     kit: HudKit,
     lines: readonly string[],
     private readonly goalIcon: string,
+    extra: readonly ExtraLine[] = [],
   ) {
     const text = (size: number, color: number, value: string, bold = false): CrispText =>
       kit.text(0, 0, size, color, DEPTH + 2, bold).setText(value);
     const F = HUD.font;
-    for (const line of lines) {
+    const all: { line: string; free: boolean; icon?: string }[] = [
+      ...lines.map((line) => ({ line, free: false })),
+      ...extra.map((e) => ({ line: e.line, free: true, icon: e.icon })),
+    ];
+    for (const { line, free, icon } of all) {
       const r = parseControl(line);
       if (r.kind === 'goal') {
-        this.lines.push({ k: 'goal', spr: kit.spr(DEPTH + 1), text: text(F.ctrlGoal, UI.textDim, r.text) });
+        this.lines.push({
+          k: 'goal',
+          spr: kit.spr(DEPTH + 1),
+          text: text(F.ctrlGoal, UI.textDim, r.text),
+          ...(icon ? { icon } : {}),
+        });
         continue;
       }
       this.lines.push({
         k: 'pairs',
+        free,
         pairs: r.pairs.map((p) => ({
           kc: kit.slice(DEPTH + 1),
           key: text(F.ctrlKey, UI.text, p.key, true).setOrigin(0.5, 0.5),
@@ -106,22 +130,36 @@ class ControlsBlock {
     const k = HUD.s;
     let maxW = 0;
     const colW: number[] = [];
+    /** 키 조각 하나의 폭 (키캡 + 덧말 + 설명) */
+    const pairW = (p: KeyPair): number => {
+      p.kw = Math.max(30 * k, Math.ceil(p.key.width) + 18 * k);
+      let x = p.kw + 10 * k;
+      if (p.note) x += Math.ceil(p.note.width) + 8 * k;
+      return x + Math.ceil(p.desc.width);
+    };
     for (const line of this.lines) {
       if (line.k === 'goal') {
         maxW = Math.max(maxW, 28 * k + line.text.width);
         continue;
       }
+      if (line.free) {
+        // 덧붙인 줄: 제 폭으로만 (조각마다 앞 조각 바로 뒤)
+        let x = 0;
+        line.pairs.forEach((p, i) => {
+          if (i > 0) x += 34 * k;
+          p.x = x;
+          x += pairW(p);
+        });
+        maxW = Math.max(maxW, x);
+        continue;
+      }
       line.pairs.forEach((p, i) => {
-        p.kw = Math.max(30 * k, Math.ceil(p.key.width) + 18 * k);
-        let x = p.kw + 10 * k;
-        if (p.note) x += Math.ceil(p.note.width) + 8 * k;
-        x += Math.ceil(p.desc.width);
-        colW[i] = Math.max(colW[i] ?? 0, x);
+        colW[i] = Math.max(colW[i] ?? 0, pairW(p));
       });
     }
     const start = colW.map((_, i) => colW.slice(0, i).reduce((a, w) => a + w + 34 * k, 0));
     for (const line of this.lines)
-      if (line.k === 'pairs') line.pairs.forEach((p, i) => (p.x = start[i] ?? 0));
+      if (line.k === 'pairs' && !line.free) line.pairs.forEach((p, i) => (p.x = start[i] ?? 0));
     const last = colW.length - 1;
     this.width = Math.max(maxW, (start[last] ?? 0) + (colW[last] ?? 0));
     this.height = this.lines.length * rowH() - 8 * k;
@@ -134,7 +172,7 @@ class ControlsBlock {
     this.lines.forEach((line, row) => {
       const dy = y + row * rowH();
       if (line.k === 'goal') {
-        line.spr.set(this.goalIcon, x + 9 * k, dy + 13 * k);
+        line.spr.set(line.icon ?? this.goalIcon, x + 9 * k, dy + 13 * k);
         line.text.setPosition(x + 28 * k, dy + mid(line.text, 2));
         return;
       }
@@ -319,6 +357,21 @@ class HelpFigure {
   }
 }
 
+/** 첫 판 조작 안내가 맵 아래 끝에서 띄우는 최소 거리 (논리 px) */
+const TUTORIAL_BOTTOM_GAP = 8;
+
+/**
+ * 첫 판 조작 안내에 덧붙이는 줄 (따라가는 카메라 확대 화면만): 화면 밖 화살표(생존자 · 괴물 따로) · 지도를 누르면 크게.
+ * 확대 1(맵 전체가 보임)이면 화살표 · 크게 보기가 필요 없어 없다
+ */
+function tutorialExtraLines(team: 'monster' | 'survivor'): ExtraLine[] {
+  if (CAM_ZOOM <= 1) return [];
+  return [
+    { line: team === 'monster' ? HELP_TEXT.edgeLineMonster : HELP_TEXT.edgeLineSurvivor },
+    { line: HELP_TEXT.minimapTap, icon: FR.icon('map', NEON, 18) },
+  ];
+}
+
 export class TutorialOverlay {
   private readonly panel: Panel;
   private readonly parts: Part[] = [];
@@ -351,6 +404,7 @@ export class TutorialOverlay {
       kit,
       CONTROLS[team],
       team === 'monster' ? FR.icon('attack', HC.red, 18) : FR.icon('point', 0x22d3ee, 18),
+      tutorialExtraLines(team),
     );
     kit.tag = prev;
     // 판 동안 바뀌지 않는다 (판 시작 때 스타일)
@@ -373,7 +427,8 @@ export class TutorialOverlay {
     const w = Math.max(headW, this.controls.width, close.width) + PAD * 2;
     const h = top + headH + 18 + this.controls.height + 22 + 24 + 22;
     const x = Math.round(VIEW_W / 2 - w / 2);
-    const y = Math.round(HUD.tutorialY - h / 2);
+    // 맵 아래쪽 1/3 가운데. 줄이 늘어 맵 아래 끝을 넘으면 그만큼 올린다 (아래 HUD 띠 · 행동 칸을 덮지 않게)
+    const y = Math.round(Math.min(HUD.tutorialY - h / 2, MAP_RECT.y + MAP_RECT.h - TUTORIAL_BOTTOM_GAP - h));
     this.panel.plate.set('ov', x, y, w, h);
     if (figure) {
       glyph.set('', 0, 0);
@@ -623,9 +678,9 @@ export class Scoreboard {
     let h = height(true);
     let y = Math.round(HUD.scoreY - h / 2);
     if (touch) {
-      // 오른쪽 위 시스템 버튼과 가로로 걸치면 그 아래부터. 다 들어가지 않으면 조작 안내 줄을 뺀다
+      // 오른쪽 위 시스템 버튼(좌우 반전이면 왼쪽 위)과 가로로 걸치면 그 아래부터. 다 들어가지 않으면 조작 안내 줄을 뺀다
       const S = touch.score;
-      const top = x + this.w > S.sysLeft ? S.sysBottom : S.top;
+      const top = (touch.mirror ? x < S.sysRight : x + this.w > S.sysLeft) ? S.sysBottom : S.top;
       this.ctrlShown = h <= S.bottom - top;
       if (!this.ctrlShown) h = height(false);
       y = Math.round(Math.max(top, Math.min((top + S.bottom) / 2 - h / 2, S.bottom - h)));

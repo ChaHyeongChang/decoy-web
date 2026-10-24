@@ -376,7 +376,8 @@ test('관전 (터치): 수감 · 탈출 중 팀 카드를 탭하면 동료 화�
   await expect.poll(async () => (await cam()).spectating).toBeNull();
   await sendTest(page, { kind: 'setSurvivor', target: you, status: 'escaped' });
   await expect.poll(async () => (await cam()).spectating).not.toBeNull();
-  await expect.poll(async () => (await touchTargets(page)).length).toBe(0);
+  // 관전 중 터치 화면은 꺼지고 판 중 '설정' 버튼만 남는다
+  await expect.poll(async () => (await touchTargets(page)).map((t) => t.id)).toEqual(['menu']);
   const scout = await tapCard(2);
   await expect.poll(async () => (await cam()).spectating).toBe(scout);
   void code;

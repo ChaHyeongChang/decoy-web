@@ -35,7 +35,7 @@ export const gfxState: GfxState = {
   displayHz: 60,
   targetHz: 60,
   upgrades: 0,
-  charStyle: 'classic',
+  charStyle: 'new',
   camZoom: 1,
 };
 

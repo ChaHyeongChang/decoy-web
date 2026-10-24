@@ -5,7 +5,6 @@ import type { LobbyPlayer, LobbyState, Role } from '@decoy/shared';
 import type { IconId } from '../art/icons';
 import { HUD_TEXT, ROLE_CARDS, TOUCH_TEXT, UI_TEXT, roleAbility, type InputMode } from '../data/storyText';
 import { canOfferFullscreen, device, enterFullscreen } from '../device';
-import { haptics } from '../haptics';
 import {
   markTouchTutorialShown,
   requestTouchHints,
@@ -13,29 +12,9 @@ import {
   touchTutorialNeeded,
 } from '../touchTutorial';
 import type { ServerStatusView } from '../serverStatus';
-import {
-  loadFrameLimit,
-  pacingHooks,
-  parseFrameLimit,
-  saveFrameLimit,
-  type FrameLimit,
-} from '../gfx/framePacing';
-import {
-  loadSavedQuality,
-  parseQualityChoice,
-  qualityHooks,
-  saveQualityChoice,
-  type QualityChoice,
-} from '../gfx/quality';
-import {
-  CHAR_STYLES,
-  currentCharStyle,
-  onCharStyleChange,
-  parseCharStyle,
-  setCharStyle,
-  type CharStyle,
-} from '../gfx/charStyle';
-import { SettingsMenu, TouchTutorialCard } from './lifecycleUi';
+import { currentCharStyle, onCharStyleChange } from '../gfx/charStyle';
+import { TouchTutorialCard } from './lifecycleUi';
+import type { SettingsPanel } from './settingsPanel';
 import {
   blueprintSvg,
   characterFigureSvg,
@@ -93,27 +72,6 @@ const ABILITY_ICONS: Record<Role, IconId[]> = {
   scout: ['track'],
 };
 
-/** 그래픽 품질 선택지 */
-const QUALITY_OPTIONS: readonly { value: QualityChoice; label: string }[] = [
-  { value: 'auto', label: UI_TEXT.qualityAuto },
-  { value: 'high', label: UI_TEXT.qualityHigh },
-  { value: 'medium', label: UI_TEXT.qualityMedium },
-  { value: 'low', label: UI_TEXT.qualityLow },
-];
-
-/** 프레임 제한 선택지 (렌더링 최적화): 자동(화면 주사율) · 60(배터리 절약) · 120 */
-const FRAME_LIMIT_OPTIONS: readonly { value: FrameLimit; label: string }[] = [
-  { value: 'auto', label: UI_TEXT.frameLimitAuto },
-  { value: '60', label: UI_TEXT.frameLimit60 },
-  { value: '120', label: UI_TEXT.frameLimit120 },
-];
-
-/** 캐릭터 스타일 선택지 (캐릭터 리디자인 2단계): 기존 · 새 캐릭터 */
-const CHAR_STYLE_LABELS: Record<CharStyle, string> = {
-  classic: UI_TEXT.charStyleClassic,
-  new: UI_TEXT.charStyleNew,
-};
-
 /** 정면 그림(새 캐릭터)에 붙는 클래스: 정면 그림만 크기 · 자리를 따로 맞춘다 (style.css — 기존 화면은 그대로) */
 const FRONT_FIGURE_CLASS = 'front';
 
@@ -169,14 +127,8 @@ export class LobbyUI {
   private errorText: HTMLSpanElement;
   private you: string | null = null;
   private lastRoom: string | null = null;
-  /** 이번 접속에서 고른 품질 (저장하지 못했어도 선택 상자를 다시 그릴 때 이 값을 보여 준다) */
-  private qualityChoice: QualityChoice | null = null;
-  /** 이번 접속에서 고른 프레임 제한 (품질과 같다: 저장하지 못했어도 다시 그릴 때 이 값) */
-  private frameLimitChoice: FrameLimit | null = null;
   /** "전체 화면" (휴대폰 브라우저에서만): 첫 화면은 로고 아래, 방 화면은 오른쪽 위 구석 */
   private readonly fsButton: HTMLButtonElement | null = null;
-  /** 설정 (M12, 터치 모드에서만: 진동 · 프레임 제한 · 터치 안내 다시 보기). 첫 화면은 그래픽 줄 옆, 방 화면은 명령 줄 왼쪽 */
-  private readonly settings: SettingsMenu | null = null;
   /** 판 직전 터치 안내 (M12, 터치 모드 · 이 기기에서 처음): 준비 뒤 방장 시작을 기다리는 동안 명령 줄 위 */
   private readonly tutorial = new TouchTutorialCard(() => this.tutorialSeen());
   /** 마지막으로 그린 방 상태 (설정에서 안내 다시 보기를 누르면 그 자리에서 다시 그린다) */
@@ -200,6 +152,11 @@ export class LobbyUI {
     host: HTMLElement,
     private readonly actions: LobbyActions,
     private readonly defaultName: string,
+    /**
+     * 설정 화면 (설정 화면 통합: PC · 터치 같은 화면). 첫 화면 패널 아래 · 방 화면 · 빠른 매칭 대기 명령 줄에 '설정' 단추를 둔다.
+     * 화면 자체는 #ui-root에 있다(판 중에도 열린다 — App이 만든다)
+     */
+    private readonly settings: SettingsPanel,
   ) {
     this.root = h('div', { class: 'lobby', 'data-testid': 'lobby' });
     // 배경 레이어는 한 번만 만든다 (방 상태가 바뀔 때마다 다시 그리는 것은 내용뿐)
@@ -229,23 +186,6 @@ export class LobbyUI {
       this.fsButton.addEventListener('click', enterFullscreen);
       this.root.classList.add('has-fs');
     }
-    if (device.touch) {
-      const menu = new SettingsMenu(this.root, {
-        haptics: haptics.supported,
-        frameLimit: true,
-        tutorial: true,
-        hapticsOn: () => haptics.enabled,
-        setHaptics: (on) => haptics.setEnabled(on),
-        frameLimitNow: () => this.frameLimitNow(),
-        setFrameLimit: (limit) => this.chooseFrameLimit(limit),
-        replayTutorial: () => {
-          resetTouchTutorial();
-          // 방에서 준비한 채 기다리는 중이면 바로 다시 보인다
-          if (this.lastLobby && this.atRoom) this.renderRoom(this.lastLobby);
-        },
-      });
-      if (menu.useful) this.settings = menu;
-    }
     host.appendChild(this.root);
     // 캐릭터 스타일이 바뀌면 (첫 화면 선택 상자 · 휴대폰 설정 판 · 디버그 훅) 보이는 역할 그림을 맞춘다.
     // LobbyUI는 앱과 수명이 같다(app.ts가 한 번 만든다): 구독을 풀 때가 없다
@@ -271,8 +211,17 @@ export class LobbyUI {
       this.content
         .querySelector(`[data-testid="practice-role-${role}"] > .pr-figure`)
         ?.replaceWith(roleFigure('pr-figure', role));
-    const select = this.content.querySelector<HTMLSelectElement>('[data-testid="char-style-select"]');
-    if (select) select.value = currentCharStyle();
+  }
+
+  /** 설정 화면의 '터치 조작 안내 다시 보기': 방에서 준비한 채 기다리는 중이면 그 자리에서 다시 보인다 */
+  tutorialReset(): void {
+    resetTouchTutorial();
+    if (this.lastLobby && this.atRoom) this.renderRoom(this.lastLobby);
+  }
+
+  /** 조작 배치 편집을 닫은 뒤: 떠 있는 판 직전 터치 안내 그림을 바꾼 배치로 다시 그린다 */
+  refreshTutorial(): void {
+    this.tutorial.refresh();
   }
 
   /** 첫 화면이 보이는 중인가 */
@@ -290,7 +239,7 @@ export class LobbyUI {
    */
   matchStarting(): void {
     if (this.tutorial.visible) this.tutorialSeen();
-    this.settings?.close();
+    if (this.settings.context === 'lobby') this.settings.close();
   }
 
   private tutorialSeen(): void {
@@ -308,7 +257,6 @@ export class LobbyUI {
 
   hide(): void {
     this.root.style.display = 'none';
-    this.settings?.close();
   }
 
   /** 오류 문구 (빈 문자열이면 숨김) */
@@ -329,7 +277,6 @@ export class LobbyUI {
     this.quickCountdown = null;
     this.netButtonsExtra = null;
     this.tutorial.hide();
-    this.settings?.close();
     const name = h('input', {
       'data-testid': 'name-input',
       placeholder: UI_TEXT.namePlaceholder,
@@ -402,14 +349,12 @@ export class LobbyUI {
       create,
       h('div', { class: 'divider' }),
       h('div', { class: 'row' }, h('label', { class: 'field field-code' }, code), join),
-      ...this.qualityRow(),
     );
     this.netButtons = [quickBtn, create, join];
     this.applyStatus();
     this.content.className = 'lobby-content lobby-home';
     const brand = this.brand(true);
-    if (this.fsButton) brand.querySelector('.brand-text')?.append(this.fsButton);
-    brand.querySelector('.brand-text')?.append(privacyLink());
+    brand.querySelector('.brand-text')?.append(this.brandActions(), privacyLink());
     this.content.replaceChildren(brand, panel);
     this.show();
   }
@@ -423,7 +368,6 @@ export class LobbyUI {
     this.quickCountdown = null;
     this.netButtonsExtra = null;
     this.tutorial.hide();
-    this.settings?.close();
     const grid = h('div', { class: 'practice-roles' });
     // '봇과 연습'을 두 번 탭한 두 번째 탭이 막 그린 역할 버튼에 떨어지지 않게 잠깐 포인터를 막는다 (검토 반영 F17)
     armAgainstDoubleTap(grid);
@@ -464,10 +408,22 @@ export class LobbyUI {
     this.applyStatus();
     this.content.className = 'lobby-content lobby-home';
     const brand = this.brand(true);
-    if (this.fsButton) brand.querySelector('.brand-text')?.append(this.fsButton);
-    brand.querySelector('.brand-text')?.append(privacyLink());
+    brand.querySelector('.brand-text')?.append(this.brandActions(), privacyLink());
     this.content.replaceChildren(brand, panel);
     this.show();
+  }
+
+  /**
+   * 첫 화면 · 연습 고르기 로고 아래 단추 줄: 전체 화면(휴대폰 브라우저) · 설정(설정 화면 통합 — PC · 터치 같은 자리, 휴대폰 가로
+   * 화면에서도 스크롤 없이 보인다)
+   */
+  private brandActions(): HTMLElement {
+    return h(
+      'div',
+      { class: 'brand-actions' },
+      ...(this.fsButton ? [this.fsButton] : []),
+      this.settings.button(),
+    );
   }
 
   /** "대기열에서 빠졌어요 — 다시 찾기" (대기 중 화면을 숨겼거나 응답이 없어 서버가 뺀 뒤) */
@@ -541,7 +497,7 @@ export class LobbyUI {
     const actions = h(
       'div',
       { class: device.touch ? 'lobby-actions life-anchor' : 'lobby-actions' },
-      h('div', { class: 'action-row' }, ...(this.settings ? [this.settings.button()] : []), cancel),
+      h('div', { class: 'action-row' }, this.settings.button(), cancel),
       h('div', { class: 'lobby-hint', 'data-testid': 'lobby-hint' }, me?.role ? '' : UI_TEXT.quickPickHint),
       this.errorBox,
     );
@@ -587,140 +543,16 @@ export class LobbyUI {
     if (this.netButtonsExtra) this.netButtonsExtra.disabled = v.status !== 'connected';
   }
 
-  /**
-   * 그래픽: 자동 / 높음 / 중간 / 낮음. 고르면 저장하고 바로 적용한다 (gfx/quality.ts, main.ts).
-   * 저장하지 못해도 이번 접속에는 고른 값이 적용되고, 저장되지 않는다는 안내를 짧게 띄운다.
-   * 같은 줄 오른쪽: PC는 프레임 제한 선택 상자, 터치는 설정 단추(프레임 제한 · 캐릭터 스타일은 설정 판 안).
-   * PC는 그 아래 줄에 캐릭터 스타일 선택 상자
-   */
-  private qualityRow(): HTMLElement[] {
-    // 저장 실패 안내는 품질 · 프레임 제한 · 캐릭터 스타일이 함께 쓴다 (저장소가 막히면 셋 다 못 쓴다)
-    let qualityUnsaved = false;
-    let frameUnsaved = false;
-    let styleUnsaved = false;
-    const select = h('select', { 'data-testid': 'quality-select' });
-    const current: QualityChoice = this.qualityChoice ?? loadSavedQuality() ?? 'auto';
-    for (const o of QUALITY_OPTIONS) {
-      const opt = h('option', { value: o.value }, o.label);
-      if (o.value === current) opt.selected = true;
-      select.appendChild(opt);
-    }
-    const note = h(
-      'div',
-      { class: 'lobby-hint quality-note', 'data-testid': 'quality-note' },
-      UI_TEXT.qualityNotSaved,
-    );
-    note.hidden = true;
-    const syncNote = (): void => {
-      note.hidden = !(qualityUnsaved || frameUnsaved || styleUnsaved);
-    };
-    select.addEventListener('change', () => {
-      const choice = parseQualityChoice(select.value);
-      if (!choice) return;
-      this.qualityChoice = choice;
-      qualityUnsaved = !saveQualityChoice(choice);
-      syncNote();
-      qualityHooks.choose?.(choice);
-    });
-    const row = h(
-      'label',
-      { class: 'field field-select' },
-      icon('sliders', 18),
-      h('span', { class: 'field-label' }, UI_TEXT.graphics),
-      select,
-    );
-    // 터치 모드: 그래픽 줄 오른쪽에 설정 단추 (진동 · 프레임 제한 · 터치 안내 다시 보기)
-    if (this.settings) return [h('div', { class: 'row' }, row, this.settings.button()), note];
-    // PC: 그래픽 줄 오른쪽에 프레임 제한 (좁으면 다음 줄로), 그 아래 줄에 캐릭터 스타일
-    const frame = this.frameLimitField((saved) => {
-      frameUnsaved = !saved;
-      syncNote();
-    });
-    const style = this.charStyleField((saved) => {
-      styleUnsaved = !saved;
-      syncNote();
-    });
-    return [h('div', { class: 'row gfx-row' }, row, frame), h('div', { class: 'row' }, style), note];
-  }
-
-  /**
-   * 캐릭터 스타일 선택 상자 (PC 첫 화면, 그래픽 줄 아래): 기존 / 새 캐릭터. 고르면 바로 적용하고 저장한다(기존이면 저장값을 지움,
-   * gfx/charStyle.ts). 저장하지 못해도 이번 접속에는 적용되고, 그래픽 줄과 같은 '저장되지 않아요' 안내를 띄운다(onSaved).
-   * 그림만 바꾼다 — 서버로 보내지 않는다
-   */
-  private charStyleField(onSaved: (saved: boolean) => void): HTMLElement {
-    const select = h('select', { 'data-testid': 'char-style-select' });
-    const current = currentCharStyle();
-    for (const value of CHAR_STYLES) {
-      const opt = h('option', { value }, CHAR_STYLE_LABELS[value]);
-      if (value === current) opt.selected = true;
-      select.appendChild(opt);
-    }
-    select.addEventListener('change', () => {
-      const style = parseCharStyle(select.value);
-      if (!style) return;
-      onSaved(setCharStyle(style));
-    });
-    return h(
-      'label',
-      { class: 'field field-select field-chars' },
-      // 아이콘 없이 이름만 (프레임 제한 상자와 같다 — 눈 아이콘은 게임에서 '발각' 뜻이라 쓰지 않는다)
-      h('span', { class: 'field-label' }, UI_TEXT.charStyle),
-      select,
-    );
-  }
-
-  /** 지금 프레임 제한: 이번 접속에서 고른 값 > 저장값 > 자동 */
-  private frameLimitNow(): FrameLimit {
-    return this.frameLimitChoice ?? loadFrameLimit() ?? 'auto';
-  }
-
-  /** 프레임 제한을 고른다: 저장(자동이면 저장값을 지움) 뒤 바로 적용 (main.ts pacingHooks). 저장하지 못하면 false */
-  private chooseFrameLimit(limit: FrameLimit): boolean {
-    this.frameLimitChoice = limit;
-    const saved = saveFrameLimit(limit);
-    pacingHooks.setLimit?.(limit);
-    return saved;
-  }
-
-  /**
-   * 프레임 제한 선택 상자 (PC 첫 화면, 그래픽 줄 옆): 자동 / 60 / 120. 고르면 저장하고 바로 적용한다.
-   * 저장하지 못해도 이번 접속에는 적용되고, 그래픽 줄과 같은 '저장되지 않아요' 안내를 띄운다(onSaved)
-   */
-  private frameLimitField(onSaved: (saved: boolean) => void): HTMLElement {
-    const select = h('select', { 'data-testid': 'frame-limit-select', title: UI_TEXT.frameLimitHint });
-    const current = this.frameLimitNow();
-    for (const o of FRAME_LIMIT_OPTIONS) {
-      const opt = h('option', { value: o.value }, o.label);
-      if (o.value === current) opt.selected = true;
-      select.appendChild(opt);
-    }
-    select.addEventListener('change', () => {
-      const limit = parseFrameLimit(select.value);
-      if (!limit) return;
-      onSaved(this.chooseFrameLimit(limit));
-    });
-    return h(
-      'label',
-      { class: 'field field-select field-frame' },
-      h('span', { class: 'field-label' }, UI_TEXT.frameLimit),
-      select,
-    );
-  }
-
   /** 방 로비 (빠른 매칭 방이면 대기 화면) */
   renderRoom(lobby: LobbyState): void {
     if (this.lastRoom !== lobby.room) this.showError('');
     if (lobby.kind === 'quick') {
-      if (!this.atRoom) this.settings?.close();
       this.lastRoom = lobby.room;
       this.lastLobby = lobby;
       this.renderQuick(lobby);
       return;
     }
     this.quickCountdown = null;
-    // 첫 화면에서 넘어왔으면 열려 있던 설정 판을 닫는다 (같은 방 화면을 다시 그릴 때는 그대로)
-    if (!this.atRoom) this.settings?.close();
     this.lastRoom = lobby.room;
     this.lastLobby = lobby;
     const me = lobby.players.find((p) => p.id === this.you);
@@ -800,13 +632,7 @@ export class LobbyUI {
       UI_TEXT.roomLeave,
     );
     leave.addEventListener('click', () => this.actions.leaveRoom());
-    const buttons = h(
-      'div',
-      { class: 'action-row' },
-      leave,
-      ...(this.settings ? [this.settings.button()] : []),
-      ready,
-    );
+    const buttons = h('div', { class: 'action-row' }, leave, this.settings.button(), ready);
     if (isHost) {
       const start = h(
         'button',

@@ -31,6 +31,12 @@ import {
   type Capture,
 } from './visualProbe';
 
+/**
+ * 기존 캐릭터 그림을 재는 시험(가운데에서 잰 흰 폭 · 몸 탐침)은 기존 스타일로 연다 — 설정 화면 통합에서 기본값이 새 캐릭터가 됐다.
+ * 새 캐릭터의 흰색 위장은 '캐릭터 스타일과 무관한 흰색 위장'이 바깥 폭으로 잰다
+ */
+const CLASSIC = '&chars=classic';
+
 /** 판 중 캐릭터 스타일을 바꾸고, 그 스타일 아틀라스를 실제로 올릴 때까지 기다린다 (설정 · 디버그 훅과 같은 경로) */
 async function useCharStyle(page: Page, style: 'classic' | 'new'): Promise<void> {
   await page.evaluate((s) => window.__DECOY__?.setCharStyle(s), style);
@@ -169,7 +175,7 @@ test(
   '괴물 화면 흰색 위장: 부채꼴 · 근접 원 · 공격 범위 안에서도 흰 공통 실루엣, 능력 노출 1초만 역할색 테두리 + 문양',
   { tag: '@core' },
   async ({ browser }) => {
-    const q = '&quality=low';
+    const q = `&quality=low${CLASSIC}`;
     const { players } = await startFourPlayerMatch(browser, undefined, [q, q, q, q]);
     const p = roles(players);
     const host = p.monster.page;
@@ -354,7 +360,7 @@ test(
 test('생존자 화면 역할색 유지: 빛 바닥 · 빨강 · 노랑 부채꼴 · 공격 범위 안에서 팀원 몸 ΔE ≤ 15, 몸/바깥 링 대비 3:1 — 기존 · 새 캐릭터 두 스타일', async ({
   browser,
 }) => {
-  const q = '&quality=low';
+  const q = `&quality=low${CLASSIC}`;
   const { players } = await startFourPlayerMatch(browser, undefined, [q, q, q, q]);
   const p = roles(players);
   const host = p.monster.page;
@@ -535,7 +541,7 @@ async function qualityRun(
   features: Record<string, unknown>;
   problems: string[];
 }> {
-  const q = `&quality=${quality}`;
+  const q = `&quality=${quality}${CLASSIC}`;
   const { players } = await startFourPlayerMatch(browser, undefined, [q, q, q, q]);
   const p = roles(players);
   const host = p.monster.page;
@@ -644,7 +650,7 @@ test('품질 높음 · 중간 · 낮음: 정보 레이어 · 그린 엔티티가
 test('노출 문양 · 기절 별 · 기절 채도 감소는 다른 캐릭터 몸 · 노출 링을 덮지 않는다 (괴물 화면 · 생존자 화면)', async ({
   browser,
 }) => {
-  const q = '&quality=low';
+  const q = `&quality=low${CLASSIC}`;
   const { players } = await startFourPlayerMatch(browser, undefined, [q, q, q, q]);
   const p = roles(players);
   const host = p.monster.page;
@@ -789,7 +795,7 @@ test('노출 문양 · 기절 별 · 기절 채도 감소는 다른 캐릭터 �
 test('부채꼴 가장자리 선 · 괴물 화면 자기 시야 테두리는 캐릭터 접지 그림자 둘레에서도 끊기지 않는다', async ({
   browser,
 }) => {
-  const q = '&quality=low';
+  const q = `&quality=low${CLASSIC}`;
   const { players } = await startFourPlayerMatch(browser, undefined, [q, q, q, q]);
   const p = roles(players);
   const host = p.monster.page;
@@ -902,7 +908,7 @@ test('부채꼴 가장자리 선 · 괴물 화면 자기 시야 테두리는 캐
 test('가드 밀치기 사거리: 거리 안이어도 철창이 가로막으면 in이 아니라 blocked (서버는 빗나감)', async ({
   browser,
 }) => {
-  const q = '&quality=low';
+  const q = `&quality=low${CLASSIC}`;
   const { players } = await startFourPlayerMatch(browser, undefined, [q, q, q, q]);
   const p = roles(players);
   const host = p.monster.page;
@@ -961,7 +967,7 @@ test('가드 밀치기 사거리: 거리 안이어도 철창이 가로막으면 
 test('프레임이 1.5초씩 걸리는 느린 기기에서도 생존자 화면에 괴물 공격 예고가 한 번은 그려진다 (늦게 처리한 이벤트를 버리지 않음)', async ({
   browser,
 }) => {
-  const q = '&quality=low';
+  const q = `&quality=low${CLASSIC}`;
   const { players } = await startFourPlayerMatch(browser, undefined, [q, q, q, q]);
   const p = roles(players);
   const host = p.monster.page;

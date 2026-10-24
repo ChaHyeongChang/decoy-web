@@ -32,7 +32,7 @@ const BUDGET = JSON.parse(
 export function budgetTests(project: 'canvas' | 'webgl'): void {
   for (const sc of WORK_SCENES.filter((s) => s.project === project && s.budget)) {
     const base = BUDGET.scenes[sc.name];
-    const pairName = sc.chars ? sc.name.replace(/-new$/, '') : null;
+    const pairName = sc.chars === 'new' ? sc.name.replace(/-new$/, '') : null;
     const pair = pairName ? BUDGET.scenes[pairName] : undefined;
     const at = BUDGET.sceneAt?.[sc.name] ?? BUDGET.measuredAt;
     const pairNote = pairName ? `, 기존 장면 ${pairName} 기준 × ${BUDGET.margin}도` : '';

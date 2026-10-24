@@ -179,6 +179,14 @@
 .tt-knob {
   fill: currentColor;
 }
+/* 바꾼 조작 배치를 그렸다는 한 줄 (그림 밑) */
+.tt-custom {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.3;
+  text-align: center;
+}
 /* 그림 번호: 그림 위에 얹은 HTML 배지 (그림 배율과 상관없이 CSS 12px, 목록 번호와 같은 모양) */
 .tt-badge {
   position: absolute;
@@ -243,6 +251,12 @@
   counter-increment: tt;
 }
 /* 그림의 번호와 같은 모양 (색만으로 잇지 않고 숫자로 잇는다) */
+.tt-edge {
+  margin: 8px 0 0 29px;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.4;
+}
 .tt-list li::before {
   content: counter(tt);
   display: inline-flex;
@@ -260,11 +274,7 @@
   transform: translateY(-1px);
 }
 
-/* ───── 설정 단추 · 설정 판 (터치 모드에서만 만든다) ───── */
-/* 설정 판이 열린 동안은 판 직전 안내를 잠깐 숨긴다 (둘 다 명령 줄 위에 떠서 겹친다) */
-.lobby:has(> .life-settings:not([hidden])) .life-tutorial {
-  visibility: hidden;
-}
+/* ───── 설정 단추 (설정 화면 통합: 첫 화면 · 방 화면 · 빠른 매칭 대기, PC · 터치) ───── */
 .btn.life-gear {
   flex: none;
   gap: 6px;
@@ -278,45 +288,7 @@
   min-width: 0;
   font-size: 15px;
 }
-.btn.life-gear[aria-expanded='true'] {
-  --ring: var(--neon);
-  background-color: var(--well);
-}
-.life-settings {
-  --ring: var(--neon-dim);
-  background-color: var(--panel);
-  position: fixed;
-  z-index: 30;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  /* 좌우 안전 영역(노치)을 뺀다 — place()도 안전 영역 안(.lobby)에 둔다 */
-  width: min(340px, calc(100vw - 16px - var(--sa-l) - var(--sa-r)));
-  padding: 14px 16px 16px;
-  animation: life-in 0.14s ease-out;
-}
-/* 설정 판 줄 묶음 (기기 설정 / 보기 설정): 보통은 상자가 없는 것처럼 한 열, 낮은 가로 화면에서 두 열 (아래 미디어 쿼리) */
-.life-col {
-  display: contents;
-}
-.life-settings-title {
-  margin: 0;
-  color: var(--neon-text);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-}
-.life-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.life-row .field-label {
-  color: var(--text);
-  font-size: 15px;
-}
-/* 켜기 / 끄기: 고른 쪽 = 청록 바탕 + ✓ (색만으로 구분하지 않기) */
+/* 켜기 / 끄기 · 고르는 칸 (설정 화면 settings.css가 쓴다): 고른 쪽 = 청록 바탕 + ✓ (색만으로 구분하지 않기) */
 .segs {
   --cut: 6px;
   --ring: #24475a;
@@ -366,19 +338,9 @@
   outline: 2px solid var(--neon);
   outline-offset: -2px;
 }
-/* 캐릭터 스타일 (기존 · 새 캐릭터): '캐릭터 스타일' 이름과 한 줄로 들게 프레임 제한 칸과 같은 폭 */
-.life-style .seg {
-  min-width: 64px;
-  padding: 0 10px;
-}
 .life-replay {
   width: 100%;
   font-size: 15px;
-}
-/* 한 열(묶음 상자가 display: contents): 판 직속 저장 실패 안내가 설정 줄 다음, 안내 다시 보기 앞에 오게 */
-.life-replay,
-.life-done {
-  order: 1;
 }
 .life-done {
   display: flex;
@@ -427,39 +389,6 @@
     width: 44px;
     height: 44px;
   }
-  /* 설정 판: 줄 묶음 두 개를 나란히 (한 열이면 가장 낮은 휴대폰 802×293에서 화면을 넘는다) */
-  .life-settings.life-two {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    column-gap: 0;
-    row-gap: 10px;
-    width: min(680px, calc(100vw - 16px - var(--sa-l) - var(--sa-r)));
-  }
-  .life-two > .life-settings-title {
-    grid-column: 1 / -1;
-  }
-  .life-two > .life-col {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    min-width: 0;
-  }
-  .life-two > .life-col:first-of-type {
-    padding-right: 14px;
-  }
-  .life-two > .life-col + .life-col {
-    padding-left: 14px;
-    border-left: 1px solid var(--edge);
-  }
-  /* 저장 실패 안내: 두 열 아래 한 줄 전체 */
-  .life-two > .quality-note {
-    grid-column: 1 / -1;
-  }
-  /* 칸이 좁으면(아주 좁은 가로 화면) 이름 아래로 단추를 내린다 */
-  .life-two .life-row {
-    flex-wrap: wrap;
-    row-gap: 4px;
-  }
   .tt-list {
     gap: 3px;
   }
@@ -467,6 +396,11 @@
     gap: 7px;
     font-size: 13px;
     line-height: 1.42;
+  }
+  .tt-edge {
+    margin: 3px 0 0 25px;
+    font-size: 12px;
+    line-height: 1.35;
   }
   .tt-list li::before {
     width: 18px;
@@ -481,8 +415,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .life-modal:not([hidden]) .life-card,
-  .life-tutorial.life-enter,
-  .life-settings {
+  .life-tutorial.life-enter {
     animation: none;
   }
 }

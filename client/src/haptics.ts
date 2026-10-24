@@ -3,7 +3,7 @@
 // (크롬이 막고 콘솔에 개입 경고를 낸다). 숨겨져 있거나, 숨김에서 돌아와 서버 시계를 다시 맞추기 전에도 울리지 않는다
 // (기기가 잠들면 performance.now가 멈춰 '지난 시간'을 믿을 수 없다). 로비 설정에서 끌 수 있다(STORAGE_KEYS.haptics).
 // 판 장면(GameScene)은 hit · spotted만 부른다. 판단은 순수 함수 hapticAllowed(tests/unit/haptics.test.ts)
-import { readKey, writeKey } from './storageKeys';
+import { readKey, removeKey, writeKey } from './storageKeys';
 
 /** 이보다 오래된 일(서버 시각 기준)에는 울리지 않는다 (ms) */
 export const HAPTIC_MAX_AGE_MS = 2000;
@@ -77,6 +77,14 @@ export class Haptics {
   setEnabled(on: boolean): boolean {
     this.choice = on;
     return writeKey('haptics', on ? '1' : '0');
+  }
+
+  /** 설정을 기본값(켜짐)으로: 저장값을 지운다 (설정 화면 '기본값'). 지우지 못하면 false (이번 접속에는 켜짐) */
+  resetSetting(): boolean {
+    this.choice = null;
+    const ok = removeKey('haptics');
+    if (!ok) this.choice = true;
+    return ok;
   }
 
   /** 내가 맞았다. ageMs = 그 일이 일어난 뒤 지난 시간(서버 시각 기준, 모르면 0) */

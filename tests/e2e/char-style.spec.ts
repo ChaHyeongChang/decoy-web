@@ -1,7 +1,7 @@
 // 캐릭터 스타일 설정 (캐릭터 리디자인 2단계, client/src/gfx/charStyle.ts · ui/lobby.ts · ui/result.ts):
-//  - PC 첫 화면: 그래픽 · 프레임 제한 줄 아래에 '캐릭터 스타일' 선택 상자(기존 · 새 캐릭터), 960×540 · 1280×720 첫 화면 안.
-//    기본은 기존. 새 캐릭터를 고르면 decoy:charStyle = 'new'로 저장하고 바로 적용, 새로고침 뒤에도 그대로, 기존이면 저장값을 지운다
-//  - 저장소가 막혀도 이번 접속에는 적용되고, 그래픽 줄과 같은 '저장되지 않아요' 안내 하나
+//  - 설정 화면(설정 화면 통합) 그래픽 탭 '캐릭터 스타일'(새 캐릭터 · 기존), 960×540 · 1280×720 화면 안. 기본은 새 캐릭터.
+//    고르면 decoy:charStyle에 저장하고 바로 적용, 새로고침 뒤에도 그대로, '기본값'으로 되돌리면 저장값을 지운다
+//  - 저장소가 막혀도 이번 접속에는 적용되고, '저장되지 않아요' 안내 하나. 주소 ?chars가 있으면 그 값이 우선이고 줄이 잠긴다
 //  - 방 역할 카드 · 연습 역할 고르기 · 빠른 매칭 대기의 역할 그림: 새 캐릭터면 정면 그림('front' 클래스, 그림 하나 = svg 하나),
 //    기존이면 위에서 본 실루엣. 방 · 대기 화면에서 스타일이 바뀌면 카드를 바로 다시 그린다(대기 남은 시간 글자는 비지 않는다)
 //  - 새 캐릭터 내 역할 카드: 좁은 휴대폰(658×320) · 좁은 창에서 '내 역할' 배지가 정면 그림 머리를 가리지 않는다(그림을 비켜 세움)
@@ -14,6 +14,8 @@ import { STORAGE_KEYS } from '../../client/src/storageKeys';
 import {
   BASE_QUERY,
   PC_NARROW,
+  closeSettings,
+  openSettings,
   PHONE_LANDSCAPE,
   PHONE_NARROW,
   PHONE_SMALL,
@@ -61,7 +63,7 @@ async function expectFigures(boxes: Locator, front: boolean, label: string): Pro
   return info.length;
 }
 
-test('PC 첫 화면: 그래픽 · 프레임 제한 줄 아래 캐릭터 스타일(기존 · 새 캐릭터), 기본 기존 · 고르면 저장하고 바로 적용 · 새로고침 뒤 그대로 · 기존이면 저장값 삭제', async ({
+test('설정 화면 그래픽 탭: 캐릭터 스타일(새 캐릭터 · 기존), 기본 새 캐릭터 · 고르면 저장하고 바로 적용 · 새로고침 뒤 그대로 · 기본값으로 되돌리면 저장값 삭제', async ({
   browser,
 }) => {
   for (const viewport of [
@@ -71,72 +73,71 @@ test('PC 첫 화면: 그래픽 · 프레임 제한 줄 아래 캐릭터 스타�
     const { context, page, problems } = await newPlayerPage(browser, { viewport });
     const label = `${viewport.width}×${viewport.height}`;
     await page.goto(`/?${BASE_QUERY.slice(1)}`);
-    const select = page.getByTestId('char-style-select');
-    await expect(select, label).toBeInViewport({ ratio: 1 });
-    // 그래픽 · 프레임 제한은 그대로 한 줄, 캐릭터 스타일은 그 아래 줄 (같은 선택 상자 모양 · 높이)
-    const field = (testId: string): Locator =>
-      page.locator('label.field-select', { has: page.getByTestId(testId) });
-    const q = (await field('quality-select').boundingBox())!;
-    const f = (await field('frame-limit-select').boundingBox())!;
-    const c = (await field('char-style-select').boundingBox())!;
-    expect(Math.abs(q.y - f.y), `${label} 그래픽 · 프레임 제한 같은 줄`).toBeLessThan(1);
-    expect(c.y, `${label} 아래 줄`).toBeGreaterThanOrEqual(q.y + q.height);
-    expect(Math.abs(c.height - q.height), `${label} 같은 높이`).toBeLessThan(1);
-    await expect(field('char-style-select')).toContainText(UI_TEXT.charStyle);
-    expect(
-      await select.locator('option').evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value)),
-    ).toEqual(['classic', 'new']);
-    await expect(select.locator('option')).toHaveText([UI_TEXT.charStyleClassic, UI_TEXT.charStyleNew]);
-    await expect(select).toHaveValue('classic');
+    // 예전 PC 첫 화면 선택 상자는 없다 (설정 화면 하나)
+    await expect(page.locator('select')).toHaveCount(0);
+    await page.getByTestId('name-input').fill('스타일');
+    await openSettings(page, 'graphics');
+    const row = page.getByTestId('row-char-style');
+    await expect(row, label).toBeInViewport({ ratio: 1 });
+    await expect(row).toContainText(UI_TEXT.charStyle);
+    await expect(row.locator('.seg')).toHaveText([UI_TEXT.charStyleNew, UI_TEXT.charStyleClassic]);
+    await expect(page.getByTestId('char-style-new')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('reset-char-style')).toBeDisabled();
     expect(await stored(page)).toBeNull();
-    expect(await applied(page)).toBe('classic');
+    expect(await applied(page)).toBe('new');
     if (viewport.width !== 960) {
       expect(problems, label).toEqual([]);
       await context.close();
       continue;
     }
-    // 새 캐릭터 → 저장 + 바로 적용 (첫 화면은 다시 그리지 않는다: 입력한 이름이 남는다)
-    await page.getByTestId('name-input').fill('스타일');
-    await select.selectOption('new');
-    await expect.poll(() => applied(page)).toBe('new');
-    expect(await stored(page)).toBe('new');
-    await expect(page.getByTestId('name-input')).toHaveValue('스타일');
+    // 기존 → 저장 + 바로 적용 (첫 화면은 다시 그리지 않는다: 입력한 이름이 남는다)
+    await press(page.getByTestId('char-style-classic'));
+    await expect.poll(() => applied(page)).toBe('classic');
+    expect(await stored(page)).toBe('classic');
+    await expect(page.getByTestId('char-style-classic')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('reset-char-style')).toBeEnabled();
     await expect(page.getByTestId('quality-note')).toBeHidden();
-    // 연습 역할 고르기: 정면 그림 넷
+    await closeSettings(page);
+    await expect(page.getByTestId('name-input')).toHaveValue('스타일');
+    // 연습 역할 고르기: 위에서 본 실루엣 넷
     await page.getByTestId('practice').click();
     await expect(page.getByTestId('practice-picker')).toBeVisible();
-    expect(await expectFigures(page.locator('.pr-figure'), true, '연습 고르기')).toBe(4);
-    // 고르기가 열린 채 바뀌어도(디버그 훅 — 저장하지 않음) 그림을 맞춘다
-    await page.evaluate(() => window.__DECOY__?.setCharStyle('classic'));
     expect(await expectFigures(page.locator('.pr-figure'), false, '연습 고르기 (기존)')).toBe(4);
-    expect(await stored(page)).toBe('new');
+    // 고르기가 열린 채 바뀌어도(디버그 훅 — 저장하지 않음) 그림을 맞춘다
     await page.evaluate(() => window.__DECOY__?.setCharStyle('new'));
+    expect(await expectFigures(page.locator('.pr-figure'), true, '연습 고르기')).toBe(4);
+    expect(await stored(page)).toBe('classic');
+    await page.evaluate(() => window.__DECOY__?.setCharStyle('classic'));
     await page.getByTestId('practice-cancel').click();
     // 새로고침: 저장값으로 시작한다
     await page.reload();
-    await expect(page.getByTestId('char-style-select')).toHaveValue('new');
-    expect(await applied(page)).toBe('new');
-    // 기존: 저장값을 지운다
-    await page.getByTestId('char-style-select').selectOption('classic');
-    await expect.poll(() => applied(page)).toBe('classic');
-    expect(await stored(page)).toBeNull();
-    await page.reload();
-    await expect(page.getByTestId('char-style-select')).toHaveValue('classic');
     expect(await applied(page)).toBe('classic');
+    await openSettings(page, 'graphics');
+    await expect(page.getByTestId('char-style-classic')).toHaveAttribute('aria-pressed', 'true');
+    // 기본값: 저장값을 지우고 새 캐릭터
+    await press(page.getByTestId('reset-char-style'));
+    await expect.poll(() => applied(page)).toBe('new');
+    expect(await stored(page)).toBeNull();
+    await expect(page.getByTestId('char-style-new')).toHaveAttribute('aria-pressed', 'true');
+    await page.reload();
+    expect(await applied(page)).toBe('new');
     await expect(page.getByTestId('quality-note')).toBeHidden();
     expect(problems, label).toEqual([]);
     await context.close();
   }
 });
 
-test('터치: 첫 화면에는 캐릭터 스타일 선택 상자가 없다 (프레임 제한처럼 설정 판이 맡는다)', async ({
+test('터치: PC와 같은 설정 화면 (그래픽 탭에 품질 · 프레임 제한 · 캐릭터 스타일), 첫 화면에 선택 상자가 없다', async ({
   browser,
 }) => {
   const { context, page, problems } = await newPlayerPage(browser, dpr1(PHONE_LANDSCAPE));
   await page.goto(`/?${BASE_QUERY.slice(1)}`);
-  await expect(page.getByTestId('quality-select')).toBeVisible();
-  await expect(page.getByTestId('settings-button')).toBeVisible();
-  await expect(page.getByTestId('char-style-select')).toHaveCount(0);
+  await expect(page.locator('select')).toHaveCount(0);
+  await expect(page.getByTestId('settings-button')).toBeInViewport({ ratio: 1 });
+  await openSettings(page, 'graphics');
+  for (const id of ['row-quality', 'row-frame-limit', 'row-char-style'])
+    await expect(page.getByTestId(id), id).toBeVisible();
+  await expect(page.getByTestId('char-style-new')).toHaveAttribute('aria-pressed', 'true');
   expect(problems).toEqual([]);
   await context.close();
 });
@@ -155,40 +156,51 @@ test('저장소가 막힌 브라우저: 고른 캐릭터 스타일이 이번 접
     });
   });
   await page.goto(`/?${BASE_QUERY.slice(1)}`);
-  const select = page.getByTestId('char-style-select');
-  await expect(select).toHaveValue('classic');
+  await openSettings(page, 'graphics');
+  await expect(page.getByTestId('char-style-new')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('quality-note')).toBeHidden();
-  await select.selectOption('new');
-  await expect.poll(() => applied(page)).toBe('new');
+  await press(page.getByTestId('char-style-classic'));
+  await expect.poll(() => applied(page)).toBe('classic');
   await expect(page.getByTestId('quality-note')).toBeVisible();
   await expect(page.getByTestId('quality-note')).toContainText(UI_TEXT.qualityNotSaved);
   // 프레임 제한도 저장하지 못해도 안내는 하나
-  await page.getByTestId('frame-limit-select').selectOption('60');
+  await press(page.getByTestId('frame-limit-60'));
   await expect(page.locator('[data-testid="quality-note"]:visible')).toHaveCount(1);
+  await closeSettings(page);
   // 첫 화면을 다시 그려도(연습 고르기 → 취소) 이번 접속에서 고른 값, 연습 고르기 그림도 그 값
   await page.getByTestId('practice').click();
-  expect(await expectFigures(page.locator('.pr-figure'), true, '연습 고르기')).toBe(4);
+  expect(await expectFigures(page.locator('.pr-figure'), false, '연습 고르기')).toBe(4);
   await page.getByTestId('practice-cancel').click();
-  await expect(page.getByTestId('char-style-select')).toHaveValue('new');
-  expect(await applied(page)).toBe('new');
+  await openSettings(page, 'graphics');
+  await expect(page.getByTestId('char-style-classic')).toHaveAttribute('aria-pressed', 'true');
+  expect(await applied(page)).toBe('classic');
   expect(problems).toEqual([]);
   await context.close();
 });
 
-test('주소 ?chars가 저장값보다 먼저이고 저장값을 바꾸지 않는다 (저장 새 캐릭터 + ?chars=classic → 기존, 주소 없이 다시 열면 저장값)', async ({
+test('주소 ?chars가 저장값보다 먼저이고(설정 화면 줄이 잠기고 그 사실을 보인다) 저장값을 바꾸지 않는다 (저장 기존 + ?chars=new → 새 캐릭터, 주소 없이 다시 열면 저장값)', async ({
   browser,
 }) => {
   const { context, page, problems } = await newPlayerPage(browser);
   await page.goto(`/?${BASE_QUERY.slice(1)}`);
-  await page.evaluate((k) => localStorage.setItem(k, 'new'), KEY);
-  await page.goto(`/?${BASE_QUERY.slice(1)}&chars=classic`);
-  await expect.poll(() => applied(page)).toBe('classic');
-  await expect(page.getByTestId('char-style-select')).toHaveValue('classic');
-  expect(await stored(page)).toBe('new');
+  await page.evaluate((k) => localStorage.setItem(k, 'classic'), KEY);
+  await page.goto(`/?${BASE_QUERY.slice(1)}&chars=new`);
+  await expect.poll(() => applied(page)).toBe('new');
+  await openSettings(page, 'graphics');
+  await expect(page.getByTestId('char-style-new')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('lock-char-style')).toBeVisible();
+  await expect(page.getByTestId('lock-char-style')).toContainText('?chars=new');
+  await expect(page.getByTestId('char-style-classic')).toHaveAttribute('aria-disabled', 'true');
+  // 잠긴 줄은 눌러도 바뀌지 않는다
+  await page.getByTestId('char-style-classic').click({ force: true });
+  expect(await applied(page)).toBe('new');
+  expect(await stored(page)).toBe('classic');
   // 주소 값 없이 다시 열면 저장값
   await page.goto(`/?${BASE_QUERY.slice(1)}`);
-  await expect.poll(() => applied(page)).toBe('new');
-  expect(await stored(page)).toBe('new');
+  await expect.poll(() => applied(page)).toBe('classic');
+  expect(await stored(page)).toBe('classic');
+  await openSettings(page, 'graphics');
+  await expect(page.getByTestId('lock-char-style')).toBeHidden();
   expect(problems).toEqual([]);
   await context.close();
 });
@@ -226,9 +238,8 @@ test('방 역할 카드 · 빠른 매칭 대기: 새 캐릭터면 정면 그림(
   browser,
 }) => {
   const { context, page, problems } = await newPlayerPage(browser);
-  // 첫 화면에서 새 캐릭터를 고르고 방을 만든다
+  // 기본값(새 캐릭터)으로 방을 만든다
   await page.goto(`/?${BASE_QUERY.slice(1)}`);
-  await page.getByTestId('char-style-select').selectOption('new');
   await page.getByTestId('create-room').click();
   await expect(page.getByTestId('room-code')).toHaveText(/^[A-Z]{4}$/);
   const figures = page.locator('.role-card .rc-figure');
@@ -245,7 +256,8 @@ test('방 역할 카드 · 빠른 매칭 대기: 새 캐릭터면 정면 그림(
   await expect(page.getByTestId('role-runner')).toHaveClass(/mine/);
   await expect(page.getByTestId('role-runner').locator('.rc-tag')).toBeVisible();
   await expect(page.getByTestId('role-guard')).toBeFocused();
-  expect(await stored(page)).toBe('new');
+  // 디버그 훅은 저장하지 않는다 (기본값이라 처음부터 저장값 없음)
+  expect(await stored(page)).toBeNull();
   await page.evaluate(() => window.__DECOY__?.setCharStyle('new'));
   expect(await expectFigures(figures, true, '방 카드 (다시 새 캐릭터)')).toBe(4);
 
@@ -265,8 +277,9 @@ test('방 역할 카드 · 빠른 매칭 대기: 새 캐릭터면 정면 그림(
   expect(await expectFigures(figures, false, '대기 카드 (기존)')).toBe(4);
   await page.getByTestId('quick-cancel').click();
   await expect(page.getByTestId('quick-match')).toBeVisible();
-  // 첫 화면 선택 상자도 지금 값 (디버그 훅으로 바꾼 값)
-  await expect(page.getByTestId('char-style-select')).toHaveValue('classic');
+  // 설정 화면도 지금 값 (디버그 훅으로 바꾼 값)
+  await openSettings(page, 'graphics');
+  await expect(page.getByTestId('char-style-classic')).toHaveAttribute('aria-pressed', 'true');
   expect(problems).toEqual([]);
   await context.close();
 });

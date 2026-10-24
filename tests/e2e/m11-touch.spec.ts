@@ -63,8 +63,9 @@ const DOWN_LANE = { x: 40.5, y: 10.5 };
 /** 오른쪽으로 곧게 트인 줄: y 24.5, x 1 → 22 */
 const RIGHT_LANE = { x: 4.5, y: 24.5 };
 
-const MONSTER_TARGETS = ['move-zone', 'aim-stick', 'dash', 'roar', 'mode', 'scoreboard'];
-const SURVIVOR_TARGETS = ['move-zone', 'ability', 'rescue', 'scoreboard'];
+// 'menu' = 판 중 설정 버튼 (설정 화면 통합, 점수판 왼쪽 시스템 버튼 — 같은 크기 · 간격 규칙)
+const MONSTER_TARGETS = ['move-zone', 'aim-stick', 'dash', 'roar', 'mode', 'scoreboard', 'menu'];
+const SURVIVOR_TARGETS = ['move-zone', 'ability', 'rescue', 'scoreboard', 'menu'];
 
 /**
  * 이 페이지가 터치 HUD에 전체 화면 버튼을 낼 수 있는가 (앱의 canOfferFullscreen과 같은 조건: 터치 모드 + 브라우저 안 +

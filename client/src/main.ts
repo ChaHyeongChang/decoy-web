@@ -6,6 +6,7 @@ import { PRACTICE_BALANCE } from './localServer';
 import { sfx } from './audio';
 import { installDebug } from './debug';
 import { canOfferFullscreen, device, enterFullscreen, initDevice, onDeviceChange } from './device';
+import { matchTuning } from './controlLayout';
 import { initCharStyle, onCharStyleChange } from './gfx/charStyle';
 import { Pacer, loadFrameLimit, pacingHooks, patchTimeStep, targetHzFor } from './gfx/framePacing';
 import { sessionFrameStats } from './gfx/frameStats';
@@ -50,11 +51,16 @@ import {
   setRenderScale,
 } from './ui/layout';
 import { drawProbeText, relayoutAll, retextAll } from './ui/text';
+import { matchMenu } from './matchMenu';
+import { audioLevelsOf, onPrefsChange, uiScaleOf } from './prefs';
+import { initSettingsUrl } from './settingsModel';
 
 /** 창 크기 · DPR이 바뀐 뒤 백버퍼를 다시 만들 때까지 기다리는 시간 (끌어서 바꾸는 동안 매번 만들지 않게) */
 const RESIZE_DEBOUNCE_MS = 150;
 
 const params = readParams(window.location.search);
+// 설정 화면: 주소 옵션(?quality · ?fpsLimit — ?chars는 initCharStyle)이 이번 접속에 우선한다 (그 줄을 잠그고 알린다)
+initSettingsUrl({ quality: params.quality, fpsLimit: params.fpsLimit });
 // 카메라 확대 수준 (판 내내 고정, 플레이어가 바꿀 수 없다). ?cam은 로컬 주소에서만(시험 · 촬영): 그림 굽기가 읽기 전에 정한다
 setCamZoom(
   params.cam !== null && camOverrideAllowed(window.location.hostname) ? params.cam : DEFAULT_CAM_ZOOM,
@@ -519,6 +525,27 @@ qualityHooks.auto = (a) => {
 // 효과음: 첫 클릭 · 키 입력 · 탭에서 오디오를 연다 (브라우저 자동 재생 규칙, 터치는 손을 뗄 때)
 sfx.attachUnlock(document);
 
+// ───────────── 설정 화면 (설정 화면 통합) ─────────────
+// 소리 세기 · UI 크기: 지금 값으로 맞추고, 바뀔 때마다 바로 (UI 크기는 DOM 화면 --ui-zoom. 터치 판 HUD는 다음 판 배치에서)
+function applyPrefs(): void {
+  sfx.setLevels(audioLevelsOf());
+  document.documentElement.style.setProperty('--ui-zoom', String(uiScaleOf()));
+}
+applyPrefs();
+onPrefsChange(applyPrefs);
+// 판 중 설정 (메뉴 버튼 · Esc): 판 장면이 떠 있을 때만. 판은 멈추지 않는다 — 판 장면이 열려 있는 동안 입력을 받지 않는다
+matchMenu.open = () => {
+  if (game.scene.isActive('game')) app.settings.open('match');
+};
+matchMenu.close = () => {
+  if (app.settings.context === 'match') app.settings.close();
+};
+matchMenu.isOpen = () => app.settings.isOpen && app.settings.context === 'match';
+app.subscribe((e) => {
+  // 판이 끝나면(결과 · 로비) 판 중 설정을 닫는다
+  if (e.kind === 'result' || (e.kind === 'lobby' && e.lobby.phase === 'lobby')) matchMenu.close?.();
+});
+
 // 세로 안내(index.html 정적 마크업)의 "전체 화면" 버튼: 터치 모드이고 브라우저 안일 때만. 누르면 전체 화면 + 가로 고정
 const rotateFs = document.getElementById('rotate-fullscreen');
 if (rotateFs && canOfferFullscreen()) {
@@ -637,12 +664,16 @@ function settleViewport(): Promise<void> {
 
 /**
  * 판 배치를 정하고(PC는 언제나 1920×1080) 논리 크기가 바뀌었으면 백버퍼 · 카메라를 다시 맞춘다.
- * 판 장면을 만들기 직전과 터치 로비의 미리 굽기 앞에서만 부른다(판 중 크기 변화는 논리 크기를 두고 zoom만 다시 맞춘다)
+ * 판 장면을 만들기 직전과 터치 로비의 미리 굽기 앞에서만 부른다(판 중 크기 변화는 논리 크기를 두고 zoom만 다시 맞춘다).
+ * 터치는 내 역할 팀(판 중이면 판 역할, 로비면 고른 역할, 모르면 생존자)의 배치 조정: 조이스틱 크기 · UI 크기 설정, 저장한 조작
+ * 배치의 좌우 반전, 판 중 설정 버튼 자리(시스템 버튼 세 칸)
  */
 function applyMatchLayout(force = false): void {
   const r = gameRoot.getBoundingClientRect();
   const before = layout();
-  const next = configureLayout(r.width, r.height, device.touch);
+  const role = app.match?.role ?? app.lobby?.players.find((p) => p.id === app.you)?.role ?? null;
+  const tuning = device.touch ? matchTuning(role === 'monster' ? 'monster' : 'survivor') : undefined;
+  const next = configureLayout(r.width, r.height, device.touch, tuning);
   gfxState.layout = next.kind;
   gfxState.viewW = next.viewW;
   gfxState.viewH = next.viewH;

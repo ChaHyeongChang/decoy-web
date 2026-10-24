@@ -9,6 +9,7 @@
   "deploy-wake.spec.ts": 75,
   "frame-independence.spec.ts": 65,
   "frame-limit.spec.ts": 45,
+  "layout-editor.spec.ts": 40,
   "m1-sync.spec.ts": 15,
   "m10-fog.spec.ts": 18,
   "m10-fog.webgl.spec.ts": 625,
@@ -47,6 +48,9 @@
   "m9-screens.spec.ts": 3,
   "perf-budget.spec.ts": 60,
   "perf-budget.webgl.spec.ts": 80,
+  "play-settings.spec.ts": 50,
+  "settings-match.spec.ts": 55,
+  "settings.spec.ts": 35,
   "smoke.spec.ts": 1,
   "smooth-motion.spec.ts": 15
 }
