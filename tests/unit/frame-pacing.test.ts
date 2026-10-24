@@ -8,6 +8,7 @@ import {
   FRAME_LIMIT_STORAGE_KEY,
   FrameLimiter,
   IDLE_CAP_HZ,
+  InputBoost,
   LIMITER,
   Pacer,
   REFRESH,
@@ -795,6 +796,53 @@ describe('Pacer (주사율 재기 + 제한기 + 판 없음 30fps)', () => {
       expect(p.displayHz, label).toBe(hz);
       expect(Object.keys(got), label).toEqual([String(n)]);
     }
+  });
+
+  it('입력 반응(boost): 판 중 누른 뒤 50ms는 매 rAF 그리고, 그 뒤 마지막으로 그린 rAF부터 다시 n칸 · 판 밖에서는 무시', () => {
+    expect(LIMITER.boostMs).toBe(50);
+    const p = new Pacer('60');
+    feed(p, ticks(120, 1500, { t0: 0 }));
+    p.setIdle(false);
+    const ts = ticks(120, 1000, { t0: 1500 });
+    const drawn: number[] = [];
+    ts.forEach((t, i) => {
+      if (i === 20) p.boost(t - 1);
+      if (p.onTick(t)) drawn.push(i);
+    });
+    // 누른 뒤 50ms(6칸) 동안 매 칸, 그 앞뒤는 두 칸마다
+    const steps = gaps(drawn);
+    const boosted = drawn.filter((i) => i >= 20 && ts[i]! < ts[20]! - 1 + 50);
+    expect(gaps(boosted).every((g) => g === 1)).toBe(true);
+    expect(boosted.length).toBe(6);
+    const after = drawn.filter((i) => i > boosted[boosted.length - 1]!);
+    expect(after[0]! - boosted[boosted.length - 1]!).toBe(2);
+    expect(gaps(after).every((g) => g === 2)).toBe(true);
+    expect(steps.filter((g) => g !== 1 && g !== 2)).toEqual([]);
+    // 판 밖: 무시 (30fps 그대로)
+    const idle = new Pacer();
+    feed(idle, ticks(120, 1500, { t0: 0 }));
+    idle.setIdle(true);
+    idle.boost(1499);
+    expect(feed(idle, ticks(120, 100, { t0: 1500 }))).toBeLessThanOrEqual(4);
+  });
+
+  it('InputBoost: 아무것도 누르지 않은 상태에서 처음 누를 때 · 마지막으로 뗄 때만 (되풀이 · 누른 채 다른 키 · 모르는 떼기 · 잃은 초점 뒤)', () => {
+    const at: number[] = [];
+    const b = new InputBoost((t) => at.push(t));
+    b.keyDown('KeyD', false, 1);
+    b.keyDown('KeyD', true, 2);
+    b.keyDown('KeyW', false, 3);
+    b.pointerDown(7, 4);
+    b.keyUp('KeyD', 5);
+    b.keyUp('KeyW', 6);
+    b.pointerUp(7, 7);
+    b.keyUp('KeyQ', 8);
+    expect(at).toEqual([1, 7]);
+    b.keyDown('KeyA', false, 9);
+    b.clear();
+    b.pointerDown(1, 10);
+    b.pointerUp(1, 11);
+    expect(at).toEqual([1, 7, 9, 10, 11]);
   });
 
   it('fallback: 자동에서 60으로 내리고 되돌린다, 고정 제한(120)에는 쓰지 않는다, 잘못된 값은 null', () => {
