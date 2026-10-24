@@ -10,7 +10,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(ROOT, 'tests/e2e/perf-budget.json');
 /**
  * 예산을 거는 장면 (tests/perf/workScene.ts에서 budget 표시가 있는 장면과 같아야 한다 — 빠지면 perfBudget.ts 시험이 실패한다).
- * E2E 시간을 아끼려 기존 셋 + 새 캐릭터 셋만, WebGL은 백버퍼 1/4 장면
+ * E2E 시간을 아끼려 기존 셋 + 새 캐릭터 셋 + WebGL 품질 중간 하나만, WebGL은 백버퍼 1/4 장면
  */
 const SCENES = [
   'canvas-high-runner',
@@ -19,6 +19,7 @@ const SCENES = [
   'canvas-high-runner-new',
   'canvas-high-monster-new',
   'webgl-high-runner-s25-new',
+  'webgl-medium-runner-s25',
 ];
 /** 렌더러마다 막는 셈 */
 const KEYS = {
