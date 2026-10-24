@@ -623,9 +623,9 @@ export class Scoreboard {
     let h = height(true);
     let y = Math.round(HUD.scoreY - h / 2);
     if (touch) {
-      // 오른쪽 위 시스템 버튼과 가로로 걸치면 그 아래부터. 다 들어가지 않으면 조작 안내 줄을 뺀다
+      // 오른쪽 위 시스템 버튼(좌우 반전이면 왼쪽 위)과 가로로 걸치면 그 아래부터. 다 들어가지 않으면 조작 안내 줄을 뺀다
       const S = touch.score;
-      const top = x + this.w > S.sysLeft ? S.sysBottom : S.top;
+      const top = (touch.mirror ? x < S.sysRight : x + this.w > S.sysLeft) ? S.sysBottom : S.top;
       this.ctrlShown = h <= S.bottom - top;
       if (!this.ctrlShown) h = height(false);
       y = Math.round(Math.max(top, Math.min((top + S.bottom) / 2 - h / 2, S.bottom - h)));

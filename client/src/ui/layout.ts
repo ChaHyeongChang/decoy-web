@@ -40,6 +40,62 @@ export interface LayoutInfo {
   hudBand: number;
   /** HUD 부품 배율 (PC 1). 터치는 글자 · 아이콘이 CSS 12px 이상이 되게 키운다 */
   uiScale: number;
+  /** 적용한 판 배치 조정 (터치만, 설정 · 조작 배치). 없으면 기본값(DEFAULT_TUNING) */
+  tuning?: LayoutTuning;
+}
+
+/**
+ * 판 배치 조정 (설정 화면 통합, 터치만 — 화면 표시만 바꾸고 규칙 · 판정과 무관하다):
+ * - stickScale: 조이스틱 크기 배율 (이동 · 조준 스틱 반지름, 버튼은 그대로) — 엄지 자리(thumbReserve)가 같은 식으로 비운다.
+ *   1보다 크면 HUD가 들어가는 만큼만 (낮은 화면 — layoutFor)
+ * - uiScale: UI 크기 배율 (터치 HUD 그림 단위 TOUCH_UI.art와 글자 CSS px, 띠 · 칸 최소 크기). 자리가 모자라면 들어가는 만큼만
+ *   (layoutFor가 0.05씩 줄인다, 적용한 값이 tuning.uiScale)
+ * - mirror: 좌우 반전 (왼손잡이). 터치 HUD 배치를 좌우로 뒤집는다 — 터치 화면(이동 스틱 오른쪽 · 엄지 버튼 왼쪽 아래 · 시스템
+ *   버튼 왼쪽 위)과 같이
+ * - sysSlots: 오른쪽 위 시스템 버튼 칸 수 (점수판 · 전체 화면 = 2, 판 중 설정 버튼까지 3 — SYS_SLOTS_MENU)
+ */
+export interface LayoutTuning {
+  stickScale: number;
+  uiScale: number;
+  mirror: boolean;
+  sysSlots: number;
+}
+
+export const DEFAULT_TUNING: Readonly<LayoutTuning> = Object.freeze({
+  stickScale: 1,
+  uiScale: 1,
+  mirror: false,
+  sysSlots: 2,
+});
+
+/** 판 중 설정 버튼까지 든 시스템 버튼 칸 수 (점수판 · 설정 · 전체 화면) */
+export const SYS_SLOTS_MENU = 3;
+
+/** 조정 값 정리: 빠진 칸 · 수가 아닌 값은 기본값, 범위 밖은 자른다 */
+export function cleanTuning(t: Partial<LayoutTuning> | null | undefined): LayoutTuning {
+  const num = (v: unknown, def: number, lo: number, hi: number): number =>
+    typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : def;
+  return {
+    stickScale: num(t?.stickScale, 1, 0.5, 2),
+    uiScale: num(t?.uiScale, 1, 1, 1.5),
+    mirror: t?.mirror === true,
+    sysSlots: Math.round(num(t?.sysSlots, 2, 1, 4)),
+  };
+}
+
+function isDefaultTuning(t: LayoutTuning): boolean {
+  const d = DEFAULT_TUNING;
+  return (
+    t.stickScale === d.stickScale &&
+    t.uiScale === d.uiScale &&
+    t.mirror === d.mirror &&
+    t.sysSlots === d.sysSlots
+  );
+}
+
+/** 배치의 조정 값 (없으면 기본값) */
+export function tuningOf(l: Readonly<LayoutInfo>): Readonly<LayoutTuning> {
+  return l.tuning ?? DEFAULT_TUNING;
 }
 
 /** PC 배치 */
@@ -113,6 +169,16 @@ export function minimapFallback(
   return free ? { x, y } : null;
 }
 
+/**
+ * 맵 창 안 미니맵 틀 사각형 (논리 px): 그림 자리(touchHudPlan minimapInset — 왼쪽 위 · 폭)에 틀 여백 · 제목 줄을 더한다.
+ * s = 그림 1단위의 논리 px (HUD.s). 조작 배치를 바꾼 버튼이 이 틀을 피한다 (touchControls)
+ */
+export function minimapInsetFrame(i: { x: number; y: number; w: number }, s: number): Rect {
+  const pad = TOUCH_PART.minimap.pad * s;
+  const title = TOUCH_PART.minimap.title * s;
+  return { x: i.x - pad, y: i.y - title, w: i.w + pad * 2, h: (i.w * MAP_H) / MAP_W + title + pad };
+}
+
 /** 터치 HUD 부품 크기 (그림 단위: × uiScale = 논리 px) */
 export const TOUCH_PART = {
   /** 팀 카드 한 장 (실루엣 · 상태 아이콘 · 체력 칸 · 수감 눈금) */
@@ -135,8 +201,14 @@ const TIMER_CSS = { plain: 76, label: 100 } as const;
 
 const clamp = (v: number, a: number, b: number): number => Math.max(a, Math.min(b, v));
 
-/** 터치 화면 요소 크기 (CSS px). 화면 높이(안전 영역 안)에 비례(휴대폰 293~400px → 0.84~1.05배, 태블릿도 1.05배까지) */
-export function thumbMetrics(h: number): {
+/**
+ * 터치 화면 요소 크기 (CSS px). 화면 높이(안전 영역 안)에 비례(휴대폰 293~400px → 0.84~1.05배, 태블릿도 1.05배까지).
+ * stickScale = 조이스틱 크기 설정 (이동 · 조준 스틱 반지름만, 버튼은 그대로)
+ */
+export function thumbMetrics(
+  h: number,
+  stickScale = 1,
+): {
   k: number;
   pad: number;
   gap: number;
@@ -157,23 +229,25 @@ export function thumbMetrics(h: number): {
     // 줄 사이는 아래 테두리에 걸친 이름표(약 9px)가 다음 줄에 닿지 않게 더 띄운다
     rowGap: Math.round(22 * k),
     btn: Math.max(52, Math.round(56 * k)),
-    aimR: Math.round(60 * k),
+    aimR: Math.round(60 * k * stickScale),
     ability: Math.round(78 * k),
     rescue: Math.max(52, Math.round(60 * k)),
     sysH: Math.max(MIN_TARGET, Math.round(50 * k)),
     sysW: Math.max(64, Math.round(66 * k)),
-    moveR: Math.round(60 * k),
+    moveR: Math.round(60 * k * stickScale),
   };
 }
 
 /**
  * 엄지 자리 (안전 영역 안 화면 기준 CSS px, touchControls.touchLayout과 같은 식): 오른쪽 아래 버튼 무리의 위 끝,
- * 오른쪽 위 시스템 버튼(점수판 + 전체 화면)의 왼쪽 끝 · 아래 끝, 이동 스틱 그림 위 끝 · 이동 영역 아래 끝
+ * 오른쪽 위 시스템 버튼(점수판 + 전체 화면, 판 중 설정까지 — tune.sysSlots 칸)의 왼쪽 끝 · 아래 끝, 이동 스틱 그림 위 끝 ·
+ * 이동 영역 아래 끝. tune.stickScale = 조이스틱 크기 (조준 스틱 · 이동 스틱 반지름)
  */
 export function thumbReserve(
   w: number,
   h: number,
   monster: boolean,
+  tune: Partial<LayoutTuning> = DEFAULT_TUNING,
 ): {
   clusterTop: number;
   sysLeft: number;
@@ -183,7 +257,8 @@ export function thumbReserve(
   /** 오른쪽 아래 버튼 무리의 버튼 · 조준 스틱 사각형 (touchControls.touchLayout과 같은 식) */
   cluster: Box[];
 } {
-  const t = thumbMetrics(h);
+  const t = thumbMetrics(h, tune.stickScale ?? 1);
+  const slots = tune.sysSlots ?? DEFAULT_TUNING.sysSlots;
   const right = w - EDGE_BAND.side - t.pad;
   const bottom = h - EDGE_BAND.bottom - t.pad;
   const sq = (x: number, y: number, s: number): Box => ({ x, y, w: s, h: s });
@@ -205,7 +280,7 @@ export function thumbReserve(
   const zoneBottom = h - EDGE_BAND.bottom;
   return {
     clusterTop,
-    sysLeft: right - t.sysW * 2 - t.gap,
+    sysLeft: right - t.sysW * slots - t.gap * (slots - 1),
     sysBottom: t.pad + 2 + t.sysH,
     moveTop: zoneBottom - t.moveR * 2 - 16,
     zoneBottom,
@@ -213,18 +288,22 @@ export function thumbReserve(
   };
 }
 
-/** 터치 화면 (CSS px)의 맵 크기 · 띠 · 배치 방식 */
-function touchShape(w: number, h: number): { kind: LayoutKind; band: number; mode: TouchHudMode } {
+/**
+ * 터치 화면 (CSS px)의 맵 크기 · 띠 · 배치 방식. ui = UI 크기 배율: 띠 · 칸 최소 크기(그림 단위 부품이 들어갈 자리)도 같이
+ * 키운다 (맵이 그만큼 작아진다 — 보이는 타일 수는 같다)
+ */
+function touchShape(w: number, h: number, ui = 1): { kind: LayoutKind; band: number; mode: TouchHudMode } {
   const U = TOUCH_UI;
+  const minSide = U.minSide * ui;
   const ratio = MAP_DRAW_W / MAP_DRAW_H;
   // 2:1 이상이고 맵을 화면 높이 가득 그려도 좌우 칸이 팀 카드 폭 이상이면 넓은 배치
-  if (w >= h * 2 && (w - h * ratio) / 2 >= U.minSide) return { kind: 'touchWide', band: 0, mode: 'wide' };
+  if (w >= h * 2 && (w - h * ratio) / 2 >= minSide) return { kind: 'touchWide', band: 0, mode: 'wide' };
   // 맵이 폭에 들어가는 최소 띠, 좌우 칸이 minSide가 되는 띠
   const fitMap = Math.max(0, (h * ratio - w) / (2 * ratio));
-  const fitSide = Math.max(0, (h * ratio - w + 2 * U.minSide) / (2 * ratio));
-  const column = Math.max(U.band, fitMap, fitSide);
-  if (column <= U.bandStack) return { kind: 'touchNarrow', band: column, mode: 'column' };
-  return { kind: 'touchNarrow', band: Math.max(U.bandStack, fitMap), mode: 'band' };
+  const fitSide = Math.max(0, (h * ratio - w + 2 * minSide) / (2 * ratio));
+  const column = Math.max(U.band * ui, fitMap, fitSide);
+  if (column <= U.bandStack * ui) return { kind: 'touchNarrow', band: column, mode: 'column' };
+  return { kind: 'touchNarrow', band: Math.max(U.bandStack * ui, fitMap), mode: 'band' };
 }
 
 /**
@@ -234,27 +313,52 @@ function touchShape(w: number, h: number): { kind: LayoutKind; band: number; mod
  *   더 넓은 화면은 좌우 칸이 넓어진다(빈 여백 · 레터박스 없음, DECISIONS)
  * - touchNarrow: 위 · 아래 띠(CSS 26px 이상, 좌우 칸이 팀 카드 폭이 되게)를 남기고 논리 크기를 키워 맵을 줄인다.
  *   맵(3:2)보다 좁은 화면(태블릿 4:3 등)은 띠를 키워 HUD를 위 띠로 모은다
- * uiScale = 그림 1단위의 논리 px = TOUCH_UI.art × (논리 px / CSS px)
+ * uiScale = 그림 1단위의 논리 px = TOUCH_UI.art × UI 크기 × (논리 px / CSS px)
+ * tuning(터치만) = 조이스틱 크기 · UI 크기 · 좌우 반전 · 시스템 버튼 칸 수. 없거나 기본값이면 예전 배치 그대로(tuning 칸 없음).
+ * UI 크기 · 조이스틱 크기가 1보다 크면 HUD가 맵 · 서로 · 엄지 자리와 겹치지 않고 점수판이 화면 폭에 들어가는 만큼만 키운다
+ * (0.05씩 줄여 본다 — 적용한 값이 tuning에 남는다)
  */
-export function layoutFor(screenW: number, screenH: number, touch: boolean): LayoutInfo {
+export function layoutFor(
+  screenW: number,
+  screenH: number,
+  touch: boolean,
+  tuning?: Partial<LayoutTuning> | null,
+): LayoutInfo {
   if (!touch) return pcLayout();
   const w = Math.max(1, Math.max(screenW, screenH));
   const h = Math.max(1, Math.min(screenW, screenH));
-  const shape = touchShape(w, h);
-  const cssMapH = h - shape.band * 2;
-  // 논리 px / CSS px: 맵 높이(논리 MAP_DRAW_H)가 CSS cssMapH가 되게
-  const L = MAP_DRAW_H / cssMapH;
-  const viewH = MAP_DRAW_H + shape.band * 2 * L;
-  const viewW = Math.round((viewH * w) / h);
-  return {
-    kind: shape.kind,
-    viewW,
-    viewH,
-    mapX: (viewW - MAP_DRAW_W) / 2,
-    mapY: shape.band * L,
-    hudBand: shape.band * L,
-    uiScale: TOUCH_UI.art * L,
+  const T = cleanTuning(tuning);
+  const build = (ui: number, stickScale: number): LayoutInfo => {
+    const shape = touchShape(w, h, ui);
+    const cssMapH = h - shape.band * 2;
+    // 논리 px / CSS px: 맵 높이(논리 MAP_DRAW_H)가 CSS cssMapH가 되게
+    const L = MAP_DRAW_H / cssMapH;
+    const viewH = MAP_DRAW_H + shape.band * 2 * L;
+    const viewW = Math.round((viewH * w) / h);
+    const tune = { ...T, uiScale: ui, stickScale };
+    return {
+      kind: shape.kind,
+      viewW,
+      viewH,
+      mapX: (viewW - MAP_DRAW_W) / 2,
+      mapY: shape.band * L,
+      hudBand: shape.band * L,
+      uiScale: TOUCH_UI.art * ui * L,
+      ...(isDefaultTuning(tune) ? {} : { tuning: tune }),
+    };
   };
+  // 키운 값은 들어가는 만큼만: UI 크기를 먼저 0.05씩 줄이고, 그래도 안 되면(낮은 화면에서 조이스틱이 커 왼쪽 칸 팀 카드가
+  // 이동 영역에 닿는다) 조이스틱 크기를 줄인다. 줄이거나 그대로인 값은 늘 들어간다(예전 배치보다 작다)
+  const down = (v: number): number => Math.round((v - 0.05) * 100) / 100;
+  for (let ui = T.uiScale; ui > 1 + 1e-9; ui = down(ui)) {
+    const l = build(ui, T.stickScale);
+    if (touchHudFits(l)) return l;
+  }
+  for (let st = T.stickScale; st > 1 + 1e-9; st = down(st)) {
+    const l = build(1, st);
+    if (touchHudFits(l)) return l;
+  }
+  return build(1, Math.min(1, T.stickScale));
 }
 
 let current: LayoutInfo = pcLayout();
@@ -397,6 +501,8 @@ export interface TouchHudPlan {
 
 export interface TouchHud {
   mode: TouchHudMode;
+  /** 좌우 반전 (조작 배치 '좌우 반전'): 시스템 버튼이 왼쪽 위, 엄지 버튼 무리가 왼쪽 아래, 타이머 · 팀 카드가 오른쪽 칸 */
+  mirror: boolean;
   /** 논리 px / CSS px (배치를 정한 화면 기준) */
   L: number;
   /** 배치를 정한 화면 (CSS px, 안전 영역 안) */
@@ -408,8 +514,11 @@ export interface TouchHud {
   hint: { y: number; h: number };
   /** 배너 · 메모가 들어갈 자리: 맵 안 가로 범위, 위 끝 (오른쪽 위 버튼이 맵에 걸치면 그 아래) */
   overlay: { x0: number; x1: number; top: number };
-  /** 점수판: 세로 범위, 오른쪽 위 시스템 버튼 왼쪽 끝 · 아래 끝 (가로로 걸치면 그 아래에서 시작) */
-  score: { top: number; bottom: number; sysLeft: number; sysBottom: number };
+  /**
+   * 점수판: 세로 범위, 오른쪽 위 시스템 버튼 왼쪽 끝 · 아래 끝 (가로로 걸치면 그 아래에서 시작). 좌우 반전이면 시스템 버튼이
+   * 왼쪽 위라 그 오른쪽 끝(sysRight)과 견준다
+   */
+  score: { top: number; bottom: number; sysLeft: number; sysRight: number; sysBottom: number };
 }
 
 /** CSS 사각형 */
@@ -429,6 +538,7 @@ function planCss(
   mapLeft: number,
   monster: boolean,
   map: Box,
+  T: Readonly<LayoutTuning> = DEFAULT_TUNING,
 ): {
   timer: Box & { label: boolean };
   gaugeA: Box;
@@ -439,8 +549,10 @@ function planCss(
 } {
   const U = TOUCH_UI;
   const P = TOUCH_PART;
-  const a = U.art;
-  const r = thumbReserve(W, H, monster);
+  // 그림 1단위 CSS px (UI 크기 배율). 타이머 틀 폭도 같은 배율 (숫자 글자가 같이 커진다)
+  const a = U.art * T.uiScale;
+  const timerCss = { plain: TIMER_CSS.plain * T.uiScale, label: TIMER_CSS.label * T.uiScale };
+  const r = thumbReserve(W, H, monster, T);
   const cardW = P.card.w * a;
   const cardH = P.card.h * a;
   const g = P.gauge * a;
@@ -458,7 +570,7 @@ function planCss(
   if (mode === 'band') {
     // 위 띠에 모두: 가운데 타이머, 그 왼쪽 링 게이지 둘, 맨 왼쪽 팀 카드 한 줄. 미니맵은 자리가 없어 숨긴다
     const cy = band / 2;
-    const timerW = TIMER_CSS.label;
+    const timerW = timerCss.label;
     const timer = { x: W / 2 - timerW / 2, y: cy - timerH / 2, w: timerW, h: timerH, label: true };
     const gr = grid(3);
     const cards = { x: U.edge, y: cy - gr.h / 2, w: gr.w, h: gr.h, cols: 3, cw: cardW, ch: cardH };
@@ -466,7 +578,7 @@ function planCss(
     const leftX = timer.x - U.gap * 2 - pairW;
     const gx = leftX >= cards.x + cards.w + U.gap * 2 ? leftX : timer.x + timer.w + U.gap * 2;
     const [ga, gb] = pairAt(gx, cy - g / 2);
-    return { timer, gaugeA: ga, gaugeB: gb, cards, minimap: null, inset: insetCss(map, r) };
+    return { timer, gaugeA: ga, gaugeB: gb, cards, minimap: null, inset: insetCss(map, r, a) };
   }
 
   const cw = mapLeft;
@@ -477,9 +589,9 @@ function planCss(
   const cols = clamp(Math.floor((colW + U.gap) / (cardW + U.gap)), 1, 3);
   const gr = grid(cols);
   const wide = mode === 'wide';
-  const timerW = Math.min(colW, TIMER_CSS.label);
-  const label = !wide || timerW >= TIMER_CSS.label;
-  const timerWidth = wide ? timerW : TIMER_CSS.label;
+  const timerW = Math.min(colW, timerCss.label);
+  const label = !wide || timerW >= timerCss.label;
+  const timerWidth = wide ? timerW : timerCss.label;
   const center = (w: number): number => (cw - w) / 2;
   const rightCenter = (w: number): number => W - cw + (cw - w) / 2;
   // 넓은 화면: 왼쪽 칸 맨 위에 타이머. 16:9: 위 띠 가운데
@@ -490,9 +602,12 @@ function planCss(
     h: timerH,
     label,
   });
-  const timerTop = wide
-    ? timerAt(center(timerWidth), U.edge)
-    : timerAt(W / 2 - timerWidth / 2, band / 2 - timerH / 2);
+  // 16:9 위 띠: 가운데. 오른쪽 위 시스템 버튼(판 중 설정까지 세 칸)에 닿으면 그 왼쪽으로 (왼쪽 칸 끝은 넘지 않는다)
+  const bandX = Math.max(
+    Math.min(W / 2 - timerWidth / 2, r.sysLeft - U.gap - timerWidth),
+    Math.min(W / 2 - timerWidth / 2, cw + U.gap),
+  );
+  const timerTop = wide ? timerAt(center(timerWidth), U.edge) : timerAt(bandX, band / 2 - timerH / 2);
   const top = wide ? U.edge + timerH + U.gap : U.edge;
 
   // 후보 (앞에서부터): ① 타이머 옆에 게이지(넓은 칸) ② 왼쪽 칸에 게이지 · 카드 ③ 게이지는 오른쪽 칸(시스템 버튼 아래)
@@ -504,11 +619,11 @@ function planCss(
   };
   const cands: Cand[] = [];
   // 타이머 + 게이지 한 줄 (가운데 맞춤). 자리가 모자라면 '최후' 글자 없이 (색 + 문 아이콘이 같은 뜻)
-  for (const tw of wide ? [timerWidth, TIMER_CSS.plain] : []) {
+  for (const tw of wide ? [timerWidth, timerCss.plain] : []) {
     if (colW < tw + U.gap + pairW || cands.length > 0) continue;
     const x0 = center(tw + U.gap + pairW);
     cands.push({
-      timer: { x: x0, y: U.edge + (g - timerH) / 2, w: tw, h: timerH, label: tw >= TIMER_CSS.label },
+      timer: { x: x0, y: U.edge + (g - timerH) / 2, w: tw, h: timerH, label: tw >= timerCss.label },
       pair: { x: x0 + tw + U.gap, y: U.edge },
       cardsY: U.edge + g + U.gap + 2,
       rightY: rightTop,
@@ -553,7 +668,7 @@ function planCss(
     gaugeB: gb,
     cards,
     minimap,
-    inset: minimap ? null : insetCss(map, r),
+    inset: minimap ? null : insetCss(map, r, a),
   };
 }
 
@@ -564,8 +679,11 @@ function planCss(
  * 버튼과 가로로 겹치지 않으면 그 버튼 높이와 상관없다 (검토 반영: 예전에는 오른쪽 절반이면 무리 맨 위 끝에서 멈춰, 낮은 16:9
  * 화면의 괴물이 옆 칸 · 안쪽 미니맵을 둘 다 못 받았다)
  */
-function insetCss(map: Box, r: { sysLeft: number; sysBottom: number; cluster: readonly Box[] }): Box | null {
-  const a = TOUCH_UI.art;
+function insetCss(
+  map: Box,
+  r: { sysLeft: number; sysBottom: number; cluster: readonly Box[] },
+  a: number = TOUCH_UI.art,
+): Box | null {
   const mm = TOUCH_PART.minimap;
   const pad = mm.pad * a;
   const title = mm.title * a;
@@ -601,80 +719,163 @@ function insetCss(map: Box, r: { sysLeft: number; sysBottom: number; cluster: re
 }
 
 /**
- * 터치 HUD 배치 (순수). 화면(CSS) 기준으로 정하고 논리 px로 돌려준다. 늘 떠 있는 부품은 맵 사각형 · 엄지 영역
- * (오른쪽 아래 버튼 무리 · 오른쪽 위 시스템 버튼 · 이동 스틱 그림)과 겹치지 않는다(tests/unit/touch-hud.test.ts)
+ * 점수판 패널 최대 폭 (그림 단위): overlays.ts 생존자 표 COLS_TEAM_TOUCH.w 670 + 좌우 TOUCH_BOARD.pad 20. UI 크기를 키울 때 화면
+ * 폭 안에 들어가는지 본다 (touch-hud 단위 시험이 overlays.ts 값과 대조한다)
  */
-export function touchHudPlan(l: LayoutInfo): TouchHud | null {
-  if (l.kind === 'pc') return null;
+export const TOUCH_BOARD_W = 710;
+
+/** 이동 스틱이 생기는 영역: 화면 왼쪽(좌우 반전이면 오른쪽) 이 비율 안 (touchControls.touchLayout) */
+export const MOVE_ZONE_RATIO = 0.4;
+
+/** 겹치는가 (닿기만 하면 아니다) */
+function overlapsCss(a: Box, b: Box, eps = 0.01): boolean {
+  return a.x < b.x + b.w - eps && b.x < a.x + a.w - eps && a.y < b.y + b.h - eps && b.y < a.y + a.h - eps;
+}
+
+/** 늘 떠 있는 부품 사각형 (CSS px, 좌우 반전 전): 타이머 · 게이지 둘 · 팀 카드 셋 · 옆 칸 미니맵 틀 */
+function planBoxes(p: ReturnType<typeof planCss>, a: number): { id: string; box: Box }[] {
+  const out: { id: string; box: Box }[] = [
+    { id: 'timer', box: p.timer },
+    { id: 'gaugeA', box: p.gaugeA },
+    { id: 'gaugeB', box: p.gaugeB },
+  ];
+  const c = p.cards;
+  for (let i = 0; i < 3; i += 1)
+    out.push({
+      id: `card${i}`,
+      box: {
+        x: c.x + (i % c.cols) * (c.cw + TOUCH_UI.gap),
+        y: c.y + Math.floor(i / c.cols) * (c.ch + TOUCH_UI.gap),
+        w: c.cw,
+        h: c.ch,
+      },
+    });
+  if (p.minimap) {
+    const m = TOUCH_PART.minimap;
+    const pad = m.pad * a;
+    out.push({
+      id: 'minimap',
+      box: {
+        x: p.minimap.x - pad,
+        y: p.minimap.y - m.title * a,
+        w: p.minimap.w + pad * 2,
+        h: p.minimap.h + (m.title + m.pad) * a,
+      },
+    });
+  }
+  return out;
+}
+
+/** 터치 HUD 배치의 CSS 기하 (touchHudPlan · touchHudFits 공통) */
+function touchGeom(l: LayoutInfo): {
+  T: Readonly<LayoutTuning>;
+  a: number;
+  L: number;
+  W: number;
+  H: number;
+  band: number;
+  mapLeft: number;
+  mapCss: Box;
+  mode: TouchHudMode;
+} {
   const U = TOUCH_UI;
-  const L = l.uiScale / U.art;
+  const T = tuningOf(l);
+  // 그림 1단위 CSS px (UI 크기 배율까지)
+  const a = U.art * T.uiScale;
+  const L = l.uiScale / a;
   const W = l.viewW / L;
   const H = l.viewH / L;
   const band = l.hudBand / L;
   const mapLeft = l.mapX / L;
-  const mapH = MAP_DRAW_H / L;
-  const mode: TouchHudMode = l.kind === 'touchWide' ? 'wide' : mapLeft >= U.minSide - 0.5 ? 'column' : 'band';
+  const mode: TouchHudMode =
+    l.kind === 'touchWide' ? 'wide' : mapLeft >= U.minSide * T.uiScale - 0.5 ? 'column' : 'band';
+  const mapCss: Box = { x: mapLeft, y: l.mapY / L, w: MAP_DRAW_W / L, h: MAP_DRAW_H / L };
+  return { T, a, L, W, H, band, mapLeft, mapCss, mode };
+}
+
+/**
+ * UI 크기를 키운 배치가 들어가는가 (layoutFor가 UI 크기를 고를 때): 두 역할 모두 늘 떠 있는 부품이 화면 안이고 맵 · 서로 · 엄지
+ * 자리(버튼 무리 · 시스템 버튼 칸 · 이동 스틱 그림 위 이동 영역)와 겹치지 않고, 점수판이 화면 폭에 들어간다
+ */
+function touchHudFits(l: LayoutInfo): boolean {
+  const U = TOUCH_UI;
+  const g = touchGeom(l);
+  const { W, H, a } = g;
+  if (TOUCH_BOARD_W * a + U.edge * 2 > W) return false;
+  for (const monster of [true, false]) {
+    const p = planCss(W, H, g.mode, g.band, g.mapLeft, monster, g.mapCss, g.T);
+    const r = thumbReserve(W, H, monster, g.T);
+    const sys: Box = { x: r.sysLeft, y: 0, w: W - r.sysLeft, h: r.sysBottom };
+    const boxes = planBoxes(p, a).map((b) => b.box);
+    for (const [i, b] of boxes.entries()) {
+      if (b.x < -0.01 || b.y < -0.01 || b.x + b.w > W + 0.01 || b.y + b.h > H + 0.01) return false;
+      if (overlapsCss(b, g.mapCss) || overlapsCss(b, sys)) return false;
+      if (r.cluster.some((c) => overlapsCss(b, c))) return false;
+      if (b.x < W * MOVE_ZONE_RATIO && b.y + b.h > r.moveTop - U.zoneTop + 0.01) return false;
+      for (const o of boxes.slice(i + 1)) if (overlapsCss(b, o)) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * 터치 HUD 배치 (순수). 화면(CSS) 기준으로 정하고 논리 px로 돌려준다. 늘 떠 있는 부품은 맵 사각형 · 엄지 영역
+ * (오른쪽 아래 버튼 무리 · 오른쪽 위 시스템 버튼 · 이동 스틱 그림)과 겹치지 않는다(tests/unit/touch-hud.test.ts).
+ * 좌우 반전(tuning.mirror)이면 다 정한 뒤 좌우로 뒤집는다 (게이지는 A가 왼쪽 그대로 — 둘의 자리를 맞바꾼다)
+ */
+export function touchHudPlan(l: LayoutInfo): TouchHud | null {
+  if (l.kind === 'pc') return null;
+  const U = TOUCH_UI;
+  const { T, a, L, W, H, band, mapLeft, mapCss, mode } = touchGeom(l);
+  const mapH = mapCss.h;
   const toL = (b: Box): Rect => ({ x: b.x * L, y: b.y * L, w: b.w * L, h: b.h * L });
-  const mapCss: Box = { x: mapLeft, y: l.mapY / L, w: MAP_DRAW_W / L, h: mapH };
+  // 좌우 반전: CSS 사각형을 화면 가운데 기준으로 뒤집는다
+  const flip = (b: Box): Box => (T.mirror ? { ...b, x: W - b.x - b.w } : b);
   const plan = (monster: boolean): TouchHudPlan => {
-    const p = planCss(W, H, mode, band, mapLeft, monster, mapCss);
-    const rects: { id: string; rect: Rect }[] = [
-      { id: 'timer', rect: toL(p.timer) },
-      { id: 'gaugeA', rect: toL(p.gaugeA) },
-      { id: 'gaugeB', rect: toL(p.gaugeB) },
-    ];
-    for (let i = 0; i < 3; i += 1) {
-      const c = p.cards;
-      const col = i % c.cols;
-      const row = Math.floor(i / c.cols);
-      rects.push({
-        id: `card${i}`,
-        rect: toL({ x: c.x + col * (c.cw + U.gap), y: c.y + row * (c.ch + U.gap), w: c.cw, h: c.ch }),
-      });
-    }
-    if (p.minimap) {
-      const m = TOUCH_PART.minimap;
-      const pad = m.pad * U.art;
-      rects.push({
-        id: 'minimap',
-        rect: toL({
-          x: p.minimap.x - pad,
-          y: p.minimap.y - m.title * U.art,
-          w: p.minimap.w + pad * 2,
-          h: p.minimap.h + (m.title + m.pad) * U.art,
-        }),
-      });
-    }
+    const p = planCss(W, H, mode, band, mapLeft, monster, mapCss, T);
+    const ga = flip(T.mirror ? p.gaugeB : p.gaugeA);
+    const gb = flip(T.mirror ? p.gaugeA : p.gaugeB);
+    const c = p.cards;
+    const gridW = c.cols * c.cw + (c.cols - 1) * U.gap;
+    const cards = { ...c, x: flip({ x: c.x, y: c.y, w: gridW, h: c.h }).x };
+    const timer = { ...flip(p.timer), label: p.timer.label };
+    const minimap = p.minimap ? flip(p.minimap) : null;
+    const inset = p.inset ? flip(p.inset) : null;
+    const rects = planBoxes({ ...p, timer, gaugeA: ga, gaugeB: gb, cards, minimap }, a).map((b) => ({
+      id: b.id,
+      rect: toL(b.box),
+    }));
     return {
       timer: {
-        ...toL(p.timer),
-        x: (p.timer.x + p.timer.w / 2) * L,
-        y: (p.timer.y + p.timer.h / 2) * L,
-        label: p.timer.label,
+        ...toL(timer),
+        x: (timer.x + timer.w / 2) * L,
+        y: (timer.y + timer.h / 2) * L,
+        label: timer.label,
       },
-      gaugeA: { x: (p.gaugeA.x + p.gaugeA.w / 2) * L, y: (p.gaugeA.y + p.gaugeA.h / 2) * L },
-      gaugeB: { x: (p.gaugeB.x + p.gaugeB.w / 2) * L, y: (p.gaugeB.y + p.gaugeB.h / 2) * L },
+      gaugeA: { x: (ga.x + ga.w / 2) * L, y: (ga.y + ga.h / 2) * L },
+      gaugeB: { x: (gb.x + gb.w / 2) * L, y: (gb.y + gb.h / 2) * L },
       cards: {
-        x: p.cards.x * L,
-        y: p.cards.y * L,
-        w: p.cards.cw * L,
-        h: p.cards.ch * L,
-        cols: p.cards.cols,
+        x: cards.x * L,
+        y: cards.y * L,
+        w: cards.cw * L,
+        h: cards.ch * L,
+        cols: cards.cols,
         gap: U.gap * L,
       },
-      minimap: p.minimap ? { x: p.minimap.x * L, y: p.minimap.y * L, w: p.minimap.w * L } : null,
-      minimapInset: p.inset ? { x: p.inset.x * L, y: p.inset.y * L, w: p.inset.w * L } : null,
+      minimap: minimap ? { x: minimap.x * L, y: minimap.y * L, w: minimap.w * L } : null,
+      minimapInset: inset ? { x: inset.x * L, y: inset.y * L, w: inset.w * L } : null,
       rects,
     };
   };
-  // 배너 · 메모: 맵 안. 오른쪽 위 시스템 버튼(전체 화면까지)이 맵에 걸치면 그 아래에서 시작한다
-  const mapRight = mapLeft + MAP_DRAW_W / L;
-  const r = thumbReserve(W, H, true);
+  // 배너 · 메모: 맵 안. 오른쪽 위 시스템 버튼(전체 화면까지)이 맵에 걸치면 그 아래에서 시작한다 (좌우 반전이면 왼쪽 위 — 같은 식)
+  const mapRight = mapLeft + mapCss.w;
+  const r = thumbReserve(W, H, true, T);
   const tile = mapH / MAP_H;
   const intrude = r.sysLeft < mapRight;
   const top = Math.max(band + tile * 3.1, intrude ? r.sysBottom + U.gap : 0);
   return {
     mode,
+    mirror: T.mirror,
     L,
     cssW: W,
     cssH: H,
@@ -686,12 +887,16 @@ export function touchHudPlan(l: LayoutInfo): TouchHud | null {
       top: U.edge * L,
       bottom: (H - U.hintH - 4) * L,
       sysLeft: (r.sysLeft - U.gap) * L,
+      sysRight: (W - r.sysLeft + U.gap) * L,
       sysBottom: (r.sysBottom + U.gap) * L,
     },
   };
 }
 
-/** HUD 글자 크기 (논리 px). PC는 M10c 값 그대로, 터치는 CSS px 하한(보조 12 · 주요 14)을 논리 px로 */
+/**
+ * HUD 글자 크기 (논리 px). PC는 M10c 값 그대로, 터치는 CSS px 하한(보조 12 · 주요 14)을 논리 px로. UI 크기(tuning.uiScale)를
+ * 키우면 글자 CSS px도 같은 배율 (하한 아래로는 내려가지 않는다 — 배율은 1 이상)
+ */
 function hudFonts(l: LayoutInfo) {
   if (l.kind === 'pc')
     return {
@@ -716,9 +921,10 @@ function hudFonts(l: LayoutInfo) {
       ctrlDesc: 18,
       ctrlGoal: 17,
     };
-  const L = l.uiScale / TOUCH_UI.art;
+  const ui = tuningOf(l).uiScale;
+  const L = l.uiScale / (TOUCH_UI.art * ui);
   const F = TOUCH_UI.font;
-  const px = (css: number): number => Math.ceil(css * L * 10) / 10;
+  const px = (css: number): number => Math.ceil(css * ui * L * 10) / 10;
   return {
     gaugeLetter: px(F.main),
     timer: px(F.timer),
@@ -788,8 +994,8 @@ function hudFor(l: LayoutInfo) {
     bottom: { y: touch ? touch.hint.y : l.viewH - band / 2 },
     /** 행동 칸: 아이콘 타일 + 이름 + 키캡 한 칸의 폭 · 간격 · 타일 한 변 */
     slot: { w: 176, gap: 12, tile: 56 },
-    /** 아래 띠 안내 줄 (수감 · 관전 · 괴물 대기: 행동 칸 대신) 높이 (그림 단위) */
-    hint: { h: touch ? TOUCH_UI.hintH / TOUCH_UI.art : 42 },
+    /** 아래 띠 안내 줄 (수감 · 관전 · 괴물 대기: 행동 칸 대신) 높이 (그림 단위). 터치는 UI 크기와 상관없이 CSS hintH (가장자리 띠 안) */
+    hint: { h: touch ? TOUCH_UI.hintH / (TOUCH_UI.art * tuningOf(l).uiScale) : 42 },
     /** 배너는 북쪽 탈출구 판정 원(맵 y 3타일)보다 아래. 지속 배너 · 알림 두 줄의 가운데 y와 높이 */
     bannerY: l.mapY + 4.2 * tileY,
     banner: touch ? { h: P.ribbon.h, rowH: P.ribbon.rowH, rowGap: 50 } : { h: 46, rowH: 40, rowGap: 50 },
@@ -808,10 +1014,15 @@ export let HUD: HudLayoutSpec = hudFor(current);
 
 /**
  * 배치를 적용한다 (main.ts가 판 장면을 만들기 직전에 부른다). 위 값들(VIEW_W · MAP_X · HUD …)이 모두 바뀐다.
- * 판 장면 · HUD는 만들 때 읽으므로 판 중에는 부르지 않는다
+ * 판 장면 · HUD는 만들 때 읽으므로 판 중에는 부르지 않는다. tuning = 터치 판 배치 조정 (LayoutTuning, PC는 무시)
  */
-export function configureLayout(screenW: number, screenH: number, touch: boolean): Readonly<LayoutInfo> {
-  applyLayout(layoutFor(screenW, screenH, touch));
+export function configureLayout(
+  screenW: number,
+  screenH: number,
+  touch: boolean,
+  tuning?: Partial<LayoutTuning> | null,
+): Readonly<LayoutInfo> {
+  applyLayout(layoutFor(screenW, screenH, touch, tuning));
   return current;
 }
 
