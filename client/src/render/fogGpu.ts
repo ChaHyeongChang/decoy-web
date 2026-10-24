@@ -11,6 +11,8 @@
 // 품질 높음은 빛 지도 이미지에 경계 셰이더(FogEdgePipeline)를 건다. 경계 안쪽 띠만 노이즈로 '어둡게만' 하고
 // 시야 밖(하한)과 완전히 밝은 곳은 바꾸지 않는다(fogMath.edgeDarken과 같은 식, GLSL은 fogMath.FOG_EDGE_FRAG).
 // 빛 지도 이미지 하나에만 걸리므로 캐릭터 · 범위 · 마커 · HUD에는 닿지 않는다.
+// 같은 셰이더가 안개 주기 사이 내 빛을 지금 자리까지 옮긴다(내 빛 따라가기, fogMath followTexel): 높음 · 중간 모두(중간은 세기 0인
+// 두 번째 파이프라인 — 경계 노이즈 없음). 내 시야 틴트 조각도 같은 Δ만큼 옮긴다(follow).
 //
 // 텍스처는 getImageData 사본을 만드는 addCanvas(CanvasTexture) 대신 fogPaint.createCanvasTexture로 올린다.
 //
@@ -38,7 +40,7 @@ import { gfxNow, gfxState } from '../gfx/state';
 import { MAP_X, MAP_Y, VIEW_TILES_H, VIEW_TILES_W, WORLD_LINE, WORLD_SCALE } from '../ui/layout';
 import { FOG } from './colors';
 import type { FogLayer, FogLayerOptions } from './baseLayer';
-import { FOG_EDGE_FRAG, snapToDevice } from './fogMath';
+import { FOG_EDGE_FRAG, SELF_MARK, ambientRgb, snapToDevice } from './fogMath';
 import {
   CanvasPen,
   LightMap,
@@ -65,10 +67,59 @@ import {
 } from './fogPaint';
 
 export const FOG_EDGE_PIPELINE = 'DecoyFogEdge';
+/** 품질 중간: 같은 셰이더 · 세기 0 (경계 노이즈 없이 내 빛 따라가기만) */
+export const FOG_FOLLOW_PIPELINE = 'DecoyFogFollow';
+
+/**
+ * 셰이더 내 빛 따라가기 값 (fogMath FollowUniforms와 같은 뜻, 타일). GpuFog가 프레임마다 쓰고 빛 지도 이미지를 그릴 때(onBind —
+ * 프로그램이 이미 묶인 뒤라 프로그램 바꾸기가 늘지 않는다) 올린다
+ */
+export interface FogFollowState {
+  selfOn: boolean;
+  eyeFogX: number;
+  eyeFogY: number;
+  eyeNowX: number;
+  eyeNowY: number;
+  r: number;
+  soft: number;
+  shiftOn: boolean;
+  shiftX: number;
+  shiftY: number;
+}
+
+export function resetFollowState(f: FogFollowState): void {
+  f.selfOn = false;
+  f.shiftOn = false;
+  f.eyeFogX = 0;
+  f.eyeFogY = 0;
+  f.eyeNowX = 0;
+  f.eyeNowY = 0;
+  f.r = 1;
+  f.soft = 1;
+  f.shiftX = 0;
+  f.shiftY = 0;
+}
 
 /** 경계 셰이더 파이프라인 (빛 지도 이미지 전용). 사전 파이프라인이라 그리는 횟수가 늘지 않는다 */
 export class FogEdgePipeline extends Phaser.Renderer.WebGL.Pipelines.SinglePipeline {
-  constructor(game: Phaser.Game) {
+  readonly follow: FogFollowState = {
+    selfOn: false,
+    eyeFogX: 0,
+    eyeFogY: 0,
+    eyeNowX: 0,
+    eyeNowY: 0,
+    r: 1,
+    soft: 1,
+    shiftOn: false,
+    shiftX: 0,
+    shiftY: 0,
+  };
+
+  constructor(
+    game: Phaser.Game,
+    /** 경계 어둡게 세기 (높음 FOG.edgeDarken, 중간 0) */
+    private readonly strength: number = FOG.edgeDarken,
+  ) {
     super({ game, fragShader: FOG_EDGE_FRAG });
   }
 
@@ -82,24 +133,55 @@ export class FogEdgePipeline extends Phaser.Renderer.WebGL.Pipelines.SinglePipel
       ((t & 255) / 255) * amb,
     );
     this.set2f('uMapSize', MAP_W, MAP_H);
-    this.set1f('uStrength', FOG.edgeDarken);
+    this.set1f('uStrength', this.strength);
     this.set1f('uNoiseScale', FOG.edgeNoiseScale);
     this.set1f('uNoiseSpeed', FOG.edgeNoiseSpeed);
     this.set1f('uTime', 0);
+    // 빛 지도 바탕 (캔버스에 칠한 반올림 값 그대로: 내 덮임 표시를 읽는 기준)
+    const lit = ambientRgb(FOG.ambient, FOG.tint);
+    this.set3f('uLightAmb', lit[0] / 255, lit[1] / 255, lit[2] / 255);
+    this.set1f('uMark', SELF_MARK / 255);
+    this.applyFollow();
   }
 
   override onPreRender(): void {
     // 장식 시계 (테스트에서 멈출 수 있다). 큰 값에서 float 정밀도가 떨어지지 않게 한 시간 주기로 접는다
     this.set1f('uTime', (gfxNow() / 1000) % 3600);
   }
+
+  override onBind(): void {
+    this.applyFollow();
+  }
+
+  /** 따라가기 값을 셰이더에 올린다 (바뀐 값만 GL 호출 — WebGLShader가 지난 값과 견준다) */
+  private applyFollow(): void {
+    const f = this.follow;
+    this.set1f('uSelfOn', f.selfOn ? 1 : 0);
+    this.set1f('uShiftOn', f.shiftOn ? 1 : 0);
+    this.set2f('uEyeFog', f.eyeFogX, f.eyeFogY);
+    this.set2f('uEyeNow', f.eyeNowX, f.eyeNowY);
+    this.set1f('uR', f.r);
+    this.set1f('uSoft', f.soft);
+    this.set2f('uShift', f.shiftX, f.shiftY);
+  }
 }
 
-/** WebGL 렌더러에 경계 셰이더를 한 번만 등록한다. Canvas 렌더러면 아무것도 만들지 않고 false */
+/** WebGL 렌더러에 안개 셰이더 둘(높음 경계 · 중간 따라가기)을 한 번만 등록한다. Canvas 렌더러면 아무것도 만들지 않고 false */
 export function ensureFogEdgePipeline(game: Phaser.Game): boolean {
   const r = game.renderer;
   if (!(r instanceof Phaser.Renderer.WebGL.WebGLRenderer)) return false;
   if (!r.pipelines.has(FOG_EDGE_PIPELINE)) r.pipelines.add(FOG_EDGE_PIPELINE, new FogEdgePipeline(game));
+  if (!r.pipelines.has(FOG_FOLLOW_PIPELINE))
+    r.pipelines.add(FOG_FOLLOW_PIPELINE, new FogEdgePipeline(game, 0));
   return true;
+}
+
+/** 등록한 안개 셰이더 (없으면 null) */
+function fogPipeline(game: Phaser.Game, name: string): FogEdgePipeline | null {
+  const r = game.renderer;
+  if (!(r instanceof Phaser.Renderer.WebGL.WebGLRenderer)) return null;
+  const p = r.pipelines.get(name);
+  return p instanceof FogEdgePipeline ? p : null;
 }
 
 /** 텍스처로 올린 캔버스 한 장과 그 이미지 */
@@ -222,6 +304,11 @@ class TintPatch {
    */
   private readonly last: number[] = [];
   private lastN = 0;
+  /** 내 시야 조각인가 (이번 주기, 내 빛 따라가기: 프레임마다 Δ만큼 옮긴다) */
+  self = false;
+  /** 마지막으로 그린 자리 (논리 px, Δ = 0일 때) */
+  private baseX = MAP_X;
+  private baseY = MAP_Y;
 
   constructor(
     scene: Phaser.Scene,
@@ -295,7 +382,9 @@ class TintPatch {
     this.pen.fillPoly(this.poly, this.color, this.alpha);
     this.layer.upload();
     const s = (TILE_PX * WORLD_SCALE) / k;
-    img.setPosition(MAP_X + x0 * s, MAP_Y + y0 * s);
+    this.baseX = MAP_X + x0 * s;
+    this.baseY = MAP_Y + y0 * s;
+    img.setPosition(this.baseX, this.baseY);
     const l = this.last;
     const poly = this.poly;
     this.lastN = 3 + poly.length * 2;
@@ -309,10 +398,20 @@ class TintPatch {
     }
   }
 
+  /** 그린 자리에서 (dx, dy) 타일만큼 옮겨 놓는다 (내 시야 조각이 아니면 0) */
+  shift(dx: number, dy: number): void {
+    const k = TILE_PX * WORLD_SCALE;
+    const x = this.baseX + dx * k;
+    const y = this.baseY + dy * k;
+    const img = this.layer.image;
+    if (img.x !== x || img.y !== y) img.setPosition(x, y);
+  }
+
   hide(): void {
     this.layer.image.setVisible(false);
     this.lastN = 0;
     this.poly = NO_POLY;
+    this.self = false;
   }
 
   destroy(): void {
@@ -340,6 +439,21 @@ const PREFETCH_BUDGET_MS = 1.5;
 export class GpuFog implements FogLayer {
   readonly mode = 'gpu' as const;
   readonly shader: boolean;
+  /** 내 빛 따라가기를 셰이더로 한다 (빛 지도가 있고 WebGL: 높음 · 중간) */
+  readonly selfFollow: boolean;
+  /** 빛 지도 셰이더 (높음 경계 · 중간 따라가기, Canvas · 안개 끔이면 null) */
+  private readonly pipe: FogEdgePipeline | null = null;
+  /**
+   * 이번 주기 빛: 내 덮임 표시가 있는 내 시야(중심 · 판정 반경 · 흐림 띠, 없으면 selfR = 0)와 '모든 빛이 내 딱 잘린 시야'(괴물)인가.
+   * 빛 지도에 칠린 그림과 같은 주기의 값이다 (기록이 지난번과 같아 다시 칠하지 않았어도 그림은 이 기록 그대로)
+   */
+  private selfX = 0;
+  private selfY = 0;
+  private selfR = 0;
+  private selfSoft = 0;
+  private hardSelf = 0;
+  private hardOther = 0;
+  private softOther = 0;
   /** 정적 맵 조각 (보이는 창 근처만, 원환 칸 아틀라스 텍스처 한 장 — 그리기 한 번에 묶인다) */
   private readonly chunks: ChunkAtlas;
   private readonly chunkKey: string;
@@ -431,7 +545,9 @@ export class GpuFog implements FogLayer {
     root.add(this.tintBox);
     const mapW = MAP_W * TILE_PX * WORLD_SCALE;
     const mapH = MAP_H * TILE_PX * WORLD_SCALE;
-    this.light = opts.fog ? new LightMap(lpt, opts.ambientCss, domLightSurface) : null;
+    this.light = opts.fog
+      ? new LightMap(lpt, opts.ambientCss, domLightSurface, ambientRgb(FOG.ambient, FOG.tint))
+      : null;
     if (this.light) {
       this.lightKey = nextFogKey('fog-light');
       this.lightTexture = createCanvasTexture(scene.textures, this.lightKey, this.light.canvas);
@@ -442,8 +558,16 @@ export class GpuFog implements FogLayer {
         .setBlendMode(Phaser.BlendModes.MULTIPLY);
       root.add(this.lightImage);
     }
-    this.shader = opts.shader && this.lightImage !== null && ensureFogEdgePipeline(scene.game);
-    if (this.shader) this.lightImage?.setPipeline(FOG_EDGE_PIPELINE);
+    // 빛 지도 셰이더: 높음은 경계 노이즈 + 따라가기, 중간은 따라가기만 (세기 0). Canvas 렌더러 · 안개 끔이면 없다
+    const piped = this.lightImage !== null && ensureFogEdgePipeline(scene.game);
+    this.shader = opts.shader && piped;
+    const pipeName = this.shader ? FOG_EDGE_PIPELINE : FOG_FOLLOW_PIPELINE;
+    this.pipe = piped ? fogPipeline(scene.game, pipeName) : null;
+    if (this.pipe) {
+      resetFollowState(this.pipe.follow);
+      this.lightImage?.setPipeline(pipeName);
+    }
+    this.selfFollow = this.pipe !== null;
     // 테두리 리프트: 정적 조각을 한 번 구운 아틀라스를 블리터로 찍는다 (정적 맵 텍셀 경계에 맞춤)
     const atlas = layoutRimLift(k);
     const lift = makeCanvas(atlas.width, atlas.height);
@@ -568,9 +692,13 @@ export class GpuFog implements FogLayer {
     this.tintN = 0;
     this.lightRec.reset();
     this.miniRec.reset();
+    this.selfR = 0;
+    this.hardSelf = 0;
+    this.hardOther = 0;
+    this.softOther = 0;
   }
 
-  fillPoly(poly: readonly Vec2[], color: number, alpha: number): void {
+  fillPoly(poly: readonly Vec2[], color: number, alpha: number, self = false): void {
     if (poly.length < 3) return;
     let t = this.tints[this.tintN];
     if (!t) {
@@ -578,6 +706,7 @@ export class GpuFog implements FogLayer {
       this.tints.push(t);
     }
     t.set(poly, color, alpha);
+    t.self = self;
     this.tintN += 1;
     this.miniRec.fillPoly(poly, color, alpha);
   }
@@ -629,11 +758,47 @@ export class GpuFog implements FogLayer {
   }
 
   addSoftLight(light: SoftLight): void {
-    if (this.light) this.lightRec.addSoft(light);
+    if (!this.light) return;
+    this.lightRec.addSoft(light);
+    if (light.poly.length < 3) return;
+    if ((light.reach ?? 0) > 0 && this.selfR === 0) {
+      this.selfX = light.center.x;
+      this.selfY = light.center.y;
+      this.selfR = light.radius;
+      this.selfSoft = light.soft;
+    } else this.softOther += 1;
   }
 
-  addHardLight(poly: readonly Vec2[]): void {
-    if (this.light) this.lightRec.addHard(poly);
+  addHardLight(poly: readonly Vec2[], self = false): void {
+    if (!this.light) return;
+    this.lightRec.addHard(poly);
+    if (poly.length < 3) return;
+    if (self) this.hardSelf += 1;
+    else this.hardOther += 1;
+  }
+
+  /**
+   * 내 빛 따라가기 (프레임마다, 안개 주기 뒤): 이번 주기에 칠한 내 시야를 (dx, dy) 타일만큼 옮겨 그린다. 생존자는 빛 지도의 내 덮임
+   * 표시 안에서 내 빛만 지금 자리로(셰이더 followLight), 괴물은 빛 지도가 모두 자기 시야라 통째로 옮겨 읽는다. 내 시야 틴트 조각도
+   * 같이 옮긴다. Δ = 0이면 예전과 같은 그림
+   */
+  follow(dx: number, dy: number): void {
+    for (let i = 0; i < this.tintN; i += 1) {
+      const t = this.tints[i];
+      if (t) t.shift(t.self ? dx : 0, t.self ? dy : 0);
+    }
+    const f = this.pipe?.follow;
+    if (!f) return;
+    f.selfOn = this.selfR > 0;
+    f.eyeFogX = this.selfX;
+    f.eyeFogY = this.selfY;
+    f.eyeNowX = this.selfX + dx;
+    f.eyeNowY = this.selfY + dy;
+    f.r = this.selfR > 0 ? this.selfR : 1;
+    f.soft = this.selfR > 0 ? this.selfSoft : 1;
+    f.shiftOn = this.hardSelf > 0 && this.hardOther === 0 && this.softOther === 0 && this.selfR === 0;
+    f.shiftX = f.shiftOn ? dx : 0;
+    f.shiftY = f.shiftOn ? dy : 0;
   }
 
   commit(): void {

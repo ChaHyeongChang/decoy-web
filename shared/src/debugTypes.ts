@@ -228,6 +228,15 @@ export interface AnimDebug {
   gait: Record<string, { phase: number; stepping: number }>;
   /** 마지막 안개 · 시야 갱신 시각 (ms, performance.now 기준. 아직 없으면 null) */
   fogAt: number | null;
+  /** 안개 주기에 쓴 내 눈 자리 (타일, 0.001 반올림. 그 주기에 내 눈이 없었으면 null — 사망 · 탈출 · 관전) */
+  fogEye: { x: number; y: number } | null;
+  /**
+   * 이번 프레임 내 빛 따라가기 Δ (타일, 0.001 반올림): 지금 내 예측 자리 − fogEye (내 눈이 없거나 역할 · 상태가 바뀌었거나 0.5타일을
+   * 넘으면 0). fogFollow가 'gpu'면 실제로 그린 내 빛 · 틴트 중심 = fogEye + fogShift, 'rims'면 테두리 · 외곽선 · 먼지만 옮긴다
+   */
+  fogShift: { x: number; y: number };
+  /** Δ를 무엇에 쓰는가: 'gpu'(빛 · 틴트 · 테두리 · 먼지) · 'rims'(Canvas 합성: 테두리 · 외곽선 · 먼지만) · 'off'(내 눈 없음) */
+  fogFollow: 'gpu' | 'rims' | 'off';
   /** 생존자 화면 괴물 부채꼴 빨강 정도 0~1 */
   coneRed: number;
   /** 돌진 잔상 수 */

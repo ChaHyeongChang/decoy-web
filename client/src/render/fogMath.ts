@@ -133,11 +133,145 @@ export function edgeDarken(light: number, ambient: number, strength: number, noi
   return light - (light - ambient) * k;
 }
 
+// ───────────── 내 빛 따라가기 (안개 주기 사이 내 시야를 지금 자리까지 옮겨 그린다) ─────────────
+// 시야 빛 지도 · 틴트 · 테두리 · 먼지 잘라내기는 안개 주기(생존자 50ms · 괴물 1/30초)에만 다시 계산한다. 카메라가 따라가는 내 몸은
+// 매 프레임 움직이므로, 그 사이 월드에 붙어 있던 내 둘레 빛 · 테두리가 화면에서 주기마다 톱니로 흔들렸다(걷기 5타일/초 × 50ms =
+// 0.25타일, 1080p 확대 3에서 22px). 이제 안개 주기에 쓴 내 눈 자리(fogEye)와 지금 내 자리의 차이 Δ만큼 내 시야 그림만 옮긴다.
+// 판정 · 정보(서버가 보내는 것)는 그대로다: 바뀌는 것은 맵 바닥을 얼마나 밝게 그리는가뿐이다.
+
+/** Δ를 이보다 크게 옮기지 않는다 (타일). 걷기 0.25 · 질주 0.36 · 괴물 0.18보다 크고, 넘으면(순간이동 · 수감) 옮기지 않는다 */
+export const FOLLOW_MAX = 0.5;
+
+/** 빛 지도의 '내 덮임' 표시: 내 시야를 칠한 곳(반경 r + FOLLOW_MAX 다각형 전체)의 B 채널을 이만큼(0~255) 낮춰 칠한다 */
+export const SELF_MARK = 8;
+
+/** 셰이더가 '관측 밝기가 칠할 때의 내 빛으로 설명된다'고 보는 여유 (밝기 0~1: 빛 지도 쌍선형 보간 · 8비트 반올림) */
+export const FOLLOW_EPS = 0.04;
+
+/**
+ * 이번 프레임 Δ (타일): 지금 내 자리 − 안개 주기에 쓴 내 눈 자리. 내 눈이 이번 주기에 없었으면(사망 · 탈출 · 관전 · 아직 없음),
+ * 역할 · 상태가 주기 뒤 바뀌었으면(same = false), |Δ| > max면 0 (지금과 같은 그림). out에 써서 돌려준다.
+ * 지금 자리 · 눈 자리가 모두 프레임 시각의 함수라 60 · 120Hz 같은 시각에 같은 값이다. Δ가 커도 안개 주기를 앞당기지 않는다
+ */
+export function followShift(
+  now: Vec2 | null,
+  eye: Vec2 | null,
+  same: boolean,
+  out: { x: number; y: number },
+  max = FOLLOW_MAX,
+): { x: number; y: number } {
+  out.x = 0;
+  out.y = 0;
+  if (!now || !eye || !same) return out;
+  const dx = now.x - eye.x;
+  const dy = now.y - eye.y;
+  if (!(Math.hypot(dx, dy) <= max)) return out;
+  out.x = dx;
+  out.y = dy;
+  return out;
+}
+
+/**
+ * 내 시야를 '내 덮임' 표시와 함께 칠하는 그라디언트 (빛 지도, GPU 경로만): 다각형은 반경 r + reach로 레이캐스트한 것이고,
+ * 안쪽 원 r − soft에서 흰색, r(정지점 soft / (soft + reach))에서 하한, r + reach까지 하한. B 채널만 전체에서 mark만큼 낮다.
+ * R · G는 예전 그라디언트(r − soft → r)와 같은 값이다(r 밖은 하한 그대로)
+ */
+export function selfMarkGradient(
+  r: number,
+  soft: number,
+  reach: number,
+  ambient: readonly [number, number, number],
+  mark = SELF_MARK,
+): { inner: number; outer: number; stops: [offset: number, css: string][] } {
+  const { inner } = softLightGeometry(r, soft);
+  const outer = r + Math.max(0, reach);
+  const knee = outer > inner ? (r - inner) / (outer - inner) : 0;
+  const lo = rgbCss([ambient[0], ambient[1], Math.max(0, ambient[2] - mark)]);
+  return {
+    inner,
+    outer,
+    stops: [
+      [0, rgbCss([255, 255, 255 - mark])],
+      [knee, lo],
+      [1, lo],
+    ],
+  };
+}
+
+/** GLSL smoothstep과 같은 식 */
+function smoothstep(e0: number, e1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+}
+
+/** 셰이더 내 빛 따라가기 값 (fogGpu.ts FogEdgePipeline.follow와 같은 이름) */
+export interface FollowUniforms {
+  /** 빛 지도 바탕 (하한 × 틴트를 0~255로 반올림한 값 / 255) */
+  lightAmb: readonly [number, number, number];
+  /** 표시 크기 (B, 0~1) */
+  mark: number;
+  /** 빛 지도에 내 덮임 표시가 있다 (생존자 GPU) */
+  selfOn: boolean;
+  /** 칠할 때 내 눈 · 지금 내 눈 (= fogEye + Δ, 타일) · 판정 반경 · 흐림 띠 */
+  eyeFog: Vec2;
+  eyeNow: Vec2;
+  r: number;
+  soft: number;
+  /** 괴물: 빛 지도 전체를 Δ만큼 옮겨 읽는다 */
+  shiftOn: boolean;
+  shift: Vec2;
+}
+
+/** 내 시야 밝기 곡선 (0~1): r − soft 안 1, r 밖 0, 사이 선형 (lightAt을 0~1로 편 것) */
+function glow(p: Vec2, eye: Vec2, r: number, soft: number): number {
+  return Math.max(0, Math.min(1, (r - Math.hypot(p.x - eye.x, p.y - eye.y)) / Math.max(soft, 1e-4)));
+}
+
+/**
+ * 셰이더 followLight의 생존자 부분 (GLSL과 같은 식, 단위 시험용). tex = 점 p(타일)에서 읽은 빛 지도 rgb(0~1).
+ * t_obs = G로 잰 관측 밝기, 기대 B = 하한B + (1 − 하한B)·t_obs, c = smoothstep(0.25, 0.75, (기대 B − B) / 표시) — 내 덮임 정도.
+ * c = 0(표시 없음)이면 텍스처 그대로이되 B만 G가 말하는 값까지 올린다 — 팀원 빛 B가 내 표시를 일부 가린 칸(팀원 빛이 내 빛보다 조금
+ * 어두운 겹친 곳)의 B를 되살린다(표시 없는 칸은 반올림 차이 ±1 안). 아니면 g(d) = clamp((r − d)/soft, 0, 1)로
+ *   관측이 칠할 때의 내 빛으로 설명되면(t_obs ≤ g_fog + ε): t = clamp(t_obs + c·(g_now − g_fog), 0, 1) — Δ = 0이면 t = t_obs
+ *   아니면(팀원 빛이 더 밝다): t = max(t_obs, c·g_now)
+ * 그리고 rgb = 하한 + (1 − 하한)·t (채널마다). 밝아지는 곳은 c > 0(칠할 때 내 다각형 P(r + reach) 안)이고 g_now > 0(지금 자리 반경 r 안)뿐이다
+ */
+export function followTexel(
+  tex: readonly [number, number, number],
+  p: Vec2,
+  u: FollowUniforms,
+): [number, number, number] {
+  if (!u.selfOn) return [tex[0], tex[1], tex[2]];
+  const a = u.lightAmb;
+  const tObs = Math.max(0, Math.min(1, (tex[1] - a[1]) / Math.max(0.001, 1 - a[1])));
+  const expB = a[2] + (1 - a[2]) * tObs;
+  const c = smoothstep(0.25, 0.75, (expB - tex[2]) / u.mark);
+  if (c <= 0) return [tex[0], tex[1], Math.max(tex[2], expB)];
+  const gFog = glow(p, u.eyeFog, u.r, u.soft);
+  const gNow = glow(p, u.eyeNow, u.r, u.soft);
+  const t =
+    tObs <= gFog + FOLLOW_EPS ? Math.max(0, Math.min(1, tObs + c * (gNow - gFog))) : Math.max(tObs, c * gNow);
+  return [a[0] + (1 - a[0]) * t, a[1] + (1 - a[1]) * t, a[2] + (1 - a[2]) * t];
+}
+
+/**
+ * 셰이더 followLight의 괴물 부분: 점 p(타일)를 그릴 때 읽는 빛 지도 자리 (p − Δ). 맵 밖이면 null (하한)
+ */
+export function followSamplePoint(p: Vec2, u: FollowUniforms, mapW: number, mapH: number): Vec2 | null {
+  if (!u.shiftOn) return p;
+  const x = p.x - u.shift.x;
+  const y = p.y - u.shift.y;
+  if (x < 0 || y < 0 || x > mapW || y > mapH) return null;
+  return { x, y };
+}
+
 /**
  * 경계 셰이더 GLSL (fogGpu.ts FogEdgePipeline이 그대로 쓴다. 여기 두는 것은 node 단위 테스트가 핵심 식을 확인하려고).
  * 빛 값 L(하한~1)에서 w = (L − 하한) / (1 − 하한), 띠 = 4w(1 − w)(경계 중간에서 최대, 양 끝 0).
  * 결과 = L − max(L − 하한, 0) × k, k = clamp(세기 × 띠 × 노이즈, 0, 1) → 항상 [하한, L] (edgeDarken과 같은 식).
  * 틴트 처리는 Phaser 기본 셰이더와 같다.
+ * L은 텍스처 값이 아니라 followLight가 내 빛을 지금 자리까지 옮긴 값이다 (followTexel · followSamplePoint와 같은 식, uSelfOn ·
+ * uShiftOn이 0이면 텍스처 그대로). 품질 중간은 같은 셰이더를 세기 0으로 쓴다(경계 노이즈 없음, 따라가기만)
  */
 export const FOG_EDGE_FRAG = `
 #define SHADER_NAME DECOY_FOG_EDGE_FS
@@ -154,6 +288,15 @@ uniform vec2 uMapSize;
 uniform float uStrength;
 uniform float uNoiseScale;
 uniform float uNoiseSpeed;
+uniform vec3 uLightAmb;
+uniform float uMark;
+uniform float uSelfOn;
+uniform vec2 uEyeFog;
+uniform vec2 uEyeNow;
+uniform float uR;
+uniform float uSoft;
+uniform float uShiftOn;
+uniform vec2 uShift;
 
 varying vec2 outTexCoord;
 varying float outTintEffect;
@@ -176,9 +319,36 @@ float noise(vec2 p)
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
+float glow(vec2 p, vec2 eye)
+{
+    return clamp((uR - distance(p, eye)) / max(uSoft, 0.0001), 0.0, 1.0);
+}
+
+vec4 followLight(vec2 uv)
+{
+    if (uShiftOn > 0.5)
+    {
+        vec2 s = uv - uShift / uMapSize;
+        if (s.x < 0.0 || s.y < 0.0 || s.x > 1.0 || s.y > 1.0) return vec4(uLightAmb, 1.0);
+        return texture2D(uMainSampler, s);
+    }
+    vec4 tex = texture2D(uMainSampler, uv);
+    if (uSelfOn < 0.5) return tex;
+    vec3 a = uLightAmb;
+    float tObs = clamp((tex.g - a.g) / max(0.001, 1.0 - a.g), 0.0, 1.0);
+    float expB = a.b + (1.0 - a.b) * tObs;
+    float c = smoothstep(0.25, 0.75, (expB - tex.b) / uMark);
+    if (c <= 0.0) return vec4(tex.r, tex.g, max(tex.b, expB), tex.a);
+    vec2 p = uv * uMapSize;
+    float gFog = glow(p, uEyeFog);
+    float gNow = glow(p, uEyeNow);
+    float t = tObs <= gFog + ${FOLLOW_EPS.toFixed(4)} ? clamp(tObs + c * (gNow - gFog), 0.0, 1.0) : max(tObs, c * gNow);
+    return vec4(a + (1.0 - a) * t, tex.a);
+}
+
 void main ()
 {
-    vec4 light = texture2D(uMainSampler, outTexCoord);
+    vec4 light = followLight(outTexCoord);
     vec3 amb = uAmbient;
     float span = max(0.001, 1.0 - amb.g);
     float w = clamp((light.g - amb.g) / span, 0.0, 1.0);

@@ -98,9 +98,11 @@ import { chunkAtlasFor, createFogLayer, fogArtParams, stepFogArt, type FogLayer 
 import type { ViewRect } from './camera';
 import {
   ConeRedTrack,
+  FOLLOW_MAX,
   PhaseClock,
   PolyCache,
   ambientRgb,
+  followShift,
   opponentFxAllowed,
   rgbCss,
   unionOutline,
@@ -184,6 +186,12 @@ export interface MotionSource {
 export interface WorldAnimDebug {
   gait: Record<string, { phase: number; stepping: number }>;
   fogAt: number | null;
+  /** 안개 주기에 쓴 내 눈 자리 (타일, r3. 이번 주기에 내 눈이 없었으면 null) */
+  fogEye: { x: number; y: number } | null;
+  /** 이번 프레임 내 빛 따라가기 Δ (타일, r3) — 실제로 그린 내 빛 중심 = fogEye + fogShift (fogFollow 'gpu'일 때) */
+  fogShift: { x: number; y: number };
+  /** Δ를 무엇에 쓰는가: 'gpu' 빛 · 틴트 · 테두리 · 먼지, 'rims' 테두리 · 외곽선 · 먼지만(Canvas 합성: 빛 · 틴트는 구웠다), 'off' 내 눈 없음 */
+  fogFollow: 'gpu' | 'rims' | 'off';
   coneRed: number;
   dashGhosts: number;
   ghosts: { at: number; alpha: number }[];
@@ -277,6 +285,8 @@ type Eye = DustEye & { role: RoleId | null; r: number };
 interface TeamEye {
   pos: Vec2;
   role: RoleId;
+  /** 내 눈 (내 빛 따라가기) */
+  self: boolean;
 }
 
 /** 몸 원 + 누구의 몸인가 */
@@ -314,9 +324,27 @@ export class WorldRenderer {
   private readonly polys = new PolyCache();
   /** 이번 프레임에 화면에 있는 효과 출처 (프레임마다 비워 다시 쓴다) */
   private readonly present = new Set<string>();
-  /** 림을 그린 눈들 (다각형 참조 · 역할) */
+  /** 림을 그린 눈들 (다각형 참조 · 역할) — 팀원 림(rims) · 내 림(selfRims) 따로 */
   private rimsOf: { poly: readonly Vec2[]; role: RoleId | null }[] = [];
+  private selfRimsOf: { poly: readonly Vec2[]; role: RoleId | null }[] = [];
   private readonly rims: Phaser.GameObjects.Graphics;
+  /**
+   * 내 눈 림 (생존자): 안개 주기에 월드 좌표로 그리고 프레임마다 Δ만큼 옮긴다(내 빛 따라가기). rims 바로 앞(예전 한 Graphics 안에서
+   * 내 눈을 먼저 그은 순서) · 같은 색 · 같은 두께
+   */
+  private readonly selfRims: Phaser.GameObjects.Graphics;
+  /**
+   * 내 빛 따라가기 (fogMath followShift): 안개 주기에 내 눈을 썼으면 그 자리(예측 그린 자리 v.me, 몸 자리 meBody가 아님)와 그때의
+   * 역할 · 상태. 프레임마다 Δ = 지금 v.me − fogEye
+   */
+  private readonly fogEyeAt = { x: 0, y: 0 };
+  private fogEyeOn = false;
+  private fogRole: Role | null = null;
+  private fogStatus: SurvivorStatus | null = null;
+  /** 이번 프레임 Δ (타일) */
+  private readonly shift = { x: 0, y: 0 };
+  /** this.eyes 앞에서 내 눈인 수 (생존자 1 · 괴물 2 — 부채꼴 · 근접 원, 없으면 0) */
+  private selfEyeN = 0;
   /** 빛 속 먼지 (그림 묶음 'mote' 이미지 풀) */
   private readonly dust: Phaser.GameObjects.Container;
   private dustImgs: Phaser.GameObjects.Image[] = [];
@@ -528,6 +556,7 @@ export class WorldRenderer {
     const gfx = (): Phaser.GameObjects.Graphics => this.counted(scene.make.graphics({}, false));
     const box = (): Phaser.GameObjects.Container => scene.make.container({}, false);
     this.rims = gfx();
+    this.selfRims = gfx();
     this.dust = box();
     this.coneOver = gfx();
     this.coneEdge = gfx();
@@ -541,6 +570,7 @@ export class WorldRenderer {
     this.attachG = gfx();
     this.markers = gfx();
     this.container.add([
+      this.selfRims,
       this.rims,
       this.dust,
       this.coneOver,
@@ -560,7 +590,7 @@ export class WorldRenderer {
       this.attachG,
     ]);
     const named: [LayerName, Phaser.GameObjects.GameObject[]][] = [
-      ['map', [this.fogRoot, this.rims]],
+      ['map', [this.fogRoot, this.rims, this.selfRims]],
       ['entities', [this.container, this.rangeFill, this.ghosts, this.fxUnder, this.ranges, this.attachG]],
       ['entities', Object.values(this.layers)],
       ['particles', [this.dust]],
@@ -863,9 +893,13 @@ export class WorldRenderer {
       const g = this.gaits.get(id);
       if (g) gait[id] = { phase: g.phase, stepping: g.stepping };
     }
+    const on = this.fogEyeOn;
     return {
       gait,
       fogAt: this.fogClock.last,
+      fogEye: on ? { x: r3(this.fogEyeAt.x), y: r3(this.fogEyeAt.y) } : null,
+      fogShift: { x: r3(this.shift.x), y: r3(this.shift.y) },
+      fogFollow: !on ? 'off' : this.fog.selfFollow ? 'gpu' : 'rims',
       coneRed: this.coneRed,
       dashGhosts: this.fx.dashGhosts,
       ghosts: this.lastGhosts.map(({ g, alpha }) => ({ at: g.at, alpha })),
@@ -880,23 +914,25 @@ export class WorldRenderer {
     const eyes = this.teamEyes;
     eyes.length = 0;
     const st = v.snap.you.surv?.status;
-    if (v.me && v.role !== 'monster' && st !== 'dead' && st !== 'escaped') this.putTeamEye(v.me, v.role);
+    if (v.me && v.role !== 'monster' && st !== 'dead' && st !== 'escaped')
+      this.putTeamEye(v.me, v.role, true);
     for (const s of v.survivors.values()) {
       if (s.status === 'dead' || s.status === 'escaped' || !s.role) continue;
-      this.putTeamEye(s, s.role);
+      this.putTeamEye(s, s.role, false);
     }
     return eyes;
   }
 
-  private putTeamEye(pos: Vec2, role: RoleId): void {
+  private putTeamEye(pos: Vec2, role: RoleId, self: boolean): void {
     const eyes = this.teamEyes;
     let e = this.teamEyePool[eyes.length];
     if (!e) {
-      e = { pos, role };
+      e = { pos, role, self };
       this.teamEyePool.push(e);
     }
     e.pos = pos;
     e.role = role;
+    e.self = self;
     eyes.push(e);
   }
 
@@ -904,7 +940,7 @@ export class WorldRenderer {
   private pushEye(poly: readonly Vec2[], center: Vec2, radius: number, role: RoleId | null, r: number): void {
     let e = this.eyePool[this.eyes.length];
     if (!e) {
-      e = { poly, center, radius, role, r };
+      e = { poly, center, radius, role, r, dx: 0, dy: 0 };
       this.eyePool.push(e);
     }
     e.poly = poly;
@@ -912,7 +948,44 @@ export class WorldRenderer {
     e.radius = radius;
     e.role = role;
     e.r = r;
+    e.dx = 0;
+    e.dy = 0;
     this.eyes.push(e);
+  }
+
+  /** 안개 주기에 내 눈을 썼다: 그 자리 · 역할 · 상태를 남긴다 (Δ의 기준) */
+  private markFogEye(v: FrameView, me: Vec2 | null): void {
+    this.fogEyeOn = me !== null;
+    if (me) {
+      this.fogEyeAt.x = me.x;
+      this.fogEyeAt.y = me.y;
+    }
+    this.fogRole = v.role;
+    this.fogStatus = v.snap.you.surv?.status ?? null;
+  }
+
+  /**
+   * 내 빛 따라가기 (프레임마다, 안개 주기 뒤): Δ = 지금 내 자리 − 안개 주기 내 눈 자리(fogMath followShift — 내 눈이 없었거나 역할 ·
+   * 상태가 바뀌었거나 FOLLOW_MAX를 넘으면 0). 안개 레이어(GPU 빛 · 틴트), 내 림, 괴물 화면 자기 시야 외곽선, 먼지 잘라내기에 건다
+   */
+  private applyFollow(v: FrameView, isMonster: boolean): void {
+    const same = v.role === this.fogRole && (v.snap.you.surv?.status ?? null) === this.fogStatus;
+    const d = followShift(v.me, this.fogEyeOn ? this.fogEyeAt : null, same, this.shift, FOLLOW_MAX);
+    this.fog.follow(d.x, d.y);
+    const px = d.x * TILE_PX;
+    const py = d.y * TILE_PX;
+    if (this.selfRims.x !== px || this.selfRims.y !== py) this.selfRims.setPosition(px, py);
+    // 괴물 화면 자기 시야 외곽선만 옮긴다 (생존자 화면의 coneEdge는 보간한 괴물 부채꼴 가장자리 — 맵 자리 그대로)
+    const ex = isMonster ? px : 0;
+    const ey = isMonster ? py : 0;
+    if (this.coneEdge.x !== ex || this.coneEdge.y !== ey) this.coneEdge.setPosition(ex, ey);
+    const eyes = this.eyes;
+    for (let i = 0; i < eyes.length; i += 1) {
+      const e = eyes[i];
+      if (!e) continue;
+      e.dx = i < this.selfEyeN ? d.x : 0;
+      e.dy = i < this.selfEyeN ? d.y : 0;
+    }
   }
 
   draw(v: FrameView, frameMs: number): void {
@@ -958,6 +1031,9 @@ export class WorldRenderer {
       b.drawPoints(snap.world.points, balance);
       b.drawExits(snap.world.exits, balance);
       this.eyes.length = 0;
+      this.selfEyeN = 0;
+      // GPU 경로: 내 빛은 반경 r + FOLLOW_MAX 다각형에 내 덮임 표시와 함께 칠한다(셰이더가 안개 주기 사이 지금 자리로 옮긴다)
+      const reach = b.selfFollow ? FOLLOW_MAX : 0;
       if (isMonster && v.me && myShape) {
         const me = v.me;
         const near =
@@ -973,10 +1049,10 @@ export class WorldRenderer {
             v.myBlend,
             monsterConePolygon(balance, me, me.face, v.myBlend),
           );
-        b.fillPoly(near, DANGER, CONE_LOOK.nearFill);
-        b.fillPoly(cone, CONE.idle, CONE_LOOK.selfFill);
-        b.addHardLight(near);
-        b.addHardLight(cone);
+        b.fillPoly(near, DANGER, CONE_LOOK.nearFill, true);
+        b.fillPoly(cone, CONE.idle, CONE_LOOK.selfFill, true);
+        b.addHardLight(near, true);
+        b.addHardLight(cone, true);
         // 테두리는 두 다각형이 그대로면 지난 값 (다각형 캐시가 같은 참조를 돌려준다)
         if (!this.useFog) this.setOutline([], null, null);
         else if (this.outlineOf[0] !== cone || this.outlineOf[1] !== near) {
@@ -985,23 +1061,40 @@ export class WorldRenderer {
         this.pushEye(cone, v.me, myShape.range, null, myShape.range);
         const nr = balance.monster.nearVisionRadius;
         this.pushEye(near, v.me, nr, null, nr);
+        this.selfEyeN = 2;
+        this.markFogEye(v, me);
       } else {
         this.setOutline([], null, null);
+        let mine: Vec2 | null = null;
         for (const e of team) {
           const r = survivorVisionRadius(balance, e.role);
           const pos = e.pos;
           const poly =
             this.polys.peek(e.role, pos.x, pos.y, r, 0) ??
             this.polys.put(e.role, pos.x, pos.y, r, 0, survivorVisionPolygon(pos, r));
-          b.fillPoly(poly, CONE_LOOK.visionTint, CONE_LOOK.visionTintAlpha);
-          b.addSoftLight({ poly, center: e.pos, radius: r, soft: balance.survivor.visionSoftEdge });
-          this.pushEye(poly, e.pos, r - balance.survivor.visionSoftEdge, e.role, r);
+          const soft = balance.survivor.visionSoftEdge;
+          // 내 눈의 빛 (GPU): 반경 r + FOLLOW_MAX로 레이캐스트한 다각형 (같은 자리면 캐시)
+          const far = e.self && reach > 0;
+          const lightPoly = far
+            ? (this.polys.peek('selfReach', pos.x, pos.y, r + reach, 0) ??
+              this.polys.put('selfReach', pos.x, pos.y, r + reach, 0, survivorVisionPolygon(pos, r + reach)))
+            : poly;
+          b.fillPoly(poly, CONE_LOOK.visionTint, CONE_LOOK.visionTintAlpha, e.self);
+          b.addSoftLight({ poly: lightPoly, center: e.pos, radius: r, soft, reach: far ? reach : 0 });
+          this.pushEye(poly, e.pos, r - soft, e.role, r);
+          if (e.self) {
+            mine = e.pos;
+            // 내 눈은 eyes 맨 앞 (survivorEyes가 나를 먼저 넣는다)
+            this.selfEyeN = this.eyes.length === 1 ? 1 : 0;
+          }
         }
+        this.markFogEye(v, this.selfEyeN > 0 ? mine : null);
       }
       b.commit();
       this.baseRefreshed = b.changed;
       this.drawRims();
     }
+    this.applyFollow(v, isMonster);
 
     // 빛 속 먼지 (장식: 자기 팀 시야 안에서만, 시계와 시드만의 함수). 그림 묶음 'mote' 이미지 (원호 테셀레이션 없음)
     const dustN = FX_LIMITS.dust[this.preset.tier];
@@ -1391,17 +1484,33 @@ export class WorldRenderer {
    * Canvas는 이어 그으면 마이터 이음이 생겨 화소가 달라지므로 예전처럼 변마다 (vision.ts traceRim)
    */
   private drawRims(): void {
-    // 눈들의 다각형 · 역할이 지난 주기와 같으면(다각형 캐시의 같은 참조) 이미 그린 선 그대로
-    const sig = this.rimsOf;
+    // 내 눈 림은 따로(selfRims: 프레임마다 Δ만큼 옮긴다), 팀원 림은 rims. 예전 한 Graphics의 순서(내 눈 먼저)와 같게 selfRims가 앞이다
+    const n = this.selfEyeN;
+    this.rimsOf = this.rimsInto(this.rims, this.rimsOf, n, this.eyes.length);
+    this.selfRimsOf = this.rimsInto(this.selfRims, this.selfRimsOf, 0, n);
+  }
+
+  /**
+   * eyes[from, to)의 림을 g에 긋는다. 눈들의 다각형 · 역할이 지난 주기(sig)와 같으면(다각형 캐시의 같은 참조) 이미 그린 선 그대로.
+   * 새 서명을 돌려준다
+   */
+  private rimsInto(
+    g: Phaser.GameObjects.Graphics,
+    sig: { poly: readonly Vec2[]; role: RoleId | null }[],
+    from: number,
+    to: number,
+  ): { poly: readonly Vec2[]; role: RoleId | null }[] {
     const eyes = this.eyes;
-    let same = sig.length === eyes.length;
-    for (let i = 0; same && i < eyes.length; i += 1)
-      same = sig[i]?.poly === eyes[i]?.poly && sig[i]?.role === eyes[i]?.role;
-    if (same) return;
-    this.rimsOf = eyes.map((e) => ({ poly: e.poly, role: e.role }));
-    const g = this.rims;
+    let same = sig.length === to - from;
+    for (let i = from; same && i < to; i += 1)
+      same = sig[i - from]?.poly === eyes[i]?.poly && sig[i - from]?.role === eyes[i]?.role;
+    if (same) return sig;
+    const out: { poly: readonly Vec2[]; role: RoleId | null }[] = [];
     g.clear();
-    for (const e of eyes) {
+    for (let i = from; i < to; i += 1) {
+      const e = eyes[i];
+      if (!e) continue;
+      out.push({ poly: e.poly, role: e.role });
       if (!e.role) continue;
       const color = ROLE[e.role];
       g.lineStyle(worldLine(CONE_LOOK.rimWidth), color, CONE_LOOK.rimAlpha);
@@ -1409,6 +1518,7 @@ export class WorldRenderer {
       traceRim(g, e.poly, e.center, e.r, this.webgl);
       g.strokePath();
     }
+    return out;
   }
 
   /**

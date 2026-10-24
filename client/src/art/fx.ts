@@ -548,6 +548,12 @@ export interface DustEye {
   center: Vec2;
   /** 완전히 밝은 반경 (생존자: 판정 반경 − 흐림 띠, 괴물: 부채꼴 길이). 이 안에만 먼지 */
   radius: number;
+  /**
+   * 내 빛 따라가기 Δ (타일, 내 눈만 · 없으면 0): 이 눈의 시야를 다각형 · 중심째 Δ만큼 옮겨 본다 — 반경 검사는 (중심 + Δ) 둘레,
+   * 다각형 검사는 (점 − Δ)를 안개 주기 다각형에. Δ = 0이면 예전과 같은 결과(비트 단위)
+   */
+  dx?: number;
+  dy?: number;
 }
 
 export interface DustMote {
@@ -617,9 +623,12 @@ export class DustField {
       for (let k = 0; k < eyes.length; k += 1) {
         const q = eyes[k];
         if (!q) continue;
-        if (Math.hypot(x - q.center.x, y - q.center.y) > q.radius) continue;
-        probe.x = x;
-        probe.y = y;
+        // 옮긴 눈: 점을 거꾸로 Δ만큼 옮겨 안개 주기 다각형 · 중심에 견준다 (x − 0 = x라 Δ = 0이면 예전과 같은 수)
+        const qx = x - (q.dx ?? 0);
+        const qy = y - (q.dy ?? 0);
+        if (Math.hypot(qx - q.center.x, qy - q.center.y) > q.radius) continue;
+        probe.x = qx;
+        probe.y = qy;
         if (pointInPolygon(probe, q.poly)) {
           inside = true;
           break;
@@ -648,14 +657,20 @@ export class DustField {
     const cell = DUST.cell;
     const sig = this.sig;
     let same = sig.length === eyes.length * 4;
+    // 칸 범위는 옮긴 중심(중심 + Δ) 둘레 (Δ = 0이면 예전과 같은 수)
     for (let k = 0; same && k < eyes.length; k += 1) {
       const e = eyes[k];
+      if (e === undefined) {
+        same = false;
+        break;
+      }
+      const cx = e.center.x + (e.dx ?? 0);
+      const cy = e.center.y + (e.dy ?? 0);
       same =
-        e !== undefined &&
-        sig[k * 4] === Math.floor((e.center.x - e.radius) / cell) &&
-        sig[k * 4 + 1] === Math.floor((e.center.x + e.radius) / cell) &&
-        sig[k * 4 + 2] === Math.floor((e.center.y - e.radius) / cell) &&
-        sig[k * 4 + 3] === Math.floor((e.center.y + e.radius) / cell);
+        sig[k * 4] === Math.floor((cx - e.radius) / cell) &&
+        sig[k * 4 + 1] === Math.floor((cx + e.radius) / cell) &&
+        sig[k * 4 + 2] === Math.floor((cy - e.radius) / cell) &&
+        sig[k * 4 + 3] === Math.floor((cy + e.radius) / cell);
     }
     if (same) return;
     sig.length = 0;
@@ -663,10 +678,12 @@ export class DustField {
     const seen = new Set<number>();
     const cells: { pri: number; i: number; j: number }[] = [];
     for (const e of eyes) {
-      const i0 = Math.floor((e.center.x - e.radius) / cell);
-      const i1 = Math.floor((e.center.x + e.radius) / cell);
-      const j0 = Math.floor((e.center.y - e.radius) / cell);
-      const j1 = Math.floor((e.center.y + e.radius) / cell);
+      const cx = e.center.x + (e.dx ?? 0);
+      const cy = e.center.y + (e.dy ?? 0);
+      const i0 = Math.floor((cx - e.radius) / cell);
+      const i1 = Math.floor((cx + e.radius) / cell);
+      const j0 = Math.floor((cy - e.radius) / cell);
+      const j1 = Math.floor((cy + e.radius) / cell);
       sig.push(i0, i1, j0, j1);
       for (let j = j0; j <= j1; j += 1) {
         for (let i = i0; i <= i1; i += 1) {

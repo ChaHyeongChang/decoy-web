@@ -27,7 +27,7 @@ import {
   type TileRect,
 } from '../art/mapArtGeom';
 import { gfxNow, gfxState } from '../gfx/state';
-import { softLightGeometry } from './fogMath';
+import { selfMarkGradient, softLightGeometry } from './fogMath';
 
 /** 좌표는 타일, 선 두께는 논리 px(맵 0.93배를 적용한 화면 px) */
 export interface FogPen {
@@ -1039,6 +1039,11 @@ export interface SoftLight {
   center: Vec2;
   radius: number;
   soft: number;
+  /**
+   * 내 시야 따라가기 여유 (타일, GPU 경로의 내 눈만 · 없으면 0): poly는 반경 radius + reach로 레이캐스트한 다각형이고, 빛 지도에
+   * '내 덮임' 표시(B − SELF_MARK)와 함께 칠한다 (LightMap.addSelfAt). 셰이더가 이 표시로 내 빛을 지금 자리까지 옮긴다
+   */
+  reach?: number;
 }
 
 /** 빛 지도를 칠하는 2D 컨텍스트 중 쓰는 부분 (단위 테스트는 기록용 가짜 컨텍스트를 넣는다) */
@@ -1095,6 +1100,8 @@ export class LightMap<C extends { readonly width: number; readonly height: numbe
     readonly k: number,
     private readonly ambientCss: string,
     surface: LightSurfaceFactory<C>,
+    /** 바탕색 RGB (0~255, ambientCss와 같은 값). 있으면 내 시야를 '내 덮임' 표시와 함께 칠할 수 있다 (addSelfAt, GPU 경로) */
+    private readonly ambient: readonly [number, number, number] | null = null,
   ) {
     const s = surface(Math.max(1, Math.round(MAP_W * k)), Math.max(1, Math.round(MAP_H * k)));
     this.canvas = s.canvas;
@@ -1138,6 +1145,42 @@ export class LightMap<C extends { readonly width: number; readonly height: numbe
     l.restore();
   }
 
+  /**
+   * 내 시야 + '내 덮임' 표시 (GPU 경로의 내 눈만, fogMath selfMarkGradient): 다각형 = 반경 radius + reach로 레이캐스트한 것,
+   * 그라디언트 = r − soft에서 흰색 → r에서 하한 → r + reach까지 하한, B 채널만 전체에서 SELF_MARK 낮다. 'source-over'로 칠한다:
+   * 'lighten'이면 하한보다 낮은 표시 B가 바탕(하한)에 져서 r 밖 띠 · 흐림 띠 바깥쪽의 표시가 사라진다. 그라디언트 R · G는 늘
+   * 하한 이상이라 바탕 위 source-over = lighten과 같은 값이고, 그래서 다른 시야보다 먼저 칠해야 한다(LightRecord.paint).
+   * 바탕 RGB를 모르면(ambient = null) 표시 없이 addSoftAt과 같은 그림
+   */
+  addSelfAt(
+    poly: readonly Vec2[],
+    centerX: number,
+    centerY: number,
+    radius: number,
+    soft: number,
+    reach: number,
+  ): void {
+    if (poly.length < 3) return;
+    const amb = this.ambient;
+    if (!amb) {
+      this.addSoftAt(poly, centerX, centerY, radius, soft);
+      return;
+    }
+    const l = this.ctx;
+    const k = this.k;
+    const g = selfMarkGradient(radius, soft, reach, amb);
+    const cx = centerX * k;
+    const cy = centerY * k;
+    const grad = l.createRadialGradient(cx, cy, g.inner * k, cx, cy, g.outer * k);
+    for (const [offset, css] of g.stops) grad.addColorStop(offset, css);
+    l.save();
+    l.globalCompositeOperation = 'source-over';
+    polyPath(l, poly, k);
+    l.fillStyle = grad;
+    l.fill();
+    l.restore();
+  }
+
   /** 경계가 딱 잘린 시야 (괴물 부채꼴 · 근접 원) */
   addHard(poly: readonly Vec2[]): void {
     if (poly.length < 3) return;
@@ -1161,6 +1204,8 @@ interface LightOp {
   cy: number;
   radius: number;
   soft: number;
+  /** 내 시야 따라가기 여유 (0 = 보통 시야, > 0 = 내 덮임 표시와 함께 칠하는 내 눈 — SoftLight.reach) */
+  reach: number;
 }
 
 /** 두 다각형이 같은 꼭짓점인가 (같은 참조면 바로 참: 시야 다각형은 만든 뒤 바꾸지 않는다) */
@@ -1185,6 +1230,7 @@ function sameLightOp(p: LightOp, q: LightOp): boolean {
     sameNum(p.cy, q.cy) &&
     sameNum(p.radius, q.radius) &&
     sameNum(p.soft, q.soft) &&
+    p.reach === q.reach &&
     samePoly(p.poly, q.poly)
   );
 }
@@ -1218,7 +1264,7 @@ export class LightRecord {
   private next(): LightOp {
     let op = this.cur[this.n];
     if (!op) {
-      op = { poly: [], cx: NaN, cy: NaN, radius: NaN, soft: NaN };
+      op = { poly: [], cx: NaN, cy: NaN, radius: NaN, soft: NaN, reach: 0 };
       this.cur.push(op);
     }
     this.n += 1;
@@ -1233,6 +1279,7 @@ export class LightRecord {
     op.cy = light.center.y;
     op.radius = light.radius;
     op.soft = light.soft;
+    op.reach = Math.max(0, light.reach ?? 0);
   }
 
   addHard(poly: readonly Vec2[]): void {
@@ -1243,6 +1290,7 @@ export class LightRecord {
     op.cy = NaN;
     op.radius = NaN;
     op.soft = NaN;
+    op.reach = 0;
   }
 
   /** 지난번에 칠한 기록과 같은가 */
@@ -1258,13 +1306,21 @@ export class LightRecord {
     return true;
   }
 
-  /** 바뀌었으면 빛 지도를 지우고 기록대로 칠한다. 칠했으면 true (텍스처를 다시 올려야 한다) */
+  /**
+   * 바뀌었으면 빛 지도를 지우고 기록대로 칠한다. 칠했으면 true (텍스처를 다시 올려야 한다).
+   * 내 덮임 표시가 있는 내 시야(reach > 0)를 먼저 칠한다 (LightMap.addSelfAt은 source-over라 바탕 위에만 맞다). 나머지는 'lighten'
+   * (채널별 최댓값)이라 순서와 상관없이 같은 그림이다
+   */
   paint<C extends { readonly width: number; readonly height: number }>(light: LightMap<C>): boolean {
     if (this.unchanged) return false;
     light.clear();
     for (let i = 0; i < this.n; i += 1) {
       const op = this.cur[i];
-      if (!op) continue;
+      if (op && op.reach > 0) light.addSelfAt(op.poly, op.cx, op.cy, op.radius, op.soft, op.reach);
+    }
+    for (let i = 0; i < this.n; i += 1) {
+      const op = this.cur[i];
+      if (!op || op.reach > 0) continue;
       if (Number.isNaN(op.radius)) light.addHard(op.poly);
       else light.addSoftAt(op.poly, op.cx, op.cy, op.radius, op.soft);
     }
