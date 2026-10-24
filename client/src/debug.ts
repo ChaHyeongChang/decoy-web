@@ -1,7 +1,7 @@
 // window.__DECOY__ 디버그 훅과 ?debug=1 오버레이 (FPS · 프레임 시간 · 그리기 호출 · 핑 · 서버 틱 · 예측 오차 · 품질 …,
 // 표시는 ui/debugOverlay.ts). 오버레이는 배포 빌드에서도 ?debug=1이면 뜨고, 그때만 그리기 호출을 센다
 import Phaser from 'phaser';
-import type { DecoyDebug, HudLayout, TouchTarget } from '@decoy/shared';
+import type { DecoyDebug, HudLayout, MatchPrefsDebug, TouchTarget } from '@decoy/shared';
 import type { App } from './app';
 import { sfx } from './audio';
 import { device } from './device';
@@ -16,6 +16,8 @@ import {
 } from './gfx/frameStats';
 import { PACING_WATCH } from './gfx/quality';
 import { freezeGfxClock, gfxState, probeSlot, setFpsOverride } from './gfx/state';
+import { matchMenu } from './matchMenu';
+import { setPref } from './prefs';
 import type { GameScene } from './scenes/GameScene';
 import { installDebugOverlay, type DebugOverlayData, type OverlayAnchor } from './ui/debugOverlay';
 import { MAP_RECT, VIEW_H, VIEW_W, layout, tileToScreen } from './ui/layout';
@@ -103,6 +105,11 @@ export function installDebug(app: App, overlay: boolean): void {
     getCamera: () => gameScene(app)?.cameraDebug ?? null,
     getSpectateCards: () => gameScene(app)?.spectateCards ?? [],
     setCameraShake: (scale) => gameScene(app)?.setShakeScale(scale),
+    // ── 판 중 설정 효과 ──
+    getMatchPrefs: () => matchPrefs(app),
+    getDrawnMinimapBig: () => gameScene(app)?.minimapBigDrawn.map((d) => ({ ...d })) ?? [],
+    fakeMatchMenu: (on) => setFakeMatchMenu(on),
+    setMatchPref: (key, on) => void setPref(key, on),
     setFrameLimit: (limit) => pacingHooks.setLimit?.(limit),
     setCharStyle: (style) => void setCharStyle(style, false),
     probeText: (text, x, y, px) => probeSlot.draw?.(text, x, y, px),
@@ -201,6 +208,59 @@ export function installDebug(app: App, overlay: boolean): void {
     expanded: !device.touch,
     anchor: () => overlayAnchor(app),
   });
+}
+
+// ── 판 중 설정 효과 (디버그) ──
+
+/** 시험용 가짜 판 중 메뉴 (fakeMatchMenu): 열림 상태 · 횟수, 되돌릴 진짜 연결점 */
+interface FakeMenu {
+  open: boolean;
+  opens: number;
+  closes: number;
+  saved: { open: typeof matchMenu.open; close: typeof matchMenu.close; isOpen: typeof matchMenu.isOpen };
+}
+let fakeMenu: FakeMenu | null = null;
+
+function setFakeMatchMenu(on: boolean): void {
+  if (on && !fakeMenu) {
+    const f: FakeMenu = {
+      open: false,
+      opens: 0,
+      closes: 0,
+      saved: { open: matchMenu.open, close: matchMenu.close, isOpen: matchMenu.isOpen },
+    };
+    matchMenu.open = () => {
+      if (f.open) return;
+      f.open = true;
+      f.opens += 1;
+    };
+    matchMenu.close = () => {
+      if (!f.open) return;
+      f.open = false;
+      f.closes += 1;
+    };
+    matchMenu.isOpen = () => f.open;
+    fakeMenu = f;
+  } else if (!on && fakeMenu) {
+    matchMenu.open = fakeMenu.saved.open;
+    matchMenu.close = fakeMenu.saved.close;
+    matchMenu.isOpen = fakeMenu.saved.isOpen;
+    fakeMenu = null;
+  }
+}
+
+/** 판 중 설정 효과 상태 (판 장면이 없으면 null) */
+function matchPrefs(app: App): MatchPrefsDebug | null {
+  const s = gameScene(app);
+  if (!s) return null;
+  const base = s.matchPrefsDebug;
+  const f = fakeMenu;
+  return {
+    ...base,
+    menu: f
+      ? { open: f.open, opens: f.opens, closes: f.closes, fake: true }
+      : { open: matchMenu.isOpen(), opens: 0, closes: 0, fake: false },
+  };
 }
 
 /** 터치 기기 칩의 맵 왼쪽 끝에서 띄우는 거리 (CSS px) */

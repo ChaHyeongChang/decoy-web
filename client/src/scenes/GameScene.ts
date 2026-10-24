@@ -1,4 +1,6 @@
 // 판 화면: 1/30초 고정 간격 입력 → 예측 → 서버 전송, 그리고 렌더링 · HUD · 배너
+// 설정 화면 통합 (판 중 설정 효과): 흔들림 · 번쩍임 줄이기(prefs) · FPS · 핑 칩 · 지도 크게 보기 · 판 중 메뉴(PC 버튼 · Esc ·
+// 터치 '설정' 버튼 → matchMenu). 메뉴가 열려 있어도 판은 흐르고 그리기도 그대로다 — 키 · 마우스 · 터치 입력만 멈춘다
 import Phaser from 'phaser';
 import {
   BTN,
@@ -13,6 +15,7 @@ import {
   type GameEvent,
   type HudLayoutItem,
   type InfoItem,
+  type MatchPrefsDebug,
   type InputFrame,
   type InputLogEntry,
   type Role,
@@ -23,7 +26,7 @@ import {
 import type { App } from '../app';
 import { LinearRamp, isWalking, selfPieces, type SelfStep, type TravelPiece } from '../art/anim';
 import { sfx } from '../audio';
-import { STORY_TEXT, UI_TEXT, formatText } from '../data/storyText';
+import { HELP_TEXT, STORY_TEXT, UI_TEXT, formatText } from '../data/storyText';
 import { device } from '../device';
 import { FPS_WINDOW_MS, sessionFrameStats, type FrameWindow } from '../gfx/frameStats';
 import {
@@ -33,9 +36,11 @@ import {
   type AdaptContext,
   type FrameSample,
 } from '../gfx/quality';
-import { getFpsOverride, gfxNow, gfxState, probeSlot } from '../gfx/state';
+import { getFpsOverride, gfxNow, gfxState, onGfxChange, probeSlot } from '../gfx/state';
 import { haptics } from '../haptics';
 import { InputLog, InputSampler } from '../input';
+import { matchMenu, toggleMatchMenu } from '../matchMenu';
+import { onPrefsChange, pref, shakeScaleOf, type PrefKey } from '../prefs';
 import { AimHold, aimAnchor } from '../aimHold';
 import { applyDashStart, applyWindupLock, predictMonsterPress, type LocalWindup } from '../localActions';
 import { COLOR } from '../render/colors';
@@ -43,6 +48,7 @@ import { cullable } from '../render/camera';
 import { CameraDirector, devPerTile } from '../render/cameraDirector';
 import { UI } from '../art/palette';
 import { ScreenEffects, collectFxTargets } from '../render/effects';
+import { bigMinimapPlace, spottedEdgeAlpha } from '../render/prefsFx';
 import { WorldRenderer, type MotionSource } from '../render/worldRenderer';
 import { TouchInput, type TouchFrameCtx } from '../touchInput';
 import { TOUCH_HINT_MS, takeTouchHints } from '../touchTutorial';
@@ -55,6 +61,7 @@ import {
   CAM,
   CAM_ZOOM,
   HUD,
+  HUD_BAND,
   MAP_RECT,
   MINIMAP_INSET,
   MIN_GAP,
@@ -67,10 +74,12 @@ import {
   minimapFallback,
   tileToScreen,
 } from '../ui/layout';
+import { MatchMenuButton, menuButtonPlace } from '../ui/matchMenuButton';
 import { Minimap } from '../ui/minimap';
 import { EdgeMarkers, edgeMetrics } from '../ui/edgeMarkers';
 import { edgeTargets, placeEdges, type EdgeMarker, type EdgeTarget } from '../render/offscreen';
 import { Scoreboard, TutorialOverlay } from '../ui/overlays';
+import { PERF_CHIP, PerfChip, perfChipPlace, perfChipText } from '../ui/perfChip';
 import { PROBE_DEPTH, drawProbeText } from '../ui/text';
 import { TouchControls, type TouchView } from '../ui/touchControls';
 import { frameDeltaMs, frameTimeOf, staleEventLimitMs, trackFrameMs } from './staleEvents';
@@ -93,8 +102,6 @@ const ALERT_LOOK: Partial<Record<string, { tone: Tone; icon: IconId }>> = {
   ALERT_EXIT_OPEN: { tone: 'info', icon: 'exit' },
   ALERT_RESCUED: { tone: 'info', icon: 'rescue' },
 };
-/** 발각 테두리 맥동 (Hz) */
-const SPOTTED_PULSE_HZ = 1.2;
 /** 늘 같은 배너 줄 (프레임마다 새 객체를 만들지 않는다. Banners는 줄을 붙잡지 않고 값만 읽는다) */
 const LINE = {
   campSlow: { text: UI_TEXT.campSlow, tone: 'warn', icon: 'prison' },
@@ -177,6 +184,40 @@ export class GameScene extends Phaser.Scene {
 
   /** 판 중 창이 낮아져 엄지 버튼이 옆 칸 미니맵을 덮었다 (TouchControls onCovered) */
   private minimapCovered = false;
+
+  // ── 판 중 설정 효과 (설정 화면 통합) ──
+  /** OS '동작 줄이기' (판 장면을 만들 때 읽는다): 흔들림 0 */
+  private osReduceMotion = false;
+  /** 시험의 흔들림 배율 덮어쓰기 (setShakeScale). '흔들림 줄이기' 설정이 바뀌면 지운다 */
+  private shakeOverride: number | null = null;
+  /** 번쩍임 줄이기 (피격 테두리 옅게 · 잘라 옮김 어두워짐 없음 · 발각 테두리 맥동 없음) */
+  private flashReduced = false;
+  /** 발각 빛 테두리에 지금 건 알파 (디버그, 보이지 않으면 0) */
+  private spottedAlphaNow = 0;
+  /** 판 중 메뉴(설정 화면)가 열려 입력을 멈췄다 (matchMenu.isOpen을 입력 틱 · 프레임마다 본다) */
+  private menuOpen = false;
+  /** #ui-root (판 중 메뉴 버튼 · FPS 칩 · 터치 화면을 붙이는 곳) */
+  private uiRoot: HTMLElement = document.body;
+  /** PC 판 중 메뉴 버튼 (터치 모드는 null — 터치 화면의 '설정' 시스템 버튼) */
+  private menuButton: MatchMenuButton | null = null;
+  /** FPS · 핑 칩 (설정을 켠 판에서 처음 보일 때 만든다) · 다음에 글자를 고칠 시각 · 설정 */
+  private chip: PerfChip | null = null;
+  private chipAt = 0;
+  private chipWanted = false;
+  /** 칩 글자 길이 (바뀌면 화면 밖 화살표가 피할 사각형을 다시 잰다) */
+  private chipLen = -1;
+  private readonly chipWin: FrameWindow = { fps: 0, intervalAvg: 0, workP95: 0, frames: 0, late: 0 };
+  /** FPS 칩 사각형 (논리 px, 화면 밖 화살표가 피한다). 칩이 없거나 숨었으면 null */
+  private chipAvoid: { x: number; y: number; w: number; h: number } | null = null;
+  /** 창 크기가 바뀌어 메뉴 버튼 · 칩 자리를 다시 놓아야 한다 */
+  private buttonDirty = true;
+  private chipDirty = true;
+  /** ?debug=1 칩 (터치 기기에서 FPS 칩과 같은 구석이면 칩이 그 아래로) */
+  private debugChip: HTMLElement | null = null;
+  /** 지도 크게 보기 (처음 열 때 만든다) · 열렸는가 · 이 판에서 연 횟수 */
+  private minimapBig: Minimap | null = null;
+  private bigOpen = false;
+  private bigOpens = 0;
 
   /**
    * 미니맵 자리: 엄지 버튼이 덮지 않으면 처음 자리. 덮으면 확대 화면에서는 맵 창 안 빈 구석으로 옮기고(미니맵이 필수, 검토 반영),
@@ -302,6 +343,50 @@ export class GameScene extends Phaser.Scene {
     return this.minimap?.drawn ?? [];
   }
 
+  /** 디버그 · 시험: 크게 본 지도에 그린 엔티티 (닫혀 있으면 빈 목록) */
+  get minimapBigDrawn(): DrawnEntity[] {
+    return this.bigOpen ? (this.minimapBig?.drawn ?? []) : [];
+  }
+
+  /** 디버그 · 시험: 판 중 설정 효과 (메뉴 상태는 debug.ts가 더한다) */
+  get matchPrefsDebug(): Omit<MatchPrefsDebug, 'menu'> {
+    const r = this.game.canvas.getBoundingClientRect();
+    const k = r.height > 0 ? r.height / VIEW_H : 0;
+    const r1 = (v: number): number => Math.round(v * 10) / 10;
+    const box = (b: { x: number; y: number; w: number; h: number }) => ({
+      x: r1(r.left + b.x * k),
+      y: r1(r.top + b.y * k),
+      w: r1(b.w * k),
+      h: r1(b.h * k),
+    });
+    const el = (e: HTMLElement) => {
+      const b = e.getBoundingClientRect();
+      return { x: r1(b.left), y: r1(b.top), w: r1(b.width), h: r1(b.height) };
+    };
+    const tap = CAM_ZOOM > 1 ? (this.minimap?.frameRect ?? null) : null;
+    const big = this.minimapBig;
+    const open = this.bigOpen && big !== null;
+    return {
+      shakeScale: this.director?.shake.scale ?? 1,
+      shakeOffset: this.director?.shakeNow ?? 0,
+      reduceFlash: this.flashReduced,
+      spottedAlpha: this.spottedAlphaNow,
+      inputSuspended: this.sampler.isSuspended,
+      menuButton: this.menuButton ? { ...el(this.menuButton.el), visible: this.menuButton.shown } : null,
+      perfChip: this.chip ? { ...el(this.chip.el), visible: this.chip.shown, text: this.chip.textNow } : null,
+      perfChipAvoid: this.chipAvoid ? { ...this.chipAvoid } : null,
+      minimapTap: tap ? box(tap) : null,
+      minimapBig: {
+        open,
+        frame: open ? big.frameRect : null,
+        frames: open ? big.drawnFrames : [],
+        opens: this.bigOpens,
+        bakes: big?.bakes ?? 0,
+        smallBakes: this.minimap?.bakes ?? 0,
+      },
+    };
+  }
+
   get bannerTexts(): string[] {
     return this.banners?.visible ?? [];
   }
@@ -419,6 +504,7 @@ export class GameScene extends Phaser.Scene {
     CAM.x = 0;
     CAM.y = 0;
     this.world = new WorldRenderer(this, FOG_ENABLED);
+    this.shakeOverride = null;
     this.makeCameraFrame();
     this.aimHold.reset();
     this.myBlend = 0;
@@ -443,6 +529,9 @@ export class GameScene extends Phaser.Scene {
     this.tutorial = info.firstMatch && !device.touch ? new TutorialOverlay(this.kit, info) : null;
     this.scoreboard = new Scoreboard(this.kit, info, balance, device.touch);
     this.screenFx = new ScreenEffects(this, this.world.stunVeil);
+    // 판 중 설정 효과: 번쩍임 줄이기 · FPS 칩 (설정이 바뀌면 판 중에도 바로 — onPref)
+    this.applyFlash();
+    this.chipWanted = pref('perfChip');
     this.localWindup = null;
     this.spottedEdge = this.kit.slice(38);
     this.spottedEdge.hollow = true;
@@ -461,6 +550,7 @@ export class GameScene extends Phaser.Scene {
     this.tutorial?.show(performance.now(), TUTORIAL_SECONDS);
 
     const host = this.game.canvas.parentElement ?? document.body;
+    this.uiRoot = document.getElementById('ui-root') ?? document.body;
     // 터치 모드: 터치 상태 기계를 입력 소스로 붙이고 터치 화면을 만든다. PC에서는 터치 레이어를 만들지 않는다
     this.inputHistory.clear();
     this.touch = device.touch ? new TouchInput() : null;
@@ -471,7 +561,7 @@ export class GameScene extends Phaser.Scene {
       aimSurface: this.game.canvas,
     });
     if (this.touch) {
-      const uiRoot = document.getElementById('ui-root') ?? document.body;
+      const uiRoot = this.uiRoot;
       // 판 HUD 자리 (논리 px): 터치 화면이 이동 영역을 그 아래에서 시작한다. 캔버스 자리는 창 크기가 바뀔 때마다 다시 잰다.
       // 판 중 창이 낮아져 엄지 버튼이 미니맵을 덮으면 미니맵을 숨기고, 크기가 돌아오면 다시 보인다 (M12 검토)
       const plan = HUD.touch ? (info.role === 'monster' ? HUD.touch.monster : HUD.touch.survivor) : null;
@@ -479,6 +569,8 @@ export class GameScene extends Phaser.Scene {
       this.touchControls = new TouchControls(uiRoot, {
         role: info.role,
         feed: this.touch,
+        // 오른쪽 위 시스템 버튼 '설정': 판 중 설정 (판은 멈추지 않는다)
+        onMenu: () => this.openMenu(),
         hud: {
           rects: plan?.rects ?? [],
           canvas: () => {
@@ -501,11 +593,13 @@ export class GameScene extends Phaser.Scene {
     // 관전 카드 고르기: 창 단위 캡처로 받아 캔버스 논리 좌표의 팀 카드 사각형과 맞춘다 (카드는 캔버스 그림이라 DOM 터치 대상이
     // 아니다 — 수감 중에도 켜져 있는 터치 이동 영역이 손가락을 먼저 붙잡지 않게 맞으면 전파를 멈춘다)
     this.cardPick = null;
-    const onCardDown = (e: PointerEvent): void => this.onCardDown(e);
-    window.addEventListener('pointerdown', onCardDown, true);
+    // 같은 캡처에서 지도 누르기(크게 보기)도 받는다 (지도도 캔버스 그림이다)
+    const onPointer = (e: PointerEvent): void => this.onPointerCapture(e);
+    window.addEventListener('pointerdown', onPointer, true);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () =>
-      window.removeEventListener('pointerdown', onCardDown, true),
+      window.removeEventListener('pointerdown', onPointer, true),
     );
+    this.setupMatchPrefs();
     this.roarPings = [];
     // 'match' 뒤 이 장면이 생기기 전(판 시작 대기 · 세로 안내 · 다시 들어온 판의 장면 재시작)에 온 거점 메모를 다시 보인다.
     // 장면이 생긴 뒤의 메모는 아래 구독이 받는다 (M12 검토: 재접속 때 서버가 남겨 보낸 메모가 터치에서 사라지던 것)
@@ -552,14 +646,15 @@ export class GameScene extends Phaser.Scene {
    */
   private makeCameraFrame(): void {
     this.director = new CameraDirector(VIEW_TILES_W, VIEW_TILES_H);
-    // 흔들림 세기: 동작 줄이기(OS 설정)면 0 — 나중에 '흔들림 줄이기' 설정이 같은 값을 정한다
+    // 흔들림 세기: 동작 줄이기(OS 설정) 또는 '흔들림 줄이기' 설정이면 0 (prefs.shakeScaleOf, 판 중에 바꾸면 onPref)
     let reduce = false;
     try {
       reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     } catch {
       reduce = false;
     }
-    this.director.shake.scale = reduce ? 0 : 1;
+    this.osReduceMotion = reduce;
+    this.applyShake();
     this.frameCovers = [];
     this.dipCover = null;
     if (CAM_ZOOM <= 1) return;
@@ -634,9 +729,132 @@ export class GameScene extends Phaser.Scene {
     gfxState.features.culledObjects = this.culled.size;
   }
 
-  /** 흔들림 세기 배율 (디버그 · 시험, 나중 '흔들림 줄이기' 설정과 같은 값) */
+  /**
+   * 흔들림 세기 배율 (디버그 · 시험의 픽셀 탐침, '흔들림 줄이기'와 같은 값). 덮어쓴 값은 '흔들림 줄이기' 설정이 바뀔 때까지 이긴다
+   */
   setShakeScale(scale: number): void {
-    if (this.director) this.director.shake.scale = Math.max(0, scale);
+    this.shakeOverride = Math.max(0, scale);
+    this.applyShake();
+  }
+
+  /** 흔들림 세기 = 시험 덮어쓰기 ?? (흔들림 줄이기 · OS 동작 줄이기면 0, 아니면 1) */
+  private applyShake(): void {
+    if (this.director) this.director.shake.scale = this.shakeOverride ?? shakeScaleOf(this.osReduceMotion);
+  }
+
+  /** 번쩍임 줄이기를 판 화면에 건다 (피격 테두리 · 잘라 옮김 어두워짐 · 발각 테두리) */
+  private applyFlash(): void {
+    const on = pref('reduceFlash');
+    this.flashReduced = on;
+    if (this.screenFx) this.screenFx.reduceFlash = on;
+    if (this.director) this.director.noDip = on;
+  }
+
+  /** 설정이 바뀌었다 (설정 화면, 판 중에도 바로 — 판은 멈추지 않는다) */
+  private onPref(key: PrefKey | null): void {
+    if (key === null || key === 'reduceShake') {
+      this.shakeOverride = null;
+      this.applyShake();
+    }
+    if (key === null || key === 'reduceFlash') this.applyFlash();
+    if (key === null || key === 'perfChip') {
+      this.chipWanted = pref('perfChip');
+      this.chipAt = 0;
+      this.chipDirty = true;
+      if (!this.chipWanted) {
+        this.chip?.show(false);
+        this.chipAvoid = null;
+      }
+    }
+  }
+
+  /**
+   * 판 중 설정 효과 준비 (create 끝): 설정 구독 · PC 메뉴 버튼 · Esc · 창 크기 변화(메뉴 버튼 · 칩 자리). 장면이 끝나면 모두 걷는다
+   */
+  private setupMatchPrefs(): void {
+    this.menuOpen = false;
+    this.bigOpen = false;
+    this.bigOpens = 0;
+    this.minimapBig = null;
+    this.chip = null;
+    this.chipAt = 0;
+    this.chipLen = -1;
+    this.chipAvoid = null;
+    this.buttonDirty = true;
+    this.chipDirty = true;
+    this.spottedAlphaNow = 0;
+    this.debugChip = document.querySelector<HTMLElement>('#debug-overlay .dbg-chip');
+    this.menuButton = device.touch ? null : new MatchMenuButton(this.uiRoot, () => this.openMenu());
+    const offPrefs = onPrefsChange((key) => this.onPref(key));
+    const onKey = (e: KeyboardEvent): void => this.onMenuKey(e);
+    // 창 거품 단계(맨 마지막): 설정 화면이 제 안에서 Esc를 처리했으면(기본 동작을 막고 전파를 멈춤) 여기 오지 않거나 defaultPrevented다
+    window.addEventListener('keydown', onKey);
+    const onResize = (): void => {
+      this.buttonDirty = true;
+      this.chipDirty = true;
+    };
+    window.addEventListener('resize', onResize);
+    this.scale.on('resize', onResize);
+    const offGfx = onGfxChange(onResize);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      offPrefs();
+      offGfx();
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', onResize);
+      this.scale.off('resize', onResize);
+      this.menuButton?.destroy();
+      this.menuButton = null;
+      this.chip?.destroy();
+      this.chip = null;
+      this.closeBigMap();
+      this.minimapBig?.destroy();
+      this.minimapBig = null;
+      this.menuOpen = false;
+    });
+  }
+
+  /** 판 중 설정을 연다 (PC 메뉴 버튼 · 터치 '설정' 버튼). 연결점이 없거나(설정 화면 전) 판이 끝났으면 아무것도 하지 않는다 */
+  private openMenu(): void {
+    if (!matchMenu.open || this.app.result !== null) return;
+    this.closeBigMap();
+    sfx.ui('open');
+    matchMenu.open();
+    this.syncMenu();
+  }
+
+  /**
+   * Esc (창 keydown, 거품 단계): 크게 본 지도가 열려 있으면 닫고, 아니면 판 중 설정을 열고 닫는다. 설정 화면이 제 안에서 이미 처리한
+   * Esc(defaultPrevented)는 건드리지 않는다 — 한 번 눌러 닫힌 설정이 다시 열리지 않게. 쓴 Esc는 기본 동작을 막고 여기서 멈춘다.
+   * 판이 끝났거나 연결점이 없으면 건드리지 않는다
+   */
+  private onMenuKey(e: KeyboardEvent): void {
+    if (e.code !== 'Escape' && e.key !== 'Escape') return;
+    if (e.defaultPrevented || this.app.result !== null) return;
+    if (this.bigOpen) {
+      this.closeBigMap();
+    } else {
+      if (!matchMenu.open) return;
+      if (!e.repeat) {
+        sfx.ui(matchMenu.isOpen() ? 'close' : 'open');
+        toggleMatchMenu();
+        this.syncMenu();
+      }
+    }
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }
+
+  /**
+   * 판 중 메뉴가 열려 있는지 따라간다 (입력 틱 · 프레임 처음): 열리면 키 · 마우스 · 터치 입력을 멈추고 누르던 것을 뗀다(InputSampler.suspend),
+   * 크게 본 지도를 닫는다. 닫히면 다시 받는다. 판 · 그리기는 그대로 흐른다
+   */
+  private syncMenu(): void {
+    const open = matchMenu.isOpen();
+    if (open === this.menuOpen) return;
+    this.menuOpen = open;
+    this.sampler.suspend(open);
+    this.aimHold.reset();
+    if (open) this.closeBigMap();
   }
 
   /** 화면 좌표 (창 CSS px) → 논리 px (캔버스 사각형 기준) */
@@ -654,21 +872,164 @@ export class GameScene extends Phaser.Scene {
     return { x: c.x - g, y: c.y - g, w: c.w + g * 2, h: c.h + g * 2 };
   }
 
-  /** 관전 카드 고르기 (창 단위 pointerdown 캡처) */
-  private onCardDown(e: PointerEvent): void {
-    if (CAM_ZOOM <= 1 || !this.director?.canSpectate) return;
+  /**
+   * 창 단위 pointerdown 캡처: 판 중 설정 화면을 누른 것은 보지 않는다. 크게 본 지도가 열려 있으면 어디를 눌러도 닫는다(캔버스를 누른 것은
+   * 닫기로만 — 공격 · 시야 전환 · 카드 고르기로 가지 않는다. DOM 버튼은 제 일도 한다). 아니면 관전 카드 · 지도(크게 보기)
+   */
+  private onPointerCapture(e: PointerEvent): void {
+    if (this.menuOpen || matchMenu.isOpen()) return;
+    if (this.bigOpen) {
+      this.closeBigMap();
+      if (e.target === this.game.canvas) e.stopPropagation();
+      return;
+    }
+    if (this.onCardDown(e)) return;
+    this.onMinimapDown(e);
+  }
+
+  /** 관전 카드 고르기 (창 단위 pointerdown 캡처). 골랐으면 true */
+  private onCardDown(e: PointerEvent): boolean {
+    if (CAM_ZOOM <= 1 || !this.director?.canSpectate) return false;
     // 점수판이 열려 있으면 닫기 동작이 먼저 (터치 점수판 버튼 · Tab)
-    if (this.sampler.tabHeld || (this.touchControls?.scoreboard ?? false)) return;
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (this.sampler.tabHeld || (this.touchControls?.scoreboard ?? false)) return false;
+    if (e.pointerType === 'mouse' && e.button !== 0) return false;
     const p = this.toLogical(e.clientX, e.clientY);
-    if (!p) return;
+    if (!p) return false;
     for (let i = 0; i < 3; i += 1) {
       const c = this.cardHitRect(i);
       if (!c || p.x < c.x || p.x > c.x + c.w || p.y < c.y || p.y > c.y + c.h) continue;
       this.cardPick = i;
       e.stopPropagation();
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * 지도 누르기 → 크게 보기 (확대 화면만: 확대 1이면 판 화면에 맵 전체가 보인다). 캔버스 위 누르기만 — 지도 위에 터치 버튼(DOM)이
+   * 겹쳐 있으면 그 버튼이 받는다. 점수판이 열려 있으면 닫기가 먼저
+   */
+  private onMinimapDown(e: PointerEvent): void {
+    if (CAM_ZOOM <= 1 || e.target !== this.game.canvas || this.app.result !== null) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (this.sampler.tabHeld || (this.touchControls?.scoreboard ?? false)) return;
+    const r = this.minimap.frameRect;
+    if (!r || !this.minimap.shown) return;
+    const p = this.toLogical(e.clientX, e.clientY);
+    if (!p || p.x < r.x || p.x > r.x + r.w || p.y < r.y || p.y > r.y + r.h) return;
+    if (this.openBigMap()) e.stopPropagation();
+  }
+
+  /**
+   * 지도 크게 보기를 연다: 처음이면 만든다(맵 창 가운데, prefsFx.bigMinimapPlace). 바닥은 지금 합성 그림으로 한 번 — 작은 지도도 같은
+   * 그림으로 맞춰 둘이 같은 것을 보인다. 그다음부터는 작은 지도가 다시 그리는 프레임에만 같이 그린다(MINIMAP_BASE_MS 간격 그대로)
+   */
+  private openBigMap(): boolean {
+    if (this.bigOpen || CAM_ZOOM <= 1 || !this.minimap.shown) return false;
+    let big = this.minimapBig;
+    if (!big) {
+      const k = HUD.s;
+      const place = bigMinimapPlace(MAP_RECT, HUD.minimap.pad * k, HUD.minimap.title * k, MAP_W / MAP_H);
+      big = new Minimap(this, this.kit, this.app.match?.role === 'monster', {
+        place,
+        caption: HELP_TEXT.minimapClose,
+      });
+      this.minimapBig = big;
+    }
+    this.bigOpen = true;
+    this.bigOpens += 1;
+    big.setHidden(false);
+    const base = this.world.baseCanvas;
+    this.minimap.refreshBase(base);
+    big.refreshBase(base);
+    return true;
+  }
+
+  /** 크게 본 지도를 닫는다 (숨기기만, 다시 열 때 그대로 쓴다) */
+  private closeBigMap(): void {
+    if (!this.bigOpen) return;
+    this.bigOpen = false;
+    this.minimapBig?.setHidden(true);
+  }
+
+  /**
+   * 크게 본 지도 한 프레임 (작은 지도 바로 뒤): 같은 메인 그림 목록 · 세계 상태 · 보이는 창 · 깜빡임. 바닥은 작은 지도가 이번 프레임에
+   * 다시 그렸을 때만(이미 합성된 같은 캔버스). 작은 지도가 숨거나 · 판이 끝나거나 · 메뉴가 열리면 닫는다
+   */
+  private updateBigMap(
+    snap: Snapshot,
+    view: { x: number; y: number; w: number; h: number },
+    blinkOff: boolean,
+    baseNew: boolean,
+  ): void {
+    if (!this.bigOpen) return;
+    const big = this.minimapBig;
+    if (!big || !this.minimap.shown || this.app.result !== null || this.menuOpen) {
+      this.closeBigMap();
       return;
     }
+    if (baseNew) big.refreshBase(this.world.baseCanvas);
+    big.setWorld(snap.world.points, snap.world.exits, view, this.director?.spectating ?? null, blinkOff);
+    big.update(this.drawn, snap.you.role, this.roleOf);
+  }
+
+  /** 캔버스 자리 (창 CSS px의 왼쪽 위 · 논리 1px의 CSS px). 보이지 않으면 null */
+  private canvasBox(): { left: number; top: number; k: number } | null {
+    const r = this.game.canvas.getBoundingClientRect();
+    return r.height > 0 ? { left: r.left, top: r.top, k: r.height / VIEW_H } : null;
+  }
+
+  /**
+   * 판 중 DOM (프레임 끝, 바뀐 것만 쓴다): PC 메뉴 버튼(판 중 · 연결점이 있을 때, 창 크기가 바뀌면 다시 놓는다) · FPS 칩
+   * (초당 2번까지 글자, 설정을 끄면 바로 숨김)
+   */
+  private updateDom(now: number): void {
+    const done = this.app.result !== null;
+    const btn = this.menuButton;
+    if (btn) {
+      const want = !done && matchMenu.open !== null;
+      if (want && (this.buttonDirty || !btn.shown)) {
+        const c = this.canvasBox();
+        if (c) {
+          const p = menuButtonPlace(c, HUD_BAND);
+          btn.place(p.left, p.top);
+          this.buttonDirty = false;
+        }
+      }
+      btn.show(want);
+    }
+    if (!this.chipWanted || done) {
+      if (this.chip?.shown) this.chip.show(false);
+      this.chipAvoid = null;
+      return;
+    }
+    if (now < this.chipAt) return;
+    this.chipAt = now + PERF_CHIP.updateMs;
+    const chip = (this.chip ??= new PerfChip(this.uiRoot));
+    // FPS = ?debug=1 오버레이와 같은 측정(최근 1초 렌더 프레임), 핑 = 왕복 시간 (연습 판 · 시계를 맞추기 전이면 모른다)
+    const w = sessionFrameStats.window(FPS_WINDOW_MS, this.chipWin);
+    const link = this.app.link;
+    chip.setText(
+      perfChipText(w.frames > 1 ? w.fps : null, link.kind === 'local' || !link.synced ? null : link.rtt),
+    );
+    const len = chip.textNow.length;
+    // 자리: 창 크기가 바뀌었거나 ?debug=1 칩이 있으면(그 칩도 4Hz로 옮겨 간다) 다시 잰다 — 읽기 먼저, 쓰기는 그 뒤
+    if (this.chipDirty || this.debugChip !== null || !chip.shown || len !== this.chipLen) {
+      const c = this.canvasBox();
+      if (c) {
+        const d = this.debugChip?.getBoundingClientRect() ?? null;
+        const p = perfChipPlace(c, MAP_RECT, d);
+        chip.place(p.left, p.top);
+        chip.show(true);
+        this.chipDirty = false;
+        this.chipLen = len;
+        // 화면 밖 화살표가 피할 사각형 (논리 px): 칩 크기는 글자 길이가 바뀔 때 · 자리를 다시 놓을 때만 잰다
+        const cw = chip.el.offsetWidth;
+        const ch = chip.el.offsetHeight;
+        this.chipAvoid = { x: (p.left - c.left) / c.k, y: (p.top - c.top) / c.k, w: cw / c.k, h: ch / c.k };
+      }
+    }
+    chip.show(true);
   }
 
   /** 숫자 키 · 카드로 고른 동료로 관전을 옮긴다 (내 카드 · 내 번호면 내 시점으로) */
@@ -820,7 +1181,7 @@ export class GameScene extends Phaser.Scene {
     if (!me) return Number.NaN;
     // 이 판에서 마우스가 캔버스 위에서 움직이거나 판 화면을 누른 적이 없으면 포인터 자리(로비에서 누른 버튼 자리 · 0,0 · 마지막 터치 자리)를
     // 따라 돌지 않는다: 지금 방향 유지 (검토 반영 — 판 시작 조준이 로비 클릭 자리를 향하던 것)
-    if (!this.sampler.aimPointerReady) {
+    if (!this.sampler.aimPointerReady || this.menuOpen) {
       this.aimHold.reset();
       return me.face;
     }
@@ -876,6 +1237,7 @@ export class GameScene extends Phaser.Scene {
   /** 입력 틱: deltaMs = 지난번부터 흐른 시간, nowMs = 그 시각 (타이머 · 렌더 프레임이 같은 시계로 쌓는다) */
   private stepInput(deltaMs: number, nowMs: number): void {
     const app = this.app;
+    this.syncMenu();
     const env = app.moveEnv();
     if (!env || !app.predictor?.state) return;
     // 사망 · 탈출 뒤에는 관전: 입력을 보내지 않는다
@@ -1189,6 +1551,7 @@ export class GameScene extends Phaser.Scene {
     if (this.minimap.insetRect) avoid.push(this.minimap.insetRect);
     const hint = this.hud.hintRect;
     if (hint) avoid.push(hint);
+    if (this.chipAvoid) avoid.push(this.chipAvoid);
     placeEdges(
       targets,
       { view, rect: MAP_RECT },
@@ -1226,6 +1589,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     const now = performance.now();
+    this.syncMenu();
     // 내 캐릭터 · 카메라는 이 프레임의 rAF 시각(vsync)으로 잰다: 화면에 나가는 간격과 같은 시계라 고르다. 콜백이 늦게 시작한
     // 만큼(입력 이벤트 · 다른 콜백) 흔들리는 performance.now 대신. 따라가기 감쇠의 간격(rawDelta)도 이 시각들의 차이다
     const frameAt = frameTimeOf(rafTime, now);
@@ -1284,16 +1648,19 @@ export class GameScene extends Phaser.Scene {
     this.screenFx.update(now, snap.you.role === 'monster' && (app.predictor?.state?.stun ?? 0) > 0);
     this.kit.sync();
     // 미니맵 바닥: 안개 그림이 바뀐 다음 프레임에 줄여 그린다 (없거나 숨었으면 읽지 않는다. 다시 보이면 그 프레임에 한 번)
-    this.minimap.syncBase(this.world.baseRefreshed, this.world, now);
+    const baseNew = this.minimap.syncBase(this.world.baseRefreshed, this.world, now);
     const d = this.director;
+    const blinkOff = Math.floor(now / 500) % 2 === 1;
     this.minimap.setWorld(
       snap.world.points,
       snap.world.exits,
       CAM_ZOOM > 1 ? view : null,
       d?.spectating ?? null,
-      Math.floor(now / 500) % 2 === 1,
+      blinkOff,
     );
     this.minimap.update(this.drawn, snap.you.role, this.roleOf);
+    // 지도 크게 보기: 작은 지도와 같은 값 · 같은 프레임
+    this.updateBigMap(snap, view, blinkOff, baseNew);
     this.updateEdges(snap, view, now);
     this.hud.setWatching(d?.spectating ?? null, CAM_ZOOM > 1 && (d?.canSpectate ?? false));
     this.hud.update(snap, now);
@@ -1310,8 +1677,9 @@ export class GameScene extends Phaser.Scene {
           : null;
     const spotted = snap.you.surv?.spotted === true;
     this.spottedEdge.show(spotted);
-    if (spotted)
-      this.spottedEdge.setAlpha(0.8 + 0.2 * Math.cos((gfxNow() / 1000) * Math.PI * 2 * SPOTTED_PULSE_HZ));
+    // 발각 빛 테두리: 1.2Hz 맥동 (번쩍임 줄이기면 맥동 없이 고정 알파 — 발각 정보는 그대로)
+    this.spottedAlphaNow = spotted ? spottedEdgeAlpha(gfxNow(), this.flashReduced) : 0;
+    if (spotted) this.spottedEdge.setAlpha(this.spottedAlphaNow);
     const lastChance = snap.world.grace !== null && snap.you.surv?.status === 'free';
     const paused = snap.world.paused;
     const persistent: BannerLine | null =
@@ -1332,10 +1700,11 @@ export class GameScene extends Phaser.Scene {
     this.scoreboard.update(tab, snap);
     // 이번 프레임 월드 그림이 다 놓인 뒤: 창 밖 그림은 그리지 않는다
     this.cullWorld();
+    this.updateDom(now);
   }
 
   /**
-   * 터치 화면: 판 중이고 관전 · 결과 · 판 정지 · 세로 화면이 아닐 때만 입력을 받는다. 끄는 순간 손가락 · 발사 대기를 비운다.
+   * 터치 화면: 판 중이고 관전 · 결과 · 판 정지 · 세로 화면 · 판 중 메뉴가 아닐 때만 입력을 받는다. 끄는 순간 손가락 · 발사 대기를 비운다.
    * 행동 칸은 이번 프레임 캔버스 HUD가 계산한 actionSlots 결과를 그대로 쓴다 (쿨타임 게이지 · 못 씀 표시)
    */
   private updateTouch(snap: Snapshot): void {
@@ -1347,7 +1716,8 @@ export class GameScene extends Phaser.Scene {
       status !== 'dead' &&
       status !== 'escaped' &&
       snap.world.paused === null &&
-      !device.portrait;
+      !device.portrait &&
+      !this.menuOpen;
     if (active !== this.touchActive) {
       this.touchActive = active;
       controls.setActive(active);

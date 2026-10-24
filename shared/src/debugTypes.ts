@@ -158,6 +158,50 @@ export interface CameraDebug {
   markers: OffscreenMarkerDebug[];
 }
 
+/** 창 CSS px 사각형 (판 중 설정 효과 디버그) */
+export interface ClientBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** 판 중 설정 효과 (설정 화면 통합, 디버그 getMatchPrefs) */
+export interface MatchPrefsDebug {
+  /** 지금 화면 흔들림 배율 (흔들림 줄이기 · OS 동작 줄이기면 0, setCameraShake로 덮어쓰면 그 값) */
+  shakeScale: number;
+  /** 이번 프레임에 창에 더한 흔들림 크기 (타일, 흔들림 줄이기면 늘 0) */
+  shakeOffset: number;
+  /** 번쩍임 줄이기가 판 화면에 걸렸는가 (피격 테두리 옅게 · 잘라 옮김 어두워짐 없음 · 발각 테두리 맥동 없음) */
+  reduceFlash: boolean;
+  /** 발각 빛 테두리 지금 알파 (보이지 않으면 0) */
+  spottedAlpha: number;
+  /** 판 입력을 멈췄는가 (판 중 메뉴가 열려 있다) */
+  inputSuspended: boolean;
+  /** 판 중 메뉴: 열려 있는가, fakeMatchMenu를 켠 뒤 연 · 닫은 횟수 (가짜가 아니면 0) */
+  menu: { open: boolean; opens: number; closes: number; fake: boolean };
+  /** PC 판 중 메뉴 버튼 (창 CSS px, 없으면 null) */
+  menuButton: (ClientBox & { visible: boolean }) | null;
+  /** FPS · 핑 칩 (창 CSS px, 만든 적이 없으면 null) */
+  perfChip: (ClientBox & { visible: boolean; text: string }) | null;
+  /** 화면 밖 화살표가 피하는 FPS 칩 사각형 (논리 px, 칩이 없거나 숨었으면 null) */
+  perfChipAvoid: { x: number; y: number; w: number; h: number } | null;
+  /** 작은 지도 누르는 자리 (창 CSS px, 지도를 그리지 않으면 null) */
+  minimapTap: ClientBox | null;
+  /** 지도 크게 보기 */
+  minimapBig: {
+    open: boolean;
+    /** 틀 사각형 (논리 px, 닫혀 있으면 null) */
+    frame: { x: number; y: number; w: number; h: number } | null;
+    /** getDrawnMinimapBig과 같은 순서로 엔티티마다 그린 몸 그림 이름 (괴물 화면 생존자 = 흰 공통 실루엣 'm:hidden') */
+    frames: string[];
+    /** 이 판에서 연 횟수 · 바닥을 다시 그린 횟수 · 그때 작은 지도가 다시 그린 횟수 */
+    opens: number;
+    bakes: number;
+    smallBakes: number;
+  };
+}
+
 /** 프레임 측정 (렌더링 최적화, ?debug=1 오버레이 · 적응형 품질 · E2E). 최근 렌더 프레임들의 요약 */
 export interface FrameStatsInfo {
   /** 요약에 쓴 프레임 수 */
@@ -280,6 +324,18 @@ export interface DecoyDebug {
   getCamera(): CameraDebug | null;
   /** 화면 흔들림 세기 배율 (0 = 끔, 시험의 픽셀 탐침용 — '흔들림 줄이기'와 같은 값) */
   setCameraShake(scale: number): void;
+  // ── 판 중 설정 효과 ──
+  /** 판 중 설정 효과 상태 (설정 화면 통합: 흔들림 · 번쩍임 줄이기 · FPS 칩 · 지도 크게 보기 · 판 중 메뉴, 판 장면이 없으면 null) */
+  getMatchPrefs(): MatchPrefsDebug | null;
+  /** 크게 본 지도에 그린 엔티티 (layer 'minimap', 닫혀 있으면 빈 배열). 같은 프레임의 getDrawn ⊆ 비교용 */
+  getDrawnMinimapBig(): DrawnEntity[];
+  /**
+   * 시험용 판 중 메뉴: true면 matchMenu.open · close · isOpen을 가짜(열림 상태만 바꾸고 횟수를 센다)로 바꾸고 false면 되돌린다.
+   * 진짜 설정 화면 없이 Esc · 메뉴 버튼 · 입력 멈춤을 본다 (getMatchPrefs().menu)
+   */
+  fakeMatchMenu(on: boolean): void;
+  /** 화면 탭 켜고 끄는 설정을 바꾼다 (설정 화면과 같은 경로 prefs.setPref — 저장된다). 판 중에도 바로 걸린다 */
+  setMatchPref(key: 'reduceShake' | 'reduceFlash' | 'perfChip', on: boolean): void;
   /** 관전 카드 판정 사각형 (창 CSS px, 카드 순서 번호 · 동료 id) — 따라가는 카메라 */
   getSpectateCards(): { index: number; id: string | null; x: number; y: number; w: number; h: number }[];
   /** 프레임 제한을 바꾼다 (로비 선택과 같은 경로, 저장하지 않음) */
