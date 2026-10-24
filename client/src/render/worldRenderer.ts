@@ -555,8 +555,10 @@ export class WorldRenderer {
     this.container.addAt(this.stunVeil, 0);
     const gfx = (): Phaser.GameObjects.Graphics => this.counted(scene.make.graphics({}, false));
     const box = (): Phaser.GameObjects.Container => scene.make.container({}, false);
-    this.rims = gfx();
-    this.selfRims = gfx();
+    // 새 Graphics는 기본 선 · 채움 스타일 명령을 들고 있어 비어 있어도 프레임마다 그린다(Canvas 렌더러 상태 · 경로 명령) — 비워 둔다.
+    // 예전 림은 첫 안개 주기에 늘 비웠다(drawRims): 이제 눈이 바뀌지 않은 쪽(괴물 화면 팀원 림 등)은 다시 비우지 않으므로 여기서
+    this.rims = gfx().clear();
+    this.selfRims = gfx().clear();
     this.dust = box();
     this.coneOver = gfx();
     this.coneEdge = gfx();
@@ -1488,6 +1490,9 @@ export class WorldRenderer {
     const n = this.selfEyeN;
     this.rimsOf = this.rimsInto(this.rims, this.rimsOf, n, this.eyes.length);
     this.selfRimsOf = this.rimsInto(this.selfRims, this.selfRimsOf, 0, n);
+    // 내 림이 없으면(괴물 · 관전 · 사망) 그리지 않는다: 빈 Graphics도 Canvas 렌더러에서 상태 · 경로 명령을 낸다
+    const any = this.selfRimsOf.some((e) => e.role !== null);
+    if (this.selfRims.visible !== any) this.selfRims.setVisible(any);
   }
 
   /**

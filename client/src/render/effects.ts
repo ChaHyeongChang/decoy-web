@@ -13,7 +13,7 @@ import { gfxState } from '../gfx/state';
 import { MAP_RECT, VIEW_H, VIEW_W } from '../ui/layout';
 import { POST, vignetteAt } from '../art/fx';
 import { createCanvasTexture, removeCanvasTexture } from './fogPaint';
-import { FOG_EDGE_PIPELINE } from './fogGpu';
+import { FOG_EDGE_PIPELINE, FOG_FOLLOW_PIPELINE } from './fogGpu';
 import { hitFlashLevel } from './prefsFx';
 
 export const HIT_FLASH_MS = 200;
@@ -350,6 +350,8 @@ function fxOf(o: object): string[] {
   if ('pipeline' in o && o.pipeline) {
     const name = pipeName(o.pipeline);
     if (name === FOG_EDGE_PIPELINE) out.push('fogEdge');
+    // 품질 중간 빛 지도 셰이더: 경계 노이즈 없이 내 빛 따라가기만 (구조 레이어)
+    else if (name === FOG_FOLLOW_PIPELINE) out.push('fogFollow');
     else if (!BASE_PIPELINES.has(name)) out.push(name);
   }
   if ('preFX' in o) out.push(...fxList('preFX', o.preFX));
