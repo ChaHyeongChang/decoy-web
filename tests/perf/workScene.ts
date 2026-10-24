@@ -13,8 +13,11 @@ export interface WorkScene {
   role: 'runner' | 'monster';
   /** ?scale (백버퍼 배율). GPU가 없는 컨테이너 · CI에서 SwiftShader 래스터가 1200프레임을 막지 않게 줄인다(셈은 이 배율 기준) */
   scale?: number;
-  /** ?chars (캐릭터 스타일, 캐릭터 리디자인 2단계). 없으면 기본(기존) */
-  chars?: 'new';
+  /**
+   * ?chars (캐릭터 스타일, 캐릭터 리디자인 2단계). 늘 적는다: 기본값이 기존 → 새 캐릭터로 바뀌어도(설정 화면 통합) 기존 장면의
+   * 기준값이 같은 그림을 잰다
+   */
+  chars: 'new' | 'classic';
   /**
    * 일의 양 예산 게이트 장면 (tests/e2e/perf-budget*.spec.ts · scripts/perf-budget.mjs SCENES). 표시가 있는데 perf-budget.json에
    * 기준값이 없으면 시험이 실패한다(기준값을 다시 쓰다 장면이 빠져도 소리 없이 게이트가 사라지지 않게)
@@ -23,11 +26,25 @@ export interface WorkScene {
 }
 
 export const WORK_SCENES: WorkScene[] = [
-  { name: 'canvas-high-runner', project: 'canvas', quality: 'high', role: 'runner', budget: true },
-  { name: 'canvas-high-monster', project: 'canvas', quality: 'high', role: 'monster', budget: true },
-  { name: 'canvas-low-runner', project: 'canvas', quality: 'low', role: 'runner' },
-  { name: 'webgl-high-runner', project: 'webgl', quality: 'high', role: 'runner' },
-  { name: 'webgl-high-monster', project: 'webgl', quality: 'high', role: 'monster' },
+  {
+    name: 'canvas-high-runner',
+    chars: 'classic',
+    project: 'canvas',
+    quality: 'high',
+    role: 'runner',
+    budget: true,
+  },
+  {
+    name: 'canvas-high-monster',
+    chars: 'classic',
+    project: 'canvas',
+    quality: 'high',
+    role: 'monster',
+    budget: true,
+  },
+  { name: 'canvas-low-runner', chars: 'classic', project: 'canvas', quality: 'low', role: 'runner' },
+  { name: 'webgl-high-runner', chars: 'classic', project: 'webgl', quality: 'high', role: 'runner' },
+  { name: 'webgl-high-monster', chars: 'classic', project: 'webgl', quality: 'high', role: 'monster' },
   // 일의 양 예산 게이트용 WebGL 장면 (tests/e2e/perf-budget.webgl.spec.ts): 백버퍼 1/4 — 원래 크기는 CI 러너에서 4분을 넘겼다
   {
     name: 'webgl-high-runner-s25',
@@ -35,6 +52,7 @@ export const WORK_SCENES: WorkScene[] = [
     quality: 'high',
     role: 'runner',
     scale: 0.25,
+    chars: 'classic',
     budget: true,
   },
   // 새 캐릭터 스타일 (캐릭터 리디자인 2단계): 같은 조작 · 같은 시드. 예산은 새 스타일 실측 기준값과 짝 기존 장면('-new'를 뗀 이름)
@@ -152,7 +170,7 @@ export async function measureWork(browser: Browser, sc: WorkScene): Promise<Work
     await page.routeWebSocket(/\/ws$/, (ws) => ws.close({ code: 1011, reason: 'blocked' }));
     const renderer = sc.project === 'canvas' ? '&renderer=canvas' : '';
     const scale = sc.scale !== undefined ? `&scale=${sc.scale}` : '';
-    const chars = sc.chars ? `&chars=${sc.chars}` : '';
+    const chars = `&chars=${sc.chars}`;
     await page.goto(`/?debug=hook&quality=${sc.quality}${renderer}${scale}${chars}`);
     await page.getByTestId('practice').waitFor({ state: 'visible' });
     await page.waitForFunction(() => window.__DECOY__?.fonts.ready === true, null, { timeout: 30_000 });
@@ -181,8 +199,8 @@ export async function measureWork(browser: Browser, sc: WorkScene): Promise<Work
     // 장면 스타일의 캐릭터 아틀라스로 그리고 있다 (?chars를 놓쳐 기존 그림으로 재는 헛측정이 아님). atlasStyle은 캐릭터 리디자인
     // (PR #21) 이후 빌드에만 있다: 기존 장면은 값이 없으면(최적화 전 · 옛 빌드 비교 측정) 기존으로 본다
     const atlasStyle = await page.evaluate(() => window.__DECOY__?.gfx.features.atlasStyle);
-    if (sc.chars ? atlasStyle !== sc.chars : atlasStyle !== undefined && atlasStyle !== 'classic')
-      throw new Error(`캐릭터 아틀라스 스타일 ${String(atlasStyle)} (장면 ${sc.chars ?? 'classic'})`);
+    if ((atlasStyle ?? 'classic') !== sc.chars)
+      throw new Error(`캐릭터 아틀라스 스타일 ${String(atlasStyle)} (장면 ${sc.chars})`);
     // 마우스를 화면 가운데 오른쪽 위로 (괴물 조준이 한쪽을 본다)
     await page.mouse.move(820, 300);
     const steps = stepsFor(sc.role);

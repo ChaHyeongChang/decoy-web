@@ -1,4 +1,4 @@
-// 캐릭터 스타일 설정 (캐릭터 리디자인 2단계, client/src/gfx/charStyle.ts): 기본값 기존 · 정하는 순서 · 저장 · 알림
+// 캐릭터 스타일 설정 (캐릭터 리디자인 2단계, client/src/gfx/charStyle.ts): 기본값 새 캐릭터(설정 화면 통합) · 정하는 순서 · 저장 · 알림
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   charStyleSource,
@@ -6,8 +6,10 @@ import {
   initCharStyle,
   onCharStyleChange,
   parseCharStyle,
+  resetCharStyle,
   resetCharStyleForTest,
   setCharStyle,
+  urlCharStyle,
 } from '../../client/src/gfx/charStyle';
 import { gfxState } from '../../client/src/gfx/state';
 import { STORAGE_KEYS, type StorageLike } from '../../client/src/storageKeys';
@@ -44,26 +46,57 @@ describe('캐릭터 스타일 설정', () => {
       expect(parseCharStyle(bad), String(bad)).toBeNull();
   });
 
-  it('기본값은 기존 (저장값 · 주소 값 없음)', () => {
-    expect(currentCharStyle()).toBe('classic');
+  it('기본값은 새 캐릭터 (저장값 · 주소 값 없음)', () => {
+    initCharStyle(null, memory());
+    expect(currentCharStyle()).toBe('new');
     expect(charStyleSource()).toBe('default');
+    expect(gfxState.charStyle).toBe('new');
   });
 
-  it('고르면 바로 적용 · 저장하고, 기존으로 되돌리면 저장값을 지운다', () => {
+  it("이미 '기존'을 저장한 기기는 기본값이 바뀌어도 기존 그대로", () => {
+    initCharStyle(null, memory({ [KEY]: 'classic' }));
+    expect(currentCharStyle()).toBe('classic');
+    expect(charStyleSource()).toBe('saved');
+    expect(gfxState.charStyle).toBe('classic');
+  });
+
+  it('고르면 바로 적용 · 저장한다 — 기본값(새 캐릭터)을 골라도 적어 둔다', () => {
     const st = memory();
+    expect(setCharStyle('classic', true, st)).toBe(true);
+    expect(st.data.get(KEY)).toBe('classic');
+    expect(currentCharStyle()).toBe('classic');
+    expect(gfxState.charStyle).toBe('classic');
     expect(setCharStyle('new', true, st)).toBe(true);
     expect(st.data.get(KEY)).toBe('new');
     expect(currentCharStyle()).toBe('new');
-    expect(gfxState.charStyle).toBe('new');
-    expect(setCharStyle('classic', true, st)).toBe(true);
+  });
+
+  it('기본값으로 되돌리기: 저장값을 지우고 새 캐릭터로 (바뀌면 알림)', () => {
+    const st = memory({ [KEY]: 'classic' });
+    initCharStyle(null, st);
+    const seen: string[] = [];
+    onCharStyleChange((x) => seen.push(x));
+    expect(resetCharStyle(st)).toBe(true);
     expect(st.data.has(KEY)).toBe(false);
+    expect(currentCharStyle()).toBe('new');
+    expect(charStyleSource()).toBe('default');
+    expect(seen).toEqual(['new']);
+  });
+
+  it('주소 값이 있으면 되돌려도 주소 값이 남고, 주소 값을 알려 준다', () => {
+    const st = memory({ [KEY]: 'new' });
+    initCharStyle('classic', st);
+    expect(urlCharStyle()).toBe('classic');
+    resetCharStyle(st);
     expect(currentCharStyle()).toBe('classic');
+    expect(charStyleSource()).toBe('url');
+    expect(st.data.has(KEY)).toBe(false);
   });
 
   it('저장하지 못해도 이번 접속에는 적용되고 false를 돌려준다', () => {
     const st = memory({}, true);
-    expect(setCharStyle('new', true, st)).toBe(false);
-    expect(currentCharStyle()).toBe('new');
+    expect(setCharStyle('classic', true, st)).toBe(false);
+    expect(currentCharStyle()).toBe('classic');
   });
 
   it('디버그 훅 경로(persist = false)는 저장소를 건드리지 않는다', () => {
@@ -73,7 +106,7 @@ describe('캐릭터 스타일 설정', () => {
     expect(currentCharStyle()).toBe('classic');
   });
 
-  it('정하는 순서: 이번 접속 선택 > 주소 ?chars > 저장값 > 기존', () => {
+  it('정하는 순서: 이번 접속 선택 > 주소 ?chars > 저장값 > 새 캐릭터', () => {
     initCharStyle('new');
     expect(currentCharStyle()).toBe('new');
     expect(charStyleSource()).toBe('url');
@@ -105,11 +138,11 @@ describe('캐릭터 스타일 설정', () => {
   it('바뀔 때만 알리고, 해제하면 더 부르지 않는다', () => {
     const seen: string[] = [];
     const off = onCharStyleChange((s) => seen.push(s));
+    setCharStyle('new', false);
     setCharStyle('classic', false);
-    setCharStyle('new', false);
-    setCharStyle('new', false);
+    setCharStyle('classic', false);
     off();
-    setCharStyle('classic', false);
-    expect(seen).toEqual(['new']);
+    setCharStyle('new', false);
+    expect(seen).toEqual(['classic']);
   });
 });
