@@ -91,7 +91,25 @@ export class InputSampler {
   anyKeyPressed = false;
   /** 숫자 키로 고른 팀 카드 번호 (관전, 판 장면이 takeSpectatePick으로 꺼낸다). 입력 프레임에는 넣지 않는다 */
   private spectatePick: number | null = null;
+  /** 판 중 메뉴(설정 화면)가 열려 있어 입력을 받지 않는다 (suspend) */
+  private suspended = false;
   private readonly cleanup: Array<() => void> = [];
+
+  /**
+   * 판 중 메뉴(설정 화면)가 열려 있는 동안 (설정 화면 통합): 키 · 마우스 · 터치를 받지 않고(기본 동작도 막지 않는다 — 설정 화면의
+   * Tab 이동 · 글자 입력), 누르고 있던 키 · 버튼 · 손가락은 모두 뗀 것으로 한다. 판은 멈추지 않으므로 입력 프레임은 계속 나가되
+   * 이동 0 · 버튼 0이다. 다시 켜면(닫힘) 그 뒤 새로 누른 것만 받는다 — 메뉴를 여는 동안 누른 키가 눌린 채 남지 않는다
+   */
+  suspend(on: boolean): void {
+    if (on === this.suspended) return;
+    this.suspended = on;
+    this.reset();
+  }
+
+  /** 입력을 멈췄는가 (디버그 · 시험) */
+  get isSuspended(): boolean {
+    return this.suspended;
+  }
 
   /** 지금 입력 방식: 터치 소스가 붙어 있으면 'touch' */
   get mode(): 'keyboard' | 'touch' {
@@ -134,7 +152,7 @@ export class InputSampler {
       touchMode ? e.pointerType === 'mouse' : e.pointerType !== 'touch';
 
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (isTyping(e)) return;
+      if (isTyping(e) || this.suspended) return;
       if (e.code === 'Tab') {
         this.tabHeld = true;
         e.preventDefault();
@@ -153,6 +171,7 @@ export class InputSampler {
       this.recomputeHeld();
     };
     const onKeyUp = (e: KeyboardEvent): void => {
+      if (this.suspended) return;
       if (e.code === 'Tab') {
         this.tabHeld = false;
         e.preventDefault();
@@ -162,6 +181,7 @@ export class InputSampler {
       this.recomputeHeld();
     };
     const onPointerDown = (e: PointerEvent): void => {
+      if (this.suspended) return;
       if (e.pointerType !== 'touch') this.canvasPointerSeen = true;
       if (clicks(e)) {
         if (e.button === 0) {
@@ -207,6 +227,7 @@ export class InputSampler {
       const onRotate = (): void => this.touch?.reset();
       // 터치 화면(캔버스 밖 DOM)에 닿아도 조작 안내를 닫는다. 터치 화면이 전파를 막아도 받게 캡처 단계에서
       const onAnyPointer = (e: PointerEvent): void => {
+        if (this.suspended) return;
         if (e.pointerType === 'mouse') this.mouseSeen = true;
         else if (e.type === 'pointerdown') this.anyKeyPressed = true;
       };
@@ -221,6 +242,7 @@ export class InputSampler {
 
   detach(): void {
     for (const f of this.cleanup.splice(0)) f();
+    this.suspended = false;
     this.reset();
     this.touch = null;
     this.touchAim = false;
@@ -281,6 +303,11 @@ export class InputSampler {
    * mouseAim은 마우스 커서 조준(괴물, 생존자는 NaN), ctx는 터치 모드에서 발사 대기를 진행할 상황
    */
   sample(seq: number, mouseAim: number, ctx?: TouchFrameCtx): InputFrame {
+    // 판 중 메뉴가 열려 있다: 이동 · 버튼 없이 (조준은 판 장면이 지금 방향을 넘긴다)
+    if (this.suspended) {
+      this.pressed = 0;
+      return { seq, mx: 0, my: 0, aim: mouseAim, held: 0, pressed: 0 };
+    }
     const m = this.moveVector();
     let held = this.held;
     let pressed = this.pressed;
