@@ -157,6 +157,14 @@ describe('FPS · 핑 칩', () => {
     expect(q.top).toBe(dbg.top + dbg.height + PERF_CHIP.gapCss);
     // 다른 구석(PC: 왼쪽 아래)이면 그대로
     expect(perfChipPlace(canvas, map, { left: 8, top: 500, width: 200, height: 20 })).toEqual(p);
+    // 여럿 (좌우 반전 터치: 시스템 버튼 두 줄이 맵 왼쪽 위에 걸침 + ?debug=1 칩) → 위에서부터 차례로 맨 아래 것 밑
+    const sys1 = { left: p.left - 30, top: p.top - 10, width: 48, height: 48 };
+    const sys2 = { left: p.left - 30, top: sys1.top + 48 + 2, width: 48, height: 48 };
+    const r = perfChipPlace(canvas, map, [sys2, dbg, sys1]);
+    expect(r.left).toBe(p.left);
+    expect(r.top).toBe(sys2.top + sys2.height + PERF_CHIP.gapCss);
+    // 빈 목록 = 그대로
+    expect(perfChipPlace(canvas, map, [])).toEqual(p);
   });
 });
 

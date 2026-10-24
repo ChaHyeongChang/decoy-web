@@ -79,7 +79,7 @@ import { Minimap } from '../ui/minimap';
 import { EdgeMarkers, edgeMetrics } from '../ui/edgeMarkers';
 import { edgeTargets, placeEdges, type EdgeMarker, type EdgeTarget } from '../render/offscreen';
 import { Scoreboard, TutorialOverlay } from '../ui/overlays';
-import { PERF_CHIP, PerfChip, perfChipPlace, perfChipText } from '../ui/perfChip';
+import { PERF_CHIP, PerfChip, perfChipPlace, perfChipText, type CssRect } from '../ui/perfChip';
 import { PROBE_DEPTH, drawProbeText } from '../ui/text';
 import { TouchControls, type TouchView } from '../ui/touchControls';
 import { frameDeltaMs, frameTimeOf, staleEventLimitMs, trackFrameMs } from './staleEvents';
@@ -1017,8 +1017,12 @@ export class GameScene extends Phaser.Scene {
     if (this.chipDirty || this.debugChip !== null || !chip.shown || len !== this.chipLen) {
       const c = this.canvasBox();
       if (c) {
-        const d = this.debugChip?.getBoundingClientRect() ?? null;
-        const p = perfChipPlace(c, MAP_RECT, d);
+        // 피할 것: ?debug=1 칩, 터치 시스템 버튼(좌우 반전이면 맵 왼쪽 위에 걸친다)
+        const avoid: CssRect[] = [];
+        if (this.debugChip) avoid.push(this.debugChip.getBoundingClientRect());
+        if (this.touchControls)
+          for (const b of this.uiRoot.querySelectorAll<HTMLElement>('.tc-sys')) avoid.push(b.getBoundingClientRect());
+        const p = perfChipPlace(c, MAP_RECT, avoid);
         chip.place(p.left, p.top);
         chip.show(true);
         this.chipDirty = false;
