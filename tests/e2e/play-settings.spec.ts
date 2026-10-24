@@ -51,6 +51,23 @@ async function threeLists(
   });
 }
 
+/**
+ * 연 뒤 크게 본 지도가 한 번 그려질 때까지 기다린 세 목록 (크게 본 지도는 연 다음 렌더 프레임에 엔티티를 채운다 — 느린 러너에서는
+ * 열림 표시와 첫 그리기 사이에 읽을 수 있다. 같은 evaluate에서 읽은 목록을 돌려준다)
+ */
+async function drawnLists(
+  page: Page,
+): Promise<{ main: DrawnEntity[]; mini: DrawnEntity[]; big: DrawnEntity[]; frames: string[] }> {
+  let last = await threeLists(page);
+  await expect
+    .poll(async () => {
+      last = await threeLists(page);
+      return last.mini.length > 0 && last.big.length === last.mini.length;
+    })
+    .toBe(true);
+  return last;
+}
+
 /** 크게 본 지도 = 작은 지도 (같은 엔티티 · 같은 자리) ⊆ 메인 화면에 그린 것 */
 function expectBigSubsetOfMain(l: { main: DrawnEntity[]; mini: DrawnEntity[]; big: DrawnEntity[] }): void {
   expect(l.big.length).toBe(l.mini.length);
@@ -263,7 +280,7 @@ test('지도 크게 보기 (PC 생존자): 지도를 누르면 맵 창 가운데
   expect(f.y + f.h).toBeLessThanOrEqual(MAP_RECT.y + MAP_RECT.h);
   expect(Math.abs(f.x + f.w / 2 - (MAP_RECT.x + MAP_RECT.w / 2))).toBeLessThan(2);
   expect(f.h / MAP_RECT.h).toBeGreaterThan(0.6);
-  expectBigSubsetOfMain(await threeLists(page));
+  expectBigSubsetOfMain(await drawnLists(page));
   // 바닥: 작은 지도가 다시 그리는 때에만 같이 (같은 간격, 더 자주 그리지 않는다)
   const b0 = (await prefs(page)).minimapBig;
   await page.evaluate(() => window.__DECOY__?.freezeClock(null));
@@ -278,7 +295,7 @@ test('지도 크게 보기 (PC 생존자): 지도를 누르면 맵 창 가운데
   );
   expect(b1.bakes - b0.bakes).toBe(b1.smallBakes - b0.smallBakes);
   expect(b1.bakes - b0.bakes).toBeGreaterThan(0);
-  expectBigSubsetOfMain(await threeLists(page));
+  expectBigSubsetOfMain(await drawnLists(page));
 
   // 맵 창 아무 곳이나 누르면 닫힌다 (그 누르기는 닫기로만)
   await page.mouse.click(MAP_RECT.x + 60, MAP_RECT.y + MAP_RECT.h - 60);
@@ -351,8 +368,7 @@ test('지도 크게 보기 (PC 괴물): 생존자는 흰 공통 실루엣만, �
   const log0 = (await inputLog(page)).at(-1)?.t ?? 0;
   await page.mouse.click(center(tap).x, center(tap).y);
   await expect.poll(async () => (await prefs(page)).minimapBig.open).toBe(true);
-  await page.waitForTimeout(200);
-  const l = await threeLists(page);
+  const l = await drawnLists(page);
   expectBigSubsetOfMain(l);
   const survivors = l.big.map((d, i) => ({ d, f: l.frames[i] })).filter((x) => x.d.kind === 'survivor');
   expect(survivors.length).toBeGreaterThanOrEqual(1);
@@ -465,7 +481,7 @@ test('터치: 지도를 탭하면 크게 · 다른 곳을 탭하면 닫힘, ?deb
   expect(tap, '확대 화면 터치에도 지도가 있다').not.toBeNull();
   await page.touchscreen.tap(center(tap!).x, center(tap!).y);
   await expect.poll(async () => (await prefs(page)).minimapBig.open).toBe(true);
-  expectBigSubsetOfMain(await threeLists(page));
+  expectBigSubsetOfMain(await drawnLists(page));
   const layout = await page.evaluate(() => window.__DECOY__!.getHudLayout()!);
   const m = layout.map;
   // 맵 가운데를 탭하면 닫힌다
