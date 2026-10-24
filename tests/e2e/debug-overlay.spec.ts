@@ -150,7 +150,7 @@ test('PC 1280×720: 펼친 채 시작, 한 화면에 모든 항목 · 값이 바
   // Canvas 렌더러: 그린 객체 수 (오버레이를 켰을 때만 센다)
   expect(num(a.panelText, /그리기 객체 (\d+)개/)).toBeGreaterThan(0);
   expect(a.panelText).toMatch(/렌더러 canvas/);
-  expect(a.panelText).toMatch(/제한 (자동|60|120)/);
+  expect(a.panelText).toMatch(/제한 (자동|60|120|절반)/);
   expect(a.panelText).toMatch(/DPR 1\.00 · \d+×\d+/);
   expect(a.chipText).toMatch(/^▾ \d+fps [\d.]+ms$/);
   // 한 화면: 표 전체가 창 안

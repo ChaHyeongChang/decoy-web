@@ -14,7 +14,7 @@ import {
   sessionFrameStats,
   type FrameWindow,
 } from './gfx/frameStats';
-import { PACING_WATCH } from './gfx/quality';
+import { lateWindowFor } from './gfx/quality';
 import { freezeGfxClock, gfxState, probeSlot, setFpsOverride } from './gfx/state';
 import { matchMenu } from './matchMenu';
 import { setPref } from './prefs';
@@ -325,11 +325,11 @@ function overlayAnchor(app: App): OverlayAnchor | null {
 
 /** 오버레이 늦은 프레임 비율 그릇 (4Hz로 다시 쓴다) */
 const LATE_WINDOW: FrameWindow = { fps: 0, intervalAvg: 0, workP95: 0, frames: 0, late: 0 };
-const LATE_AT = { periodMs: 1000 / 60, factor: PACING_WATCH.lateFactor };
+const LATE_AT = { periodMs: 1000 / 60, slackMs: 1000 / 120 };
 
-/** 최근 1초 늦은 프레임 비율 (지금 목표 주기 기준, 렌더한 프레임이 없으면 null) */
+/** 최근 1초 늦은 프레임 비율 (지금 목표 주기 + 반 vsync 기준, 렌더한 프레임이 없으면 null) */
 function lateRatio(): number | null {
-  LATE_AT.periodMs = 1000 / Math.max(1, gfxState.targetHz);
+  lateWindowFor(gfxState.targetHz, gfxState.displayHz, LATE_AT);
   const w = sessionFrameStats.window(FPS_WINDOW_MS, LATE_WINDOW, LATE_AT);
   return w.frames > 1 ? w.late : null;
 }

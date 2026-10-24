@@ -463,7 +463,8 @@ qualityHooks.choose = (choice) => {
   setQuality(decideQuality());
   applyResolution(true);
 };
-// 판 중 적응형 품질 (gfx/quality.ts AutoDowngrade): 느리면 자동 제한에서는 목표 FPS부터 60으로, 그다음 품질을 한 단계 내린다.
+// 판 중 적응형 품질 (gfx/quality.ts AutoDowngrade): 느리거나 고르지 않으면 자동 제한에서는 목표 FPS부터 화면 주사율의 약수로
+// (144 → 72, 120 → 60), 그다음 품질을 한 단계 내린다.
 // 내렸는데 FPS가 오르지 않았으면(화면 갱신 상한 등) 되돌린다. 여유가 생기면 내린 것을 최근 것부터 되돌린다 — 목표 FPS는 판 중에,
 // 품질은 다음 판 시작 전에(판 중에 다시 굽는 끊김을 피한다). 시작 단계(사용자가 고른 것 · 주소 · 자동)보다 올리는 일은 없다.
 // downgrades = 실제로 내린 횟수(품질 · 목표 FPS, 되돌려도 그대로), upgrades = 되돌려 올린 횟수
@@ -492,8 +493,9 @@ qualityHooks.auto = (a) => {
       pacer.setFallback(a.to);
       break;
     case 'rateUp':
+      // 사다리 한 칸 위로 (맨 위 = 화면 주사율이면 낮춤을 지운다)
       gfxState.upgrades += 1;
-      pacer.setFallback(null);
+      pacer.setFallback(a.to >= pacer.displayHz - 1e-6 ? null : a.to);
       break;
     case 'upgrade':
       // 판 시작 전에만 온다 (takePendingUpgrade). 백버퍼 · 그림은 판 배치(applyMatchLayout)가 바로 뒤에 맞춘다

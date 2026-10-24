@@ -119,7 +119,8 @@ export const UI_TEXT = {
   frameLimitAuto: '자동',
   frameLimit60: '60',
   frameLimit120: '120',
-  frameLimitHint: '배터리를 아끼려면 60',
+  frameLimitHalf: '절반',
+  frameLimitHint: '배터리를 아끼려면 60 · 화면 주사율을 나눠 고르게 그려요 (144Hz: 60 → 72)',
   // ── 캐릭터 스타일 (캐릭터 리디자인): PC는 첫 화면 그래픽 줄 아래 선택 상자, 터치는 설정 판 ──
   charStyle: '캐릭터 스타일',
   charStyleClassic: '기존',

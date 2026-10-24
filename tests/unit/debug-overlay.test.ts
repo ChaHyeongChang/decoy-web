@@ -125,6 +125,13 @@ describe('formatDebugPanel (펼친 표)', () => {
     expect(formatDebugPanel({ ...DATA, quality: 'low', qualitySource: 'url', frameLimit: '120' })).toMatch(
       /제한 120\n[\s\S]*품질 낮음\(주소\)/,
     );
+    // 잔렉 고치기: 목표는 화면 주사율의 약수라 반 정수가 될 수 있다(165Hz의 절반 82.5), 절반 제한
+    expect(
+      formatDebugPanel({ ...DATA, frameLimit: 'half', targetHz: 82.5, displayHz: 165 }).split('\n')[0],
+    ).toBe('FPS 119.8 · 목표 82.5 · 화면 165Hz · 제한 절반');
+    expect(formatDebugPanel({ ...DATA, targetHz: 72, displayHz: 144 }).split('\n')[0]).toMatch(
+      /목표 72 · 화면 144Hz/,
+    );
   });
 
   it('아직 렌더한 프레임이 없거나 스냅샷이 없으면 -', () => {

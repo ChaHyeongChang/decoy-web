@@ -105,7 +105,7 @@ export interface GfxDebugInfo {
   /** 품질 판단에 쓴 최근 FPS */
   measuredFps: number;
   /** 프레임 제한 설정 (렌더링 최적화): 자동(화면 주사율을 따른다) · 60 · 120 */
-  frameLimit: 'auto' | '60' | '120';
+  frameLimit: 'auto' | '60' | '120' | 'half';
   /** 잰 화면 주사율 (Hz, 60 아래로는 보지 않는다) */
   displayHz: number;
   /** 지금 목표 FPS = min(제한, 화면). 자동 제한에서 버티지 못하면 60으로 내려갈 수 있다 */
@@ -358,7 +358,7 @@ export interface DecoyDebug {
   /** 관전 카드 판정 사각형 (창 CSS px, 카드 순서 번호 · 동료 id) — 따라가는 카메라 */
   getSpectateCards(): { index: number; id: string | null; x: number; y: number; w: number; h: number }[];
   /** 프레임 제한을 바꾼다 (로비 선택과 같은 경로, 저장하지 않음) */
-  setFrameLimit(limit: 'auto' | '60' | '120'): void;
+  setFrameLimit(limit: 'auto' | '60' | '120' | 'half'): void;
   /** 캐릭터 스타일을 바꾼다 (설정과 같은 경로, 저장하지 않음). 판 중이면 다음 프레임에 그림을 다시 굽는다 */
   setCharStyle(style: 'classic' | 'new'): void;
   /** 선명도 검사: HUD에 글자를 그린다 (논리 좌표 x, y, 글자 크기 px) */

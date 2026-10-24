@@ -1,5 +1,5 @@
 // 프레임 제한 설정 (렌더링 최적화 · 설정 화면 통합, client/src/ui/settingsPanel.ts · settingsModel.ts · gfx/framePacing.ts):
-//  - 설정 화면 그래픽 탭 '프레임 제한'(자동 · 60 · 120, 고른 칸 = ✓ + 바탕 · aria-pressed) — PC · 터치 같은 화면
+//  - 설정 화면 그래픽 탭 '프레임 제한'(자동 · 60 · 120 · 절반, 고른 칸 = ✓ + 바탕 · aria-pressed) — PC · 터치 같은 화면
 //  - 고르면 decoy:frameLimit에 저장(자동이면 지움)하고 바로 적용한다. 적용 결과는 디버그 훅 gfx.frameLimit으로 본다
 //    (main.ts가 pacingHooks.setLimit에서 pacer와 gfxState.frameLimit을 바꾸고, 시작할 때 저장값을 읽는다). 새로고침 뒤에도 고른 값
 //  - 저장소가 막혀도 이번 접속에는 적용되고(첫 화면을 다시 그려도 고른 값), '저장되지 않아요' 안내는 하나
@@ -20,7 +20,7 @@ import {
 } from './helpers';
 
 const POLL = { intervals: [100, 150, 200], timeout: 10_000 };
-const LIMITS = ['auto', '60', '120'] as const;
+const LIMITS = ['auto', '60', '120', 'half'] as const;
 
 /** 디버그 훅의 지금 프레임 제한 (main.ts가 적용한 값) */
 async function appliedLimit(page: Page): Promise<string | null> {
@@ -31,7 +31,7 @@ async function stored(page: Page): Promise<string | null> {
   return page.evaluate((k) => localStorage.getItem(k), FRAME_LIMIT_STORAGE_KEY);
 }
 
-/** 프레임 제한 칸의 aria-pressed [자동, 60, 120] */
+/** 프레임 제한 칸의 aria-pressed [자동, 60, 120, 절반] */
 function pressed(page: Page): Promise<(string | null)[]> {
   return Promise.all(LIMITS.map((l) => page.getByTestId(`frame-limit-${l}`).getAttribute('aria-pressed')));
 }
@@ -43,7 +43,7 @@ async function stubFullscreen(context: BrowserContext): Promise<void> {
   });
 }
 
-test('PC 설정 화면 그래픽 탭: 프레임 제한(자동 · 60 · 120), 고르면 저장하고 바로 적용 · 새로고침 뒤 그대로 · 자동이면 저장값 삭제', async ({
+test('PC 설정 화면 그래픽 탭: 프레임 제한(자동 · 60 · 120 · 절반), 고르면 저장하고 바로 적용 · 새로고침 뒤 그대로 · 자동이면 저장값 삭제', async ({
   browser,
 }) => {
   for (const viewport of [
@@ -63,13 +63,14 @@ test('PC 설정 화면 그래픽 탭: 프레임 제한(자동 · 60 · 120), 고
       UI_TEXT.frameLimitAuto,
       UI_TEXT.frameLimit60,
       UI_TEXT.frameLimit120,
+      UI_TEXT.frameLimitHalf,
     ]);
-    // 세 칸이 한 줄
+    // 네 칸이 한 줄
     const tops = await Promise.all(
       LIMITS.map(async (l) => Math.round((await page.getByTestId(`frame-limit-${l}`).boundingBox())!.y)),
     );
     expect(new Set(tops).size, label).toBe(1);
-    expect(await pressed(page)).toEqual(['true', 'false', 'false']);
+    expect(await pressed(page)).toEqual(['true', 'false', 'false', 'false']);
     expect(await stored(page)).toBeNull();
     expect(await appliedLimit(page)).toBe('auto');
     await expect(page.getByTestId('reset-frame-limit')).toBeDisabled();
@@ -89,12 +90,22 @@ test('PC 설정 화면 그래픽 탭: 프레임 제한(자동 · 60 · 120), 고
     const checks = await Promise.all(
       LIMITS.map((l) => page.getByTestId(`frame-limit-${l}`).locator('.seg-ico').isVisible()),
     );
-    expect(checks).toEqual([false, false, true]);
+    expect(checks).toEqual([false, false, true, false]);
     // 새로고침: 저장값으로 시작한다
     await page.reload();
     expect(await appliedLimit(page)).toBe('120');
     await openSettings(page, 'graphics');
-    expect(await pressed(page)).toEqual(['false', 'false', 'true']);
+    expect(await pressed(page)).toEqual(['false', 'false', 'true', 'false']);
+    // 절반 (PC 모니터: 화면 주사율의 절반 — 헤드리스 60Hz면 목표 30)
+    await press(page.getByTestId('frame-limit-half'));
+    await expect.poll(() => appliedLimit(page), POLL).toBe('half');
+    expect(await stored(page)).toBe('half');
+    expect(await pressed(page)).toEqual(['false', 'false', 'false', 'true']);
+    await expect
+      .poll(() => page.evaluate(() => window.__DECOY__?.gfx.targetHz), POLL)
+      .toBe((await page.evaluate(() => window.__DECOY__?.gfx.displayHz ?? 60)) / 2);
+    await press(page.getByTestId('frame-limit-120'));
+    await expect.poll(() => appliedLimit(page), POLL).toBe('120');
     // 디버그 훅(같은 적용 경로, 저장하지 않음)
     await page.evaluate(() => window.__DECOY__?.setFrameLimit('60'));
     await expect.poll(() => appliedLimit(page), POLL).toBe('60');
@@ -128,7 +139,7 @@ test('저장소가 막힌 브라우저: 고른 프레임 제한이 이번 접속
   });
   await page.goto(`/?${BASE_QUERY.slice(1)}`);
   await openSettings(page, 'graphics');
-  expect(await pressed(page)).toEqual(['true', 'false', 'false']);
+  expect(await pressed(page)).toEqual(['true', 'false', 'false', 'false']);
   await expect(page.getByTestId('quality-note')).toBeHidden();
   await press(page.getByTestId('frame-limit-60'));
   await expect.poll(() => appliedLimit(page), POLL).toBe('60');
@@ -142,7 +153,7 @@ test('저장소가 막힌 브라우저: 고른 프레임 제한이 이번 접속
   await page.getByTestId('practice').click();
   await page.getByTestId('practice-cancel').click();
   await openSettings(page, 'graphics');
-  expect(await pressed(page)).toEqual(['false', 'true', 'false']);
+  expect(await pressed(page)).toEqual(['false', 'true', 'false', 'false']);
   expect(await appliedLimit(page)).toBe('60');
   expect(problems).toEqual([]);
   await context.close();
@@ -157,7 +168,7 @@ test('주소 ?fpsLimit이 우선: 저장값보다 먼저이고 설정 화면 줄
   await page.goto(`/?${BASE_QUERY.slice(1)}&fpsLimit=60`);
   expect(await appliedLimit(page)).toBe('60');
   await openSettings(page, 'graphics');
-  expect(await pressed(page)).toEqual(['false', 'true', 'false']);
+  expect(await pressed(page)).toEqual(['false', 'true', 'false', 'false']);
   await expect(page.getByTestId('lock-frame-limit')).toBeVisible();
   await expect(page.getByTestId('lock-frame-limit')).toContainText('?fpsLimit=60');
   for (const l of LIMITS)
@@ -184,7 +195,7 @@ test('주소 ?fpsLimit이 우선: 저장값보다 먼저이고 설정 화면 줄
   await context.close();
 });
 
-test('터치: PC와 같은 설정 화면에 프레임 제한(자동 · 60 · 120, ✓ + 바탕) — 누르면 저장 · 바로 적용, 다시 열어도 · 새로고침 뒤에도 그 값', async ({
+test('터치: PC와 같은 설정 화면에 프레임 제한(자동 · 60 · 120 · 절반, ✓ + 바탕) — 누르면 저장 · 바로 적용, 다시 열어도 · 새로고침 뒤에도 그 값', async ({
   browser,
 }) => {
   const { context, page, problems } = await newPlayerPage(browser, dpr1(PHONE_LANDSCAPE));
@@ -196,30 +207,30 @@ test('터치: PC와 같은 설정 화면에 프레임 제한(자동 · 60 · 120
   await expect(row).toBeVisible();
   await expect(row).toContainText(UI_TEXT.frameLimit);
   await expect(page.getByTestId('frame-limit-hint')).toHaveText(UI_TEXT.frameLimitHint);
-  expect(await pressed(page)).toEqual(['true', 'false', 'false']);
+  expect(await pressed(page)).toEqual(['true', 'false', 'false', 'false']);
   for (const l of LIMITS) {
     await expect(page.getByTestId(`frame-limit-${l}`)).toBeInViewport({ ratio: 1 });
     expect((await page.getByTestId(`frame-limit-${l}`).boundingBox())!.height).toBeGreaterThanOrEqual(48);
   }
   await press(page.getByTestId('frame-limit-60'));
-  expect(await pressed(page)).toEqual(['false', 'true', 'false']);
+  expect(await pressed(page)).toEqual(['false', 'true', 'false', 'false']);
   await expect.poll(() => appliedLimit(page), POLL).toBe('60');
   expect(await stored(page)).toBe('60');
   // 닫았다 다시 열어도 그 값
   await closeSettings(page);
   await openSettings(page, 'graphics');
-  expect(await pressed(page)).toEqual(['false', 'true', 'false']);
+  expect(await pressed(page)).toEqual(['false', 'true', 'false', 'false']);
   // 새로고침 뒤에도
   await page.reload();
   await expect.poll(() => appliedLimit(page), POLL).toBe('60');
   await openSettings(page, 'graphics');
-  expect(await pressed(page)).toEqual(['false', 'true', 'false']);
+  expect(await pressed(page)).toEqual(['false', 'true', 'false', 'false']);
   await press(page.getByTestId('frame-limit-120'));
   await expect.poll(() => appliedLimit(page), POLL).toBe('120');
   expect(await stored(page)).toBe('120');
   // 자동: 저장값 삭제
   await press(page.getByTestId('frame-limit-auto'));
-  expect(await pressed(page)).toEqual(['true', 'false', 'false']);
+  expect(await pressed(page)).toEqual(['true', 'false', 'false', 'false']);
   await expect.poll(() => appliedLimit(page), POLL).toBe('auto');
   expect(await stored(page)).toBeNull();
   expect(problems).toEqual([]);

@@ -55,11 +55,18 @@ export interface DebugOverlayData {
 
 const QUALITY_LABEL: Record<QualityTier, string> = { high: '높음', medium: '중간', low: '낮음' };
 const SOURCE_LABEL: Record<QualitySource, string> = { auto: '자동', saved: '저장', url: '주소' };
-const LIMIT_LABEL: Record<FrameLimit, string> = { auto: '자동', '60': '60', '120': '120' };
+const LIMIT_LABEL: Record<FrameLimit, string> = { auto: '자동', '60': '60', '120': '120', half: '절반' };
 /** 값이 없을 때 */
 const NONE = '-';
 
 const ms = (v: number | undefined): string => (v === undefined ? NONE : `${v.toFixed(2)}ms`);
+/** 목표 FPS: 화면 주사율의 약수라 반 정수가 될 수 있다(165Hz의 절반 82.5). 그 밖에는 정수로(59.7 → 60) */
+const hzText = (v: number): string => {
+  const twice = v * 2;
+  return Math.abs(twice - Math.round(twice)) < 1e-6 && !Number.isInteger(Math.round(twice) / 2)
+    ? (Math.round(twice) / 2).toFixed(1)
+    : String(Math.round(v));
+};
 
 /** 그리기 칸: WebGL은 그리기 호출 수, Canvas 렌더러는 Phaser가 그린 객체 수 (세는 것이 달라 이름도 다르다) */
 function drawText(s: FrameStatsInfo | null, renderer: DebugOverlayData['renderer']): string {
@@ -81,7 +88,7 @@ function drawText(s: FrameStatsInfo | null, renderer: DebugOverlayData['renderer
 export function formatDebugPanel(d: DebugOverlayData): string {
   const s = d.stats;
   return [
-    `FPS ${s ? s.fps.toFixed(1) : NONE} · 목표 ${Math.round(d.targetHz)} · 화면 ${Math.round(d.displayHz)}Hz · ` +
+    `FPS ${s ? s.fps.toFixed(1) : NONE} · 목표 ${hzText(d.targetHz)} · 화면 ${Math.round(d.displayHz)}Hz · ` +
       `제한 ${LIMIT_LABEL[d.frameLimit]}`,
     `프레임 ${ms(s?.intervalAvg)} · p95 ${ms(s?.intervalP95)} · 늦음 ${
       d.late === null || s === null ? NONE : `${Math.round(d.late * 100)}%`

@@ -29,8 +29,9 @@ import { sfx } from '../audio';
 import { HELP_TEXT, STORY_TEXT, UI_TEXT, formatText } from '../data/storyText';
 import { device } from '../device';
 import { FPS_WINDOW_MS, sessionFrameStats, type FrameWindow } from '../gfx/frameStats';
+import { rateLadder } from '../gfx/framePacing';
 import {
-  PACING_WATCH,
+  lateWindowFor,
   qualityHooks,
   sessionAutoDowngrade,
   type AdaptContext,
@@ -309,8 +310,8 @@ export class GameScene extends Phaser.Scene {
   private readonly adaptSample: FrameSample = { fps: 0, workP95: 0, late: 0 };
   private readonly adaptCtx: AdaptContext = { targetHz: 60, displayHz: 60, canRateFallback: false };
   private readonly adaptWindow: FrameWindow = { fps: 0, intervalAvg: 0, workP95: 0, frames: 0, late: 0 };
-  /** 늦은 프레임을 재는 목표 주기 (적응형 목표 FPS의 고르지 않은 프레임, PACING_WATCH) */
-  private readonly adaptLate = { periodMs: 1000 / 60, factor: PACING_WATCH.lateFactor };
+  /** 늦은 프레임 기준: 목표 주기 + 반 vsync (적응형 목표 FPS의 고르지 않은 프레임, PACING_WATCH) */
+  private readonly adaptLate = { periodMs: 1000 / 60, slackMs: 1000 / 120 };
   private nextAdaptWindowAt = 0;
   /** 지금 처리하는 스냅샷이 서버에서 만들어진 뒤 지난 시간 (ms, 진동: 오래된 일은 울리지 않는다) */
   private eventAgeMs = 0;
@@ -1460,8 +1461,8 @@ export class GameScene extends Phaser.Scene {
       sample.late = 0;
     } else if (now >= this.nextAdaptWindowAt) {
       this.nextAdaptWindowAt = now + ADAPT_WINDOW_EVERY_MS;
-      // 늦은 프레임은 지금 목표 주기로 잰다 (120Hz면 12.5ms 이상, 60이면 25ms 이상)
-      this.adaptLate.periodMs = 1000 / Math.max(1, gfxState.targetHz);
+      // 늦은 프레임은 지금 목표 주기 + 반 vsync로 잰다 (120Hz 화면에서 목표 120이면 12.5ms 이상, 목표 60이면 20.8ms 이상)
+      lateWindowFor(gfxState.targetHz, gfxState.displayHz, this.adaptLate);
       sessionFrameStats.window(FPS_WINDOW_MS, this.adaptWindow, this.adaptLate);
       sample.fps = this.adaptWindow.fps;
       sample.workP95 = this.adaptWindow.workP95;
@@ -1471,7 +1472,8 @@ export class GameScene extends Phaser.Scene {
     const ctx = this.adaptCtx;
     ctx.targetHz = gfxState.targetHz;
     ctx.displayHz = gfxState.displayHz;
-    ctx.canRateFallback = gfxState.frameLimit === 'auto' && gfxState.displayHz > 60;
+    // 목표 FPS를 약수 사다리로 내리고 올릴 수 있는가 (자동 제한 · 화면 주사율에 60 이상 약수가 있음 — 60 · 75Hz는 없다)
+    ctx.canRateFallback = gfxState.frameLimit === 'auto' && rateLadder(gfxState.displayHz).length > 1;
     const action = sessionAutoDowngrade.sample(now, sample, gfxState.quality, ctx);
     gfxState.measuredFps = sessionAutoDowngrade.average;
     if (action) qualityHooks.auto?.(action);
@@ -1609,7 +1611,8 @@ export class GameScene extends Phaser.Scene {
     // 만큼(입력 이벤트 · 다른 콜백) 흔들리는 performance.now 대신. 따라가기 감쇠의 간격(rawDelta)도 이 시각들의 차이다
     const frameAt = frameTimeOf(rafTime, now);
     this.catchUpInput(frameAt);
-    const renderTime = app.renderTime();
+    // 다른 캐릭터 보간 시각도 같은 rAF 시각으로 (내 캐릭터 · 카메라와 같은 시계 — 콜백이 늦게 시작한 만큼 흔들리지 않게)
+    const renderTime = app.renderTime(frameAt);
     const span = this.motionSpan;
     span.r0 = this.lastRenderTime ?? renderTime;
     span.r1 = renderTime;

@@ -1,5 +1,6 @@
 // 적응형 품질 단위 테스트용 세션 (렌더링 최적화): 판을 이어서 돌리며 자동 조정을 적용한다.
-// main.ts qualityHooks.auto · 프레임 페이싱(framePacing Pacer.setFallback)과 같은 규칙으로 품질 · 목표 FPS를 바꾼다
+// main.ts qualityHooks.auto · 프레임 페이싱(framePacing Pacer.setFallback · targetHzFor)과 같은 규칙으로 품질 · 목표 FPS를 바꾼다
+import { rateLadder, targetHzFor, type FrameLimit } from '../../client/src/gfx/framePacing';
 import type { QualityTier } from '../../client/src/gfx/presets';
 import type {
   AdaptContext,
@@ -9,7 +10,7 @@ import type {
   PerfMode,
 } from '../../client/src/gfx/quality';
 
-export type Limit = 'auto' | '60' | '120';
+export type Limit = FrameLimit;
 
 /** 한 프레임의 측정: 지금 품질 · 목표 FPS · 판 안 경과 ms로 정한다 */
 export type FrameFn = (tier: QualityTier, targetHz: number, elapsed: number) => FrameSample;
@@ -44,17 +45,16 @@ export class AdaptiveSession {
     public displayHz = 60,
   ) {}
 
-  /** 목표 FPS = 자동이면 화면(낮춤이 있으면 그 값까지), 고정이면 min(제한, 화면) (framePacing targetHzFor) */
+  /** 목표 FPS = 화면 주사율의 약수 (framePacing targetHzFor — 자동이면 낮춤에 가장 가까운 약수, 고정 제한은 그 값에 가장 가까운 약수) */
   get targetHz(): number {
-    if (this.limit !== 'auto') return Math.min(Number(this.limit), this.displayHz);
-    return this.fallback !== null ? Math.min(this.fallback, this.displayHz) : this.displayHz;
+    return targetHzFor(this.limit, this.displayHz, this.fallback);
   }
 
   ctx(): AdaptContext {
     return {
       targetHz: this.targetHz,
       displayHz: this.displayHz,
-      canRateFallback: this.limit === 'auto' && this.displayHz > 60,
+      canRateFallback: this.limit === 'auto' && rateLadder(this.displayHz).length > 1,
     };
   }
 
@@ -74,7 +74,8 @@ export class AdaptiveSession {
         this.fallback = a.to;
         break;
       case 'rateUp':
-        this.fallback = null;
+        // 사다리 한 칸 위로 (맨 위 = 화면 주사율이면 낮춤을 지운다 — main.ts와 같다)
+        this.fallback = a.to >= this.displayHz - 1e-6 ? null : a.to;
         break;
       default:
         break;

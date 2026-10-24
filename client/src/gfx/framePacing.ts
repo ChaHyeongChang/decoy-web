@@ -1,23 +1,28 @@
-// 프레임 페이싱 (렌더링 최적화): 프레임 제한 설정(자동 · 60 · 120) · 화면 주사율 재기 · 제한기.
+// 프레임 페이싱 (렌더링 최적화): 프레임 제한 설정(자동 · 60 · 120 · 절반) · 화면 주사율 재기 · 제한기.
 // 순수 로직은 Phaser를 import하지 않는다. main.ts가 Phaser 루프에 끼운다(patchTimeStep(Phaser.Core.TimeStep.prototype, pacer)).
 // 아래 값은 판정과 무관한 그래픽 · 페이싱 값이라 balance.json이 아니라 여기 둔다(gfx/quality.ts와 같다).
-//  - 목표 FPS = 제한이 자동이면 화면 주사율, 아니면 min(제한, 화면). 자동에서 적응형 품질이 60으로 내릴 수 있다(fallbackHz)
+//  - 목표 FPS는 늘 화면 주사율의 약수(화면 / n, n은 정수)다(잔렉 고치기 2026-10-25, DECISIONS 12절): 자동이면 화면 주사율,
+//    60 · 120이면 그 값에 가장 가까운 약수(144Hz에 60 → 72, 165Hz에 60 → 55, 144Hz에 120 → 144), 절반이면 화면 / 2.
+//    자동에서 고르게 못 버티면 적응형 품질이 약수 사다리(rateLadder: 144 → 72, 165 → 82.5, 240 → 120 → 80 → 60)로 내린다
 //  - 제한기는 Phaser의 fps.limit을 쓰지 않는다(생성 때 고정 · 허용 오차가 없어 흔들리는 120Hz에서 40fps가 된다).
-//    rAF마다 '다음 차례 시각'과 견주어 Phaser 한 걸음(TimeStep.step)을 부르거나 건너뛴다. 건너뛰면 Phaser lastTime이
-//    그대로라 다음 delta = 마지막으로 그린 프레임부터의 시간이다
-//  - 판이 없을 때(로비 · 결과)는 제한 설정과 상관없이 30fps로 묶는다(Pacer.setIdle, main.ts가 판 시작 · 끝에 부른다)
+//    rAF마다 '마지막으로 그린 rAF 시각 + (n − 0.5) vsync'와 견주어 Phaser 한 걸음(TimeStep.step)을 부르거나 건너뛴다(위상 고정).
+//    건너뛰면 Phaser lastTime이 그대로라 다음 delta = 마지막으로 그린 프레임부터의 시간이다
+//  - 판이 없을 때(로비 · 결과)는 제한 설정과 상관없이 30fps 가까이로 묶는다(Pacer.setIdle, main.ts가 판 시작 · 끝에 부른다)
 //  - 매 프레임 메모리를 새로 잡지 않는다(고정 크기 typed array 고리, 백분위는 미리 잡은 배열을 정렬)
 import { STORAGE_KEYS, readKey, removeKey, writeKey, type StorageLike } from '../storageKeys';
 
-/** 프레임 제한 선택: 자동 = 화면 주사율을 따른다(제한 없음), 60 = 배터리 절약, 120 */
-export type FrameLimit = 'auto' | '60' | '120';
-export const FRAME_LIMITS: readonly FrameLimit[] = ['auto', '60', '120'];
+/**
+ * 프레임 제한 선택: 자동 = 화면 주사율을 따른다(제한 없음, 고르게 못 버티면 약수로 내림), 60 = 배터리 절약, 120,
+ * 절반 = 화면 주사율의 절반(PC 모니터: 144Hz → 72, 165Hz → 82.5, 240Hz → 120). 60 · 120은 화면 주사율의 가장 가까운 약수로 맞춘다
+ */
+export type FrameLimit = 'auto' | '60' | '120' | 'half';
+export const FRAME_LIMITS: readonly FrameLimit[] = ['auto', '60', '120', 'half'];
 
 export function isFrameLimit(v: unknown): v is FrameLimit {
-  return v === 'auto' || v === '60' || v === '120';
+  return v === 'auto' || v === '60' || v === '120' || v === 'half';
 }
 
-/** 프레임 제한 글자 해석 (앞뒤 공백 · 대소문자 무시: 'auto' · '60' · '120'). 그 밖에는 null */
+/** 프레임 제한 글자 해석 (앞뒤 공백 · 대소문자 무시: 'auto' · '60' · '120' · 'half'). 그 밖에는 null */
 export function parseFrameLimit(raw: string | null): FrameLimit | null {
   if (raw === null) return null;
   const v = raw.trim().toLowerCase();
@@ -164,31 +169,77 @@ export class RefreshEstimator {
   }
 }
 
+// ───────────── 고른 목표 (화면 주사율의 약수) ─────────────
+
+export const EVEN_RATE = {
+  /** 자동 제한의 목표 사다리는 이 값 이상인 약수만 (그 아래로는 품질을 내린다) */
+  ladderMinHz: 60,
+  /** 60 이상인 약수가 화면 주사율 하나뿐이면(90 · 100Hz) 절반이 이 값 이상일 때 한 단으로 둔다 (90 → 45, 100 → 50, 75 → 없음) */
+  ladderFloorHz: 45,
+} as const;
+
+/**
+ * 화면 주사율 displayHz에서 wantHz에 가장 가까운 고른 목표의 분주 n (n개 vsync마다 한 번 그린다, n ≥ 1).
+ * n = round(화면 / 원하는 값): 144Hz에 60 → 2(72), 165Hz에 60 → 3(55), 90Hz에 60 → 2(45), 75Hz에 60 → 1(75), 144Hz에 120 → 1.
+ * 잘못된 값이면 1
+ */
+export function divisorFor(displayHz: number, wantHz: number): number {
+  if (!(displayHz > 0) || !(wantHz > 0) || !Number.isFinite(wantHz)) return 1;
+  return Math.max(1, Math.round(displayHz / wantHz));
+}
+
+/**
+ * 자동 제한의 목표 사다리 (내림차순, 첫 칸 = 화면 주사율): 화면 / n 중 60 이상인 것, 그런 약수가 화면 하나뿐이면 절반이 45 이상일 때
+ * 그 절반 하나. 60 → [60], 75 → [75], 90 → [90, 45], 100 → [100, 50], 120 → [120, 60], 144 → [144, 72], 165 → [165, 82.5],
+ * 240 → [240, 120, 80, 60]
+ */
+export function rateLadder(displayHz: number): number[] {
+  const out = [displayHz];
+  if (!(displayHz > 0) || !Number.isFinite(displayHz)) return out;
+  for (let n = 2; displayHz / n >= EVEN_RATE.ladderMinHz; n += 1) out.push(displayHz / n);
+  if (out.length === 1 && displayHz / 2 >= EVEN_RATE.ladderFloorHz) out.push(displayHz / 2);
+  return out;
+}
+
+/**
+ * 지금 목표보다 낮은 사다리 칸 (없으면 null). 바로 아래 칸이 기본이고, fpsHint(느린 상태의 평균 FPS)를 주면 그 FPS 이하인 가장 높은
+ * 칸까지 한 번에 내려간다(240Hz에서 100fps면 120을 건너뛰고 80) — 그 FPS 이하 칸이 없으면 맨 아래 칸
+ */
+export function lowerRate(displayHz: number, targetHz: number, fpsHint?: number): number | null {
+  const below = rateLadder(displayHz).filter((hz) => hz < targetHz * (1 - 1e-9));
+  if (below.length === 0) return null;
+  if (fpsHint === undefined || !(fpsHint > 0)) return below[0] ?? null;
+  return below.find((hz) => hz <= fpsHint * (1 + 1e-9)) ?? below[below.length - 1] ?? null;
+}
+
+/** 지금 목표보다 한 단 높은 사다리 칸 (없으면 null) */
+export function higherRate(displayHz: number, targetHz: number): number | null {
+  const above = rateLadder(displayHz).filter((hz) => hz > targetHz * (1 + 1e-9));
+  return above[above.length - 1] ?? null;
+}
+
 // ───────────── 제한기 ─────────────
 
 export const LIMITER = {
-  /** 차례 시각보다 이만큼 이르면 그린다 (rAF 시각 흔들림 ±0.3ms를 넘게, ms) */
-  toleranceMs: 1,
-  /** 제한이 화면의 이 비율 이상이면 제한하지 않는다 (120 화면에 120 제한 = 모든 rAF) */
-  nearDisplay: 0.97,
-  /** rAF 사이가 이보다 길면(숨김 · 멈춤) 차례 시각을 지금으로 다시 맞춘다 (ms) */
+  /** 위상 고정 허용 (vsync 비율): 마지막으로 그린 rAF + (n − 이 값) vsync 이후의 첫 rAF에 그린다 */
+  phaseSlack: 0.5,
+  /** rAF 사이가 이보다 길면(숨김 · 멈춤) 지금 그리고 거기서 다시 센다 (ms) */
   resyncGapMs: 250,
 } as const;
 
 /**
- * 프레임 제한기 (차례 시각 방식): rAF 시각 t마다 shouldRun(t, 화면Hz).
- * 제한이 없거나 화면의 97% 이상이면 늘 그린다. 아니면 t < next − 1ms면 건너뛰고, 그리면 next += 1000/제한
- * (그래도 next가 한 주기보다 더 뒤처졌으면 next = t + 1000/제한). 제한이 바뀌거나 250ms 넘게 rAF가 끊기면 그 tick에 그리고
- * 거기서 다시 센다. 예: 120Hz에 60 → 한 번 걸러 한 번, 90Hz에 60 → 세 번에 두 번, 144Hz에 120 → 여섯 번에 다섯 번꼴(평균 120)
+ * 프레임 제한기 (vsync 위상 고정): rAF 시각 t마다 shouldRun(t, 화면Hz). 제한 cap은 화면 주사율의 약수로 맞춰(n = round(화면 / cap))
+ * n개 vsync마다 한 번 그린다 — 마지막으로 그린 rAF 시각 + (n − 0.5) vsync 이후의 첫 rAF. n이 1이면 늘 그린다.
+ * 그리기로 한 vsync를 놓쳐도(무거운 프레임) 다음 vsync에 몰아 그리지 않고 그 자리에서 다시 n칸을 센다(옛 '차례 시각 누적'은
+ * 120Hz에 60이 놓친 뒤 2 · 3 · 1 · 2칸으로 흔들렸다). 제한이 바뀌거나 250ms 넘게 rAF가 끊기면 그 tick에 그리고 거기서 다시 센다.
+ * 예: 120Hz에 60 → 한 번 걸러 한 번, 144Hz에 60 → n 2(72), 165Hz에 60 → n 3(55), 90Hz에 60 → n 2(45)
  *
- * 화면 주사율로 나누어떨어지지 않는 제한(90 · 144Hz에 60, 144Hz에 120)은 일부러 정수 분주(90Hz → 45, 144Hz → 72 · 144)로
- * 반올림하지 않는다: 차례 시각을 1000/제한씩 쌓아 가므로 평균 FPS는 정확히 제한과 같고, 대신 프레임 간격이 고르지 않다
- * (90Hz에 60이면 11.1ms · 22.2ms가 섞인다). 사용자가 고른 숫자(60 · 120)와 적응형 품질의 목표 FPS가 실제 평균과 같아야
- * 기준(목표의 2/3 · 5/6)이 맞는다. 판 장면은 실제 간격(rawDelta)으로 적분하므로 고르지 않은 간격도 움직임은 맞다
+ * 나누어떨어지지 않는 제한을 평균만 맞추던 예전 방식(90Hz에 60이면 11.1 · 22.2ms가 섞임)은 움직임이 고르지 않아 버렸다
+ * (잔렉 고치기, DECISIONS 12절). 화면 주사율을 조금 잘못 재도(±30%) 반 vsync 허용이라 n칸마다 그린다
  */
 export class FrameLimiter {
   private cap: number | null = null;
-  private next = Number.NaN;
+  private lastRun = Number.NaN;
   private lastTick = Number.NaN;
   private skips = 0;
 
@@ -202,12 +253,12 @@ export class FrameLimiter {
     return this.skips;
   }
 
-  /** 제한을 바꾼다 (null · 0 이하 · 유한하지 않은 값 = 제한 없음). 값이 바뀌면 차례 시각을 다시 센다 */
+  /** 제한을 바꾼다 (null · 0 이하 · 유한하지 않은 값 = 제한 없음). 값이 바뀌면 위상을 다시 센다 */
   setCap(hz: number | null): void {
     const cap = hz !== null && Number.isFinite(hz) && hz > 0 ? hz : null;
     if (cap === this.cap) return;
     this.cap = cap;
-    this.next = Number.NaN;
+    this.lastRun = Number.NaN;
   }
 
   /** 이 rAF에 Phaser 한 걸음을 부를까 */
@@ -215,22 +266,21 @@ export class FrameLimiter {
     const gap = t - this.lastTick;
     this.lastTick = t;
     const cap = this.cap;
-    if (cap === null || cap >= displayHz * LIMITER.nearDisplay) {
-      this.next = Number.NaN;
+    const n = cap === null ? 1 : divisorFor(displayHz, cap);
+    if (n <= 1) {
+      this.lastRun = t;
       return true;
     }
-    const period = 1000 / cap;
     // 처음 · 제한이 막 바뀜 · 긴 공백 · 시간이 거꾸로: 지금 그리고 여기서 다시 센다
-    if (Number.isNaN(this.next) || !(gap >= 0 && gap <= LIMITER.resyncGapMs)) {
-      this.next = t + period;
+    if (Number.isNaN(this.lastRun) || !(gap >= 0 && gap <= LIMITER.resyncGapMs) || t < this.lastRun) {
+      this.lastRun = t;
       return true;
     }
-    if (t < this.next - LIMITER.toleranceMs) {
+    if (t - this.lastRun < ((n - LIMITER.phaseSlack) * 1000) / displayHz) {
       this.skips += 1;
       return false;
     }
-    this.next += period;
-    if (this.next < t - period) this.next = t + period;
+    this.lastRun = t;
     return true;
   }
 }
@@ -238,25 +288,29 @@ export class FrameLimiter {
 // ───────────── 목표 FPS ─────────────
 
 /**
- * 목표 FPS: 자동 = 화면 주사율(적응형 품질이 내린 fallbackHz가 있으면 그것과 화면 중 작은 값), 60 · 120 = min(제한, 화면).
- * fallbackHz는 자동에서만 쓴다 (고정 제한은 적응형 품질이 FPS를 바꾸지 않는다)
+ * 목표 FPS (늘 화면 주사율의 약수): 자동 = 화면 주사율(적응형 품질이 내린 fallbackHz가 있으면 그것에 가장 가까운 약수),
+ * 60 · 120 = 그 값에 가장 가까운 약수(divisorFor), 절반 = 화면 / 2. fallbackHz는 자동에서만 쓴다 (고정 제한은 적응형 품질이
+ * FPS를 바꾸지 않는다)
  */
 export function targetHzFor(limit: FrameLimit, displayHz: number, fallbackHz: number | null): number {
-  if (limit === 'auto') return fallbackHz !== null ? Math.min(displayHz, fallbackHz) : displayHz;
-  return Math.min(Number(limit), displayHz);
+  if (limit === 'auto')
+    return fallbackHz !== null ? displayHz / divisorFor(displayHz, fallbackHz) : displayHz;
+  if (limit === 'half') return displayHz / 2;
+  return displayHz / divisorFor(displayHz, Number(limit));
 }
 
-/** 제한기에 줄 제한 (Hz). 목표가 화면의 97% 이상이면 제한할 것이 없어 null */
+/** 제한기에 줄 제한 (Hz). 목표가 화면 주사율이면 제한할 것이 없어 null */
 export function capHzFor(limit: FrameLimit, displayHz: number, fallbackHz: number | null): number | null {
   const target = targetHzFor(limit, displayHz, fallbackHz);
-  return target < displayHz * LIMITER.nearDisplay ? target : null;
+  return divisorFor(displayHz, target) > 1 ? target : null;
 }
 
 // ───────────── Phaser 루프에 끼우기 ─────────────
 
 /**
  * 판이 없을 때(로비 · 결과 · 연습 고르기)의 그리기 제한 (Hz). 그때 Phaser는 빈 장면(IdleScene)만 그리는데도 rAF마다 한 걸음을
- * 돌아 120Hz 휴대폰에서 배터리를 쓴다 → 프레임 제한 설정과 상관없이 30으로 묶는다. 화면 주사율 재기는 그대로 모든 rAF를 본다
+ * 돌아 120Hz 휴대폰에서 배터리를 쓴다 → 프레임 제한 설정과 상관없이 30에 가장 가까운 화면 주사율의 약수로 묶는다(144Hz → 28.8).
+ * 화면 주사율 재기는 그대로 모든 rAF를 본다
  */
 export const IDLE_CAP_HZ = 30;
 
@@ -289,7 +343,10 @@ export class Pacer {
     this.current = limit;
   }
 
-  /** 자동 제한에서 목표를 내린다 / null이면 되돌린다 (0 이하 · 유한하지 않은 값은 null) */
+  /**
+   * 자동 제한에서 목표를 내린다 / null이면 되돌린다 (0 이하 · 유한하지 않은 값은 null). 목표는 이 값에 가장 가까운 화면 주사율의
+   * 약수다(targetHzFor) — 판 중 잰 화면 주사율이 오르면(heldHz) 새 화면의 약수로 다시 맞춘다
+   */
   setFallback(hz: number | null): void {
     this.fallback = hz !== null && Number.isFinite(hz) && hz > 0 ? hz : null;
   }
@@ -322,9 +379,10 @@ export class Pacer {
     return targetHzFor(this.current, this.displayHz, this.fallback);
   }
 
-  /** 지금 제한기 제한 (Hz, 없으면 null). 판이 없으면 IDLE_CAP_HZ */
+  /** 지금 제한기 제한 (Hz, 화면 주사율의 약수 — 없으면 null). 판이 없으면 IDLE_CAP_HZ에 가장 가까운 약수 */
   get capHz(): number | null {
-    return this.idleOn ? IDLE_CAP_HZ : capHzFor(this.current, this.displayHz, this.fallback);
+    if (this.idleOn) return this.displayHz / divisorFor(this.displayHz, IDLE_CAP_HZ);
+    return capHzFor(this.current, this.displayHz, this.fallback);
   }
 
   /** 제한 때문에 건너뛴 rAF 수 (누계) */

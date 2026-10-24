@@ -10,7 +10,6 @@ import {
   FpsWatch,
   PACING_WATCH,
   QUALITY_STORAGE_KEY,
-  RATE_FALLBACK_HZ,
   SAMPLE_RING_SIZE,
   SlidingAverage,
   THRESHOLD_CAP_HZ,
@@ -24,6 +23,7 @@ import {
   isSoftwareGl,
   isTouchDevice,
   loadSavedQuality,
+  lateWindowFor,
   maxLateFor,
   minFpsFor,
   parseQuality,
@@ -494,7 +494,7 @@ function countArrayCalls(run: () => void): number {
 
 describe('렌더링 최적화: 하향 기준은 목표 FPS에 비례한다', () => {
   it('기준 = 60Hz 값 × min(목표, 120) / 60: PC 2/3 · 터치 5/6, 144 · 165Hz도 기준 목표 120', () => {
-    expect([BASE_TARGET_HZ, THRESHOLD_CAP_HZ, RATE_FALLBACK_HZ]).toEqual([60, 120, 60]);
+    expect([BASE_TARGET_HZ, THRESHOLD_CAP_HZ]).toEqual([60, 120]);
     expect([60, 90, 120, 144, 165, 240].map((hz) => minFpsFor(FPS_WATCH, hz))).toEqual([
       40, 60, 80, 80, 80, 80,
     ]);
@@ -519,7 +519,7 @@ describe('렌더링 최적화: 하향 기준은 목표 FPS에 비례한다', () 
     expect(ok.tier).toBe('high');
   });
 
-  it('144Hz 화면에서 90fps인 PC는 내려가지 않는다 (기준 80). 75fps면 먼저 목표 FPS를 60으로', () => {
+  it('144Hz 화면에서 90fps인 PC는 내려가지 않는다 (기준 80). 75fps면 먼저 목표 FPS를 화면 주사율의 약수 72로', () => {
     const fast = new AdaptiveSession('high', new AutoDowngrade(), 'auto', 144);
     expect(fast.play(60_000, () => injected(90))).toEqual([]);
     expect([fast.tier, fast.targetHz]).toEqual(['high', 144]);
@@ -527,9 +527,9 @@ describe('렌더링 최적화: 하향 기준은 목표 FPS에 비례한다', () 
     const slow = new AdaptiveSession('high', new AutoDowngrade(), 'auto', 144);
     const acts = slow.play(20_000, () => injected(75));
     expect(acts.map((l) => l.action)).toEqual([
-      { kind: 'rateDown', mode: 'online', from: 144, to: 60, fpsBefore: 75 },
+      { kind: 'rateDown', mode: 'online', from: 144, to: 72, fpsBefore: 75 },
     ]);
-    expect([slow.tier, slow.targetHz]).toEqual(['high', 60]);
+    expect([slow.tier, slow.targetHz]).toEqual(['high', 72]);
   });
 
   it('120 제한이어도 60Hz 화면이면 목표 60 · 기준 40 (M10 그대로)', () => {
@@ -856,16 +856,78 @@ describe('렌더링 최적화: 여유가 이어지면 자동으로 내린 단계
   });
 });
 
-describe('내 움직임 고르기: 120Hz를 고르게 못 버티면 고른 60으로 (늦은 프레임, PACING_WATCH)', () => {
+describe('내 움직임 고르기 · 잔렉 고치기: 고르게 못 버티면 화면 주사율의 약수로 (늦은 프레임, PACING_WATCH)', () => {
   /** 평균 FPS fps, 그중 late 비율의 프레임이 vsync를 놓친 측정 */
   const uneven = (fps: number, late: number): FrameSample => ({ fps, workP95: 6, late });
   const steady60: FrameSample = { fps: 60, workP95: 6, late: 0 };
 
-  it('기준: 간격이 목표 주기의 1.5배 이상이면 늦은 프레임, 늦은 비율 0.15 이상이 이어지면. 자동 제한 · 목표 60 초과에서만 본다', () => {
-    expect(PACING_WATCH).toEqual({ lateFactor: 1.5, maxLateRatio: 0.15 });
-    expect(maxLateFor({ targetHz: 120, canRateFallback: true })).toBe(0.15);
-    expect(maxLateFor({ targetHz: 120, canRateFallback: false })).toBe(Infinity);
-    expect(maxLateFor({ targetHz: 60, canRateFallback: true })).toBe(Infinity);
+  it('기준: 간격이 목표 주기 + 반 vsync 이상이면 늦은 프레임, 늦은 비율 0.05 이상이 이어지면. 자동 제한 · 사다리 아래 칸이 있을 때만 본다', () => {
+    expect(PACING_WATCH).toEqual({ lateSlack: 0.5, maxLateRatio: 0.05 });
+    expect(maxLateFor({ targetHz: 120, displayHz: 120, canRateFallback: true })).toBe(0.05);
+    expect(maxLateFor({ targetHz: 144, displayHz: 144, canRateFallback: true })).toBe(0.05);
+    expect(maxLateFor({ targetHz: 120, displayHz: 240, canRateFallback: true })).toBe(0.05);
+    expect(maxLateFor({ targetHz: 120, displayHz: 120, canRateFallback: false })).toBe(Infinity);
+    expect(maxLateFor({ targetHz: 60, displayHz: 120, canRateFallback: true })).toBe(Infinity);
+    expect(maxLateFor({ targetHz: 72, displayHz: 144, canRateFallback: true })).toBe(Infinity);
+    expect(maxLateFor({ targetHz: 60, displayHz: 240, canRateFallback: true })).toBe(Infinity);
+    // 늦은 프레임 기준 (frameStats.window): 목표 주기 + 반 vsync — 120Hz 목표 120이면 12.5ms, 120Hz 목표 60이면 20.8ms(3칸 째에서 늦음),
+    // 240Hz 목표 80이면 14.6ms(4칸)
+    const out = { periodMs: 0, slackMs: 0 };
+    for (const [target, display, lateMs] of [
+      [120, 120, 12.5],
+      [60, 120, 20.833],
+      [80, 240, 14.583],
+      [72, 144, 17.361],
+    ] as const) {
+      lateWindowFor(target, display, out);
+      expect(out.periodMs + out.slackMs, `${display}Hz 목표 ${target}`).toBeCloseTo(lateMs, 2);
+    }
+  });
+
+  it('144Hz PC가 약 132fps(늦은 프레임 8%)면 평균이 기준 위여도 고른 72로, 165Hz 약 150fps면 82.5로 (예전 0.15 기준은 그대로 두었다)', () => {
+    for (const [display, fps, late, to] of [
+      [144, 132, 0.08, 72],
+      [165, 150, 0.09, 82.5],
+    ] as const) {
+      const s = new AdaptiveSession('high', new AutoDowngrade(), 'auto', display);
+      const acts = s.play(60_000, (_tier, hz) =>
+        hz > to ? uneven(fps, late) : { fps: hz, workP95: 6, late: 0 },
+      );
+      expect(
+        acts.map((l) => l.action),
+        `${display}Hz`,
+      ).toEqual([{ kind: 'rateDown', mode: 'online', from: display, to, fpsBefore: fps }]);
+      expect([s.targetHz, s.tier]).toEqual([to, 'high']);
+    }
+  });
+
+  it('240Hz에서 약 105fps면 한 번에 80으로(되돌릴 단계는 240 → 120 → 80 두 칸), 여유가 생기면 한 칸(120)씩 올리고 120에서도 고르지 않으면 80으로 되돌려 막는다', () => {
+    const s = new AdaptiveSession('high', new AutoDowngrade(), 'auto', 240);
+    s.play(150_000, (_tier, hz) =>
+      hz >= 120 ? { fps: Math.min(hz, 105), workP95: 3, late: 0.2 } : { fps: hz, workP95: 3, late: 0 },
+    );
+    expect(kinds(s.log)).toEqual(['rateDown', 'rateUp', 'upRevert']);
+    expect(s.log[0]!.action).toEqual({ kind: 'rateDown', mode: 'online', from: 240, to: 80, fpsBefore: 105 });
+    expect(s.log[1]!.action).toMatchObject({ kind: 'rateUp', from: 80, to: 120 });
+    expect(s.log[2]!.action).toMatchObject({ kind: 'upRevert', step: 'rate', from: 120, to: 80 });
+    expect([s.targetHz, s.auto.upgradesBlocked]).toEqual([80, true]);
+  });
+
+  it('여유가 생기면 사다리를 한 칸씩 되돌린다 (240 → 80에서 120, 다시 240)', () => {
+    const s = new AdaptiveSession('high', new AutoDowngrade(), 'auto', 240);
+    // 처음 30초만 고르지 않고 그 뒤로는 어느 목표에서든 고르고 여유 있다
+    s.play(200_000, (_tier, hz, e) =>
+      e < 30_000 && hz >= 120
+        ? { fps: Math.min(hz, 105), workP95: 3, late: 0.2 }
+        : { fps: hz, workP95: 1.5, late: 0 },
+    );
+    const rates = s.log.filter((l) => l.action.kind === 'rateDown' || l.action.kind === 'rateUp');
+    expect(rates.map((l) => [l.action.kind, (l.action as { to: number }).to])).toEqual([
+      ['rateDown', 80],
+      ['rateUp', 120],
+      ['rateUp', 240],
+    ]);
+    expect(s.targetHz).toBe(240);
   });
 
   it('자동 · 120Hz: 평균 FPS가 하향 기준(PC 80 · 터치 100) 위여도 늦은 프레임이 이어지면 목표를 60으로 (품질 그대로)', () => {
@@ -889,7 +951,7 @@ describe('내 움직임 고르기: 120Hz를 고르게 못 버티면 고른 60으
 
   it('늦은 프레임이 기준 미만이거나 잠깐뿐이면 120을 그대로 둔다', () => {
     const few = new AdaptiveSession('high', new AutoDowngrade(TOUCH_FPS_WATCH), 'auto', 120);
-    expect(few.play(60_000, () => uneven(110, 0.1))).toEqual([]);
+    expect(few.play(60_000, () => uneven(117, 0.03))).toEqual([]);
     // 9초마다 1초씩만 고르다: 지속 10초를 채우지 못한다
     const bursts = new AdaptiveSession('high', new AutoDowngrade(TOUCH_FPS_WATCH), 'auto', 120);
     expect(

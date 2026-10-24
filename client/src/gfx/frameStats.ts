@@ -29,7 +29,7 @@ export interface FrameWindow {
   /** 구간 안 렌더 프레임 수 */
   frames: number;
   /**
-   * 구간 안 늦은 프레임 비율 (0~1, 내 움직임 고르기): 간격이 목표 주기 × lateFactor 이상인 간격 수 ÷ 간격 수.
+   * 구간 안 늦은 프레임 비율 (0~1, 내 움직임 고르기 · 잔렉 고치기): 간격이 목표 주기 + slackMs(반 vsync) 이상인 간격 수 ÷ 간격 수.
    * 목표 주기를 주지 않았거나 FPS를 덮어썼으면 0
    */
   late: number;
@@ -218,13 +218,13 @@ export class FrameStats {
   window(
     ms: number,
     out: FrameWindow = { fps: 0, intervalAvg: 0, workP95: 0, frames: 0, late: 0 },
-    late?: { periodMs: number; factor: number },
+    late?: { periodMs: number; slackMs: number },
   ): FrameWindow {
     let frames = 0;
     let nInt = 0;
     let sumInt = 0;
     let nLate = 0;
-    const lateMs = late && late.periodMs > 0 ? late.periodMs * late.factor : Infinity;
+    const lateMs = late && late.periodMs > 0 ? late.periodMs + late.slackMs : Infinity;
     if (this.count > 0) {
       const newest = this.times[this.slot(0)] ?? 0;
       const from = newest - ms;

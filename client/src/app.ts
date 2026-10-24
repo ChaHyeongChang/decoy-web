@@ -767,9 +767,12 @@ export class App {
     };
   }
 
-  /** 다른 캐릭터를 그릴 시각 (스냅샷 시계 − 100ms) */
-  renderTime(): number {
-    return this.snapClock.now(performance.now()) - (this.balance?.network.interpolationDelayMs ?? 100);
+  /**
+   * 다른 캐릭터를 그릴 시각 (스냅샷 시계 − 100ms). atMs = 이 프레임 시각 — 판 장면은 rAF 시각(frameTimeOf)을 준다(잔렉 고치기):
+   * 콜백 안 performance.now는 콜백이 늦게 시작한 만큼 프레임마다 흔들려, 따라가는 카메라(rAF 시각) 아래에서 걷는 상대가 그만큼 떨렸다
+   */
+  renderTime(atMs: number = performance.now()): number {
+    return this.snapClock.now(atMs) - (this.balance?.network.interpolationDelayMs ?? 100);
   }
 
   get dt(): number {
