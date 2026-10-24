@@ -33,8 +33,20 @@ export const STORAGE_KEYS = {
   charStyle: {
     key: 'decoy:charStyle',
     area: 'local',
-    what: '캐릭터 스타일 선택 (기존이면 저장하지 않음)',
+    what: '캐릭터 스타일 선택 (고르지 않았거나 기본값으로 되돌리면 저장하지 않음)',
     keep: '사용자가 바꾸거나 브라우저 데이터를 지울 때까지',
+  },
+  settings: {
+    key: 'decoy:settings',
+    area: 'local',
+    what: '화면 · 소리 · 조작 설정 (UI 크기 · 흔들림 · 번쩍임 줄이기 · FPS 표시 · 음량 · 조이스틱, 기본값이면 저장하지 않음)',
+    keep: '사용자가 바꾸거나 기본값으로 되돌리거나 브라우저 데이터를 지울 때까지',
+  },
+  controlLayout: {
+    key: 'decoy:controlLayout',
+    area: 'local',
+    what: '터치 조작 배치 (생존자 · 괴물 따로, 화면 비율로 적은 버튼 자리 · 크기, 기본값이면 저장하지 않음)',
+    keep: '사용자가 바꾸거나 기본값으로 되돌리거나 브라우저 데이터를 지울 때까지',
   },
   name: {
     key: 'decoy:name',

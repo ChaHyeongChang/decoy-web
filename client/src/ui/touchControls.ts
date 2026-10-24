@@ -32,6 +32,8 @@ export interface TouchView {
 export interface TouchControlsOptions {
   role: Role;
   feed: TouchFeed;
+  /** 오른쪽 위 시스템 버튼 '설정'을 누르면 (판 중 설정 열기, matchMenu). 없으면 버튼을 만들지 않는다 */
+  onMenu?: () => void;
   /**
    * 늘 떠 있는 판 HUD 부품 (논리 px)과 지금 캔버스 자리(창 CSS px의 왼쪽 위 · 논리 1px의 CSS px). 이동 영역을 그 아래에서
    * 시작한다 (M12). 없으면 M11 배치 그대로. onCovered = 다시 배치할 때마다 버튼 · 조준 스틱이 덮는 부품 id (hudCovered)

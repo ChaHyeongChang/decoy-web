@@ -3,6 +3,14 @@
 // 터치 · 펜의 pointerdown은 사용자 활성화가 아니다(크롬이 경고를 낸다): 마우스는 pointerdown, 터치 · 펜은 pointerup에서 연다 (M11)
 
 export type SfxName = 'windup' | 'hit' | 'captureStart' | 'captureDone' | 'doorOpen' | 'roar';
+/** UI 소리 (설정 화면 통합): 단추 누름 · 켜고 끔 · 화면 열기 · 닫기 */
+export type UiSfxName = 'tap' | 'toggle' | 'open' | 'close';
+/** 소리 세기 (0~1, prefs.audioLevelsOf): 전체 · 효과음 묶음 · UI 묶음 */
+export interface SfxLevels {
+  master: number;
+  sfx: number;
+  ui: number;
+}
 
 const MASTER_GAIN = 0.32;
 /** 같은 소리가 너무 촘촘히 겹치지 않게 (ms) */
@@ -90,6 +98,16 @@ export class Sfx {
     } catch {
       this.ctx = null;
     }
+  }
+
+  /** 소리 세기를 바꾼다 (설정 소리 탭). 계약 단계의 자리표시 — 갈래 G가 묶음 이득 노드로 채운다 */
+  setLevels(levels: SfxLevels): void {
+    this.muted = levels.master <= 0;
+  }
+
+  /** UI 소리 하나 (설정 화면 단추 등). 계약 단계의 자리표시 — 갈래 G가 채운다 */
+  ui(name: UiSfxName): void {
+    void name;
   }
 
   /** volume: 0~1 (남의 일은 작게) */
