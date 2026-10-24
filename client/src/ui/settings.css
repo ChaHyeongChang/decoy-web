@@ -1,0 +1,449 @@
+/* 설정 화면 (설정 화면 통합, settingsPanel.ts, VISUAL_SPEC 9.5): 로비 · 결과와 같은 언어(깎은 패널 .panel · 버튼 .btn ·
+   켜고 끄는 칸 .segs/.seg — lifecycle.css). 색은 style.css 토큰만. 안전 영역 안쪽. 판 화면은 그 뒤에서 계속 흐르므로 흐림 필터 없이
+   어둡게만 덮는다. UI 크기(--ui-zoom, prefs uiSize)는 카드에만 걸린다 */
+
+.set-modal {
+  position: fixed;
+  inset: 0;
+  /* 로비(20) · 터치 화면(5) · 깨우기 안내(60 · 70) 위, 뒤로 가기 확인 · 다른 탭 안내(75) · 세로 안내(80) 아래 */
+  z-index: 74;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(8px, env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px))
+    max(8px, env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
+  background: rgba(5, 8, 12, 0.72);
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  font-family: var(--font);
+}
+.set-modal[hidden] {
+  display: none;
+}
+.set-card {
+  --ring: var(--neon-dim);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  grid-template-areas: 'head' 'note' 'tabs' 'body' 'foot';
+  width: min(660px, 100%);
+  max-height: 100%;
+  background-color: var(--panel);
+  color: var(--text);
+  zoom: var(--ui-zoom, 1);
+  animation: life-in 0.14s ease-out;
+}
+.set-head {
+  grid-area: head;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 8px 18px;
+}
+.set-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--neon-text);
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+.set-close {
+  flex: none;
+  gap: 6px;
+  padding: 0 14px;
+  font-size: 15px;
+}
+.set-inmatch {
+  grid-area: note;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 18px 6px;
+  padding: 8px 12px;
+  background: var(--well);
+  box-shadow: inset 3px 0 0 var(--warn);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.4;
+}
+.set-inmatch[hidden] {
+  display: none;
+}
+.set-inmatch .ico {
+  color: var(--warn);
+  flex: none;
+}
+
+/* ───── 탭: 고른 탭 = 아래 굵은 청록 막대 + 밝은 굵은 글자 + 바탕 (색만으로 구분하지 않기) ───── */
+.set-tabs {
+  grid-area: tabs;
+  display: flex;
+  gap: 2px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--edge);
+}
+.set-tab {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.set-tab[hidden] {
+  display: none;
+}
+.set-tab[aria-selected='true'] {
+  border-bottom-color: var(--neon);
+  background: var(--well);
+  color: #fff;
+  font-weight: 800;
+}
+.set-tab:focus-visible {
+  outline: 2px solid var(--neon);
+  outline-offset: -2px;
+}
+
+/* ───── 본문 (줄이 많으면 이 안에서만 스크롤) ───── */
+.set-body {
+  grid-area: body;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 18px 8px;
+}
+.set-page[hidden] {
+  display: none;
+}
+.set-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--edge);
+}
+.set-row:last-child {
+  border-bottom: 0;
+}
+.set-row[hidden] {
+  display: none;
+}
+.set-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 32px;
+}
+.set-row-head .field-label {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+}
+.set-row .segs {
+  align-self: flex-start;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+.set-row .seg {
+  min-width: 64px;
+}
+.set-hint {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.set-hint[hidden] {
+  display: none;
+}
+/* 항목별 기본값: 작은 단추 (기본값이면 꺼짐 — 흐린 글자 + 사선 해치) */
+.set-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 48px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--edge-2);
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--neon-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.set-reset:disabled {
+  border-color: var(--edge);
+  background:
+    repeating-linear-gradient(135deg, transparent 0 5px, rgba(148, 163, 184, 0.08) 5px 7px), var(--panel);
+  color: var(--text-faint);
+  cursor: default;
+}
+.set-reset:focus-visible {
+  outline: 2px solid var(--neon);
+  outline-offset: 1px;
+}
+/* 주소 옵션으로 잠긴 줄: 칸은 흐린 해치, 아래 경고색 안내 (아이콘 + 글자) */
+.set-lock {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: #fcd34d;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.set-lock[hidden] {
+  display: none;
+}
+.set-lock .ico {
+  flex: none;
+  margin-top: 2px;
+}
+.set-row.locked .seg {
+  cursor: not-allowed;
+}
+.set-row.locked .seg:not([aria-pressed='true']) {
+  background: repeating-linear-gradient(135deg, transparent 0 5px, rgba(148, 163, 184, 0.08) 5px 7px);
+  color: var(--text-faint);
+}
+/* 밀대 (음량 · 조이스틱) */
+.set-slide {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.set-slide input[type='range'] {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 44px;
+  margin: 0;
+  accent-color: var(--neon);
+  cursor: pointer;
+}
+.set-value {
+  flex: none;
+  min-width: 52px;
+  color: var(--neon-text);
+  font-size: 15px;
+  font-weight: 700;
+  text-align: right;
+}
+.set-action .set-row-head .btn {
+  gap: 8px;
+  font-size: 15px;
+}
+.set-help .set-hint + .set-hint {
+  margin-top: 2px;
+}
+.set-keys {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.set-keys[hidden] {
+  display: none;
+}
+.set-keys li {
+  display: flex;
+  gap: 10px;
+}
+.set-key {
+  flex: none;
+  min-width: 118px;
+  color: var(--neon-text);
+  font-weight: 700;
+}
+.set-goal {
+  color: var(--text-dim);
+}
+.set-team {
+  margin: 6px 0 2px;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.set-team[hidden] {
+  display: none;
+}
+
+/* ───── 아래: 저장 실패 안내 · 모두 기본값으로 ───── */
+.set-foot {
+  grid-area: foot;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 18px 14px;
+  border-top: 1px solid var(--edge);
+}
+.set-foot .quality-note {
+  margin: 0;
+}
+.set-foot-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+.set-reset-all {
+  gap: 6px;
+  padding: 0 14px;
+  font-size: 14px;
+}
+.set-done {
+  color: var(--exit);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.set-done:empty {
+  display: none;
+}
+
+/* 넓은 카드: 이름 · 고르는 칸 · 기본값을 한 줄에 (안내 · 잠금은 그 아래 줄 전체) */
+@media (min-width: 600px) {
+  .set-row {
+    display: grid;
+    grid-template-columns: minmax(96px, 9.5em) minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 12px;
+    row-gap: 4px;
+  }
+  .set-row-head {
+    display: contents;
+  }
+  .set-row-head .field-label {
+    grid-column: 1;
+  }
+  .set-row-head .set-reset {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .set-row > .segs,
+  .set-row > .set-slide {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .set-row > .segs {
+    justify-self: start;
+  }
+  .set-row > .set-hint,
+  .set-row > .set-lock,
+  .set-row > .life-done,
+  .set-row > .set-keys,
+  .set-row > .set-team,
+  .set-action .set-row-head > .btn,
+  .set-help .set-row-head .field-label {
+    grid-column: 1 / -1;
+  }
+  .set-action .set-row-head > .btn {
+    justify-self: start;
+  }
+}
+
+@media (pointer: coarse) {
+  .set-tab,
+  .set-reset {
+    min-height: 48px;
+  }
+  .set-slide input[type='range'] {
+    height: 48px;
+  }
+}
+
+/* ───── 낮은 가로 화면 (휴대폰): 탭은 왼쪽 세로 칸, 본문은 오른쪽, '모두 기본값으로'는 맨 위 줄 (가장 낮은 휴대폰 802×293에서도
+   탭 네 개가 48px로 스크롤 없이 들고 본문 줄이 보이게). 저장 실패 · 되돌림 안내는 카드 아래쪽에 겹쳐 띄운다 ───── */
+@media (max-height: 520px) {
+  .set-card {
+    position: relative;
+    grid-template-columns: 148px minmax(0, 1fr) auto auto;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-areas: 'title title foot close' 'note note note note' 'tabs body body body';
+    width: min(780px, 100%);
+    height: 100%;
+  }
+  .set-head {
+    display: contents;
+  }
+  .set-title {
+    grid-area: title;
+    padding: 8px 0 6px 14px;
+    font-size: 16px;
+  }
+  .set-close {
+    grid-area: close;
+    margin: 6px 10px 6px 0;
+  }
+  .set-inmatch {
+    margin: 0 14px 4px;
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+  .set-tabs {
+    flex-direction: column;
+    padding: 2px 0 6px 10px;
+    border-bottom: 0;
+    border-right: 1px solid var(--edge);
+    overflow-y: auto;
+  }
+  .set-tab {
+    flex: none;
+    text-align: left;
+    border-bottom: 0;
+    border-left: 3px solid transparent;
+  }
+  .set-tab[aria-selected='true'] {
+    border-left-color: var(--neon);
+  }
+  .set-body {
+    padding: 0 14px 6px;
+  }
+  .set-row {
+    padding: 8px 0;
+  }
+  .set-foot {
+    padding: 6px 8px 6px 0;
+    border-top: 0;
+  }
+  .set-reset-all {
+    padding: 0 12px;
+    font-size: 14px;
+  }
+  /* 안내 두 줄은 카드 아래쪽 본문 위에 겹친다 (잠깐 보이는 알림) */
+  .set-foot .quality-note,
+  .set-done {
+    position: absolute;
+    right: 12px;
+    bottom: 8px;
+    left: 160px;
+    z-index: 1;
+    padding: 6px 10px;
+    background: var(--well);
+    box-shadow: inset 3px 0 0 var(--neon-dim);
+    font-size: 13px;
+  }
+  .set-foot .quality-note {
+    bottom: 44px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .set-card {
+    animation: none;
+  }
+}

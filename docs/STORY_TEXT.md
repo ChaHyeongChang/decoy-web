@@ -221,7 +221,7 @@
 | 제목 · 닫기 | 설정 · 닫기 | `title` · `close` |
 | 탭 | 그래픽 / 화면 / 소리 / 조작 | `tabGraphics` · `tabScreen` · `tabSound` · `tabControls` |
 | 판 중에 열었을 때 맨 위 | 판은 멈추지 않아요 — 설정을 여는 동안에도 판이 계속돼요 | `inMatch` |
-| 항목별 · 전체 되돌리기 | 기본값 · 모두 기본값으로 · 모두 기본값으로 되돌렸어요 | `resetItem` · `resetAll` · `resetAllDone` |
+| 항목별 · 전체 되돌리기 | 기본값 · 모두 기본값으로 · 한 번 더 누르면 조작 배치까지 모두 되돌려요 · 모두 기본값으로 되돌렸어요 | `resetItem` · `resetAll` · `resetAllConfirm` · `resetAllDone` |
 | 주소 옵션이 있는 줄 아래 | 주소 옵션(?quality=low)이 이번 접속에 우선해요 — 주소에서 빼면 여기서 고른 값을 써요 | `urlOverride` |
 | 켜고 끄는 줄 · 비율 | 켜기 · 끄기 · 60% | `on` · `off` · `percent` |
 | 그래픽 | 품질 · 자동은 기기에 맞춰 고르고, 판 중에 느리면 한 단계 낮춰요 | `quality` · `qualityHint` |
@@ -235,7 +235,7 @@
 | 소리 | 전체 음량 · 효과음 · UI 소리 · 음소거 | `volMaster` · `volSfx` · `volUi` · `muted` |
 | 조작 (터치) | 조이스틱 크기 · 조이스틱 투명도 · 다음 판부터 적용돼요 | `stickSize` · `stickClear` · `stickHint` |
 | 조작 (터치) | 조작 배치 편집 · 버튼 자리와 크기를 바꿔요 (생존자 · 괴물 따로, 로비에서만) | `layoutEdit` · `layoutEditHint` |
-| 조작 (PC) | 키보드 · 마우스 조작 | `controlsPc` |
+| 조작 (PC) | 키보드 · 마우스 조작 · 팀 이름 생존자 / 괴물 | `controlsPc` · `teamSurvivor` · `teamMonster` |
 
 - 조작 탭에는 진동 · 터치 조작 안내 다시 보기(6절 `APP_TEXT`)와 조작 안내(6절 `CONTROLS` · `CONTROLS_TOUCH`), 아래 화면 밖 화살표 설명도 있다
 

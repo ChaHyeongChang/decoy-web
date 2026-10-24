@@ -342,6 +342,8 @@ export const SETTINGS_TEXT = {
   /** 항목별 되돌리기 버튼 */
   resetItem: '기본값',
   resetAll: '모두 기본값으로',
+  /** 첫 번째 누름 (4초 안에 한 번 더 누르면 되돌린다) */
+  resetAllConfirm: '한 번 더 누르면 조작 배치까지 모두 되돌려요',
   resetAllDone: '모두 기본값으로 되돌렸어요',
   /** 주소 옵션(?quality · ?fpsLimit · ?chars)이 있으면 그 줄 아래 ({param} = 옵션 이름과 값) */
   urlOverride: '주소 옵션({param})이 이번 접속에 우선해요 — 주소에서 빼면 여기서 고른 값을 써요',
@@ -377,6 +379,8 @@ export const SETTINGS_TEXT = {
   layoutEdit: '조작 배치 편집',
   layoutEditHint: '버튼 자리와 크기를 바꿔요 (생존자 · 괴물 따로, 로비에서만)',
   controlsPc: '키보드 · 마우스 조작',
+  teamSurvivor: '생존자',
+  teamMonster: '괴물',
 } as const;
 
 /** 화면 밖 화살표 · 지도 설명 (설정 조작 탭 · PC 첫 판 안내 · 터치 판 직전 안내, 따라가는 카메라) */

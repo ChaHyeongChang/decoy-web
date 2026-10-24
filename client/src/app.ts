@@ -56,7 +56,9 @@ import { serverStatus } from './serverStatus';
 import { Interpolator, Predictor, SnapshotClock, lerpAngle, lerpNum } from './sync';
 import type { Transport } from './transport';
 import { LeaveDialog, ReplacedNotice } from './ui/lifecycleUi';
+import { openLayoutEditor } from './ui/layoutEditor';
 import { LobbyUI } from './ui/lobby';
+import { SettingsPanel } from './ui/settingsPanel';
 import { ResultUI } from './ui/result';
 import { WakeNoticeUI } from './ui/wakeNotice';
 import { WakeNoticeState, wakeOffersHome } from './wakeNotice';
@@ -161,6 +163,8 @@ export class App {
   readonly net: NetClient;
   readonly lobbyUi: LobbyUI;
   readonly resultUi: ResultUI;
+  /** 설정 화면 (설정 화면 통합): 로비 · 판 중 메뉴에서 연다 (#ui-root, 로비 · 판 화면 위) */
+  readonly settings: SettingsPanel;
   balance: Balance | null = null;
   balanceHash = '';
   you: string | null = null;
@@ -246,6 +250,24 @@ export class App {
       },
       browserClock,
     );
+    this.settings = new SettingsPanel(uiRoot, {
+      touch: device.touch,
+      haptics: {
+        supported: device.touch && haptics.supported,
+        enabled: () => haptics.enabled,
+        setEnabled: (on) => haptics.setEnabled(on),
+      },
+      role: () => this.match?.role ?? this.lobby?.players.find((p) => p.id === this.you)?.role ?? null,
+      replayTutorial: () => this.lobbyUi.tutorialReset(),
+      openLayoutEditor: (done) => {
+        const role = this.lobby?.players.find((p) => p.id === this.you)?.role ?? null;
+        openLayoutEditor({
+          host: uiRoot,
+          role: role === 'monster' ? 'monster' : 'survivor',
+          onClose: () => done(),
+        });
+      },
+    });
     this.lobbyUi = new LobbyUI(
       uiRoot,
       {
@@ -283,6 +305,7 @@ export class App {
         start: () => this.link.send({ t: 'start' }),
       },
       params.name ?? getSavedName(),
+      this.settings,
     );
     this.resultUi = new ResultUI(
       uiRoot,
