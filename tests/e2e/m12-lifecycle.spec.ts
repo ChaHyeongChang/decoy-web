@@ -22,11 +22,13 @@ import type { LifecycleDebug } from '../../client/src/lifecycle';
 import {
   BASE_QUERY,
   PHONE_LANDSCAPE,
+  closeSettings,
   createRoom,
   dpr1,
   inputLog,
   myId,
   newPlayerPage,
+  openSettings,
   pickRoleAndReady,
   press,
   sendTest,
@@ -824,28 +826,23 @@ test('진동: 활성화 전 0번, 피격 1번 · 오래된 피격 0번, 발각 �
     h.hapticSpotted(true, 0);
   });
   expect((await vib()).map((v) => v.pattern)).toEqual([[70], [35, 80, 35]]);
-  // 설정에서 끄기 → 0번, 다시 켜기 → 울림
-  await press(page.getByTestId('settings-button'));
-  // 설정 판 내용: 진동 · 프레임 제한(렌더링 최적화, 자동 · 60 · 120 — 고르는 시험은 frame-limit.spec) · 캐릭터 스타일(기존 ·
-  // 새 캐릭터 — 고르는 시험은 char-style-touch.spec) · 안내 다시 보기 순서
-  const settingsOrder = await page
-    .getByTestId('settings-panel')
-    .locator('[data-testid]')
+  // 설정에서 끄기 → 0번, 다시 켜기 → 울림 (설정 화면 조작 탭: 조이스틱 · 진동 · 배치 편집 · 안내 다시 보기 순서)
+  await openSettings(page, 'controls');
+  const controlsOrder = await page
+    .getByTestId('settings-page-controls')
+    .locator('[data-testid^="row-"]:visible')
     .evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')));
-  expect(settingsOrder).toEqual([
-    'haptics-on',
-    'haptics-off',
-    'frame-limit-row',
-    'frame-limit-auto',
-    'frame-limit-60',
-    'frame-limit-120',
-    'frame-limit-hint',
-    'char-style-row',
-    'char-style-classic',
-    'char-style-new',
-    'tutorial-replay',
+  expect(controlsOrder).toEqual([
+    'row-stick-size',
+    'row-stick-clear',
+    'row-haptics',
+    'row-layout',
+    'row-tutorial',
+    'row-edge-help',
   ]);
+  await openSettings(page, 'graphics');
   await expect(page.getByTestId('frame-limit-auto')).toHaveAttribute('aria-pressed', 'true');
+  await openSettings(page, 'controls');
   await press(page.getByTestId('haptics-off'));
   await expect(page.getByTestId('haptics-off')).toHaveAttribute('aria-pressed', 'true');
   expect(await page.evaluate(() => localStorage.getItem('decoy:haptics'))).toBe('0');
@@ -983,14 +980,11 @@ test('판 직전 터치 안내: 새 휴대폰에서 준비 뒤 카드, 닫으면
   await expect(page.getByTestId('ready-button')).toHaveText('준비 취소');
   await page.waitForTimeout(300);
   await expect(card).toHaveCount(0);
-  // 설정 → 다시 보기: 준비한 채면 바로 다시 뜬다
-  await press(page.getByTestId('settings-button'));
+  // 설정 → 다시 보기: 준비한 채면 바로 다시 뜬다 (설정 화면이 덮개라 닫은 뒤 보인다)
+  await openSettings(page, 'controls');
   await press(page.getByTestId('tutorial-replay'));
   await expect(page.getByTestId('settings-panel')).toContainText('다음 판 전에 다시 보여 드려요');
-  // 설정 판이 열린 동안은 숨어 있다가(겹치지 않게) 닫으면 보인다
-  await expect(card).toBeHidden();
-  await press(page.getByTestId('settings-button'));
-  await expect(page.getByTestId('settings-panel')).toBeHidden();
+  await closeSettings(page);
   await expect(card).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem('decoy:touchTutorial'))).toBeNull();
   // 떠 있는 채 판이 시작하면 본 것으로 친다
@@ -1033,14 +1027,14 @@ test('판 직전 터치 안내: 새 휴대폰에서 준비 뒤 카드, 닫으면
   expect(problems).toEqual([]);
   await context.close();
 
-  // PC: 카드 · 설정 단추 없음, 능력 줄 키캡, 첫 판 조작 안내 그대로
+  // PC: 카드 없음(설정 단추는 PC에도 있다 — 설정 화면 통합), 능력 줄 키캡, 첫 판 조작 안내 그대로
   const pc = await newPlayerPage(browser);
   await createRoom(pc.page, '&bots=1');
   expect(await pc.page.locator('.role-card .keycap').count()).toBeGreaterThan(0);
   await pickRoleAndReady(pc.page, 'runner');
   await pc.page.waitForTimeout(300);
   await expect(pc.page.getByTestId('touch-tutorial')).toHaveCount(0);
-  await expect(pc.page.getByTestId('settings-button')).toHaveCount(0);
+  await expect(pc.page.getByTestId('settings-button')).toBeVisible();
   await press(pc.page.getByTestId('start-button'));
   await waitForSnapshots(pc.page, 3);
   await expect.poll(() => pc.page.evaluate(() => window.__DECOY__?.getHud().help), POLL).toBe(true);

@@ -1,12 +1,11 @@
-// 캐릭터 스타일 — 터치 설정 판 · 터치 조작 안내 카드 · PC 첫 판 조작 안내 (캐릭터 리디자인 2단계, client/src/ui/lifecycleUi.ts ·
-// ui/overlays.ts · gfx/charStyle.ts):
-//  - 터치 설정 판: 진동 · 프레임 제한 아래 '캐릭터 스타일' 줄(기존 · 새 캐릭터, 고른 칸 = ✓ + 바탕 · aria-pressed). 기본은 기존.
-//    새 캐릭터를 누르면 decoy:charStyle = 'new'로 저장하고 바로 적용, 판을 다시 열어도 · 새로고침 뒤에도 그대로, 기존이면 저장값을
-//    지운다. 저장소가 막히면 이번 접속에는 적용되고 설정 판에 '저장되지 않아요' 안내
-//    (가장 낮은 휴대폰 802×293에서 새 단추까지 화면 안인지는 frame-limit.spec이 본다). 노치 휴대폰 가로(좌우 안전 영역)에서는
-//    넓은 두 열 판도 첫 화면 · 방 화면 모두 안전 영역 안(.lobby 사각형 안)
+// 캐릭터 스타일 — 터치 설정 화면 · 터치 조작 안내 카드 · PC 첫 판 조작 안내 (캐릭터 리디자인 2단계 · 설정 화면 통합,
+// client/src/ui/settingsPanel.ts · lifecycleUi.ts · ui/overlays.ts · gfx/charStyle.ts):
+//  - 터치 설정 화면 그래픽 탭 '캐릭터 스타일' 줄(새 캐릭터 · 기존, 고른 칸 = ✓ + 바탕 · aria-pressed). 기본은 새 캐릭터.
+//    기존을 누르면 decoy:charStyle = 'classic'으로 저장하고 바로 적용, 다시 열어도 · 새로고침 뒤에도 그대로, '기본값'이면 저장값을
+//    지운다. 저장소가 막히면 이번 접속에는 적용되고 설정 화면에 '저장되지 않아요' 안내. 노치 휴대폰 가로(좌우 안전 영역)에서는
+//    설정 화면이 첫 화면 · 방 화면 모두 안전 영역 안
 //  - 판 직전 터치 안내 카드: 새 캐릭터면 제목 옆에 내 역할의 정면 그림(svg 하나, 44~56px, 제목과 한 줄), 기존이면 그림이 없다.
-//    설정 판에서 바꾸면 카드를 바로 다시 그리고, 같은 팀 안에서 역할을 바꿔도 그 역할 그림으로 바뀐다. 가장 낮은 화면에서도 카드가
+//    설정 화면에서 바꾸면 카드를 바로 다시 그리고, 같은 팀 안에서 역할을 바꿔도 그 역할 그림으로 바뀐다. 가장 낮은 화면에서도 카드가
 //    스크롤되지 않는다. 괴물을 고르면 괴물 그림 하나뿐(남의 역할 그림은 없다)
 //  - PC 첫 판 조작 안내: 새 캐릭터면 역할 문양 자리에 내 역할 정면 그림(HUD 이미지 helpFigure, 64 논리 px, 이름 글자 왼쪽 ·
 //    같은 높이), 안내가 닫히면 그림도 사라진다. 기존이면 helpFigure가 없다(문양 그대로)
@@ -20,8 +19,10 @@ import {
   PHONE_LANDSCAPE,
   PHONE_SMALL,
   createRoom,
+  closeSettings,
   dpr1,
   newPlayerPage,
+  openSettings,
   pickRoleAndReady,
   press,
   waitForSnapshots,
@@ -54,57 +55,50 @@ async function pressed(page: Page): Promise<(string | null)[]> {
   );
 }
 
-test('터치 설정 판: 캐릭터 스타일 줄(기존 · 새 캐릭터, 기본 기존) — 새 캐릭터를 누르면 저장 · 바로 적용, 다시 열어도 · 새로고침 뒤에도 그대로, 기존이면 저장값 삭제', async ({
+test('터치 설정 화면: 캐릭터 스타일 줄(새 캐릭터 · 기존, 기본 새 캐릭터) — 기존을 누르면 저장 · 바로 적용, 다시 열어도 · 새로고침 뒤에도 그대로, 기본값이면 저장값 삭제', async ({
   browser,
 }) => {
   const { context, page, problems } = await newPlayerPage(browser, dpr1(PHONE_LANDSCAPE));
   await context.addInitScript(stubFullscreen);
   await page.goto(`/?${BASE_QUERY.slice(1)}`);
-  const panel = page.getByTestId('settings-panel');
-  await press(page.getByTestId('settings-button'));
-  await expect(panel).toBeVisible();
-  const row = panel.getByTestId('char-style-row');
-  await expect(row).toBeVisible();
-  await expect(row).toHaveAttribute('role', 'group');
-  await expect(row).toHaveAttribute('aria-label', UI_TEXT.charStyle);
+  await openSettings(page, 'graphics');
+  const row = page.getByTestId('row-char-style');
+  await expect(row).toBeInViewport({ ratio: 1 });
   await expect(row).toContainText(UI_TEXT.charStyle);
   await expect(page.getByTestId('char-style-classic')).toHaveText(UI_TEXT.charStyleClassic);
   await expect(page.getByTestId('char-style-new')).toHaveText(UI_TEXT.charStyleNew);
-  // 기본 = 기존 (저장값 없음)
-  expect(await pressed(page)).toEqual(['true', 'false']);
+  expect(await pressed(page)).toEqual(['false', 'true']);
   expect(await stored(page)).toBeNull();
-  expect(await applied(page)).toBe('classic');
-  // 고른 칸만 ✓ 아이콘이 보인다 (색만으로 구분하지 않기)
-  await expect(page.getByTestId('char-style-classic').locator('.seg-ico')).toBeVisible();
-  await expect(page.getByTestId('char-style-new').locator('.seg-ico')).toBeHidden();
-  // 새 캐릭터: 저장 + 바로 적용, 판은 열린 채
-  await press(page.getByTestId('char-style-new'));
-  expect(await pressed(page)).toEqual(['false', 'true']);
-  await expect.poll(() => applied(page), POLL).toBe('new');
-  expect(await stored(page)).toBe('new');
-  await expect(panel).toBeVisible();
+  expect(await applied(page)).toBe('new');
+  // 고른 칸 = ✓ 아이콘 + 바탕 (색만으로 구분하지 않기)
   await expect(page.getByTestId('char-style-new').locator('.seg-ico')).toBeVisible();
-  await expect(panel.locator('.quality-note')).toBeHidden();
-  // 닫았다 다시 열어도
-  await press(page.getByTestId('settings-button'));
-  await expect(panel).toBeHidden();
-  await press(page.getByTestId('settings-button'));
-  expect(await pressed(page)).toEqual(['false', 'true']);
+  await expect(page.getByTestId('char-style-classic').locator('.seg-ico')).toBeHidden();
+  // 터치 대상 48px 이상
+  for (const id of ['char-style-new', 'char-style-classic', 'reset-char-style', 'settings-close'])
+    expect((await page.getByTestId(id).boundingBox())!.height, id).toBeGreaterThanOrEqual(48);
+  await press(page.getByTestId('char-style-classic'));
+  await expect.poll(() => applied(page), POLL).toBe('classic');
+  expect(await stored(page)).toBe('classic');
+  expect(await pressed(page)).toEqual(['true', 'false']);
+  await expect(page.getByTestId('char-style-classic').locator('.seg-ico')).toBeVisible();
+  // 닫았다 다시 열어도 그대로
+  await closeSettings(page);
+  await openSettings(page, 'graphics');
+  expect(await pressed(page)).toEqual(['true', 'false']);
   // 새로고침 뒤에도
   await page.reload();
-  await expect.poll(() => applied(page), POLL).toBe('new');
-  await press(page.getByTestId('settings-button'));
-  expect(await pressed(page)).toEqual(['false', 'true']);
-  // 기존: 저장값 삭제
-  await press(page.getByTestId('char-style-classic'));
+  expect(await applied(page)).toBe('classic');
+  await openSettings(page, 'graphics');
   expect(await pressed(page)).toEqual(['true', 'false']);
-  await expect.poll(() => applied(page), POLL).toBe('classic');
+  // 기본값: 저장값을 지운다
+  await press(page.getByTestId('reset-char-style'));
+  await expect.poll(() => applied(page), POLL).toBe('new');
   expect(await stored(page)).toBeNull();
   expect(problems).toEqual([]);
   await context.close();
 });
 
-test('터치 설정 판 · 저장소가 막힌 브라우저: 고른 캐릭터 스타일이 이번 접속에 적용되고 설정 판에 저장되지 않는다는 안내 (두 열이면 두 열 아래 한 줄, 화면 안)', async ({
+test('터치 설정 화면 · 저장소가 막힌 브라우저: 고른 캐릭터 스타일이 이번 접속에 적용되고 저장되지 않는다는 안내 하나 (가장 낮은 휴대폰에서도 화면 안)', async ({
   browser,
 }) => {
   for (const dev of [PHONE_LANDSCAPE, PHONE_SMALL]) {
@@ -121,54 +115,43 @@ test('터치 설정 판 · 저장소가 막힌 브라우저: 고른 캐릭터 �
     });
     await page.goto(`/?${BASE_QUERY.slice(1)}`);
     const panel = page.getByTestId('settings-panel');
-    await press(page.getByTestId('settings-button'));
-    expect(await pressed(page)).toEqual(['true', 'false']);
-    await expect(panel.locator('.quality-note')).toBeHidden();
-    await press(page.getByTestId('char-style-new'));
-    await expect.poll(() => applied(page), POLL).toBe('new');
+    await openSettings(page, 'graphics');
     expect(await pressed(page)).toEqual(['false', 'true']);
+    await expect(panel.locator('.quality-note')).toBeHidden();
+    await press(page.getByTestId('char-style-classic'));
+    await expect.poll(() => applied(page), POLL).toBe('classic');
+    expect(await pressed(page)).toEqual(['true', 'false']);
     await expect(panel.locator('.quality-note')).toBeVisible();
     await expect(panel.locator('.quality-note')).toHaveText(UI_TEXT.qualityNotSaved);
-    // 낮은 가로 화면(두 열)이면 안내는 두 열 아래 한 줄 전체 — 어느 열의 줄이 저장에 실패해도 같은 자리. 판은 화면 안
-    const box = await panel.evaluate((el) => {
-      const cols = [...el.querySelectorAll(':scope > .life-col')].map((c) => c.getBoundingClientRect());
-      const n = el.querySelector(':scope > .quality-note')?.getBoundingClientRect();
-      const r = el.getBoundingClientRect();
-      return {
-        two: el.classList.contains('life-two'),
-        cols: cols.map((c) => ({ l: c.left, r: c.right, b: c.bottom })),
-        note: n ? { l: n.left, r: n.right, t: n.top } : null,
-        panel: { t: r.top, b: r.bottom },
-        vh: window.innerHeight,
-      };
-    });
-    const label = dev.viewport ? `${dev.viewport.width}×${dev.viewport.height}` : '';
-    expect(box.two, label).toBe(true);
-    expect(box.cols.length, label).toBe(2);
-    expect(box.note, label).not.toBeNull();
-    const [c0, c1] = box.cols;
-    expect(box.note!.t, `${label} 안내가 두 열 아래`).toBeGreaterThanOrEqual(Math.max(c0!.b, c1!.b) - 1);
-    expect(box.note!.l, `${label} 안내 왼쪽 = 첫 열 왼쪽`).toBeLessThanOrEqual(c0!.l + 1);
-    expect(box.note!.r, `${label} 안내 오른쪽 = 둘째 열 오른쪽`).toBeGreaterThanOrEqual(c1!.r - 1);
-    expect(box.panel.t, `${label} 판 위`).toBeGreaterThanOrEqual(0);
-    expect(box.panel.b, `${label} 판 아래`).toBeLessThanOrEqual(box.vh);
-    // 다시 열어도 이번 접속에서 고른 값
-    await press(page.getByTestId('settings-button'));
-    await press(page.getByTestId('settings-button'));
-    expect(await pressed(page)).toEqual(['false', 'true']);
+    // 설정 화면 · 안내는 화면 안
+    await expect(panel).toBeInViewport({ ratio: 1 });
+    await expect(panel.locator('.quality-note')).toBeInViewport({ ratio: 1 });
     expect(problems).toEqual([]);
     await context.close();
   }
 });
 
-/** 설정 판과 판 안 단추 중 안전 영역 밖(.lobby 사각형 밖)인 것: 'testid(또는 글자) 왼,오,위,아래' */
-async function outsideSafeArea(page: Page): Promise<{ lobby: number[]; two: boolean; out: string[] }> {
+/** 설정 화면과 그 안 단추가 로비 사각형(안전 영역 안) 밖으로 나간 것 */
+async function outsideSafeArea(page: Page): Promise<{ lobby: number[]; out: string[] }> {
   return page.evaluate(() => {
     const lobby = document.querySelector('[data-testid="lobby"]')!.getBoundingClientRect();
     const panel = document.querySelector<HTMLElement>('[data-testid="settings-panel"]')!;
     const out: string[] = [];
+    const body = panel.querySelector<HTMLElement>('.set-body')!.getBoundingClientRect();
     for (const el of [panel, ...panel.querySelectorAll<HTMLElement>('button')]) {
-      const r = el.getBoundingClientRect();
+      const raw = el.getBoundingClientRect();
+      if (raw.width === 0 && raw.height === 0) continue;
+      // 본문(카드 안에서만 스크롤) 단추는 본문 상자로 잘린 보이는 부분만 본다 — 아래로 스크롤하면 닿는 단추
+      const inBody = el !== panel && el.closest('.set-body') !== null;
+      const r = inBody
+        ? {
+            left: Math.max(raw.left, body.left),
+            right: Math.min(raw.right, body.right),
+            top: Math.max(raw.top, body.top),
+            bottom: Math.min(raw.bottom, body.bottom),
+          }
+        : raw;
+      if (r.right <= r.left || r.bottom <= r.top) continue;
       const tol = 0.5;
       if (
         r.left < lobby.left - tol ||
@@ -180,15 +163,11 @@ async function outsideSafeArea(page: Page): Promise<{ lobby: number[]; two: bool
           `${el.dataset.testid ?? el.textContent ?? ''} ${[r.left, r.right, r.top, r.bottom].map(Math.round).join(',')}`,
         );
     }
-    return {
-      lobby: [lobby.left, lobby.right, lobby.top, lobby.bottom].map(Math.round),
-      two: getComputedStyle(panel).display === 'grid',
-      out,
-    };
+    return { lobby: [lobby.left, lobby.right, lobby.top, lobby.bottom].map(Math.round), out };
   });
 }
 
-test('노치 휴대폰 가로(844×390, 좌우 안전 영역 47px): 첫 화면 · 방 화면 모두 두 열 설정 판과 단추가 안전 영역 안', async ({
+test('노치 휴대폰 가로(844×390, 좌우 안전 영역 47px): 첫 화면 · 방 화면 모두 설정 화면과 단추가 안전 영역 안', async ({
   browser,
 }) => {
   const { context, page, problems } = await newPlayerPage(
@@ -202,30 +181,27 @@ test('노치 휴대폰 가로(844×390, 좌우 안전 영역 47px): 첫 화면 �
   await context.addInitScript(stubFullscreen);
   await emulateSafeArea(page, { left: 47, right: 47, bottom: 21 });
   await page.goto(`/?${BASE_QUERY.slice(1)}&bots=1`);
-  const panel = page.getByTestId('settings-panel');
-  // 첫 화면: 설정 단추가 오른쪽
-  await press(page.getByTestId('settings-button'));
-  await expect(panel).toBeVisible();
+  // 첫 화면
+  await openSettings(page, 'graphics');
   const home = await outsideSafeArea(page);
-  // 흉내가 들어갔는가 (로비가 안전 영역만큼 들어가 있다) · 넓은 두 열 판인가
+  // 흉내가 들어갔는가 (로비가 안전 영역만큼 들어가 있다)
   expect(home.lobby).toEqual([47, 797, 0, 369]);
-  expect(home.two, '두 열').toBe(true);
+  for (const tab of ['screen', 'sound', 'controls'] as const) {
+    await openSettings(page, tab);
+    expect((await outsideSafeArea(page)).out, `첫 화면 ${tab}`).toEqual([]);
+  }
   expect(home.out, '첫 화면').toEqual([]);
-  await press(page.getByTestId('settings-button'));
-  await expect(panel).toBeHidden();
-  // 방 화면: 설정 단추가 왼쪽 반 — 판 왼쪽 끝을 단추에 맞추되 오른쪽 안전 영역을 넘지 않는다
+  await closeSettings(page);
+  // 방 화면
   await press(page.getByTestId('create-room'));
   await expect(page.getByTestId('room-code')).toHaveText(/^[A-Z]{4}$/);
   await pickRoleAndReady(page, 'runner');
-  await press(page.getByTestId('settings-button'));
-  await expect(panel).toBeVisible();
-  const room = await outsideSafeArea(page);
-  expect(room.two, '두 열').toBe(true);
-  expect(room.out, '방 화면').toEqual([]);
-  // 새 캐릭터를 골라도(판이 열린 채 다시 그려진다) 그대로
-  await press(page.getByTestId('char-style-new'));
-  await expect.poll(() => applied(page), POLL).toBe('new');
-  expect((await outsideSafeArea(page)).out, '새 캐릭터 고른 뒤').toEqual([]);
+  await openSettings(page, 'graphics');
+  expect((await outsideSafeArea(page)).out, '방 화면').toEqual([]);
+  // 기존을 골라도(뒤 방 화면이 다시 그려진다) 그대로
+  await press(page.getByTestId('char-style-classic'));
+  await expect.poll(() => applied(page), POLL).toBe('classic');
+  expect((await outsideSafeArea(page)).out, '기존 고른 뒤').toEqual([]);
   expect(problems).toEqual([]);
   await context.close();
 });
@@ -267,7 +243,7 @@ async function cardFigure(page: Page, role: Role) {
   }, hexCss(ROLE[role]).toLowerCase());
 }
 
-test('터치 안내 카드: 기존이면 그림 없음, 설정 판에서 새 캐릭터로 바꾸면 제목 옆에 내 역할 정면 그림 — 역할을 바꾸면 그 역할 그림, 괴물은 괴물 그림 하나 (802×293에서 스크롤 없음)', async ({
+test('터치 안내 카드: 기존이면 그림 없음, 새 캐릭터(기본)면 제목 옆에 내 역할 정면 그림 — 설정 화면에서 바꾸면 바로 다시 그리고, 역할을 바꾸면 그 역할 그림, 괴물은 괴물 그림 하나 (802×293에서 스크롤 없음)', async ({
   browser,
 }) => {
   test.setTimeout(120_000);
@@ -277,15 +253,19 @@ test('터치 안내 카드: 기존이면 그림 없음, 설정 판에서 새 캐
   await pickRoleAndReady(page, 'runner');
   const card = page.getByTestId('touch-tutorial');
   await expect(card).toBeVisible();
-  // 기존: 그림 없음 (예전과 같은 카드)
+  // 설정 화면에서 기존 → 그림 없음 (예전과 같은 카드)
+  await openSettings(page, 'graphics');
+  await press(page.getByTestId('char-style-classic'));
+  await expect.poll(() => applied(page), POLL).toBe('classic');
+  await closeSettings(page);
+  await expect(card).toBeVisible();
   await expect(page.getByTestId('touch-tutorial-figure')).toHaveCount(0);
   await expect(card.locator('.tt-head')).toHaveCount(0);
-  // 설정 판에서 새 캐릭터 → 카드를 바로 다시 그린다 (설정 판이 열린 동안 카드는 숨는다)
-  await press(page.getByTestId('settings-button'));
+  // 설정 화면에서 새 캐릭터 → 카드를 바로 다시 그린다
+  await openSettings(page, 'graphics');
   await press(page.getByTestId('char-style-new'));
   await expect.poll(() => applied(page), POLL).toBe('new');
-  await press(page.getByTestId('settings-button'));
-  await expect(page.getByTestId('settings-panel')).toBeHidden();
+  await closeSettings(page);
   await expect(card).toBeVisible();
   await expect(page.getByTestId('touch-tutorial-figure')).toHaveCount(1);
   const runner = await cardFigure(page, 'runner');
@@ -325,9 +305,9 @@ test('터치 안내 카드: 기존이면 그림 없음, 설정 판에서 새 캐
   for (const other of ['runner', 'guard', 'scout'] as const)
     expect((await cardFigure(page, other)).hasRoleColor, `괴물 카드에 ${other} 그림`).toBe(false);
   // 다시 기존: 그림이 빠지고 제목만
-  await press(page.getByTestId('settings-button'));
+  await openSettings(page, 'graphics');
   await press(page.getByTestId('char-style-classic'));
-  await press(page.getByTestId('settings-button'));
+  await closeSettings(page);
   await expect(card).toBeVisible();
   await expect(page.getByTestId('touch-tutorial-figure')).toHaveCount(0);
   await expect(card.locator('.tt-head')).toHaveCount(0);

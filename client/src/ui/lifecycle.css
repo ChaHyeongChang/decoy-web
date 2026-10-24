@@ -243,6 +243,12 @@
   counter-increment: tt;
 }
 /* 그림의 번호와 같은 모양 (색만으로 잇지 않고 숫자로 잇는다) */
+.tt-edge {
+  margin: 8px 0 0 29px;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.4;
+}
 .tt-list li::before {
   content: counter(tt);
   display: inline-flex;
@@ -382,6 +388,11 @@
     gap: 7px;
     font-size: 13px;
     line-height: 1.42;
+  }
+  .tt-edge {
+    margin: 3px 0 0 25px;
+    font-size: 12px;
+    line-height: 1.35;
   }
   .tt-list li::before {
     width: 18px;

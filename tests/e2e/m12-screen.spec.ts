@@ -580,16 +580,13 @@ const HOME_IDS = [
   'create-room',
   'room-code-input',
   'join-room',
-  'quality-select',
+  'settings-button',
   'privacy-link',
 ] as const;
-/**
- * PC 첫 화면은 그래픽 줄 옆 프레임 제한 선택 상자(렌더링 최적화)와 그 아래 캐릭터 스타일 선택 상자(캐릭터 리디자인 2단계)까지
- * (터치는 둘 다 설정 판 안이라 첫 화면에 없다)
- */
-const PC_HOME_IDS = [...HOME_IDS, 'frame-limit-select', 'char-style-select'] as const;
-/** 터치 첫 화면은 그래픽 줄 옆 설정 단추(진동 · 프레임 제한 · 안내 다시 보기)와 로고 칸의 전체 화면 버튼까지 */
-const TOUCH_HOME_IDS = [...HOME_IDS, 'settings-button', 'lobby-fullscreen'] as const;
+/** PC 첫 화면: 로고 아래 설정 단추 (설정 화면 통합 — 그래픽 · 프레임 제한 · 캐릭터 스타일은 설정 화면 안) */
+const PC_HOME_IDS = HOME_IDS;
+/** 터치 첫 화면은 로고 칸의 전체 화면 버튼까지 (설정 단추 옆) */
+const TOUCH_HOME_IDS = [...HOME_IDS, 'lobby-fullscreen'] as const;
 const PICK_IDS = [
   'server-status',
   'practice-role-monster',

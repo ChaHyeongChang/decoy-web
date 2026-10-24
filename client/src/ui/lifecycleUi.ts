@@ -3,7 +3,7 @@
 // (lifecycle.css, style.css 토큰), 문구는 storyText.ts(APP_TEXT · TOUCH_TEXT · UI_TEXT)에서만. 판 중 매 프레임 건드리지 않는다
 // (열고 닫을 때만 DOM을 바꾼다)
 import { teamOf, type Role } from '@decoy/shared';
-import { APP_TEXT, TOUCH_TEXT } from '../data/storyText';
+import { APP_TEXT, HELP_TEXT, TOUCH_TEXT } from '../data/storyText';
 import { currentCharStyle, type CharStyle } from '../gfx/charStyle';
 import type { LeaveKind } from '../lifecycle';
 import { frontFigureSvg, h, icon, roleVars, svgSpan } from './uiArt';
@@ -314,6 +314,12 @@ export class TouchTutorialCard {
         // 기존 스타일은 예전과 같은 구조 (제목 바로 아래 목록)
         this.figure ? h('div', { class: 'tt-head' }, this.figure, heading) : heading,
         list,
+        // 화면 밖 화살표 뜻 (따라가는 카메라 — 번호 없는 한 줄, 그림에 자리가 없다)
+        h(
+          'p',
+          { class: 'tt-edge', 'data-testid': 'touch-tutorial-edge' },
+          (team === 'monster' ? HELP_TEXT.edgeLineMonster : HELP_TEXT.edgeLineSurvivor).replace('  ', ' — '),
+        ),
       ),
     );
     return this.el;

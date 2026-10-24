@@ -379,6 +379,7 @@ export class SettingsPanel {
         reset: resetQuality,
         hint: T.qualityHint,
         lock: () => urlLock('quality'),
+        repress: true,
       }),
       this.segRow<FrameLimit>({
         id: 'frame-limit',
@@ -514,12 +515,14 @@ export class SettingsPanel {
     hint?: string;
     hintTestId?: string;
     lock?: () => string | null;
+    /** 고른 칸을 다시 눌러도 고르기를 부른다 (품질 '자동': 판 중 측정 기억을 지우고 기기 자동부터 다시 잰다) */
+    repress?: boolean;
   }): Row {
     const shell = this.rowShell(o.id, o.tab, o.label, o.reset);
     const segs = o.options.map((opt) => {
       const b = segButton(o.testid(opt.value), opt.label);
       b.addEventListener('click', () => {
-        if (b.getAttribute('aria-disabled') === 'true' || o.get() === opt.value) return;
+        if (b.getAttribute('aria-disabled') === 'true' || (o.get() === opt.value && !o.repress)) return;
         this.saved(o.set(opt.value));
         sfx.ui('tap');
         this.syncAll();

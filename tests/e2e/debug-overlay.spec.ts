@@ -104,22 +104,6 @@ async function tapChip(page: Page, expand: boolean): Promise<void> {
   else await expect(page.getByTestId('debug-overlay-panel')).toBeHidden();
 }
 
-/** 누를 것이 없는 로비 빈 곳 (단추 · 입력칸 · 링크 · 설정 메뉴 · 디버그 오버레이 밖). 격자로 찾는다 */
-async function blankPoint(page: Page): Promise<{ x: number; y: number } | null> {
-  return page.evaluate(() => {
-    const busy =
-      'button, input, select, textarea, a, label, [role="button"], [role="dialog"], #debug-overlay';
-    for (let fy = 0.15; fy < 0.95; fy += 0.1)
-      for (let fx = 0.05; fx < 0.95; fx += 0.1) {
-        const x = Math.round(innerWidth * fx);
-        const y = Math.round(innerHeight * fy);
-        const el = document.elementFromPoint(x, y);
-        if (el && el.closest('.lobby') && !el.closest(busy)) return { x, y };
-      }
-    return null;
-  });
-}
-
 /** 펼친 표의 숫자 하나 */
 function num(text: string, re: RegExp): number {
   const m = re.exec(text);
@@ -255,19 +239,16 @@ for (const c of TOUCH_CASES) {
     const lobby = (await overlayState(page))!;
     expect(lobby.expanded).toBe('false');
     expect(lobby.panelHidden).toBe(true);
-    // 로비 설정 메뉴는 바깥을 누르면 닫힌다(문서 캡처 리스너): 칩을 눌러 펼치고 접어도 열린 채
+    // 칩은 로비에서 눌러 펼치고 접는다 (판 입력 · 설정 단추로 가지 않는다)
     const settings = page.getByTestId('settings-panel');
+    await tapChip(page, true);
+    await tapChip(page, false);
+    await expect(settings).toBeHidden();
+    // 설정 화면(덮개)은 막(카드 바깥)을 누르면 닫힌다
     await press(page.getByTestId('settings-button'));
     await expect(settings).toBeVisible();
-    await tapChip(page, true);
-    await expect(settings).toBeVisible();
-    await tapChip(page, false);
-    await expect(settings).toBeVisible();
-    // 칩 밖(아무 단추도 없는 로비 빈 곳)을 누르면 예전처럼 닫힌다. 설정 단추를 다시 누르지 않는다: 낮은 화면에서는
-    // Playwright가 단추를 화면 안으로 스크롤하고, 메뉴는 스크롤에 닫혔다가 그 탭에 다시 열린다
-    const blank = await blankPoint(page);
-    expect(blank, '로비 빈 곳').not.toBeNull();
-    await page.touchscreen.tap(blank!.x, blank!.y);
+    const vp0 = page.viewportSize()!;
+    await page.touchscreen.tap(3, Math.round(vp0.height / 2));
     await expect(settings).toBeHidden();
     await startPractice(page, c.role);
     await waitForTouchTarget(page, 'move-zone');
