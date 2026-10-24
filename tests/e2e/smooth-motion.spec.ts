@@ -93,7 +93,15 @@ interface Walk {
   intervals: number[];
   /** 누른 뒤 처음 움직인 프레임까지 (ms) */
   firstMove: number;
+  /**
+   * 누른 직후 · 뗀 직후 EDGE_MS 동안 (잔렉 고치기 — 입력 반응 requestFrame): 그린 간격 중 목표 주기가 아닌 것의 수 · 보인 프레임
+   * |표시 간격 − rAF 간격| (ms). 멈춤 ↔ 걷기가 바뀐 틱 뒤 한 칸만 짧고, 표시는 계산 시각과 어긋나지 않아야 한다
+   */
+  edges: { offPeriod: number[]; mismatch: number[] }[];
 }
+
+/** 누른 직후 · 뗀 직후 보는 구간 (ms): 입력 틱 1/30초 + 따라가는 카메라가 따라붙는 동안 */
+const EDGE_MS = 300;
 
 interface WalkOpts {
   /** 적응형 목표 FPS가 스스로 정하게 둔다 (injectFps 없이 판 시작 뒤 STAND_MS 서 있다가 걷는다) */
@@ -188,6 +196,16 @@ async function walk(browser: Browser, cfg: VirtualClockConfig, opts: WalkOpts = 
       screen: [],
       intervals: [],
       firstMove: moved.t - down,
+      edges: [down, up].map((at) => {
+        const ef = trace.frames.filter((f) => f.t >= at - 50 && f.t <= at + EDGE_MS);
+        const period = 1000 / trace.targetHz;
+        const offPeriod: number[] = [];
+        for (let i = 1; i < ef.length; i += 1) {
+          const dt = ef[i]!.t - ef[i - 1]!.t;
+          if (Math.abs(dt - period) > 0.01) offPeriod.push(dt);
+        }
+        return { offPeriod, mismatch: displayMismatch(ef, trace.logs) };
+      }),
     };
     for (let i = 1; i < fr.length; i += 1) {
       const a = fr[i - 1];
@@ -292,7 +310,8 @@ for (const sc of SCENES) {
       const shake = Math.max(...w.screen);
       console.log(
         `[smooth-motion] ${sc.name}: 프레임 ${w.ratios.length + 1}개 · 간격 ${Math.min(...w.intervals).toFixed(2)}~${Math.max(...w.intervals).toFixed(2)}ms · ` +
-          `① 비율 ${lo.toFixed(4)}~${hi.toFixed(4)} · ③ 프레임당 변화 최대 ${shake.toFixed(4)}px · 첫 움직임 ${w.firstMove.toFixed(1)}ms`,
+          `① 비율 ${lo.toFixed(4)}~${hi.toFixed(4)} · ③ 프레임당 변화 최대 ${shake.toFixed(4)}px · 첫 움직임 ${w.firstMove.toFixed(1)}ms · ` +
+          `누른 · 뗀 직후 주기 밖 간격 ${w.edges.map((e) => e.offPeriod.length).join(' · ')}`,
       );
       if (sc.cfg.dropFrames) expect(Math.max(...w.intervals), '건너뛴 vsync가 섞였다').toBeGreaterThan(15);
       // 목표 FPS: 적응형 · 고정 제한이 화면 주사율의 약수로 정했다. 걷는 동안 그린 간격이 모두 그 주기 (고르다)
@@ -311,9 +330,22 @@ for (const sc of SCENES) {
       expect(hi, '① 가장 많이 움직인 프레임 (튐)').toBeLessThan(1.02);
       // ③ 카메라 기준 화면 위 내 자리: 같은 빠르기면 따라가기 늦음이 그대로라 움직이지 않는다 (격자 맞추기 반 픽셀도 없다)
       expect(shake, '③ 화면 위 내 자리 프레임당 변화 (px)').toBeLessThan(0.05);
-      // 입력 지연: 다음 입력 틱(최대 1/30초) + 한 프레임 안 (vsync를 건너뛰는 장면은 건너뛴 두 칸까지, 약수 목표면 그 주기)
+      // 입력 지연: 다음 입력 틱(최대 1/30초) + 한 프레임 안 (vsync를 건너뛰는 장면은 건너뛴 두 칸까지). 약수 목표(n칸)여도 한 vsync 안:
+      // 멈춤 ↔ 걷기가 바뀐 틱 뒤 rAF를 바로 그린다(requestFrame — 예전에는 다음 그릴 차례까지 n칸)
       const frames = sc.cfg.dropFrames ? 3 : 1;
-      expect(w.firstMove).toBeLessThanOrEqual(1000 / 30 + frames * period + 1);
+      expect(w.firstMove).toBeLessThanOrEqual(1000 / 30 + frames * (1000 / sc.cfg.hz) + 1);
+      // 누른 직후 · 뗀 직후: 목표 주기가 아닌 간격은 바뀐 틱 뒤 한 칸뿐이고(그 칸은 주기보다 짧다), 보인 프레임은 계산 시각과 맞다
+      if (sc.target !== undefined && !sc.cfg.dropFrames)
+        for (const [k, e] of w.edges.entries()) {
+          const label = k === 0 ? '누른 직후' : '뗀 직후';
+          expect(
+            e.offPeriod.length,
+            `${label} 주기가 아닌 간격 ${e.offPeriod.map((d) => d.toFixed(2)).join(' ')}`,
+          ).toBeLessThanOrEqual(1);
+          for (const d of e.offPeriod) expect(d, `${label} 짧은 칸`).toBeLessThan(period);
+          if (sc.cfg.work && e.mismatch.length > 0)
+            expect(Math.max(...e.mismatch), `${label} 표시 − 계산 간격 차 (ms)`).toBeLessThan(0.01);
+        }
     },
   );
 }

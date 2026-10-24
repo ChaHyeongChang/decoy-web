@@ -642,7 +642,6 @@ M10 비주얼 리마스터(어두운 시설 · 청록 네온 · 붉은 괴물) �
 | 목표 FPS를 낮추는 늦은 프레임 비율 | `0.05` | `quality.PACING_WATCH.maxLateRatio` |
 | 판 밖 그리기 제한(Hz, 가장 가까운 약수) | `30` | `framePacing.IDLE_CAP_HZ` |
 | 제한기 위상 고정 허용(vsync 비율) | `0.5` | `framePacing.LIMITER.phaseSlack` |
-| 처음 누를 때 · 마지막으로 뗄 때 제한 없이 그리는 시간(ms) | `50` | `framePacing.LIMITER.boostMs` |
 | 판 중 화면 주사율이 낮아졌을 때 화면이 바뀐 것으로 볼 비율(붙잡은 값 ÷ 잰 값이 정수에서 벗어난 양) | `0.15` | `framePacing.HELD_DROP_SLACK` |
 | 자동 올리기 조용한 시간(ms) | `20000` | `quality.UP_WATCH.quietMs` |
 | 자동 올리기 여유 지속(ms) | `15000` | `quality.UP_WATCH.sustainMs` |

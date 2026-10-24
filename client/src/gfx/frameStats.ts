@@ -15,6 +15,12 @@ export const FPS_WINDOW_MS = 1000;
  * 한 간격으로 들어와 평균 · p95를 몇 초 동안 망가뜨린다. 그 프레임의 작업 시간은 그대로 센다
  */
 export const FRAME_GAP_MS = 1000;
+/**
+ * '넘김'에서 그리기를 마친 뒤 보이기까지 남겨 두는 여유 (ms): 메인 스레드 JS가 끝난 뒤의 style · paint · commit 마감. 가상 시계 작업
+ * 시간 모형(tests/helpers/virtualClock.ts VirtualWorkModel.deadlineMs 기본값)과 같은 1ms. 실기기에서는 이것도 하한이다
+ */
+export const DISPLAY_DEADLINE_MS = 1;
+
 /** 요약에 쓰는 백분위 */
 const P95 = 0.95;
 
@@ -89,6 +95,8 @@ export class FrameStats {
   private readonly spans: Float32Array;
   /** 안개 주기(빛 지도를 다시 칠한) 프레임이면 1 */
   private readonly fogs: Uint8Array;
+  /** 프레임 제한과 상관없이 그린 칸(Pacer.requestFrame)이면 1: 그 간격은 늦은 프레임 · FPS 창에서 뺀다 */
+  private readonly extras: Uint8Array;
   /** 백분위 계산용 (요약할 때만 쓴다) */
   private readonly scratch: Float32Array;
   /** 다음에 쓸 칸 */
@@ -107,6 +115,8 @@ export class FrameStats {
   private beginWall = 0;
   /** 지금 열린 프레임이 안개 주기 프레임인가 (markFog) */
   private fogOpen = false;
+  /** 지금 열린 프레임이 제한과 상관없이 그린 칸인가 (markExtra) */
+  private extraOpen = false;
   private override: number | null = null;
 
   /**
@@ -123,6 +133,7 @@ export class FrameStats {
     this.works = new Float32Array(this.capacity);
     this.spans = new Float32Array(this.capacity);
     this.fogs = new Uint8Array(this.capacity);
+    this.extras = new Uint8Array(this.capacity);
     this.scratch = new Float32Array(this.capacity);
   }
 
@@ -135,6 +146,15 @@ export class FrameStats {
     this.beginWall = wallNow;
     this.open = true;
     this.fogOpen = false;
+    this.extraOpen = false;
+  }
+
+  /**
+   * 지금 그리는 프레임은 프레임 제한과 상관없이 그린 칸이다 (Pacer.requestFrame — 멈춤 ↔ 걷기가 바뀐 입력 틱). 그 프레임에서 끝나는
+   * 간격(목표 주기보다 짧다)은 window의 FPS · 늦은 프레임 비율에서 뺀다 — 넣으면 분모만 늘어 늦은 비율이 묽어진다(검토)
+   */
+  markExtra(): void {
+    if (this.open) this.extraOpen = true;
   }
 
   /** 지금 그리는 프레임이 안개 주기 프레임이다 (worldRenderer가 빛 지도를 다시 칠할 때). begin과 end 사이에만 뜻이 있다 */
@@ -160,6 +180,8 @@ export class FrameStats {
     this.spans[i] = span > 0 ? span : 0;
     this.fogs[i] = this.fogOpen ? 1 : 0;
     this.fogOpen = false;
+    this.extras[i] = this.extraOpen ? 1 : 0;
+    this.extraOpen = false;
     this.head = i + 1 === this.capacity ? 0 : i + 1;
     if (this.count < this.capacity) this.count++;
     this.totalFrames++;
@@ -252,7 +274,7 @@ export class FrameStats {
         this.scratch[frames] = this.works[i] ?? 0;
         frames++;
         const iv = this.intervals[i] ?? Number.NaN;
-        if (!Number.isNaN(iv)) {
+        if (!Number.isNaN(iv) && this.extras[i] !== 1) {
           nInt++;
           sumInt += iv;
           if (iv >= lateMs) nLate++;
@@ -276,7 +298,7 @@ export class FrameStats {
   }
 
   /**
-   * 최근 ms 구간에서 vsync를 넘긴 프레임 비율 (0~1, 잔렉 고치기): rAF 시각부터 그리기를 마칠 때까지가 vsyncMs보다 긴 프레임 수 ÷
+   * 최근 ms 구간에서 vsync를 넘긴 프레임 비율 (0~1, 잔렉 고치기): rAF 시각부터 그리기를 마칠 때까지 + DISPLAY_DEADLINE_MS가 vsyncMs보다 긴 프레임 수 ÷
    * 프레임 수. 그런 프레임은 다음 vsync로 밀려 늦게 보인다(크롬은 다음 rAF에 같은 격자 시각을 주므로 FPS · 늦음에는 안 나온다).
    * 0이나 1에 가까우면 고르고(모두 같은 칸에 보인다), 그 사이면 몇 프레임만 늦게 보인다. 프레임이 없거나 FPS를 덮어썼으면 0
    */
@@ -289,7 +311,7 @@ export class FrameStats {
       const i = this.slot(k);
       if ((this.times[i] ?? 0) <= from) break;
       n++;
-      if ((this.spans[i] ?? 0) > vsyncMs) over++;
+      if ((this.spans[i] ?? 0) + DISPLAY_DEADLINE_MS > vsyncMs) over++;
     }
     return n > 0 ? over / n : 0;
   }

@@ -8,7 +8,6 @@ import {
   FRAME_LIMIT_STORAGE_KEY,
   FrameLimiter,
   IDLE_CAP_HZ,
-  InputBoost,
   LIMITER,
   Pacer,
   REFRESH,
@@ -798,51 +797,61 @@ describe('Pacer (주사율 재기 + 제한기 + 판 없음 30fps)', () => {
     }
   });
 
-  it('입력 반응(boost): 판 중 누른 뒤 50ms는 매 rAF 그리고, 그 뒤 마지막으로 그린 rAF부터 다시 n칸 · 판 밖에서는 무시', () => {
-    expect(LIMITER.boostMs).toBe(50);
+  it('입력 반응(requestFrame): 판 중 다음 rAF를 한 번 바로 그리고 거기서 다시 n칸 · 그릴 차례였으면 그대로 · 판 밖에서는 무시', () => {
     const p = new Pacer('60');
     feed(p, ticks(120, 1500, { t0: 0 }));
     p.setIdle(false);
     const ts = ticks(120, 1000, { t0: 1500 });
     const drawn: number[] = [];
+    const extra: number[] = [];
+    let skipped = 0;
+    const skippedBefore = p.skipped;
+    p.onSkip = () => (skipped += 1);
     ts.forEach((t, i) => {
-      if (i === 20) p.boost(t - 1);
+      // 그릴 차례가 아닌 칸 바로 앞에서 요청 (21번째 rAF는 원래 건너뛴다)
+      if (i === 21) p.requestFrame();
       if (p.onTick(t)) drawn.push(i);
+      if (p.extraFrame) extra.push(i);
     });
-    // 누른 뒤 50ms(6칸) 동안 매 칸, 그 앞뒤는 두 칸마다
+    expect(drawn.includes(21)).toBe(true);
+    expect(extra).toEqual([21]);
+    // 요청 앞은 두 칸마다, 요청 칸 다음부터 다시 두 칸마다 (짧은 간격은 요청 칸 하나뿐)
     const steps = gaps(drawn);
-    const boosted = drawn.filter((i) => i >= 20 && ts[i]! < ts[20]! - 1 + 50);
-    expect(gaps(boosted).every((g) => g === 1)).toBe(true);
-    expect(boosted.length).toBe(6);
-    const after = drawn.filter((i) => i > boosted[boosted.length - 1]!);
-    expect(after[0]! - boosted[boosted.length - 1]!).toBe(2);
-    expect(gaps(after).every((g) => g === 2)).toBe(true);
+    expect(steps.filter((g) => g === 1).length).toBe(1);
     expect(steps.filter((g) => g !== 1 && g !== 2)).toEqual([]);
+    expect(drawn.filter((i) => i > 21).every((i) => (i - 21) % 2 === 0)).toBe(true);
+    // 건너뛴 수 = skipped = onSkip 수 (요청 칸은 건너뛰지 않았다)
+    expect(p.skipped - skippedBefore).toBe(skipped);
+    expect(drawn.length + skipped).toBe(ts.length);
+    // 그릴 차례에 요청하면 그대로 (extraFrame 없음)
+    const q = new Pacer('60');
+    feed(q, ticks(120, 1500, { t0: 0 }));
+    q.setIdle(false);
+    const qt = ticks(120, 200, { t0: 1500 });
+    let firstDrawn = -1;
+    qt.forEach((t, i) => {
+      if (firstDrawn >= 0) return;
+      if (q.onTick(t)) firstDrawn = i;
+    });
+    q.requestFrame();
+    expect(q.onTick(qt[firstDrawn + 2]!)).toBe(true);
+    expect(q.extraFrame).toBe(false);
     // 판 밖: 무시 (30fps 그대로)
     const idle = new Pacer();
     feed(idle, ticks(120, 1500, { t0: 0 }));
     idle.setIdle(true);
-    idle.boost(1499);
+    idle.requestFrame();
     expect(feed(idle, ticks(120, 100, { t0: 1500 }))).toBeLessThanOrEqual(4);
-  });
-
-  it('InputBoost: 아무것도 누르지 않은 상태에서 처음 누를 때 · 마지막으로 뗄 때만 (되풀이 · 누른 채 다른 키 · 모르는 떼기 · 잃은 초점 뒤)', () => {
-    const at: number[] = [];
-    const b = new InputBoost((t) => at.push(t));
-    b.keyDown('KeyD', false, 1);
-    b.keyDown('KeyD', true, 2);
-    b.keyDown('KeyW', false, 3);
-    b.pointerDown(7, 4);
-    b.keyUp('KeyD', 5);
-    b.keyUp('KeyW', 6);
-    b.pointerUp(7, 7);
-    b.keyUp('KeyQ', 8);
-    expect(at).toEqual([1, 7]);
-    b.keyDown('KeyA', false, 9);
-    b.clear();
-    b.pointerDown(1, 10);
-    b.pointerUp(1, 11);
-    expect(at).toEqual([1, 7, 9, 10, 11]);
+    // 판 밖에서 남은 요청은 판이 시작해도 쓰지 않는다
+    const left = new Pacer('60');
+    feed(left, ticks(120, 1500, { t0: 0 }));
+    left.setIdle(false);
+    left.requestFrame();
+    left.setIdle(true);
+    left.setIdle(false);
+    const lt = ticks(120, 100, { t0: 1500 });
+    left.onTick(lt[0]!);
+    expect(left.onTick(lt[1]!)).toBe(false);
   });
 
   it('fallback: 자동에서 60으로 내리고 되돌린다, 고정 제한(120)에는 쓰지 않는다, 잘못된 값은 null', () => {

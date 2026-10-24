@@ -8,14 +8,7 @@ import { installDebug } from './debug';
 import { canOfferFullscreen, device, enterFullscreen, initDevice, onDeviceChange } from './device';
 import { matchTuning } from './controlLayout';
 import { initCharStyle, onCharStyleChange } from './gfx/charStyle';
-import {
-  InputBoost,
-  Pacer,
-  loadFrameLimit,
-  pacingHooks,
-  patchTimeStep,
-  targetHzFor,
-} from './gfx/framePacing';
+import { Pacer, loadFrameLimit, pacingHooks, patchTimeStep, targetHzFor } from './gfx/framePacing';
 import { sessionFrameStats } from './gfx/frameStats';
 import type { QualityPreset, QualityTier, RendererKind } from './gfx/presets';
 import {
@@ -244,21 +237,15 @@ const timeStep = Phaser.Core.TimeStep.prototype;
 const rawStep = timeStep.step;
 timeStep.step = function measuredStep(this: Phaser.Core.TimeStep, time: number): void {
   sessionFrameStats.begin(time, performance.now());
+  // requestFrame으로 그린 칸: 늦은 프레임 · FPS 창에서 그 간격을 뺀다 (pacer.onTick이 이 걸음보다 먼저 돈다)
+  if (pacer.extraFrame) sessionFrameStats.markExtra();
   rawStep.call(this, time);
   sessionFrameStats.end(performance.now());
 };
 patchTimeStep(timeStep, pacer);
 pacer.onSkip = () => sessionFrameStats.noteSkipped();
-// 입력 반응 (잔렉 고치기): 멈춰 있다 처음 누르거나 마지막으로 뗄 때 잠깐 제한 없이 그린다 — 목표를 화면의 절반으로 낮춰도 첫 움직임 ·
-// 멈춤이 다음 그릴 차례까지 늦지 않게. 창 캡처 단계에서 듣기만 한다(막지 않음)
-const inputBoost = new InputBoost((at) => pacer.boost(at));
-const listen = { capture: true, passive: true } as const;
-window.addEventListener('keydown', (e) => inputBoost.keyDown(e.code, e.repeat, performance.now()), listen);
-window.addEventListener('keyup', (e) => inputBoost.keyUp(e.code, performance.now()), listen);
-window.addEventListener('pointerdown', (e) => inputBoost.pointerDown(e.pointerId, performance.now()), listen);
-window.addEventListener('pointerup', (e) => inputBoost.pointerUp(e.pointerId, performance.now()), listen);
-window.addEventListener('pointercancel', (e) => inputBoost.pointerUp(e.pointerId, performance.now()), listen);
-window.addEventListener('blur', () => inputBoost.clear());
+// 입력 반응 (잔렉 고치기): 판 장면이 멈춤 ↔ 걷기가 바뀐 입력 틱에 다음 rAF를 한 번 바로 그리게 한다
+pacingHooks.requestFrame = () => pacer.requestFrame();
 
 /** 디버그 훅 · 오버레이 · 적응형 품질이 읽는 페이싱 상태 */
 function syncPacing(): void {

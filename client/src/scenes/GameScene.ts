@@ -29,7 +29,7 @@ import { sfx } from '../audio';
 import { HELP_TEXT, STORY_TEXT, UI_TEXT, formatText } from '../data/storyText';
 import { device } from '../device';
 import { FPS_WINDOW_MS, sessionFrameStats, type FrameWindow } from '../gfx/frameStats';
-import { ladderSize } from '../gfx/framePacing';
+import { ladderSize, pacingHooks } from '../gfx/framePacing';
 import {
   lateWindowFor,
   qualityHooks,
@@ -1274,6 +1274,9 @@ export class GameScene extends Phaser.Scene {
     const dtMs = app.dt * 1000;
     this.acc = Math.min(this.acc + deltaMs, dtMs * MAX_CATCHUP_STEPS);
     const frames: InputFrame[] = [];
+    // 입력 반응 (잔렉 고치기): 이번 틱들에서 멈춤 ↔ 걷기가 바뀌었는가
+    let walking = this.selfSteps[this.selfSteps.length - 1]?.walk ?? false;
+    let walkFlip = false;
     while (this.acc >= dtMs - STEP_EPS_MS) {
       this.acc = Math.max(0, this.acc - dtMs);
       this.seq += 1;
@@ -1285,12 +1288,18 @@ export class GameScene extends Phaser.Scene {
       const at = nowMs - this.acc;
       app.predictor.applyLocal(frame, env, at);
       const moved = app.predictor.stepDistance;
-      this.noteSelfStep(at, moved / dtMs, at + dtMs, isWalking(moved, dtMs));
+      const walk = isWalking(moved, dtMs);
+      if (walk !== walking) walkFlip = true;
+      walking = walk;
+      this.noteSelfStep(at, moved / dtMs, at + dtMs, walk);
       frames.push(frame);
       this.lastFrame = frame;
       this.inputHistory.push(frame, performance.now(), this.sampler.mode);
     }
     if (frames.length > 0) app.link.send({ t: 'input', frames });
+    // 멈춤 ↔ 걷기가 바뀌었으면 다음 rAF를 제한과 상관없이 한 번 그린다(목표를 화면의 절반으로 낮춰도 첫 움직임 · 멈춤이 다음 그릴
+    // 차례까지 늦지 않게). 렌더 프레임이 처리한 틱이면(catchUpInput) 그 프레임이 이미 그린다
+    if (walkFlip && !this.inFrameInput) pacingHooks.requestFrame?.();
   }
 
   /** 괴물: 공격 준비 · 돌진을 서버 확인 전에 먼저 보여 준다 (판정은 서버, 어긋나면 보정) */
@@ -1354,9 +1363,17 @@ export class GameScene extends Phaser.Scene {
     if (this.acc + (frameAt - this.lastInputAt) < dtMs - STEP_EPS_MS) return;
     window.clearTimeout(this.inputTimer);
     this.inputTimer = null;
-    this.inputTick(frameAt);
+    this.inFrameInput = true;
+    try {
+      this.inputTick(frameAt);
+    } finally {
+      this.inFrameInput = false;
+    }
     if (this.sys.isActive()) this.scheduleInput();
   }
+
+  /** catchUpInput이 렌더 프레임 안에서 입력 틱을 처리하는 중 (그 프레임이 이미 그린다 — requestFrame을 부르지 않는다) */
+  private inFrameInput = false;
 
   /**
    * 공격 준비 표시: 누른 순간부터 내 시계로 0.4초 (예측). 서버가 그 입력을 처리한 뒤 도착하는 같은 준비(서버 값)는

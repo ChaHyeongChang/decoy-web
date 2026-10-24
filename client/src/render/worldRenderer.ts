@@ -1017,7 +1017,9 @@ export class WorldRenderer {
     const clockMs = gfxNow();
     this.gfxCount.arcs = 0;
     this.gfxCount.fills = 0;
-    if (this.fogDirty) this.rebuildFog();
+    // 다시 굽는 중(품질 · 해상도 바뀜)인 프레임은 안개 주기 프레임으로 세지 않는다: '안개 p95'가 굽기 비용으로 부풀지 않게
+    const rebaking = this.fogDirty;
+    if (rebaking) this.rebuildFog();
     // 카메라: 월드(안개 레이어 · 캐릭터 컨테이너)를 보이는 창만큼 옮긴다. 창이 합성한 영역 밖이면 안개 주기를 앞당긴다
     this.applyView(v.view);
     const fogStale = this.fog.setView(v.view);
@@ -1042,7 +1044,7 @@ export class WorldRenderer {
     this.gaitDrawn.clear();
     if (fogDue) {
       // 프레임 측정: 이 프레임은 안개 주기 프레임 (?debug=1 '안개 p95' — 안개 프레임만 무거워 vsync를 넘기는지 본다)
-      noteFogFrame();
+      if (!rebaking) noteFogFrame();
       const b = this.fog;
       b.begin();
       b.drawPoints(snap.world.points, balance);

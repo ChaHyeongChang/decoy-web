@@ -10,6 +10,7 @@ import {
   percentileInPlace,
   sessionFrameStats,
   type FrameWindow,
+  DISPLAY_DEADLINE_MS,
 } from '../../client/src/gfx/frameStats';
 import { setFpsOverride } from '../../client/src/gfx/state';
 import { percentile } from '../perf/perfHooks';
@@ -298,6 +299,60 @@ describe('FrameStats: 최근 구간 FPS (적응형 품질 · 표시)', () => {
     // 잘못된 vsync · 빈 측정은 0
     expect(s.overrun(1000, 0)).toBe(0);
     expect(new FrameStats().overrun(1000, v)).toBe(0);
+  });
+
+  it('넘김은 그리기를 마친 뒤 1ms 마감까지 센다 (DISPLAY_DEADLINE_MS, 가상 시계 작업 모형과 같다): vsync − 0.5ms에 끝난 프레임도 넘김', () => {
+    expect(DISPLAY_DEADLINE_MS).toBe(1);
+    const s = new FrameStats();
+    const v = 1000 / 144;
+    for (let k = 0; k < 10; k++) {
+      const t = 1000 + k * v;
+      s.begin(t, t);
+      s.end(t + (k === 5 ? v - 0.5 : 2));
+    }
+    expect(s.overrun(1000, v)).toBeCloseTo(0.1, 9);
+  });
+
+  it('requestFrame으로 그린 칸(markExtra)의 간격은 FPS · 늦은 프레임 창에서 뺀다 (분모만 늘려 늦은 비율을 묽히지 않게), 작업 시간은 그대로 센다', () => {
+    const v = 1000 / 240;
+    const late = { periodMs: 2 * v, slackMs: v / 2 };
+    // 목표 120(2칸): 늦은 간격(3칸) 6개 + 고른 간격 54개
+    const plain = new FrameStats();
+    const extra = new FrameStats();
+    let t = 1000;
+    let te = 1000;
+    const steps = [
+      ...Array.from({ length: 54 }, (_, k) => (k % 9 === 0 ? 3 : 2)),
+      ...Array.from({ length: 6 }, () => 2),
+    ];
+    plain.begin(t, t);
+    plain.end(t + 1);
+    extra.begin(te, te);
+    extra.end(te + 1);
+    steps.forEach((k, i) => {
+      t += k * v;
+      plain.begin(t, t);
+      plain.end(t + 1);
+      // 같은 흐름에 다섯 번째마다 요청 칸(앞 칸 1칸 뒤)을 끼운다 — Pacer는 요청 칸에서 다시 n칸을 세므로 다음 간격은 그대로 k칸
+      if (i % 5 === 0) {
+        te += v;
+        extra.begin(te, te);
+        extra.markExtra();
+        extra.end(te + 1);
+      }
+      te += k * v;
+      extra.begin(te, te);
+      extra.end(te + 1);
+    });
+    const a = plain.window(5000, undefined, late);
+    const b = extra.window(5000, undefined, late);
+    expect(b.late).toBeCloseTo(a.late, 9);
+    expect(b.frames).toBeGreaterThan(a.frames);
+    // begin 밖의 markExtra는 무시
+    const s = new FrameStats();
+    s.markExtra();
+    feed(s, 10, 60);
+    expect(s.window(1000).fps).toBeCloseTo(60, 3);
   });
 
   it('안개 프레임 작업 p95: markFog를 부른 프레임과 그 밖을 따로 (begin 밖의 markFog는 무시, 안개 프레임이 없으면 null)', () => {

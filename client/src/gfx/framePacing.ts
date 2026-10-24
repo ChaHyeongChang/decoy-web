@@ -36,7 +36,9 @@ export function parseFrameLimit(raw: string | null): FrameLimit | null {
 export const pacingHooks: {
   /** 고른 제한을 바로 적용한다 (저장은 부르는 쪽이 먼저 한다) */
   setLimit: ((limit: FrameLimit) => void) | null;
-} = { setLimit: null };
+  /** 다음 rAF를 제한과 상관없이 한 번 그린다 (Pacer.requestFrame — 판 장면이 멈춤 ↔ 걷기가 바뀐 입력 틱에 부른다) */
+  requestFrame: (() => void) | null;
+} = { setLimit: null, requestFrame: null };
 
 // ───────────── 저장 (로비에서 고른 값, 'decoy:frameLimit') ─────────────
 
@@ -267,12 +269,6 @@ export const LIMITER = {
   phaseSlack: 0.5,
   /** rAF 사이가 이보다 길면(숨김 · 멈춤) 지금 그리고 거기서 다시 센다 (ms) */
   resyncGapMs: 250,
-  /**
-   * 판 중 새 키 · 누르기 뒤 이만큼(ms)은 제한 없이 매 rAF 그린다(Pacer.boost): 입력 틱(1/30초) 하나 + 한 프레임. 목표를 화면의
-   * 절반으로 낮춰도 키를 누른 뒤 첫 움직임이 다음 그릴 차례(최대 한 칸 더)까지 늦지 않게 — 멈춰 있다 움직이기 시작하는 프레임이라
-   * 간격이 한 번 짧아져도 보이지 않는다. 끝나면 마지막으로 그린 rAF부터 다시 n칸을 센다
-   */
-  boostMs: 50,
 } as const;
 
 /**
@@ -302,10 +298,10 @@ export class FrameLimiter {
     return this.skips;
   }
 
-  /** 이 rAF는 제한과 상관없이 그렸다 (Pacer.boost): 여기서 다시 n칸을 센다 */
-  ranAt(t: number): void {
+  /** 방금 건너뛰기로 한 rAF를 그리기로 바꾼다 (Pacer.requestFrame): 여기서 다시 n칸을 센다 */
+  takeOver(t: number): void {
     this.lastRun = t;
-    this.lastTick = t;
+    this.skips = Math.max(0, this.skips - 1);
   }
 
   /** 제한을 바꾼다 (null · 0 이하 · 유한하지 않은 값 = 제한 없음). 값이 바뀌면 위상을 다시 센다 */
@@ -400,8 +396,10 @@ export class Pacer {
   private idleOn = false;
   /** 판 중 붙잡은 화면 주사율 (판 중에는 정수배로 낮아지지 않는다 — heldAfter, 판 밖이면 null) */
   private heldHz: number | null = null;
-  /** 이 시각(ms, performance.now · rAF 시각과 같은 시계) 전의 rAF는 제한 없이 그린다 (boost) */
-  private boostUntil = Number.NEGATIVE_INFINITY;
+  /** 다음 rAF를 제한과 상관없이 그린다 (requestFrame) */
+  private once = false;
+  /** 지난 onTick이 requestFrame 때문에 그린 rAF인가 (제한대로면 건너뛸 칸) */
+  private extra = false;
 
   constructor(limit: FrameLimit = 'auto') {
     this.current = limit;
@@ -434,18 +432,23 @@ export class Pacer {
   }
 
   /**
-   * 입력 반응 (잔렉 고치기): 판 중 새 키 · 누르기를 받은 시각 atMs부터 LIMITER.boostMs 동안 제한 없이 그린다. 판 밖이면 무시한다.
-   * main.ts가 창 캡처 단계 keydown(되풀이 아님) · keyup · pointerdown에 부른다
+   * 입력 반응 (잔렉 고치기): 다음 rAF를 제한과 상관없이 한 번 그리고 거기서 다시 n칸을 센다. 판 밖이면 무시한다. 판 장면이 내 캐릭터가
+   * 멈춤 ↔ 걷기로 바뀐 입력 틱에 부른다(pacingHooks.requestFrame) — 목표를 화면의 절반으로 낮춰도 첫 움직임 · 멈춤이 다음 그릴
+   * 차례까지 늦지 않게. 바뀐 바로 그 순간의 프레임 하나뿐이라 걷는 중 간격은 그대로다
    */
-  boost(atMs: number): void {
-    if (this.idleOn || !Number.isFinite(atMs)) return;
-    this.boostUntil = Math.max(this.boostUntil, atMs + LIMITER.boostMs);
+  requestFrame(): void {
+    if (!this.idleOn) this.once = true;
+  }
+
+  /** 지난 rAF가 requestFrame 때문에 그린 칸인가 (프레임 측정이 늦은 프레임 · FPS 창에서 그 간격을 뺀다) */
+  get extraFrame(): boolean {
+    return this.extra;
   }
 
   /** 판이 없으면 true: 그리기를 IDLE_CAP_HZ로 묶는다(제한 설정과 상관없이). false면 제한 설정대로 */
   setIdle(idle: boolean): void {
     this.idleOn = idle;
-    if (idle) this.boostUntil = Number.NEGATIVE_INFINITY;
+    if (idle) this.once = false;
     this.heldHz = idle ? null : this.estimator.hz;
   }
 
@@ -483,56 +486,19 @@ export class Pacer {
     this.estimator.tick(t);
     if (this.heldHz !== null) this.heldHz = heldAfter(this.heldHz, this.estimator.hz, this.estimator.rawHz);
     this.limiter.setCap(this.capHz);
-    if (t < this.boostUntil && !this.idleOn) {
-      this.limiter.ranAt(t);
+    this.extra = false;
+    if (this.limiter.shouldRun(t, this.displayHz)) {
+      this.once = false;
       return true;
     }
-    const run = this.limiter.shouldRun(t, this.displayHz);
-    if (!run) this.onSkip?.(t);
-    return run;
-  }
-}
-
-/**
- * 입력 반응 (Pacer.boost를 언제 부를지): 아무 키 · 누르기도 없던 상태에서 처음 누를 때(멈춰 있다 움직이기 시작)와 마지막으로 뗄 때
- * (멈춤)만 부른다. 이미 누르고 있는 동안의 다른 키(방향 바꾸기 · 공격)에는 부르지 않는다 — 움직이는 중에 매 rAF 그리기가 끼면
- * 간격이 섞인다. 키 되풀이(repeat)는 새 누르기가 아니다. 창이 초점을 잃으면 잊는다(clear)
- */
-export class InputBoost {
-  private readonly keys = new Set<string>();
-  private readonly pointers = new Set<number>();
-
-  constructor(private readonly onBoost: (atMs: number) => void) {}
-
-  private get anyHeld(): boolean {
-    return this.keys.size > 0 || this.pointers.size > 0;
-  }
-
-  keyDown(code: string, repeat: boolean, atMs: number): void {
-    if (repeat || this.keys.has(code)) return;
-    if (!this.anyHeld) this.onBoost(atMs);
-    this.keys.add(code);
-  }
-
-  keyUp(code: string, atMs: number): void {
-    if (!this.keys.delete(code)) return;
-    if (!this.anyHeld) this.onBoost(atMs);
-  }
-
-  pointerDown(id: number, atMs: number): void {
-    if (this.pointers.has(id)) return;
-    if (!this.anyHeld) this.onBoost(atMs);
-    this.pointers.add(id);
-  }
-
-  pointerUp(id: number, atMs: number): void {
-    if (!this.pointers.delete(id)) return;
-    if (!this.anyHeld) this.onBoost(atMs);
-  }
-
-  clear(): void {
-    this.keys.clear();
-    this.pointers.clear();
+    if (this.once && !this.idleOn) {
+      this.once = false;
+      this.extra = true;
+      this.limiter.takeOver(t);
+      return true;
+    }
+    this.onSkip?.(t);
+    return false;
   }
 }
 
