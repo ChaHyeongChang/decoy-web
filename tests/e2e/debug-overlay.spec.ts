@@ -145,12 +145,13 @@ test('PC 1280×720: 펼친 채 시작, 한 화면에 모든 항목 · 값이 바
   for (const label of PANEL_LABELS) expect(a.panelText, label).toContain(label);
   const lines = a.panelText.split('\n');
   expect(lines.length).toBeLessThanOrEqual(8);
-  expect(a.panelText).toMatch(/프레임 [\d.]+ms · p95 [\d.]+ms/);
-  expect(a.panelText).toMatch(/작업 [\d.]+ms · p95 [\d.]+ms/);
+  expect(a.panelText).toMatch(/프레임 [\d.]+ms · p95 [\d.]+ms · 늦음 \d+% · 넘김 \d+%/);
+  // 판 중이라 안개 주기 프레임이 있다: 그 프레임만의 작업 p95 (잔렉 고치기)
+  expect(a.panelText).toMatch(/작업 [\d.]+ms · p95 [\d.]+ms · 안개 p95 [\d.]+ms/);
   // Canvas 렌더러: 그린 객체 수 (오버레이를 켰을 때만 센다)
   expect(num(a.panelText, /그리기 객체 (\d+)개/)).toBeGreaterThan(0);
   expect(a.panelText).toMatch(/렌더러 canvas/);
-  expect(a.panelText).toMatch(/제한 (자동|60|120)/);
+  expect(a.panelText).toMatch(/제한 (자동|60|120|절반)/);
   expect(a.panelText).toMatch(/DPR 1\.00 · \d+×\d+/);
   expect(a.chipText).toMatch(/^▾ \d+fps [\d.]+ms$/);
   // 한 화면: 표 전체가 창 안

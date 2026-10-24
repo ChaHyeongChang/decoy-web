@@ -6,6 +6,7 @@
 // 렌더링 최적화: 하향 기준은 목표 FPS에 비례하고(60Hz 기준값 × 기준 목표 / 60, 기준 목표는 120까지), 자동 프레임 제한에서는
 // 품질보다 목표 FPS(60)를 먼저 낮추며, 자동으로 내린 단계는 여유가 이어지면 하나씩 되돌린다(AutoDowngrade).
 import { STORAGE_KEYS, browserStorage, readKey, removeKey, writeKey, type StorageLike } from '../storageKeys';
+import { higherRate, lowerRate } from './framePacing';
 import { QUALITY_TIERS, isQualityTier, lowerTier, type QualityTier, type RendererKind } from './presets';
 
 // 저장소 접근은 storageKeys.ts에서만 (M12). 기존 import 경로를 지키려고 다시 내보낸다
@@ -66,25 +67,37 @@ export const BASE_TARGET_HZ = 60;
  */
 export const THRESHOLD_CAP_HZ = 120;
 
-/** 자동 프레임 제한에서 버티지 못하면 품질보다 먼저 목표 FPS를 이 값으로 낮춘다 (화면이 이보다 빠를 때만) */
-export const RATE_FALLBACK_HZ = 60;
-
 /**
- * 고르지 않은 프레임 (내 움직임 고르기 2026-10-24, DECISIONS 10절). 늦은 프레임 = 간격이 목표 주기의 lateFactor배 이상(vsync를
- * 놓쳐 한 번 더 보인 프레임). 자동 프레임 제한 · 목표가 RATE_FALLBACK_HZ보다 높을 때, 평균 FPS가 하향 기준 위여도 최근 1초의
- * 늦은 프레임 비율 평균이 maxLateRatio 이상인 상태가 하향과 같은 시간(예열 5초 · 지속 10초)을 넘게 이어지면 목표를 60으로
- * 낮춘다(rateDown, 품질 그대로). 되돌려 올린 뒤 확인(UpProbation)에서 이 비율이 넘어도 다시 내리고 이번 세션에서는 올리지 않는다.
- * 120Hz에서 늦은 비율 m이면 FPS ≈ 120 / (1 + m): 0.15는 약 104fps — 휴대폰 하향 기준 100(m 0.2)보다 조금 이르고, PC 기준 80
- * (m 0.5)보다 훨씬 이르다. 품질 하향 · 고정 제한(60 · 120)에는 쓰지 않는다
+ * 고르지 않은 프레임 (내 움직임 고르기 2026-10-24 DECISIONS 10절, 잔렉 고치기 2026-10-25 DECISIONS 12절). 늦은 프레임 = 간격이
+ * 목표 주기 + lateSlack vsync 이상(그리기로 한 vsync를 놓쳐 한 번 더 보인 프레임 — 목표가 화면 / n이면 (n + 0.5) vsync).
+ * 자동 프레임 제한에서 지금 목표보다 낮은 약수 사다리 칸(framePacing.rateLadder)이 있을 때, 평균 FPS가 하향 기준 위여도 최근 1초의
+ * 늦은 프레임 비율 평균이 maxLateRatio 이상인 상태가 하향과 같은 시간(예열 5초 · 지속 10초)을 넘게 이어지면 목표를 사다리 아래 칸
+ * (화면 주사율의 약수: 144 → 72, 165 → 82.5, 120 → 60)으로 낮춘다(rateDown, 품질 그대로). 되돌려 올린 뒤 확인(UpProbation)에서
+ * 이 비율이 넘어도 다시 내리고 이번 세션에서는 올리지 않는다.
+ * 비율 0.05: 144Hz에서 약 137fps(초당 늦은 프레임 7개) 아래면 내린다. 예전 0.15는 144Hz 125fps · 165Hz 143.5fps 이상을 그대로 두어
+ * 초당 20개 넘는 늦은 프레임이 섞였고, 100~130fps를 오가면 1초 평균이 0.15를 넘나들어 10초 지속이 계속 처음부터 다시 시작했다.
+ * 품질 하향 · 고정 제한(60 · 120 · 절반)에는 쓰지 않는다
  */
 export const PACING_WATCH = {
-  lateFactor: 1.5,
-  maxLateRatio: 0.15,
+  lateSlack: 0.5,
+  maxLateRatio: 0.05,
 } as const;
 
 /** 이 목표 · 제한에서 고르지 않은 프레임을 목표 FPS 낮춤 이유로 보는가 (아니면 Infinity — 보지 않음) */
-export function maxLateFor(ctx: { targetHz: number; canRateFallback: boolean }): number {
-  return ctx.canRateFallback && ctx.targetHz > RATE_FALLBACK_HZ ? PACING_WATCH.maxLateRatio : Infinity;
+export function maxLateFor(ctx: { targetHz: number; displayHz: number; canRateFallback: boolean }): number {
+  return ctx.canRateFallback && lowerRate(ctx.displayHz, ctx.targetHz) !== null
+    ? PACING_WATCH.maxLateRatio
+    : Infinity;
+}
+
+/** 늦은 프레임 기준 (frameStats.window의 late): 목표 주기 + lateSlack vsync */
+export function lateWindowFor(
+  targetHz: number,
+  displayHz: number,
+  out: { periodMs: number; slackMs: number },
+): void {
+  out.periodMs = 1000 / Math.max(1, targetHz);
+  out.slackMs = (PACING_WATCH.lateSlack * 1000) / Math.max(1, displayHz);
 }
 
 /**
@@ -753,9 +766,11 @@ export type AutoQualityAction =
       fpsBefore: number;
       fpsAfter: number;
     }
-  /** 자동 프레임 제한에서 느림: 품질은 그대로 두고 목표 FPS를 낮춘다(pacer.setFallback(to)). 효과 확인 없음 */
+  /** 자동 프레임 제한에서 느림: 품질은 그대로 두고 목표 FPS를 화면 주사율의 약수로 낮춘다(pacer.setFallback(to)). 효과 확인 없음 */
   | { kind: 'rateDown'; mode: PerfMode; from: number; to: number; fpsBefore: number }
-  /** 낮춘 목표 FPS를 되돌린다(pacer.setFallback(null), to = 지금 화면 주사율). 판 중에도 한다 */
+  /**
+   * 낮춘 목표 FPS를 사다리 한 칸 되돌린다(to = 그 칸, 화면 주사율이면 pacer.setFallback(null) — 아니면 setFallback(to)). 판 중에도 한다
+   */
   | { kind: 'rateUp'; mode: PerfMode; from: number; to: number; fps: number; workP95: number }
   /** 자동으로 내린 품질 단계 하나를 되돌린다. 판 중에는 내지 않고 다음 판 시작 전에 takePendingUpgrade가 준다 */
   | { kind: 'upgrade'; mode: PerfMode; from: QualityTier; to: QualityTier; fps: number; workP95: number }
@@ -777,8 +792,10 @@ export type AutoDowngradeStatus = 'on' | 'checking' | 'probation' | 'off';
  * 내리기 (판 중):
  *  - 판마다 FpsWatch로 잰다: 예열 5초 뒤 1초 평균이 하향 기준(minFpsFor: PC는 기준 목표의 2/3 · 터치 5/6, 60Hz에서 40 · 50)
  *    미만인 상태가 10초를 넘으면 내린다
- *  - 자동 프레임 제한이고 화면이 60Hz보다 빠르면 먼저 목표 FPS를 60으로(rateDown, 품질 그대로, 확인 없음 — 프레임 예산만 는다).
- *    판당 품질 하향 한도에 세지 않고, 새 목표에서 예열부터 다시 잰다. 고정 제한(60 · 120)은 목표를 바꾸지 않는다
+ *  - 자동 프레임 제한이고 지금 목표보다 낮은 약수 사다리 칸이 있으면(rateLadder: 120 → 60, 144 → 72, 240 → 120 → 80 → 60) 먼저
+ *    목표 FPS를 그 칸으로(rateDown, 품질 그대로, 확인 없음 — 프레임 예산만 는다). 느린 평균 FPS 이하인 가장 높은 칸까지 한 번에
+ *    내려가되 되돌릴 단계는 칸마다 쌓는다(올릴 때 한 칸씩). 판당 품질 하향 한도에 세지 않고, 새 목표에서 예열부터 다시 잰다.
+ *    고정 제한(60 · 120 · 절반)은 목표를 바꾸지 않는다
  *  - 품질은 한 단계(판당 최대 1번). 내린 뒤 같은 판에서 DowngradeCheck로 효과를 본다(판이 먼저 끝나면 같은 모드의 다음 판 예열 뒤)
  *  - 효과 없음 → 원래 단계로 되돌리고 이번 세션에서는 자동 조정을 끈다(30Hz로 묶인 화면) / 효과 있음 → 유지(되돌릴 단계로 쌓는다)
  * 올리기 (UP_WATCH · UP_PROBATION):
@@ -1031,12 +1048,19 @@ export class AutoDowngrade {
     const fpsBefore = this.watch.slowAverage;
     const mode = this.mode;
     this.changed(nowMs);
-    if (ctx.canRateFallback && ctx.targetHz > RATE_FALLBACK_HZ) {
-      // 품질은 그대로 두고 목표만 낮춘다. 새 목표에서 예열부터 다시 잰다(판당 품질 하향 한도와 따로)
-      this.stack.push({ kind: 'rate', from: ctx.targetHz, to: RATE_FALLBACK_HZ });
-      this.expectTargetHz = RATE_FALLBACK_HZ;
+    const to = ctx.canRateFallback ? lowerRate(ctx.displayHz, ctx.targetHz, fpsBefore) : null;
+    if (to !== null) {
+      // 품질은 그대로 두고 목표만 화면 주사율의 약수로 낮춘다. 새 목표에서 예열부터 다시 잰다(판당 품질 하향 한도와 따로).
+      // 되돌릴 단계는 사다리 칸마다 쌓는다(올릴 때 한 칸씩 — 맨 위로 한 번에 올리면 그 예산의 절반을 거의 못 맞춘다)
+      let from = ctx.targetHz;
+      while (from > to * (1 + 1e-9)) {
+        const next = lowerRate(ctx.displayHz, from) ?? to;
+        this.stack.push({ kind: 'rate', from, to: next });
+        from = next;
+      }
+      this.expectTargetHz = to;
       this.watch.restart(nowMs, this.watchCfg);
-      return { kind: 'rateDown', mode, from: ctx.targetHz, to: RATE_FALLBACK_HZ, fpsBefore };
+      return { kind: 'rateDown', mode, from: ctx.targetHz, to, fpsBefore };
     }
     this.watchOn = false;
     const lower = lowerTier(tier);
@@ -1114,9 +1138,10 @@ export class AutoDowngrade {
       }
       budgetHz = ctx.targetHz;
     } else {
-      // 목표 FPS는 자동 제한이고 화면이 지금 목표보다 빠를 때만 되돌릴 수 있다
+      // 목표 FPS는 자동 제한이고 화면이 지금 목표보다 빠를 때만 되돌릴 수 있다. 지금 목표의 사다리 한 칸 위로 올린다(예산도 그 칸) —
+      // 그사이 잰 화면 주사율이 올라(120 → 144) 쌓아 둔 칸과 지금 목표가 달라도 지금 화면의 사다리로
       if (!ctx.canRateFallback || ctx.displayHz <= ctx.targetHz) return null;
-      budgetHz = ctx.displayHz;
+      budgetHz = higherRate(ctx.displayHz, ctx.targetHz) ?? ctx.displayHz;
     }
     const openAt = Math.max(
       this.matchStartMs + this.watchCfg.warmupMs,
@@ -1131,7 +1156,15 @@ export class AutoDowngrade {
       this.queued = { step: top, fps, workP95: s.workP95 };
       return null;
     }
-    this.probing = top;
+    // 목표 FPS: 실제로 올리는 칸(지금 목표 → 한 칸 위)을 확인한다(되돌리면 지금 목표로). 쌓아 둔 칸을 다 썼는데 아직 화면 주사율
+    // 아래면(판 중 잰 화면 주사율이 올라 사다리가 길어짐) 남은 칸을 하나 쌓는다
+    if (budgetHz < ctx.displayHz - 1e-6 && !this.stack.some((st) => st.kind === 'rate'))
+      this.stack.push({
+        kind: 'rate',
+        from: higherRate(ctx.displayHz, budgetHz) ?? ctx.displayHz,
+        to: budgetHz,
+      });
+    this.probing = { kind: 'rate', from: budgetHz, to: ctx.targetHz };
     this.probation = new UpProbation(
       nowMs,
       this.probationCfg.settleMs,
@@ -1139,12 +1172,12 @@ export class AutoDowngrade {
       this.watchCfg.gapMs,
     );
     this.lastChangeAt = nowMs;
-    this.expectTargetHz = ctx.displayHz;
+    this.expectTargetHz = budgetHz;
     return {
       kind: 'rateUp',
       mode: this.mode,
       from: ctx.targetHz,
-      to: ctx.displayHz,
+      to: budgetHz,
       fps,
       workP95: s.workP95,
     };

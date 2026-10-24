@@ -72,6 +72,11 @@ export interface FogLayerOptions {
 export interface FogLayer {
   readonly mode: FogMode;
   readonly shader: boolean;
+  /**
+   * 내 빛 따라가기를 빛 지도 · 틴트로 한다 (GPU 경로: 셰이더가 내 덮임 표시 안의 내 빛을 지금 자리로 옮긴다). 참이면 내 눈의 빛은
+   * 반경 r + FOLLOW_MAX로 레이캐스트한 다각형과 reach로 넘긴다. Canvas 합성은 빛 · 틴트를 한 장에 구워 옮기지 못한다(거짓)
+   */
+  readonly selfFollow: boolean;
   /** 미니맵이 줄여 그릴 합성 캔버스 (맵 전체, 안개 포함) */
   readonly miniSource: HTMLCanvasElement;
   /** 측정: 마지막 합성(begin~commit)에 걸린 시간 (ms) */
@@ -84,16 +89,22 @@ export interface FogLayer {
    */
   setView(view: ViewRect): boolean;
   begin(): void;
-  /** 바닥 위 다각형 채우기 (시야 원 역할색 12%, 괴물 자기 부채꼴 등) */
-  fillPoly(poly: readonly Vec2[], color: number, alpha: number): void;
+  /** 바닥 위 다각형 채우기 (시야 원 역할색 12%, 괴물 자기 부채꼴 등). self = 내 시야 (GPU는 follow에서 Δ만큼 옮긴다) */
+  fillPoly(poly: readonly Vec2[], color: number, alpha: number, self?: boolean): void;
   drawPoints(points: readonly PointView[], balance: Balance): void;
   drawExits(exits: readonly ExitView[], balance: Balance): void;
   /** 경계가 부드러운 원형 시야 (반경 안쪽 soft 타일에 걸쳐 하한으로 흐려진다) */
   addSoftLight(light: SoftLight): void;
-  /** 경계가 딱 잘린 시야 (괴물 부채꼴 · 근접 원) */
-  addHardLight(poly: readonly Vec2[]): void;
+  /** 경계가 딱 잘린 시야 (괴물 부채꼴 · 근접 원). self = 내 시야 (GPU 괴물 화면은 빛 지도를 통째로 옮겨 읽는다) */
+  addHardLight(poly: readonly Vec2[], self?: boolean): void;
   /** 안개를 곱하고 화면에 반영 */
   commit(): void;
+  /**
+   * 내 빛 따라가기 (프레임마다, 안개 주기 뒤): 이번 주기에 칠한 내 시야를 (dx, dy) 타일만큼 옮겨 그린다 (fogMath followShift).
+   * Canvas 합성은 아무것도 하지 않는다(빛 · 틴트를 한 장에 구웠다 — selfFollow가 거짓이라 worldRenderer도 테두리 · 외곽선 · 먼지를
+   * 옮기지 않는다: 빛 경계와 같이 안개 주기 자리)
+   */
+  follow(dx: number, dy: number): void;
   destroy(): void;
 }
 
@@ -230,6 +241,7 @@ export function prebakeFogArt(renderer: RendererKind = gfxState.renderer, at: Ve
 export class CanvasFog implements FogLayer {
   readonly mode = 'canvas' as const;
   readonly shader = false;
+  readonly selfFollow = false;
   private readonly base: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
   /**
@@ -379,6 +391,9 @@ export class CanvasFog implements FogLayer {
   addHardLight(poly: readonly Vec2[]): void {
     if (this.light) this.lightRec.addHard(poly);
   }
+
+  /** 빛 · 틴트를 한 장에 구웠으므로 옮기지 않는다 (FogLayer.follow) */
+  follow(): void {}
 
   commit(): void {
     const lightChanged = this.light !== null && this.lightRec.paint(this.light);

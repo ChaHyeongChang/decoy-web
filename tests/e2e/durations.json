@@ -7,6 +7,7 @@
   "char-style.spec.ts": 35,
   "debug-overlay.spec.ts": 55,
   "deploy-wake.spec.ts": 75,
+  "fog-follow.webgl.spec.ts": 260,
   "frame-independence.spec.ts": 65,
   "frame-limit.spec.ts": 45,
   "layout-editor.spec.ts": 40,
@@ -47,10 +48,10 @@
   "m9-reconnect.spec.ts": 85,
   "m9-screens.spec.ts": 3,
   "perf-budget.spec.ts": 60,
-  "perf-budget.webgl.spec.ts": 80,
+  "perf-budget.webgl.spec.ts": 120,
   "play-settings.spec.ts": 50,
   "settings-match.spec.ts": 55,
   "settings.spec.ts": 35,
   "smoke.spec.ts": 1,
-  "smooth-motion.spec.ts": 15
+  "smooth-motion.spec.ts": 35
 }

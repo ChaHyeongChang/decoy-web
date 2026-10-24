@@ -430,6 +430,7 @@ export class SettingsPanel {
           { value: 'auto', label: UI_TEXT.frameLimitAuto },
           { value: '60', label: UI_TEXT.frameLimit60 },
           { value: '120', label: UI_TEXT.frameLimit120 },
+          { value: 'half', label: UI_TEXT.frameLimitHalf },
         ],
         testid: (v) => `frame-limit-${v}`,
         get: frameLimitNow,

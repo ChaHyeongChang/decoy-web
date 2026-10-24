@@ -1,6 +1,9 @@
 {
   "margin": 1.05,
   "measuredAt": "따라가는 카메라 PR #22",
+  "sceneAt": {
+    "webgl-medium-runner-s25": "내 빛 따라가기 검토 반영 (품질 중간 장면 처음 넣음)"
+  },
   "scenes": {
     "canvas-high-runner": {
       "pathMainPerFrame": 572.78,
@@ -70,6 +73,19 @@
       "paintOffPerFrame": 10.89,
       "textPerSec": 3.5,
       "resizePerSec": 13,
+      "readbackPerSec": 0.8
+    },
+    "webgl-medium-runner-s25": {
+      "drawsPerFrame": 9,
+      "uploadsPerSec": 70,
+      "uploadPxPerFrame": 43027.82,
+      "bufferBytesPerFrame": 89283.77,
+      "programsPerFrame": 4,
+      "framebuffersPerFrame": 3,
+      "pathOffPerFrame": 283.15,
+      "paintOffPerFrame": 10.89,
+      "textPerSec": 3.5,
+      "resizePerSec": 13.2,
       "readbackPerSec": 0.8
     }
   }

@@ -95,6 +95,11 @@ export interface AppParams {
    * 배포 주소에서는 무시한다(확대 수준은 플레이어가 바꿀 수 없다, 공정성). 그 밖에는 null
    */
   cam: number | null;
+  /**
+   * ?camSnap=0: 따라가는 카메라 창을 기기 픽셀 격자에 맞추지 않는다 (잔렉 고치기 — 사람이 격자 맞춤의 미세한 걸음을 견주어 보는 진단용,
+   * 저장하지 않음, 그림 정보 · 판정과 무관해 배포 주소에서도 받는다). 없거나 그 밖의 값이면 true(맞춘다)
+   */
+  camSnap: boolean;
 }
 
 /** ?cam 값 해석: 1~6 사이 수만 (소수 허용), 그 밖에는 null */
@@ -130,6 +135,7 @@ export function readParams(search: string): AppParams {
     fpsLimit: isFrameLimit(fpsLimit) ? fpsLimit : null,
     chars: parseCharStyle(p.get('chars')),
     cam: parseCamZoom(p.get('cam')),
+    camSnap: p.get('camSnap') !== '0',
   };
 }
 
@@ -767,9 +773,12 @@ export class App {
     };
   }
 
-  /** 다른 캐릭터를 그릴 시각 (스냅샷 시계 − 100ms) */
-  renderTime(): number {
-    return this.snapClock.now(performance.now()) - (this.balance?.network.interpolationDelayMs ?? 100);
+  /**
+   * 다른 캐릭터를 그릴 시각 (스냅샷 시계 − 100ms). atMs = 이 프레임 시각 — 판 장면은 rAF 시각(frameTimeOf)을 준다(잔렉 고치기):
+   * 콜백 안 performance.now는 콜백이 늦게 시작한 만큼 프레임마다 흔들려, 따라가는 카메라(rAF 시각) 아래에서 걷는 상대가 그만큼 떨렸다
+   */
+  renderTime(atMs: number = performance.now()): number {
+    return this.snapClock.now(atMs) - (this.balance?.network.interpolationDelayMs ?? 100);
   }
 
   get dt(): number {

@@ -14,8 +14,8 @@ import {
   sessionFrameStats,
   type FrameWindow,
 } from './gfx/frameStats';
-import { PACING_WATCH } from './gfx/quality';
-import { freezeGfxClock, gfxState, probeSlot, setFpsOverride } from './gfx/state';
+import { lateWindowFor } from './gfx/quality';
+import { freezeGfxClock, gfxState, probeSlot, setFogFollowDisabled, setFpsOverride } from './gfx/state';
 import { matchMenu } from './matchMenu';
 import { setPref } from './prefs';
 import type { GameScene } from './scenes/GameScene';
@@ -132,6 +132,7 @@ export function installDebug(app: App, overlay: boolean): void {
     injectFps: (fps) => setFpsOverride(fps),
     getFrameStats: () => frameStatsInfo(),
     getAnimState: () => gameScene(app)?.animDebug ?? null,
+    setFogFollowDisabled: (off) => setFogFollowDisabled(off),
     getCamera: () => gameScene(app)?.cameraDebug ?? null,
     getSpectateCards: () => gameScene(app)?.spectateCards ?? [],
     setCameraShake: (scale) => gameScene(app)?.setShakeScale(scale),
@@ -325,13 +326,22 @@ function overlayAnchor(app: App): OverlayAnchor | null {
 
 /** 오버레이 늦은 프레임 비율 그릇 (4Hz로 다시 쓴다) */
 const LATE_WINDOW: FrameWindow = { fps: 0, intervalAvg: 0, workP95: 0, frames: 0, late: 0 };
-const LATE_AT = { periodMs: 1000 / 60, factor: PACING_WATCH.lateFactor };
+const LATE_AT = { periodMs: 1000 / 60, slackMs: 1000 / 120 };
 
-/** 최근 1초 늦은 프레임 비율 (지금 목표 주기 기준, 렌더한 프레임이 없으면 null) */
+/** 최근 1초 늦은 프레임 비율 (지금 목표 주기 + 반 vsync 기준, 렌더한 프레임이 없으면 null) */
 function lateRatio(): number | null {
-  LATE_AT.periodMs = 1000 / Math.max(1, gfxState.targetHz);
+  lateWindowFor(gfxState.targetHz, gfxState.displayHz, LATE_AT);
   const w = sessionFrameStats.window(FPS_WINDOW_MS, LATE_WINDOW, LATE_AT);
   return w.frames > 1 ? w.late : null;
+}
+
+/** 오버레이 안개 프레임 작업 그릇 */
+const FOG_WORK = { fog: null as number | null, other: 0 };
+
+/** 최근 1초 vsync를 넘긴 프레임 비율 (렌더한 프레임이 2개 미만이면 null) */
+function overrunRatio(): number | null {
+  if (sessionFrameStats.recorded < 2) return null;
+  return sessionFrameStats.overrun(FPS_WINDOW_MS, 1000 / Math.max(1, gfxState.displayHz));
 }
 
 function overlayData(app: App, hook: DecoyDebug): DebugOverlayData {
@@ -339,6 +349,8 @@ function overlayData(app: App, hook: DecoyDebug): DebugOverlayData {
   return {
     stats: frameStatsInfo(),
     late: lateRatio(),
+    overrun: overrunRatio(),
+    fogWorkP95: sessionFrameStats.recorded > 0 ? sessionFrameStats.fogWork(FOG_WORK).fog : null,
     targetHz: gfxState.targetHz,
     displayHz: gfxState.displayHz,
     frameLimit: gfxState.frameLimit,

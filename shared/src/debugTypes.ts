@@ -105,7 +105,7 @@ export interface GfxDebugInfo {
   /** 품질 판단에 쓴 최근 FPS */
   measuredFps: number;
   /** 프레임 제한 설정 (렌더링 최적화): 자동(화면 주사율을 따른다) · 60 · 120 */
-  frameLimit: 'auto' | '60' | '120';
+  frameLimit: 'auto' | '60' | '120' | 'half';
   /** 잰 화면 주사율 (Hz, 60 아래로는 보지 않는다) */
   displayHz: number;
   /** 지금 목표 FPS = min(제한, 화면). 자동 제한에서 버티지 못하면 60으로 내려갈 수 있다 */
@@ -228,6 +228,19 @@ export interface AnimDebug {
   gait: Record<string, { phase: number; stepping: number }>;
   /** 마지막 안개 · 시야 갱신 시각 (ms, performance.now 기준. 아직 없으면 null) */
   fogAt: number | null;
+  /** 안개 주기에 쓴 내 눈 자리 (타일, 0.001 반올림. 그 주기에 내 눈이 없었으면 null — 사망 · 탈출 · 관전) */
+  fogEye: { x: number; y: number } | null;
+  /**
+   * 이번 프레임에 실제로 옮긴 내 빛 따라가기 Δ (타일, 0.001 반올림): 지금 내 예측 자리 − fogEye (내 눈이 없거나 역할 · 상태가
+   * 바뀌었거나 한도를 넘거나 따라가지 않는 경로면 0). 그린 내 빛 · 틴트 · 테두리 중심 = fogEye + fogShift (셰이더에 넘긴 값 — 화소는
+   * fog-follow.webgl 시험이 잰다)
+   */
+  fogShift: { x: number; y: number };
+  /**
+   * 'gpu'(빛 지도 셰이더로 빛 · 틴트 · 테두리 · 외곽선 · 먼지를 옮김) · 'fixed'(옮기지 않음: Canvas 합성 · 셰이더 정밀도 부족 ·
+   * 디버그로 끔) · 'off'(이번 주기에 내 눈 없음)
+   */
+  fogFollow: 'gpu' | 'fixed' | 'off';
   /** 생존자 화면 괴물 부채꼴 빨강 정도 0~1 */
   coneRed: number;
   /** 돌진 잔상 수 */
@@ -339,6 +352,8 @@ export interface DecoyDebug {
   getFrameStats(): FrameStatsInfo | null;
   /** 프레임 독립성 시험용 연출 상태 (판 장면이 없으면 null) */
   getAnimState(): AnimDebug | null;
+  /** 내 빛 따라가기를 끈다(true) · 되돌린다(false) — 측정 · 시험에서 안개 주기 자리에 고정된 예전 그림과 견준다 */
+  setFogFollowDisabled(off: boolean): void;
   /** 카메라 상태 (판 장면이 없으면 null) */
   getCamera(): CameraDebug | null;
   /** 화면 흔들림 세기 배율 (0 = 끔, 시험의 픽셀 탐침용 — '흔들림 줄이기'와 같은 값) */
@@ -358,7 +373,7 @@ export interface DecoyDebug {
   /** 관전 카드 판정 사각형 (창 CSS px, 카드 순서 번호 · 동료 id) — 따라가는 카메라 */
   getSpectateCards(): { index: number; id: string | null; x: number; y: number; w: number; h: number }[];
   /** 프레임 제한을 바꾼다 (로비 선택과 같은 경로, 저장하지 않음) */
-  setFrameLimit(limit: 'auto' | '60' | '120'): void;
+  setFrameLimit(limit: 'auto' | '60' | '120' | 'half'): void;
   /** 캐릭터 스타일을 바꾼다 (설정과 같은 경로, 저장하지 않음). 판 중이면 다음 프레임에 그림을 다시 굽는다 */
   setCharStyle(style: 'classic' | 'new'): void;
   /** 선명도 검사: HUD에 글자를 그린다 (논리 좌표 x, y, 글자 크기 px) */

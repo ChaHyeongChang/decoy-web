@@ -67,6 +67,13 @@ describe('readParams', () => {
     expect(readParams('').chars).toBeNull();
   });
 
+  it('?camSnap=0이면 카메라 격자 맞춤을 끈다(진단용), 없거나 그 밖의 값이면 맞춘다', () => {
+    expect(readParams('').camSnap).toBe(true);
+    expect(readParams('?camSnap=0').camSnap).toBe(false);
+    for (const v of ['1', 'false', 'off', '', ' 0'])
+      expect(readParams(`?camSnap=${v}`).camSnap, v).toBe(true);
+  });
+
   it('측정 표시는 ?debug=1 오버레이: 따로 ?fps 매개변수는 없다', () => {
     expect(readParams('?fps=1')).not.toHaveProperty('fps');
     expect(readParams('?debug=1').debug).toBe('overlay');
@@ -85,6 +92,7 @@ describe('readParams', () => {
       scaleOverride: null,
       quality: null,
       fpsLimit: null,
+      camSnap: true,
     });
   });
 });

@@ -16,6 +16,7 @@ import * as mapArtGeom from '../../client/src/art/mapArtGeom';
 import * as palette from '../../client/src/art/palette';
 import * as shapes from '../../client/src/art/shapes';
 import * as presets from '../../client/src/gfx/presets';
+import * as framePacing from '../../client/src/gfx/framePacing';
 import * as quality from '../../client/src/gfx/quality';
 import * as colors from '../../client/src/render/colors';
 import { ambientRgb } from '../../client/src/render/fogMath';
@@ -50,6 +51,7 @@ const MODULES: Readonly<Record<string, { file: string; mod: object }>> = {
   camera: { file: 'client/src/render/camera.ts', mod: camera },
   presets: { file: 'client/src/gfx/presets.ts', mod: presets },
   quality: { file: 'client/src/gfx/quality.ts', mod: quality },
+  framePacing: { file: 'client/src/gfx/framePacing.ts', mod: framePacing },
   hudArt: { file: 'client/src/ui/hudArt.ts', mod: hudArt },
   layout: { file: 'client/src/ui/layout.ts', mod: layout },
   fonts: { file: 'client/src/ui/fonts.ts', mod: fonts },
