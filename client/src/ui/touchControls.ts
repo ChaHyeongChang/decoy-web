@@ -238,25 +238,7 @@ export function touchLayout(
         : { x: rowLeft - gap - sysW, y: sysY, w: sysW, h: sysH };
   }
   const moveR = t.moveR;
-  const safeBottom = safe.y + safe.h;
-  const band = Math.round(w * MOVE_ZONE_RATIO);
-  /** 이동 영역: side 쪽 화면 40% 띠. 판 HUD 아래에서 시작 (이동 스틱 그림(반지름 r) + 위 8px은 남긴다) */
-  const zoneAt = (side: Side, r: number, list: readonly Box[]): Box => {
-    const zone: Box =
-      side === 'left'
-        ? { x: safe.x, y: safe.y, w: band - safe.x, h: safe.h }
-        : { x: w - band, y: safe.y, w: safe.x + safe.w - (w - band), h: safe.h };
-    let top = zone.y;
-    for (const b of list)
-      if (b.x < zone.x + zone.w && b.x + b.w > zone.x && b.y < safeBottom)
-        top = Math.max(top, b.y + b.h + MIN_GAP);
-    top = Math.min(top, safeBottom - r * 2 - 24);
-    if (top > zone.y) {
-      zone.h = safeBottom - top;
-      zone.y = top;
-    }
-    return zone;
-  };
+  const zoneAt = (side: Side, r: number, list: readonly Box[]): Box => moveZone(w, safe, side, r, list);
   const zone = zoneAt('left', moveR, avoid);
   const def: TouchLayout = {
     safe,
@@ -296,6 +278,29 @@ export function touchLayout(
     buttons: out,
     ...(res.fallback ? { fallback: true as const } : {}),
   };
+}
+
+/**
+ * 이동 영역 (창 CSS px): side 쪽 화면 40% 띠(MOVE_ZONE_RATIO, 안전 사각형 안). 판 HUD(list)와 가로로 겹치면 그 아래에서 시작하되
+ * 이동 스틱 그림(반지름 r) + 위 24px 높이는 남긴다 (M12 — 왼쪽이 기본, 좌우 반전 · 옮긴 이동 스틱이면 오른쪽)
+ */
+export function moveZone(w: number, safe: Box, side: Side, r: number, list: readonly Box[]): Box {
+  const band = Math.round(w * MOVE_ZONE_RATIO);
+  const safeBottom = safe.y + safe.h;
+  const zone: Box =
+    side === 'left'
+      ? { x: safe.x, y: safe.y, w: band - safe.x, h: safe.h }
+      : { x: w - band, y: safe.y, w: safe.x + safe.w - (w - band), h: safe.h };
+  let top = zone.y;
+  for (const b of list)
+    if (b.x < zone.x + zone.w && b.x + b.w > zone.x && b.y < safeBottom)
+      top = Math.max(top, b.y + b.h + MIN_GAP);
+  top = Math.min(top, safeBottom - r * 2 - 24);
+  if (top > zone.y) {
+    zone.h = safeBottom - top;
+    zone.y = top;
+  }
+  return zone;
 }
 
 /** 이동 스틱이 쉬는 고리 사각형 */

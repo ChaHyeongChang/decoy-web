@@ -168,8 +168,15 @@ export function serializeControlLayout(s: SavedLayouts): string | null {
   return any ? JSON.stringify(out) : null;
 }
 
-/** 저장한 두 역할 배치 (storage = 시험용 가짜, 없으면 브라우저 저장소) */
+/**
+ * 브라우저 저장소에 쓰지 못한 배치 (사생활 보호 · 가득 참): 이번 접속에는 이 값을 쓴다 (설정 화면의 '저장되지 않아요'와 같다).
+ * undefined = 없음
+ */
+let unsaved: string | null | undefined;
+
+/** 저장한 두 역할 배치 (storage = 시험용 가짜, 없으면 브라우저 저장소 — 쓰지 못했으면 이번 접속의 값) */
 export function loadControlLayouts(storage?: StorageLike | null): SavedLayouts {
+  if (storage === undefined && unsaved !== undefined) return parseControlLayout(unsaved);
   return parseControlLayout(readKey('controlLayout', '', storage));
 }
 
@@ -178,10 +185,13 @@ export function loadControlLayout(team: Team, storage?: StorageLike | null): Tea
   return loadControlLayouts(storage)[team];
 }
 
-/** 두 역할 배치를 저장한다 (둘 다 기본이면 키를 지운다). 저장하지 못하면 false */
+/** 두 역할 배치를 저장한다 (둘 다 기본이면 키를 지운다). 저장하지 못하면 false (브라우저 저장소면 이번 접속에는 적용) */
 export function saveControlLayouts(s: SavedLayouts, storage?: StorageLike | null): boolean {
   const raw = serializeControlLayout(s);
-  return raw === null ? removeKey('controlLayout', '', storage) : writeKey('controlLayout', raw, '', storage);
+  const ok =
+    raw === null ? removeKey('controlLayout', '', storage) : writeKey('controlLayout', raw, '', storage);
+  if (storage === undefined) unsaved = ok ? undefined : raw;
+  return ok;
 }
 
 /**
