@@ -968,6 +968,30 @@ describe('내 움직임 고르기 · 잔렉 고치기: 고르게 못 버티면 �
     }
   });
 
+  it('판 중에 화면 주사율이 바뀌어 낮춘 목표의 가장 가까운 약수가 사다리 밖이면 맨 아래 칸 (90 → 120Hz에 45 → 60, 120 → 165Hz에 60 → 82.5, 100 → 75Hz에 50 → 75): 사다리 밖 40 · 55 · 37.5에 머물지 않는다', () => {
+    // 작업 10ms: 맨 아래 칸(60 · 82.5)은 넉넉하지만 그 위 칸 예산의 절반은 못 맞춘다 — 예전에는 사다리 밖 칸에서 올리기 예산(한 칸 위의
+    // 절반 = 8.33 · 6.06ms)도 못 맞춰 그대로 머물렀다. 75Hz는 사다리가 한 칸뿐이라 낮춘 값이 남으면 세션 내내 묶였다
+    for (const [from, to, fb, work, want] of [
+      [90, 120, 45, 10, 60],
+      [120, 165, 60, 10, 82.5],
+      [100, 75, 50, 1, 75],
+    ] as const) {
+      const label = `${from} → ${to}Hz`;
+      const s = new AdaptiveSession('high', new AutoDowngrade(TOUCH_FPS_WATCH), 'auto', from);
+      // 처음 화면에서 고르지 않아 사다리 아래 칸으로
+      s.play(30_000, (_tier, hz) =>
+        hz >= from ? uneven(from * 0.92, 0.1) : { fps: hz, workP95: 1, late: 0 },
+      );
+      expect(s.fallback, `${label} 낮춤`).toBe(fb);
+      // 판 중 화면 주사율을 다시 재니 달랐다 (판 시작 15초 뒤)
+      s.play(200_000, (_tier, hz, e) => {
+        if (e >= 15_000) s.displayHz = to;
+        return { fps: hz, workP95: work, late: 0 };
+      });
+      expect(s.targetHz, label).toBe(want);
+    }
+  });
+
   it('늦은 프레임이 기준 미만이거나 잠깐뿐이면 120을 그대로 둔다', () => {
     const few = new AdaptiveSession('high', new AutoDowngrade(TOUCH_FPS_WATCH), 'auto', 120);
     expect(few.play(60_000, () => uneven(117, 0.03))).toEqual([]);
@@ -1094,6 +1118,39 @@ describe('렌더링 최적화: 샘플마다 할당하지 않는다', () => {
       }),
     ).toBe(0);
     expect(probing.status).toBe('probation');
+  });
+
+  it('자동 제한 · 사다리가 있는 화면(120 · 144 · 240Hz)에서도 감시 · 목표 FPS 단계 여유 감시 중 배열을 늘리거나 당기지 않는다 (검토: 사다리를 샘플마다 배열로 만들었다)', () => {
+    for (const hz of [120, 144, 240]) {
+      const ctx: AdaptContext = { targetHz: hz, displayHz: hz, canRateFallback: true };
+      // 하향 감시 (늦은 프레임이 있어도 결정 전까지)
+      const late: FrameSample = { fps: hz * 0.92, workP95: 3, late: 0.08 };
+      const watch = new AutoDowngrade();
+      watch.beginMatch(0);
+      expect(
+        countArrayCalls(() => {
+          for (let t = 0; t < 12_000; t += 1000 / hz) watch.sample(t, late, 'high', ctx);
+        }),
+        `${hz}Hz 감시`,
+      ).toBe(0);
+      // 결정까지 돌려 목표를 한 칸 내린 뒤(rate 단계가 맨 위), 여유가 없는 동안의 여유 감시
+      let t = 12_000;
+      let down: number | null = null;
+      for (; t < 40_000 && down === null; t += 1000 / hz) {
+        const a = watch.sample(t, late, 'high', ctx);
+        if (a?.kind === 'rateDown') down = a.to;
+      }
+      expect(down, `${hz}Hz 내림`).not.toBeNull();
+      const low: AdaptContext = { targetHz: down!, displayHz: hz, canRateFallback: true };
+      const busy: FrameSample = { fps: down!, workP95: 1000 / down!, late: 0 };
+      expect(
+        countArrayCalls(() => {
+          for (let u = t; u < t + 60_000; u += 1000 / down!) watch.sample(u, busy, 'high', low);
+        }),
+        `${hz}Hz 여유 감시`,
+      ).toBe(0);
+      expect(watch.steps[watch.steps.length - 1]?.kind, `${hz}Hz 단계`).toBe('rate');
+    }
   });
 
   it('여유 감시 · 올린 뒤 확인 단위: 끊김은 처음부터, 판단은 평균으로', () => {

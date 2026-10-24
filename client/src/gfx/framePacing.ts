@@ -54,8 +54,13 @@ export function saveFrameLimit(limit: FrameLimit, storage?: StorageLike | null):
 
 // ───────────── 화면 주사율 재기 ─────────────
 
-/** 흔한 화면 주사율 (재 값이 ±REFRESH.snapTolerance 안이면 이 값으로 맞춘다) */
-export const KNOWN_REFRESH_HZ: readonly number[] = [60, 72, 75, 90, 100, 120, 144, 165, 240];
+/**
+ * 흔한 화면 주사율 (재 값이 ±REFRESH.snapTolerance 안이면 이 값으로 맞춘다). 500은 넣지 않는다: 크롬은 rAF 시각을 0.1ms로 끊어
+ * 480Hz(2.08ms)의 짧은 쪽 간격이 2.0ms(500)로 잡힌다 — 500Hz 화면은 480으로 맞춰도 제한기 허용(반 vsync) 안이다
+ */
+export const KNOWN_REFRESH_HZ: readonly number[] = [
+  60, 72, 75, 90, 100, 120, 144, 165, 240, 280, 300, 360, 480, 540,
+];
 
 export const REFRESH = {
   /** 간격 고리 크기 (최근 rAF 간격 수) */
@@ -75,13 +80,16 @@ export const REFRESH = {
   snapTolerance: 0.07,
   /** 이 아래로는 보지 않는다: 바쁜 기기의 rAF가 30으로 떨어져도 기준(목표 FPS)을 낮추지 않게 */
   floorHz: 60,
-  /** 위 한계 */
-  capHz: 240,
+  /**
+   * 위 한계. 제한기가 이 값으로 vsync 길이를 재므로 실제 화면보다 낮게 자르면 안 된다(480Hz를 240으로 자르면 n칸 기준이 실제
+   * vsync 정수배에 걸려 3 · 4칸이 섞였다 — 잔렉 고치기 검토). 적응형 품질 기준은 quality.THRESHOLD_CAP_HZ로 따로 묶는다
+   */
+  capHz: 540,
 } as const;
 
 /**
  * 잰 주사율(Hz)을 흔한 값으로 맞춘다: 가장 가까운 KNOWN_REFRESH_HZ와 상대 오차가 ±7% 안이면 그 값, 아니면 반올림.
- * 그 뒤 [60, 240]으로 자른다. 잘못된 값(0 · 음수 · NaN)은 60
+ * 그 뒤 [60, 540]으로 자른다. 잘못된 값(0 · 음수 · NaN)은 60
  */
 export function snapRefreshHz(rawHz: number): number {
   if (!Number.isFinite(rawHz) || rawHz <= 0) return REFRESH.floorHz;
@@ -132,7 +140,7 @@ export class RefreshEstimator {
     }
   }
 
-  /** 맞춘 화면 주사율 (Hz, 60 ~ 240) */
+  /** 맞춘 화면 주사율 (Hz, 60 ~ 540) */
   get hz(): number {
     return this.reported;
   }
@@ -194,28 +202,62 @@ export function divisorFor(displayHz: number, wantHz: number): number {
  * 240 → [240, 120, 80, 60]
  */
 export function rateLadder(displayHz: number): number[] {
-  const out = [displayHz];
-  if (!(displayHz > 0) || !Number.isFinite(displayHz)) return out;
-  for (let n = 2; displayHz / n >= EVEN_RATE.ladderMinHz; n += 1) out.push(displayHz / n);
-  if (out.length === 1 && displayHz / 2 >= EVEN_RATE.ladderFloorHz) out.push(displayHz / 2);
+  const out: number[] = [];
+  const size = ladderSize(displayHz);
+  for (let i = 0; i < size; i += 1) out.push(rateRung(displayHz, i));
   return out;
 }
 
 /**
- * 지금 목표보다 낮은 사다리 칸 (없으면 null). 바로 아래 칸이 기본이고, fpsHint(느린 상태의 평균 FPS)를 주면 그 FPS 이하인 가장 높은
- * 칸까지 한 번에 내려간다(240Hz에서 100fps면 120을 건너뛰고 80) — 그 FPS 이하 칸이 없으면 맨 아래 칸
+ * 사다리 칸 수 (rateLadder 길이, 배열 없이 — 적응형 품질이 프레임마다 부른다). 칸 i의 값은 늘 화면 / (i + 1)이다
+ * (60 이상 약수는 n = 1, 2, …로 이어지고, 절반 한 칸 예외도 n = 2)
  */
-export function lowerRate(displayHz: number, targetHz: number, fpsHint?: number): number | null {
-  const below = rateLadder(displayHz).filter((hz) => hz < targetHz * (1 - 1e-9));
-  if (below.length === 0) return null;
-  if (fpsHint === undefined || !(fpsHint > 0)) return below[0] ?? null;
-  return below.find((hz) => hz <= fpsHint * (1 + 1e-9)) ?? below[below.length - 1] ?? null;
+export function ladderSize(displayHz: number): number {
+  if (!(displayHz > 0) || !Number.isFinite(displayHz)) return 1;
+  let size = 1;
+  for (let n = 2; displayHz / n >= EVEN_RATE.ladderMinHz; n += 1) size += 1;
+  return size === 1 && displayHz / 2 >= EVEN_RATE.ladderFloorHz ? 2 : size;
 }
 
-/** 지금 목표보다 한 단 높은 사다리 칸 (없으면 null) */
+/** 사다리 칸 i (0 = 화면 주사율) */
+function rateRung(displayHz: number, i: number): number {
+  return displayHz / (i + 1);
+}
+
+/** 사다리 맨 아래 칸 (Hz). 자동 목표는 이보다 낮아지지 않는다 */
+export function lowestRate(displayHz: number): number {
+  return rateRung(displayHz, ladderSize(displayHz) - 1);
+}
+
+/**
+ * 지금 목표보다 낮은 사다리 칸 (없으면 null). 바로 아래 칸이 기본이고, fpsHint(느린 상태의 평균 FPS)를 주면 그 FPS 이하인 가장 높은
+ * 칸까지 한 번에 내려간다(240Hz에서 100fps면 120을 건너뛰고 80) — 그 FPS 이하 칸이 없으면 맨 아래 칸. 할당하지 않는다
+ */
+export function lowerRate(displayHz: number, targetHz: number, fpsHint?: number): number | null {
+  const size = ladderSize(displayHz);
+  const hint = fpsHint !== undefined && fpsHint > 0 ? fpsHint : null;
+  let first: number | null = null;
+  let last: number | null = null;
+  for (let i = 0; i < size; i += 1) {
+    const hz = rateRung(displayHz, i);
+    if (!(hz < targetHz * (1 - 1e-9))) continue;
+    if (first === null) {
+      first = hz;
+      if (hint === null) return hz;
+    }
+    if (hint !== null && hz <= hint * (1 + 1e-9)) return hz;
+    last = hz;
+  }
+  return last;
+}
+
+/** 지금 목표보다 한 단 높은 사다리 칸 (없으면 null). 할당하지 않는다 */
 export function higherRate(displayHz: number, targetHz: number): number | null {
-  const above = rateLadder(displayHz).filter((hz) => hz > targetHz * (1 + 1e-9));
-  return above[above.length - 1] ?? null;
+  for (let i = ladderSize(displayHz) - 1; i >= 0; i -= 1) {
+    const hz = rateRung(displayHz, i);
+    if (hz > targetHz * (1 + 1e-9)) return hz;
+  }
+  return null;
 }
 
 // ───────────── 제한기 ─────────────
@@ -293,8 +335,12 @@ export class FrameLimiter {
  * FPS를 바꾸지 않는다)
  */
 export function targetHzFor(limit: FrameLimit, displayHz: number, fallbackHz: number | null): number {
+  // 자동: 낮춘 값이 있으면 가장 가까운 약수, 단 사다리 맨 아래 칸보다 낮추지 않는다 — 낮춘 뒤 잰 화면 주사율이 바뀌면(90 → 120Hz에
+  // 45) 가장 가까운 약수가 사다리 밖(40)이 되어 늦은 프레임 감시도 꺼진 채 머물렀다(검토)
   if (limit === 'auto')
-    return fallbackHz !== null ? displayHz / divisorFor(displayHz, fallbackHz) : displayHz;
+    return fallbackHz !== null
+      ? Math.max(displayHz / divisorFor(displayHz, fallbackHz), lowestRate(displayHz))
+      : displayHz;
   if (limit === 'half') return displayHz / 2;
   return displayHz / divisorFor(displayHz, Number(limit));
 }
@@ -314,6 +360,22 @@ export function capHzFor(limit: FrameLimit, displayHz: number, fallbackHz: numbe
  */
 export const IDLE_CAP_HZ = 30;
 
+/** 판 중 붙잡은 화면 주사율을 낮출 때: 붙잡은 값 ÷ 잰 값이 정수에서 이만큼 넘게 벗어나야 화면이 정말 바뀐 것으로 본다 */
+export const HELD_DROP_SLACK = 0.15;
+
+/**
+ * 판 중 붙잡은 화면 주사율의 다음 값: 더 높게 재면 올린다. 낮게 재면 대개 놓친 vsync(간격이 정수배로 는다 — 120 → 60, 144 → 72)라
+ * 그대로 두되, 비율이 정수배가 아니고(90 → 60, 180 → 120: 배터리 세이버 · 발열로 화면이 바뀜) 잰 값이 하한에 잘린 값이 아니면
+ * 그 값으로 내린다. 붙잡은 값을 그대로 두면 n = 2 제한기 기준(1.5 × 11.1ms)이 실제 60Hz 한 칸과 겹쳐 1 · 2칸이 섞였다(검토)
+ */
+export function heldAfter(heldHz: number, measuredHz: number, rawHz: number | null): number {
+  if (measuredHz > heldHz) return measuredHz;
+  if (measuredHz >= heldHz || rawHz === null) return heldHz;
+  if (rawHz < REFRESH.floorHz * (1 - REFRESH.snapTolerance)) return heldHz;
+  const r = heldHz / measuredHz;
+  return Math.abs(r - Math.round(r)) > HELD_DROP_SLACK ? measuredHz : heldHz;
+}
+
 /** 프레임 제한 · 화면 주사율 · 제한기를 묶는다. main.ts가 하나 만들어 patchTimeStep으로 Phaser 루프에 끼운다 */
 export class Pacer {
   readonly estimator = new RefreshEstimator();
@@ -323,7 +385,7 @@ export class Pacer {
   private current: FrameLimit;
   private fallback: number | null = null;
   private idleOn = false;
-  /** 판 중 붙잡은 화면 주사율 (판 중에는 낮아지지 않는다, 판 밖이면 null) */
+  /** 판 중 붙잡은 화면 주사율 (판 중에는 정수배로 낮아지지 않는다 — heldAfter, 판 밖이면 null) */
   private heldHz: number | null = null;
 
   constructor(limit: FrameLimit = 'auto') {
@@ -363,9 +425,9 @@ export class Pacer {
   }
 
   /**
-   * 화면 주사율. 판 중에는 판 시작(또는 그 뒤 더 높게 잰) 값을 붙잡고 낮추지 않는다: 판 중 rAF는 게임 작업에 밀려 간격이 늘 수 있고
-   * (120을 못 버티는 기기), 그것을 화면이 느려진 것으로 보면 자동 제한의 목표 낮추기 · 60 제한이 꺼진다. 화면이 정말 느려졌으면
-   * (절전) 목표를 못 버텨 적응형 품질이 목표를 낮춘다. 판 밖(가벼운 30fps)에서는 잰 값을 그대로 쓴다
+   * 화면 주사율. 판 중에는 판 시작(또는 그 뒤 더 높게 잰) 값을 붙잡고 정수배로 낮아진 값으로는 낮추지 않는다: 판 중 rAF는 게임 작업에
+   * 밀려 간격이 늘 수 있고(120을 못 버티는 기기), 그것을 화면이 느려진 것으로 보면 자동 제한의 목표 낮추기 · 60 제한이 꺼진다. 정수배가
+   * 아닌 비율(90 → 60)은 화면이 바뀐 것이라 내린다(heldAfter). 판 밖(가벼운 30fps)에서는 잰 값을 그대로 쓴다
    */
   get displayHz(): number {
     return this.heldHz ?? this.estimator.hz;
@@ -394,7 +456,7 @@ export class Pacer {
   onTick(t: number): boolean {
     // 주사율 재기는 건너뛸 tick도 본다 (제한 · 판 없음과 상관없이 실제 화면 주사율)
     this.estimator.tick(t);
-    if (this.heldHz !== null && this.estimator.hz > this.heldHz) this.heldHz = this.estimator.hz;
+    if (this.heldHz !== null) this.heldHz = heldAfter(this.heldHz, this.estimator.hz, this.estimator.rawHz);
     this.limiter.setCap(this.capHz);
     const run = this.limiter.shouldRun(t, this.displayHz);
     if (!run) this.onSkip?.(t);

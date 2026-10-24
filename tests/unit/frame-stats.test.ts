@@ -258,6 +258,27 @@ describe('FrameStats: 최근 구간 FPS (적응형 품질 · 표시)', () => {
     expect(s.window(2000).workP95).toBeCloseTo(12, 5);
   });
 
+  it('늦은 프레임 = 간격 ≥ 목표 주기 + 반 vsync: 144Hz · 목표 72에서 2칸(13.9ms)은 늦지 않고 3칸(20.8ms)은 늦다 (lateWindowFor와 같은 창)', () => {
+    const s = new FrameStats();
+    const v = 1000 / 144;
+    let t = 1000;
+    // 2칸 18번 + 3칸 2번 = 간격 20개 중 2개 늦음
+    const steps = [...Array.from({ length: 9 }, () => 2), 3, ...Array.from({ length: 9 }, () => 2), 3];
+    s.begin(t, t);
+    s.end(t + 1);
+    for (const k of steps) {
+      t += k * v;
+      s.begin(t, t);
+      s.end(t + 1);
+    }
+    const late = { periodMs: 2 * v, slackMs: 0.5 * v };
+    expect(s.window(1000, undefined, late).late).toBeCloseTo(0.1, 9);
+    // 목표 144(주기 1칸)로 보면 모두 늦다
+    expect(s.window(1000, undefined, { periodMs: v, slackMs: 0.5 * v }).late).toBe(1);
+    // 창을 주지 않으면 0
+    expect(s.window(1000).late).toBe(0);
+  });
+
   it('out을 주면 그 객체를 채워 돌려준다 (프레임마다 불러도 할당 없음)', () => {
     const s = new FrameStats();
     feed(s, 30, 60);

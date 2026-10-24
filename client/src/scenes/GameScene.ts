@@ -29,7 +29,7 @@ import { sfx } from '../audio';
 import { HELP_TEXT, STORY_TEXT, UI_TEXT, formatText } from '../data/storyText';
 import { device } from '../device';
 import { FPS_WINDOW_MS, sessionFrameStats, type FrameWindow } from '../gfx/frameStats';
-import { rateLadder } from '../gfx/framePacing';
+import { ladderSize } from '../gfx/framePacing';
 import {
   lateWindowFor,
   qualityHooks,
@@ -1476,7 +1476,7 @@ export class GameScene extends Phaser.Scene {
     ctx.targetHz = gfxState.targetHz;
     ctx.displayHz = gfxState.displayHz;
     // 목표 FPS를 약수 사다리로 내리고 올릴 수 있는가 (자동 제한 · 화면 주사율에 60 이상 약수가 있음 — 60 · 75Hz는 없다)
-    ctx.canRateFallback = gfxState.frameLimit === 'auto' && rateLadder(gfxState.displayHz).length > 1;
+    ctx.canRateFallback = gfxState.frameLimit === 'auto' && ladderSize(gfxState.displayHz) > 1;
     const action = sessionAutoDowngrade.sample(now, sample, gfxState.quality, ctx);
     gfxState.measuredFps = sessionAutoDowngrade.average;
     if (action) qualityHooks.auto?.(action);

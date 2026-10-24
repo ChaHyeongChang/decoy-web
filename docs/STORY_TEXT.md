@@ -202,7 +202,7 @@
 |---|---|---|---|
 | 로비 | 설정 묶음 제목 | 설정 | `settings` |
 | 로비 | 진동 설정 | 진동 · 켜기 / 끄기 | `haptics` · `hapticsOn` · `hapticsOff` |
-| 로비 (터치, 렌더링 최적화 · 잔렉 고치기) | 프레임 제한 설정 · 줄 아래 안내 | 프레임 제한 · 자동 / 60 / 120 / 절반 · 배터리를 아끼려면 60 · 화면 주사율을 나눠 고르게 그려요 (144Hz: 60 → 72) | `UI_TEXT.frameLimit` · `frameLimitAuto` · `frameLimit60` · `frameLimit120` · `frameLimitHalf` · `frameLimitHint` |
+| 로비 (터치, 렌더링 최적화 · 잔렉 고치기) | 프레임 제한 설정 · 줄 아래 안내 | 프레임 제한 · 자동 / 60 / 120 / 절반 · 화면 주사율을 나눠 고르게 그려요 (144Hz: 60 → 72, 75Hz: 60 = 자동) · 배터리를 더 아끼려면 절반 | `UI_TEXT.frameLimit` · `frameLimitAuto` · `frameLimit60` · `frameLimit120` · `frameLimitHalf` · `frameLimitHint` |
 | 로비 (터치, 캐릭터 리디자인) | 캐릭터 스타일 설정 | 캐릭터 스타일 · 기존 / 새 캐릭터 | `UI_TEXT.charStyle` · `charStyleClassic` · `charStyleNew` |
 | 로비 (터치) | 안내 다시 보기 버튼 · 누른 뒤 | 터치 조작 안내 다시 보기 · 다음 판 전에 다시 보여 드려요 | `tutorialReplay` · `tutorialReplayDone` |
 | 다른 탭에서 접속 안내 | 버튼 | 여기서 계속하기 | `continueHere` |

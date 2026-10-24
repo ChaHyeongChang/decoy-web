@@ -19,6 +19,10 @@ import {
   isFrameLimit,
   lowerRate,
   rateLadder,
+  ladderSize,
+  lowestRate,
+  heldAfter,
+  HELD_DROP_SLACK,
   loadFrameLimit,
   parseFrameLimit,
   patchTimeStep,
@@ -174,10 +178,16 @@ describe('화면 주사율 맞추기 (snapRefreshHz)', () => {
     expect(snapRefreshHz(200)).toBe(200);
   });
 
-  it('바닥 60 · 위 240, 잘못된 값은 60', () => {
+  it('바닥 60 · 위 540(240Hz보다 빠른 화면도 자르지 않는다 — 제한기가 이 값으로 vsync 길이를 잰다), 잘못된 값은 60', () => {
     expect(snapRefreshHz(30)).toBe(60);
     expect(snapRefreshHz(48)).toBe(60);
-    expect(snapRefreshHz(360)).toBe(240);
+    expect(snapRefreshHz(281)).toBe(280);
+    expect(snapRefreshHz(359)).toBe(360);
+    expect(snapRefreshHz(478)).toBe(480);
+    // 0.1ms로 끊은 480Hz rAF의 짧은 쪽 간격 2.0ms(500)도 480
+    expect(snapRefreshHz(500)).toBe(480);
+    expect(snapRefreshHz(1000)).toBe(540);
+    expect(REFRESH.capHz).toBe(540);
     for (const v of [0, -5, Number.NaN, Infinity]) expect(snapRefreshHz(v), String(v)).toBe(60);
   });
 });
@@ -528,6 +538,18 @@ describe('목표 FPS (targetHzFor) · 제한기 제한 (capHzFor)', () => {
       ['half', 165, null, 82.5, 82.5],
       ['half', 240, null, 120, 120],
       ['half', 144, 48, 72, 72],
+      // 낮춘 뒤 잰 화면 주사율이 바뀌어 가장 가까운 약수가 사다리 밖이면 맨 아래 칸 (검토: 90 → 120Hz에 45가 40으로 떨어지던 것)
+      ['auto', 120, 45, 60, 60],
+      ['auto', 165, 60, 82.5, 82.5],
+      ['auto', 144, 50, 72, 72],
+      ['auto', 75, 50, 75, null],
+      ['auto', 240, 45, 60, 60],
+      ['auto', 90, 45, 45, 45],
+      // 240Hz보다 빠른 화면
+      ['half', 480, null, 240, 240],
+      ['120', 480, null, 120, 120],
+      ['60', 480, null, 60, 60],
+      ['half', 360, null, 180, 180],
     ];
     for (const [limit, display, fb, target, cap] of rows) {
       const label = `${limit} · 화면 ${display} · fallback ${fb}`;
@@ -551,7 +573,18 @@ describe('고른 목표 사다리 (rateLadder · lowerRate · higherRate · divi
       [240, [240, 120, 80, 60]],
     ];
     for (const [hz, ladder] of rows) expect(rateLadder(hz), `${hz}Hz`).toEqual(ladder);
+    expect(rateLadder(480)).toEqual([480, 240, 160, 120, 96, 80, 480 / 7, 60]);
     expect(EVEN_RATE).toEqual({ ladderMinHz: 60, ladderFloorHz: 45 });
+  });
+
+  it('ladderSize · lowestRate = rateLadder 길이 · 맨 아래 칸 (배열 없이, 칸 i = 화면 / (i + 1))', () => {
+    for (const hz of [60, 66, 72, 75, 90, 100, 110, 120, 144, 165, 200, 240, 280, 300, 360, 480, 540]) {
+      const ladder = rateLadder(hz);
+      expect(ladderSize(hz), `${hz}Hz`).toBe(ladder.length);
+      expect(lowestRate(hz), `${hz}Hz`).toBe(ladder[ladder.length - 1]);
+      ladder.forEach((v, i) => expect(v, `${hz}Hz 칸 ${i}`).toBe(hz / (i + 1)));
+    }
+    for (const bad of [0, -1, Number.NaN, Infinity]) expect(ladderSize(bad)).toBe(1);
   });
 
   it('한 칸 아래 · 위, 느린 FPS를 주면 그 FPS 이하 가장 높은 칸까지 한 번에 (없으면 맨 아래)', () => {
@@ -651,6 +684,116 @@ describe('Pacer (주사율 재기 + 제한기 + 판 없음 30fps)', () => {
       const ts = ticks(display, 5000, { t0: 1000, jitter: 0.3, seed: 5 });
       const n = feed(p, ts);
       expect(Math.abs(n - target * 5), label).toBeLessThanOrEqual(1);
+    }
+  });
+
+  /** 크롬처럼 rAF 시각을 0.1ms로 끊는다 (교차 출처 격리 없는 페이지) */
+  const coarse = (ts: readonly number[]): number[] => ts.map((t) => Math.round(t * 10) / 10);
+  /** 그린 rAF 사이 간격을 vsync 칸 수로 (값 → 개수) */
+  const drawnSteps = (p: Pacer, ts: readonly number[], hz: number): Record<number, number> => {
+    const out: Record<number, number> = {};
+    let last: number | null = null;
+    for (const t of ts) {
+      if (!p.onTick(t)) continue;
+      if (last !== null) {
+        const k = Math.round(((t - last) * hz) / 1000);
+        out[k] = (out[k] ?? 0) + 1;
+      }
+      last = t;
+    }
+    return out;
+  };
+
+  it('240Hz보다 빠른 화면(280 · 360 · 480Hz): 실제 주사율로 재고 제한 · 절반 · 낮춤 · 판 밖이 늘 n칸 (검토: 240으로 자르면 480Hz에 3 · 4칸이 섞였다)', () => {
+    const rows: [number, FrameLimit, number | null, number][] = [
+      [480, '120', null, 4],
+      [480, '60', null, 8],
+      [480, 'half', null, 2],
+      [480, 'auto', 120, 4],
+      [480, 'auto', 80, 6],
+      [360, 'half', null, 2],
+      [360, '120', null, 3],
+      [280, 'half', null, 2],
+      [280, 'auto', 80, 4],
+    ];
+    for (const [hz, limit, fb, n] of rows) {
+      const label = `${hz}Hz · ${limit} · fallback ${fb}`;
+      const p = new Pacer(limit);
+      feed(p, coarse(ticks(hz, 1500, { t0: 0, jitter: 0.05, seed: hz })));
+      p.setIdle(false);
+      p.setFallback(fb);
+      expect(p.displayHz, label).toBe(hz);
+      const steps = drawnSteps(p, coarse(ticks(hz, 4000, { t0: 1500, jitter: 0.05, seed: hz + 1 })), hz);
+      expect(Object.keys(steps).map(Number), label).toEqual([n]);
+    }
+    // 판 밖 30fps도 약수: 480Hz → 16칸
+    const idle = new Pacer();
+    feed(idle, coarse(ticks(480, 1500, { t0: 0, jitter: 0.05 })));
+    idle.setIdle(true);
+    expect(
+      Object.keys(drawnSteps(idle, coarse(ticks(480, 3000, { t0: 1500, jitter: 0.05, seed: 3 })), 480)),
+    ).toEqual(['16']);
+  });
+
+  it('heldAfter: 높게 재면 올리고, 정수배로 낮아지면(놓친 vsync) 그대로, 정수배가 아닌 비율(90 → 60, 180 → 120, 120 → 90)이면 내린다, 하한에 잘린 값으로는 내리지 않는다', () => {
+    expect(heldAfter(120, 144, 144)).toBe(144);
+    expect(heldAfter(120, 120, 120)).toBe(120);
+    expect(heldAfter(120, 60, 60)).toBe(120);
+    expect(heldAfter(144, 72, 72)).toBe(144);
+    expect(heldAfter(240, 120, 120)).toBe(240);
+    expect(heldAfter(165, 83, 82.5)).toBe(165);
+    expect(heldAfter(90, 60, 60)).toBe(60);
+    expect(heldAfter(180, 120, 120)).toBe(120);
+    expect(heldAfter(120, 90, 90)).toBe(90);
+    // 90Hz에서 프레임마다 vsync를 놓치면 raw 45 → 60으로 잘림: 화면이 바뀐 것이 아니다
+    expect(heldAfter(90, 60, 45)).toBe(90);
+    expect(heldAfter(90, 60, null)).toBe(90);
+    expect(HELD_DROP_SLACK).toBe(0.15);
+  });
+
+  it('판 중 화면이 90 → 60Hz로 바뀌면(절전 · 발열) 60으로 다시 잡아 60 · 절반 · 자동이 고르다 (검토: 90을 붙잡으면 1 · 2칸이 섞여 약 38fps)', () => {
+    for (const [limit, fb, steps] of [
+      ['60', null, ['1']],
+      ['half', null, ['2']],
+      ['auto', 45, ['1']],
+    ] as const) {
+      const label = `${limit} · fallback ${fb}`;
+      const p = new Pacer(limit);
+      feed(p, coarse(ticks(90, 1500, { t0: 0, jitter: 0.05 })));
+      p.setIdle(false);
+      p.setFallback(fb);
+      expect(p.displayHz, label).toBe(90);
+      // 판 중 60Hz: 간격 고리(120개)의 짧은 쪽 20%가 60Hz 간격이 되고 잰 값이 두 번 같게 나올 때까지(약 2.5초) 지난 뒤부터 본다
+      feed(p, coarse(ticks(60, 3000, { t0: 1500, jitter: 0.05, seed: 2 })));
+      expect(p.displayHz, label).toBe(60);
+      const got = drawnSteps(p, coarse(ticks(60, 4000, { t0: 4500, jitter: 0.05, seed: 3 })), 60);
+      expect(Object.keys(got), label).toEqual(steps);
+    }
+  });
+
+  it('판 중 무거운 프레임으로 rAF가 vsync를 놓쳐도(90 · 120Hz, 무거운 · 가벼운 구간 번갈아) 붙잡은 화면 주사율 · n칸 그대로 (정수배)', () => {
+    for (const [hz, limit, n] of [
+      [90, '60', 2],
+      [120, '60', 2],
+      [120, 'half', 2],
+    ] as const) {
+      const label = `${hz}Hz · ${limit}`;
+      const p = new Pacer(limit);
+      feed(p, coarse(ticks(hz, 1500, { t0: 0, jitter: 0.05 })));
+      p.setIdle(false);
+      const ts: number[] = [];
+      let t = 1500;
+      for (let block = 0; block < 6; block += 1) {
+        // 무거운 구간: 모든 rAF가 한 칸씩 놓침(간격 2칸), 가벼운 구간: 매 칸
+        const step = block % 2 === 0 ? 2 : 1;
+        for (let k = 0; k < 2 * hz; k += step) {
+          ts.push(t);
+          t += (step * 1000) / hz;
+        }
+      }
+      const got = drawnSteps(p, coarse(ts), hz);
+      expect(p.displayHz, label).toBe(hz);
+      expect(Object.keys(got), label).toEqual([String(n)]);
     }
   });
 

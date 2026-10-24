@@ -1,6 +1,6 @@
 // 적응형 품질 단위 테스트용 세션 (렌더링 최적화): 판을 이어서 돌리며 자동 조정을 적용한다.
 // main.ts qualityHooks.auto · 프레임 페이싱(framePacing Pacer.setFallback · targetHzFor)과 같은 규칙으로 품질 · 목표 FPS를 바꾼다
-import { rateLadder, targetHzFor, type FrameLimit } from '../../client/src/gfx/framePacing';
+import { ladderSize, targetHzFor, type FrameLimit } from '../../client/src/gfx/framePacing';
 import type { QualityTier } from '../../client/src/gfx/presets';
 import type {
   AdaptContext,
@@ -54,7 +54,7 @@ export class AdaptiveSession {
     return {
       targetHz: this.targetHz,
       displayHz: this.displayHz,
-      canRateFallback: this.limit === 'auto' && rateLadder(this.displayHz).length > 1,
+      canRateFallback: this.limit === 'auto' && ladderSize(this.displayHz) > 1,
     };
   }
 
