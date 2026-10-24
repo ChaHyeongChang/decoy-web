@@ -283,7 +283,8 @@ export const LIMITER = {
  * 예: 120Hz에 60 → 한 번 걸러 한 번, 144Hz에 60 → n 2(72), 165Hz에 60 → n 3(55), 90Hz에 60 → n 2(45)
  *
  * 나누어떨어지지 않는 제한을 평균만 맞추던 예전 방식(90Hz에 60이면 11.1 · 22.2ms가 섞임)은 움직임이 고르지 않아 버렸다
- * (잔렉 고치기, DECISIONS 12절). 화면 주사율을 조금 잘못 재도(±30%) 반 vsync 허용이라 n칸마다 그린다
+ * (잔렉 고치기, DECISIONS 12절). 반 vsync 허용이라 화면 주사율을 조금 잘못 재도 n칸마다 그린다: 잰 값 ÷ 실제 값 r이
+ * (n − 1)/(n − 0.5) < r ≤ n/(n − 0.5)이면 된다(n = 2 약 ±30%, n = 3 약 ±20%, n = 6 약 ±9%)
  */
 export class FrameLimiter {
   private cap: number | null = null;
