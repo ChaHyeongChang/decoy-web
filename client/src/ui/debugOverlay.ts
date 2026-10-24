@@ -1,5 +1,5 @@
 // ?debug=1 오버레이 (렌더링 최적화에서 debug.ts에서 옮기고 넓혔다): 한 화면에 FPS · 목표 · 화면 주사율 · 프레임 제한,
-// 프레임 간격 · 작업 시간(평균 · p95), 그리기 호출, 핑 · 서버 틱, 예측 오차, 품질 · 자동 조정, DPR · 백버퍼, 렌더러 · 입력 · 밸런스.
+// 프레임 간격 · 늦음 · 넘김, 작업 시간(평균 · p95 · 안개 주기 프레임 p95), 그리기 호출, 핑 · 서버 틱, 예측 오차, 품질 · 자동 조정, DPR · 백버퍼, 렌더러 · 입력 · 밸런스.
 // 배포 빌드에서도 ?debug=1만으로 뜬다(실제 휴대폰에서 잰다). 개발자용이라 한국어 이름표를 여기에 바로 쓴다.
 //  - 접기 · 펼치기: 칩(▸ 119fps 8.3ms)을 누르면 표가 열리고 닫힌다. 터치 기기는 접은 채, PC는 펼친 채 시작. 저장하지 않는다
 //  - 칩(누르는 자리 44px 높이)만 입력을 받고 표는 손가락 · 마우스가 통과한다(pointer-events: none). 칩을 누른 것은
@@ -21,10 +21,17 @@ export interface DebugOverlayData {
   /** 프레임 측정 요약 (아직 렌더한 프레임이 없으면 null) */
   stats: FrameStatsInfo | null;
   /**
-   * 최근 1초 늦은 프레임 비율 (0~1, 간격 ≥ 목표 주기 × 1.5 — vsync를 놓친 프레임, 적응형 목표 FPS의 고르지 않은 프레임 기준).
-   * 모르면 null
+   * 최근 1초 늦은 프레임 비율 (0~1, 간격 ≥ 목표 주기 + 반 vsync — rAF가 vsync를 건너뛴 프레임, 적응형 목표 FPS의 고르지 않은
+   * 프레임 기준). 모르면 null
    */
   late: number | null;
+  /**
+   * 최근 1초 vsync를 넘긴 프레임 비율 (0~1, rAF 시각부터 그리기를 마칠 때까지가 한 vsync보다 긴 프레임 — 다음 vsync로 밀려 늦게
+   * 보인다. 크롬은 다음 rAF에 같은 격자 시각을 줘 FPS · 늦음에는 안 나온다). 모르면 null
+   */
+  overrun: number | null;
+  /** 안개 주기 프레임(빛 지도를 다시 칠한 프레임)의 작업 시간 p95 (ms, 버퍼 전체). 안개 프레임이 없으면 null */
+  fogWorkP95: number | null;
   targetHz: number;
   displayHz: number;
   frameLimit: FrameLimit;
@@ -60,6 +67,9 @@ const LIMIT_LABEL: Record<FrameLimit, string> = { auto: '자동', '60': '60', '1
 const NONE = '-';
 
 const ms = (v: number | undefined): string => (v === undefined ? NONE : `${v.toFixed(2)}ms`);
+/** 비율 (0~1 → 정수 %). 값이나 측정이 없으면 '-' */
+const pct = (v: number | null, s: FrameStatsInfo | null): string =>
+  v === null || s === null ? NONE : `${Math.round(v * 100)}%`;
 /** 목표 FPS: 화면 주사율의 약수라 반 정수가 될 수 있다(165Hz의 절반 82.5). 그 밖에는 정수로(59.7 → 60) */
 const hzText = (v: number): string => {
   const twice = v * 2;
@@ -77,8 +87,8 @@ function drawText(s: FrameStatsInfo | null, renderer: DebugOverlayData['renderer
 /**
  * 펼친 표 (8줄).
  *   FPS 119.8 · 목표 120 · 화면 120Hz · 제한 자동
- *   프레임 8.33ms · p95 8.90ms · 늦음 3%
- *   작업 4.10ms · p95 6.02ms
+ *   프레임 8.33ms · p95 8.90ms · 늦음 3% · 넘김 14%
+ *   작업 4.10ms · p95 6.02ms · 안개 p95 9.10ms
  *   그리기 12회 · 건너뜀 0 · 렌더러 webgl        ← Canvas: 그리기 객체 230개
  *   핑 42ms · 지연설정 0ms · 서버 틱 1234 · 스냅샷 567
  *   예측 오차 0.012타일 · 대기 3 · 입력 touch
@@ -90,10 +100,10 @@ export function formatDebugPanel(d: DebugOverlayData): string {
   return [
     `FPS ${s ? s.fps.toFixed(1) : NONE} · 목표 ${hzText(d.targetHz)} · 화면 ${Math.round(d.displayHz)}Hz · ` +
       `제한 ${LIMIT_LABEL[d.frameLimit]}`,
-    `프레임 ${ms(s?.intervalAvg)} · p95 ${ms(s?.intervalP95)} · 늦음 ${
-      d.late === null || s === null ? NONE : `${Math.round(d.late * 100)}%`
+    `프레임 ${ms(s?.intervalAvg)} · p95 ${ms(s?.intervalP95)} · 늦음 ${pct(d.late, s)} · 넘김 ${pct(d.overrun, s)}`,
+    `작업 ${ms(s?.workAvg)} · p95 ${ms(s?.workP95)} · 안개 p95 ${
+      d.fogWorkP95 === null || s === null ? NONE : ms(d.fogWorkP95)
     }`,
-    `작업 ${ms(s?.workAvg)} · p95 ${ms(s?.workP95)}`,
     `그리기 ${drawText(s, d.renderer)} · 건너뜀 ${s ? s.skipped : NONE} · 렌더러 ${d.renderer}`,
     `핑 ${d.ping.toFixed(0)}ms · 지연설정 ${d.lag}ms · 서버 틱 ${d.tick ?? NONE} · 스냅샷 ${d.snapCount}`,
     `예측 오차 ${d.correction.toFixed(3)}타일 · 대기 ${d.pending} · 입력 ${d.inputMode}`,

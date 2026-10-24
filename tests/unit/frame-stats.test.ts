@@ -279,6 +279,44 @@ describe('FrameStats: 최근 구간 FPS (적응형 품질 · 표시)', () => {
     expect(s.window(1000).late).toBe(0);
   });
 
+  it('넘김: rAF 시각부터 그리기를 마칠 때까지가 한 vsync보다 긴 프레임 비율 (콜백이 늦게 시작한 시간도 센다, 크롬은 같은 격자 시각을 줘 간격 · 늦음에는 안 나온다)', () => {
+    const s = new FrameStats();
+    const v = 1000 / 144;
+    // 144Hz 격자 70프레임: 7번에 한 번(안개 주기) 작업 9ms → 다음 프레임도 2.1ms 늦게 시작
+    let carry = 0;
+    for (let k = 0; k < 70; k++) {
+      const t = 1000 + k * v;
+      const start = t + 0.3 + carry;
+      const work = k % 7 === 0 ? 9 : 2;
+      s.begin(t, start);
+      s.end(start + work);
+      carry = Math.max(0, start + work - (t + v));
+    }
+    // 간격은 모두 1칸이라 늦음 0, 넘김은 안개 프레임 10개 / 70
+    expect(s.window(1000, undefined, { periodMs: v, slackMs: v / 2 }).late).toBe(0);
+    expect(s.overrun(1000, v)).toBeCloseTo(10 / 70, 9);
+    // 잘못된 vsync · 빈 측정은 0
+    expect(s.overrun(1000, 0)).toBe(0);
+    expect(new FrameStats().overrun(1000, v)).toBe(0);
+  });
+
+  it('안개 프레임 작업 p95: markFog를 부른 프레임과 그 밖을 따로 (begin 밖의 markFog는 무시, 안개 프레임이 없으면 null)', () => {
+    const s = new FrameStats();
+    s.markFog();
+    for (let k = 0; k < 60; k++) {
+      const t = 1000 + (k * 1000) / 60;
+      s.begin(t, t);
+      if (k % 3 === 0) s.markFog();
+      s.end(t + (k % 3 === 0 ? 8 : 2));
+    }
+    const out = { fog: null as number | null, other: 0 };
+    expect(s.fogWork(out)).toBe(out);
+    expect(out).toEqual({ fog: 8, other: 2 });
+    const none = new FrameStats();
+    feed(none, 10, 60);
+    expect(none.fogWork()).toEqual({ fog: null, other: 2 });
+  });
+
   it('out을 주면 그 객체를 채워 돌려준다 (프레임마다 불러도 할당 없음)', () => {
     const s = new FrameStats();
     feed(s, 30, 60);

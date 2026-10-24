@@ -335,11 +335,22 @@ function lateRatio(): number | null {
   return w.frames > 1 ? w.late : null;
 }
 
+/** 오버레이 안개 프레임 작업 그릇 */
+const FOG_WORK = { fog: null as number | null, other: 0 };
+
+/** 최근 1초 vsync를 넘긴 프레임 비율 (렌더한 프레임이 2개 미만이면 null) */
+function overrunRatio(): number | null {
+  if (sessionFrameStats.recorded < 2) return null;
+  return sessionFrameStats.overrun(FPS_WINDOW_MS, 1000 / Math.max(1, gfxState.displayHz));
+}
+
 function overlayData(app: App, hook: DecoyDebug): DebugOverlayData {
   const renderer = hook.renderer;
   return {
     stats: frameStatsInfo(),
     late: lateRatio(),
+    overrun: overrunRatio(),
+    fogWorkP95: sessionFrameStats.recorded > 0 ? sessionFrameStats.fogWork(FOG_WORK).fog : null,
     targetHz: gfxState.targetHz,
     displayHz: gfxState.displayHz,
     frameLimit: gfxState.frameLimit,

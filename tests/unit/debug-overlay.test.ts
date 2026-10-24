@@ -28,6 +28,8 @@ const STATS: FrameStatsInfo = {
 const DATA: DebugOverlayData = {
   stats: STATS,
   late: 0.03,
+  overrun: 0.14,
+  fogWorkP95: 9.1,
   targetHz: 120,
   displayHz: 120,
   frameLimit: 'auto',
@@ -54,8 +56,8 @@ describe('formatDebugPanel (펼친 표)', () => {
     expect(formatDebugPanel(DATA)).toBe(
       [
         'FPS 119.8 · 목표 120 · 화면 120Hz · 제한 자동',
-        '프레임 8.33ms · p95 8.90ms · 늦음 3%',
-        '작업 4.10ms · p95 6.02ms',
+        '프레임 8.33ms · p95 8.90ms · 늦음 3% · 넘김 14%',
+        '작업 4.10ms · p95 6.02ms · 안개 p95 9.10ms',
         '그리기 12회 · 건너뜀 0 · 렌더러 webgl',
         '핑 42ms · 지연설정 0ms · 서버 틱 1234 · 스냅샷 567',
         '예측 오차 0.012타일 · 대기 3 · 입력 touch',
@@ -134,12 +136,18 @@ describe('formatDebugPanel (펼친 표)', () => {
     );
   });
 
+  it('넘김 · 안개 p95를 모르면 - (안개 프레임이 아직 없음)', () => {
+    const lines = formatDebugPanel({ ...DATA, overrun: null, fogWorkP95: null }).split('\n');
+    expect(lines[1]).toBe('프레임 8.33ms · p95 8.90ms · 늦음 3% · 넘김 -');
+    expect(lines[2]).toBe('작업 4.10ms · p95 6.02ms · 안개 p95 -');
+  });
+
   it('아직 렌더한 프레임이 없거나 스냅샷이 없으면 -', () => {
     const lines = formatDebugPanel({ ...DATA, stats: null, tick: null }).split('\n');
     expect(lines.slice(0, 5)).toEqual([
       'FPS - · 목표 120 · 화면 120Hz · 제한 자동',
-      '프레임 - · p95 - · 늦음 -',
-      '작업 - · p95 -',
+      '프레임 - · p95 - · 늦음 - · 넘김 -',
+      '작업 - · p95 - · 안개 p95 -',
       '그리기 - · 건너뜀 - · 렌더러 webgl',
       '핑 42ms · 지연설정 0ms · 서버 틱 - · 스냅샷 567',
     ]);

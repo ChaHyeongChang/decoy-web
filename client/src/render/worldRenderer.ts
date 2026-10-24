@@ -71,6 +71,7 @@ import {
 import { CONE, DANGER, NEON, ROLE, WARN } from '../art/palette';
 import { effectivePreset, type QualityPreset, type RendererKind } from '../gfx/presets';
 import { currentCharStyle } from '../gfx/charStyle';
+import { noteFogFrame } from '../gfx/frameStats';
 import { fogFollowDisabled, gfxNow, gfxState, onGfxChange } from '../gfx/state';
 import { MAP_PX_H, MAP_PX_W, MAP_X, MAP_Y, WORLD_SCALE, worldLine } from '../ui/layout';
 import {
@@ -1040,6 +1041,8 @@ export class WorldRenderer {
     this.baseRefreshed = false;
     this.gaitDrawn.clear();
     if (fogDue) {
+      // 프레임 측정: 이 프레임은 안개 주기 프레임 (?debug=1 '안개 p95' — 안개 프레임만 무거워 vsync를 넘기는지 본다)
+      noteFogFrame();
       const b = this.fog;
       b.begin();
       b.drawPoints(snap.world.points, balance);

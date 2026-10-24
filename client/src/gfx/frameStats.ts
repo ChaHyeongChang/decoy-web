@@ -85,6 +85,10 @@ export class FrameStats {
   private readonly intervals: Float32Array;
   /** 메인 스레드 작업 시간 (ms) */
   private readonly works: Float32Array;
+  /** rAF 시각(vsync)부터 그리기를 마칠 때까지 (ms): 콜백이 늦게 시작한 시간 + 작업 시간. 한 vsync를 넘으면 그 프레임은 늦게 보인다 */
+  private readonly spans: Float32Array;
+  /** 안개 주기(빛 지도를 다시 칠한) 프레임이면 1 */
+  private readonly fogs: Uint8Array;
   /** 백분위 계산용 (요약할 때만 쓴다) */
   private readonly scratch: Float32Array;
   /** 다음에 쓸 칸 */
@@ -101,6 +105,8 @@ export class FrameStats {
   private open = false;
   private beginT = 0;
   private beginWall = 0;
+  /** 지금 열린 프레임이 안개 주기 프레임인가 (markFog) */
+  private fogOpen = false;
   private override: number | null = null;
 
   /**
@@ -115,6 +121,8 @@ export class FrameStats {
     this.times = new Float64Array(this.capacity);
     this.intervals = new Float32Array(this.capacity);
     this.works = new Float32Array(this.capacity);
+    this.spans = new Float32Array(this.capacity);
+    this.fogs = new Uint8Array(this.capacity);
     this.scratch = new Float32Array(this.capacity);
   }
 
@@ -126,6 +134,12 @@ export class FrameStats {
     this.beginT = t;
     this.beginWall = wallNow;
     this.open = true;
+    this.fogOpen = false;
+  }
+
+  /** 지금 그리는 프레임이 안개 주기 프레임이다 (worldRenderer가 빛 지도를 다시 칠할 때). begin과 end 사이에만 뜻이 있다 */
+  markFog(): void {
+    if (this.open) this.fogOpen = true;
   }
 
   /** 그리기까지 끝났다 (now = performance.now()). begin 없이 부르면 무시한다 */
@@ -142,6 +156,10 @@ export class FrameStats {
     this.intervals[i] = interval;
     // 음수 · NaN(시계가 섞인 잘못된 호출)은 0
     this.works[i] = work > 0 ? work : 0;
+    const span = now - t;
+    this.spans[i] = span > 0 ? span : 0;
+    this.fogs[i] = this.fogOpen ? 1 : 0;
+    this.fogOpen = false;
     this.head = i + 1 === this.capacity ? 0 : i + 1;
     if (this.count < this.capacity) this.count++;
     this.totalFrames++;
@@ -257,6 +275,48 @@ export class FrameStats {
     return out;
   }
 
+  /**
+   * 최근 ms 구간에서 vsync를 넘긴 프레임 비율 (0~1, 잔렉 고치기): rAF 시각부터 그리기를 마칠 때까지가 vsyncMs보다 긴 프레임 수 ÷
+   * 프레임 수. 그런 프레임은 다음 vsync로 밀려 늦게 보인다(크롬은 다음 rAF에 같은 격자 시각을 주므로 FPS · 늦음에는 안 나온다).
+   * 0이나 1에 가까우면 고르고(모두 같은 칸에 보인다), 그 사이면 몇 프레임만 늦게 보인다. 프레임이 없거나 FPS를 덮어썼으면 0
+   */
+  overrun(ms: number, vsyncMs: number): number {
+    if (this.count === 0 || !(vsyncMs > 0) || this.overrideFps !== null) return 0;
+    const from = (this.times[this.slot(0)] ?? 0) - ms;
+    let n = 0;
+    let over = 0;
+    for (let k = 0; k < this.count; k++) {
+      const i = this.slot(k);
+      if ((this.times[i] ?? 0) <= from) break;
+      n++;
+      if ((this.spans[i] ?? 0) > vsyncMs) over++;
+    }
+    return n > 0 ? over / n : 0;
+  }
+
+  /**
+   * 버퍼 전체에서 안개 주기 프레임 · 그 밖 프레임의 작업 시간 p95 (ms, 잔렉 고치기). 안개 프레임이 하나도 없으면 fog = null.
+   * out을 주면 거기에 채운다(할당 없음)
+   */
+  fogWork(out: { fog: number | null; other: number } = { fog: null, other: 0 }): {
+    fog: number | null;
+    other: number;
+  } {
+    let n = 0;
+    for (let k = 0; k < this.count; k++) {
+      const i = this.slot(k);
+      if (this.fogs[i] === 1) this.scratch[n++] = this.works[i] ?? 0;
+    }
+    out.fog = n > 0 ? percentileInPlace(this.scratch, n, P95) : null;
+    let m = 0;
+    for (let k = 0; k < this.count; k++) {
+      const i = this.slot(k);
+      if (this.fogs[i] !== 1) this.scratch[m++] = this.works[i] ?? 0;
+    }
+    out.other = percentileInPlace(this.scratch, m, P95);
+    return out;
+  }
+
   /** 버퍼 전체(최근 capacity 프레임) 요약. fps는 최근 1초 */
   summary(): FrameStatsInfo {
     const fps = this.window(FPS_WINDOW_MS).fps;
@@ -292,6 +352,11 @@ export class FrameStats {
 
 /** 이 세션의 측정 (main.ts가 Phaser 루프에 끼운다). 덮어쓰기는 디버그 injectFps(gfx/state.ts)를 따른다 */
 export const sessionFrameStats = new FrameStats(FRAME_STATS_CAPACITY, getFpsOverride);
+
+/** 판 장면이 지금 그리는 프레임이 안개 주기 프레임이다 (worldRenderer) */
+export function noteFogFrame(): void {
+  sessionFrameStats.markFog();
+}
 
 /** 지금 측정 요약 (아직 렌더한 프레임이 없으면 null) */
 export function frameStatsInfo(): FrameStatsInfo | null {
