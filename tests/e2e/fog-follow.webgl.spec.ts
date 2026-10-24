@@ -6,6 +6,8 @@
 //  - 생존자(맵 전체 고정 화면 ?cam=1): 내 둘레 흐림 띠 위 점들의 비가 'Δ만큼 옮긴 빛'의 비(lightAt(지금 눈) / lightAt(주기 눈))와
 //    맞는다 — 품질 중간(경계 노이즈 없음)은 식과 ±0.045, 높음(경계 노이즈)은 방향만(앞 밝아짐 · 뒤 어두워짐)
 //  - 괴물(따라가는 카메라 확대): 빛 지도를 통째로 Δ만큼 옮겨 읽는다 — 근접 원 경계의 앞 띠는 밝아지고 뒤 띠는 어두워진다
+//  - 화소로 잰 어긋남 (144Hz, 품질 중간): 프레임마다 밝기 비를 'x만큼 옮긴 빛'에 맞춰 실제로 그린 빛 중심을 찾고, 지금 내 자리와의
+//    어긋남 폭을 잰다. 따라가기를 끄면(디버그 훅 — 예전 그림) 안개 주기 톱니(걷기 0.24타일)가 보이고, 켜면 사라진다
 //  - 콘솔 에러 · 경고 0
 import { readFileSync } from 'node:fs';
 import { expect, test, type Browser, type Page } from '@playwright/test';
@@ -195,13 +197,14 @@ async function startPractice(
   browser: Browser,
   role: 'runner' | 'monster',
   query: string,
+  hz = HZ,
 ): Promise<{ page: Page; problems: string[]; close: () => Promise<void> }> {
   // 괴물은 따라가는 카메라(확대)라 넓은 창으로 띠(Δ ≈ 0.14타일)를 화면 px로 넓힌다
   const { context, page, problems } = await newPlayerPage(
     browser,
     role === 'monster' ? { viewport: { width: 1600, height: 900 } } : undefined,
   );
-  await context.addInitScript(installVirtualClock, { seed: SEED, hz: HZ });
+  await context.addInitScript(installVirtualClock, { seed: SEED, hz });
   await page.routeWebSocket(/\/ws$/, (ws) => ws.close({ code: 1011, reason: 'blocked' }));
   await page.goto(`/?debug=hook&renderer=webgl${query}`);
   await expect(page.getByTestId('practice')).toBeVisible();
@@ -240,7 +243,7 @@ async function startPractice(
         d.sendTest({ kind: 'freeze', target: d.you, frozen: false });
       }
     },
-    { start: START, far: FAR, hz: HZ, face },
+    { start: START, far: FAR, hz, face },
   );
   await advance(page, 1500);
   return { page, problems, close: () => context.close() };
@@ -352,6 +355,147 @@ test('괴물 · 품질 중간(WebGL, 따라가는 카메라): 안개 주기 사�
       if (x.ahead) expect(x.got, `앞 ${JSON.stringify(x.p)}`).toBeGreaterThan(1.25);
       else expect(x.got, `뒤 ${JSON.stringify(x.p)}`).toBeLessThan(0.8);
     }
+  } finally {
+    await s.close();
+  }
+});
+
+/** 1920×1080 · DPR 1 따라가는 카메라의 타일당 기기 px (tests/perf/pacing.spec.ts 측정 k), 휴대폰 800×360 · DPR 3(백버퍼 1.5배) */
+const DEV_PER_TILE_1080P = 89.25;
+const DEV_PER_TILE_PHONE = 33.74 * 1.5;
+
+/**
+ * 화소로 빛 중심 이동 찾기 (x, 타일): 안개를 다시 그린 프레임 A(빛 중심 = fogEye)와 같은 주기 프레임 B의 밝기 비를 'x만큼 옮긴 빛'의
+ * 비 lightAt(|p − (fogEye + x)|) / lightAt(|p − fogEye|)에 맞춘다 (로그 비 최소 제곱, 먼지 등 튀는 점은 한 번 빼고 다시 맞춘다)
+ */
+function fitShift(fogEye: Vec2, pts: readonly Vec2[], ratio: readonly number[]): number {
+  const r = survivorVisionRadius(balance, 'runner');
+  const soft = balance.survivor.visionSoftEdge;
+  const model = (p: Vec2, x: number): number =>
+    lightAt(Math.hypot(p.x - fogEye.x - x, p.y - fogEye.y), r, soft, LUMA_AMBIENT) /
+    lightAt(Math.hypot(p.x - fogEye.x, p.y - fogEye.y), r, soft, LUMA_AMBIENT);
+  const cost = (x: number, use: readonly boolean[]): number =>
+    pts.reduce(
+      (sum, p, i) => (use[i] ? sum + (Math.log(ratio[i] ?? 1) - Math.log(model(p, x))) ** 2 : sum),
+      0,
+    );
+  const best = (use: readonly boolean[]): number => {
+    let x0 = 0;
+    let c0 = Infinity;
+    for (let x = -0.2; x <= 0.5; x += 0.0025) {
+      const c = cost(x, use);
+      if (c < c0) [x0, c0] = [x, c];
+    }
+    for (let x = x0 - 0.003; x <= x0 + 0.003; x += 0.0001) {
+      const c = cost(x, use);
+      if (c < c0) [x0, c0] = [x, c];
+    }
+    return x0;
+  };
+  const all = pts.map(() => true);
+  const x1 = best(all);
+  const res = pts.map((p, i) => Math.abs(Math.log(ratio[i] ?? 1) - Math.log(model(p, x1))));
+  const med = [...res].sort((a, b) => a - b)[Math.floor(res.length / 2)] ?? 0;
+  return best(res.map((e) => e <= Math.max(0.01, med * 4)));
+}
+
+/** 맞추기에 쓸 점: 주기 눈 둘레 흐림 띠(r − 1.0 ~ r − 0.55) 앞뒤 여러 방향, 0 ~ 0.3타일 옮긴 빛 모두 벽 그림자 · 테두리 밖 */
+function fitProbes(fogEye: Vec2): Vec2[] {
+  const r = survivorVisionRadius(balance, 'runner');
+  const a = survivorVisionPolygon(fogEye, r - 0.3);
+  const b = survivorVisionPolygon({ x: fogEye.x + 0.3, y: fogEye.y }, r - 0.3);
+  const out: Vec2[] = [];
+  for (const d of [r - 1.0, r - 0.8, r - 0.6])
+    for (const deg of [-50, -35, -20, -10, 0, 10, 20, 35, 50, 130, 145, 160, 170, 180, 190, 200, 215, 230]) {
+      const t = (deg * Math.PI) / 180;
+      const p = { x: fogEye.x + Math.cos(t) * d, y: fogEye.y + Math.sin(t) * d };
+      if (pointInPolygon(p, a) && pointInPolygon(p, b)) out.push(p);
+    }
+  return out;
+}
+
+interface Offset {
+  /** 화소로 찾은 빛 중심 − 지금 내 자리 (x, 타일) */
+  off: number;
+  /** 지금 내 자리 − 주기 눈 (x, 타일) */
+  delta: number;
+  fogFollow: string;
+}
+
+/** 걸으며 n프레임 동안 프레임마다 화소로 잰 빛 중심 − 지금 내 자리 (주기 첫 프레임은 정의상 0이라 맞추지 않는다) */
+async function walkOffsets(page: Page, hz: number, n: number): Promise<Offset[]> {
+  await page.keyboard.down('KeyD');
+  await advance(page, 450);
+  // 안개를 다시 그린 프레임에서 시작
+  let a = await frameInfo(page);
+  for (let i = 0; i < 12; i += 1) {
+    await advance(page, 1000 / hz);
+    const next = await frameInfo(page);
+    const fresh = next.fogAt !== a.fogAt;
+    a = next;
+    if (fresh) break;
+  }
+  let shotA = await page.screenshot();
+  let pts = a.fogEye ? fitProbes(a.fogEye) : [];
+  let la = await lumas(page, shotA, a, pts, 2);
+  const out: Offset[] = [];
+  for (let i = 0; i < n; i += 1) {
+    await advance(page, 1000 / hz);
+    const b = await frameInfo(page);
+    const me = await page.evaluate(() => window.__DECOY__?.getRenderPos() ?? null);
+    const shot = await page.screenshot();
+    if (!me || !b.fogEye) throw new Error('내 자리 · 안개 눈 없음');
+    if (b.fogAt !== a.fogAt) {
+      // 새 주기: 빛을 지금 자리(= fogEye)에 칠했다 — 어긋남 0, 다음 프레임들의 기준
+      a = b;
+      shotA = shot;
+      pts = fitProbes(b.fogEye);
+      la = await lumas(page, shotA, a, pts, 2);
+      out.push({ off: b.fogEye.x - me.x, delta: 0, fogFollow: b.fogFollow });
+      continue;
+    }
+    const eye = a.fogEye;
+    if (!eye) throw new Error('안개 눈 없음');
+    const lb = await lumas(page, shot, b, pts, 2);
+    const x = fitShift(
+      eye,
+      pts,
+      pts.map((_, k) => (lb[k] ?? 0) / Math.max(1e-6, la[k] ?? 0)),
+    );
+    out.push({ off: eye.x + x - me.x, delta: me.x - eye.x, fogFollow: b.fogFollow });
+  }
+  await page.keyboard.up('KeyD');
+  return out;
+}
+
+test('생존자 · 품질 중간(WebGL) 144Hz: 화소로 잰 내 빛 중심 − 지금 내 자리 어긋남 폭 (따라가기 끔 → 켬)', async ({
+  browser,
+}) => {
+  test.setTimeout(300_000);
+  const hz = 144;
+  const s = await startPractice(browser, 'runner', `&quality=medium${CAM1}`, hz);
+  try {
+    const range = (o: readonly Offset[]): number =>
+      Math.max(...o.map((x) => x.off)) - Math.min(...o.map((x) => x.off));
+    await s.page.evaluate(() => window.__DECOY__?.setFogFollowDisabled(true));
+    const off = await walkOffsets(s.page, hz, 22);
+    await s.page.evaluate(() => window.__DECOY__?.setFogFollowDisabled(false));
+    await advance(s.page, 300);
+    const on = await walkOffsets(s.page, hz, 22);
+    const fmt = (o: readonly Offset[]): string => {
+      const w = range(o);
+      return `${w.toFixed(3)}타일 (1080p ${(w * DEV_PER_TILE_1080P).toFixed(1)}px · 휴대폰 ${(w * DEV_PER_TILE_PHONE).toFixed(1)}px)`;
+    };
+    console.log(
+      `[fog-follow] 화소 어긋남 폭 ${hz}Hz 중간: 끔 ${fmt(off)} → 켬 ${fmt(on)}\n  끔 ${off.map((x) => `${x.off.toFixed(3)}/${x.delta.toFixed(3)}`).join(' ')}\n  켬 ${on.map((x) => `${x.off.toFixed(3)}/${x.delta.toFixed(3)}`).join(' ')}`,
+    );
+    expect(s.problems).toEqual([]);
+    expect(new Set(off.map((x) => x.fogFollow))).toEqual(new Set(['fixed']));
+    expect(new Set(on.map((x) => x.fogFollow))).toEqual(new Set(['gpu']));
+    // 끔: 빛이 주기 자리에 머물러 몸과 걷기 한 주기(5타일/초 × 50ms × 6/7.2) 가까이 벌어진다 — 측정이 톱니를 본다
+    expect(range(off)).toBeGreaterThan(0.15);
+    // 켬: 빛 중심이 지금 자리를 따라온다 (남는 것은 맞추기 잡음)
+    expect(range(on)).toBeLessThan(0.05);
   } finally {
     await s.close();
   }

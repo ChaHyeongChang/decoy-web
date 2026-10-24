@@ -1,8 +1,8 @@
 // 잔렉 측정 (docs/PERF.md 6절): 화면 주사율 60 · 75 · 100 · 120 · 144 · 165 · 240Hz와, 각 주사율에서 실제 그리기가 그보다 조금
 // 모자란 상황(작업 시간 모형)을 가상 시계로 만들어 같은 경로를 걷고, 그린 프레임마다 ① 내 그린 자리 변화 ② 카메라 이동
 // ③ 카메라 기준 화면 위 내 자리 ④ rAF 간격 · 화면 표시 간격 · 표시 지연 ⑤ 시야 빛(안개 눈)과 내 몸의 화면 위 어긋남을 적는다.
-// ⑤는 이 렌더러(Canvas)가 실제로 그린 빛 중심(fog: 빛은 안개 주기에 구웠다)과 GPU 경로 빛 · 두 경로 테두리 중심(gpuFog: fogEye + fogShift,
-// 내 빛 따라가기) 둘 다 적는다.
+// ⑤는 이 렌더러가 그린 빛 중심(fogEye + 실제로 옮긴 fogShift: Canvas 합성은 옮기지 않아 안개 주기 자리)이다. GPU 경로(WebGL)의
+// 실제 화소 어긋남은 tests/e2e/fog-follow.webgl.spec.ts가 잰다.
 //   npm run build && npx playwright test --config tests/perf/playwright.config.ts tests/perf/pacing.spec.ts
 //   DECOY_PERF_DIR=<빌드한 다른 checkout> DECOY_PERF_LABEL=before npx playwright test --config tests/perf/playwright.config.ts tests/perf/pacing.spec.ts
 //   node scripts/pacing-table.mjs before after
