@@ -1082,11 +1082,6 @@ export class TouchControls {
     this.parked = null;
   }
 
-  /** 디버그 · 시험: 맡아 둔 이동 스틱 손가락이 있는가 */
-  get hasParked(): boolean {
-    return this.parked !== null;
-  }
-
   /** 지금 누르고 있는 이동 스틱 손가락 (맡겨 둘 자리 · 마지막 손가락 자리) */
   private moveStickFinger(): ParkedStick | null {
     for (const [id, f] of this.fingers)

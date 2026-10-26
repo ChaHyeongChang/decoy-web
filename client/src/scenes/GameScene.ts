@@ -743,15 +743,15 @@ export class GameScene extends Phaser.Scene {
     gfxState.features.culledObjects = this.culled.size;
   }
 
-  /**
-   * 흔들림 세기 배율 (디버그 · 시험의 픽셀 탐침, '흔들림 줄이기'와 같은 값). 덮어쓴 값은 '흔들림 줄이기' 설정이 바뀔 때까지 이긴다
-   */
   /** 시험 · 선명도 비교 (디버그 setMinimapBigSharp): 끄면 크게 본 지도가 예전처럼 작은 미니맵 합성을 늘려 그린다 */
   setMinimapBigSharp(on: boolean): void {
     this.bigSharp = on;
     this.bigTexelsDirty = true;
   }
 
+  /**
+   * 흔들림 세기 배율 (디버그 · 시험의 픽셀 탐침, '흔들림 줄이기'와 같은 값). 덮어쓴 값은 '흔들림 줄이기' 설정이 바뀔 때까지 이긴다
+   */
   setShakeScale(scale: number): void {
     this.shakeOverride = Math.max(0, scale);
     this.applyShake();
