@@ -38,8 +38,9 @@ test('지도 크게 보기 (WebGL PC 1920×1080@2 높음): 열린 동안에도 �
   await expect.poll(async () => (await prefs()).minimapBig.sharpReady, { timeout: 30_000 }).toBe(true);
   const big = (await prefs()).minimapBig;
   const open = await bytes();
+  const bake = await page.evaluate(() => window.__DECOY__!.gfx.features);
   console.log(
-    `[minimap-sharp.webgl] 바닥 ${big.smallTexW} → ${big.tex.w}×${big.tex.h} (화면 ${big.needW.toFixed(0)}px), 텍스처 ${(closed / MiB).toFixed(2)} → ${(open / MiB).toFixed(2)}MiB`,
+    `[minimap-sharp.webgl] 바닥 ${big.smallTexW} → ${big.tex.w}×${big.tex.h} (화면 ${big.needW.toFixed(0)}px), 텍스처 ${(closed / MiB).toFixed(2)} → ${(open / MiB).toFixed(2)}MiB, 굽기 ${String(bake.minimapBigSteps)}걸음 · 한 걸음 최대 ${String(bake.minimapBigStepMaxMs)}ms · 합계 ${String(bake.minimapBigBakeMs)}ms`,
   );
   expect(open).toBeLessThanOrEqual(HIGH_BUDGET);
   expect(big.tex.w).toBeGreaterThan(big.smallTexW);

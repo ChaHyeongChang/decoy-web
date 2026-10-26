@@ -178,8 +178,11 @@ async function walk(browser: Browser, cfg: VirtualClockConfig, opts: WalkOpts = 
     const up = trace.keys.find((k) => k.type === 'keyup')?.t;
     if (down === undefined || up === undefined) throw new Error('키 기록 없음');
     const rest = [...trace.frames].reverse().find((f) => f.t <= down);
+    // 첫 움직임 = 그린 자리가 처음 출발한 프레임 (부동소수 오차만 뺀다). 그린 자리는 걷기 틱의 명목 시각부터 보간하므로 틱 바로 뒤
+    // vsync(0.06ms 뒤 등)에 그린 프레임은 아주 조금만 움직인다 — 예전 기준(0.001타일)은 그 프레임을 빼고 다음 그린 프레임(+1/목표 FPS)을
+    // 세어, 그 위상(약 3%)에서만 실패했다 (남은 문제 정리에서 기록으로 확인)
     const moved = trace.frames.find(
-      (f) => f.t > down && rest && Math.hypot(f.mx - rest.mx, f.my - rest.my) > 1e-3,
+      (f) => f.t > down && rest && Math.hypot(f.mx - rest.mx, f.my - rest.my) > 1e-6,
     );
     const fr = trace.frames.filter((f) => f.t >= down + SETTLE_MS && f.t <= up);
     // 걷는 동안 그린 프레임: 목표 FPS의 8할 넘게 (vsync를 건너뛰는 장면은 화면 주사율의 절반 넘게)

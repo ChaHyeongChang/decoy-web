@@ -4,6 +4,7 @@
 // 보여 줄 수 없다. 처음 읽을 때 만들고(미니맵이 없는 배치는 만들지 않는다), 기록이 바뀐 뒤 처음 읽을 때만 다시 합성한다
 import { MAP_W, TILE_PX } from '@decoy/shared';
 import { StaticMapBake, getStaticMap } from '../art/mapArt';
+import { gfxState } from '../gfx/state';
 import { WORLD_LINE, WORLD_SCALE } from '../ui/layout';
 import type { PenRecord } from './fogPaint';
 import { CanvasPen, addRimLift, makeCanvas, rimLiftPath, type LightMap } from './fogPaint';
@@ -111,11 +112,22 @@ export class BigMiniComposite {
     this.bake = new StaticMapBake(w / (MAP_W * TILE_PX), true);
   }
 
-  /** 정적 맵을 budgetMs 안에서 굽는다. 이번에 다 구워 합성을 쓸 수 있게 됐으면 true (그 프레임에 크게 본 지도를 다시 그린다) */
+  /**
+   * 정적 맵을 budgetMs 안에서 굽는다. 이번에 합성을 쓸 수 있게 됐으면 true (그 프레임에 크게 본 지도를 다시 그린다). 다 구운 다음
+   * 프레임에 합성을 만든다 — 마지막 굽기 걸음과 큰 바닥 합성 · 올리기가 한 프레임에 몰리지 않게
+   */
   step(budgetMs: number): boolean {
     const b = this.bake;
     if (!b || this.comp) return false;
-    if (!b.step(budgetMs)) return false;
+    if (!b.done) {
+      b.step(budgetMs);
+      // 측정 (디버그 · PERF): 이번 굽기의 한 걸음 최대 · 합계 · 걸음 수
+      const f = gfxState.features;
+      f.minimapBigStepMaxMs = Math.round(b.maxStepMs * 10) / 10;
+      f.minimapBigBakeMs = Math.round(b.totalMs * 10) / 10;
+      f.minimapBigSteps = b.steps;
+      return false;
+    }
     this.comp = new MiniComposite(b.canvas.width / MAP_W, this.light, b.canvas);
     if (this.last) this.comp.take(this.last);
     return true;

@@ -886,6 +886,43 @@ function newCanvas(w: number, h: number): { canvas: HTMLCanvasElement; ctx: Canv
   return { canvas, ctx };
 }
 
+/**
+ * 발광 번짐 칠하기를 한 줄씩 (네온 줄마다 · 철창 고리 · 거점 단말): 한 번에 굽기(bakeGlow)와 판 중 나눠 굽기(StaticMapBake)가 같이 쓴다.
+ * 더하기(lighter)로 겹치므로 순서와 상관없이 같은 그림이다
+ */
+function glowJobs(P: Painter): (() => void)[] {
+  const halo = (pts: Vec2[], color: number, widths: readonly number[], alphas: readonly number[]): void => {
+    widths.forEach((w, n) => P.stroke(pts, false, Math.max(1, w * P.k), color, alphas[n] ?? 0, 'round'));
+  };
+  const jobs: (() => void)[] = allNeon().map(
+    (n) => () =>
+      halo(
+        [
+          { x: n.x0, y: n.y0 },
+          { x: n.x1, y: n.y1 },
+        ],
+        MC.neon,
+        [0.62, 0.36, 0.18],
+        [0.06, 0.12, 0.26],
+      ),
+  );
+  // 감옥 철창: 고리 경로 하나로 (칸마다 겹친 둥근 끝이 얼룩지지 않게)
+  jobs.push(() => halo(prisonRing(), MC.bar, [0.95, 0.62], [0.07, 0.11]));
+  for (const p of Object.values(CAPTURE_POINTS))
+    jobs.push(() =>
+      halo(
+        [
+          { x: p.x - 0.12, y: p.y - 0.02 },
+          { x: p.x + 0.12, y: p.y - 0.02 },
+        ],
+        MC.neon,
+        [0.6, 0.34],
+        [0.08, 0.14],
+      ),
+    );
+  return jobs;
+}
+
 /** 발광 번짐 (투명 바탕, 더하기로 겹침). 네온 · 철창 창살 · 거점 단말 화면 */
 export function bakeGlow(scale = GLOW_SCALE): HTMLCanvasElement {
   const t0 = performance.now();
@@ -893,31 +930,7 @@ export function bakeGlow(scale = GLOW_SCALE): HTMLCanvasElement {
   const { canvas, ctx } = newCanvas(size.w, size.h);
   const P = new Painter(ctx, TILE_PX * scale);
   ctx.globalCompositeOperation = 'lighter';
-  const halo = (pts: Vec2[], color: number, widths: readonly number[], alphas: readonly number[]): void => {
-    widths.forEach((w, n) => P.stroke(pts, false, Math.max(1, w * P.k), color, alphas[n] ?? 0, 'round'));
-  };
-  for (const n of allNeon())
-    halo(
-      [
-        { x: n.x0, y: n.y0 },
-        { x: n.x1, y: n.y1 },
-      ],
-      MC.neon,
-      [0.62, 0.36, 0.18],
-      [0.06, 0.12, 0.26],
-    );
-  // 감옥 철창: 고리 경로 하나로 (칸마다 겹친 둥근 끝이 얼룩지지 않게)
-  halo(prisonRing(), MC.bar, [0.95, 0.62], [0.07, 0.11]);
-  for (const p of Object.values(CAPTURE_POINTS))
-    halo(
-      [
-        { x: p.x - 0.12, y: p.y - 0.02 },
-        { x: p.x + 0.12, y: p.y - 0.02 },
-      ],
-      MC.neon,
-      [0.6, 0.34],
-      [0.08, 0.14],
-    );
+  for (const job of glowJobs(P)) job();
   record('glow', scale, performance.now() - t0);
   return canvas;
 }
@@ -944,13 +957,22 @@ export function paintStaticMap(
   paintPillars(P);
   paintExitsStatic(P);
   paintNeonCore(P, geomOf().neon);
-  if (withGlow) {
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.imageSmoothingEnabled = true;
-    drawStretched(ctx, getGlowMap(), P.W, P.H, cull);
-    ctx.restore();
-  }
+  if (withGlow) addGlowTo(ctx, getGlowMap(), P.W, P.H, cull);
+}
+
+/** 발광 번짐을 더한다 (더하기, 맵 전체 크기로 늘려) */
+function addGlowTo(
+  ctx: CanvasRenderingContext2D,
+  glow: HTMLCanvasElement,
+  W: number,
+  H: number,
+  cull: PxBox | null,
+): void {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.imageSmoothingEnabled = true;
+  drawStretched(ctx, glow, W, H, cull);
+  ctx.restore();
 }
 
 /** 정적 맵을 굽는다. withGlow면 발광 번짐을 구워 넣는다 (Canvas 합성 · 미니맵) */
@@ -1012,12 +1034,12 @@ interface StaticJob {
 let job: StaticJob | null = null;
 
 /** 띠 하나를 굽는다 (정수 px 띠에 자르기 + 겹치는 것만 칠하기: 한 번에 구운 것과 같은 화소) */
-function bakeBand(j: StaticJob): void {
+function bakeBand(j: StaticJob, tiles = BAKE_BAND_TILES): void {
   const t0 = performance.now();
   const k = TILE_PX * j.scale;
   const H = j.canvas.height;
-  const y0 = Math.min(H, Math.round(j.band * BAKE_BAND_TILES * k));
-  const y1 = j.band === j.bands - 1 ? H : Math.min(H, Math.round((j.band + 1) * BAKE_BAND_TILES * k));
+  const y0 = Math.min(H, Math.round(j.band * tiles * k));
+  const y1 = j.band === j.bands - 1 ? H : Math.min(H, Math.round((j.band + 1) * tiles * k));
   const c = j.ctx;
   c.save();
   c.beginPath();
@@ -1103,26 +1125,40 @@ export function bakeStaticMapStep(scale: number, withGlow: boolean, budgetMs: nu
 
 /**
  * 캐시에 넣지 않고 나눠 굽는 정적 맵 (지도 크게 보기: 그림이 화면에서 차지하는 해상도로 — 판 배율 · 미니맵 그림 캐시와 따로,
- * 열려 있는 동안만 쓰고 버린다). step(budgetMs)를 프레임마다 부르면 공통 준비(발광 지도가 없으면 그것부터) → 띠 몇 개씩 굽고,
- * 다 구웠으면 true. 띠마다 자르기 + 겹치는 것만 칠하기라 한 번에 구운 것과 같은 화소다(bakeBand)
+ * 열려 있는 동안만 쓰고 버린다). step(budgetMs)를 프레임마다 부르면 1타일 띠 몇 개씩(bakeBand — 한 번에 구운 것과 같은 화소) 굽고,
+ * 마지막에 발광 번짐을 더한다: 전역 발광 캔버스가 있으면(GPU 경로) 그것을 늘려 그리고(paintStaticMap과 같다), 없으면(Canvas 경로는
+ * 판 시작 때 버린다 — 맵만 한 캔버스) 이 해상도로 줄 몇 개씩 나눠 구워 더한 뒤 버린다. 한 걸음은 띠 하나 · 발광 줄 하나 단위라
+ * 예산을 크게 넘지 않는다. 다 구웠으면 true
  */
 export class StaticMapBake {
   private readonly j: StaticJob;
+  /** 발광: 남은 줄 · 이 해상도로 굽는 캔버스 (전역 발광이 없을 때) */
+  private glowLeft: (() => void)[] | null = null;
+  private glowCanvas: HTMLCanvasElement | null = null;
+  done = false;
+  /** 측정: 한 걸음 최대 · 합계 (ms) · 걸음(프레임) 수 */
+  maxStepMs = 0;
+  totalMs = 0;
+  steps = 0;
 
-  constructor(scale: number, withGlow: boolean) {
+  constructor(
+    scale: number,
+    private readonly withGlow: boolean,
+  ) {
     const size = staticMapSize(scale);
     const { canvas, ctx } = newCanvas(size.w, size.h);
+    // 띠에는 발광을 넣지 않는다 (맨 끝에 한 번)
     this.j = {
       key: '',
       scale,
-      withGlow,
+      withGlow: false,
       canvas,
       ctx,
       band: 0,
-      bands: Math.max(1, Math.ceil(MAP_H / BAKE_BAND_TILES)),
+      bands: MAP_H,
       ms: 0,
       maxBandMs: 0,
-      warm: 0,
+      warm: 2,
     };
   }
 
@@ -1130,38 +1166,63 @@ export class StaticMapBake {
     return this.j.canvas;
   }
 
-  get done(): boolean {
-    return this.j.band >= this.j.bands;
-  }
-
-  /** budgetMs 안에서 굽는다 (적어도 한 걸음). 다 구웠으면 true */
+  /** budgetMs 안에서 굽는다 (적어도 한 단위). 다 구웠으면 true */
   step(budgetMs: number): boolean {
-    const j = this.j;
     if (this.done) return true;
     const t0 = performance.now();
-    // 공통 준비 (판 전에 이미 했다 — Canvas 합성은 판 시작 때 발광 캔버스를 버리므로 그것만 다시)
-    if (j.warm === 0) {
-      geomOf();
-      decalsOf(MAP_ART.seed);
-      noiseMap(MAP_ART.seed);
-      j.warm = 1;
-      if (j.withGlow && performance.now() - t0 >= budgetMs) return false;
-    }
-    if (j.warm === 1) {
-      if (j.withGlow) getGlowMap();
-      j.warm = 2;
-      if (performance.now() - t0 >= budgetMs) return false;
-    }
-    do bakeBand(j);
-    while (j.band < j.bands && performance.now() - t0 < budgetMs);
+    do this.stepOne();
+    while (!this.done && performance.now() - t0 < budgetMs);
+    const ms = performance.now() - t0;
+    this.maxStepMs = Math.max(this.maxStepMs, ms);
+    this.totalMs += ms;
+    this.steps += 1;
     return this.done;
+  }
+
+  /** 띠 하나 · 발광 캔버스 만들기 · 발광 줄 하나 · 더하기 중 하나 */
+  private stepOne(): void {
+    const j = this.j;
+    if (j.band < j.bands) {
+      bakeBand(j, 1);
+      this.done = j.band >= j.bands && !this.withGlow;
+      return;
+    }
+    const ready = glowIfReady();
+    if (ready && !this.glowLeft) return this.addGlow(ready);
+    if (!this.glowLeft) {
+      const g = Math.min(glowScale(), j.scale);
+      const m = newCanvas(
+        Math.max(1, Math.round(MAP_W * TILE_PX * g)),
+        Math.max(1, Math.round(MAP_H * TILE_PX * g)),
+      );
+      m.ctx.globalCompositeOperation = 'lighter';
+      this.glowCanvas = m.canvas;
+      this.glowLeft = glowJobs(new Painter(m.ctx, TILE_PX * g));
+      return;
+    }
+    const job = this.glowLeft.shift();
+    if (job) job();
+    else if (this.glowCanvas) this.addGlow(this.glowCanvas);
+  }
+
+  /** 발광 번짐을 더하고 끝낸다 */
+  private addGlow(glow: HTMLCanvasElement): void {
+    addGlowTo(this.j.ctx, glow, this.j.canvas.width, this.j.canvas.height, null);
+    this.dropGlow();
+    this.done = true;
+  }
+
+  private dropGlow(): void {
+    if (this.glowCanvas) this.glowCanvas.width = this.glowCanvas.height = 0;
+    this.glowCanvas = null;
+    this.glowLeft = null;
   }
 
   /** 캔버스를 놓는다 (0 × 0) */
   release(): void {
-    this.j.canvas.width = 0;
-    this.j.canvas.height = 0;
-    this.j.band = this.j.bands;
+    this.j.canvas.width = this.j.canvas.height = 0;
+    this.dropGlow();
+    this.done = true;
   }
 }
 
@@ -1194,6 +1255,11 @@ export function getStaticMap(scale: number, withGlow: boolean): HTMLCanvasElemen
   }
   recordCache();
   return canvas;
+}
+
+/** 지금 배율로 이미 구운 발광 번짐 (없으면 null — 굽지 않는다. Canvas 합성은 판 시작 때 버린다) */
+export function glowIfReady(): HTMLCanvasElement | null {
+  return glowCanvas && glowCanvasScale === glowScale() ? glowCanvas : null;
 }
 
 /** 발광 번짐 (배율 고정이라 한 번만, 쓰지 않는 경로로 바뀌면 keepStaticMaps가 버린다) */

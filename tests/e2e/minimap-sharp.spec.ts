@@ -232,9 +232,13 @@ async function compare(
   const p = await prefs(page);
   const openBytes = await textureBytes(page);
   const after = await shotBig(page);
+  const bake = await page.evaluate(() => window.__DECOY__!.gfx.features);
   console.log(
-    `[minimap-sharp] ${label}: 바닥 ${old.minimapBig.tex.w} → ${p.minimapBig.tex.w}×${p.minimapBig.tex.h} (화면 ${p.minimapBig.needW.toFixed(0)}px), 고운 세부 ${before.detail.toFixed(2)} → ${after.detail.toFixed(2)} (×${(after.detail / before.detail).toFixed(2)}), 기울기 RMS ${before.sharp.toFixed(2)} → ${after.sharp.toFixed(2)} (바닥 화소 ${(after.floorFrac * 100).toFixed(0)}%), 텍스처 ${(closedBytes / MiB).toFixed(2)} → ${(openBytes / MiB).toFixed(2)}MiB, 잰 화소 ${JSON.stringify(after.px)}`,
+    `[minimap-sharp] ${label}: 바닥 ${old.minimapBig.tex.w} → ${p.minimapBig.tex.w}×${p.minimapBig.tex.h} (화면 ${p.minimapBig.needW.toFixed(0)}px), 고운 세부 ${before.detail.toFixed(2)} → ${after.detail.toFixed(2)} (×${(after.detail / before.detail).toFixed(2)}), 기울기 RMS ${before.sharp.toFixed(2)} → ${after.sharp.toFixed(2)} (바닥 화소 ${(after.floorFrac * 100).toFixed(0)}%), 텍스처 ${(closedBytes / MiB).toFixed(2)} → ${(openBytes / MiB).toFixed(2)}MiB, 잰 화소 ${JSON.stringify(after.px)}, 굽기 ${String(bake.minimapBigSteps)}걸음 · 한 걸음 최대 ${String(bake.minimapBigStepMaxMs)}ms · 합계 ${String(bake.minimapBigBakeMs)}ms`,
   );
+  // 판 중 나눠 굽기: 한 걸음(한 프레임)이 예산(4ms)을 크게 넘지 않는다 — 띠 하나 · 발광 줄 하나 단위라
+  // (예전에는 Canvas 경로에서 버린 맵 전체 발광을 첫 걸음에 다시 구워 한 프레임에 수십 ms였다)
+  expect(Number(bake.minimapBigStepMaxMs), `${label} 굽기 한 걸음 최대 (ms)`).toBeLessThan(25);
   return { before, after, p, closedBytes, openBytes };
 }
 
@@ -281,6 +285,11 @@ test('지도 크게 보기 선명도 (괴물 화면 PC 낮음): 선명해져도 
   await settle(page);
   await waitCamera(page);
   await openBig(page, false);
+  // 화면 해상도 바닥은 연 뒤 몇 프레임에 나눠 굽는다 — 다 구운 뒤의 그림을 본다
+  await expect.poll(async () => (await prefs(page)).minimapBig.sharpReady).toBe(true);
+  await page.evaluate(
+    () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))),
+  );
   const p = await prefs(page);
   expect(p.minimapBig.tex.w).toBeGreaterThan(p.minimapBig.smallTexW);
   const big = await page.evaluate(() => window.__DECOY__!.getDrawnMinimapBig());

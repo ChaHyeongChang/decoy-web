@@ -84,8 +84,11 @@ vi.mock('../../client/src/art/mapArt', () => ({
   // 다 구운 그림만 (판 배율 맵 전체 그림은 레이어를 만들 때 구웠다)
   staticMapIfReady: (scale: number): unknown => h.statics.find((s) => s.scale === scale)?.canvas ?? null,
   getGlowMap: (): unknown => document.createElement('canvas'),
-  // 크게 본 지도 정적 맵: 맵 그림 캐시 밖에서 두 걸음에 다 굽는 가짜 (맵 48 × 32타일 × 32px × 배율)
+  // 크게 본 지도 정적 맵: 맵 그림 캐시 밖에서 두 걸음에 다 굽는 가짜 (맵 48 × 32타일 × 32px × 배율) — 합성은 그다음 걸음에
   StaticMapBake: class {
+    maxStepMs = 0;
+    totalMs = 0;
+    steps = 0;
     readonly rec: {
       scale: number;
       withGlow: boolean;
@@ -102,9 +105,12 @@ vi.mock('../../client/src/art/mapArt', () => ({
     get canvas(): unknown {
       return this.rec.canvas;
     }
+    get done(): boolean {
+      return this.rec.steps >= 2;
+    }
     step(): boolean {
       this.rec.steps += 1;
-      return this.rec.steps >= 2;
+      return this.done;
     }
     release(): void {
       this.rec.canvas.width = 0;
@@ -374,6 +380,7 @@ describe('지도 크게 보기 바닥 (setBigMini): 열려 있는 동안만, 작
     fog.stepBigMini(4),
     fog.stepBigMini(4),
     fog.stepBigMini(4),
+    fog.stepBigMini(4),
   ];
 
   it('열기 전에는 아무것도 굽지 않고 null, 열면 그 폭의 정적 맵을 맵 그림 캐시 밖에서 나눠 굽고 다 구울 때까지 null', async () => {
@@ -392,7 +399,8 @@ describe('지도 크게 보기 바닥 (setBigMini): 열려 있는 동안만, 작
     expect(h.bakes.map((b) => [b.scale, b.withGlow])).toEqual([[960 / (48 * TILE_PX), true]]);
     expect([h.bakes[0]?.canvas.width, h.bakes[0]?.canvas.height]).toEqual([960, 640]);
     expect(fog.bigMiniSource).toBeNull();
-    expect(bakeAll(fog)).toEqual([false, true, false]);
+    // 두 걸음에 다 굽고, 합성은 그다음 걸음에 (마지막 굽기와 한 프레임에 몰리지 않게)
+    expect(bakeAll(fog)).toEqual([false, false, true, false]);
     expect(fog.bigMiniReady).toBe(true);
     expect(fog.bigMiniSource).not.toBeNull();
     // 같은 폭이면 다시 굽지 않는다
@@ -408,6 +416,8 @@ describe('지도 크게 보기 바닥 (setBigMini): 열려 있는 동안만, 작
     // 굽는 동안 기록이 바뀌어도 다 구운 뒤 마지막 것을 그린다
     fog.stepBigMini(4);
     cycle(tri(12, 11));
+    fog.stepBigMini(4);
+    expect(fog.bigMiniSource).toBeNull();
     fog.stepBigMini(4);
     void fog.miniSource;
     const big = fog.bigMiniSource as unknown as FakeCanvas;
