@@ -10,13 +10,17 @@ import { CameraDirector } from '../../client/src/render/cameraDirector';
 import {
   HIT_FLASH_REDUCED,
   MINIMAP_BIG,
+  MINIMAP_BIG_TEXELS,
   SPOTTED_EDGE,
   bigMinimapPlace,
+  bigMinimapTexels,
   hitFlashLevel,
   spottedEdgeAlpha,
 } from '../../client/src/render/prefsFx';
-import { MENU_BUTTON, menuButtonPlace } from '../../client/src/ui/matchMenuButton';
+import { MENU_BUTTON, menuButtonPlace, type MenuKeepOut } from '../../client/src/ui/matchMenuButton';
+import { HUD, HUD_BAND, MAP_RECT } from '../../client/src/ui/layout';
 import { PERF_CHIP, perfChipPlace, perfChipText } from '../../client/src/ui/perfChip';
+import { TEXTURE_BUDGET } from '../../client/src/gfx/presets';
 import { loadTestBalance } from '../helpers/fixtures';
 
 const HIT_MS = 200;
@@ -168,15 +172,136 @@ describe('FPS · 핑 칩', () => {
   });
 });
 
+describe('지도 크게 보기 바닥 해상도 (bigMinimapTexels)', () => {
+  const MiB = 1024 * 1024;
+  const A = MAP_W / MAP_H;
+  const bytesOf = (w: number): number => w * Math.round(w / A) * 4;
+
+  it('화면 기기 px에 맞춘다 (컨테이너 실측 장면): PC 낮음 · 태블릿 · 휴대폰 낮음은 기기 px 그대로, 휴대폰 높음 · 중간은 작은 지도 합성 그대로(null)', () => {
+    // PC 1920×1080 낮음: 그림 888px, 작은 합성 384, 나머지 텍스처 5.55MiB / 예산 8MiB
+    expect(bigMinimapTexels(888, 384, A, TEXTURE_BUDGET.low, 5.55 * MiB)).toBe(888);
+    // 태블릿 높음 1061px · 휴대폰 915×412 낮음 476px
+    expect(bigMinimapTexels(1061, 768, A, TEXTURE_BUDGET.high, 24.76 * MiB)).toBe(1061);
+    expect(bigMinimapTexels(476, 384, A, TEXTURE_BUDGET.low, 4.38 * MiB)).toBe(476);
+    // 휴대폰 800×360 높음 658px < 작은 합성 768: 작은 지도 합성을 그대로 (예전과 같다)
+    expect(bigMinimapTexels(658, 768, A, TEXTURE_BUDGET.high, 15.74 * MiB)).toBeNull();
+    expect(bigMinimapTexels(570, 576, A, TEXTURE_BUDGET.medium, 11.47 * MiB)).toBeNull();
+  });
+
+  it('텍스처 예산을 넘지 않는다: PC 1920×1080@2 높음(나머지 29.43MiB)은 남은 만큼만(작은 합성 768보다는 크게), 남은 것이 없으면 null', () => {
+    const w = bigMinimapTexels(1776, 768, A, TEXTURE_BUDGET.high, 29.43 * MiB);
+    expect(w).not.toBeNull();
+    expect(w!).toBeGreaterThan(768);
+    expect(w!).toBeLessThan(1776);
+    expect(29.43 * MiB + bytesOf(w!)).toBeLessThanOrEqual(
+      TEXTURE_BUDGET.high - MINIMAP_BIG_TEXELS.budgetMargin,
+    );
+    expect(bigMinimapTexels(1776, 768, A, TEXTURE_BUDGET.high, 31.9 * MiB)).toBeNull();
+    expect(bigMinimapTexels(888, 384, A, TEXTURE_BUDGET.low, 9 * MiB)).toBeNull();
+  });
+
+  it('어떤 값이든: null이거나, 작은 합성보다 크고 필요한 기기 px · 상한 이하이며 예산 − 여유 안', () => {
+    let seed = 7;
+    const rnd = (): number => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed / 2147483648;
+    };
+    for (let i = 0; i < 2000; i += 1) {
+      const need = rnd() * 3000;
+      const base = 256 + Math.floor(rnd() * 600);
+      const budget = rnd() < 0.5 ? TEXTURE_BUDGET.low : TEXTURE_BUDGET.high;
+      const others = rnd() * budget;
+      const w = bigMinimapTexels(need, base, A, budget, others);
+      if (w === null) continue;
+      expect(w).toBeGreaterThan(base);
+      expect(w).toBeLessThanOrEqual(Math.ceil(need));
+      expect(w).toBeLessThanOrEqual(MINIMAP_BIG_TEXELS.maxW);
+      expect(others + bytesOf(w)).toBeLessThanOrEqual(budget - MINIMAP_BIG_TEXELS.budgetMargin);
+    }
+    expect(bigMinimapTexels(0, 384, A, TEXTURE_BUDGET.high, 0)).toBeNull();
+    expect(bigMinimapTexels(Number.NaN, 384, A, TEXTURE_BUDGET.high, 0)).toBeNull();
+  });
+});
+
 describe('PC 판 중 메뉴 버튼 자리', () => {
-  it('위 띠 왼쪽 (팀 카드 왼쪽 끝 줄), 띠가 높으면 세로 가운데 · 낮으면 캔버스 맨 위', () => {
-    // 1920×1080 창: 띠 64 CSS px → 가운데 (10px 아래)
-    expect(menuButtonPlace({ left: 0, top: 0, k: 1 }, 64)).toEqual({ left: 14, top: 10 });
-    // 960×540 창: 띠 32 CSS px < 44 → 맨 위
-    expect(menuButtonPlace({ left: 0, top: 0, k: 0.5 }, 64)).toEqual({ left: 7, top: 0 });
-    // 레터박스 캔버스
-    expect(menuButtonPlace({ left: 100, top: 50, k: 1.5 }, 64)).toEqual({ left: 121, top: 50 + 26 });
+  /** 판 장면이 넘기는 값 (PC 배치) */
+  const KEEP: MenuKeepOut = {
+    band: HUD_BAND,
+    cardTop: HUD.leftCards.y,
+    mapLeft: MAP_RECT.x,
+    gaugeLeft: HUD.gaugeA.x - HUD.gauge.dia / 2,
+  };
+  /** 실제 버튼 크기 (Noto Sans KR 15px '설정' + 아이콘 + Esc 키캡, 1920×1080에서 잰 값) */
+  const SIZE = { w: 119, h: 44 };
+  /** 창 크기 → 캔버스 자리 (1920×1080을 비율 그대로 맞추고 가운데) */
+  const canvasOf = (w: number, h: number): { left: number; top: number; k: number } => {
+    const k = Math.min(w / 1920, h / 1080);
+    return { left: (w - 1920 * k) / 2, top: (h - 1080 * k) / 2, k };
+  };
+  type Box = { x: number; y: number; w: number; h: number };
+  const hit = (a: Box, b: Box, gap: number): boolean =>
+    a.x < b.x + b.w + gap && b.x < a.x + a.w + gap && a.y < b.y + b.h + gap && b.y < a.y + a.h + gap;
+
+  it('큰 창은 예전 그대로: 1920×1080 띠 가운데(10px 아래), 1280×720 · 1366×768은 줄이지 않고 캔버스 맨 위', () => {
+    expect(menuButtonPlace({ left: 0, top: 0, k: 1 }, SIZE, KEEP)).toEqual({ left: 14, top: 10, scale: 1 });
+    expect(menuButtonPlace(canvasOf(1280, 720), SIZE, KEEP)).toMatchObject({ top: 0, scale: 1 });
+    expect(menuButtonPlace(canvasOf(1366, 768), SIZE, KEEP)).toMatchObject({ top: 0, scale: 1 });
     expect(MENU_BUTTON.heightCss).toBeGreaterThanOrEqual(44);
+  });
+
+  it('작은 창 · 레터박스 · 필러박스: 팀 카드 · 맵 사각형 · 거점 A 게이지와 4px 넘게 떨어지고 창 안 (960×540은 줄여서 — 예전에는 카드에 5px 걸침)', () => {
+    const sizes: [number, number][] = [
+      [1920, 1080],
+      [2560, 1440],
+      [1366, 768],
+      [1280, 720],
+      [1138, 712],
+      [1024, 768],
+      [1024, 576],
+      [960, 540],
+      [800, 600],
+      [1280, 540],
+      [640, 360],
+    ];
+    for (const [ww, wh] of sizes) {
+      const c = canvasOf(ww, wh);
+      const p = menuButtonPlace(c, SIZE, KEEP);
+      const b = { x: p.left, y: p.top, w: SIZE.w * p.scale, h: SIZE.h * p.scale };
+      const k = c.k;
+      const L = (x: number): number => c.left + x * k;
+      const T = (y: number): number => c.top + y * k;
+      const cards: Box = { x: L(HUD.leftCards.x), y: T(HUD.leftCards.y), w: HUD.leftCards.w * k, h: 400 * k };
+      const map: Box = { x: L(MAP_RECT.x), y: T(MAP_RECT.y), w: MAP_RECT.w * k, h: MAP_RECT.h * k };
+      const gauge: Box = {
+        x: L(KEEP.gaugeLeft),
+        y: T(0),
+        w: (HUD.gauge.w + HUD.gauge.dia) * k,
+        h: HUD_BAND * k,
+      };
+      const label = `${ww}×${wh} ${JSON.stringify(p)}`;
+      expect(hit(b, cards, MENU_BUTTON.gapCss - 0.5), `${label} ↔ 팀 카드`).toBe(false);
+      expect(hit(b, map, MENU_BUTTON.gapCss - 0.5), `${label} ↔ 맵`).toBe(false);
+      expect(hit(b, gauge, MENU_BUTTON.gapCss - 0.5), `${label} ↔ 게이지`).toBe(false);
+      expect(b.x, label).toBeGreaterThanOrEqual(0);
+      expect(b.y, label).toBeGreaterThanOrEqual(0);
+      expect(b.x + b.w, label).toBeLessThanOrEqual(ww);
+      expect(p.scale, label).toBeGreaterThanOrEqual(MENU_BUTTON.minScale);
+      expect(p.scale, label).toBeLessThanOrEqual(1);
+    }
+    // 960×540: 들어가는 만큼만 줄인다 (높이 35px 안팎 — 글자 약 12px), 팀 카드 위 끝(39px)보다 4px 위
+    const s960 = menuButtonPlace(canvasOf(960, 540), SIZE, KEEP);
+    expect(s960.scale).toBeGreaterThan(0.75);
+    expect(s960.top + SIZE.h * s960.scale).toBeLessThanOrEqual(39 - MENU_BUTTON.gapCss + 0.01);
+    // 800×600 (위 여백 75px): 줄이지 않고 캔버스 위 여백 가운데
+    const s800 = menuButtonPlace(canvasOf(800, 600), SIZE, KEEP);
+    expect(s800.scale).toBe(1);
+    expect(s800.top + SIZE.h).toBeLessThanOrEqual(75);
+  });
+
+  it('크기를 아직 모르면(0) 기본 높이로 계산하고 배율은 하한 아래로 내려가지 않는다', () => {
+    const p = menuButtonPlace({ left: 0, top: 0, k: 0.1 }, { w: 0, h: 0 }, KEEP);
+    expect(p.scale).toBe(MENU_BUTTON.minScale);
+    expect(p.top).toBe(0);
   });
 });
 
@@ -229,35 +354,61 @@ describe('판 중 메뉴: 입력 멈춤 (InputSampler.suspend)', () => {
     expect(r.sampler.anyKeyPressed).toBe(false);
   });
 
-  it('닫으면 다시 받는다: 여는 동안 누른 키는 눌린 채 남지 않고, 새로 누른 것만', () => {
+  it('닫는 순간 누르고 있는 이동 키를 이어받는다 (연 전부터 · 여는 동안 누른 키 모두, 다시 누르지 않아도 걷는다)', () => {
+    const r = rig();
+    r.win.dispatchEvent(keyEv('keydown', 'KeyW'));
+    expect(r.sampler.sample(1, 0).my).toBe(-1);
+    r.sampler.suspend(true);
+    r.win.dispatchEvent(keyEv('keydown', 'KeyW', true));
+    r.win.dispatchEvent(keyEv('keydown', 'KeyD'));
+    expect(r.sampler.sample(2, 0)).toMatchObject({ mx: 0, my: 0 });
+    r.sampler.suspend(false);
+    expect(r.sampler.isSuspended).toBe(false);
+    const f = r.sampler.sample(3, 0);
+    expect(f.mx).toBeCloseTo(Math.SQRT1_2, 6);
+    expect(f.my).toBeCloseTo(-Math.SQRT1_2, 6);
+    expect([f.held, f.pressed]).toEqual([0, 0]);
+    // 이어받은 키의 자동 반복은 그대로 누르고 있는 것 · 떼면 멈춘다
+    r.win.dispatchEvent(keyEv('keydown', 'KeyW', true));
+    r.win.dispatchEvent(keyEv('keyup', 'KeyD'));
+    expect(r.sampler.sample(4, 0)).toMatchObject({ mx: 0, my: -1, pressed: 0 });
+    r.win.dispatchEvent(keyEv('keyup', 'KeyW'));
+    expect(r.sampler.sample(5, 0)).toMatchObject({ mx: 0, my: 0 });
+    // 같은 값으로 다시 불러도 그대로 (누르던 키를 다시 떼지 않는다)
+    r.win.dispatchEvent(keyEv('keydown', 'KeyS'));
+    r.sampler.suspend(false);
+    expect(r.sampler.sample(6, 0).my).toBe(1);
+  });
+
+  it('여는 동안 눌렀다 뗀 키 · 닫으려고 누른 Esc는 남지 않는다 (누른 신호 · 아무 키 표시도 없다)', () => {
     const r = rig();
     r.sampler.suspend(true);
     r.win.dispatchEvent(keyEv('keydown', 'KeyA'));
-    r.sampler.suspend(false);
-    expect(r.sampler.isSuspended).toBe(false);
-    expect(r.sampler.sample(1, 0)).toMatchObject({ mx: 0, my: 0, held: 0, pressed: 0 });
     r.win.dispatchEvent(keyEv('keyup', 'KeyA'));
-    r.win.dispatchEvent(keyEv('keydown', 'KeyS'));
-    r.win.dispatchEvent(keyEv('keydown', 'Space'));
-    const f = r.sampler.sample(2, 0);
-    expect(f.my).toBe(1);
-    expect(f.pressed & BTN.ABILITY).toBe(BTN.ABILITY);
-    // 같은 값으로 다시 불러도 그대로 (누르던 키를 다시 떼지 않는다)
+    r.win.dispatchEvent(keyEv('keydown', 'Escape'));
+    r.sampler.anyKeyPressed = false;
+    // Esc를 누른 채 닫힌다 (설정 화면이 keydown에서 닫는다)
     r.sampler.suspend(false);
-    expect(r.sampler.sample(3, 0).my).toBe(1);
+    expect(r.sampler.sample(1, 0)).toMatchObject({ mx: 0, my: 0, held: 0, pressed: 0 });
+    // 닫은 뒤 오는 Esc 자동 반복 · keyup도 게임 입력이 아니다
+    r.win.dispatchEvent(keyEv('keydown', 'Escape', true));
+    r.win.dispatchEvent(keyEv('keyup', 'Escape'));
+    expect(r.sampler.sample(2, 0)).toMatchObject({ mx: 0, my: 0, held: 0, pressed: 0 });
+    expect(r.sampler.anyKeyPressed).toBe(false);
   });
 
-  it('닫은 뒤 계속 누르고 있던 키의 자동 반복은 새로 누른 것이 아니다 (능력이 저절로 나가지 않는다), 다시 누르면 받는다', () => {
+  it('버튼 키(능력 · 구조 · 돌진 · 포효)와 Tab은 이어받지 않는다: 닫은 뒤 자동 반복으로 능력이 나가지 않고, 다시 누르면 받는다', () => {
     const r = rig();
-    r.win.dispatchEvent(keyEv('keydown', 'Space'));
-    r.win.dispatchEvent(keyEv('keydown', 'KeyW'));
-    r.win.dispatchEvent(keyEv('keydown', 'Tab'));
+    for (const code of ['Space', 'KeyE', 'ShiftLeft', 'KeyQ', 'KeyW', 'Tab'])
+      r.win.dispatchEvent(keyEv('keydown', code));
     r.sampler.sample(1, 0);
     r.sampler.suspend(true);
     r.sampler.suspend(false);
     // 손을 떼지 않은 채 운영체제 자동 반복이 온다
-    for (const code of ['Space', 'KeyW', 'Tab']) r.win.dispatchEvent(keyEv('keydown', code, true));
-    expect(r.sampler.sample(2, 0)).toMatchObject({ mx: 0, my: 0, held: 0, pressed: 0 });
+    for (const code of ['Space', 'KeyE', 'ShiftLeft', 'KeyQ', 'KeyW', 'Tab'])
+      r.win.dispatchEvent(keyEv('keydown', code, true));
+    // 이동(W)만 이어받는다
+    expect(r.sampler.sample(2, 0)).toMatchObject({ mx: 0, my: -1, held: 0, pressed: 0 });
     expect(r.sampler.tabHeld).toBe(false);
     // 떼고 다시 누르면 받는다 · 받은 뒤의 자동 반복은 그대로 누르고 있는 것
     r.win.dispatchEvent(keyEv('keyup', 'Space'));
@@ -267,6 +418,33 @@ describe('판 중 메뉴: 입력 멈춤 (InputSampler.suspend)', () => {
     expect(f.pressed & BTN.ABILITY).toBe(BTN.ABILITY);
     expect(f.held & BTN.ABILITY).toBe(BTN.ABILITY);
     expect(r.sampler.sample(4, 0).pressed & BTN.ABILITY).toBe(0);
+  });
+
+  it('마우스 버튼은 이어받지 않는다: 닫으려고 누른 클릭이 공격으로 새지 않는다', () => {
+    const r = rig();
+    r.sampler.suspend(true);
+    r.host.dispatchEvent(ptrEv('pointerdown', 'mouse', 0));
+    r.sampler.suspend(false);
+    expect(r.sampler.sample(1, 0)).toMatchObject({ held: 0, pressed: 0 });
+    r.win.dispatchEvent(ptrEv('pointerup', 'mouse', 0));
+    expect(r.sampler.sample(2, 0)).toMatchObject({ held: 0, pressed: 0 });
+  });
+
+  it('여는 동안 창을 떠났거나(blur) 숨겼으면 닫을 때 이어받을 키가 없다 (keyup을 못 받았을 수 있다)', () => {
+    for (const leave of ['blur', 'hidden'] as const) {
+      const env: InputEnv = { win: new EventTarget(), doc: new FakeDoc(), orientation: null };
+      const sampler = new InputSampler();
+      sampler.attach(new EventTarget(), { touch: null, env });
+      env.win.dispatchEvent(keyEv('keydown', 'KeyW'));
+      sampler.suspend(true);
+      if (leave === 'blur') env.win.dispatchEvent(new Event('blur'));
+      else {
+        (env.doc as FakeDoc).visibilityState = 'hidden';
+        env.doc.dispatchEvent(new Event('visibilitychange'));
+      }
+      sampler.suspend(false);
+      expect(sampler.sample(1, 0), leave).toMatchObject({ mx: 0, my: 0 });
+    }
   });
 
   it('떼어 내면(판 장면 끝) 멈춤도 풀린다', () => {

@@ -492,6 +492,22 @@ interface Finger {
   /** 마지막으로 쓴 손잡이 · 방향 transform (같으면 쓰지 않는다) */
   knobT: string;
   dirT: string;
+  /** 마지막 손가락 자리 (창 CSS px) — 판 중 메뉴로 꺼질 때 이동 스틱을 맡겨 둔다(ParkedStick) */
+  lx: number;
+  ly: number;
+}
+
+/**
+ * 판 중 메뉴가 터치 화면을 끌 때 누르고 있던 이동 스틱 손가락 (닫으면 이어받는다). 꺼진 동안에도 창 단위로 그 손가락의 자리를
+ * 따라가고, 떼거나 취소되면 버린다
+ */
+interface ParkedStick {
+  id: number;
+  cx: number;
+  cy: number;
+  r: number;
+  x: number;
+  y: number;
 }
 
 /** 위치 표시가 사라지는 전환 시간 (ms, style.css .tc-hints.gone의 0.6s와 같다 — hud-gate.test.ts가 견준다) */
@@ -515,6 +531,8 @@ export class TouchControls {
   private layout: TouchLayout | null = null;
   private active = true;
   private live = true;
+  /** 판 중 메뉴가 꺼 둔 동안 맡아 둔 이동 스틱 손가락 (setActive(false, true)). 다시 켜지면 이어받는다 */
+  private parked: ParkedStick | null = null;
   /**
    * 판 중 '설정' 버튼만은 터치 화면이 꺼져도(관전 · 사망 · 탈출 · 판 정지) 누를 수 있다 — 판이 끝나기 전 · 메뉴가 닫혀 있을 때
    * (판 장면이 setMenuAvailable로 정한다, 세로 화면은 제외). PC 메뉴 버튼과 같다
@@ -629,6 +647,18 @@ export class TouchControls {
       },
       true,
     );
+    // 판 중 메뉴로 꺼 둔 동안 맡아 둔 이동 스틱 손가락: 붙잡기를 놓아 이벤트가 레이어로 오지 않으므로 창 캡처 단계에서 따라간다
+    // (설정 화면이 전파를 멈춰도). 떼거나 취소되면 버린다 — 닫을 때 눌려 있는 손가락만 이어받는다
+    const onParked = (ev: Event): void => {
+      const e = ev as PointerEvent;
+      const p = this.parked;
+      if (!p || e.pointerId !== p.id) return;
+      if (e.type === 'pointermove') {
+        p.x = e.clientX;
+        p.y = e.clientY;
+      } else this.parked = null;
+    };
+    for (const type of ['pointermove', 'pointerup', 'pointercancel']) on(window, type, onParked, true);
     // 손가락이 사라지는 경우: 창 이탈 · 숨김 · 화면 회전 · 전체 화면 전환(창 크기가 바뀌면 손가락 좌표 기준이 달라진다)
     on(window, 'blur', () => this.cancelAll());
     on(document, 'visibilitychange', () => {
@@ -755,6 +785,8 @@ export class TouchControls {
       dir: null,
       knobT: '',
       dirT: '',
+      lx: e.clientX,
+      ly: e.clientY,
       ...f,
     });
     el.classList.add('down');
@@ -783,10 +815,17 @@ export class TouchControls {
   }
 
   private onMove(e: PointerEvent): void {
-    const f = this.fingers.get(e.pointerId);
+    this.moveFinger(e.pointerId, e.clientX, e.clientY);
+  }
+
+  /** 스틱 손가락이 (x, y)(창 CSS px)로 움직였다: 상태 기계에 넣고 손잡이 · 방향 표시를 옮긴다 */
+  private moveFinger(id: number, x: number, y: number): void {
+    const f = this.fingers.get(id);
     if (!f || !f.knob) return;
-    const v = stickVector(e.clientX - f.cx, e.clientY - f.cy, f.r);
-    this.opts.feed.stickMove(e.pointerId, v.x, v.y);
+    f.lx = x;
+    f.ly = y;
+    const v = stickVector(x - f.cx, y - f.cy, f.r);
+    this.opts.feed.stickMove(id, v.x, v.y);
     // 손잡이는 바닥 원 안에서만 (반지름 0.4 손잡이 → 0.6까지). 돌진은 버튼 전체가 끄는 고리까지 빠진다
     const travel = f.kind === 'dash' ? f.r : f.r * 0.6;
     const knobT = `translate(${v.x * travel}px,${v.y * travel}px)`;
@@ -848,8 +887,9 @@ export class TouchControls {
     }
   }
 
-  /** 모든 손가락을 버린다 (붙잡기도 놓는다) */
+  /** 모든 손가락을 버린다 (붙잡기도 놓는다). 맡아 둔 이동 스틱도 버린다 */
   private cancelAll(): void {
+    this.parked = null;
     for (const [id, f] of [...this.fingers]) {
       this.drop(id);
       try {
@@ -1024,11 +1064,69 @@ export class TouchControls {
     }
   }
 
-  /** 끄면(결과 · 관전 · 세로 · 대화상자) 즉시 손가락 상태를 비우고(feed.stickCancel) 입력을 받지 않는다 */
-  setActive(on: boolean): void {
+  /**
+   * 끄면(결과 · 관전 · 세로 · 대화상자) 즉시 손가락 상태를 비우고(feed.stickCancel) 입력을 받지 않는다.
+   * keepMove = 판 중 메뉴 때문에만 끈다: 누르고 있던 이동 스틱 손가락을 맡아 두었다가, 다시 켤 때 아직 눌려 있으면 그 자리로
+   * 이어받는다(다시 누르지 않아도 걷는다). 다른 손가락(조준 · 버튼 · 구조)은 이어받지 않는다
+   */
+  setActive(on: boolean, keepMove = false): void {
     if (on === this.active) return;
     this.active = on;
+    const f = !on && keepMove ? this.moveStickFinger() : null;
     this.apply();
+    if (f) this.parked = f;
+  }
+
+  /** 꺼진 채로 판 중 메뉴가 아닌 이유가 생겼다(결과 · 사망 · 판 정지 등): 맡아 둔 이동 스틱을 버린다 */
+  dropParked(): void {
+    this.parked = null;
+  }
+
+  /** 디버그 · 시험: 맡아 둔 이동 스틱 손가락이 있는가 */
+  get hasParked(): boolean {
+    return this.parked !== null;
+  }
+
+  /** 지금 누르고 있는 이동 스틱 손가락 (맡겨 둘 자리 · 마지막 손가락 자리) */
+  private moveStickFinger(): ParkedStick | null {
+    for (const [id, f] of this.fingers)
+      if (f.kind === 'move') return { id, cx: f.cx, cy: f.cy, r: f.r, x: f.lx, y: f.ly };
+    return null;
+  }
+
+  /**
+   * 다시 켜질 때 맡아 둔 이동 스틱을 이어받는다: 손가락을 이동 영역이 다시 붙잡고(이후 움직임 · 뗌이 레이어로 온다) 같은 중심 ·
+   * 지금 손가락 자리로 상태 기계에 넣는다. 그 사이 손을 뗐으면(맡은 것이 지워졌다) · 붙잡을 수 없으면(이미 사라진 손가락) 아무것도
+   * 하지 않는다. 누른 신호(탭 · 발사)는 만들지 않는다
+   */
+  private resumeParked(): void {
+    const p = this.parked;
+    this.parked = null;
+    if (!p || !this.layout) return;
+    try {
+      this.zone.setPointerCapture(p.id);
+    } catch {
+      return;
+    }
+    this.fingers.set(p.id, {
+      kind: 'move',
+      el: this.zone,
+      knob: this.moveKnob,
+      cx: p.cx,
+      cy: p.cy,
+      r: p.r,
+      out: false,
+      dir: null,
+      knobT: '',
+      dirT: '',
+      lx: p.x,
+      ly: p.y,
+    });
+    this.zone.classList.add('down');
+    this.opts.feed.stickStart(p.id, 'move', performance.now());
+    this.move.style.transform = `translate(${p.cx}px,${p.cy}px)`;
+    this.move.classList.add('live');
+    this.moveFinger(p.id, p.x, p.y);
   }
 
   /** 판 중 '설정' 버튼을 터치 화면이 꺼져 있어도 보이고 누를 수 있게 (판 장면: 결과 전 · 메뉴가 닫혀 있을 때) */
@@ -1056,6 +1154,7 @@ export class TouchControls {
       this.setBoard(false);
     }
     this.layer.classList.toggle('off', !live);
+    if (live) this.resumeParked();
   }
 
   destroy(): void {

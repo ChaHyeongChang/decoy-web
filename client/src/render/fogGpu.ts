@@ -35,7 +35,7 @@ import {
 import { getStaticMap, keepStaticMaps } from '../art/mapArt';
 import { ChunkAtlas, chunkBox, chunkRange } from '../art/mapChunks';
 import type { ViewRect } from './camera';
-import { MiniComposite } from './fogMini';
+import { BigMiniComposite, MiniComposite } from './fogMini';
 import type { TileRect } from '../art/mapArtGeom';
 import { gfxNow, gfxState } from '../gfx/state';
 import { MAP_X, MAP_Y, VIEW_TILES_H, VIEW_TILES_W, WORLD_LINE, WORLD_SCALE } from '../ui/layout';
@@ -524,6 +524,8 @@ export class GpuFog implements FogLayer {
   /** 마지막으로 바뀐 주기의 미니맵 명령 (null = 아직 없음 — 첫 주기는 늘 바뀐 것으로 본다) */
   private miniLast: PenRecord | null = null;
   private readonly mini: MiniComposite;
+  /** 지도 크게 보기의 바닥 (열려 있는 동안만 캔버스를 든다) */
+  private readonly bigMini: BigMiniComposite;
   /** 마지막 commit에서 화면 · 미니맵 그림이 바뀌었는가 (안 바뀌었으면 미니맵도 다시 그릴 필요가 없다) */
   changed = true;
   private readonly lightKey: string | null = null;
@@ -638,6 +640,7 @@ export class GpuFog implements FogLayer {
     gfxState.features.liftPieces = atlas.bobs.length;
 
     this.mini = new MiniComposite(lpt, this.light);
+    this.bigMini = new BigMiniComposite(this.light);
     // 정적 맵 캐시는 조각을 복사할 맵 전체 그림과 미니맵 두 장만 남긴다 (옛 배율 · 다른 경로의 큰 캔버스를 붙잡지 않게)
     keepStaticMaps(
       [
@@ -653,6 +656,26 @@ export class GpuFog implements FogLayer {
   /** 미니맵 합성 (마지막 commit 뒤 처음 읽을 때만 합성한다) */
   get miniSource(): HTMLCanvasElement {
     return this.mini.canvas;
+  }
+
+  get bigMiniSource(): HTMLCanvasElement | null {
+    return this.bigMini.canvas;
+  }
+
+  setBigMini(width: number | null): void {
+    this.bigMini.setWidth(width);
+  }
+
+  get bigMiniWidth(): number {
+    return this.bigMini.width;
+  }
+
+  stepBigMini(budgetMs: number): boolean {
+    return this.bigMini.step(budgetMs);
+  }
+
+  get bigMiniReady(): boolean {
+    return this.bigMini.ready;
   }
 
   /**
@@ -884,6 +907,7 @@ export class GpuFog implements FogLayer {
       this.miniLast = this.miniRec;
       this.miniRec = last ?? new PenRecord();
       this.mini.take(this.miniLast);
+      this.bigMini.take(this.miniLast);
     }
     // 화면 쪽 시야 채움 · 조각 · 빛은 모두 미니맵 기록에도 들어가므로, 미니맵이 그대로면 화면도 그대로다
     this.changed = miniChanged;
@@ -896,6 +920,7 @@ export class GpuFog implements FogLayer {
   }
 
   destroy(): void {
+    this.bigMini.release();
     this.chunks.onBaked = null;
     this.chunkBox.destroy();
     this.chunkImgs.length = 0;

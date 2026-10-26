@@ -184,7 +184,11 @@ test('PC 판 중 메뉴: 위 띠 왼쪽 버튼 · Esc로 열고 닫고, 여는 �
   expect(await page.evaluate(() => window.__DECOY__!.snapCount)).toBeGreaterThan(snaps0);
   expect((await page.evaluate(() => window.__DECOY__!.getAnimState()?.frames)) ?? 0).toBeGreaterThan(frames0);
 
-  // Esc로 닫는다: 다시 받지만, 여는 동안 · 그 전부터 누르던 키는 눌린 채 남지 않는다
+  // Esc로 닫는다: 다시 받고, 닫는 순간 누르고 있는 이동 키(A)만 이어받는다 — 여는 동안 눌렀다 뗀 W · D와 Space(능력)는 남지 않는다.
+  // (위 Tab이 포커스를 페이지 밖으로 옮기면 창 blur로 실제 키 기록이 비워진다 — 그 뒤에 누른 A로 본다. 이어받기 자세히: menu-resume)
+  await page.keyboard.up('KeyW');
+  await page.keyboard.up('KeyD');
+  await page.keyboard.down('KeyA');
   await page.keyboard.press('Escape');
   await expect.poll(async () => (await prefs(page)).menu.open).toBe(false);
   const p2 = await prefs(page);
@@ -193,9 +197,8 @@ test('PC 판 중 메뉴: 위 띠 왼쪽 버튼 · Esc로 열고 닫고, 여는 �
   await page.waitForTimeout(300);
   const after = (await inputLog(page)).filter((f) => f.t > tClose + 40);
   expect(after.length).toBeGreaterThan(3);
-  for (const f of after) expect([f.mx, f.my]).toEqual([0, 0]);
-  await page.keyboard.up('KeyW');
-  await page.keyboard.up('KeyD');
+  for (const f of after) expect([f.mx, f.my, f.pressed, f.held]).toEqual([-1, 0, 0, 0]);
+  await page.keyboard.up('KeyA');
   await page.keyboard.down('KeyS');
   await expect.poll(async () => (await inputLog(page)).at(-1)?.my).toBe(1);
   await page.keyboard.up('KeyS');
@@ -224,7 +227,7 @@ test('PC 판 중 메뉴: 위 띠 왼쪽 버튼 · Esc로 열고 닫고, 여는 �
   await s.context.close();
 });
 
-test('PC 960×540: 메뉴 버튼은 띠 왼쪽 빈 자리 (팀 카드 · 게이지 · 선명도 탐침 자리를 덮지 않음), 창 크기를 바꾸면 다시 놓는다', async ({
+test('PC 960×540: 메뉴 버튼은 띠 왼쪽 빈 자리 — 팀 카드 위 끝 · 맵 사각형 · 게이지와 겹치지 않게 들어가는 만큼 줄이고(예전에는 44px 그대로 카드에 5px 걸침), 창을 키우면 원래 크기로 다시 놓는다', async ({
   browser,
 }) => {
   const s = await startBotRoom(browser, QUERY, 'runner');
@@ -237,13 +240,20 @@ test('PC 960×540: 메뉴 버튼은 띠 왼쪽 빈 자리 (팀 카드 · 게이�
       return b && b.visible ? Math.round(b.x) : null;
     })
     .toBe(7);
+  await expect.poll(async () => Math.round((await prefs(page)).menuButton?.h ?? 0)).toBeLessThan(44);
   const b = (await prefs(page)).menuButton!;
-  expect(b.y).toBe(0);
-  expect(b.h).toBeGreaterThanOrEqual(44);
-  // 거점 A 게이지(논리 292 = 146 CSS px) 왼쪽
-  expect(b.x + b.w).toBeLessThanOrEqual(146);
+  console.log(`[play-settings] 960×540 메뉴 버튼 ${JSON.stringify(b)}`);
+  expect(b.y).toBeGreaterThanOrEqual(0);
+  // 팀 카드 위 끝(논리 78 = 39 CSS px)보다 4px 위, 맵 사각형 왼쪽 끝(논리 246 = 123)보다 왼쪽 — 줄여도 32px 넘게 (글자 약 12px)
+  expect(b.y + b.h).toBeLessThanOrEqual(39 - 4 + 0.5);
+  expect(b.x + b.w).toBeLessThanOrEqual(123 - 4 + 0.5);
+  expect(b.h).toBeGreaterThan(32);
+  // 눌러도 열린다 (줄인 버튼의 누르는 자리 = 보이는 자리)
+  await page.mouse.click(b.x + b.w / 2, b.y + b.h / 2);
+  await expect.poll(async () => (await prefs(page)).menu.opens).toBe(1);
   await page.setViewportSize({ width: 1920, height: 1080 });
   await expect.poll(async () => Math.round((await prefs(page)).menuButton?.y ?? -1)).toBe(10);
+  expect(Math.round((await prefs(page)).menuButton!.h)).toBe(44);
   expect(s.problems).toEqual([]);
   await s.context.close();
 });

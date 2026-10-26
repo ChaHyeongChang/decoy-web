@@ -93,17 +93,27 @@ export class InputSampler {
   private spectatePick: number | null = null;
   /** 판 중 메뉴(설정 화면)가 열려 있어 입력을 받지 않는다 (suspend) */
   private suspended = false;
+  /**
+   * 지금 실제로 누르고 있는 키 (판 중 메뉴가 열려 있어도 따라간다 — 닫을 때 이동 키를 이어받는다). 창 캡처 단계에서 받아 설정 화면이
+   * 전파를 멈춘 키도 놓치지 않는다. 창 이탈 · 숨김이면 비운다
+   */
+  private readonly physical = new Set<string>();
   private readonly cleanup: Array<() => void> = [];
 
   /**
    * 판 중 메뉴(설정 화면)가 열려 있는 동안 (설정 화면 통합): 키 · 마우스 · 터치를 받지 않고(기본 동작도 막지 않는다 — 설정 화면의
    * Tab 이동 · 글자 입력), 누르고 있던 키 · 버튼 · 손가락은 모두 뗀 것으로 한다. 판은 멈추지 않으므로 입력 프레임은 계속 나가되
-   * 이동 0 · 버튼 0이다. 다시 켜면(닫힘) 그 뒤 새로 누른 것만 받는다 — 메뉴를 여는 동안 누른 키가 눌린 채 남지 않는다
+   * 이동 0 · 버튼 0이다. 다시 켜면(닫힘) 그 순간 실제로 누르고 있는 **이동 키만** 이어받는다(다시 누르지 않아도 걷는다). 버튼 키 ·
+   * 마우스는 이어받지 않고 누른 신호(pressed)도 만들지 않는다 — 닫으려고 누른 Esc · 닫기 클릭이 공격 · 능력으로 새지 않는다.
+   * 터치 이동 스틱은 터치 화면이 이어받는다(touchControls)
    */
   suspend(on: boolean): void {
     if (on === this.suspended) return;
     this.suspended = on;
     this.reset();
+    if (on) return;
+    for (const code of this.physical) if (MOVE_KEYS[code]) this.keys.add(code);
+    this.recomputeHeld();
   }
 
   /** 입력을 멈췄는가 (디버그 · 시험) */
@@ -214,11 +224,23 @@ export class InputSampler {
       this.canvasPointerSeen = true;
     };
     const onContext = (e: Event): void => e.preventDefault();
-    const onBlur = (): void => this.reset();
+    const onBlur = (): void => {
+      this.physical.clear();
+      this.reset();
+    };
     const onVisibility = (): void => {
-      if (env.doc.visibilityState === 'hidden') this.reset();
+      if (env.doc.visibilityState !== 'hidden') return;
+      this.physical.clear();
+      this.reset();
+    };
+    /** 실제 키 상태 (캡처 단계 — 메뉴가 열려 있어도, 설정 화면이 전파를 멈춰도) */
+    const onPhysical = (e: KeyboardEvent): void => {
+      if (e.type === 'keydown') this.physical.add(e.code);
+      else this.physical.delete(e.code);
     };
     this.cleanup.push(
+      listen(env.win, 'keydown', onPhysical, true),
+      listen(env.win, 'keyup', onPhysical, true),
       listen(env.win, 'keydown', onKeyDown),
       listen(env.win, 'keyup', onKeyUp),
       listen(canvasHost, 'pointerdown', onPointerDown),
@@ -249,6 +271,7 @@ export class InputSampler {
   detach(): void {
     for (const f of this.cleanup.splice(0)) f();
     this.suspended = false;
+    this.physical.clear();
     this.reset();
     this.touch = null;
     this.touchAim = false;

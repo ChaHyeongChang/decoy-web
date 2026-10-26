@@ -1101,6 +1101,70 @@ export function bakeStaticMapStep(scale: number, withGlow: boolean, budgetMs: nu
   return true;
 }
 
+/**
+ * 캐시에 넣지 않고 나눠 굽는 정적 맵 (지도 크게 보기: 그림이 화면에서 차지하는 해상도로 — 판 배율 · 미니맵 그림 캐시와 따로,
+ * 열려 있는 동안만 쓰고 버린다). step(budgetMs)를 프레임마다 부르면 공통 준비(발광 지도가 없으면 그것부터) → 띠 몇 개씩 굽고,
+ * 다 구웠으면 true. 띠마다 자르기 + 겹치는 것만 칠하기라 한 번에 구운 것과 같은 화소다(bakeBand)
+ */
+export class StaticMapBake {
+  private readonly j: StaticJob;
+
+  constructor(scale: number, withGlow: boolean) {
+    const size = staticMapSize(scale);
+    const { canvas, ctx } = newCanvas(size.w, size.h);
+    this.j = {
+      key: '',
+      scale,
+      withGlow,
+      canvas,
+      ctx,
+      band: 0,
+      bands: Math.max(1, Math.ceil(MAP_H / BAKE_BAND_TILES)),
+      ms: 0,
+      maxBandMs: 0,
+      warm: 0,
+    };
+  }
+
+  get canvas(): HTMLCanvasElement {
+    return this.j.canvas;
+  }
+
+  get done(): boolean {
+    return this.j.band >= this.j.bands;
+  }
+
+  /** budgetMs 안에서 굽는다 (적어도 한 걸음). 다 구웠으면 true */
+  step(budgetMs: number): boolean {
+    const j = this.j;
+    if (this.done) return true;
+    const t0 = performance.now();
+    // 공통 준비 (판 전에 이미 했다 — Canvas 합성은 판 시작 때 발광 캔버스를 버리므로 그것만 다시)
+    if (j.warm === 0) {
+      geomOf();
+      decalsOf(MAP_ART.seed);
+      noiseMap(MAP_ART.seed);
+      j.warm = 1;
+      if (j.withGlow && performance.now() - t0 >= budgetMs) return false;
+    }
+    if (j.warm === 1) {
+      if (j.withGlow) getGlowMap();
+      j.warm = 2;
+      if (performance.now() - t0 >= budgetMs) return false;
+    }
+    do bakeBand(j);
+    while (j.band < j.bands && performance.now() - t0 < budgetMs);
+    return this.done;
+  }
+
+  /** 캔버스를 놓는다 (0 × 0) */
+  release(): void {
+    this.j.canvas.width = 0;
+    this.j.canvas.height = 0;
+    this.j.band = this.j.bands;
+  }
+}
+
 /** 다 구운 정적 맵 (없으면 null — 굽지 않는다) */
 export function staticMapIfReady(scale: number, withGlow: boolean): HTMLCanvasElement | null {
   return cache.get(cacheKey(scale, withGlow)) ?? null;

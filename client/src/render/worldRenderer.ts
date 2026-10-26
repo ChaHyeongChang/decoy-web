@@ -532,6 +532,31 @@ export class WorldRenderer {
     return this.fog.miniSource;
   }
 
+  /** 지도 크게 보기의 바닥 (setBigMini로 연 동안, 미니맵과 같은 기록 · 빛). 없으면 null — 그때는 baseCanvas를 늘려 그린다 */
+  get bigBaseCanvas(): HTMLCanvasElement | null {
+    return this.fog.bigMiniSource;
+  }
+
+  /** 지도 크게 보기 바닥 폭 (텍셀, null = 놓는다). 안개 레이어를 다시 만들면(품질 · 배율 변경) 새 레이어에 다시 정해야 한다 */
+  setBigMini(width: number | null): void {
+    this.fog.setBigMini(width);
+  }
+
+  /** 지금 크게 본 지도 바닥 폭 (텍셀, 없으면 0 — 안개 레이어를 새로 만들면 0이 된다). 읽어도 합성하지 않는다 */
+  get bigMiniWidth(): number {
+    return this.fog.bigMiniWidth;
+  }
+
+  /** 크게 본 지도 정적 맵을 budgetMs 안에서 나눠 굽는다. 이번에 다 구웠으면 true */
+  stepBigMini(budgetMs: number): boolean {
+    return this.fog.stepBigMini(budgetMs);
+  }
+
+  /** 크게 본 지도 바닥을 쓸 수 있는가 (다 구웠다) */
+  get bigMiniReady(): boolean {
+    return this.fog.bigMiniReady;
+  }
+
   constructor(scene: Phaser.Scene, useFog: boolean) {
     this.scene = scene;
     this.useFog = useFog;

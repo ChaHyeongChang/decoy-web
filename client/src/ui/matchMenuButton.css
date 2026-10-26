@@ -9,6 +9,8 @@
   gap: 6px;
   font-size: 15px;
   background-color: rgba(19, 36, 51, 0.9);
+  /* 작은 창에서는 스크립트가 HUD와 겹치지 않게 줄인다 (menuButtonPlace, 왼쪽 위 기준) */
+  transform-origin: 0 0;
 }
 #ui-root > .match-menu[hidden] {
   display: none;

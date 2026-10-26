@@ -139,6 +139,7 @@ export function installDebug(app: App, overlay: boolean): void {
     // ── 판 중 설정 효과 ──
     getMatchPrefs: () => matchPrefs(app),
     getDrawnMinimapBig: () => gameScene(app)?.minimapBigDrawn.map((d) => ({ ...d })) ?? [],
+    setMinimapBigSharp: (on) => gameScene(app)?.setMinimapBigSharp(on),
     fakeMatchMenu: (on) => setFakeMatchMenu(on),
     setMatchPref: (key, on) => void setPref(key, on),
     setFrameLimit: (limit) => pacingHooks.setLimit?.(limit),

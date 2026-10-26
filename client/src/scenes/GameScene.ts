@@ -38,6 +38,7 @@ import {
   type FrameSample,
 } from '../gfx/quality';
 import { getFpsOverride, gfxNow, gfxState, onGfxChange, probeSlot } from '../gfx/state';
+import { TEXTURE_BUDGET } from '../gfx/presets';
 import { haptics } from '../haptics';
 import { InputLog, InputSampler } from '../input';
 import { matchMenu, toggleMatchMenu } from '../matchMenu';
@@ -49,7 +50,7 @@ import { cullable } from '../render/camera';
 import { CameraDirector, devPerTile } from '../render/cameraDirector';
 import { UI } from '../art/palette';
 import { ScreenEffects, collectFxTargets } from '../render/effects';
-import { bigMinimapPlace, spottedEdgeAlpha } from '../render/prefsFx';
+import { MINIMAP_BIG_TEXELS, bigMinimapPlace, bigMinimapTexels, spottedEdgeAlpha } from '../render/prefsFx';
 import { WorldRenderer, type MotionSource } from '../render/worldRenderer';
 import { TouchInput, type TouchFrameCtx } from '../touchInput';
 import { TOUCH_HINT_MS, takeTouchHints } from '../touchTutorial';
@@ -219,6 +220,13 @@ export class GameScene extends Phaser.Scene {
   private minimapBig: Minimap | null = null;
   private bigOpen = false;
   private bigOpens = 0;
+  /** 크게 본 지도 바닥 해상도를 다시 정해야 한다 (열 때 · 그래픽 상태가 바뀌었을 때 — 안개 레이어를 새로 만들었을 수 있다) */
+  private bigTexelsDirty = true;
+  /** 크게 본 지도 바닥 폭 (텍셀, null = 작은 미니맵 합성을 늘려 쓴다) · 그때 작은 미니맵 합성 폭 (디버그) */
+  private bigTexels: number | null = null;
+  private bigBaseW = 0;
+  /** 화면 해상도 바닥을 쓰는가 (시험이 끄면 예전처럼 작은 지도 합성을 늘린다) */
+  private bigSharp = true;
 
   /**
    * 미니맵 자리: 엄지 버튼이 덮지 않으면 처음 자리. 덮으면 확대 화면에서는 맵 창 안 빈 구석으로 옮기고(미니맵이 필수, 검토 반영),
@@ -380,10 +388,15 @@ export class GameScene extends Phaser.Scene {
       minimapBig: {
         open,
         frame: open ? big.frameRect : null,
+        image: open ? big.imageRect : null,
         frames: open ? big.drawnFrames : [],
         opens: this.bigOpens,
         bakes: big?.bakes ?? 0,
         smallBakes: this.minimap?.bakes ?? 0,
+        tex: big?.texSize ?? { w: 0, h: 0 },
+        sharpReady: open && this.world.bigMiniReady,
+        smallTexW: this.bigBaseW,
+        needW: big ? big.w * (gfxState.zoom > 0 ? gfxState.zoom : 1) : 0,
       },
     };
   }
@@ -733,6 +746,12 @@ export class GameScene extends Phaser.Scene {
   /**
    * 흔들림 세기 배율 (디버그 · 시험의 픽셀 탐침, '흔들림 줄이기'와 같은 값). 덮어쓴 값은 '흔들림 줄이기' 설정이 바뀔 때까지 이긴다
    */
+  /** 시험 · 선명도 비교 (디버그 setMinimapBigSharp): 끄면 크게 본 지도가 예전처럼 작은 미니맵 합성을 늘려 그린다 */
+  setMinimapBigSharp(on: boolean): void {
+    this.bigSharp = on;
+    this.bigTexelsDirty = true;
+  }
+
   setShakeScale(scale: number): void {
     this.shakeOverride = Math.max(0, scale);
     this.applyShake();
@@ -777,6 +796,10 @@ export class GameScene extends Phaser.Scene {
     this.bigOpen = false;
     this.bigOpens = 0;
     this.minimapBig = null;
+    this.bigTexels = null;
+    this.bigTexelsDirty = true;
+    this.bigSharp = true;
+    this.bigBaseW = 0;
     this.chip = null;
     this.chipAt = 0;
     this.chipLen = -1;
@@ -793,6 +816,7 @@ export class GameScene extends Phaser.Scene {
     const onResize = (): void => {
       this.buttonDirty = true;
       this.chipDirty = true;
+      this.bigTexelsDirty = true;
     };
     window.addEventListener('resize', onResize);
     this.scale.on('resize', onResize);
@@ -944,15 +968,44 @@ export class GameScene extends Phaser.Scene {
     big.setHidden(false);
     const base = this.world.baseCanvas;
     this.minimap.refreshBase(base);
-    big.refreshBase(base);
+    this.bigTexelsDirty = true;
+    this.fitBigTexels(big);
+    big.refreshBase(this.world.bigBaseCanvas ?? base);
     return true;
   }
 
-  /** 크게 본 지도를 닫는다 (숨기기만, 다시 열 때 그대로 쓴다) */
+  /**
+   * 크게 본 지도 바닥 해상도 (열 때 · 그래픽 상태가 바뀐 뒤 한 번): 그림이 화면에서 차지하는 기기 px에 맞춰 안개 레이어에 따로 합성을
+   * 맡긴다(같은 기록 · 빛). 텍스처 예산에서 다른 텍스처를 뺀 만큼만, 작은 미니맵 합성보다 클 때만(아니면 그것을 늘려 쓴다 — 예전과 같다).
+   * 바뀌었으면 true
+   */
+  private fitBigTexels(big: Minimap): boolean {
+    if (!this.bigTexelsDirty) return false;
+    this.bigTexelsDirty = false;
+    const base = this.world.baseCanvas;
+    this.bigBaseW = base.width;
+    const own = big.texSize;
+    const others = Number(gfxState.features.textureBytes ?? 0) - own.w * own.h * 4;
+    const z = gfxState.zoom > 0 ? gfxState.zoom : 1;
+    const w = this.bigSharp
+      ? bigMinimapTexels(big.w * z, base.width, MAP_W / MAP_H, TEXTURE_BUDGET[gfxState.quality], others)
+      : null;
+    // 안개 레이어를 새로 만들었으면(품질 · 배율 변경) 같은 폭이어도 새 레이어에 다시 정한다
+    const same = w === this.bigTexels && (w ?? 0) === this.world.bigMiniWidth;
+    this.bigTexels = w;
+    this.world.setBigMini(w);
+    gfxState.features.minimapBigTexels = w ?? 0;
+    return !same;
+  }
+
+  /** 크게 본 지도를 닫는다 (숨기고 바닥 합성 · 텍스처를 놓는다 — 다시 열 때 다시 합성한다) */
   private closeBigMap(): void {
     if (!this.bigOpen) return;
     this.bigOpen = false;
     this.minimapBig?.setHidden(true);
+    this.minimapBig?.releaseBase();
+    this.world.setBigMini(null);
+    this.bigTexels = null;
   }
 
   /**
@@ -971,7 +1024,14 @@ export class GameScene extends Phaser.Scene {
       this.closeBigMap();
       return;
     }
-    if (baseNew) big.refreshBase(this.world.baseCanvas);
+    // 그래픽 상태가 바뀌었거나 안개 레이어를 새로 만들었으면(창 크기 · 품질 — 새 레이어는 바닥을 들고 있지 않다) 해상도를 다시 정한다.
+    // 그 해상도 정적 맵은 프레임마다 나눠 굽고, 다 구운 프레임 · 해상도를 바꾼 프레임에 다시 그린다 — 같은 기록이라 정보는 같다
+    // (바닥 다시 그린 횟수 bakes는 작은 지도와 같은 때만 센다)
+    if ((this.bigTexels ?? 0) !== this.world.bigMiniWidth) this.bigTexelsDirty = true;
+    const refit = this.fitBigTexels(big);
+    const baked = this.world.stepBigMini(MINIMAP_BIG_TEXELS.stepMs);
+    if (baseNew || refit || baked)
+      big.refreshBase(this.world.bigBaseCanvas ?? this.world.baseCanvas, baseNew);
     big.setWorld(snap.world.points, snap.world.exits, view, this.director?.spectating ?? null, blinkOff);
     big.update(this.drawn, snap.you.role, this.roleOf);
   }
@@ -991,15 +1051,23 @@ export class GameScene extends Phaser.Scene {
     const btn = this.menuButton;
     if (btn) {
       const want = !done && matchMenu.open !== null;
-      if (want && (this.buttonDirty || !btn.shown)) {
+      const placeIt = want && (this.buttonDirty || !btn.shown);
+      btn.show(want);
+      if (placeIt) {
+        // 보인 뒤에 잰다 (숨긴 버튼은 크기가 0). 창 크기가 바뀔 때만 — 읽기 한 번 뒤 쓰기
         const c = this.canvasBox();
-        if (c) {
-          const p = menuButtonPlace(c, HUD_BAND);
-          btn.place(p.left, p.top);
+        const size = btn.naturalSize;
+        if (c && size.w > 0) {
+          const p = menuButtonPlace(c, size, {
+            band: HUD_BAND,
+            cardTop: HUD.leftCards.y,
+            mapLeft: MAP_RECT.x,
+            gaugeLeft: HUD.gaugeA.x - HUD.gauge.dia / 2,
+          });
+          btn.place(p.left, p.top, p.scale);
           this.buttonDirty = false;
         }
       }
-      btn.show(want);
     }
     if (!this.chipWanted || done) {
       if (this.chip?.shown) this.chip.show(false);
@@ -1750,18 +1818,19 @@ export class GameScene extends Phaser.Scene {
     const controls = this.touchControls;
     if (!controls) return;
     const status = snap.you.surv?.status;
-    const active =
+    const playable =
       this.app.result === null &&
       status !== 'dead' &&
       status !== 'escaped' &&
       snap.world.paused === null &&
-      !device.portrait &&
-      !this.menuOpen;
+      !device.portrait;
+    const active = playable && !this.menuOpen;
     if (active !== this.touchActive) {
       this.touchActive = active;
-      controls.setActive(active);
+      // 판 중 메뉴 때문에만 끄면 누르고 있던 이동 스틱을 맡아 두었다가 닫을 때 이어받는다
+      controls.setActive(active, playable);
       if (!active) this.touch?.reset();
-    }
+    } else if (!active && !playable) controls.dropParked();
     // 판 중 '설정' 버튼: 관전 · 판 정지 중에도 (결과 전 · 메뉴가 닫혀 있을 때, PC 메뉴 버튼과 같다)
     controls.setMenuAvailable(this.app.result === null && !this.menuOpen);
     if (active) {

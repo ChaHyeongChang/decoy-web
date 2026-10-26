@@ -24,7 +24,7 @@ import { CAM_ZOOM, MAP_X, MAP_Y, VIEW_TILES_H, VIEW_TILES_W, WORLD_LINE, WORLD_S
 import type { ViewRect } from './camera';
 import { GpuFog, PREFETCH_MARGIN } from './fogGpu';
 import { cameraCompositeScale, fogPathFor, snapToDevice, type FogMode } from './fogMath';
-import { MiniComposite } from './fogMini';
+import { BigMiniComposite, MiniComposite } from './fogMini';
 import {
   CanvasPen,
   LightMap,
@@ -79,6 +79,19 @@ export interface FogLayer {
   readonly selfFollow: boolean;
   /** 미니맵이 줄여 그릴 합성 캔버스 (맵 전체, 안개 포함) */
   readonly miniSource: HTMLCanvasElement;
+  /**
+   * 지도 크게 보기의 바닥 (미니맵과 같은 기록 · 빛, 폭 setBigMini 텍셀). 열려 있지 않거나 · 정적 맵을 아직 굽는 중이거나 · 맵 전체를
+   * 한 장으로 합성하는 배치(확대 1)면 null
+   */
+  readonly bigMiniSource: HTMLCanvasElement | null;
+  /** 크게 본 지도 바닥 폭 (텍셀, null = 놓는다 — 닫을 때). 정적 맵은 그 해상도로 나눠 굽는다(stepBigMini, 맵 그림 캐시 밖) */
+  setBigMini(width: number | null): void;
+  /** 지금 크게 본 지도 바닥 폭 (텍셀, 놓았으면 0). 읽어도 합성하지 않는다 */
+  readonly bigMiniWidth: number;
+  /** 크게 본 지도 정적 맵을 budgetMs 안에서 나눠 굽는다 (열려 있는 동안 프레임마다). 이번에 다 구웠으면 true */
+  stepBigMini(budgetMs: number): boolean;
+  /** 크게 본 지도 바닥을 쓸 수 있는가 (다 구웠다) */
+  readonly bigMiniReady: boolean;
   /** 측정: 마지막 합성(begin~commit)에 걸린 시간 (ms) */
   readonly lastCommitMs: number;
   /** 마지막 commit에서 그림이 바뀌었는가 (바뀌지 않았으면 미니맵도 다시 그릴 필요가 없다) */
@@ -266,6 +279,8 @@ export class CanvasFog implements FogLayer {
   private readonly texture: Phaser.Textures.Texture;
   private readonly image: Phaser.GameObjects.Image;
   private readonly mini: MiniComposite | null;
+  /** 지도 크게 보기의 바닥 (열려 있는 동안만 캔버스를 든다) */
+  private readonly bigMini: BigMiniComposite | null;
   /** px / 타일 (정적 맵 조각 · 합성) */
   private readonly k: number;
   private readonly s: number;
@@ -326,6 +341,7 @@ export class CanvasFog implements FogLayer {
     this.pen = new CanvasPen(ctx, k, s * WORLD_LINE);
     this.light = opts.fog ? new LightMap(opts.lightPxPerTile, opts.ambientCss, domLightSurface) : null;
     this.mini = whole ? null : new MiniComposite(opts.lightPxPerTile, this.light);
+    this.bigMini = whole ? null : new BigMiniComposite(this.light);
     this.key = nextFogKey('fog-base');
     // 안개 주기마다 다시 그리므로 addCanvas의 생성자 사본(getImageData)은 바로 쓸모없어진다 → 사본 없이 올린다
     this.texture = createCanvasTexture(scene.textures, this.key, this.base);
@@ -343,6 +359,26 @@ export class CanvasFog implements FogLayer {
 
   get miniSource(): HTMLCanvasElement {
     return this.mini ? this.mini.canvas : this.base;
+  }
+
+  get bigMiniSource(): HTMLCanvasElement | null {
+    return this.bigMini?.canvas ?? null;
+  }
+
+  setBigMini(width: number | null): void {
+    this.bigMini?.setWidth(width);
+  }
+
+  get bigMiniWidth(): number {
+    return this.bigMini?.width ?? 0;
+  }
+
+  stepBigMini(budgetMs: number): boolean {
+    return this.bigMini?.step(budgetMs) ?? false;
+  }
+
+  get bigMiniReady(): boolean {
+    return this.bigMini?.ready ?? false;
   }
 
   setView(view: ViewRect): boolean {
@@ -457,6 +493,7 @@ export class CanvasFog implements FogLayer {
         this.last = this.rec;
         this.rec = last ?? new PenRecord();
         this.mini?.take(this.last);
+        this.bigMini?.take(this.last);
       }
     } else {
       gfxState.features.fogSkips = Number(gfxState.features.fogSkips ?? 0) + 1;
@@ -469,6 +506,7 @@ export class CanvasFog implements FogLayer {
   }
 
   destroy(): void {
+    this.bigMini?.release();
     this.image.destroy();
     removeCanvasTexture(this.scene.textures, this.key);
   }
