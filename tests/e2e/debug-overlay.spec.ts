@@ -133,12 +133,18 @@ test('PC 1280×720: 펼친 채 시작, 한 화면에 모든 항목 · 값이 바
   await startPractice(page, 'monster');
   await expect(page.getByTestId('debug-overlay-panel')).toBeVisible();
 
-  // 측정이 찰 때까지 (판 시작 직후 첫 프레임들). FPS · 그린 객체 수 · 서버 틱이 모두 찰 때까지 기다린다: 첫 화면에서 그림을
-  // 미리 구워 두면 판 장면이 빨리 떠서, 첫 스냅샷 전 프레임(그린 객체 0개 · 서버 틱 없음)에 FPS가 먼저 찰 수 있다
+  // 측정이 찰 때까지 (판 시작 직후 첫 프레임들). FPS · 그린 객체 수 · 서버 틱 · 안개 p95가 모두 찰 때까지 기다린다: 첫 화면에서
+  // 그림을 미리 구워 두면 판 장면이 빨리 떠서, 첫 스냅샷 전 프레임(그린 객체 0개 · 서버 틱 없음)에 FPS가 먼저 찰 수 있다. 안개 p95는
+  // 첫 안개 주기 프레임을 센 뒤에 찬다(다시 굽는 프레임은 세지 않는다) — 느린 CI(24fps)에서 서버 틱 3에 읽으면 아직 '-'였다
   await expect
     .poll(async () => {
       const t = (await overlayState(page))?.panelText ?? '';
-      return Math.min(num(t, /FPS ([\d.]+)/), num(t, /그리기 객체 (\d+)개/), num(t, /서버 틱 (\d+)/));
+      return Math.min(
+        num(t, /FPS ([\d.]+)/),
+        num(t, /그리기 객체 (\d+)개/),
+        num(t, /서버 틱 (\d+)/),
+        num(t, /안개 p95 ([\d.]+)ms/),
+      );
     }, POLL)
     .toBeGreaterThan(0);
   const a = (await overlayState(page))!;
