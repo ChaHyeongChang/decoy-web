@@ -35,12 +35,21 @@ test('지도 크게 보기 (WebGL PC 1920×1080@2 높음): 열린 동안에도 �
   const tap = (await prefs()).minimapTap!;
   await page.mouse.click(tap.x + tap.w / 2, tap.y + tap.h / 2);
   await expect.poll(async () => (await prefs()).minimapBig.open).toBe(true);
-  await expect.poll(async () => (await prefs()).minimapBig.sharpReady, { timeout: 30_000 }).toBe(true);
+  // 화면 해상도 바닥은 한 프레임 4ms씩 10여 프레임에 나눠 굽는다. 이 장면(SwiftShader · 3840×2160)은 프레임이 컨테이너에서 1초 안팎,
+  // CI 러너에서는 몇 초씩이라 넉넉히 기다린다 (실패하면 그때까지 굽기 걸음 수를 남긴다)
+  const t0 = Date.now();
+  try {
+    await expect.poll(async () => (await prefs()).minimapBig.sharpReady, { timeout: 120_000 }).toBe(true);
+  } finally {
+    const f = await page.evaluate(() => window.__DECOY__!.gfx.features);
+    console.log(
+      `[minimap-sharp.webgl] 연 뒤 ${((Date.now() - t0) / 1000).toFixed(1)}초: 굽기 ${String(f.minimapBigSteps)}걸음 · 한 걸음 최대 ${String(f.minimapBigStepMaxMs)}ms · 합계 ${String(f.minimapBigBakeMs)}ms · 바닥 폭 ${String(f.minimapBigTexels)}`,
+    );
+  }
   const big = (await prefs()).minimapBig;
   const open = await bytes();
-  const bake = await page.evaluate(() => window.__DECOY__!.gfx.features);
   console.log(
-    `[minimap-sharp.webgl] 바닥 ${big.smallTexW} → ${big.tex.w}×${big.tex.h} (화면 ${big.needW.toFixed(0)}px), 텍스처 ${(closed / MiB).toFixed(2)} → ${(open / MiB).toFixed(2)}MiB, 굽기 ${String(bake.minimapBigSteps)}걸음 · 한 걸음 최대 ${String(bake.minimapBigStepMaxMs)}ms · 합계 ${String(bake.minimapBigBakeMs)}ms`,
+    `[minimap-sharp.webgl] 바닥 ${big.smallTexW} → ${big.tex.w}×${big.tex.h} (화면 ${big.needW.toFixed(0)}px), 텍스처 ${(closed / MiB).toFixed(2)} → ${(open / MiB).toFixed(2)}MiB`,
   );
   expect(open).toBeLessThanOrEqual(HIGH_BUDGET);
   expect(big.tex.w).toBeGreaterThan(big.smallTexW);
