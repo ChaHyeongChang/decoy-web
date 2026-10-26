@@ -8,6 +8,7 @@ import {
   MAP_H,
   MAP_W,
   PRISON_RECT,
+  TILE_PX,
   tileAt,
   type ExitId,
   type ExitView,
@@ -50,10 +51,13 @@ import {
 } from '../../client/src/art/mapArtGeom';
 import {
   GLOW_SCALE,
+  StaticMapBake,
   bakeGlow,
   bakeStaticMap,
   getGlowMap,
   getStaticMap,
+  glowIfReady,
+  glowScale,
   keepStaticMaps,
   staticMapSize,
 } from '../../client/src/art/mapArt';
@@ -632,6 +636,65 @@ describe('정적 맵 캐시: 지금 쓰는 것만 남긴다 (R4)', () => {
     expect(cacheBytes()).toBe(size(0.93));
     // 버린 배율은 다시 구우면 새 캔버스
     expect(getStaticMap(1.86, false)).not.toBe(undefined);
+  });
+});
+
+describe('크게 본 지도 정적 맵 나눠 굽기 (StaticMapBake): 판 중 한 걸음이 짧다', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** 예산 0으로 한 걸음씩 (한 걸음 = 한 단위) 다 구울 때까지 */
+  const bakeAll = (b: StaticMapBake): void => {
+    for (let n = 0; n < 1000 && !b.step(0); n += 1);
+  };
+
+  it('전역 발광이 없으면(Canvas 경로 — 판 시작 때 버림) 1타일 띠 MAP_H개 뒤 발광을 이 해상도로 줄마다 따로 굽고 더한 뒤 버린다. 맵 그림 캐시 · 전역 발광은 건드리지 않는다', () => {
+    vi.stubGlobal('document', fakeCanvasDoc(null));
+    keepStaticMaps([], false);
+    expect(glowIfReady()).toBeNull();
+    const log: string[] = [];
+    vi.stubGlobal('document', fakeCanvasDoc(log));
+    const scale = 0.5;
+    const b = new StaticMapBake(scale, true);
+    expect({ w: b.canvas.width, h: b.canvas.height }).toEqual(staticMapSize(scale));
+    bakeAll(b);
+    expect(b.done).toBe(true);
+    // 띠 MAP_H개(아래 GPU 경로 시험) · 발광 캔버스 만들기 · 줄 여럿(네온 · 철창 · 거점) · 더하기
+    expect(b.steps).toBeGreaterThan(MAP_H + 3);
+    // 마지막 그리기: 더하기로 이 해상도의 발광 캔버스를 맵 크기로 늘려
+    const g = Math.min(glowScale(), scale);
+    const gw = Math.round(MAP_W * TILE_PX * g);
+    const gh = Math.round(MAP_H * TILE_PX * g);
+    const draws = log.filter((l) => l.startsWith('drawImage('));
+    expect(draws[draws.length - 1]).toBe(
+      `drawImage(canvas${gw}x${gh},0,0,${b.canvas.width},${b.canvas.height})`,
+    );
+    const at = log.lastIndexOf(draws[draws.length - 1]!);
+    expect(
+      log
+        .slice(0, at)
+        .reverse()
+        .find((l) => l.startsWith('globalCompositeOperation=')),
+    ).toBe('globalCompositeOperation=lighter');
+    expect(Number(gfxState.features.mapCacheCount)).toBe(0);
+    expect(glowIfReady()).toBeNull();
+    b.release();
+    expect({ w: b.canvas.width, h: b.canvas.height }).toEqual({ w: 0, h: 0 });
+  });
+
+  it('전역 발광이 지금 배율로 있으면(GPU 경로) 띠 MAP_H개 + 한 번 더하기, 발광 없이면 띠만', () => {
+    vi.stubGlobal('document', fakeCanvasDoc(null));
+    const glow = getGlowMap();
+    expect(glowIfReady()).toBe(glow);
+    const a = new StaticMapBake(0.5, true);
+    bakeAll(a);
+    expect(a.steps).toBe(MAP_H + 1);
+    const c = new StaticMapBake(0.5, false);
+    bakeAll(c);
+    expect(c.steps).toBe(MAP_H);
+    expect(c.maxStepMs).toBeGreaterThanOrEqual(0);
+    expect(c.totalMs).toBeGreaterThanOrEqual(c.maxStepMs);
   });
 });
 

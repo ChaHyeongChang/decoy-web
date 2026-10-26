@@ -53,6 +53,8 @@ import './settings.css';
 
 /** 연 손가락의 click을 버리는 시간 (ms, 연 뒤 설정 화면 안에서 누른 적 없는 포인터 click만 — ghostUntil) */
 const GHOST_CLICK_MS = 800;
+/** 두 번째 손가락 탭을 click으로 대신 보낸 뒤 브라우저가 같은 단추에 만든 click을 버리는 시간 (ms) */
+const SECOND_FINGER_CLICK_MS = 600;
 
 /** 설정 화면이 바깥에서 받는 것 */
 export interface SettingsEnv {
@@ -210,6 +212,7 @@ export class SettingsPanel {
     });
     this.card.addEventListener('keydown', (e) => this.onKey(e));
     this.root.addEventListener('pointerdown', () => (this.downSinceOpen = true), true);
+    this.listenSecondFinger();
     this.root.addEventListener(
       'click',
       (e) => {
@@ -314,6 +317,54 @@ export class SettingsPanel {
     this.showTab(want);
     this.syncAll();
     this.tabs.get(want)?.focus({ preventScroll: true });
+  }
+
+  /**
+   * 두 번째 손가락 탭 (판 중 설정을 이동 스틱을 누른 채 열고 닫을 때): 다른 손가락이 화면에 닿아 있으면 브라우저가 탭을 click으로
+   * 바꾸지 않아(pointerdown · pointerup만 온다) '닫기' 등 단추가 눌리지 않았다. 첫 손가락이 아닌 손가락이 단추에서 눌렸다가 그
+   * 단추 안에서 떼어지면 그 단추를 click한다. 브라우저가 click을 따로 만들면(첫 손가락이 그새 떨어진 경우 등) 한 번만 처리한다
+   */
+  private listenSecondFinger(): void {
+    let down: { id: number; el: HTMLElement } | null = null;
+    let fired: { el: HTMLElement; at: number } | null = null;
+    const buttonOf = (t: EventTarget | null): HTMLElement | null =>
+      t instanceof Element ? t.closest<HTMLElement>('button:not([disabled])') : null;
+    this.root.addEventListener(
+      'pointerdown',
+      (e) => {
+        if (e.pointerType !== 'touch' || e.isPrimary) return;
+        const el = buttonOf(e.target);
+        down = el && this.root.contains(el) ? { id: e.pointerId, el } : null;
+      },
+      true,
+    );
+    this.root.addEventListener(
+      'pointerup',
+      (e) => {
+        const d = down;
+        if (!d || e.pointerId !== d.id) return;
+        down = null;
+        const r = d.el.getBoundingClientRect();
+        if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return;
+        fired = { el: d.el, at: performance.now() };
+        d.el.click();
+      },
+      true,
+    );
+    this.root.addEventListener('pointercancel', () => (down = null), true);
+    // 대신 보낸 click 바로 뒤에 브라우저가 같은 단추에 만든 click은 버린다 (두 번 누른 것이 되지 않게)
+    this.root.addEventListener(
+      'click',
+      (e) => {
+        const f = fired;
+        if (!f || e.detail === 0 || performance.now() - f.at > SECOND_FINGER_CLICK_MS) return;
+        if (!(e.target instanceof Node) || !f.el.contains(e.target)) return;
+        fired = null;
+        e.preventDefault();
+        e.stopPropagation();
+      },
+      true,
+    );
   }
 
   close(): void {

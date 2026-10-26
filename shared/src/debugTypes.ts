@@ -193,12 +193,21 @@ export interface MatchPrefsDebug {
     open: boolean;
     /** 틀 사각형 (논리 px, 닫혀 있으면 null) */
     frame: { x: number; y: number; w: number; h: number } | null;
+    /** 지도 그림 사각형 (논리 px, 틀 · 제목 안쪽, 닫혀 있으면 null) */
+    image: { x: number; y: number; w: number; h: number } | null;
     /** getDrawnMinimapBig과 같은 순서로 엔티티마다 그린 몸 그림 이름 (괴물 화면 생존자 = 흰 공통 실루엣 'm:hidden') */
     frames: string[];
     /** 이 판에서 연 횟수 · 바닥을 다시 그린 횟수 · 그때 작은 지도가 다시 그린 횟수 */
     opens: number;
     bakes: number;
     smallBakes: number;
+    /** 바닥 텍스처 크기 (텍셀 — 닫혀 있으면 1 × 1) · 작은 미니맵 바닥 합성 폭 */
+    tex: { w: number; h: number };
+    /** 화면 해상도 정적 맵을 다 구워 그 바닥을 쓰는 중 (열자마자 몇 프레임은 작은 지도 합성을 늘린다) */
+    sharpReady: boolean;
+    smallTexW: number;
+    /** 그림 폭이 화면에서 차지하는 기기 px (논리 폭 × 백버퍼 배율) */
+    needW: number;
   };
 }
 
@@ -363,6 +372,11 @@ export interface DecoyDebug {
   getMatchPrefs(): MatchPrefsDebug | null;
   /** 크게 본 지도에 그린 엔티티 (layer 'minimap', 닫혀 있으면 빈 배열). 같은 프레임의 getDrawn ⊆ 비교용 */
   getDrawnMinimapBig(): DrawnEntity[];
+  /**
+   * 시험 · 선명도 비교: 지도 크게 보기의 화면 해상도 바닥을 끄면(false) 예전처럼 작은 미니맵 합성을 늘려 그린다. 판 장면이
+   * 새로 만들어지면 켜짐으로 돌아온다
+   */
+  setMinimapBigSharp(on: boolean): void;
   /**
    * 시험용 판 중 메뉴: true면 matchMenu.open · close · isOpen을 가짜(열림 상태만 바꾸고 횟수를 센다)로 바꾸고 false면 되돌린다.
    * 진짜 설정 화면 없이 Esc · 메뉴 버튼 · 입력 멈춤을 본다 (getMatchPrefs().menu)

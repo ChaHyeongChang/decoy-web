@@ -272,6 +272,13 @@ export class Minimap {
     return { x: M.x + this.ox - M.pad, y: M.y + this.oy - M.title, w: f.w, h: f.h };
   }
 
+  /** 지도 그림 사각형 (논리 px, 틀 · 제목 안쪽 — 선명도 시험). 그리지 않으면 null */
+  get imageRect(): { x: number; y: number; w: number; h: number } | null {
+    const M = this.at;
+    if (!M || this.hidden) return null;
+    return { x: M.x + this.ox, y: M.y + this.oy, w: this.w, h: this.h };
+  }
+
   /** 틀 (제목 · 여백 포함) 크기 (논리 px). 자리가 없으면 null */
   get frameSize(): { w: number; h: number } | null {
     const M = this.at;
@@ -398,8 +405,11 @@ export class Minimap {
     return this.pacer.waiting || this.deferred;
   }
 
-  /** 메인 바닥 합성을 줄여 그린다 */
-  refreshBase(base: HTMLCanvasElement): void {
+  /**
+   * 메인 바닥 합성을 줄여 그린다. count = 바닥 다시 그린 횟수(bakes)에 센다 — 크게 본 지도가 화면 해상도 정적 맵을 다 구워
+   * 바꿔 그릴 때는 세지 않는다(작은 지도와 같은 때에만 다시 그리는지 보는 시험)
+   */
+  refreshBase(base: HTMLCanvasElement, count = true): void {
     if (!this.texture) return;
     this.stale = false;
     if (this.resizePending) this.applyScale();
@@ -413,11 +423,28 @@ export class Minimap {
     this.ctx.imageSmoothingQuality = 'high';
     this.ctx.drawImage(base, 0, 0, this.canvas.width, this.canvas.height);
     uploadCanvasTexture(this.texture);
-    this.bakes += 1;
+    if (count) this.bakes += 1;
   }
 
   /** 바닥을 다시 그린 횟수 (디버그 · 시험: 크게 본 지도가 작은 지도와 같은 때에만 다시 그리는지) */
   bakes = 0;
+
+  /** 바닥 텍스처 크기 (텍셀 — 크게 본 지도는 바닥 합성 크기를 따른다. 디버그 · 텍스처 예산 계산) */
+  get texSize(): { w: number; h: number } {
+    return { w: this.canvas.width, h: this.canvas.height };
+  }
+
+  /**
+   * 크게 본 지도를 닫을 때: 바닥 캔버스 · 텍스처를 1 × 1로 줄여 놓는다 (텍스처 예산에서 빠진다). 다시 열면 refreshBase가 바닥 합성
+   * 크기로 다시 잡는다. 작은 지도는 아무것도 하지 않는다
+   */
+  releaseBase(): void {
+    if (!this.big || !this.texture || !this.image) return;
+    if (this.canvas.width === 1 && this.canvas.height === 1) return;
+    resizeCanvasTexture(this.texKey, this.texture, this.canvas, 1, 1, false);
+    this.image.setSizeToFrame(this.texture.get());
+    this.image.setScale(this.w, this.h);
+  }
 
   private px(x: number): number {
     return (this.at?.x ?? 0) + this.ox + (x / MAP_W) * this.w;

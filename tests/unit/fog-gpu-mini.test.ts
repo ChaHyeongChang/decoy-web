@@ -52,6 +52,13 @@ class FakeCanvas {
 const h = vi.hoisted(() => ({
   canvases: [] as { calls: { fn: string; op: string; args: unknown[] }[] }[],
   statics: [] as { scale: number; canvas: unknown }[],
+  /** 크게 본 지도 정적 맵 나눠 굽기 (StaticMapBake): 배율 · 캔버스 · 걸음 수 */
+  bakes: [] as {
+    scale: number;
+    withGlow: boolean;
+    canvas: { width: number; height: number };
+    steps: number;
+  }[],
 }));
 
 vi.mock('phaser', () => {
@@ -74,7 +81,42 @@ vi.mock('../../client/src/art/mapArt', () => ({
     h.statics.push({ scale, canvas });
     return canvas;
   },
+  // 다 구운 그림만 (판 배율 맵 전체 그림은 레이어를 만들 때 구웠다)
+  staticMapIfReady: (scale: number): unknown => h.statics.find((s) => s.scale === scale)?.canvas ?? null,
   getGlowMap: (): unknown => document.createElement('canvas'),
+  // 크게 본 지도 정적 맵: 맵 그림 캐시 밖에서 두 걸음에 다 굽는 가짜 (맵 48 × 32타일 × 32px × 배율) — 합성은 그다음 걸음에
+  StaticMapBake: class {
+    maxStepMs = 0;
+    totalMs = 0;
+    steps = 0;
+    readonly rec: {
+      scale: number;
+      withGlow: boolean;
+      canvas: { width: number; height: number };
+      steps: number;
+    };
+    constructor(scale: number, withGlow: boolean) {
+      const canvas = document.createElement('canvas') as unknown as { width: number; height: number };
+      canvas.width = Math.round(48 * 32 * scale);
+      canvas.height = Math.round(32 * 32 * scale);
+      this.rec = { scale, withGlow, canvas, steps: 0 };
+      h.bakes.push(this.rec);
+    }
+    get canvas(): unknown {
+      return this.rec.canvas;
+    }
+    get done(): boolean {
+      return this.rec.steps >= 2;
+    }
+    step(): boolean {
+      this.rec.steps += 1;
+      return this.done;
+    }
+    release(): void {
+      this.rec.canvas.width = 0;
+      this.rec.canvas.height = 0;
+    }
+  },
   keepStaticMaps: () => undefined,
   paintStaticMap: () => undefined,
 }));
@@ -92,6 +134,7 @@ const LPT = 12;
 async function makeFog() {
   h.canvases.length = 0;
   h.statics.length = 0;
+  h.bakes.length = 0;
   vi.stubGlobal('document', {
     createElement: () => {
       const c = new FakeCanvas();
@@ -328,5 +371,100 @@ describe('GPU 안개 조각 · 시야 채움: 바뀔 때만 다시 그려 올린
     expect(step(0.3, tri(5, 5))).toBe(false);
     expect(step(0.3, tri(6, 5))).toBe(true);
     expect(step(0.3, tri(6, 5))).toBe(false);
+  });
+});
+
+describe('지도 크게 보기 바닥 (setBigMini): 열려 있는 동안만, 작은 미니맵과 같은 기록 · 빛을 화면 해상도로', () => {
+  /** 크게 본 지도를 다 굽는다 (가짜 굽기는 두 걸음). 다 구운 걸음에만 true */
+  const bakeAll = (fog: { stepBigMini(ms: number): boolean }): boolean[] => [
+    fog.stepBigMini(4),
+    fog.stepBigMini(4),
+    fog.stepBigMini(4),
+    fog.stepBigMini(4),
+  ];
+
+  it('열기 전에는 아무것도 굽지 않고 null, 열면 그 폭의 정적 맵을 맵 그림 캐시 밖에서 나눠 굽고 다 구울 때까지 null', async () => {
+    const { fog, cycle } = await makeFog();
+    cycle(tri(10, 10));
+    const made = h.canvases.length;
+    const cached = h.statics.length;
+    expect(fog.bigMiniSource).toBeNull();
+    expect([fog.bigMiniWidth, fog.bigMiniReady]).toEqual([0, false]);
+    expect(fog.stepBigMini(4)).toBe(false);
+    expect(h.canvases.length).toBe(made);
+    fog.setBigMini(960);
+    expect(fog.bigMiniWidth).toBe(960);
+    // 맵 그림 캐시(getStaticMap)는 건드리지 않는다 — 판 배율 · 미니맵 그림을 밀어내지 않게
+    expect(h.statics.length).toBe(cached);
+    expect(h.bakes.map((b) => [b.scale, b.withGlow])).toEqual([[960 / (48 * TILE_PX), true]]);
+    expect([h.bakes[0]?.canvas.width, h.bakes[0]?.canvas.height]).toEqual([960, 640]);
+    expect(fog.bigMiniSource).toBeNull();
+    // 두 걸음에 다 굽고, 합성은 그다음 걸음에 (마지막 굽기와 한 프레임에 몰리지 않게)
+    expect(bakeAll(fog)).toEqual([false, false, true, false]);
+    expect(fog.bigMiniReady).toBe(true);
+    expect(fog.bigMiniSource).not.toBeNull();
+    // 같은 폭이면 다시 굽지 않는다
+    fog.setBigMini(960);
+    expect(h.bakes.length).toBe(1);
+    expect(fog.bigMiniReady).toBe(true);
+  });
+
+  it('다 구우면 작은 미니맵과 같은 마지막 commit 그림(같은 명령 순서 · 같은 다각형 · 같은 빛 지도)을 큰 격자로 합성한다', async () => {
+    const { fog, lastComposite, cycle } = await makeFog();
+    cycle(tri(10, 10));
+    fog.setBigMini(960);
+    // 굽는 동안 기록이 바뀌어도 다 구운 뒤 마지막 것을 그린다
+    fog.stepBigMini(4);
+    cycle(tri(12, 11));
+    fog.stepBigMini(4);
+    expect(fog.bigMiniSource).toBeNull();
+    fog.stepBigMini(4);
+    void fog.miniSource;
+    const big = fog.bigMiniSource as unknown as FakeCanvas;
+    expect([big.width, big.height]).toEqual([960, 640]);
+    const st = h.bakes[0]!.canvas;
+    const at = big.calls.map((c) => c.fn === 'drawImage' && c.args[0] === st).lastIndexOf(true);
+    expect(at).toBeGreaterThanOrEqual(0);
+    const bigCalls = big.calls.slice(at);
+    // 명령 순서는 작은 미니맵 합성과 같다: 정적 맵 → 채움 → 빛 곱하기 → 테두리 리프트
+    expect(bigCalls.map((c) => `${c.fn}@${c.op}`)).toEqual(lastComposite().map((c) => `${c.fn}@${c.op}`));
+    // 같은 다각형을 큰 격자(960 / 48 = 20px / 타일)로
+    expect(firstMove(lastComposite())).toEqual([12 * LPT, 11 * LPT]);
+    expect(firstMove(bigCalls)).toEqual([12 * 20, 11 * 20]);
+    // 빛 곱하기는 같은 빛 지도 캔버스를 늘려 그린다
+    const smallLight = lastComposite().find((c) => c.fn === 'drawImage' && c.op === 'multiply')?.args[0];
+    const bigLight = bigCalls.find((c) => c.fn === 'drawImage' && c.op === 'multiply');
+    expect(bigLight?.args[0]).toBe(smallLight);
+    expect(bigLight?.args.slice(1)).toEqual([0, 0, 960, 640]);
+    // 바뀌지 않았으면 다시 합성하지 않고, 다음 주기도 함께 · 같은 그림
+    const n0 = big.calls.length;
+    expect(fog.bigMiniSource).toBe(big as unknown as HTMLCanvasElement);
+    expect(big.calls.length).toBe(n0);
+    cycle(tri(30, 12));
+    void fog.miniSource;
+    void fog.bigMiniSource;
+    expect(firstMove(lastComposite())).toEqual([30 * LPT, 12 * LPT]);
+    expect(firstMove(big.calls.slice(n0))).toEqual([30 * 20, 12 * 20]);
+  });
+
+  it('닫으면(null) 합성 · 정적 맵 캔버스를 0 × 0으로 놓고 null, 다시 열면 새로 구워 그때의 마지막 기록으로', async () => {
+    const { fog, cycle } = await makeFog();
+    cycle(tri(10, 10));
+    fog.setBigMini(960);
+    bakeAll(fog);
+    const big = fog.bigMiniSource as unknown as FakeCanvas;
+    const st = h.bakes[0]!.canvas;
+    fog.setBigMini(null);
+    expect(fog.bigMiniSource).toBeNull();
+    expect([fog.bigMiniWidth, fog.bigMiniReady]).toEqual([0, false]);
+    expect([big.width, big.height, st.width, st.height]).toEqual([0, 0, 0, 0]);
+    // 닫혀 있는 동안 바뀐 기록도 다시 열어 다 구우면 바로 그 그림이다
+    cycle(tri(25, 8));
+    fog.setBigMini(720);
+    expect(fog.bigMiniSource).toBeNull();
+    bakeAll(fog);
+    const again = fog.bigMiniSource as unknown as FakeCanvas;
+    expect([again.width, again.height]).toEqual([720, 480]);
+    expect(firstMove(again.calls)).toEqual([25 * 15, 8 * 15]);
   });
 });

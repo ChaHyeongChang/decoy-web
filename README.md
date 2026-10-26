@@ -12,13 +12,13 @@ TypeScript · Phaser 3 · Node `ws` 권한 서버. 그래픽은 코드로 그리
 
 ## 화면
 
-| 휴대폰 가로 — 생존자(러너), 화면 밖 화살표 · 지도 | PC — 괴물, 생존자는 모두 흰색으로 보인다 |
+| 휴대폰 가로 — 생존자(러너), 화면 밖 화살표 · 지도 · 설정 | PC — 괴물, 생존자는 모두 흰색으로 보인다 |
 |---|---|
-| ![휴대폰 생존자 화면](artifacts/camera/final/phone-800x360/survivor-arrows.png) | ![PC 괴물 화면](artifacts/camera/final/pc-1920x1080/monster-arrows.png) |
+| ![휴대폰 생존자 화면](artifacts/final/match-phone-survivor.png) | ![PC 괴물 화면](artifacts/final/match-pc-monster.png) |
 
-![휴대폰: 걷기 → 수감 → 팀원 화면 보기(관전)](artifacts/camera/final/phone-800x360/walk-spectate.gif)
+![휴대폰: 걷기 → 수감 → 팀원 화면 보기(관전)](artifacts/final/match-phone-walk.gif)
 
-실제 게임을 헤드리스 크롬으로 찍은 그림이다(`tests/camera/`). 화면은 내 캐릭터 둘레 16 × 10.7타일을 따라가고, 화면 밖에 있는 팀원 · 거점 · 탈출구는 가장자리 화살표로 가리킨다(괴물 화면은 점령 중인 거점 · 포효로 드러난 자리만).
+실제 게임을 헤드리스 크롬으로 찍은 그림이다(`tests/camera/`, 2026-10-26 — 새 캐릭터 · 판 중 '설정' 버튼 · 몸을 따라가는 시야 빛). 화면은 내 캐릭터 둘레 16 × 10.7타일을 따라가고, 화면 밖에 있는 팀원 · 거점 · 탈출구는 가장자리 화살표로 가리킨다(괴물 화면은 점령 중인 거점 · 포효로 드러난 자리만). 판 중 지도를 누르면 맵 전체를 크게 본다.
 
 ## 실행
 

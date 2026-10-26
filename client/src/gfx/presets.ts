@@ -48,6 +48,16 @@ export interface QualityPreset {
 
 const MP = (w: number, h: number): number => w * h;
 
+/**
+ * 올린 캔버스 텍스처 바이트 예산 (gfx.features.textureBytes, MOBILE_PLAN M10 · PERF.md): 높음 · 중간 32MiB, 낮음 8MiB.
+ * 시험(m10-fog · m10-map · camera)이 이 값을 넘지 않는지 보고, 지도 크게 보기는 남은 만큼만 해상도를 올린다
+ */
+export const TEXTURE_BUDGET: Readonly<Record<QualityTier, number>> = {
+  high: 32 * 1024 * 1024,
+  medium: 32 * 1024 * 1024,
+  low: 8 * 1024 * 1024,
+};
+
 export const PRESETS: Readonly<Record<QualityTier, QualityPreset>> = {
   high: {
     tier: 'high',
