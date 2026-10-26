@@ -13,9 +13,11 @@ const BEFORE_M10 = 346_679;
  * 넘었다(실측 347,785B = M10 전 +1.1KiB, 새 캐릭터 그림 명령 gzip 약 21.6KB). 따라가는 카메라에서 M10 전 + 18KiB로 올린다
  * (카메라 · 맵 조각 굽기 · 화면 밖 표시 · 관전 · 미니맵, DECISIONS 9절 '번들 예산'). 설정 화면 통합에서 M10 전 + 36KiB로 올린다
  * (설정 화면 · 조작 배치 편집 · 판 중 설정 효과, DECISIONS 11절 '번들 예산'). 잔렉 고치기에서 M10 전 + 40KiB로 올린다
- * (내 빛 따라가기 셰이더 · 프레임 페이싱 약수 사다리, DECISIONS 12절 '번들 예산')
+ * (내 빛 따라가기 셰이더 · 프레임 페이싱 약수 사다리, DECISIONS 12절 '번들 예산'). 번들 상한 올리기(PR #27)에서 M10 전 + 88KiB로
+ * 올린다: PR #26 병합 387,509B에서 상한까지 130B뿐이라 다음 기능(결과 화면 · 레벨 · 스킨 등)을 넣을 자리로 +48KiB. 없애지 않고
+ * 경보로 둔다 — 다시 닿으면 올리기 전에 구성(docs/PERF.md 8절, scripts/bundle-breakdown.mjs)부터 본다 (DECISIONS 11절 '번들 상한 올리기')
  */
-const CAP = BEFORE_M10 + 40 * 1024;
+const CAP = BEFORE_M10 + 88 * 1024;
 /**
  * 마일스톤마다의 예산: 직전 마일스톤 병합 값에서 이번 마일스톤이 더 쓸 수 있는 양 (DECISIONS M11 "번들 예산").
  * M10c는 Phaser 사용자 빌드 직후 243,281B에서 +25KiB였다. 다음 마일스톤에서 기준을 그 병합 값으로 옮긴다
@@ -34,9 +36,10 @@ const CAP = BEFORE_M10 + 40 * 1024;
 // (DECISIONS 12절 '번들 예산') — PR #24 병합 381,122B에서 +4KiB
 // 남은 문제 정리: 크게 본 지도 화면 해상도 바닥(나눠 굽기 · 예산 맞춤) · 메뉴를 닫으면 이동 키 · 스틱 이어받기 · 두 번째 손가락 탭 ·
 // 작은 PC 창 메뉴 버튼 맞춤 (DECISIONS 13절 '번들 예산') — PR #25 병합 385,014B에서. 상한(M10 전 + 40KiB)은 그대로
+// 번들 상한 올리기(PR #27)는 코드를 바꾸지 않아 이 값을 그대로 둔다. 다음 기능 작업이 base를 PR #26 병합 387,509B로 옮기고 예산을 정한다
 const MILESTONE = { name: '남은 문제 정리', base: 385_014, baseName: 'PR #25 병합', budget: 3 * 1024 };
 
-test('JS 번들 gzip: 마일스톤 예산 이하, 상한(리마스터 전 + 40KiB) 아래', { tag: '@core' }, () => {
+test('JS 번들 gzip: 마일스톤 예산 이하, 상한(리마스터 전 + 88KiB) 아래', { tag: '@core' }, () => {
   const dir = join(process.cwd(), 'client/dist/assets');
   let total = 0;
   for (const f of readdirSync(dir))
@@ -44,7 +47,7 @@ test('JS 번들 gzip: 마일스톤 예산 이하, 상한(리마스터 전 + 40Ki
   const kib = (n: number): string => `${n >= 0 ? '+' : ''}${(n / 1024).toFixed(1)}KiB`;
   const M = MILESTONE;
   console.log(
-    `[번들] JS gzip ${total}B (${M.baseName} ${M.base}B ${kib(total - M.base)} / ${M.name} 예산 +${M.budget / 1024}KiB, M10 전 ${BEFORE_M10}B ${kib(total - BEFORE_M10)}, 상한 ${CAP}B)`,
+    `[번들] JS gzip ${total}B (${M.baseName} ${M.base}B ${kib(total - M.base)} / ${M.name} 예산 +${M.budget / 1024}KiB, M10 전 ${BEFORE_M10}B ${kib(total - BEFORE_M10)}, 상한 ${CAP}B까지 ${CAP - total}B)`,
   );
   expect(total).toBeGreaterThan(M.base / 2);
   expect(total - M.base).toBeLessThanOrEqual(M.budget);
