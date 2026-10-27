@@ -57,9 +57,12 @@ import { Interpolator, Predictor, SnapshotClock, lerpAngle, lerpNum } from './sy
 import type { Transport } from './transport';
 import { LeaveDialog, ReplacedNotice } from './ui/lifecycleUi';
 import { openLayoutEditor } from './ui/layoutEditor';
+import { MetaState } from './meta/meta';
+import { DeviceProfileStore } from './meta/profileStore';
+import { LevelChip } from './ui/levelChip';
 import { LobbyUI } from './ui/lobby';
 import { SettingsPanel } from './ui/settingsPanel';
-import { ResultUI } from './ui/result';
+import { ResultHost } from './ui/resultHost';
 import { WakeNoticeUI } from './ui/wakeNotice';
 import { WakeNoticeState, wakeOffersHome } from './wakeNotice';
 
@@ -168,7 +171,15 @@ declare global {
 export class App {
   readonly net: NetClient;
   readonly lobbyUi: LobbyUI;
-  readonly resultUi: ResultUI;
+  /** 결과 화면 (나눠 받는 조각, ui/resultHost.ts) */
+  readonly resultUi: ResultHost;
+  /**
+   * 내 성장 기록 (GAME_DESIGN 12장): 기기 저장소에서 읽고 판 결과의 내 평가로 경험치를 적립한다. 저장 부분은 떼어 두었다
+   * (meta/profileStore.ts — 다음 단계에서 서버 저장을 끼운다)
+   */
+  readonly meta = new MetaState(new DeviceProfileStore());
+  /** 첫 화면 · 로비 위 내 레벨 칩 */
+  readonly levelChip = new LevelChip(this.meta);
   /** 설정 화면 (설정 화면 통합): 로비 · 판 중 메뉴에서 연다 (#ui-root, 로비 · 판 화면 위) */
   readonly settings: SettingsPanel;
   balance: Balance | null = null;
@@ -316,11 +327,13 @@ export class App {
       },
       params.name ?? getSavedName(),
       this.settings,
+      { chip: this.levelChip.el, level: () => this.meta.level().level },
     );
-    this.resultUi = new ResultUI(
+    this.resultUi = new ResultHost(
       uiRoot,
       () => this.link.send({ t: 'rematch' }),
       () => this.leaveToHome(),
+      () => this.showUpdate(),
     );
     this.wakeUi = new WakeNoticeUI(uiRoot, () => this.leaveBootRoom());
     this.leaveDialog = new LeaveDialog(uiRoot, {
@@ -893,12 +906,15 @@ export class App {
         this.emit({ kind: 'snapshot', snap });
         return;
       }
-      case 'result':
+      case 'result': {
         this.result = msg.result;
         this.setPlaying(false);
-        this.resultUi.show(msg.result, this.match?.role ?? null);
+        // 내 평가 적립 (같은 판이면 다시 주지 않는다 — 재접속해 결과를 다시 받아도). 저장이 안 돼도 화면은 그대로
+        const rated = msg.rating ? this.meta.applyRating(msg.rating) : null;
+        this.resultUi.show(msg.result, this.match?.role ?? null, rated);
         this.emit({ kind: 'result', result: msg.result });
         return;
+      }
       case 'error':
         if (msg.code === 'replaced') {
           // 다른 탭(기기)이 이 자리를 가져갔다: 다시 연결하지 않고 "여기서 계속하기"를 기다린다

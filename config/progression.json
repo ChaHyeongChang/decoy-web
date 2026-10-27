@@ -1,75 +1,88 @@
 {
-  "_comment": "DECOY 판 밖 성장 · 보상(메타) 수치. 판 안 규칙 · 판정 · balance.json과 무관하다(꾸미기 보상뿐). 바꾸면 docs/GAME_DESIGN.md 12장 표와 변경 이력에 적는다. 평가 점수 = 가중치 × 판 기록 수치의 합, 등급 = 넘은 기준 수(0 없음 ~ 4 빛). 수치 정의는 shared/src/types.ts RatingStatId",
+  "_comment": "DECOY 판 밖 성장 · 보상(메타) 수치. 판 안 규칙 · 판정 · balance.json과 무관하다(꾸미기 보상뿐). 바꾸면 docs/GAME_DESIGN.md 12장 표와 변경 이력에 적는다. 평가 점수 = 가중치 × 판 기록 수치의 합, 단계 = 넘은 기준 수(0 없음 · 1 동 · 2 은 · 3 금 · 4 빛). 수치 정의는 shared/src/types.ts RatingStatId, 이름 · 설명 문구는 client/src/data/storyText.ts META_TEXT",
   "version": 1,
-
-  "tierNames": ["없음", "동", "은", "금", "빛"],
-
   "emblems": {
     "capture": {
       "team": "survivor",
-      "name": "점령",
-      "desc": "거점 점령 · 탈출구 열기에 머문 시간",
-      "weights": { "captureSec": 1, "exitSec": 3 },
+      "weights": {
+        "captureSec": 1,
+        "exitSec": 3
+      },
       "tiers": [10, 24, 38, 52]
     },
     "rescue": {
       "team": "survivor",
-      "name": "구조",
-      "desc": "감옥 구조 · 풀어 준 동료",
-      "weights": { "rescues": 10, "freed": 4, "rescueSec": 1 },
+      "weights": {
+        "rescues": 10,
+        "freed": 4,
+        "rescueSec": 1
+      },
       "tiers": [3, 14, 24, 38]
     },
     "survive": {
       "team": "survivor",
-      "name": "생존",
-      "desc": "탈출 · 버틴 시간",
-      "weights": { "escaped": 40, "surviveRatio": 30, "cleanEscape": 10, "imprisons": -6 },
+      "weights": {
+        "escaped": 40,
+        "surviveRatio": 30,
+        "cleanEscape": 10,
+        "imprisons": -6
+      },
       "tiers": [10, 22, 40, 62]
     },
     "evade": {
       "team": "survivor",
-      "name": "회피",
-      "desc": "추격 따돌림 · 능력 활용",
-      "weights": { "evades": 6, "chaseSec": 0.3, "abilityGood": 4, "abilityUses": 1 },
+      "weights": {
+        "evades": 6,
+        "chaseSec": 0.3,
+        "abilityGood": 4,
+        "abilityUses": 1
+      },
       "tiers": [8, 18, 30, 45]
     },
     "hunt": {
       "team": "monster",
-      "name": "사냥",
-      "desc": "타격 · 수감 · 사망",
-      "weights": { "hits": 3, "jails": 6, "kills": 10 },
+      "weights": {
+        "hits": 3,
+        "jails": 6,
+        "kills": 10
+      },
       "tiers": [15, 40, 70, 100]
     },
     "deny": {
       "team": "monster",
-      "name": "저지",
-      "desc": "점령 끊기 · 거점 지키기 · 거점 안 타격",
-      "weights": { "pointStops": 2, "blockSec": 0.5, "zoneHits": 4, "pointsLeft": 10 },
+      "weights": {
+        "pointStops": 2,
+        "blockSec": 0.5,
+        "zoneHits": 4,
+        "pointsLeft": 10
+      },
       "tiers": [6, 16, 28, 42]
     },
     "track": {
       "team": "monster",
-      "name": "추적",
-      "desc": "새로 찾기 · 시야에 둔 시간 · 포효로 찾기",
-      "weights": { "finds": 1.5, "seeSec": 0.25, "roarFinds": 1.5 },
+      "weights": {
+        "finds": 1.5,
+        "seeSec": 0.25,
+        "roarFinds": 1.5
+      },
       "tiers": [15, 35, 60, 90]
     },
     "gate": {
       "team": "monster",
-      "name": "문지기",
-      "desc": "탈출 저지",
-      "weights": { "kept": 10, "exitStops": 8, "exitHoldSec": 0.2 },
+      "weights": {
+        "kept": 10,
+        "exitStops": 8,
+        "exitHoldSec": 0.2
+      },
       "tiers": [10, 20, 30, 42]
     }
   },
-
   "xp": {
     "base": 30,
     "perTier": 10,
     "win": 40,
     "voidScale": 0.5
   },
-
   "level": {
     "first": 100,
     "step": 20,

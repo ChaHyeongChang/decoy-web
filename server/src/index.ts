@@ -4,6 +4,7 @@ import type { Duplex } from 'node:stream';
 import { performance } from 'node:perf_hooks';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { LagQueue, Rng } from '@decoy/shared';
+import { PROGRESSION, validateProgression } from '@decoy/shared/meta';
 import { ServerCore, truthOf, type Conn, type Room } from '@decoy/shared/sim';
 import {
   BUILD_HEADER,
@@ -24,6 +25,8 @@ import { createQuickBots } from './quickBots';
 
 const options = parseOptions(process.argv.slice(2), process.env);
 const balance = loadBalance(options.balancePath);
+// 판 밖 성장 수치(빌드에 넣은 config/progression.json): 평가 계산 전에 모양을 본다 — 틀리면 시작하지 않는다
+validateProgression(PROGRESSION);
 /** 함께 빌드한 화면의 빌드 ID (M13d). 없으면 null(비교 안 함) */
 const buildId = readBuildId(options.staticDir);
 /** 안드로이드 앱 도메인 연결 (M14): 환경 변수가 맞으면 본문, 아니면 null → 404 */

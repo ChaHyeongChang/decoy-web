@@ -8,7 +8,7 @@
 |---|---|---|
 | 판 기록 (평가에 쓰는 수치) | 서버 — 판정 상태를 **읽기만** 한다(`shared/src/sim/record.ts` `MatchRecorder`) | 서버 메모리, 결과를 보내면 버린다 |
 | 판 평가 (항목 넷 × 단계 0~4) | 서버 — 판이 끝날 때 받는 사람 **자기 것만** 결과에 실어 보낸다(`result.rating`) | 메시지 |
-| 보상 (경험치 · 재화 · 도전 진행) | 지금은 기기 — 공용 순수 함수(`shared/src/meta`)라 나중에 서버가 그대로 쓴다 | 기기 저장 `decoy:profile` |
+| 보상 (경험치 · 재화 · 도전 진행) | 지금은 기기 — 공용 순수 함수(`shared/src/meta`)라 나중에 서버가 그대로 쓴다 | 기기 저장 `decoy:progress` |
 | 봇과 연습 | 기기 안 서버(같은 `Room` 코드)가 평가 → 기기가 적립 | 같은 경로 |
 
 - 봇 판(빠른 매칭 봇 채움 · 봇과 연습)도 보상 대상이다. 봇 자리는 평가하지 않는다
@@ -31,7 +31,7 @@
 
 ## 3. 저장 형식
 
-기기 저장소 키 하나 `decoy:profile`(JSON, `client/src/storageKeys.ts`). 형식은 `shared/src/meta/profile.ts`.
+기기 저장소 키 하나 `decoy:progress`(JSON, `client/src/storageKeys.ts`). 형식은 `shared/src/meta/profile.ts`.
 
 ```json
 {

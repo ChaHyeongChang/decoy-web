@@ -219,7 +219,8 @@ export class MatchRecorder {
         if (s.status === 'imprisoned' || s.status === 'dead') t.chase = null;
         t.status = s.status;
       }
-      if (s.status === 'free') t.freeSec += dt;
+      // 지난 관찰부터 이번 틱까지는 그 앞 상태로 지냈다 (이번 틱에 탈출 · 수감돼도 그 틱까지는 자유)
+      if (prevStatus === 'free') t.freeSec += dt;
       // 맞음: 거점 · 켜진 탈출구 안에서 맞았으면 괴물의 저지 타격
       const hitNow = s.stats.hitsTaken - t.hitsTaken;
       if (hitNow > 0) {

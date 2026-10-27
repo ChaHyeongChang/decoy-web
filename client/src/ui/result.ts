@@ -1,10 +1,13 @@
 // 결과 화면 (HTML, M10c 리디자인 · VISUAL_SPEC 9장): 승리 팀 + 팀 문장(생존자 셋 실루엣 / 괴물 후드),
-// 결과 등급 배지(문 아이콘 3/2/1개 + 글자, 생존자 화면만), 결말 문구는 "기록자 메모", 플레이어별 기록, 다시 하기.
-// 화면이 낮으면 위에서부터 스크롤한다(960×540에서 위가 잘리지 않게)
+// 결과 등급 배지(문 아이콘 3/2/1개 + 글자, 생존자 화면만), 내 평가 · 경험치(GAME_DESIGN 12장, VISUAL_SPEC 9.6),
+// 결말 문구는 "기록자 메모", 플레이어별 기록, 다시 하기. 화면이 낮으면 위에서부터 스크롤한다(960×540에서 위가 잘리지 않게).
+// 이 파일(과 resultRating.ts)은 나눠 받는 묶음이다 — 첫 화면에 필요 없어서 첫 묶음에서 뺐다(ui/resultHost.ts가 받는다)
 import type { MatchResult, PlayerRecord, Role, SurvivorStatus } from '@decoy/shared';
 import type { IconId } from '../art/icons';
 import { HUD_TEXT, ROLE_CARDS, UI_TEXT, formatText } from '../data/storyText';
 import { currentCharStyle, onCharStyleChange } from '../gfx/charStyle';
+import type { RatingApplied } from '../meta/meta';
+import { ratingPanel } from './resultRating';
 import { characterFigureSvg, frontFigureSvg, glyphSvg, h, icon, logoImg, roleVars, svgSpan } from './uiArt';
 
 const STATUS: Record<SurvivorStatus, { text: string; icon: IconId }> = {
@@ -117,7 +120,8 @@ export class ResultUI {
     this.root.style.display = 'none';
   }
 
-  show(r: MatchResult, myRole: Role | null): void {
+  /** rated: 내 평가 적립 결과 (평가가 없는 판 · 봇 자리 · 옛 서버면 null). 오면 기록자 메모 위에 '내 평가'를 붙인다 */
+  show(r: MatchResult, myRole: Role | null, rated: Promise<RatingApplied> | null = null): void {
     const mm = Math.floor(r.durationSec / 60);
     const ss = String(r.durationSec % 60).padStart(2, '0');
     const head = h(
@@ -226,12 +230,24 @@ export class ResultUI {
       [again, () => this.onRematch()],
       [home, () => this.onHome()],
     ]);
+    // 내 평가: 적립(보통 바로 끝난다)이 끝나면 자리에 채운다. 그사이 다른 결과가 오면(재접속) 옛 것은 버린다
+    const slot = h('div', { class: 'rating-slot' });
+    if (rated) {
+      void rated.then(
+        (applied) => {
+          if (slot.isConnected) slot.replaceWith(ratingPanel(applied));
+        },
+        () => undefined,
+      );
+    }
+    // 넓은 화면은 '내 평가'를 승리 팀 옆 칸에, 좁은 화면은 기록자 메모 아래에 둔다 (style.css .has-rating 격자)
     const box = h(
       'div',
-      { class: 'panel result-box' },
+      { class: rated ? 'panel result-box has-rating' : 'panel result-box' },
       head,
       hero,
       memo,
+      slot,
       // 좁은 화면(휴대폰)에서는 표만 가로로 스크롤한다 (M11)
       h('div', { class: 'table-wrap' }, table),
       h('div', { class: 'result-foot' }, home, again),
