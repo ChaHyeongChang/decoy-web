@@ -1,10 +1,14 @@
 // 의상 '목도리' (생존자 의상 150 불씨, 판 밖 메타 c): 목을 두 번 감은 두툼한 크림색 뜨개 목도리 + 등 뒤로 날리는 긴 꼬리 하나.
-// 위 그림: 머리 뒤를 감싼 크림 깃(아래 단, 머리 밑에서 비어져 나온다) + 머리 뒤 끝에 얹힌 위 단(가드 · 스카우트) + 옆 매듭 +
+// 위 그림: 머리 뒤를 감싼 크림 깃(아래 단, 머리 밑에서 비어져 나온다) + 깃 위에 겹쳐 감은 위 단(가드 · 스카우트) + 옆 매듭 +
 // 등 위로 흐르는 꼬리. 꼬리 끝에 역할색 줄 둘 · 술. 가드 · 스카우트 깃은 한쪽으로 감아 묶은 모양(매듭 쪽이 굵고 반대쪽은
 // 가늘게 머리 밑으로 — 좌우 같은 말굽은 웃는 입 · 앞 단서와 이어진 고리로 읽힌다). 매듭 쪽: 러너 왼쪽(후드 끝 천이 오른쪽),
 // 가드 오른쪽(정면 그림과 같은 쪽), 스카우트 오른쪽(왼쪽 등의 안테나를 덮지 않게).
-// 몸 가운데 0.45r 원판 · 머리 앞(챙 · 고글 · 헬멧 앞)은 덮지 않는다 — 러너는 후드 뒤 끝이 그 원판 안이라 깃이 후드 옆 두
-// 조각으로만 보인다(앞으로 흔든 주먹 뒤). 휴대폰 크기에서는 '머리 뒤 크림 초승달 + 옆 꼬리 줄기'로 읽힌다.
+// 머리 앞(챙 · 고글 · 헬멧 앞)은 덮지 않고, 몸 가운데 0.45r 원판(역할색)에서는 0.57r 둘레(KEEP_R)까지 떨어진다 — 가장 작은
+// 화면(생존자 18.4px)에서도 원판 칸이 기본 그림 그대로다(1텍셀 넘는 틈: 안티에일리어싱 · 쌍선형 번짐이 원판에 닿지 않는다).
+// 비켜 갈 때 꼬리 · 매듭 · 위 단은 두께 그대로 바깥으로 물러나고(경계에 눌려 얇아지지 않게), 깃은 경계에서 잘린 몫을 바깥
+// 두께로 되찾아 크림 면적이 0.47r 때와 같다. 러너는 후드 뒤 끝이 그 둘레 안이라 깃이 후드 옆 두 조각으로만 보이고(앞으로
+// 흔든 주먹 뒤), 가드 · 스카우트 위 단은 머리 밖 깃 위에 얹힌다. 휴대폰 크기에서는 '머리 뒤 크림 초승달 + 옆 꼬리 줄기'로
+// 읽힌다.
 // 정면 그림: 턱 밑 목에 두 번 감은 두 단(턱 끝만 조금 덮는다) + 한쪽 매듭 + 긴 꼬리 · 짧은 끝(끝마다 역할색 줄 둘 · 술).
 // 러너(3/4)는 꼬리가 등 쪽(화면 왼쪽)으로 날리고, 가드는 방패를 피해 화면 왼쪽, 스카우트는 망원경 팔을 피해 화면 오른쪽 어깨
 // 위로 늘어진다. 청록 네온은 긴 꼬리 끝단 실 한 줄뿐(정면만, 위 그림에는 청록 없음).
@@ -169,12 +173,12 @@ function drawTail(
     light: readonly [Pt, Pt];
     /** 골 · 술 선 굵기 기준 (위 그림은 몸 반지름 단위라 굵게, 정면은 가늘게) */
     lw: number;
-    /** 위 그림: 몸 가운데 원판 밖 · 뒤 크기 한도 안으로 다듬는다 */
-    clamp?: boolean;
+    /** 위 그림: 띠 점 다듬기 (몸 가운데 원판 밖 · 뒤 크기 한도 안) */
+    map?: (p: Pt) => Pt;
   },
 ): void {
   const [l0, l1] = o.light;
-  const map = o.clamp ? clampOut : (p: Pt): Pt => p;
+  const map = o.map ?? ((p: Pt): Pt => p);
   sk.part(
     path().smooth(ribbonPts(s, w0, w1, 9, map), 1).d,
     linear(l0[0], l0[1], l1[0], l1[1], [
@@ -203,21 +207,43 @@ function drawTail(
 // ───────────────────────── 위 그림 ─────────────────────────
 
 /**
- * 몸 가운데 원판(역할색, 0.45r) 밖으로: 목도리 점이 이 타원 안이면 몸 중심에서 바깥으로 민다. 세로(y)는 조금 크게 — 러너 위
- * 그림은 내보낼 때 옆 폭을 0.94배로 줄인다(index.ts TOP_WIDTH)
+ * 목도리가 비켜 가는 몸 가운데 둘레 (몸 반지름 배수): 역할색 원판 0.45r + 가장 작은 화면에서 1텍셀 넘는 틈. 생존자 18.4px
+ * (배율 1.25 휴대폰 터치 낮음)에서 1텍셀 = 0.11r — 띠 가장자리(안쪽 테 선 포함)가 이보다 가까우면 안티에일리어싱 · 쌍선형
+ * 찍기로 원판 맨 바깥 칸에 크림 · 외곽선 색이 번진다 (tests/unit/costume-parity-disc*.test.ts). 0.47r이던 때 러너 · 가드
+ * 휴대폰 크기에서 원판 칸 최대 8.6%가 달랐다 (0.54r부터 기준 안, 0.57r에서 모든 크기 · 화면 0%)
  */
-const DISC = { x: 0.47, y: 0.51 } as const;
+const KEEP_R = 0.57;
+
+/**
+ * 위 단 (가드 · 스카우트): 머리 둘레 밖으로 덧댄 두께 · 몸 가운데 둘레에서 더 떼는 몫. 머리 뒤 끝이 둘레 안이라 위 단은
+ * 머리 밖 깃 위로 물러나 얹힌다 — 안쪽 테를 아래 단(깃) 안쪽 테와 같은 경계에 두지 않는다(맞닿은 테는 칸마다 안티에일리어싱이
+ * 겹쳐 밑의 짙은 외곽선이 비친다)
+ */
+const OVER_OUT = 0.11;
+const OVER_IN = 0.02;
+
+/** 위 그림 옆 폭 배율 (index.ts TOP_WIDTH와 같은 값 — 러너는 내보낼 때 y를 0.94배로 줄이므로 그만큼 y를 크게 비켜 간다) */
+const TOP_SQUASH: Readonly<Record<RoleCharId, number>> = { runner: 0.94, guard: 1, scout: 1 };
 
 /** 뒤쪽 크기 한도 (measure.SIZE_RULE 뒤 1.0r — 다듬기 전 점 기준, 여유 조금) */
 const BACK_MAX = 0.985;
 
-/** 위 그림 점 다듬기: 몸 가운데 원판 밖으로 밀고, 뒤쪽(x < 0)은 크기 한도 안으로 당긴다 (걸음 출렁임 끝에서도) */
-function clampOut(p: Pt): Pt {
+/**
+ * 몸 가운데 둘레 밖으로 미는 함수 (역할마다): 점이 둘레(+ margin) 타원 안이면 몸 중심에서 바깥으로 민다. margin = 그 점에서
+ * 안쪽으로 뻗는 두께(띠 등뼈면 반폭, 깃 바깥 테면 깃 두께) — 경계에 눌려 얇아지지 않고 두께 그대로 바깥으로 비켜 간다
+ */
+function keeper(role: RoleCharId): (p: Pt, margin?: number) => Pt {
+  const ky = 1 / TOP_SQUASH[role];
+  return (p, margin = 0) => {
+    const q = Math.hypot(p[0] / (KEEP_R + margin), p[1] / (KEEP_R * ky + margin));
+    return q < 1 && q > 1e-6 ? [p[0] / q, p[1] / q] : p;
+  };
+}
+
+/** 뒤쪽(x < 0) 점은 크기 한도 안으로 당긴다 (걸음 출렁임 끝에서도) */
+function backLimit(p: Pt): Pt {
   const r = Math.hypot(p[0], p[1]);
-  if (r < 1e-6) return p;
-  const q = Math.hypot(p[0] / DISC.x, p[1] / DISC.y);
-  const k = q < 1 ? 1 / q : p[0] < 0 && r > BACK_MAX ? BACK_MAX / r : 1;
-  return k === 1 ? p : [p[0] * k, p[1] * k];
+  return p[0] < 0 && r > BACK_MAX ? [(p[0] * BACK_MAX) / r, (p[1] * BACK_MAX) / r] : p;
 }
 
 /**
@@ -227,7 +253,9 @@ function clampOut(p: Pt): Pt {
  *  안쪽(음수) · 위 단(머리 뒤 끝에 얹힌 두 번째 감김) 매듭 쪽 · 반대쪽 끝 각, over 0이면 없음 · 매듭 각 · 매듭 반지름 · 꼬리
  *  가운데 · 끝(몸 기준, 왼쪽 매듭 기준 — 오른쪽이면 y를 뒤집는다) · 꼬리 반폭(뿌리 · 끝).
  *  가드 · 스카우트 깃은 한쪽으로 감아 묶은 모양(매듭 쪽이 굵고 반대쪽은 가늘게 머리 밑으로) — 좌우 같은 굵은 말굽이면 큰
- *  그림에서 웃는 입처럼, 휴대폰 크기에서 앞 단서(가드 챙 · 스카우트 고글 띠)와 이어진 고리처럼 읽혀 바라보는 쪽이 흐려진다
+ *  그림에서 웃는 입처럼, 휴대폰 크기에서 앞 단서(가드 챙 · 스카우트 고글 띠)와 이어진 고리처럼 읽혀 바라보는 쪽이 흐려진다.
+ *  깃 두께 · 꼬리 반폭은 몸 가운데 둘레(KEEP_R)를 비켜 가며 잃은 크림 면적을 바깥으로 되찾은 값 (0.57r로 옮기기 전과 크림 칸 수가
+ *  같은 정도 — 러너 0.17 · 0.15/0.12, 가드 · 스카우트 옆 0.14 · 뒤 0.24이던 것)
  */
 interface TopFit {
   readonly side: -1 | 1;
@@ -255,8 +283,8 @@ const TOP_FIT: Readonly<Record<RoleCharId, TopFit>> = {
     span: 1.38,
     far: 1.38,
     gap: 0.6,
-    tSide: 0.17,
-    tBack: 0.17,
+    tSide: 0.18,
+    tBack: 0.18,
     tIn: -0.1,
     over: 0,
     overFar: 0,
@@ -264,8 +292,8 @@ const TOP_FIT: Readonly<Record<RoleCharId, TopFit>> = {
     knotR: 0.15,
     mid: [-0.15, -0.66],
     tip: [-0.57, -0.5],
-    w0: 0.15,
-    w1: 0.12,
+    w0: 0.16,
+    w1: 0.13,
   },
   // 가드: 오른쪽 매듭 (정면 그림도 매듭이 가드 오른쪽 어깨 — 화면 왼쪽). 꼬리는 등 판 위로
   guard: {
@@ -273,8 +301,8 @@ const TOP_FIT: Readonly<Record<RoleCharId, TopFit>> = {
     span: 1.42,
     far: 0.95,
     gap: 0,
-    tSide: 0.14,
-    tBack: 0.24,
+    tSide: 0.17,
+    tBack: 0.29,
     tIn: -0.08,
     over: 1.05,
     overFar: 0.4,
@@ -292,8 +320,8 @@ const TOP_FIT: Readonly<Record<RoleCharId, TopFit>> = {
     span: 1.38,
     far: 0.9,
     gap: 0,
-    tSide: 0.14,
-    tBack: 0.24,
+    tSide: 0.17,
+    tBack: 0.29,
     tIn: -0.08,
     over: 1.05,
     overFar: 0.4,
@@ -330,9 +358,11 @@ function topBack(sk: Sketch, a: SurvivorTopAnchor): void {
   const { x: hx, y: hy, r: R } = a.head;
   const rb = hx - a.head.backX;
   const shrink = 1 - 0.08 * a.captive;
-  // u = 뒤 가운데에서 매듭 쪽으로 잰 각 → 머리 둘레 각
+  const keep = keeper(a.role);
+  // u = 뒤 가운데에서 매듭 쪽으로 잰 각 → 머리 둘레 각. m = 그 점에서 안쪽으로 뻗는 두께 (몸 가운데 둘레를 비켜 갈 때 지킨다)
   const at = (u: number): number => Math.PI - f.side * u;
-  const ring = (u: number, off: number): Pt => clampOut(apply(H, ...ringPt(hx, hy, rb, R, at(u), off)));
+  const ring = (u: number, off: number, m = 0): Pt =>
+    backLimit(keep(apply(H, ...ringPt(hx, hy, rb, R, at(u), off)), m));
   // 깃 두께: 옆 → 뒤, 조각 양 끝은 머리 윤곽으로 가늘어진다 (러너 조각은 렌즈꼴). 한 조각 깃은 매듭 반대쪽 끝이 가늘다
   const tOut = (u: number, lo: number, hi: number): number => {
     const c = Math.cos(u);
@@ -394,7 +424,9 @@ function topBack(sk: Sketch, a: SurvivorTopAnchor): void {
   const sway = (k: number, amp: number): number => amp * wave * Math.sin(a.walk + 0.9 - 2.2 * k);
   const pull = 0.1 * a.hit + 0.08 * a.captive;
   const thK = at(f.knot);
-  const knot = ring(f.knot, tOut(f.knot, f.gap, f.span) * 0.5);
+  const kr = f.knotR * shrink;
+  // 매듭은 반지름 절반만큼 더 비켜 간다 (안쪽 반은 머리 · 후드 밑에 숨는다 — 다 비키면 수감 때 몸판 밖으로 튀어나온다)
+  const knot = ring(f.knot, tOut(f.knot, f.gap, f.span) * 0.5, kr * 0.5);
   // 꼬리 자리는 왼쪽 매듭 기준 — 오른쪽 매듭이면 y를 뒤집는다 (출렁임도 거울로)
   const my = -f.side;
   // 스카우트는 수감 · 구조 중 망원경을 배낭 오른쪽 옆에 꽂아 둔다 — 꼬리를 등 가운데 쪽으로 붙여 겹치지 않게
@@ -409,22 +441,26 @@ function topBack(sk: Sketch, a: SurvivorTopAnchor): void {
     f.tip[0] - 0.12 * run + pull - 0.08 * tuck,
     my * (f.tip[1] * (1 - 0.25 * run) * (1 - 0.65 * tuck) + sway(1, 0.08)),
   );
+  // 등뼈 조절점은 반폭만큼 몸 가운데 둘레를 비켜 간다 (띠가 경계에 눌려 얇아지지 않고 폭 그대로 바깥으로). 띠 점은 한 번 더
+  // 둘레 밖 · 뒤 크기 한도 안으로 다듬는다
+  const w0 = f.w0 * shrink;
+  const w1 = f.w1 * shrink;
+  const wm = (w0 + w1) / 2;
   const sp: Spine = {
     a: knot,
-    b: [knot[0] + (mid[0] - knot[0]) * 0.55, knot[1] + (mid[1] - knot[1]) * 0.95],
-    c: mid,
-    d: tip,
+    b: keep([knot[0] + (mid[0] - knot[0]) * 0.55, knot[1] + (mid[1] - knot[1]) * 0.95], w0),
+    c: keep(mid, wm),
+    d: keep(tip, w1),
   };
-  drawTail(sk, ink, a.outline, sp, f.w0 * shrink, f.w1 * shrink, stripeOf(a.role), {
+  drawTail(sk, ink, a.outline, sp, w0, w1, stripeOf(a.role), {
     fringeLen: 0.06,
     bend: sway(1.2, 0.04),
     ribs: 4,
     light: [knot, tip],
     lw: 0.19,
-    clamp: true,
+    map: (p) => backLimit(keep(p)),
   });
   // 3) 매듭 (꼬리 뿌리 위 둥근 덩이 + 접힌 주름)
-  const kr = f.knotR * shrink;
   sk.part(
     path().ellipse(knot[0], knot[1], kr, kr * 0.86, thK).d,
     radial(knot[0] + 0.02, knot[1], kr * 1.25, [
@@ -459,11 +495,12 @@ function topOver(sk: Sketch, a: SurvivorTopAnchor): void {
   const H = headMat(a);
   const { x: hx, y: hy, r: R } = a.head;
   const rb = hx - a.head.backX;
-  // 위 단: 머리 뒤 끝에 얹힌 두 번째 감김 (머리 뒤쪽 반에만 — 앞 단서는 그대로, 매듭 쪽으로 치우친다). 안쪽 끝은 몸 가운데
-  // 원판 밖
+  // 위 단: 머리 뒤에 감은 두 번째 감김 (머리 뒤쪽 반에만 — 앞 단서는 그대로, 매듭 쪽으로 치우친다). 안쪽 테는 몸 가운데
+  // 둘레(KEEP_R) + OVER_IN 밖 — 가드 · 스카우트는 머리 뒤 끝이 그 둘레 안이라 머리 밖 깃 위에 얹힌다
   const u0 = -f.overFar;
   const u1 = f.over;
   const depth = 0.12 * (1 - 0.1 * a.captive);
+  const keep = keeper(a.role);
   const n = 8;
   const outer: Pt[] = [];
   const inner: Pt[] = [];
@@ -471,16 +508,24 @@ function topOver(sk: Sketch, a: SurvivorTopAnchor): void {
     const th = Math.PI - f.side * (u0 + ((u1 - u0) * i) / n);
     // 가운데가 가장 두껍고 양 끝은 머리 윤곽으로 가늘어진다
     const k = Math.sin((Math.PI * i) / n);
-    outer.push(clampOut(apply(H, ...ringPt(hx, hy, rb, R, th, 0.05 * k))));
-    inner.push(clampOut(apply(H, ...ringPt(hx, hy, rb, R, th, -depth * k))));
+    // 바깥 테는 단 두께만큼 비켜 간다 (머리 뒤 끝이 몸 가운데 둘레 안이면 단이 두께 그대로 머리 밖 깃 위로 물러난다)
+    outer.push(
+      backLimit(keep(apply(H, ...ringPt(hx, hy, rb, R, th, OVER_OUT * k)), OVER_IN + (OVER_OUT + depth) * k)),
+    );
+    inner.push(keep(apply(H, ...ringPt(hx, hy, rb, R, th, -depth * k)), OVER_IN));
   }
+  // 칠은 단의 실제 자리(비켜 간 뒤)를 따른다: 가운데 단면의 안 · 바깥 테 거리로 안쪽 그늘 → 가운데 밝은 결 → 바깥 그늘
   const [gx, gy] = apply(H, hx, hy);
+  const mid = n / 2;
+  const dist = (p: Pt | undefined): number => (p ? Math.hypot(p[0] - gx, p[1] - gy) : R);
+  const dOut = dist(outer[mid]);
+  const dIn = Math.min(dist(inner[mid]), dOut - 0.01);
   sk.part(
     path().smooth([...outer, ...inner.slice(1, -1).reverse()], 1).d,
-    radial(gx, gy, R + 0.05, [
+    radial(gx, gy, dOut, [
       [0, ink(shade(KNIT, 0.2))],
-      [(R - depth) / (R + 0.05), ink(shade(KNIT, 0.06))],
-      [(R - depth * 0.3) / (R + 0.05), ink(tint(KNIT, 0.22))],
+      [dIn / dOut, ink(shade(KNIT, 0.06))],
+      [(dIn + 0.5 * (dOut - dIn)) / dOut, ink(tint(KNIT, 0.22))],
       [1, ink(shade(KNIT, 0.14))],
     ]),
     a.outline,

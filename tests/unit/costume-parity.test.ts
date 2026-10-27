@@ -1,8 +1,9 @@
 // 의상 유불리 점검 (판 밖 메타 c, 사용자 결정: '꾸미기는 유불리가 없어야 한다'): 괴물 의상은 생존자 화면에도 그대로 보이므로,
 // 의상 때문에 괴물이 바닥 · 어둠 속에서 덜 보이면 생존자에게 불리하고, 더 보이면 괴물에게 불리하다. 그래서 생존자 화면의 괴물
 // 위 그림(게임 화면)을 Node에서 직접 칠해(client/src/art/chars/measure.ts drawingRaster) 같은 프레임 · 크기 · 화면의 기본 그림과
-// 견준다. 이 파일은 칠하기 · 재기 도구, 잴 크기 · 프레임, 반례, Chromium 기준 값을 본다. 의상마다 점검은
-// costume-parity-{hood,feathers,chains}.test.ts, 몸 가운데 원판은 costume-parity-disc.test.ts (공용 식: tests/helpers/parity.ts).
+// 견준다. 이 파일은 칠하기 · 재기 도구, 잴 크기 · 프레임, 반례, Chromium 기준 값을 본다. 괴물 의상마다 점검(보이는 정도 · 몸 색조 ·
+// 몸 가운데 원판)은 costume-parity-{hood,feathers,chains}.test.ts, 생존자 의상의 몸 가운데 원판은 costume-parity-disc*.test.ts
+// (공용 식: tests/helpers/parity.ts).
 //
 // 칠하기 — 실제 Canvas2D와 같게 (3판, 검증에서 찾은 빈틈):
 //   Canvas는 명령(칠 · 선)마다 따로 안티에일리어싱해 겹친다. 두 도형이 맞닿은 곳(깃대를 따라 나뉜 두 광택 반쪽, 사슬 가장자리 ·
@@ -53,13 +54,24 @@
 //    #17212B와 ΔE76 4.8, 기본 망토 끝은 36.9). 그래서 같은 띠 칸 · 같은 두 배치의 조각마다 바닥 톤까지 평균 ΔE76(CIELAB)을
 //    견주고 가장 나쁜 바닥 톤 · 조각을 본다. 두건 0.987 이상, Node ↔ Chromium 차이 ±0.015(0.85 이상 값에서), 망토를 같은 휘도의
 //    바닥 색조로 칠한 반례는 0.12 ~ 0.21이다. 아래쪽만 막는다
-//  - 몸 가운데 원판(costume-parity-disc.test.ts): 0.45r 원판에서 기본 그림과 ΔE76 15 넘게 다른 칸이 5% 이하 (VISUAL_SPEC 0장 ②)
+//  - 몸 색조 ≥ 0.9 (4판, 검증에서 찾은 빈틈): 띠 색조는 테두리 띠만 봐서, 띠 안쪽(0.47 ~ 0.65r 고리 — 몸의 약 20%)을 같은 휘도의
+//    바닥 색조로 칠하면 휘도 점검 · 띠 색조를 다 지나갔다. 그래서 기본 그림의 보이는 칸 전부(외곽선 포함, 같은 칸)에서 칸 색과
+//    바닥 톤의 ΔE76을 ① 몸 전체 평균 ② 몸 중심 둘레 8조각(몸 방향 기준, 띠와 같은 두 배치)마다 평균해 의상 / 기본을 견주고 가장
+//    나쁜 바닥 톤 · 조각을 본다(measure.ts pairedBodyHue). 하한은 띠 색조와 같은 0.9: 두건 몸 전체 0.989 · 몸 조각 0.969 이상, 까마귀
+//    깃 0.976 · 0.952 이상, 고리 반례는 21프레임 · 크기 열 전부에서 몸 전체 0.83 ~ 0.90 · 몸 조각 0.75 ~ 0.85다. Node − Chromium
+//    (raster-calibrate와 같은 격자, 9자세 × 21 ~ 45px × 화면 셋)은 소프트웨어 Canvas에서 몸 전체 −0.006 ~ +0.002 · 몸 조각 −0.014 ~
+//    +0.009, GPU Canvas에서 −0.016 ~ +0.006 · −0.032 ~ +0.015라 0.95 안팎 값(까마귀 깃)도 0.9와 여유가 있다. 아래쪽만 막는다
+//  - 몸 가운데 원판 (VISUAL_SPEC 0장 ②, 4판부터 크기 열 · 방향 · 위상 전부 — 전에는 44.8px 구운 그대로만): 0.45r 원판에서 기본 그림과
+//    ΔE76 15 넘게 다른 칸이 5% 이하. 크기와 상관없이 같은 상한이다 — 원판 둘레 1텍셀 안으로 번지는 가장자리(안티에일리어싱 ·
+//    쌍선형)도 휴대폰 크기 화면에 실제로 보이는 역할색 침범이라 그대로 센다(원판 칸이 21px에서 약 74칸 · 생존자 18px에서 약 54칸이라
+//    5%는 2 ~ 3칸: 의상 가장자리가 원판에서 1텍셀 넘게 떨어져야 한다). Node − Chromium 원판 몫 차이 −1.4 ~ +2.7%p
 // 생존자 의상은 보이는 정도를 재지 않는다: 괴물 화면의 생존자는 언제나 흰 공통 그림이고(의상 훅 없음, VISUAL_SPEC 0장 ③), 생존자
-// 의상은 같은 편(생존자끼리)에게만 보이므로 누가 누구를 보는지(상대 편 정보)를 바꾸지 못한다. 몸 가운데 역할색만 본다.
+// 의상은 같은 편(생존자끼리)에게만 보이므로 누가 누구를 보는지(상대 편 정보)를 바꾸지 못한다. 몸 가운데 역할색만 본다 — 생존자
+// 몸 지름(괴물 몸 지름 × 생존자 반지름 / 괴물 반지름, 같은 화면 · 품질에서 약 18.4 ~ 76.8px)으로 같은 화면 방향 · 위상에서.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { MONSTER_COSTUMES, type MonsterCostumeId } from '@decoy/shared';
-import { MONSTER_BOX, MONSTER_FRAME_NAMES } from '../../client/src/art/charFrames';
+import { MONSTER_BOX, MONSTER_FRAME_NAMES, SURVIVOR_BOX } from '../../client/src/art/charFrames';
 import { MONSTER_ART } from '../../client/src/art/chars/index';
 import { linear, path, solid, type Drawing } from '../../client/src/art/chars/kit';
 import {
@@ -70,6 +82,7 @@ import {
   labHex,
   luminance01,
   outsideDistance,
+  pairedBodyHue,
   pairedSectorContrast,
   pairedSectorHue,
   resampleRaster,
@@ -85,12 +98,15 @@ import { TOUCH_LOW_OVERRIDE } from '../../client/src/gfx/presets';
 import {
   AREA_TOL,
   BAND,
+  BODY_HUE_MIN,
   CONTRAST_AREA_TOL,
   FLOOR,
   FLOOR_CONTRAST,
   FLOOR_L,
+  HUE_FLOORS,
   HUE_MIN,
   LUMA_TOL,
+  MONSTER_R_PX,
   OUTLINE_WORLD_PX,
   PC_1080,
   PHONE_LOW,
@@ -100,16 +116,22 @@ import {
   SECTOR_NAME,
   SIZES,
   SIZE_GROUPS,
+  SURVIVOR_R_PX,
+  SURVIVOR_SIZES,
   W,
   atlasPhase,
   bake,
   bodyPx,
   capPx,
   fingerprint,
+  floorHueAt,
   floorHuePaint,
   monsterFrames,
+  outsideBody,
+  outsideDisc,
   outsideMeans,
   outsideSpread,
+  outsideVisibility,
   parityCases,
   phone,
   type CaseResult,
@@ -418,6 +440,50 @@ describe('그림 칠하기 · 보이는 정도 재기 (measure.ts drawingRaster 
     const centre: Drawing = { ops: [...base.ops, { d: path().circle(0, 0, 0.6).d, fill: solid(0x22c55e) }] };
     expect(discDiffShare(drawingRaster(centre, d), rb, 0.45 * (d / 2), FLOOR, 15).share).toBe(1);
   });
+
+  it('몸 색조(pairedBodyHue): 같은 그림은 1, 띠 안쪽 고리를 같은 휘도의 바닥 색조로 칠하면 띠 색조는 그대로여도 몸 전체 · 몸 조각이 떨어진다', () => {
+    const d = 40;
+    const red = 0xef4444;
+    const base: Drawing = { ops: [{ d: path().circle(0, 0, 0.8).d, fill: solid(red) }] };
+    const ring = (dr: string): Drawing => ({
+      ops: [...base.ops, { d: dr, fill: solid(floorHueAt(red)), rule: 'evenodd' }],
+    });
+    // 띠(0.8r 바깥에서 몸 지름 8% = 0.16r, 0.64r까지) 안쪽 0.2 ~ 0.6r 고리 · 그 뒤쪽 반만
+    const full = ring(path().circle(0, 0, 0.6).circle(0, 0, 0.2).d);
+    const back = ring(
+      path()
+        .arc(0, 0, 0.6, Math.PI / 2, (Math.PI * 3) / 2)
+        .arc(0, 0, 0.2, (Math.PI * 3) / 2, Math.PI / 2, false)
+        .Z().d,
+    );
+    const rb = drawingRaster(base, d);
+    const vb = visibilityDetail(rb, FLOOR, 0, BAND * d);
+    const same = pairedBodyHue(rb, rb, HUE_FLOORS, 8, [0, 0.5]);
+    expect([same.whole.ratio, same.sector.ratio]).toEqual([1, 1]);
+    expect(same.cells).toBe(vb.area);
+    // 같은 휘도라 밝기는 그대로, 띠 칸은 건드리지 않는다
+    expect(relativeLuminance(floorHueAt(red)) / relativeLuminance(red)).toBeCloseTo(1, 1);
+    for (const dr of [full, back]) {
+      const rx = drawingRaster(dr, d);
+      expect(pairedSectorHue(rx, rb, vb, HUE_FLOORS, 8, [0, 0.5]).ratio).toBeGreaterThan(0.99);
+      const h = pairedBodyHue(rx, rb, HUE_FLOORS, 8, [0, 0.5]);
+      expect(h.whole.ratio).toBeLessThan(BODY_HUE_MIN);
+      expect(h.sector.ratio).toBeLessThan(h.whole.ratio + 1e-9);
+    }
+    // 뒤쪽 반 고리: 가장 나쁜 몸 조각이 뒤 쪽 (몸 방향 기준 — 돌려 칠해도 같다)
+    for (const rot of [0, 2.5]) {
+      const h = pairedBodyHue(
+        drawingRaster(back, d, rot),
+        drawingRaster(base, d, rot),
+        HUE_FLOORS,
+        8,
+        [0, 0.5],
+        rot,
+      );
+      expect(SECTOR_NAME[h.sector.at]).toMatch(/뒤/);
+      expect(h.sector.ratio).toBeLessThan(0.8);
+    }
+  });
 });
 
 // ───────────────────────── Chromium 기준 값 ─────────────────────────
@@ -425,6 +491,8 @@ describe('그림 칠하기 · 보이는 정도 재기 (measure.ts drawingRaster 
 // 칠해 잰 값. 다시 재기: `npx tsx scripts/char-art/raster-calibrate.ts` (① 합성 도형 · ② 괴물 서기 줄을 여기에 옮긴다).
 // Node가 Canvas에서 멀어지면(칠하기를 바꾸다 이음매 · 머리카락 선 · 덮임이 틀어지면) 여기서 잡는다. 허용 폭 = 지금 남은 차이 + 여유:
 // 큰 도형 2%, 굵은 선 3%, 0.25px 머리카락 선 · 반지름 3px 원판 5% (Skia가 작은 곡선을 몇 조각으로 펴 조금 작게 칠한다).
+// 괴물 서기 값은 그림 지문(명령 JSON의 FNV-1a)과 묶여 있다: 그림이 바뀌면 지문 시험이 실패하고(건너뛰지 않는다 — 건너뛰면 기준
+// 값이 낡은 채 아무도 모른다), 위 명령으로 다시 재서 ② 줄의 지문 · 밝기를 ART_REF에 옮겨야 지나간다.
 
 /** 합성 도형 격자: 몸 지름 24px, 원점 위상 (0.3, 0.25) — 이음매(y = 0)가 칸 줄 20의 3/4 자리 */
 const SYNTH_GRID = { d: 24, dx: 0.3, dy: 0.25, row: Math.floor(Math.ceil(24 * 1.7) / 2 + 0.25) } as const;
@@ -484,14 +552,16 @@ function seamRowRed(r: DrawingRaster): number {
   return s / c;
 }
 
-/** 괴물 서기(monster-idle-0) 구운 그대로: 기본 밝기 · 의상 / 기본 밝기 비율과 그때 그림 지문 */
+/** 괴물 서기(monster-idle-0) 구운 그대로: 기본 밝기 · 의상 / 기본 밝기 비율과 그때 그림 지문 (2026-10-27, 사슬 4판 그림 — Chromium 153 소프트웨어 Canvas) */
 const ART_REF = {
-  fingerprints: { basic: '570c896f', hood: 'd8bc93ec', feathers: 'c2f9e359', chains: '79acce16' },
+  fingerprints: { basic: '570c896f', hood: '88c88a33', feathers: 'da16e7b9', chains: '2ad238cb' },
   sizes: [
-    { d: PHONE_LOW.d, basic: 0.0968, ratio: { hood: 1.004, feathers: 0.932, chains: 0.961 } },
-    { d: capPx('low'), basic: 0.1037, ratio: { hood: 1.004, feathers: 0.954, chains: 0.988 } },
+    { d: PHONE_LOW.d, basic: 0.0968, ratio: { hood: 1.004, feathers: 0.981, chains: 1.011 } },
+    { d: capPx('low'), basic: 0.1037, ratio: { hood: 1.001, feathers: 0.993, chains: 1.013 } },
   ],
 } as const;
+
+const RECALIBRATE = 'npx tsx scripts/char-art/raster-calibrate.ts';
 
 describe('Chromium 기준 값 (Node 칠하기가 실제 Canvas에서 멀어지지 않는다)', () => {
   it('합성 도형: 이음매 · 머리카락 선 · 굵은 선 · 작은 원판 · 그라디언트의 덮임 합이 Chromium과 허용 폭 안', () => {
@@ -512,25 +582,29 @@ describe('Chromium 기준 값 (Node 칠하기가 실제 Canvas에서 멀어지�
         ?.draw(W),
     ]),
   ) as Record<'basic' | 'hood' | 'feathers' | 'chains', Drawing>;
-  const sameArt = (Object.keys(ART_REF.fingerprints) as (keyof typeof ART_REF.fingerprints)[]).every(
-    (c) => fingerprint(current[c]) === ART_REF.fingerprints[c],
-  );
-  // 그림이 바뀌면 기준 값을 다시 재야 한다 (위 명령) — 그때까지 이 시험은 건너뛴다 (합성 도형 시험은 늘 돈다)
-  it.skipIf(!sameArt)(
-    '괴물 서기 24px · 45px 구운 그대로: 기본 밝기 ±2%, 의상 / 기본 밝기 비율 ±0.012 (그림 지문이 잰 때와 같을 때)',
-    () => {
-      for (const s of ART_REF.sizes) {
-        const base = visibilityDetail(bake(current.basic, s.d), FLOOR, (W * s.d) / 2, BAND * s.d);
-        expect(Math.abs(base.luma / s.basic - 1)).toBeLessThan(0.02);
-        for (const c of ['hood', 'feathers', 'chains'] as const) {
-          const v = visibilityDetail(bake(current[c], s.d), FLOOR, (W * s.d) / 2, BAND * s.d);
-          expect(Math.abs(v.luma / base.luma - s.ratio[c]), `${c} ${s.d.toFixed(1)}px`).toBeLessThanOrEqual(
-            0.012,
-          );
-        }
+  it('괴물 서기 그림 지문이 기준 값을 잰 그림과 같다 (다르면 실패 — 다시 재서 ART_REF를 고친다)', () => {
+    const changed = (Object.keys(ART_REF.fingerprints) as (keyof typeof ART_REF.fingerprints)[])
+      .filter((c) => fingerprint(current[c]) !== ART_REF.fingerprints[c])
+      .map((c) => `${c}: 지금 ${fingerprint(current[c])}, 잰 때 ${ART_REF.fingerprints[c]}`);
+    expect(
+      changed,
+      `괴물 서기 그림이 바뀌어 Chromium 기준 값이 낡았다 — \`${RECALIBRATE}\`로 다시 재서 ② 줄(지문 · 기본 밝기 · 의상 / 기본 밝기)을 tests/unit/costume-parity.test.ts ART_REF에 옮긴다`,
+    ).toEqual([]);
+  });
+
+  it('괴물 서기 24px · 45px 구운 그대로: 기본 밝기 ±2%, 의상 / 기본 밝기 비율 ±0.012', () => {
+    for (const s of ART_REF.sizes) {
+      const base = visibilityDetail(bake(current.basic, s.d), FLOOR, (W * s.d) / 2, BAND * s.d);
+      expect(Math.abs(base.luma / s.basic - 1)).toBeLessThan(0.02);
+      for (const c of ['hood', 'feathers', 'chains'] as const) {
+        const v = visibilityDetail(bake(current[c], s.d), FLOOR, (W * s.d) / 2, BAND * s.d);
+        expect(
+          Math.abs(v.luma / base.luma - s.ratio[c]),
+          `${c} ${s.d.toFixed(1)}px (그림이 바뀌었으면 \`${RECALIBRATE}\`로 다시 잰다)`,
+        ).toBeLessThanOrEqual(0.012);
       }
-    },
-  );
+    }
+  });
 });
 
 // ───────────────────────── 잴 크기 · 프레임 ─────────────────────────
@@ -541,6 +615,7 @@ describe('잴 크기 · 프레임 · 화면은 게임이 굽고 찍는 그대로
     expect(src).toContain('return Math.min(Math.max(0.25, zoom) * worldScale, cap > 0 ? cap : Infinity);');
     expect(src).toContain(`outlineWorldPx: ${OUTLINE_WORLD_PX},`);
     expect(src).toContain('m: params.monsterR * TILE_PX * tpw');
+    expect(src).toContain('s: params.survivorR * TILE_PX * tpw');
     expect(src).toContain('const wm = ART.outlineWorldPx / (monsterR * TILE_PX);');
     // 칸 원점 (atlasPhase가 따르는 식): 여백 = 외곽선 + 2, 원점 = 여백 − 상자 시작 × 단위, 칸 자리는 정수
     expect(src).toContain('const w = ART.outlineWorldPx * tpw;');
@@ -585,6 +660,27 @@ describe('잴 크기 · 프레임 · 화면은 게임이 굽고 찍는 그대로
       expect(s.phases.length, s.label).toBe(!s.capped && s.d < 32 ? PHASES_SMALL.length : 1);
     }
     expect(SIZE_GROUPS.flatMap((g) => g.sizes).length).toBe(SIZES.length);
+  });
+
+  it('생존자 크기 열: 같은 화면 · 품질의 괴물 크기 × 생존자 반지름 / 괴물 반지름, 방향 · 위상은 그 화면과 같고 칸 위상은 생존자 상자로', () => {
+    expect(SURVIVOR_SIZES.length).toBe(SIZES.length);
+    expect(SURVIVOR_R_PX).toBeLessThan(MONSTER_R_PX);
+    SURVIVOR_SIZES.forEach((s, i) => {
+      const m = SIZES[i];
+      if (!m) throw new Error('크기 열 길이');
+      expect(s.who).toBe('survivor');
+      expect(m.who).toBe('monster');
+      expect(s.d / m.d).toBeCloseTo(SURVIVOR_R_PX / MONSTER_R_PX, 9);
+      expect([s.label, s.capped, s.rots, s.phases]).toEqual([m.label, m.capped, m.rots, m.phases]);
+    });
+    // 생존자 칸 원점: 같은 텍셀 배율(tpw)의 여백 · 생존자 상자 시작으로 (atlas.ts cellOf, 단위 s)
+    const d = SURVIVOR_SIZES[1]?.d ?? 0;
+    const tpw = d / (2 * SURVIVOR_R_PX);
+    const ox = OUTLINE_WORLD_PX * tpw + 2 - SURVIVOR_BOX.x0 * (d / 2);
+    const oy = OUTLINE_WORLD_PX * tpw + 2 - SURVIVOR_BOX.y0 * (d / 2);
+    const [px, py] = atlasPhase(d, 'survivor');
+    expect(px).toBeCloseTo(ox - Math.floor(ox), 9);
+    expect(py).toBeCloseTo(oy - Math.floor(oy), 9);
   });
 
   it('프레임: 아틀라스가 굽는 괴물 칸 21개 그대로 (대기 망토 8 · 걷기 8 · 돌진 · 기절 · 준비 · 타격 · 포효), 의상마다 같은 이름', () => {
@@ -661,7 +757,7 @@ describe('점검이 실제로 잡는다 (반례 — 휴대폰 낮음 두 크기 
     }
   });
 
-  it('색조 반례: 망토를 같은 휘도의 바닥 청회색으로 칠하면 휘도 점검(평균 셋 · 조각 대비 · 바닥 대비 면적)은 다 지나도 조각 색조가 잡는다', () => {
+  it('색조 반례: 망토를 같은 휘도의 바닥 청회색으로 칠하면 휘도 점검(평균 셋 · 조각 대비 · 바닥 대비 면적)은 다 지나도 조각 색조 · 몸 색조가 잡는다', () => {
     const gaps = cases((dr) => {
       const ops = [...dr.ops];
       const i = ops.findIndex((o) => o.fill !== undefined);
@@ -676,7 +772,61 @@ describe('점검이 실제로 잡는다 (반례 — 휴대폰 낮음 두 크기 
       expect(g.gap.sector.ratio, g.frame).toBeGreaterThanOrEqual(SECTOR_MIN);
       expect(Math.abs(g.gap.contrastArea - 1), g.frame).toBeLessThanOrEqual(CONTRAST_AREA_TOL);
       expect(g.gap.hue.ratio, g.frame).toBeLessThan(HUE_MIN);
+      expect(outsideBody(g.gap).length, g.frame).toBe(2);
     }
     expect(Math.max(...gaps.map((g) => g.gap.hue.ratio))).toBeLessThan(0.3);
+  });
+
+  it('몸 색조 반례 (4판 검증): 띠 안쪽 0.47 ~ 0.65r 고리(몸의 약 20%)를 같은 휘도의 바닥 색조로 칠하면 휘도 점검 · 띠 색조는 다 지나도 몸 색조가 잡는다', () => {
+    // 망토 칠 바로 위 고리, 칠은 망토 칠을 같은 휘도의 바닥 색조로 (그라디언트 위치 그대로 — 칸마다 휘도가 망토와 같다)
+    const ringD = path().circle(0, 0, 0.65).circle(0, 0, 0.47).d;
+    const gaps = cases((dr) => {
+      const cloak = dr.ops.find((o) => o.fill !== undefined);
+      if (!cloak?.fill) throw new Error('망토 칠이 없다');
+      return overCloak(dr, { d: ringD, fill: floorHuePaint(cloak.fill), rule: 'evenodd' });
+    });
+    expect(gaps.length).toBe(36);
+    for (const g of gaps) {
+      // 3판까지의 점검(평균 셋 · 조각 대비 · 바닥 대비 면적 · 띠 색조)은 모두 지난다 — 이 빈틈을 몸 색조가 막는다
+      expect(outsideVisibility(g.gap), `${g.frame} ${g.view.size.d.toFixed(1)}px`).toEqual([]);
+      expect(g.gap.body.whole.ratio, g.frame).toBeLessThan(BODY_HUE_MIN);
+      expect(g.gap.body.sector.ratio, g.frame).toBeLessThan(BODY_HUE_MIN);
+    }
+    expect(Math.max(...gaps.map((g) => g.gap.body.sector.ratio))).toBeLessThan(0.86);
+  });
+});
+
+describe('기본 괴물을 기본 괴물과 견주면 어느 점검도 걸리지 않는다 (크기 열 · 방향 · 위상 전부)', () => {
+  // 자세 다섯 (서기 · 걷기 · 돌진 · 기절 · 공격 준비 — 실루엣 · 조각 칸 수가 가장 다른 것들). 21프레임 전부는 의상 파일마다 기본 그림을
+  // 같은 식으로 재므로 여기서는 비어 있는 조각 · 0 나누기 같은 크기 · 화면 탓 빈틈만 본다
+  const FRAMES = [
+    MONSTER_FRAME_NAMES.idle[0] ?? '',
+    MONSTER_FRAME_NAMES.move[2] ?? '',
+    MONSTER_FRAME_NAMES.dash,
+    MONSTER_FRAME_NAMES.stun,
+    MONSTER_FRAME_NAMES.windup,
+  ];
+  it('모든 비율이 정확히 1, 원판 0%', () => {
+    const res = parityCases('basic', SIZES, { frames: FRAMES });
+    expect(res.length).toBe(FRAMES.length * SIZES.reduce((n, s) => n + s.rots.length * s.phases.length, 0));
+    const off = res.filter((r) => {
+      const g = r.gap;
+      return (
+        [
+          g.area,
+          g.luma,
+          g.rim,
+          g.contrastArea,
+          g.sector.ratio,
+          g.hue.ratio,
+          g.body.whole.ratio,
+          g.body.sector.ratio,
+        ].some((v) => v !== 1) || g.disc !== 0
+      );
+    });
+    expect(off.map((r) => `${r.frame} ${r.view.size.d.toFixed(1)}px`)).toEqual([]);
+    expect(
+      res.flatMap((r) => [...outsideVisibility(r.gap), ...outsideBody(r.gap), ...outsideDisc(r.gap)]),
+    ).toEqual([]);
   });
 });

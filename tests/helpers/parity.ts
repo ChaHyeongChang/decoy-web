@@ -2,10 +2,11 @@
 // 구하고, 그림을 Node에서 칠해(client/src/art/chars/measure.ts drawingRaster — Canvas2D처럼 명령마다 칸 단위로 겹친다) 기본
 // 그림과 견준다. 기준 · 그 이유는 tests/unit/costume-parity.test.ts 머리 주석에 있다.
 import { describe, expect, it } from 'vitest';
-import { TILE_PX, type MonsterCostumeId, type SurvivorCostumeId } from '@decoy/shared';
+import { SURVIVOR_COSTUMES, TILE_PX, type MonsterCostumeId, type SurvivorCostumeId } from '@decoy/shared';
 import {
   BASIC_COSTUME_SET,
   MONSTER_BOX,
+  SURVIVOR_BOX,
   newStyleFrameSpecs,
   type CharFrameSpec,
   type CostumeSet,
@@ -16,11 +17,13 @@ import {
   discDiffShare,
   drawingRaster,
   luminance01,
+  pairedBodyHue,
   pairedSectorContrast,
   pairedSectorHue,
   resampleRaster,
   visibilityDetail,
   type DrawingRaster,
+  type PairedBodyHue,
   type PairedWorst,
   type VisibilityDetail,
 } from '../../client/src/art/chars/measure';
@@ -46,6 +49,11 @@ export const SURVIVOR_R_PX = BALANCE.survivor.radius * TILE_PX;
 export const OUTLINE_WORLD_PX = 1.8;
 export const W = OUTLINE_WORLD_PX / MONSTER_R_PX;
 export const W_SURVIVOR = OUTLINE_WORLD_PX / SURVIVOR_R_PX;
+
+/** 그림 주인: 괴물(단위 m, MONSTER_BOX) · 생존자(단위 s, SURVIVOR_BOX) — 아틀라스가 단위 · 상자를 달리 굽는다 */
+export type Who = 'monster' | 'survivor';
+const R_PX: Readonly<Record<Who, number>> = { monster: MONSTER_R_PX, survivor: SURVIVOR_R_PX };
+const BOX: Readonly<Record<Who, typeof MONSTER_BOX>> = { monster: MONSTER_BOX, survivor: SURVIVOR_BOX };
 
 /** 그림 밑 바닥 (빛 속 바닥 강판색) */
 export const FLOOR = MAP_COLOR.floor;
@@ -121,14 +129,14 @@ export const PHONE_LOW = PHONES.map((p) => ({ p, d: bodyPx(p, 'low', true) })).r
 
 /**
  * 아틀라스 칸 안 그림 원점의 소수부 (atlas.ts cellOf: 여백 pad = 외곽선 w + 2, ox = pad − 상자 x0 × u, 칸 자리는 정수).
- * 이 위상으로 굽는다 — 몸 지름마다 다르다
+ * 이 위상으로 굽는다 — 몸 지름 · 주인(단위 · 상자)마다 다르다
  */
-export function atlasPhase(d: number): readonly [number, number] {
-  const tpw = d / (2 * MONSTER_R_PX);
+export function atlasPhase(d: number, who: Who = 'monster'): readonly [number, number] {
+  const tpw = d / (2 * R_PX[who]);
   const pad = OUTLINE_WORLD_PX * tpw + 2;
   const u = d / 2;
-  const ox = pad - MONSTER_BOX.x0 * u;
-  const oy = pad - MONSTER_BOX.y0 * u;
+  const ox = pad - BOX[who].x0 * u;
+  const oy = pad - BOX[who].y0 * u;
   return [ox - Math.floor(ox), oy - Math.floor(oy)];
 }
 
@@ -142,7 +150,10 @@ export const PHASES_SMALL: readonly (readonly [number, number])[] = [
 
 export interface SizeCase {
   readonly label: string;
+  /** 그 주인의 몸 지름 (아틀라스 텍셀) */
   readonly d: number;
+  /** 그림 주인 (굽는 단위 · 칸 상자) */
+  readonly who: Who;
   /** 품질 상한에 닿아 늘려 찍는 크기 (구운 그대로 · 돌리지 않고 잰다) */
   readonly capped: boolean;
   readonly rots: readonly number[];
@@ -156,6 +167,7 @@ function sizeCase(label: string, d: number, capped: boolean): SizeCase {
   return {
     label,
     d,
+    who: 'monster',
     capped,
     rots: capped ? [0] : ROTS_1TO1,
     phases: !capped && d < SMALL_MAX ? PHASES_SMALL : [[0, 0]],
@@ -193,6 +205,16 @@ export const SIZE_GROUPS: readonly { readonly label: string; readonly sizes: rea
   { label: '1:1 큰 화면 (방향 셋)', sizes: SIZES.filter((s) => !s.capped && s.phases.length === 1) },
   { label: '품질 상한 (구운 그대로)', sizes: SIZES.filter((s) => s.capped) },
 ];
+
+/**
+ * 생존자 크기 열: 같은 화면 · 품질(SIZES)에서 생존자 몸 지름 = 괴물 몸 지름 × 생존자 반지름 / 괴물 반지름 (아틀라스가 같은 텍셀
+ * 배율로 단위 s를 굽는다 — atlas.ts unitPx). 방향 · 위상은 그 화면의 괴물 크기와 같다 (같은 화면 = 같은 찍기)
+ */
+export const SURVIVOR_SIZES: readonly SizeCase[] = SIZES.map((s) => ({
+  ...s,
+  d: (s.d * SURVIVOR_R_PX) / MONSTER_R_PX,
+  who: 'survivor',
+}));
 
 // ───────────────────────── 프레임 (아틀라스가 굽는 그대로) ─────────────────────────
 
@@ -249,12 +271,32 @@ export const SECTORS = 8;
 export const SECTOR_LAYOUTS: readonly number[] = [0, 0.5];
 export const SECTOR_NAME = ['앞', '앞오른', '오른', '뒤오른', '뒤', '뒤왼', '왼', '앞왼'] as const;
 
-/** 아틀라스처럼 굽기 (돌리지 않고, 그 크기의 아틀라스 위상으로) */
-export function bake(dr: Drawing, d: number): DrawingRaster {
+/** 아틀라스처럼 굽기 (돌리지 않고, 그 크기 · 주인의 아틀라스 위상으로) */
+export function bake(dr: Drawing, d: number, who: Who = 'monster'): DrawingRaster {
   const n = Math.ceil(d * 1.7);
-  const [px, py] = atlasPhase(d);
+  const [px, py] = atlasPhase(d, who);
   const half = n / 2 - Math.floor(n / 2);
   return drawingRaster(dr, d, 0, { dx: px - half, dy: py - half });
+}
+
+/** 원판 둘레 여유 (텍셀): 화면 쌍선형(이웃 한 칸) · 반 화소 위상 · 칸 가운데 반 칸 */
+const DISC_ROW_PAD = 3;
+
+/**
+ * 몸 가운데 원판만 쓰는 굽기: bake와 같고 원판(DISC_R) 둘레 DISC_ROW_PAD 텍셀 안 칸 줄만 칠한다 (drawingRaster rows — 그 줄의 칸
+ * 값은 bake와 같다). 화면에 돌려 찍어도 원판 칸은 몸 중심에서 같은 거리의 텍셀만 읽으므로 원판 몫이 bake와 같다
+ */
+export function bakeDisc(dr: Drawing, d: number, who: Who = 'monster'): DrawingRaster {
+  const n = Math.ceil(d * 1.7);
+  const [px, py] = atlasPhase(d, who);
+  const half = n / 2 - Math.floor(n / 2);
+  const cy = n / 2 + py - half;
+  const reach = (DISC_R * d) / 2 + DISC_ROW_PAD;
+  return drawingRaster(dr, d, 0, {
+    dx: px - half,
+    dy: py - half,
+    rows: [Math.floor(cy - reach), Math.ceil(cy + reach)],
+  });
 }
 
 /** 구운 그림을 그 화면 방향 · 위상으로 찍는다 (방향 0 · 위상 0이면 구운 그대로) */
@@ -266,46 +308,81 @@ export function onScreen(baked: DrawingRaster, v: View): DrawingRaster {
   return resampleRaster(baked, v.rot, cx, cy);
 }
 
-/** 한 화면에서 잰 값: 보이는 정도 + 화면에 찍은 그림 */
+/** 한 화면에서 잰 값: 보이는 정도 + 화면에 찍은 그림 · 몸 지름 · 화면 방향 */
 export interface ViewMeasure {
   readonly v: VisibilityDetail;
   readonly r: DrawingRaster;
+  readonly d: number;
+  readonly rot: number;
 }
 
-export function measureRaster(r: DrawingRaster, d: number, rot: number): ViewMeasure {
+export function measureRaster(r: DrawingRaster, d: number, rot: number, who: Who = 'monster'): ViewMeasure {
+  // 외곽선 두께 (텍셀) = 1.8 월드 px × 텍셀 / 월드 px — 괴물이면 W × d / 2
+  const inPx = (OUTLINE_WORLD_PX * d) / (2 * R_PX[who]);
   return {
-    v: visibilityDetail(r, FLOOR, (W * d) / 2, BAND * d, {
+    v: visibilityDetail(r, FLOOR, inPx, BAND * d, {
       sectors: SECTORS,
       rot,
       minContrast: FLOOR_CONTRAST,
     }),
     r,
+    d,
+    rot,
   };
 }
 
 /** 그림 · 크기마다 굽기를 한 번만 (같은 그림이 여러 프레임 · 화면에 나온다) */
 export class ParityCache {
   private readonly baked = new Map<string, DrawingRaster>();
+  private readonly screens = new Map<string, DrawingRaster>();
   private readonly views = new Map<string, ViewMeasure>();
 
-  bakeOf(dr: Drawing, key: string, d: number): DrawingRaster {
-    const k = `${key}@${d}`;
+  bakeOf(dr: Drawing, key: string, d: number, who: Who = 'monster'): DrawingRaster {
+    const k = `${who}/${key}@${d}`;
     let r = this.baked.get(k);
-    if (!r) this.baked.set(k, (r = bake(dr, d)));
+    if (!r) this.baked.set(k, (r = bake(dr, d, who)));
+    return r;
+  }
+
+  /**
+   * 화면에 찍은 그림만 (보이는 정도를 재지 않는다 — 생존자 원판 점검). disc = 원판 둘레 줄만 굽는다(bakeDisc — 원판 몫만 맞다)
+   */
+  screen(dr: Drawing, v: View, key = drawingKey(dr), disc = false): DrawingRaster {
+    const at = `${key}@${v.size.d}`;
+    const k = `${v.size.who}/${disc ? 'disc/' : ''}${at}/${v.rot}/${v.phase[0]},${v.phase[1]}`;
+    let r = this.screens.get(k);
+    if (!r) {
+      let b: DrawingRaster | undefined;
+      if (disc) {
+        const bk = `${v.size.who}/disc/${at}`;
+        b = this.baked.get(bk);
+        if (!b) this.baked.set(bk, (b = bakeDisc(dr, v.size.d, v.size.who)));
+      } else b = this.bakeOf(dr, key, v.size.d, v.size.who);
+      this.screens.set(k, (r = onScreen(b, v)));
+    }
     return r;
   }
 
   measure(dr: Drawing, v: View, key = drawingKey(dr)): ViewMeasure {
-    const k = `${key}@${v.size.d}/${v.rot}/${v.phase[0]},${v.phase[1]}`;
+    const k = `${v.size.who}/${key}@${v.size.d}/${v.rot}/${v.phase[0]},${v.phase[1]}`;
     let m = this.views.get(k);
     if (!m)
-      this.views.set(k, (m = measureRaster(onScreen(this.bakeOf(dr, key, v.size.d), v), v.size.d, v.rot)));
+      this.views.set(
+        k,
+        (m = measureRaster(
+          onScreen(this.bakeOf(dr, key, v.size.d, v.size.who), v),
+          v.size.d,
+          v.rot,
+          v.size.who,
+        )),
+      );
     return m;
   }
 
   /** 한 크기를 다 잰 뒤 비운다 (메모리) */
   clear(): void {
     this.baked.clear();
+    this.screens.clear();
     this.views.clear();
   }
 }
@@ -324,9 +401,13 @@ export interface Gap {
   readonly sector: SectorWorst;
   /** 조각별 바닥 색 차이 ΔE76 (기본 띠 칸, 바닥 톤마다) 의상 / 기본 중 가장 작은 값 · 그 바닥 톤 */
   readonly hue: SectorWorst & { readonly floor: number };
+  /** 몸 색조: 기본 그림의 보이는 칸 전부에서 바닥 톤까지 ΔE76 — 몸 전체 평균 · 몸 조각별 평균의 의상 / 기본 (measure.ts pairedBodyHue) */
+  readonly body: PairedBodyHue;
+  /** 몸 가운데 0.45r 원판에서 기본과 ΔE76 15 넘게 다른 칸 몫 */
+  readonly disc: number;
 }
 
-/** 의상(x)과 기본(b)을 같은 화면에서 견준다 (조각 · 색조는 기본 띠 칸에서 — measure.ts pairedSector* 설명) */
+/** 의상(x)과 기본(b)을 같은 화면에서 견준다 (조각 · 색조는 기본 그림의 칸에서 — measure.ts pairedSector* · pairedBodyHue 설명) */
 export function compare(x: ViewMeasure, b: ViewMeasure): Gap {
   const xv = x.v;
   const bv = b.v;
@@ -337,6 +418,8 @@ export function compare(x: ViewMeasure, b: ViewMeasure): Gap {
     contrastArea: xv.contrastArea / bv.contrastArea,
     sector: pairedSectorContrast(xv, bv, FLOOR_L, SECTORS, SECTOR_LAYOUTS),
     hue: pairedSectorHue(x.r, b.r, bv, HUE_FLOORS, SECTORS, SECTOR_LAYOUTS),
+    body: pairedBodyHue(x.r, b.r, HUE_FLOORS, SECTORS, SECTOR_LAYOUTS, b.rot),
+    disc: discShare(x.r, b.r, b.d),
   };
 }
 
@@ -348,10 +431,18 @@ export const RIM_TOL = 0.05;
 export const CONTRAST_AREA_TOL = 0.05;
 export const SECTOR_MIN = 0.93;
 export const HUE_MIN = 0.9;
+/** 몸 색조 (몸 전체 · 몸 조각): 띠 조각 색조와 같은 하한 — 기본보다 바닥 톤 쪽으로 10% 넘게 가지 않기 */
+export const BODY_HUE_MIN = HUE_MIN;
 /** 몸 가운데 원판: 반지름 0.45r, 기본과 ΔE76 15 넘게 다른 칸 몫 상한 */
 export const DISC_R = 0.45;
 export const DISC_DE = 15;
 export const DISC_MAX = 0.05;
+/**
+ * 원판 가장자리에서 빼는 폭 (텍셀). 0 = 칸 가운데가 0.45r 안인 칸 전부를 센다 — 원판 둘레 칸으로 번지는 의상 가장자리도 센다
+ * (휴대폰 크기에서 원판 밖 0.47 ~ 0.52r에 놓인 띠 · 끈의 안티에일리어싱이 원판 맨 바깥 칸을 물들여 5%를 넘는다). 0.5로 두면 맨
+ * 바깥 반 텍셀(칸 일부가 원판 밖인 칸)을 빼고 잰다 — 바꾸면 costume-parity.test.ts 머리 주석 · DECISIONS에 이유를 적는다
+ */
+export const DISC_EDGE_PX = 0;
 
 export function sectorLabel(s: SectorWorst): string {
   const name = SECTOR_NAME[s.at] ?? String(s.at);
@@ -381,8 +472,32 @@ export function outsideSpread(g: Gap): string[] {
   return bad;
 }
 
-export function outside(g: Gap): string[] {
+const hex6 = (c: number): string => `#${c.toString(16).padStart(6, '0')}`;
+
+/** 몸 색조 (띠 안쪽까지) — 몸 전체 평균 · 몸 조각 */
+export function outsideBody(g: Gap): string[] {
+  const bad: string[] = [];
+  if (g.body.whole.ratio < BODY_HUE_MIN)
+    bad.push(`몸 전체 바닥색(${hex6(g.body.whole.floor)}) 차이 ×${g.body.whole.ratio.toFixed(3)}`);
+  if (g.body.sector.ratio < BODY_HUE_MIN)
+    bad.push(
+      `몸 조각 ${sectorLabel(g.body.sector)} 바닥색(${hex6(g.body.sector.floor)}) 차이 ×${g.body.sector.ratio.toFixed(3)}`,
+    );
+  return bad;
+}
+
+/** 몸 가운데 원판 (역할색) */
+export function outsideDisc(g: Gap): string[] {
+  return g.disc > DISC_MAX ? [`원판 ${(g.disc * 100).toFixed(1)}%`] : [];
+}
+
+/** 보이는 정도 (평균 셋 + 조각 · 바닥 대비 면적 · 띠 색조) */
+export function outsideVisibility(g: Gap): string[] {
   return [...outsideMeans(g), ...outsideSpread(g)];
+}
+
+export function outside(g: Gap): string[] {
+  return [...outsideVisibility(g), ...outsideBody(g), ...outsideDisc(g)];
 }
 
 export interface CaseResult {
@@ -429,24 +544,29 @@ export function parityCases(
   return out;
 }
 
-/** 기준 밖 경우를 묶어 보고 (점검별 가장 나쁜 값 · 경우 수 · 앞의 몇 개) */
-export function summarize(results: readonly CaseResult[], limit = 12): string[] {
+/** 기준 밖 경우를 묶어 보고 (앞의 limit개 + 남은 건수). check = 볼 점검 (기본 전부) */
+export function summarize(
+  results: readonly CaseResult[],
+  check: (g: Gap) => string[] = outside,
+  limit = 12,
+): string[] {
   const bad = results
-    .map((r) => ({ r, why: outside(r.gap) }))
+    .map((r) => ({ r, why: check(r.gap) }))
     .filter((x) => x.why.length > 0)
     .map((x) => `${x.r.frame} · ${viewName(x.r.view)}: ${x.why.join(', ')}`);
-  if (bad.length <= limit) return bad;
-  return [
-    ...bad.slice(0, limit),
-    `… 외 ${bad.length - limit}건 (모두 ${results.length}건 중 ${bad.length}건)`,
-  ];
+  return capList(bad, results.length, limit);
+}
+
+function capList(bad: readonly string[], total: number, limit: number): string[] {
+  if (bad.length <= limit) return [...bad];
+  return [...bad.slice(0, limit), `… 외 ${bad.length - limit}건 (모두 ${total}건 중 ${bad.length}건)`];
 }
 
 // ───────────────────────── 몸 가운데 원판 ─────────────────────────
 
 /** 몸 가운데 원판(반지름 DISC_R × 몸 반지름)에서 의상(a) · 기본(b) 색이 ΔE76 DISC_DE 넘게 다른 칸 몫 */
 export function discShare(a: DrawingRaster, b: DrawingRaster, d: number): number {
-  return discDiffShare(a, b, (DISC_R * d) / 2, FLOOR, DISC_DE).share;
+  return discDiffShare(a, b, (DISC_R * d) / 2 - DISC_EDGE_PX, FLOOR, DISC_DE).share;
 }
 
 // ───────────────────────── 반례 만들기 ─────────────────────────
@@ -472,17 +592,110 @@ export function floorHuePaint(p: Paint): Paint {
   return { ...p, stops };
 }
 
+// ───────────────────────── 생존자 몸 가운데 원판 ─────────────────────────
+
+export interface DiscRow {
+  readonly costume: SurvivorCostumeId;
+  readonly frame: string;
+  readonly view: View;
+  readonly share: number;
+}
+
+/**
+ * 역할 하나의 생존자 의상들을 그 역할 프레임 전부 · 생존자 크기 열 sizes · 그 크기의 방향 · 위상에서 기본 그림과 원판으로 견준다.
+ * 기본 그림은 크기마다 한 번만 굽는다(의상 여럿이 같이 쓴다). 의상과 기본이 같은 그림인 프레임(회색 등)은 칠하지 않고 0
+ */
+export function survivorDiscCases(
+  role: RoleCharId,
+  costumes: readonly SurvivorCostumeId[],
+  sizes: readonly SizeCase[] = SURVIVOR_SIZES,
+): DiscRow[] {
+  const base = survivorFrames(role, 'basic').map((s) => {
+    const dr = s.draw(W_SURVIVOR);
+    return { name: s.name, dr, key: drawingKey(dr) };
+  });
+  const byName = new Map(base.map((b) => [b.name, b]));
+  const dressed = costumes.flatMap((costume) =>
+    survivorFrames(role, costume).map((s) => {
+      const dr = s.draw(W_SURVIVOR);
+      return { costume, name: s.name, dr, key: drawingKey(dr) };
+    }),
+  );
+  const cache = new ParityCache();
+  const out: DiscRow[] = [];
+  for (const size of sizes) {
+    if (size.who !== 'survivor') throw new Error(`생존자 크기가 아니다: ${size.label}`);
+    for (const x of dressed) {
+      const b = byName.get(x.name);
+      if (!b) throw new Error(`기본 프레임 없음: ${role} ${x.name}`);
+      for (const view of viewsOf(size)) {
+        const share =
+          x.key === b.key
+            ? 0
+            : discShare(cache.screen(x.dr, view, x.key, true), cache.screen(b.dr, view, b.key, true), size.d);
+        out.push({ costume: x.costume, frame: x.name, view, share });
+      }
+    }
+    cache.clear();
+  }
+  return out;
+}
+
+/** 원판 기준 밖 줄 (큰 것부터) */
+export function discOver(rows: readonly DiscRow[], limit = 12): string[] {
+  const bad = rows
+    .filter((r) => r.share > DISC_MAX)
+    .sort((a, b) => b.share - a.share)
+    .map((r) => `${r.costume} ${r.frame} · ${viewName(r.view)}: 원판 ${(r.share * 100).toFixed(1)}%`);
+  return capList(bad, rows.length, limit);
+}
+
 // ───────────────────────── 의상 파일마다 같은 시험 ─────────────────────────
 
-/** 괴물 의상 하나: 크기 묶음마다 시험 하나 (21프레임 × 그 묶음의 크기 · 방향 · 위상 전부) */
+/**
+ * 괴물 의상 하나: 크기 묶음마다 21프레임 × 그 묶음의 크기 · 방향 · 위상 전부를 한 번 재고(묶음마다 한 번 — 아래 시험 셋이 나눠 본다)
+ * ① 보이는 정도 ② 몸 색조 ③ 몸 가운데 원판을 따로 시험한다 (하나가 깨져도 나머지가 보이게)
+ */
 export function describeMonsterParity(costume: MonsterCostumeId): void {
   describe(`괴물 의상 ${costume}: 생존자 화면에서 기본 괴물과 같게 보인다 (꾸미기는 유불리가 없다)`, () => {
-    for (const group of SIZE_GROUPS)
-      it(`${group.label} ${group.sizes.map((s) => s.d.toFixed(1)).join(' · ')}px: 면적 ±${AREA_TOL * 100}% · 밝기 ±${LUMA_TOL * 100}% · 외곽 대비 ±${RIM_TOL * 100}% · 조각 대비 ≥ ${SECTOR_MIN} · 바닥 대비 면적 ±${CONTRAST_AREA_TOL * 100}% · 조각 색조 ≥ ${HUE_MIN}`, () => {
-        const res = parityCases(costume, group.sizes);
-        const views = group.sizes.reduce((sum, s) => sum + viewsOf(s).length, 0);
-        expect(res.length).toBe(monsterFrames(costume).length * views);
-        expect(summarize(res)).toEqual([]);
+    for (const group of SIZE_GROUPS) {
+      let memo: CaseResult[] | undefined;
+      const results = (): CaseResult[] => {
+        if (!memo) {
+          memo = parityCases(costume, group.sizes);
+          const views = group.sizes.reduce((sum, s) => sum + viewsOf(s).length, 0);
+          expect(memo.length).toBe(monsterFrames(costume).length * views);
+        }
+        return memo;
+      };
+      const at = `${group.label} ${group.sizes.map((s) => s.d.toFixed(1)).join(' · ')}px`;
+      it(`${at}: 면적 ±${AREA_TOL * 100}% · 밝기 ±${LUMA_TOL * 100}% · 외곽 대비 ±${RIM_TOL * 100}% · 조각 대비 ≥ ${SECTOR_MIN} · 바닥 대비 면적 ±${CONTRAST_AREA_TOL * 100}% · 띠 조각 색조 ≥ ${HUE_MIN}`, () => {
+        expect(summarize(results(), outsideVisibility)).toEqual([]);
       });
+      it(`${at}: 몸 색조 (보이는 칸 전부 — 몸 전체 · 몸 조각 ${SECTORS}개 × 배치 ${SECTOR_LAYOUTS.length}) ≥ ${BODY_HUE_MIN}`, () => {
+        expect(summarize(results(), outsideBody)).toEqual([]);
+      });
+      it(`${at}: 몸 가운데 ${DISC_R}r 원판에서 기본과 ΔE76 ${DISC_DE} 넘게 다른 칸 ≤ ${DISC_MAX * 100}%`, () => {
+        expect(summarize(results(), outsideDisc)).toEqual([]);
+      });
+    }
+  });
+}
+
+/** 생존자 역할 하나: 생존자 의상 셋 × 그 역할 프레임 전부 × 생존자 크기 열 · 방향 · 위상 전부의 몸 가운데 원판 */
+export function describeSurvivorDisc(role: RoleCharId): void {
+  const costumes = SURVIVOR_COSTUMES.filter((c) => c !== 'basic');
+  describe(`생존자 ${role} 몸 가운데 ${DISC_R}r 원판: 의상을 입어도 기본 그림과 ΔE76 ${DISC_DE} 넘게 다른 칸이 ${DISC_MAX * 100}% 이하`, () => {
+    for (const group of SIZE_GROUPS) {
+      const sizes = SURVIVOR_SIZES.filter((s) => group.sizes.some((m) => m.label === s.label));
+      it(`${group.label} ${sizes.map((s) => s.d.toFixed(1)).join(' · ')}px: ${costumes.join(' · ')} × 모든 프레임`, () => {
+        const rows = survivorDiscCases(role, costumes, sizes);
+        const views = sizes.reduce((sum, s) => sum + viewsOf(s).length, 0);
+        const frames = survivorFrames(role, 'basic').length;
+        expect(frames).toBeGreaterThan(15);
+        expect(rows.length).toBe(costumes.length * frames * views);
+        expect(discOver(rows)).toEqual([]);
+      });
+    }
   });
 }

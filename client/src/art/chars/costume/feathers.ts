@@ -29,33 +29,39 @@
 // 날개로 더 넘어간다(눕는 만큼 덮는 망토의 밝은 목 둘레 몫). 정면은 숨 · 시각에 따라 들썩인다.
 //
 // 정면 그림(frontMantle — 어깨 망토 위, 두건 밑, 로비 · 옷장): 승인된 모양 그대로 — 두건 밑동에서 어깨를 덮는 둥근 깃 세 줄(가슴은
-// 두 줄이 두건 밑으로 보인다), 깃마다 깃대 · 빛 쪽(왼쪽) 날개 광택(한 도형), 줄 밑 그늘, 어깨 위 붉은 림 라이트, 어깨 망토의 붉은
-// 톱니 끝이 깃 아래로 조금 남는다. 상반신은 손이 깃 아래를 쥔다. 색은 위 그림과 같은 무늬 · 짙기로 바꿨다(옷장에서 두 그림이 한
-// 의상으로 읽히게 — 2판까지는 정면만 거의 검은 깃이었다).
+// 두 줄이 두건 밑으로 보인다), 깃마다 깃대 · 빛 쪽(왼쪽) 날개를 넓게 덮고 깃대를 조금 넘는 진홍 광택(한 도형), 줄 밑 옅은 그늘,
+// 어깨 위 붉은 림 라이트, 어깨 망토의 붉은 톱니 끝이 깃 아래로 조금 남는다. 상반신은 손이 깃 아래를 쥔다.
+// 짙기 · 색은 위 그림에 맞춘다(옷장에서 두 그림이 한 의상으로 읽히게): 앞선 판은 깃 몸이 거의 검고 광택이 가는 잎이라 정면만 훨씬
+// 짙었다 — 기본과 달라진 칸 평균(300px) 정면 #55242A 휘도 0.049(0.06 밑 77%) ↔ 위 #AD2D3C 0.127(15%). 지금은 깃 몸을 위 그림 바깥
+// 줄처럼 채도 있는 검붉은 색으로 밝히고, 광택을 빛 쪽 날개 전체로 넓히고, 줄 가장자리 안쪽 선을 외곽선 검정 대신 짙은 검붉은
+// 색으로, 그늘 · 틈을 옅게 해 정면 #902931 휘도 0.101 · 상반신 #9B2C34 0.111이다. 남은 차이는 정면에만 있는 실루엣 외곽선(정면 칸의
+// 14%)이고, 그것을 빼면 0.116 · 0.120이다. 위 그림(게임 화면)은 바꾸지 않았다.
 //
 // 색: 위 그림 깃 몸 바깥 줄 #8A2430 → #80242C(뿌리 → 끝, 채도 있는 검붉은 색), 가운데 · 목 쪽 줄 #683A3E → #623438(채도를 죽인
 // 검붉은 색 — 짙게 읽힌다), 광택 #FF2A48 → 끝 #E01E3C(망토 #EF4444보다 차고 진한 진홍이라 망토와 갈린다).
-// 정면 깃 #6E3C41(왼쪽 위) → #5C3034 → #402226, 날개 광택 #FF2A48(빛 쪽) → #E01E3C → #A8182C, 깃대 #2E1418, 틈 · 겹친 깃 그늘
-// #1A0B0E, 림 라이트 = 기본 괴물 림 색(어깨 오른쪽 강하게 · 왼쪽 약하게). 모든 색은 ink()를 거친다. 보라 · 자홍 · 청록 없음.
+// 정면 깃 #A0363F(왼쪽 위) → #8E2C34 → #802A30, 날개 광택 #FF3D4A(빛 쪽) → #E8323F → #DC303F, 깃대 #5A1E26, 줄 가장자리 안쪽 선
+// #4A161C, 틈 · 겹친 깃 그늘 #2A0E12(옅게), 림 라이트 = 기본 괴물 림 색(어깨 오른쪽 강하게 · 왼쪽 약하게). 모든 색은 ink()를 거친다.
+// 보라 · 자홍 · 청록 없음.
 import { apply, linear, path, solid, type Mat, type Paint, type Path, type Sketch, type Stop } from '../kit';
 import type { MonsterCostumeArt, MonsterFrontAnchor, MonsterTopAnchor, Pt } from './types';
 
 /**
- * 정면 깃 색 (로비 · 옷장): 위 그림과 같은 의상으로 읽히게 같은 짙기 · 같은 무늬 — 채도를 죽인 검붉은 깃 몸 + 빛 쪽 날개의
- * 진홍 광택 (위 그림 깃 몸 #683A3E · #623438, 광택 #FF2A48 · #E01E3C와 같은 쪽)
+ * 정면 깃 색 (로비 · 옷장): 위 그림과 같은 의상으로 읽히게 같은 짙기 · 같은 무늬 — 채도 있는 검붉은 깃 몸 + 빛 쪽 날개를
+ * 넓게 덮는 진홍 광택 (위 그림 깃 몸 #8A2430 · #683A3E, 광택 #FF2A48 · #E01E3C와 같은 쪽)
  */
 const F = {
   /** 깃 몸: 왼쪽 위(빛 쪽) → 가운데 → 오른쪽 아래 그늘 */
-  base: 0x6e3c41,
-  deep: 0x5c3034,
-  far: 0x402226,
-  /** 날개 광택: 빛 쪽(왼쪽)이 가장 밝은 진홍 → 오른쪽으로 짙은 진홍 */
-  hot: 0xff2a48,
-  glint: 0xe01e3c,
-  sheen: 0xa8182c,
-  /** 깃대 (광택 날개와 그늘 날개의 경계) · 깃 사이 틈 · 겹친 깃 그늘 */
-  shaft: 0x2e1418,
-  gap: 0x1a0b0e,
+  base: 0xa0363f,
+  deep: 0x8e2c34,
+  far: 0x802a30,
+  /** 날개 광택: 빛 쪽(왼쪽)이 가장 밝은 진홍 → 오른쪽으로 조금 짙은 진홍 */
+  hot: 0xff3d4a,
+  glint: 0xe8323f,
+  sheen: 0xdc303f,
+  /** 깃대 (광택 날개와 그늘 날개의 경계) · 깃 사이 틈 · 겹친 깃 그늘 · 줄 가장자리 안쪽 선 */
+  shaft: 0x5a1e26,
+  gap: 0x2a0e12,
+  edge: 0x4a161c,
 } as const;
 
 const lerp = (a: number, b: number, k: number): number => a + (b - a) * k;
@@ -166,16 +172,19 @@ function shaftPath(m: Mat, fs: readonly Feather[], root = 0.1): string {
   return p.d;
 }
 
-/** 깃 한쪽 날개 광택 (깃대 옆 가는 잎 모양 — 한 경로에 깃마다 하위 경로). side = 빛 쪽 (−: u 반대) */
+/**
+ * 깃 한쪽 날개 광택 (빛 쪽 날개를 넓게 덮고 깃대를 조금 넘는 잎 — 한 경로에 깃마다 하위 경로). side = 빛 쪽 (−: u 반대).
+ * 빛 쪽 옆선은 깃 옆선보다 0.1w쯤 안쪽에 머문다 (이웃 깃 · 실루엣 밖으로 넘지 않게)
+ */
 function vanePath(m: Mat, fs: readonly Feather[], side: number): string {
   const p = path(m);
   for (const f of fs) {
-    const a0 = along(f, 0.3, side * 0.03);
-    const a1 = along(f, 0.5, side * 0.42);
-    const a2 = along(f, 0.84, side * 0.36);
-    const a3 = along(f, 0.93, side * 0.04);
-    const b1 = along(f, 0.78, side * 0.07);
-    const b2 = along(f, 0.5, side * 0.06);
+    const a0 = along(f, 0.22, 0);
+    const a1 = along(f, 0.45, side * 0.62);
+    const a2 = along(f, 0.86, side * 0.52);
+    const a3 = along(f, 0.96, side * 0.02);
+    const b1 = along(f, 0.8, -side * 0.2);
+    const b2 = along(f, 0.45, -side * 0.18);
     p.M(a0[0], a0[1])
       .C(a1[0], a1[1], a2[0], a2[1], a3[0], a3[1])
       .C(b1[0], b1[1], b2[0], b2[1], a0[0], a0[1])
@@ -503,12 +512,12 @@ function frontBody(a: MonsterFrontAnchor): Paint {
   ]);
 }
 
-/** 정면 깃 광택 칠 (왼쪽 빛 쪽이 밝은 진홍) */
+/** 정면 깃 광택 칠 (왼쪽 빛 쪽이 밝은 진홍 → 오른쪽으로 조금 짙은 진홍, 끝까지 불투명) */
 function frontSheen(a: MonsterFrontAnchor): Paint {
   return lin(a.m, -0.6, 0, 0.6, 0, [
     [0, a.ink(F.hot), 1],
-    [0.5, a.ink(F.glint), 0.85],
-    [1, a.ink(F.sheen), 0.6],
+    [0.5, a.ink(F.glint), 1],
+    [1, a.ink(F.sheen)],
   ]);
 }
 
@@ -517,17 +526,20 @@ function frontMantle(sk: Sketch, a: MonsterFrontAnchor): void {
   const ink = a.ink;
   const ls = a.ls;
   const by = a.by;
-  // 빛은 왼쪽 위: 왼쪽 위 깃이 조금 밝고 오른쪽 아래로 짙어진다 (거의 검게 — 광택만 진홍)
+  // 빛은 왼쪽 위: 왼쪽 위 깃이 조금 밝고 오른쪽 아래로 짙어진다 (위 그림 바깥 줄 같은 검붉은 색 — 빛 쪽 날개는 진홍 광택)
   const body = frontBody(a);
   const sheen = frontSheen(a);
   for (let k = 0; k < FRONT_ROWS.length; k += 1) {
     const { fs, back } = frontRow(a, k);
-    // 깃 밑 그늘 (아래 줄 · 어깨 망토 위로 조금 아래에)
-    sk.fill(rowPath(shifted(M, 0.01, 0.035), fs, back), solid(ink(F.gap), 0.5));
-    sk.part(rowPath(M, fs, back), body, a.outline, undefined, 0.5);
-    sk.line(gapPath(M, fs, 0.07), solid(ink(F.gap), 0.7), 0.016 * ls);
+    // 깃 밑 그늘 (아래 줄 · 어깨 망토 위로 조금 아래에, 옅게). 줄 가장자리 안쪽 선은 외곽선 검정 대신 짙은 검붉은 색 —
+    // 줄은 갈리되 정면이 위 그림보다 짙어지지 않게 (바깥 실루엣 외곽선은 그대로)
+    sk.fill(rowPath(shifted(M, 0.01, 0.035), fs, back), solid(ink(F.gap), 0.25));
+    const row = rowPath(M, fs, back);
+    sk.part(row, body, a.outline, undefined, 0);
+    sk.line(row, solid(ink(F.edge), 0.85), a.w * 0.5);
+    sk.line(gapPath(M, fs, 0.07), solid(ink(F.gap), 0.5), 0.016 * ls);
     sk.fill(vanePath(M, fs, -1), sheen);
-    sk.line(shaftPath(M, fs), solid(ink(F.shaft), 0.9), 0.014 * ls);
+    sk.line(shaftPath(M, fs), solid(ink(F.shaft), 0.8), 0.014 * ls);
   }
   // 림 라이트: 목도리 위 테 안쪽을 따라 (오른쪽 강하게, 왼쪽 약하게). 바깥 줄 위 테보다 안으로 들여 실루엣 밖에 뜨지 않는다
   for (const side of [-1, 1]) {

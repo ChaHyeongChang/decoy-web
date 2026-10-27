@@ -392,6 +392,11 @@ export interface RasterOptions {
   /** 그림 원점의 어긋남 (텍셀, 격자 가운데 n / 2에서) — 화소 격자에 대한 위상 */
   readonly dx?: number;
   readonly dy?: number;
+  /**
+   * 칠할 칸 줄 범위 [j0, j1] (둘 다 포함). 그 밖의 줄은 비워 둔다(투명) — 몸 가운데 원판처럼 일부만 볼 때 빨리 칠한다.
+   * 범위 안 칸 값은 범위 없이 칠한 값과 같다 (줄마다 따로 덮임을 재므로)
+   */
+  readonly rows?: readonly [number, number];
 }
 
 /** 덮임 누적기: 명령 하나가 칸마다 덮는 몫 (0~1)과 건드린 칸 목록 */
@@ -533,6 +538,11 @@ export function drawingRaster(dr: Drawing, dpx: number, rot = 0, opts: RasterOpt
   const cx = n / 2 + (opts.dx ?? 0);
   const cy = n / 2 + (opts.dy ?? 0);
   const M = n * ss;
+  // 칠할 표본 줄 범위 (opts.rows — 칸 줄 j0..j1의 표본 줄)
+  const mLo = opts.rows ? Math.max(0, Math.floor(opts.rows[0]) * ss) : 0;
+  const mHi = opts.rows ? Math.min(M - 1, (Math.floor(opts.rows[1]) + 1) * ss - 1) : M - 1;
+  const jLo = Math.floor(mLo / ss);
+  const jHi = Math.floor(mHi / ss);
   const buf = new Float64Array(n * n * 4);
   const cv = new Coverage(n);
   const rows: number[][] = Array.from({ length: M }, () => []);
@@ -570,6 +580,8 @@ export function drawingRaster(dr: Drawing, dpx: number, rot = 0, opts: RasterOpt
       if (k <= 0) continue;
       const i = p % n;
       const j = (p - i) / n;
+      // 머리카락 선은 줄 범위 밖 칸도 덮는다 — 여기서 버린다
+      if (j < jLo || j > jHi) continue;
       smp((i + 0.5 - cx) / u, (j + 0.5 - cy) / u, col);
       const sa = (col[3] ?? 0) * k;
       if (sa <= 0) continue;
@@ -597,8 +609,8 @@ export function drawingRaster(dr: Drawing, dpx: number, rot = 0, opts: RasterOpt
           const up = a[1] < b[1];
           const y0 = up ? a[1] : b[1];
           const y1 = up ? b[1] : a[1];
-          const m0 = Math.max(0, rowAt(y0));
-          const m1 = Math.min(M - 1, rowAt(y1) - 1);
+          const m0 = Math.max(mLo, rowAt(y0));
+          const m1 = Math.min(mHi, rowAt(y1) - 1);
           for (let m = m0; m <= m1; m += 1) {
             const x = a[0] + ((rowY(m) - a[1]) * (b[0] - a[0])) / (b[1] - a[1]);
             push(m, x, up ? 1 : -1);
@@ -675,8 +687,8 @@ export function drawingRaster(dr: Drawing, dpx: number, rot = 0, opts: RasterOpt
           const L = Math.hypot(dx, dy);
           const tx = L > 0 ? dx / L : 1;
           const ty = L > 0 ? dy / L : 0;
-          const m0 = Math.max(0, rowAt(Math.min(a[1], b[1]) - hw));
-          const m1 = Math.min(M - 1, rowAt(Math.max(a[1], b[1]) + hw) - 1);
+          const m0 = Math.max(mLo, rowAt(Math.min(a[1], b[1]) - hw));
+          const m1 = Math.min(mHi, rowAt(Math.max(a[1], b[1]) + hw) - 1);
           for (let m = m0; m <= m1; m += 1) {
             const Y = rowY(m);
             let lo = Infinity;
@@ -1185,38 +1197,211 @@ export function pairedSectorHue(
   layouts: readonly number[],
 ): PairedWorst & { readonly floor: number } {
   const band = bd.rimIndex;
-  const pos = new Map<number, number>();
-  band.forEach((k, q) => pos.set(k, q));
-  const labs = floors.map((f) => labHex(f));
-  const dist = (r: DrawingRaster): Float64Array[] => {
-    const out = floors.map(() => new Float64Array(band.length));
-    for (let q = 0; q < band.length; q += 1) {
+  const m = band.length;
+  const F = floors.length;
+  const fc = new Float64Array(F * 3);
+  const fl = new Float64Array(F * 3);
+  const lab = new Float64Array(3);
+  floors.forEach((f, t) => {
+    fc[t * 3] = ((f >> 16) & 255) / 255;
+    fc[t * 3 + 1] = ((f >> 8) & 255) / 255;
+    fc[t * 3 + 2] = (f & 255) / 255;
+    labInto(fc[t * 3] ?? 0, fc[t * 3 + 1] ?? 0, fc[t * 3 + 2] ?? 0, lab);
+    fl.set(lab, t * 3);
+  });
+  /** 띠 칸마다 바닥 톤별 ΔE76 ([바닥 톤 × 칸 수 + 칸 순서]) */
+  const dist = (r: DrawingRaster): Float64Array => {
+    const out = new Float64Array(F * m);
+    const px = r.rgba;
+    for (let q = 0; q < m; q += 1) {
       const k = band[q] ?? 0;
-      const own = (r.rgba[k * 4 + 3] ?? 0) >= 0.999 ? pixelLab(r, k, floors[0] ?? 0) : null;
-      floors.forEach((f, t) => {
-        const arr = out[t];
-        if (arr) arr[q] = deltaE76(own ?? pixelLab(r, k, f), labs[t] ?? [0, 0, 0]);
-      });
+      const cr = px[k * 4] ?? 0;
+      const cg = px[k * 4 + 1] ?? 0;
+      const cb = px[k * 4 + 2] ?? 0;
+      const tr = 1 - (px[k * 4 + 3] ?? 0);
+      const opaque = tr <= 0.001;
+      if (opaque) labInto(cr + (fc[0] ?? 0) * tr, cg + (fc[1] ?? 0) * tr, cb + (fc[2] ?? 0) * tr, lab);
+      for (let t = 0; t < F; t += 1) {
+        if (!opaque)
+          labInto(
+            cr + (fc[t * 3] ?? 0) * tr,
+            cg + (fc[t * 3 + 1] ?? 0) * tr,
+            cb + (fc[t * 3 + 2] ?? 0) * tr,
+            lab,
+          );
+        const d0 = (lab[0] ?? 0) - (fl[t * 3] ?? 0);
+        const d1 = (lab[1] ?? 0) - (fl[t * 3 + 1] ?? 0);
+        const d2 = (lab[2] ?? 0) - (fl[t * 3 + 2] ?? 0);
+        out[t * m + q] = Math.sqrt(d0 * d0 + d1 * d1 + d2 * d2);
+      }
     }
     return out;
   };
   const dx = dist(x);
   const db = dist(b);
+  // 띠 칸의 조각 번호 (배치마다 — sectorMeans와 같은 식)
+  const step = (2 * Math.PI) / sectors;
+  const secOf = layouts.map((layout) =>
+    Int32Array.from(bd.rimAngle, (a) => ((Math.round(a / step - layout) % sectors) + sectors) % sectors),
+  );
   let worst: PairedWorst & { floor: number } = { ratio: Infinity, at: -1, layout: 0, floor: floors[0] ?? 0 };
+  const xs = new Float64Array(sectors);
+  const bs = new Float64Array(sectors);
   floors.forEach((f, t) => {
-    const ax = dx[t];
-    const ab = db[t];
-    if (!ax || !ab) return;
-    for (const layout of layouts) {
-      const xs = sectorMeans(bd, (k) => ax[pos.get(k) ?? 0] ?? 0, sectors, layout).mean;
-      const bs = sectorMeans(bd, (k) => ab[pos.get(k) ?? 0] ?? 0, sectors, layout).mean;
+    layouts.forEach((layout, li) => {
+      const sec = secOf[li];
+      if (!sec) return;
+      xs.fill(0);
+      bs.fill(0);
+      for (let q = 0; q < m; q += 1) {
+        const sq = sec[q] ?? 0;
+        xs[sq] = (xs[sq] ?? 0) + (dx[t * m + q] ?? 0);
+        bs[sq] = (bs[sq] ?? 0) + (db[t * m + q] ?? 0);
+      }
+      // 같은 띠 칸이라 합의 비율 = 평균의 비율 (칸이 없거나 기본이 바닥과 같은 조각은 건너뛴다)
       for (let q = 0; q < sectors; q += 1) {
-        const bl = bs[q] ?? Number.NaN;
-        if (Number.isNaN(bl) || bl <= 0) continue;
+        const bl = bs[q] ?? 0;
+        if (bl <= 0) continue;
         const ratio = (xs[q] ?? 0) / bl;
         if (ratio < worst.ratio) worst = { ratio, at: q, layout, floor: f };
       }
-    }
+    });
   });
   return worst;
+}
+
+/** 몸 색조 (pairedBodyHue): 몸 전체 평균 · 가장 나쁜 몸 조각의 의상 / 기본 비율과 그 바닥 톤 */
+export interface PairedBodyHue {
+  readonly whole: { readonly ratio: number; readonly floor: number };
+  readonly sector: PairedWorst & { readonly floor: number };
+  /** 견준 칸 수 (기본 그림의 보이는 칸) */
+  readonly cells: number;
+}
+
+/** labOf와 같은 식으로 out[0..2]에 쓴다 (배열을 만들지 않는다 — 칸이 많은 pairedBodyHue용) */
+function labInto(r: number, g: number, b: number, out: Float64Array): void {
+  const R = toLinear(r);
+  const G = toLinear(g);
+  const B = toLinear(b);
+  const x = (0.4124564 * R + 0.3575761 * G + 0.1804375 * B) / 0.95047;
+  const y = 0.2126729 * R + 0.7151522 * G + 0.072175 * B;
+  const z = (0.0193339 * R + 0.119192 * G + 0.9503041 * B) / 1.08883;
+  const e = 216 / 24389;
+  const k = 24389 / 27 / 116;
+  const fx = x > e ? Math.cbrt(x) : k * x + 16 / 116;
+  const fy = y > e ? Math.cbrt(y) : k * y + 16 / 116;
+  const fz = z > e ? Math.cbrt(z) : k * z + 16 / 116;
+  out[0] = 116 * fy - 16;
+  out[1] = 500 * (fx - fy);
+  out[2] = 200 * (fy - fz);
+}
+
+/**
+ * 몸 색조 (바닥 색조 위장 — 테두리 안쪽까지, 의상 유불리 점검 4판): 기본(b) 그림의 보이는 칸(알파 0.5 이상, 외곽선 포함) 전부에서
+ * 칸 색(바닥 톤 위에 얹은 색)과 그 바닥 톤의 ΔE76을 의상(x) · 기본에서 구해, 바닥 톤마다 ① 몸 전체 평균 ② 몸 중심 둘레 조각
+ * (몸 방향 기준 — rot는 drawingRaster · 화면에서 돌린 각, 배치 layouts는 sectorMeans와 같다)마다 평균의 의상 / 기본 중 가장 작은
+ * 값을 낸다. 테두리 띠만 보는 pairedSectorHue는 띠 안쪽(예: 0.47 ~ 0.65r 고리)을 같은 휘도의 바닥 색조로 칠해도 지나간다.
+ * 같은 칸에서 견주는 까닭은 pairedSectorContrast와 같다 (실루엣이 1px 밀려도 칸 몫이 흔들리지 않게). 두 그림은 같은 격자 · 원점.
+ * 불투명 칸(알파 0.999 이상)은 바닥 톤과 상관없이 CIELAB을 한 번만 구한다 (pairedSectorHue와 같다)
+ */
+export function pairedBodyHue(
+  x: DrawingRaster,
+  b: DrawingRaster,
+  floors: readonly number[],
+  sectors: number,
+  layouts: readonly number[],
+  rot = 0,
+): PairedBodyHue {
+  if (x.n !== b.n) throw new Error('pairedBodyHue: 격자 크기가 다르다');
+  const n = b.n;
+  const cx = b.cx ?? n / 2;
+  const cy = b.cy ?? n / 2;
+  const step = (2 * Math.PI) / sectors;
+  const F = floors.length;
+  const L = layouts.length;
+  // 바닥 톤 sRGB · CIELAB
+  const fc = new Float64Array(F * 3);
+  const fl = new Float64Array(F * 3);
+  const lab = new Float64Array(3);
+  floors.forEach((f, t) => {
+    fc[t * 3] = ((f >> 16) & 255) / 255;
+    fc[t * 3 + 1] = ((f >> 8) & 255) / 255;
+    fc[t * 3 + 2] = (f & 255) / 255;
+    labInto(fc[t * 3] ?? 0, fc[t * 3 + 1] ?? 0, fc[t * 3 + 2] ?? 0, lab);
+    fl.set(lab, t * 3);
+  });
+  // 합: 몸 전체 [그림(0 = 의상, 1 = 기본)][바닥 톤], 조각 [그림][바닥 톤][배치][조각]
+  const whole = new Float64Array(2 * F);
+  const part = new Float64Array(2 * F * L * sectors);
+  const sec = new Int32Array(L);
+  const X = x.rgba;
+  const Bp = b.rgba;
+  let m = 0;
+  for (let j = 0; j < n; j += 1)
+    for (let i = 0; i < n; i += 1) {
+      const k = j * n + i;
+      if ((b.rgba[k * 4 + 3] ?? 0) < 0.5) continue;
+      m += 1;
+      let a = Math.atan2(j + 0.5 - cy, i + 0.5 - cx) - rot;
+      a -= 2 * Math.PI * Math.round(a / (2 * Math.PI));
+      // 배치마다 칸의 조각 번호 (sectorMeans와 같은 식)
+      for (let li = 0; li < L; li += 1)
+        sec[li] = ((Math.round(a / step - (layouts[li] ?? 0)) % sectors) + sectors) % sectors;
+      // 두 그림의 칸이 같으면(의상이 덮지 않은 곳 — 몸 대부분) 한 번만 재서 둘 다에 더한다
+      const same =
+        X[k * 4] === Bp[k * 4] &&
+        X[k * 4 + 1] === Bp[k * 4 + 1] &&
+        X[k * 4 + 2] === Bp[k * 4 + 2] &&
+        X[k * 4 + 3] === Bp[k * 4 + 3];
+      for (let w = same ? 1 : 0; w < 2; w += 1) {
+        const px = w === 0 ? X : Bp;
+        const r = px[k * 4] ?? 0;
+        const g = px[k * 4 + 1] ?? 0;
+        const bl = px[k * 4 + 2] ?? 0;
+        const al = px[k * 4 + 3] ?? 0;
+        const tr = 1 - al;
+        const opaque = al >= 0.999;
+        if (opaque) labInto(r + (fc[0] ?? 0) * tr, g + (fc[1] ?? 0) * tr, bl + (fc[2] ?? 0) * tr, lab);
+        for (let t = 0; t < F; t += 1) {
+          if (!opaque)
+            labInto(
+              r + (fc[t * 3] ?? 0) * tr,
+              g + (fc[t * 3 + 1] ?? 0) * tr,
+              bl + (fc[t * 3 + 2] ?? 0) * tr,
+              lab,
+            );
+          const d0 = (lab[0] ?? 0) - (fl[t * 3] ?? 0);
+          const d1 = (lab[1] ?? 0) - (fl[t * 3 + 1] ?? 0);
+          const d2 = (lab[2] ?? 0) - (fl[t * 3 + 2] ?? 0);
+          const de = Math.sqrt(d0 * d0 + d1 * d1 + d2 * d2);
+          for (let v = same ? 0 : w; v <= w; v += 1) {
+            const wt = v * F + t;
+            whole[wt] = (whole[wt] ?? 0) + de;
+            for (let li = 0; li < L; li += 1) {
+              const o = (wt * L + li) * sectors + (sec[li] ?? 0);
+              part[o] = (part[o] ?? 0) + de;
+            }
+          }
+        }
+      }
+    }
+  // 같은 칸에서 견주므로 합의 비율 = 평균의 비율
+  let wholeWorst = { ratio: Infinity, floor: floors[0] ?? 0 };
+  let sector: PairedWorst & { floor: number } = { ratio: Infinity, at: -1, layout: 0, floor: floors[0] ?? 0 };
+  floors.forEach((f, t) => {
+    const sb = whole[F + t] ?? 0;
+    if (sb > 0) {
+      const ratio = (whole[t] ?? 0) / sb;
+      if (ratio < wholeWorst.ratio) wholeWorst = { ratio, floor: f };
+    }
+    layouts.forEach((layout, li) => {
+      for (let q = 0; q < sectors; q += 1) {
+        const bs = part[((F + t) * L + li) * sectors + q] ?? 0;
+        if (bs <= 0) continue;
+        const ratio = (part[(t * L + li) * sectors + q] ?? 0) / bs;
+        if (ratio < sector.ratio) sector = { ratio, at: q, layout, floor: f };
+      }
+    });
+  });
+  return { whole: wholeWorst, sector, cells: m };
 }
