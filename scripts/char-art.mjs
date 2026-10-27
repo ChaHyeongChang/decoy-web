@@ -9,6 +9,9 @@
 //   node scripts/char-art.mjs sheets [--out=artifacts/characters/sheets]                       캐릭터별 큰 그림 시트 + 다섯 나란히
 //   node scripts/char-art.mjs gifs [장면 id ...] [--out=artifacts/characters/anim] [--fps=25]   동작 GIF (ffmpeg 필요: palettegen · paletteuse)
 //   node scripts/char-art.mjs list                                                             GIF 장면 목록
+//   node scripts/char-art.mjs costumes [의상 id ...] [--out=artifacts/characters/costumes]       의상 시안 시트 + 세 화면 비교 (메타 c)
+//   node scripts/char-art.mjs costume-gifs [의상 id ...] [--out=artifacts/characters/costumes] [--fps=20]  의상 걷기 GIF
+//   node scripts/char-art.mjs costume-sizes                                                    의상마다 크기 기준 점검 (브라우저 없이)
 // 기본 출력 폴더: artifacts/characters/_preview (커밋하지 않는 작업 그림은 --out으로 다른 곳에)
 /* global window */
 import { execFileSync } from 'node:child_process';
@@ -26,9 +29,13 @@ const opt = (name, def) => {
 const positional = args.filter((s) => !s.startsWith('--'));
 const cmd = positional[0] ?? 'preview';
 const defaultOut =
-  { sheets: 'artifacts/characters/sheets', gifs: 'artifacts/characters/anim' }[cmd] ??
-  'artifacts/characters/_preview';
-if (cmd === 'sizes') {
+  {
+    sheets: 'artifacts/characters/sheets',
+    gifs: 'artifacts/characters/anim',
+    costumes: 'artifacts/characters/costumes',
+    'costume-gifs': 'artifacts/characters/costumes',
+  }[cmd] ?? 'artifacts/characters/_preview';
+if (cmd === 'sizes' || cmd === 'costume-sizes') {
   // 크기 점검은 Node에서 바로 돈다 (그림 명령의 경로만 잰다)
   const r = await build({
     entryPoints: ['scripts/char-art/sizes.ts'],
@@ -44,7 +51,8 @@ if (cmd === 'sizes') {
     const file = join(dir, 'sizes.mjs');
     writeFileSync(file, r.outputFiles[0].text);
     const mod = await import(file);
-    if (!mod.run(positional.slice(1))) process.exitCode = 1;
+    const ok = cmd === 'costume-sizes' ? mod.runCostumes() : mod.run(positional.slice(1));
+    if (!ok) process.exitCode = 1;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -54,8 +62,15 @@ const out = resolve(opt('out', defaultOut));
 mkdirSync(out, { recursive: true });
 
 const finalCmd = ['sheets', 'gifs', 'list'].includes(cmd);
+const costumeCmd = ['costumes', 'costume-gifs'].includes(cmd);
 const bundled = await build({
-  entryPoints: [finalCmd ? 'scripts/char-art/final.ts' : 'scripts/char-art/entry.ts'],
+  entryPoints: [
+    costumeCmd
+      ? 'scripts/char-art/costumes.ts'
+      : finalCmd
+        ? 'scripts/char-art/final.ts'
+        : 'scripts/char-art/entry.ts',
+  ],
   bundle: true,
   format: 'iife',
   platform: 'browser',
@@ -81,7 +96,8 @@ try {
   await page.setContent('<!doctype html><html><body style="background:#0b1622"></body></html>');
   await page.addScriptTag({ content: code });
   await page.evaluate(
-    (f) => (window.CHAR_FINAL ?? window.CHAR_ART).loadFont(`data:font/woff2;base64,${f}`),
+    (f) =>
+      (window.CHAR_COSTUME ?? window.CHAR_FINAL ?? window.CHAR_ART).loadFont(`data:font/woff2;base64,${f}`),
     font,
   );
   const save = async (name, dataUrl) => {
@@ -199,6 +215,59 @@ try {
           frames.push(...r.frames);
         }
         await encode(`${prefix}-all.gif`, frames, ofps);
+      }
+    }
+  } else if (cmd === 'costumes') {
+    const all = await page.evaluate(() => window.CHAR_COSTUME.costumeList());
+    const want = positional.slice(1);
+    for (const { id } of all.filter((s) => !want.length || want.includes(s.id)))
+      await save(
+        `costume-${id}.png`,
+        await page.evaluate((cid) => window.CHAR_COSTUME.costumeSheet(cid), id),
+      );
+    if (!want.length || want.includes('screens'))
+      await save('costume-screens.png', await page.evaluate(() => window.CHAR_COSTUME.screensBoard()));
+  } else if (cmd === 'costume-gifs') {
+    const fps = Number(opt('fps', '20'));
+    const all = await page.evaluate(() => window.CHAR_COSTUME.costumeList());
+    const want = positional.slice(1);
+    // 걸음 두 주기 남짓 (생존자 걸음 한 주기 = 1.1타일)
+    const n = Math.round(2.4 * fps);
+    for (const { id } of all.filter((s) => !want.length || want.includes(s.id))) {
+      const frames = [];
+      for (let from = 0; from < n; from += 12)
+        frames.push(
+          ...(await page.evaluate(
+            ([cid, f, a, c]) => window.CHAR_COSTUME.walkFrames(cid, f, a, c),
+            [id, fps, from, Math.min(12, n - from)],
+          )),
+        );
+      const dir = mkdtempSync(join(tmpdir(), 'costume-gif-'));
+      try {
+        frames.forEach((url, i) =>
+          writeFileSync(
+            join(dir, `${String(i).padStart(4, '0')}.png`),
+            Buffer.from(url.split(',')[1], 'base64'),
+          ),
+        );
+        const file = join(out, `costume-walk-${id}.gif`);
+        execFileSync('ffmpeg', [
+          '-v',
+          'error',
+          '-y',
+          '-framerate',
+          String(fps),
+          '-i',
+          join(dir, '%04d.png'),
+          '-vf',
+          'split[a][b];[a]palettegen=max_colors=255:stats_mode=full[p];[b][p]paletteuse=dither=none:diff_mode=rectangle',
+          '-loop',
+          '0',
+          file,
+        ]);
+        console.log(`저장: ${file} (${frames.length}프레임, ${Math.round(statSync(file).size / 1024)}KiB)`);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
       }
     }
   } else throw new Error(`모르는 명령: ${cmd}`);

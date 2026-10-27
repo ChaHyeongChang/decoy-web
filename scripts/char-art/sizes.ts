@@ -1,5 +1,7 @@
 // 캐릭터 리디자인 크기 점검 (Node, 브라우저 없이): 자세 묶음마다 크기 기준(client/src/art/chars/measure.ts SIZE_RULE)을
 // 가장 많이 넘는 점과 구역별 최대 거리를 찍는다. `node scripts/char-art.mjs sizes [runner|guard|scout|common|monster ...]`
+import { MONSTER_COSTUMES, SURVIVOR_COSTUMES } from '@decoy/shared';
+import { registerAllCostumeArt } from '../../client/src/art/chars/costume/art';
 import { COMMON_ART, MONSTER_ART, SURVIVOR_ART } from '../../client/src/art/chars/index';
 import type { Drawing } from '../../client/src/art/chars/kit';
 import {
@@ -91,11 +93,13 @@ function survivorGroups(
   ];
 }
 
-function monsterGroups(): { label: string; drawings: { d: Drawing; dash: boolean }[] }[] {
+function monsterGroups(
+  costume: (typeof MONSTER_COSTUMES)[number] = 'basic',
+): { label: string; drawings: { d: Drawing; dash: boolean }[] }[] {
   const grid = (extra: Partial<MonsterPose>): { d: Drawing; dash: boolean }[] =>
     PHASES.flatMap((walk) =>
       [0, 1].map((stride) => ({
-        d: MONSTER_ART.top({ ...MONSTER_REST, walk, stride, cloak: walk * 1.7, ...extra }, { w: W }),
+        d: MONSTER_ART.top({ ...MONSTER_REST, walk, stride, cloak: walk * 1.7, ...extra }, { w: W, costume }),
         dash: (extra.dash ?? 0) > 0,
       })),
     );
@@ -137,5 +141,22 @@ export function run(ids: readonly CharId[]): boolean {
   console.log(
     `기준: 생존자 앞 ±60° ≤ ${SIZE_RULE.survivor.front} · 옆 ≤ ${SIZE_RULE.survivor.side} · 뒤 ≤ ${SIZE_RULE.survivor.back} / 괴물 ≤ ${SIZE_RULE.monster.all} (돌진 ≤ ${SIZE_RULE.monster.dash})`,
   );
+  return ok;
+}
+
+/** 의상마다 크기 기준 (메타 c: 의상을 입어도 판정 원 · 크기 기준은 같다) */
+export function runCostumes(): boolean {
+  registerAllCostumeArt();
+  let ok = true;
+  for (const costume of SURVIVOR_COSTUMES)
+    for (const id of ['runner', 'guard', 'scout'] as const)
+      ok =
+        report(
+          `${id} · ${costume}`,
+          survivorGroups((p) => SURVIVOR_ART[id].top(p, { w: W, costume })),
+          (d) => survivorOver(d),
+        ) && ok;
+  for (const costume of MONSTER_COSTUMES)
+    ok = report(`monster · ${costume}`, monsterGroups(costume), monsterOver) && ok;
   return ok;
 }

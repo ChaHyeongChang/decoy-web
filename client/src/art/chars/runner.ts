@@ -14,6 +14,8 @@
 // 위 그림(게임 화면)에는 청록을 넣지 않는다(게임 화면에서 청록은 시설 · 목표 뜻).
 // 색은 역할색 파랑(#3B82F6)과 그 짙은/밝은 변형, 어두운 남회색 바지 · 신발, 밝은 회색 밑창, 얼굴 피부색(정면).
 import { OUTLINE, ROLE } from '../palette';
+import { survivorCostumeArt } from './costume/registry';
+import type { SurvivorFrontAnchor, SurvivorTopAnchor } from './costume/types';
 import {
   IDENTITY,
   Sketch,
@@ -47,9 +49,9 @@ import {
 import {
   cleanFrontPose,
   cleanSurvivorPose,
-  type ArtOptions,
   type FrontPose,
   type SurvivorArt,
+  type SurvivorArtOptions,
   type SurvivorPose,
 } from './types';
 
@@ -383,9 +385,10 @@ function topArm(
   );
 }
 
-function top(p: SurvivorPose, o: ArtOptions): Drawing {
+function top(p: SurvivorPose, o: SurvivorArtOptions): Drawing {
   const ink = inkFor(p.tone);
   const sk = new Sketch(o.w);
+  const cos = survivorCostumeArt(o.costume);
   // 질주 자세는 보통(free)일 때만: 구조 중 · 수감 중에는 질주 효과가 남아 있어도 제자리 자세다
   const a = p.mode === 'free' ? p.action : 0;
   const hit = p.hit;
@@ -451,6 +454,27 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
   );
   // 2) 팔 (몸판 위): 서 있을 때 걸음 직전 자세, 걸으면 팔치기. 앞으로 간 손 · 구조 · 수감 때 주먹이 드러난다
   for (const side of [0, 1] as const) topArm(sk, r, side, fist[side], aft[side], body, topGlove, ink, P);
+  // 의상 기준점 (몸판 등 끝 · 머리 뒤 끝 · 목): 의상 등 부품은 몸판 · 팔 위, 후드 끝 끈 · 머리 밑
+  const anchor: SurvivorTopAnchor | null = cos && {
+    role: 'runner',
+    pose: p,
+    ink,
+    outline: ink(OUTLINE),
+    w: o.w,
+    body: P,
+    head: { x: hx, y: hy, r: R, backX: hx - R * HEAD.back },
+    backX: -PLATE.back * (PLATE.rim[3] ?? 1) * pk,
+    halfW: r.halfW * pk,
+    neckX: neck[0],
+    walk: p.walk,
+    s: r.s,
+    stride: p.stride,
+    action: a,
+    hit,
+    captive,
+    reach,
+  };
+  if (anchor) cos?.topBack?.(sk, anchor);
   // 3) 후드 끝 천: 머리 뒤에서 어깨 · 등 위로 흐르는 가늘어지는 끈. 가운데가 아니라 한쪽(오른쪽)으로 휘고 걸음마다
   //    출렁인다(뿌리 → 끝으로 갈수록 크고 늦게 — S자). 질주 때 곧게 뒤로 편다. 끝은 둥글고 몸판 안이라 실루엣은
   //    뒤로 뾰족해지지 않는다. 피격 때 몸 쪽으로 눌리고 수감 때 움츠러든다
@@ -519,6 +543,7 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
   );
   // 5) 후드 앞 (짙은 구멍 + 챙). 질주 · 수감 때 고개를 숙여 구멍이 얇아지고, 질주 때 네온이 밝아진다
   topHoodFront(sk, ink, hx, hy, R, Math.max(a, captive), a, E);
+  if (anchor) cos?.topOver?.(sk, anchor);
   return sk.drawing();
 }
 
@@ -785,13 +810,38 @@ function frontFace(sk: Sketch, ink: Ink, neon: FrontNeon, hcx: number, hy: numbe
   }
 }
 
-function frontBody(p: FrontPose, o: ArtOptions): Drawing {
+function frontBody(p: FrontPose, o: SurvivorArtOptions): Drawing {
   const ink = inkFor(p.tone);
   const sk = new Sketch(o.w);
   const neon = frontNeon(sk, p.tone);
   const by = frontBreath(p.t);
   const sway = Math.sin(p.t * 2.4) * 0.05;
   const mid = QUARTER.mid;
+  const cos = survivorCostumeArt(o.costume);
+  // 의상 기준점: 3/4 시점이라 등 쪽 어깨(가까운 팔, 화면 왼쪽)가 0번, 가슴 쪽(먼 팔)이 1번
+  const anchor: SurvivorFrontAnchor | null = cos && {
+    role: 'runner',
+    ink,
+    neon,
+    outline: ink(OUTLINE),
+    w: o.w,
+    t: p.t,
+    by,
+    sway: sway / 0.05,
+    bust: p.bust,
+    torso: LEAN,
+    neck: [0.06, FRONT.neckY + by],
+    shoulders: [
+      [-0.28, FRONT.shoulderY + 0.08 + by],
+      [0.17, FRONT.shoulderY + 0.08 + by],
+    ],
+    shoulderY: FRONT.shoulderY + by,
+    hipY: FRONT.hipY,
+    halfW: FRONT.shoulderX,
+    head: { x: QUARTER.headX, y: FRONT.headY + by + 0.02, r: FRONT.headR * 1.16 },
+    facing: 1,
+  };
+  if (anchor) cos?.frontBehind?.(sk, anchor);
   // 1) 먼 팔 (앞으로 치는 팔, 몸 뒤): 어깨 → 아래 앞 팔꿈치 → 가슴 앞 주먹. 먼 어깨는 몸 안쪽(3/4 원근으로 좁다)
   bentArm(
     sk,
@@ -845,6 +895,7 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
     .L(mid + 0.05, 0.17 + by)
     .L(mid - 0.02, 0.23 + by).d;
   neon.line(chev, 0.03, 1);
+  if (anchor) cos?.frontTorso?.(sk, anchor);
   // 4) 가까운 팔 (뒤로 젖힌 팔, 몸 앞): 어깨 → 뒤로 뺀 팔꿈치 → 허리 뒤 주먹. 가까운 어깨는 바깥쪽(넓게 보인다)
   bentArm(
     sk,
@@ -888,6 +939,7 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
   );
   // 6) 얼굴 (3/4)
   frontFace(sk, ink, neon, hcx, hy, sway);
+  if (anchor) cos?.frontNeck?.(sk, anchor);
   return sk.drawing();
 }
 
@@ -898,9 +950,9 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
  */
 const BUST = { k: 1.65, tx: 0.03, ty: 0.42 } as const;
 
-function front(p: FrontPose, o: ArtOptions): Drawing {
+function front(p: FrontPose, o: SurvivorArtOptions): Drawing {
   if (!p.bust) return frontBody(p, o);
-  return transformDrawing(frontBody(p, { w: o.w / BUST.k }), BUST.k, BUST.tx, BUST.ty);
+  return transformDrawing(frontBody(p, { ...o, w: o.w / BUST.k }), BUST.k, BUST.tx, BUST.ty);
 }
 
 export const RUNNER_ART: SurvivorArt = {

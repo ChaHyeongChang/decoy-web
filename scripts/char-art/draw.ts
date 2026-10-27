@@ -1,7 +1,15 @@
 // 캐릭터 리디자인 시안 그림의 공통 그리기 도우미 (브라우저 쪽, scripts/char-art/*에서 쓴다). 게임 코드는 바꾸지 않는다.
 // 새 캐릭터(client/src/art/chars) · 옛 캐릭터(art/atlas.ts bakeAtlas)를 그리고, 게임 연출(베기 호 · 불꽃 · 흩어짐 · 충격파 ·
 // 기절 별 · 보호 거품 · 구조 링 · 속도선 · 노출 링 · 탐지 표시 · 공격 범위 · 감옥 철창)을 VISUAL_SPEC 값으로 흉내 낸다.
-import { MAP_H, TILE_PX, validateBalance } from '@decoy/shared';
+import {
+  MAP_H,
+  MONSTER_COSTUMES,
+  SURVIVOR_COSTUMES,
+  TILE_PX,
+  validateBalance,
+  type MonsterCostumeId,
+  type SurvivorCostumeId,
+} from '@decoy/shared';
 import balanceJson from '../../config/balance.json';
 import { ANIM } from '../../client/src/art/anim';
 import { ART, bakeAtlas, type AtlasBuild } from '../../client/src/art/atlas';
@@ -216,11 +224,21 @@ export function paint(
   ctx.restore();
 }
 
-export type AnyPose = Partial<SurvivorPose> & Partial<MonsterPose>;
+/** 자세 + 의상 (메타 c 시안: 생존자 · 괴물 의상 id, 없으면 기본) */
+export type AnyPose = Partial<SurvivorPose> & Partial<MonsterPose> & { costume?: string };
+
+function survivorCostume(c: string | undefined): SurvivorCostumeId | undefined {
+  return SURVIVOR_COSTUMES.find((k) => k === c);
+}
+
+function monsterCostume(c: string | undefined): MonsterCostumeId | undefined {
+  return MONSTER_COSTUMES.find((k) => k === c);
+}
 
 export function topDrawing(id: CharId, pose: AnyPose): Drawing {
   const w = wUnits(id);
-  if (id === 'monster') return MONSTER_ART.top({ ...MONSTER_REST, ...pose }, { w });
+  if (id === 'monster')
+    return MONSTER_ART.top({ ...MONSTER_REST, ...pose }, { w, costume: monsterCostume(pose.costume) });
   if (id === 'common')
     // 공통 생존자는 괴물 화면이 받는 값(걷기 · 수감 · 톤)만 쓴다: 능력 · 피격 · 구조 값은 건네지 않는다
     return COMMON_ART.top(
@@ -233,7 +251,7 @@ export function topDrawing(id: CharId, pose: AnyPose): Drawing {
       },
       { w },
     );
-  return SURVIVOR_ART[id].top({ ...SURVIVOR_REST, ...pose }, { w });
+  return SURVIVOR_ART[id].top({ ...SURVIVOR_REST, ...pose }, { w, costume: survivorCostume(pose.costume) });
 }
 
 /** 새 그림: 위에서 본 캐릭터 (그림자 포함). rPx = 판정 반지름 (px). scale = 숨쉬기 · 찌그러짐 (x, y 따로) */
@@ -255,7 +273,7 @@ export function newTop(
 export function newFront(
   ctx: Ctx,
   id: CharId,
-  pose: Partial<FrontPose>,
+  pose: Partial<FrontPose> & { costume?: string },
   x: number,
   y: number,
   size: number,
@@ -266,10 +284,10 @@ export function newFront(
   const p = { ...FRONT_REST, ...pose };
   const d =
     id === 'monster'
-      ? MONSTER_ART.front(p, { w })
+      ? MONSTER_ART.front(p, { w, costume: monsterCostume(pose.costume) })
       : id === 'common'
         ? COMMON_ART.front(p, { w })
-        : SURVIVOR_ART[id].front(p, { w });
+        : SURVIVOR_ART[id].front(p, { w, costume: survivorCostume(pose.costume) });
   paint(ctx, d, x, y, k);
 }
 

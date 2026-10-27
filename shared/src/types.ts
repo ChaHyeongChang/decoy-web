@@ -378,6 +378,17 @@ export interface MatchRating {
   stats: RatingStats;
 }
 
+// ───────────────────────── 의상 (판 밖 메타 c, GAME_DESIGN 12장) ─────────────────────────
+
+/**
+ * 의상: 새 캐릭터 그림에만 얹는 모양 장식. 판정 원 · 크기 · 속도 · 소리와 무관하다. basic = 기본(늘 가짐).
+ * 생존자 의상은 세 역할(러너 · 가드 · 스카우트) 모두에 같이 맞는다. 괴물 화면의 생존자(흰색 위장)는 의상을 그리지 않는다
+ */
+export const SURVIVOR_COSTUMES = ['basic', 'scarf', 'pack', 'cape'] as const;
+export const MONSTER_COSTUMES = ['basic', 'hood', 'feathers', 'chains'] as const;
+export type SurvivorCostumeId = (typeof SURVIVOR_COSTUMES)[number];
+export type MonsterCostumeId = (typeof MONSTER_COSTUMES)[number];
+
 // ───────────────────────── 메시지 ─────────────────────────
 
 export type TestCommand =
