@@ -27,6 +27,8 @@
   --tier-2: #cbd5e1;
   --tier-3: #facc15;
   --tier-4: #67e8f9;
+  /* 불씨 (판 밖 재화, VISUAL_SPEC 9.7) — 경고 주황과 다른 연한 호박색 */
+  --ember: #fdba74;
   --text: #e2e8f0;
   --text-dim: #94a3b8;
   --text-faint: #7c8ca0;
@@ -2566,7 +2568,7 @@ html:not(.touch) #debug-overlay .dbg-toggle {
 /* 불씨: 따뜻한 빛 (경고 주황 #F59E0B와 다른 연한 호박색 — 글자 대비 4.5:1 이상) */
 .lv-ember {
   display: inline-flex;
-  color: #fdba74;
+  color: var(--ember);
   line-height: 0;
 }
 .lv-coins {
@@ -2832,19 +2834,49 @@ html:not(.touch) #debug-overlay .dbg-toggle {
   .xp-parts {
     display: none;
   }
+  /* 낮은 창: 칸을 가로로 (아이콘 왼쪽, 이름 · 단계 오른쪽 두 줄) — 칸 높이 약 62 → 36px */
   .rate-tile {
-    padding: 4px 2px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      'badge name'
+      'badge tier';
+    column-gap: 5px;
+    row-gap: 0;
+    align-items: center;
+    justify-items: start;
+    padding: 3px 5px;
   }
   .rate-badge {
-    width: 28px;
-    height: 28px;
+    grid-area: badge;
+    width: 26px;
+    height: 26px;
   }
   .rate-badge svg {
-    width: 18px;
-    height: 18px;
+    width: 16px;
+    height: 16px;
   }
   .rate-name {
+    grid-area: name;
     font-size: 13px;
+  }
+  .rate-tier {
+    grid-area: tier;
+    gap: 3px;
+  }
+  .pip {
+    width: 5px;
+    height: 5px;
+  }
+  .rate-tile .tag-best {
+    display: none;
+  }
+}
+/* 낮고 좁은 창(휴대폰 가로): 단계 글자는 칸 수(마름모)와 읽어 주기 글자로 — 칸이 좁아 넘치지 않게 */
+@media (max-height: 620px) and (max-width: 900px),
+  (pointer: coarse) and (max-height: 680px) and (max-width: 900px) {
+  .rate-tier-name {
+    display: none;
   }
 }
 
