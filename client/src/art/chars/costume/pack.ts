@@ -3,12 +3,14 @@
 //   끝에 침낭 원통을 가로(y축)로 얹고(짙은 끈 띠 둘), 덮개 위 끈 둘 끝에 쇠 버클, 뒤쪽 옆에 작은 주머니 둘. 멜빵 둘은
 //   어깨 위로 앞을 향한다. 가드 · 스카우트는 침낭 가운데가 머리 밑에 숨고 양끝만 머리 옆으로 나온다(머리 바로 뒤부터 밝은
 //   덮개가 보여 휴대폰 크기에서 등의 밝은 네모 짐으로 읽히게). 배낭은 몸 기준 자리라 피격 · 밀치기 준비로 머리가 젖혀지면
-//   머리가 앞쪽을 덮는다. 몸 가운데 0.45r 원판은 덮지 않는다(VISUAL_SPEC 0장 ② '원판은 역할색', tests/unit/costume-parity-disc
-//   .test.ts — 원판 안 칸 중 기본과 ΔE76 15 넘게 다른 칸 5% 이하): 러너는 침낭 앞 끝을 −0.49(안쪽 가는 외곽선까지 원판 밖)에
-//   두고 배낭 몸통 앞 끝은 그보다 0.05 뒤 침낭 밑에 숨기며(몸통 안쪽 외곽선이 원판 쪽으로 비어져 나오지 않게), 멜빵은 앞 끝을
-//   |y| 0.58 이상으로 두고 곡선 가운데를 바깥으로 부풀려 원판 둘레를 따라 돈다 — 수감(어깨 움츠림 · 그림 0.97배) 때도 짙은
-//   멜빵 테 안쪽 끝이 원판 둘레 칸 밖이다. 이전에는 멜빵이 원판 안 0.44r까지 들어와 러너 수감 걷기 · 질주에서 원판이 5.2~5.8%
-//   바뀌었다(이제 0.3% 이하). 침낭은 그만큼 가늘게(반지름 0.065) 해 침낭 뒤로 밝은 덮개 · 버클이 남는다. 뒤 끝은 판정 원 1.0r 안.
+//   머리가 앞쪽을 덮는다. 몸 가운데 0.45r 원판은 덮지 않는다(VISUAL_SPEC 0장 ② '원판은 역할색', tests/unit/costume-parity-disc*
+//   .test.ts — 생존자 18.4~76.8px · 모든 프레임 · 화면 방향 · 위상에서 원판 안 칸 중 기본과 ΔE76 15 넘게 다른 칸 5% 이하): 러너는
+//   침낭 · 멜빵을 0.57r 둘레(KEEP_R — 가장 작은 화면에서 1텍셀 넘는 틈, 목도리 · 망토와 같은 값) 밖에 둔다. 침낭 앞 끝 −0.61
+//   (안쪽 가는 외곽선까지 둘레 밖), 배낭 몸통 앞 끝은 그보다 0.05 뒤 침낭 밑에 숨기고, 멜빵은 곡선 점마다 둘레(+ 짙은 테 반폭)
+//   밖으로 다듬어 둘레를 따라 어깨(소매 안쪽 끝 위)로 돈다 — 수감 때는 좁아진 몸판 옆에 들게 가늘게(0.12 → 0.09). 침낭 앞 끝이
+//   −0.49 · 멜빵이 0.58이던 때 휴대폰 크기(18.4~20.7px)에서 원판 칸 최대 9.3%가 달랐다 — 이제 0%. 뒤로 물린 만큼 침낭은 가늘게
+//   (반지름 0.045), 배낭은 뒤로 길게(뒤 끝 −0.84) · 덮개 테는 얇게(0.035) 해 침낭 뒤로 밝은 덮개 · 버클이 남는다. 앞이 좁아진
+//   몸판 쪽으로 물러난 만큼 배낭 앞 폭도 줄여(어깨 반폭 × 0.45) 역할끼리 실루엣 겹침이 0.8 안이다. 뒤 끝은 판정 원 1.0r 안.
 //   배낭 모양은 역할마다 제 등 윤곽 안(TOP_FIT): 가드는 둥근 등을 채우고, 스카우트는 원래 배낭 폭(어깨 옆 오목한 홈이 남게),
 //   러너는 뒤로 좁아지는 사다리꼴로 몸판 뒤 끝을 조금만 넘는다 — 의상을 입어도 역할 실루엣이 갈린다(VISUAL_SPEC 0장 ④).
 // 정면(로비 역할 카드 · 결과 화면 — 산 사람이 의상을 가장 오래 보는 곳이라 크게): 가드 · 스카우트는 양 어깨 밖으로 나오고
@@ -67,14 +69,44 @@ const TOPP = {
 } as const;
 
 /**
- * 위 그림 몸 가운데 원판(0.45r — VISUAL_SPEC 0장 ② '원판은 역할색') 둘레에 닿는 부품 자리 (몸 반지름 배수). 원판 둘레 칸은
- * 낮음 상한 44.8px에서 가운데가 0.45r 안이고 칸 끝이 0.47~0.48r까지 걸친다 — 짙은 멜빵 테 · 침낭 앞 끝(안쪽 가는 외곽선
- * 포함)이 그 밖에 머물게 둔다. 수감(어깨가 움츠러들고 그림 전체가 0.97배) 때가 가장 안쪽이다.
- *  strapY = 멜빵 앞 끝 |y| 하한, strapBulge = 멜빵 곡선 가운데를 바깥으로 부풀리는 몫 (곡선이 원판 둘레를 따라 돌게)
- *  rollFront = 러너 침낭 앞 끝 x, rollR = 러너 침낭 반지름 (앞 끝을 뒤로 물린 만큼 가늘게 — 뒤로 밝은 덮개가 남게)
- *  tuck = 러너 배낭 몸통 앞 끝을 침낭 앞 끝보다 뒤로 물린 길이 (배낭 몸통 안쪽 외곽선이 침낭 밑에 숨게)
+ * 위 그림 멜빵 자리 (몸 반지름 배수, 모든 역할): y = 멜빵 앞 끝 |y| 하한, bulge = 멜빵 곡선 가운데를 바깥으로 부풀리는 몫
+ * (곡선이 몸 가운데 원판 둘레를 따라 돌게)
  */
-const DISC_CLEAR = { strapY: 0.58, strapBulge: 0.06, rollFront: -0.49, rollR: 0.065, tuck: 0.05 } as const;
+const STRAP = { y: 0.58, bulge: 0.06 } as const;
+
+/**
+ * 러너가 비켜 가는 몸 가운데 둘레 (몸 반지름 배수, 내보낸 그림 기준): 역할색 원판 0.45r(VISUAL_SPEC 0장 ② '원판은 역할색') +
+ * 가장 작은 화면에서 1텍셀 넘는 틈. 생존자 18.4px(배율 1.25 휴대폰 터치 낮음)에서 1텍셀 = 0.11r — 침낭 · 멜빵 가장자리(안쪽 가는
+ * 선 포함)가 이보다 가까우면 안티에일리어싱 · 쌍선형 찍기로 원판 맨 바깥 칸에 짙은 끈 · 외곽선 색이 번진다
+ * (tests/unit/costume-parity-disc*.test.ts, 목도리 scarf.ts · 망토 cape.ts와 같은 값). 러너 침낭 앞 끝이 −0.49 · 멜빵이 0.58이던
+ * 때 휴대폰 크기에서 원판 칸 최대 9.3%가 달랐다. 가드 · 스카우트는 침낭 · 멜빵이 등판 · 머리 뒤 자리라 그대로
+ */
+const KEEP_R = 0.57;
+
+/** 위 그림 옆 폭 배율 (index.ts TOP_WIDTH.runner와 같은 값 — 러너는 내보낼 때 y를 0.94배로 줄이므로 그만큼 y를 크게 비켜 간다) */
+const RUNNER_SQUASH = 0.94;
+
+/** 점이 둘레(+ margin = 그 점에서 안쪽으로 뻗는 선 반폭) 타원 안이면 몸 중심에서 바깥으로 민다 (그림 좌표) */
+function keepOut(p: Pt, margin: number): Pt {
+  const q = Math.hypot(p[0] / (KEEP_R + margin), p[1] / (KEEP_R / RUNNER_SQUASH + margin));
+  return q < 1 && q > 1e-6 ? [p[0] / q, p[1] / q] : p;
+}
+
+/**
+ * 러너 위 그림 배낭 자리 (몸 반지름 배수): 몸 가운데 둘레(KEEP_R) 밖에 둔다.
+ *  rollFront = 침낭 앞 끝 x (둘레 0.57 + 침낭 안쪽 가는 선 반폭 · 여유), rollR = 침낭 반지름 (등이 짧아 가늘게 — 뒤로 밝은 덮개가
+ *  남게), tuck = 배낭 몸통 앞 끝을 침낭 앞 끝보다 뒤로 물린 길이 (몸통 안쪽 외곽선이 침낭 밑에 숨게), inset = 덮개를 몸통
+ *  윤곽에서 들인 거리 (짧은 배낭에서 밝은 덮개가 남게 얇게), strapW · strapCaptive = 멜빵 짙은 테 굵기 · 수감 때 굵기 (수감 때
+ *  어깨가 움츠러들어 몸판 옆이 좁다 — 둘레와 몸판 윤곽 사이에 들게 가늘게)
+ */
+const RUNNER_TOP = {
+  rollFront: -0.61,
+  rollR: 0.045,
+  tuck: 0.05,
+  inset: 0.035,
+  strapW: 0.12,
+  strapCaptive: 0.09,
+} as const;
 
 /** 위 그림 배낭 모양 한 벌 (TOP_FIT) */
 interface TopFit {
@@ -95,12 +127,13 @@ interface TopFit {
  * 실루엣 겹침이 역할끼리 0.8 이하, 괴물 화면 공통 생존자와 0.85 이하. 12.7 · 18 · 36px, 두 방향으로 쟀다)
  *  guard: 둥근 원판 등 — 등을 꽉 채운다
  *  scout: 원래 배낭(반폭 약 0.42)만큼 좁고 뒤가 둥글다 — 어깨와 배낭 사이 오목한 홈이 남는다
- *  runner: 뒤로 갈수록 좁아지는 몸판을 따라 뒤가 좁은 사다리꼴, 몸판 뒤 끝(−0.72)을 조금만 넘는다 — 둥근 등이 되지 않게
+ *  runner: 뒤로 갈수록 좁아지는 몸판을 따라 뒤가 좁은 사다리꼴, 몸판 뒤 끝(−0.72)을 조금만 넘는다 — 둥근 등이 되지 않게.
+ *    몸 가운데 둘레 밖(앞 끝 −0.66)에서 시작해 짧으므로 앞뒤 폭을 줄이고 뒤로 조금 길게 (침낭은 배낭 옆보다 0.01만 나온다)
  */
 const TOP_FIT: Record<RoleCharId, TopFit> = {
   guard: { wb: 0.56, wf: 0.56, back: null, corner: 0.2, pocket: { x0: 0.12, out: 0.08 }, roll: 0.1 },
   scout: { wb: 0.38, wf: 0.38, back: null, corner: 0.28, pocket: { x0: 0.2, out: 0.05 }, roll: 0.08 },
-  runner: { wb: 0.3, wf: 0.55, back: -0.79, corner: 0.14, pocket: null, roll: 0.03 },
+  runner: { wb: 0.26, wf: 0.45, back: -0.84, corner: 0.14, pocket: null, roll: 0.01 },
 };
 
 /** 위 그림 배낭 윤곽: 뒤 끝 xb(반폭 wb) ~ 앞 끝 xf(반폭 wf), 모서리 r. 앞뒤 폭이 같으면 둥근 네모, 다르면 둥근 사다리꼴 */
@@ -137,16 +170,18 @@ function topBack(sk: Sketch, a: SurvivorTopAnchor): void {
   const rc = fit.corner;
   // 뒤 끝: 정해 두지 않으면 뒤 모서리 둥근 끝이 rmax 안에 들게 잡는다 (뒤 끝은 곧게 — 네모난 짐으로 읽히게)
   const xb = (fit.back ?? -(Math.sqrt((TOPP.rmax - rc) ** 2 - (hw - rc) ** 2) + rc)) + push;
-  // 침낭: 러너는 몸 가운데 원판 바로 뒤(등이 짧아 — 몸판 뒤 끝 −0.72 — 가늘게: 침낭 뒤로 밝은 덮개 · 버클이 보이게),
+  // 침낭: 러너는 몸 가운데 둘레(KEEP_R) 바로 뒤(등이 짧아 — 몸판 뒤 끝 −0.72 — 가늘게: 침낭 뒤로 밝은 덮개 · 버클이 보이게),
   // 가드 · 스카우트는 가운데가 머리 밑에 숨고 양끝만 머리 옆으로 나온다 (머리 바로 뒤부터 밝은 덮개가 보이게). 배낭은 몸에
   // 메므로 몸 기준 자리에 둔다 — 피격 · 밀치기 준비로 머리가 뒤로 젖혀지면 머리가 침낭 · 덮개 앞쪽을 덮는다
-  const rr = runner ? DISC_CLEAR.rollR : TOPP.rollR;
-  const rollX = runner ? DISC_CLEAR.rollFront - rr : TOPP.rollX;
-  const xf = runner ? DISC_CLEAR.rollFront - DISC_CLEAR.tuck : rollX + 0.12;
+  const rr = runner ? RUNNER_TOP.rollR : TOPP.rollR;
+  const rollX = runner ? RUNNER_TOP.rollFront - rr : TOPP.rollX;
+  const xf = runner ? RUNNER_TOP.rollFront - RUNNER_TOP.tuck : rollX + 0.12;
   const L = wf + fit.roll;
   /** x 자리에서 배낭 반폭 (사다리꼴 옆선) */
   const wAt = (x: number): number =>
     hw + ((wf - hw) * Math.min(1, Math.max(0, x - xb))) / Math.max(0.01, xf - xb);
+  // 그리는 모서리 둥글기는 배낭 길이의 반 이하 (러너처럼 짧은 배낭에서 옆선이 뒤집혀 모서리에 가시가 생기지 않게)
+  const rd = Math.min(rc, (xf - xb) / 2);
 
   // 0) 옆 주머니 둘 (몸통 뒤쪽 옆에 붙은 둥근 주머니 — 네모난 상자가 아니라 배낭으로 읽히게, 어깨보다는 좁게). 몸통보다 먼저
   //    그려 안쪽 반은 몸통이 덮는다. 뒤 모서리가 rmax 안에 들게 뒤 끝에서 조금 앞
@@ -177,10 +212,10 @@ function topBack(sk: Sketch, a: SurvivorTopAnchor): void {
   }
   // 1) 배낭 몸통 (옆면 테 = 카키) + 덮개 (밝은 윗면, 위에서 받는 빛)
   const [cx, cy] = apply(M, (xf + xb) / 2 - 0.04, 0);
-  sk.part(packOutline(M, xb, xf, hw, wf, rc), solid(ink(shade(C.canvas, 0.08))), a.outline, 1, 0.45);
-  const n = TOPP.inset;
+  sk.part(packOutline(M, xb, xf, hw, wf, rd), solid(ink(shade(C.canvas, 0.08))), a.outline, 1, 0.45);
+  const n = runner ? RUNNER_TOP.inset : TOPP.inset;
   sk.fill(
-    packOutline(M, xb + n, xf - n, hw - n, wf - n, rc - n * 0.6),
+    packOutline(M, xb + n, xf - n, hw - n, wf - n, Math.min(rc - n * 0.6, (xf - xb) / 2 - n)),
     radial(cx, cy, wf * 1.15, [
       [0, ink(tint(C.lid, 0.3))],
       [0.6, ink(tint(C.lid, 0.12))],
@@ -212,16 +247,33 @@ function topBack(sk: Sketch, a: SurvivorTopAnchor): void {
     sk.fill(path(M).roundRect(bx - 0.05, y - 0.055, 0.1, 0.11, 0.025).d, solid(ink(C.steel)));
     sk.fill(path(M).roundRect(bx - 0.02, y - 0.032, 0.04, 0.064, 0.01).d, solid(ink(shade(C.steel, 0.45))));
   }
-  // 2) 멜빵 둘 (배낭 위쪽 끝에서 어깨 위로 앞을 향한다)
+  // 2) 멜빵 둘 (배낭 위쪽 끝에서 어깨 위로 앞을 향한다). 러너는 곡선 점마다 몸 가운데 둘레 밖으로 다듬어(짙은 테 반폭만큼 더)
+  //    둘레를 따라 돈다 — 어깨에서는 소매 안쪽 끝 위로 지난다. 수감 때는 몸판 옆이 좁아 가늘게
+  const sw = runner ? RUNNER_TOP.strapW + (RUNNER_TOP.strapCaptive - RUNNER_TOP.strapW) * a.captive : 0.12;
   for (const side of [-1, 1] as const) {
     const y0 = side * (wf - 0.1);
     // 앞 끝은 몸 가운데 원판(0.45r) 밖으로, 곡선은 원판 둘레를 따라 바깥으로 부푼다 (수감 때 어깨가 움츠러들어도)
-    const y1 = side * Math.max(wf + 0.02, DISC_CLEAR.strapY);
-    const d = path(M)
-      .M(rollX, y0)
-      .Q(rollX + 0.35, y1 + side * DISC_CLEAR.strapBulge, Math.max(rollX + 0.6, 0.12), y1).d;
-    sk.line(d, solid(ink(shade(C.strap, 0.1))), 0.12);
-    sk.line(d, solid(ink(C.canvas)), 0.075);
+    const y1 = side * Math.max(wf + 0.02, STRAP.y);
+    const p0: Pt = [rollX, y0];
+    const c1: Pt = [rollX + 0.35, y1 + side * STRAP.bulge];
+    const p1: Pt = [Math.max(rollX + 0.6, 0.12), y1];
+    let d: string;
+    if (runner) {
+      const pts: Pt[] = [];
+      for (let i = 0; i <= 12; i += 1) {
+        const t = i / 12;
+        const u = 1 - t;
+        const q = apply(
+          M,
+          u * u * p0[0] + 2 * u * t * c1[0] + t * t * p1[0],
+          u * u * p0[1] + 2 * u * t * c1[1] + t * t * p1[1],
+        );
+        pts.push(keepOut(q, sw / 2 + 0.005));
+      }
+      d = path().curve(pts).d;
+    } else d = path(M).M(p0[0], p0[1]).Q(c1[0], c1[1], p1[0], p1[1]).d;
+    sk.line(d, solid(ink(shade(C.strap, 0.1))), sw);
+    sk.line(d, solid(ink(C.canvas)), sw * 0.625);
   }
   // 3) 침낭 (가로 원통): 빛은 위에서 — 원통 등(가운데 x)이 밝고 앞뒤 가장자리가 어둡다
   const [r0x, r0y] = apply(M, rollX - rr, 0);

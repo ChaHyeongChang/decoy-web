@@ -5,18 +5,24 @@
 // 안감 띠는 접힌 곳(천 쪽)이 가장 밝고 아랫단 끝으로 한 단 내려가며, 접힌 곳 위에 천 그늘 선이 있어 짙은 천과 갈린다.
 // 머리 바로 뒤 목둘레를 따라 어깨를 가로지르는 어깨 망토 띠(아랫단 밝은 결 · 밑 그늘) + 띠 양 끝 쇠 걸쇠를 잇는 사슬,
 // 띠 밑에서 나와 아랫단 물결 배로 퍼지는 넓은 주름 결 셋(어깨 둘 · 목덜미 하나, 빛 받는 쪽)과 그 사이 골 둘.
-// 팔은 망토 위에 남는다: 러너는 팔 안쪽 폭(소매 안쪽 끝 약 0.6r)으로 지나 등 뒤로 흐르고(목둘레는 몸 가운데 0.45r 원판 밖
-// 0.515~0.525r을 따라 돈다 — VISUAL_SPEC 0장 ② '원판은 역할색', tests/unit/costume-parity-disc.test.ts: 원판 안 칸 중 기본과
-// ΔE76 15 넘게 다른 칸 5% 이하. 목둘레 안쪽 가는 외곽선 · 어깨 걸쇠(80°)의 안쪽 끝까지 원판 둘레 칸 밖이다. 이전 0.47r에서는
-// 짙은 천 · 외곽선 · 걸쇠가 원판 둘레에 걸려 질주 · 능력 프레임에서 원판이 9.2%까지 바뀌었다 — 이제 0.3% 이하),
-// 가드는 어깨 갑옷 뒤 반을 덮고(정면 그림의 어깨 망토처럼 — 갑옷 앞 반 · 방패 · 헬멧은 그대로), 스카우트는 소매 밑에서
-// 시작한다(스카우트 배낭 · 안테나는 망토가 대신한다 — hidesPack).
+// 몸 가운데 0.45r 원판은 덮지 않는다(VISUAL_SPEC 0장 ② '원판은 역할색', tests/unit/costume-parity-disc*.test.ts: 생존자
+// 18.4~76.8px · 모든 프레임 · 화면 방향 · 위상에서 원판 안 칸 중 기본과 ΔE76 15 넘게 다른 칸 5% 이하). 러너는 목둘레를 0.57r
+// 둘레(KEEP_R — 가장 작은 화면에서 1텍셀 넘는 틈, 목도리 scarf.ts와 같은 값) 밖으로 옮기고 모든 점 · 걸쇠를 둘레 밖으로
+// 다듬는다: 어깨에서는 소매 안쪽 끝 위로 지나(어깨를 덮은 망토 밑에서 팔이 나온다) 등 뒤로 흐르고, 뒤에서는 접어 올린 안감
+// 띠가 목둘레 바로 밖에서 시작한다(짙은 천은 어깨 · 옆에 남는다). 사슬은 목둘레를 따라 돌고 가운데는 안감 밑에 숨으며, 걸쇠는
+// 어깨 뒤(96°). 목둘레가 0.515~0.525r이던 때 휴대폰 크기(18.4~25.3px)에서 원판 칸 최대 11.1%가 달랐다 — 이제 0%.
+// 옮기며 잃은 안감은 바깥으로 되찾는다: 띠가 옆으로 더 길게(100°부터) 돌고, 어깨 뒤 바깥 테를 몸판 윤곽 안쪽까지 내밀며
+// (swell — 질주 · 피격 · 수감 때는 거둔다), 밝기 띠를 보이는 띠 폭에 맞춘다 — 휴대폰 크기에서 기본보다 밝아진 정도(L* 합)가
+// 옛 망토와 같다(±2%). 수감 · 피격 때 눌리는 아랫단 · 걸음 흔들림은 옛 목둘레(pivot) 기준이라 실루엣은 옛 망토와 같다(64px
+// 기준 늘어난 칸 없음). 가드는 어깨 갑옷 뒤 반을 덮고(정면 그림의 어깨 망토처럼 — 갑옷 앞 반 · 방패 · 헬멧은 그대로),
+// 스카우트는 소매 밑에서 시작한다(스카우트 배낭 · 안테나는 망토가 대신한다 — hidesPack). 둘은 목둘레가 등판 · 갑옷 · 배낭 자리
+// 위라 그대로다.
 // 역할 실루엣은 지킨다(VISUAL_SPEC 0장 ④ — 역할끼리 겹침 0.8 이하): 러너는 허리 쪽이 좁은 등 윤곽 안에, 스카우트는 어깨와
 // 등 사이 오목한 허리를 남기고 아랫단에서 퍼진다(둥근 가드 원판과 갈린다).
 // 정면 그림: 몸 뒤로 양옆에 펼쳐진 망토 자락(안감이 보이고, 바깥으로 젖힌 끝은 겉감 · 아랫단 테두리) +
 // 어깨를 덮는 짧은 어깨 망토(겉감, 아랫단 테두리 · 청록 네온 솔기) + 목 앞 둥근 쇠 걸쇠(가운데 청록 네온 보석).
 // 러너(3/4)는 자락이 등 쪽(화면 왼쪽)으로 물결치며 날린다. 상반신은 자락을 짧게 해 상자 안에 둔다.
-// 움직임: 위 그림 아랫단은 걸음마다 옆으로 흔들리고(목둘레는 제자리, 아랫단일수록 크게) 물결이 흐른다. 러너 질주 때 뒤로
+// 움직임: 위 그림 아랫단은 걸음마다 옆으로 흔들리고(목둘레는 거의 제자리, 아랫단일수록 크게) 물결이 흐른다. 러너 질주 때 뒤로
 // 길게 모여 펄럭이고, 수감 때 몸에 붙고, 피격 때 눌린다(러너는 옆으로 꺾이는 후드를 같이 따라 돈다). 정면 자락 ·
 // 아랫단은 바람(sway)에 흔들린다.
 // 정면 색: 겉감 = 역할색 45% 어둡게(러너 #204887 · 가드 #5C2F88 · 스카우트 #136C34), 안감 = 65% 어둡게(#152E56 · #3B1E56 ·
@@ -112,36 +118,87 @@ interface TopFit {
   readonly mantle: number;
   readonly mantleFrom: number;
   readonly clasp: number;
-  /** 아랫단 안감 띠 두께 (뒤 가운데, 옆으로 가늘어진다). 띠 안쪽 끝은 어깨 망토 띠 · 머리 뒤보다 밖 — 짙은 천이 남는다 */
+  /**
+   * 아랫단 안감 띠 두께 (뒤 가운데, 옆으로 가늘어진다). 가드 · 스카우트는 띠 안쪽 끝이 어깨 망토 띠 · 머리 뒤보다 밖 — 짙은 천이
+   * 남는다. 러너는 목둘레까지 닿게 넉넉히 (뒤에서 보이는 띠 0.26r — 짙은 천은 어깨 · 옆에 남는다)
+   */
   readonly band: number;
+  /** 안감 띠 안쪽 끝을 목둘레에서 떼는 최소 거리 (러너는 목둘레가 몸 가운데 둘레 밖이라 띠가 목둘레 바로 밖까지 온다) */
+  readonly bandGap: number;
+  /** 천 안쪽 가는 선 굵기 (외곽선 두께 배수) · 걸쇠 사슬 자리 (목둘레에서 어깨 망토 띠 폭의 몫) */
+  readonly seam: number;
+  readonly chain: number;
+  /**
+   * 몸 가운데 둘레(KEEP_R) 밖으로 비켜 가는지 (러너: 목둘레가 둘레 바로 밖이라 걸음 비틀림 · 질주 모으기 · 수감에도 모든 점 ·
+   * 걸쇠를 둘레 밖으로 다듬는다. 가드 · 스카우트는 목둘레가 등판 · 어깨 갑옷 · 배낭 자리 위라 그대로)
+   */
+  readonly keep: boolean;
+  /**
+   * 수감 · 피격 때 바깥 테를 눌러 모으고 걸음 옆 흔들림이 0인 반지름 (없으면 목둘레). 러너는 목둘레를 몸 가운데 둘레 밖으로
+   * 옮기기 전 자리 — 눌리거나 흔들린 아랫단 윤곽이 옛 망토와 같다(목둘레는 조금 흔들려도 둘레 밖으로 다듬는다)
+   */
+  readonly pivot?: Polar;
+  /**
+   * 어깨 · 어깨 뒤 바깥 테를 몸판 윤곽 안쪽까지 더 내미는 몫 (없으면 0. 뒤로 흔든 주먹 자리 112~118°는 비운다). 서 있거나 걸을
+   * 때만 — 질주(뒤로 모인다) · 피격 · 수감(눌린다) 때는 거둬 몸판 밖으로 나오지 않는다 (실루엣 그대로)
+   */
+  readonly swell?: Polar;
 }
 
 const TOP_FIT: Readonly<Record<RoleCharId, TopFit>> = {
-  // 러너: 앞 끝은 후드 밑(목), 어깨에서는 몸 가운데 원판(0.45r)과 팔 사이로 좁게 지나 등 뒤로 흐른다 (팔치기를 덮지 않게).
-  // 아랫단은 몸판의 좁은 허리 윤곽 근처에서 끝난다 — 더 길면 등이 둥글게 차서 가드 원판과 실루엣이 겹친다
+  // 러너: 앞 끝은 후드 밑(목), 목둘레는 몸 가운데 둘레(KEEP_R) 바로 밖을 돌아 어깨에서는 소매 안쪽 끝 위로 지나 등 뒤로
+  // 흐른다(어깨를 덮은 망토 밑에서 팔이 나온다 — 소매 · 몸판 윤곽 안이라 실루엣은 그대로. 목 옆 55~70°는 후드와 어깨 사이
+  // 오목한 곳이라 좁게). 아랫단은 몸판의 좁은 허리 윤곽 근처에서 끝난다 — 더 길면 등이 둥글게 차서 가드 원판과 실루엣이
+  // 겹친다(바깥 테 128° 뒤는 옛 망토 그대로 — 실루엣 · 겹침 그대로). 안 테 = 둘레 0.57r + 천 안쪽 가는 선 반폭을 그림 좌표로
+  // (옆 폭 0.94배 — 옆일수록 크다). 걸쇠는 어깨 뒤 96° (80°이면 수감 때 좁아진 몸판 옆 밖으로 나온다)
   runner: {
     outer: [
-      [40, 0.7],
-      [60, 0.64],
-      [90, 0.575],
-      [112, 0.6],
+      [40, 0.68],
+      [55, 0.645],
+      [70, 0.655],
+      [90, 0.69],
+      [112, 0.7],
       [128, 0.7],
       [145, 0.79],
       [162, 0.85],
       [180, 0.87],
     ],
     inner: [
+      [40, 0.61],
+      [55, 0.62],
+      [75, 0.63],
+      [100, 0.632],
+      [120, 0.625],
+      [145, 0.61],
+      [180, 0.595],
+    ],
+    hem: 126,
+    trim: 100,
+    mantle: 0.7,
+    mantleFrom: 44,
+    clasp: 96,
+    band: 0.3,
+    bandGap: 0,
+    seam: 0.2,
+    chain: 0.15,
+    keep: true,
+    pivot: [
       [40, 0.62],
       [55, 0.555],
       [75, 0.525],
       [180, 0.515],
     ],
-    hem: 126,
-    trim: 118,
-    mantle: 0.6,
-    mantleFrom: 44,
-    clasp: 80,
-    band: 0.24,
+    swell: [
+      [55, 0],
+      [72, 0.04],
+      [90, 0.05],
+      [102, 0.03],
+      [112, 0],
+      [118, 0],
+      [128, 0.06],
+      [135, 0.05],
+      [141, 0],
+    ],
   },
   // 가드: 어깨 갑옷 뒤 반을 덮고(어깨 망토 — 정면 그림처럼 어깨를 덮는다) 등판을 덮는다. 바깥 테는 갑옷 · 등판 윤곽 바로
   // 안쪽을 따른다 (실루엣 그대로 — 둥근 원판). 갑옷 앞 반 · 방패 · 헬멧은 그대로 보인다
@@ -166,6 +223,10 @@ const TOP_FIT: Readonly<Record<RoleCharId, TopFit>> = {
     mantleFrom: 89,
     clasp: 100,
     band: 0.25,
+    bandGap: 0.03,
+    seam: 0.4,
+    chain: 0.55,
+    keep: false,
   },
   // 스카우트: 앞 끝은 소매 어깨 밑, 어깨와 등 사이는 오목하게 좁히고(허리) 등 뒤 배낭 자리에서 퍼진다 — 다 채우면 둥근
   // 가드와 실루엣이 겹친다
@@ -187,6 +248,10 @@ const TOP_FIT: Readonly<Record<RoleCharId, TopFit>> = {
     mantleFrom: 99,
     clasp: 116,
     band: 0.27,
+    bandGap: 0.03,
+    seam: 0.4,
+    chain: 0.55,
+    keep: false,
   },
 };
 
@@ -216,6 +281,23 @@ function clampTop(p: Pt): Pt {
   return r > lim ? [(p[0] * lim) / r, (p[1] * lim) / r] : p;
 }
 
+/**
+ * 망토가 비켜 가는 몸 가운데 둘레 (몸 반지름 배수, 내보낸 그림 기준): 역할색 원판 0.45r + 가장 작은 화면에서 1텍셀 넘는 틈.
+ * 생존자 18.4px(배율 1.25 휴대폰 터치 낮음)에서 1텍셀 = 0.11r — 천 가장자리(안쪽 가는 선 포함)가 이보다 가까우면 안티에일리어싱
+ * · 쌍선형 찍기로 원판 맨 바깥 칸에 짙은 천 · 외곽선 색이 번진다 (tests/unit/costume-parity-disc*.test.ts, 목도리 scarf.ts와
+ * 같은 값). 러너 목둘레가 0.515~0.525r이던 때 휴대폰 크기에서 원판 칸 최대 11.1%가 달랐다
+ */
+const KEEP_R = 0.57;
+
+/** 위 그림 옆 폭 배율 (index.ts TOP_WIDTH와 같은 값 — 러너는 내보낼 때 y를 0.94배로 줄이므로 그만큼 y를 크게 비켜 간다) */
+const TOP_SQUASH: Readonly<Record<RoleCharId, number>> = { runner: 0.94, guard: 1, scout: 1 };
+
+/** 점이 둘레(+ margin = 그 점에서 안쪽으로 뻗는 선 · 고리 반폭) 타원 안이면 몸 중심에서 바깥으로 민다 */
+function keepOut(role: RoleCharId, p: Pt, margin: number): Pt {
+  const q = Math.hypot(p[0] / (KEEP_R + margin), p[1] / (KEEP_R / TOP_SQUASH[role] + margin));
+  return q < 1 && q > 1e-6 ? [p[0] / q, p[1] / q] : p;
+}
+
 /** 망토 위 그림 상태 (자세에서 한 번 계산) */
 interface TopState {
   readonly f: TopFit;
@@ -226,6 +308,8 @@ interface TopState {
   /** 질주 펴짐 0~1 · 수감 움츠림 0/1 */
   readonly fly: number;
   readonly tuck: number;
+  /** 몸 가운데 둘레를 비켜 갈 때 지키는 여유 (천 안쪽 가는 선 반폭) */
+  readonly margin: number;
 }
 
 /** 각 → 앞 끝에서 아랫단까지 깊이 0~1 */
@@ -252,7 +336,8 @@ function outerR(st: TopState, deg: number, side: 1 | -1): number {
   const { f, a } = st;
   const inner = polarAt(f.inner, deg);
   const k = depthOf(st, deg);
-  let r = polarAt(f.outer, deg) + 0.04 * st.fly * k * k;
+  const swell = f.swell ? polarAt(f.swell, deg) * (1 - Math.max(st.fly, a.hit, st.tuck)) : 0;
+  let r = polarAt(f.outer, deg) + swell + 0.04 * st.fly * k * k;
   const u = hemU(f, deg, side);
   if (u >= 0) {
     // 물결: 홈(u = j/n)과 둥근 배(그 사이)가 번갈아, 양 끝은 옆 테로 이어진다
@@ -264,7 +349,8 @@ function outerR(st: TopState, deg: number, side: 1 | -1): number {
   }
   // 수감 · 피격: 목둘레 쪽으로 눌린다
   const press = 0.14 * st.tuck + 0.08 * a.hit;
-  return inner + (r - inner) * (1 - press);
+  const pivot = f.pivot ? polarAt(f.pivot, deg) : inner;
+  return pivot + (r - pivot) * (1 - press);
 }
 
 /** 극좌표 → 그림 좌표 (질주 · 수감 때 아랫단을 뒤로 모으고, 걸음 옆 흔들림을 더한다) */
@@ -274,10 +360,11 @@ function topPt(st: TopState, deg: number, r: number, side: 1 | -1): Pt {
   const th = (180 - (180 - deg) * (1 - gather)) * DEG;
   // 걸음 옆 흔들림: 아랫단일수록 크게 (몸 비틀림보다 늦게 따라온다). 목둘레(안 테)는 제자리 — 몸 가운데 원판(0.45r)을
   // 덮지 않고, 목에 매인 천의 아랫단만 흔들린다
-  const ri = polarAt(st.f.inner, deg);
+  const ri = polarAt(st.f.pivot ?? st.f.inner, deg);
   const hang = Math.min(1, Math.max(0, (r - ri) / (polarAt(st.f.outer, deg) - ri || 1)));
   const y = side * r * Math.sin(th) - 0.09 * st.a.s * (1 - st.tuck) * k * k * hang;
-  return clampTop(apply(st.M, r * Math.cos(th), y));
+  const p = apply(st.M, r * Math.cos(th), y);
+  return clampTop(st.f.keep ? keepOut(st.a.role, p, st.margin) : p);
 }
 
 /** 앞 끝 테 점들 (바깥 → 안): 둥근 끝 */
@@ -307,6 +394,7 @@ function topBack(sk: Sketch, a: SurvivorTopAnchor): void {
     tip: (f.outer[0] ?? [90, 0])[0] + (a.role === 'runner' ? 78 * a.captive : 0),
     fly: a.role === 'runner' ? a.action : 0,
     tuck: a.captive,
+    margin: (a.w * f.seam) / 2,
   };
   /** 안 테와 바깥 테 사이 자리 (0 = 목둘레, 1 = 바깥 테) */
   const at = (deg: number, side: 1 | -1, k: number): number => {
@@ -338,7 +426,7 @@ function topBack(sk: Sketch, a: SurvivorTopAnchor): void {
     ]),
     a.outline,
     1,
-    0.4,
+    f.seam,
   );
   // 2) 주름: 어깨 망토 밑에서 나와 아랫단 물결 배로 퍼지는 넓은 결 셋(빛 받는 등 · 어깨 쪽) + 그 사이 물결 홈으로 가는 골 둘.
   //    결은 어깨(옆 결) · 목덜미(가운데 결)에서 시작해 아랫단까지 — 작은 크기에서도 짙은 천 위에 밝은 결이 남는다
@@ -352,7 +440,9 @@ function topBack(sk: Sketch, a: SurvivorTopAnchor): void {
     const k0 = ridge && off > 0 ? 0.45 : 0.3;
     const ri1 = polarAt(f.inner, deg);
     const ro1 = outerR(st, deg, side);
-    const k1 = (ro1 - f.band - 0.02 - ri1) / (ro1 - ri1);
+    // 결 끝은 안감 띠 안쪽 끝 근처 (띠 밑에 숨는다). 러너는 띠가 뒤에서 목둘레까지 와 끝이 목둘레 안으로 뒤집히지 않게 k0에서 멈춘다
+    const k1raw = (ro1 - f.band - 0.02 - ri1) / (ro1 - ri1);
+    const k1 = f.keep ? Math.max(k1raw, k0) : k1raw;
     const pts: Pt[] = [];
     for (let i = 0; i <= 4; i += 1) {
       const t = i / 4;
@@ -397,7 +487,43 @@ function topBack(sk: Sketch, a: SurvivorTopAnchor): void {
     ]),
   );
   sk.line(path().curve(m1).d, solid(ink(col.lip)), 0.018);
-  // 4) 아랫단 안감 띠 (접어 올린 안감, 바깥 테 안쪽을 따라 — 윤곽은 그대로, 끝은 가늘어진다): 몸판보다 확실히 밝은 역할색.
+  // 걸쇠 사슬: 어깨 망토 띠 양 끝의 둥근 쇠 걸쇠 둘을 머리 뒤로 잇는 사슬 (가드 · 스카우트는 가운데가 머리 밑에 숨는다 — 안감
+  // 띠 위에 그린다. 러너는 머리가 앞이라 목둘레 바로 밖을 따라 돌고 가운데는 접어 올린 안감 밑에 숨는다 — 안감 띠 전에 그린다)
+  const drawChain = (): void => {
+    const chain: Pt[] = [];
+    for (let d = -(180 - f.clasp); d <= 180 - f.clasp + 1e-6; d += 3) {
+      const deg = 180 - Math.abs(d);
+      const side: 1 | -1 = d < 0 ? -1 : 1;
+      const ri = polarAt(f.inner, deg);
+      chain.push(topPt(st, deg, ri + mw * f.chain, side));
+    }
+    sk.line(path().curve(chain).d, solid(ink(shade(STEEL, 0.62))), 0.028);
+    // 고리 (밝은 점, 하나 걸러) — 한 경로로
+    const links = path();
+    for (let i = 1; i < chain.length - 1; i += 2) {
+      const [x, y] = chain[i] ?? [0, 0];
+      links.circle(x, y, 0.01);
+    }
+    sk.fill(links.d, solid(ink(shade(STEEL, 0.35))));
+    for (const p of [chain[0], chain[chain.length - 1]]) {
+      if (!p) continue;
+      // 걸쇠 고리(반지름 0.045 + 안쪽 가는 선)까지 몸 가운데 둘레 밖
+      const [x, y] = f.keep ? keepOut(a.role, p, 0.045 + a.w * 0.175) : p;
+      sk.part(
+        path().circle(x, y, 0.045).d,
+        radial(x - 0.015, y - 0.015, 0.065, [
+          [0, ink(tint(STEEL, 0.4))],
+          [1, ink(shade(STEEL, 0.4))],
+        ]),
+        a.outline,
+        1,
+        0.35,
+      );
+    }
+  };
+  // 4) 걸쇠 사슬 (러너 — 가운데가 안감 밑)
+  if (f.keep) drawChain();
+  // 5) 아랫단 안감 띠 (접어 올린 안감, 바깥 테 안쪽을 따라 — 윤곽은 그대로, 끝은 가늘어진다): 몸판보다 확실히 밝은 역할색.
   //    휴대폰 크기에서 짙은 천과 함께 등 뒤 반이 두 톤(짙은 윗등 · 밝은 아랫단)으로 읽힌다
   const band0: Pt[] = [];
   const band1: Pt[] = [];
@@ -412,51 +538,24 @@ function topBack(sk: Sketch, a: SurvivorTopAnchor): void {
     band0.push(topPt(st, deg, r, side));
     // 안쪽 끝은 목둘레(안 테)보다 밖 — 수감 · 피격으로 아랫단이 눌려도 몸 가운데 0.45r 원판 쪽으로 들어가지 않는다
     const w = f.band * (0.15 + 0.85 * ends) * (0.55 + 0.45 * hemK);
-    band1.push(topPt(st, deg, Math.max(r - w, polarAt(f.inner, deg) + 0.03), side));
+    band1.push(topPt(st, deg, Math.max(r - w, polarAt(f.inner, deg) + f.bandGap), side));
   }
+  // 밝기 띠는 뒤 가운데에서 보이는 띠 폭에 맞춘다 (러너는 띠가 목둘레에서 시작한다 — 접힌 곳 66% → 끝 45%)
   const bandOut = rOut - HEM.trimIn;
-  const bandIn = bandOut - f.band;
+  const bandIn = Math.max(bandOut - f.band, rIn + f.bandGap);
   sk.fill(
     path().curve(band0).curve(band1.slice().reverse(), 1, false).Z().d,
     radial(cx, cy, bandOut, [
       [bandIn / bandOut, ink(col.liningHi)],
-      [(bandIn + f.band * 0.5) / bandOut, ink(col.lining)],
+      [(bandIn + bandOut) / 2 / bandOut, ink(col.lining)],
       [1, ink(col.liningLo)],
     ]),
   );
   // 접힌 곳 그늘 (천 밑으로 들어가는 안감 윗선) — 큰 크기에서 짙은 천과 밝은 안감 두 겹이 또렷하게. 밝기 띠(radial)는
   // 몸 중심 기준이라 뒤 가운데에서 접힌 곳 66% → 끝 45%로 맞고, 바깥 테가 안으로 들어간 옆은 접힌 곳 색으로 남는다
   sk.line(path().curve(band1).d, solid(ink(col.valley)), 0.03, 'round', 0.9);
-  // 5) 걸쇠 사슬: 어깨 망토 띠 양 끝의 둥근 쇠 걸쇠 둘을 머리 뒤로 잇는 사슬 (가운데는 머리 밑에 숨는다)
-  const chain: Pt[] = [];
-  for (let d = -(180 - f.clasp); d <= 180 - f.clasp + 1e-6; d += 3) {
-    const deg = 180 - Math.abs(d);
-    const side: 1 | -1 = d < 0 ? -1 : 1;
-    const ri = polarAt(f.inner, deg);
-    chain.push(topPt(st, deg, ri + mw * 0.55, side));
-  }
-  sk.line(path().curve(chain).d, solid(ink(shade(STEEL, 0.62))), 0.028);
-  // 고리 (밝은 점, 하나 걸러) — 한 경로로
-  const links = path();
-  for (let i = 1; i < chain.length - 1; i += 2) {
-    const [x, y] = chain[i] ?? [0, 0];
-    links.circle(x, y, 0.01);
-  }
-  sk.fill(links.d, solid(ink(shade(STEEL, 0.35))));
-  for (const p of [chain[0], chain[chain.length - 1]]) {
-    if (!p) continue;
-    const [x, y] = p;
-    sk.part(
-      path().circle(x, y, 0.045).d,
-      radial(x - 0.015, y - 0.015, 0.065, [
-        [0, ink(tint(STEEL, 0.4))],
-        [1, ink(shade(STEEL, 0.4))],
-      ]),
-      a.outline,
-      1,
-      0.35,
-    );
-  }
+  // 6) 걸쇠 사슬 (가드 · 스카우트 — 가운데가 머리 밑)
+  if (!f.keep) drawChain();
 }
 
 // ───────────────────────── 정면 ─────────────────────────
