@@ -91,6 +91,12 @@ export const STORAGE_KEYS = {
     what: '서버 깨우기 화면의 자동 새로고침 시각 (1분 안에 3번 넘으면 멈춤)',
     keep: '탭을 닫을 때까지',
   },
+  progress: {
+    key: 'decoy:progress',
+    area: 'local',
+    what: '이 기기의 성장 기록 (레벨 · 경험치 · 판 수 · 평가 최고 단계 · 최근 받은 판 번호, 서버로 보내지 않음)',
+    keep: '브라우저 데이터를 지울 때까지',
+  },
   perf: {
     key: 'decoy:perf',
     area: 'local',

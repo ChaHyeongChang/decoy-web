@@ -37,17 +37,27 @@ const CAP = BEFORE_M10 + 88 * 1024;
 // 남은 문제 정리: 크게 본 지도 화면 해상도 바닥(나눠 굽기 · 예산 맞춤) · 메뉴를 닫으면 이동 키 · 스틱 이어받기 · 두 번째 손가락 탭 ·
 // 작은 PC 창 메뉴 버튼 맞춤 (DECISIONS 13절 '번들 예산') — PR #25 병합 385,014B에서. 상한(M10 전 + 40KiB)은 그대로
 // 번들 상한 올리기(PR #27)는 코드를 바꾸지 않아 이 값을 그대로 둔다. 다음 기능 작업이 base를 PR #26 병합 387,509B로 옮기고 예산을 정한다
-const MILESTONE = { name: '남은 문제 정리', base: 385_014, baseName: 'PR #25 병합', budget: 3 * 1024 };
+// 판 밖 성장 · 보상(메타, DECISIONS 14절 '번들 예산'): 기준을 PR #26 병합 387,509B로 옮기고 a · b · c를 상한(M10 전 + 88KiB) 안에서
+// +10 · +8 · +24KiB로 나눈다(셋 합 42KiB, 상한까지 약 6KiB 남김). 나눠 받는 조각(결과 화면 등)도 이 합에 든다
+// a(판 평가 · 경험치 · 레벨): 판 기록 · 평가 · 성장 기록 저장 · 레벨 칩 · 결과 화면 조각(나눠 받기) — PR #26 병합에서 +10KiB
+const MILESTONE = { name: '판 평가 · 레벨', base: 387_509, baseName: 'PR #26 병합', budget: 10 * 1024 };
 
 test('JS 번들 gzip: 마일스톤 예산 이하, 상한(리마스터 전 + 88KiB) 아래', { tag: '@core' }, () => {
   const dir = join(process.cwd(), 'client/dist/assets');
   let total = 0;
-  for (const f of readdirSync(dir))
-    if (f.endsWith('.js')) total += gzipSync(readFileSync(join(dir, f))).length;
+  /** 첫 묶음(index-*) 밖의 나눠 받는 조각 (기록용: 첫 화면에 받지 않는다) */
+  const lazy: string[] = [];
+  for (const f of readdirSync(dir)) {
+    if (!f.endsWith('.js')) continue;
+    const n = gzipSync(readFileSync(join(dir, f))).length;
+    total += n;
+    if (!f.startsWith('index-')) lazy.push(`${f.replace(/-[\w-]+\.js$/, '')} ${n}B`);
+  }
   const kib = (n: number): string => `${n >= 0 ? '+' : ''}${(n / 1024).toFixed(1)}KiB`;
   const M = MILESTONE;
   console.log(
-    `[번들] JS gzip ${total}B (${M.baseName} ${M.base}B ${kib(total - M.base)} / ${M.name} 예산 +${M.budget / 1024}KiB, M10 전 ${BEFORE_M10}B ${kib(total - BEFORE_M10)}, 상한 ${CAP}B까지 ${CAP - total}B)`,
+    `[번들] JS gzip ${total}B (${M.baseName} ${M.base}B ${kib(total - M.base)} / ${M.name} 예산 +${M.budget / 1024}KiB, M10 전 ${BEFORE_M10}B ${kib(total - BEFORE_M10)}, 상한 ${CAP}B까지 ${CAP - total}B)` +
+      (lazy.length > 0 ? ` · 나눠 받기: ${lazy.join(', ')}` : ''),
   );
   expect(total).toBeGreaterThan(M.base / 2);
   expect(total - M.base).toBeLessThanOrEqual(M.budget);

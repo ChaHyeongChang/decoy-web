@@ -3,7 +3,15 @@
 // 남이 고른 카드 = 사선 해치 + 주인 이름 — 색만으로 구분하지 않는다
 import type { LobbyPlayer, LobbyState, Role } from '@decoy/shared';
 import type { IconId } from '../art/icons';
-import { HUD_TEXT, ROLE_CARDS, TOUCH_TEXT, UI_TEXT, roleAbility, type InputMode } from '../data/storyText';
+import {
+  HUD_TEXT,
+  META_TEXT,
+  ROLE_CARDS,
+  TOUCH_TEXT,
+  UI_TEXT,
+  roleAbility,
+  type InputMode,
+} from '../data/storyText';
 import { canOfferFullscreen, device, enterFullscreen } from '../device';
 import {
   markTouchTutorialShown,
@@ -157,6 +165,11 @@ export class LobbyUI {
      * 화면 자체는 #ui-root에 있다(판 중에도 열린다 — App이 만든다)
      */
     private readonly settings: SettingsPanel,
+    /**
+     * 내 레벨 (GAME_DESIGN 12장, 내 기기 기록으로만 — 남의 레벨은 그리지 않는다): 첫 화면은 이름 칸 옆, 연습 고르기는 취소 옆에 칩
+     * (요소 하나를 옮겨 붙인다 — 높이를 늘리지 않는 자리), 방 · 빠른 매칭 대기는 내 줄의 '나' 옆에 "Lv n" 꼬리표
+     */
+    private readonly myLevel: { chip: HTMLElement; level: () => number } | null = null,
   ) {
     this.root = h('div', { class: 'lobby', 'data-testid': 'lobby' });
     // 배경 레이어는 한 번만 만든다 (방 상태가 바뀔 때마다 다시 그리는 것은 내용뿐)
@@ -265,6 +278,18 @@ export class LobbyUI {
     this.errorBox.hidden = message === '';
   }
 
+  /** 방 · 빠른 매칭 대기 내 줄의 "Lv n" (내 기기 기록) */
+  private levelTag(): HTMLElement[] {
+    if (!this.myLevel) return [];
+    return [
+      h(
+        'span',
+        { class: 'tag tag-lv num', 'data-testid': 'my-level' },
+        `${META_TEXT.levelShort} ${this.myLevel.level()}`,
+      ),
+    ];
+  }
+
   private brand(hero: boolean): HTMLElement {
     const text = h('div', { class: 'brand-text' }, h('div', { class: 'wordmark' }, UI_TEXT.title));
     if (hero) text.append(h('div', { class: 'brand-sub' }, UI_TEXT.subtitle));
@@ -340,7 +365,12 @@ export class LobbyUI {
     const panel = h(
       'div',
       { class: 'panel home-panel' },
-      h('label', { class: 'field' }, name),
+      h(
+        'div',
+        { class: 'name-row' },
+        h('label', { class: 'field' }, name),
+        ...(this.myLevel ? [this.myLevel.chip] : []),
+      ),
       this.statusLine,
       this.errorBox,
       ...(queueDropped ? [this.droppedRow(() => this.actions.quick(name.value))] : []),
@@ -402,7 +432,7 @@ export class LobbyUI {
       this.statusLine,
       this.errorBox,
       grid,
-      h('div', { class: 'action-row' }, cancel),
+      h('div', { class: 'action-row' }, ...(this.myLevel ? [this.myLevel.chip] : []), cancel),
     );
     this.netButtons = [];
     this.applyStatus();
@@ -482,7 +512,7 @@ export class LobbyUI {
           { class: 'chip quick-person', style: p.role ? roleVars(p.role) : undefined },
           avatar,
           h('span', { class: 'nm' }, p.name),
-          ...(p.id === this.you ? [h('span', { class: 'tag' }, UI_TEXT.me)] : []),
+          ...(p.id === this.you ? [h('span', { class: 'tag' }, UI_TEXT.me), ...this.levelTag()] : []),
         ),
       );
     }
@@ -592,7 +622,7 @@ export class LobbyUI {
       if (p.host)
         name.append(h('span', { role: 'img', 'aria-label': UI_TEXT.host }, icon('crown', 16, 'host')));
       name.append(h('span', { class: 'nm' }, p.name));
-      if (p.id === this.you) name.append(h('span', { class: 'tag' }, UI_TEXT.me));
+      if (p.id === this.you) name.append(h('span', { class: 'tag' }, UI_TEXT.me), ...this.levelTag());
       if (p.bot) name.append(h('span', { class: 'tag tag-bot' }, UI_TEXT.bot));
       const avatar = p.role ? svgSpan('avatar', glyphSvg(p.role)) : h('span', { class: 'avatar none' });
       list.append(

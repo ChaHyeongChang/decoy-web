@@ -445,3 +445,34 @@ export const EDITOR_TEXT = {
   /** 생존자 능력 버튼 (편집 화면은 역할이 아니라 팀 배치라 능력 이름 대신) */
   ability: '능력',
 } as const;
+
+/**
+ * 판 밖 성장 · 보상 (메타, GAME_DESIGN 12장, docs/STORY_TEXT.md 8절): 첫 화면 · 로비 레벨 칩, 결과 화면 내 평가 · 경험치.
+ * 평가 이름 · 단계 이름은 여기(수치는 config/progression.json)
+ */
+export const META_TEXT = {
+  levelShort: 'Lv',
+  levelAria: '레벨 {level} — 다음 레벨까지 경험치 {into}/{need}',
+  levelMaxAria: '레벨 {level} — 최고 레벨',
+  ratingTitle: '내 평가',
+  /** 평가 단계 0~4 (없음 · 동 · 은 · 금 · 빛). 결과 등급(완전 탈출 등)과 헷갈리지 않게 '단계'라 부른다 */
+  tiers: ['없음', '동', '은', '금', '빛'],
+  tierAria: '{name} {tier} — {desc}',
+  emblems: {
+    capture: { name: '점령', desc: '거점 점령 · 탈출구 열기에 머문 시간' },
+    rescue: { name: '구조', desc: '감옥 구조 · 풀어 준 동료' },
+    survive: { name: '생존', desc: '탈출 · 버틴 시간' },
+    evade: { name: '회피', desc: '추격 따돌림 · 능력 활용' },
+    hunt: { name: '사냥', desc: '타격 · 수감 · 사망' },
+    deny: { name: '저지', desc: '점령 끊기 · 거점 지키기 · 거점 안 타격' },
+    track: { name: '추적', desc: '새로 찾기 · 시야에 둔 시간 · 포효로 찾기' },
+    gate: { name: '문지기', desc: '탈출 못 한 생존자 · 탈출구 지키기' },
+  },
+  xpGain: '경험치 +{n}',
+  xpParts: '기본 {base} · 평가 {tiers} · 승리 {win}',
+  levelUp: '레벨 업! Lv {level}',
+  newBest: '최고 단계',
+  voidHalf: '무효 판이라 경험치 절반',
+  notSaved: '이 기기에 저장하지 못했어요 — 이번 접속 동안만 남아요',
+  alreadyGot: '이 판의 보상은 이미 받았어요',
+} as const;

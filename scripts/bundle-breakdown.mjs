@@ -21,6 +21,16 @@ const asJson = process.argv.includes('--json');
 const GROUPS = [
   ['엔진', 'Phaser (사용자 빌드)', (p) => p.includes('node_modules/') || p === 'client/src/phaserCore.js'],
   [
+    '메타',
+    '판 밖 성장 · 보상 (판 기록 · 평가 · 레벨 · 기록 저장 · 결과 평가 패널)',
+    (p) =>
+      p.startsWith('shared/src/meta/') ||
+      p === 'shared/src/sim/record.ts' ||
+      p === 'config/progression.json' ||
+      p.startsWith('client/src/meta/') ||
+      /^client\/src\/ui\/(levelChip|resultRating|resultHost)\.ts$/.test(p),
+  ],
+  [
     '그래픽 그리는 코드',
     '캐릭터 그림 (그림 명령 · 자세 프레임)',
     (p) => /^client\/src\/art\/(chars\/|charFrames)/.test(p),

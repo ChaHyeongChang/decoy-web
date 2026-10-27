@@ -51,6 +51,7 @@ DECOY의 그래픽은 **코드로 그린다**. 저장소에 들어 있는 이미
 | UI 아이콘 (SVG 경로, HTML · Phaser 공용) | `client/src/art/icons.ts` |
 | HUD 패널 · 게이지 · 리본 · 미니맵 그림 | `client/src/ui/hudArt.ts` · `hudKit.ts` · `minimap.ts` |
 | 로비 · 결과의 실루엣 · 문양 SVG · 맵 설계도 배경 | `client/src/ui/uiArt.ts` |
+| 판 평가 아이콘 · 단계 칸 · 레벨 막대 (판 밖 성장, SVG 경로 · CSS) | `client/src/ui/resultRating.ts` · `levelChip.ts`, `client/src/style.css` |
 | 화면 스타일 (깎은 모서리 패널 · 버튼 · 해치) | `client/src/style.css`, `client/public/wake.html`(CSS만) |
 | 색 | `client/src/art/palette.ts` |
 

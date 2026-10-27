@@ -3,7 +3,8 @@
 import type { Balance, MatchInfo, Role, Snapshot } from '../index';
 import type { BotBrain } from './botBrains';
 import { Game, type GamePlayerSetup } from './game';
-import { AliasBook, buildSnapshot, computeVisibility } from './interest';
+import { AliasBook, buildSnapshot, computeVisibility, type VisibilityFacts } from './interest';
+import type { MatchRecorder } from './record';
 
 export function isSnapshotTick(balance: Balance, tick: number): boolean {
   const n = balance.network;
@@ -21,6 +22,8 @@ export class SimMatch {
   /** 받는 사람별로 받은 모든 스냅샷 (정보 차단 검사용) */
   readonly received = new Map<string, Snapshot[]>();
   readonly infos = new Map<string, MatchInfo>();
+  /** 판 기록 (평가 시험 · 기준 맞추기용, 없으면 세지 않는다) */
+  recorder: MatchRecorder | null = null;
 
   constructor(
     setup: GamePlayerSetup[],
@@ -49,7 +52,7 @@ export class SimMatch {
     return roles.map((role, i) => ({ id: `p${i + 1}`, name: `봇${i + 1}`, role, bot: true }));
   }
 
-  private snapshot(): void {
+  private snapshot(): VisibilityFacts {
     const facts = computeVisibility(this.game);
     this.aliases.update(facts.monsterSees);
     for (const id of this.game.players.keys()) {
@@ -68,6 +71,7 @@ export class SimMatch {
         this.received.set(id, list);
       }
     }
+    return facts;
   }
 
   step(): void {
@@ -80,7 +84,8 @@ export class SimMatch {
       this.game.queueInput(id, [brain.decide(snap, info, this.balance, seq)]);
     }
     this.game.step();
-    if (isSnapshotTick(this.balance, this.game.tick) || this.game.end) this.snapshot();
+    const facts = isSnapshotTick(this.balance, this.game.tick) || this.game.end ? this.snapshot() : null;
+    this.recorder?.observe(this.game, facts);
   }
 
   /** 조건이 맞거나 판이 끝나거나 제한 시간(시뮬레이션 초)이 지날 때까지 */

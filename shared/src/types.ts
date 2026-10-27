@@ -299,6 +299,85 @@ export interface MatchResult {
   players: PlayerRecord[];
 }
 
+// ───────────────────────── 판 평가 (판 밖 메타, GAME_DESIGN 12장) ─────────────────────────
+
+/**
+ * 판 평가 항목. 생존자: 점령 · 구조 · 생존 · 회피 / 괴물: 사냥 · 저지 · 추적 · 문지기.
+ * 이름 · 가중치 · 등급 기준은 config/progression.json (규칙 · 판정과 무관한 판 밖 수치)
+ */
+export type EmblemId = 'capture' | 'rescue' | 'survive' | 'evade' | 'hunt' | 'deny' | 'track' | 'gate';
+export const SURVIVOR_EMBLEMS: readonly EmblemId[] = ['capture', 'rescue', 'survive', 'evade'];
+export const MONSTER_EMBLEMS: readonly EmblemId[] = ['hunt', 'deny', 'track', 'gate'];
+
+/** 평가 등급: 0 없음 · 1 동 · 2 은 · 3 금 · 4 빛 */
+export type EmblemTier = 0 | 1 | 2 | 3 | 4;
+
+/**
+ * 판 기록의 내 수치 (평가 · 도전 진행에 쓴다). 서버가 판정 상태를 지켜보며 센다(shared/src/sim/record.ts) —
+ * 판정에 끼어들지 않는다.
+ *  생존자: captureSec 거점 점령 기여(초) · exitSec 탈출구 열기 기여(초) · rescues 구조 · freed 풀어 준 동료 수 ·
+ *          rescueSec 구조 버틴 초 · escaped 탈출(0/1) · surviveRatio 버틴 비율(탈출 뒤는 버틴 것으로) · cleanEscape 한 번도
+ *          갇히지 않고 탈출(0/1) · imprisons 갇힌 횟수 · died 사망(0/1) · hitsTaken 맞은 수 · chaseSec 발각된 채 버틴 초 ·
+ *          evades 따돌린 추격 · abilityUses 능력 사용 · abilityGood 쓸모 있게 쓴 능력
+ *  괴물:   hits 타격 · jails 수감시킨 수 · kills 사망시킨 수 · seeSec 생존자를 시야에 둔 초 · finds 새로 찾은 수 ·
+ *          roarFinds 포효로 찾은 수 · blockSec 거점 진행을 멈춘 초 · pointStops 괴물이 가까이 와
+ *          끊긴 점령 · pointsLeft 끝까지 남은 거점 · zoneHits 거점 · 탈출구
+ *          안 타격 · kept 탈출 못 한 생존자 · exitStops 끊은 탈출구 열기 · exitHoldSec 탈출구가 켜진 뒤 첫 탈출까지 버틴 초
+ */
+export type RatingStatId =
+  | 'captureSec'
+  | 'exitSec'
+  | 'rescues'
+  | 'freed'
+  | 'rescueSec'
+  | 'escaped'
+  | 'surviveRatio'
+  | 'cleanEscape'
+  | 'imprisons'
+  | 'died'
+  | 'hitsTaken'
+  | 'chaseSec'
+  | 'evades'
+  | 'abilityUses'
+  | 'abilityGood'
+  | 'hits'
+  | 'jails'
+  | 'kills'
+  | 'seeSec'
+  | 'finds'
+  | 'roarFinds'
+  | 'blockSec'
+  | 'pointStops'
+  | 'pointsLeft'
+  | 'zoneHits'
+  | 'kept'
+  | 'exitStops'
+  | 'exitHoldSec';
+
+export type RatingStats = Partial<Record<RatingStatId, number>>;
+
+export interface EmblemResult {
+  id: EmblemId;
+  tier: EmblemTier;
+  /** 가중합 점수 (소수 첫째 자리) */
+  score: number;
+}
+
+/**
+ * 판 평가 (판이 끝날 때 서버가 받는 사람 자기 것만 보낸다 — 판 중에는 누구에게도 보내지 않는다).
+ * 보상(경험치 등)은 이것으로 공용 코드(shared/src/meta)가 계산한다
+ */
+export interface MatchRating {
+  /** 판마다 다른 값: 같은 판 결과를 다시 받아도(재접속) 보상은 한 번 */
+  matchId: string;
+  role: Role;
+  outcome: 'win' | 'lose' | 'void';
+  durationSec: number;
+  /** 역할 팀의 평가 넷 (순서 고정: SURVIVOR_EMBLEMS · MONSTER_EMBLEMS) */
+  emblems: EmblemResult[];
+  stats: RatingStats;
+}
+
 // ───────────────────────── 메시지 ─────────────────────────
 
 export type TestCommand =
@@ -361,5 +440,6 @@ export type ServerMessage =
   | { t: 'snap'; s: Snapshot }
   /** build: 서버 빌드 ID (M13d, join 전에도 비교) */
   | { t: 'pong'; c: number; s: number; build?: string | null }
-  | { t: 'result'; result: MatchResult }
+  /** rating: 받는 사람 자기 판 평가 (봇 자리 · 평가할 수 없는 판이면 없음, GAME_DESIGN 12장) */
+  | { t: 'result'; result: MatchResult; rating?: MatchRating | null }
   | { t: 'error'; code: ErrorCode; message: string };
