@@ -1,8 +1,21 @@
 // 로비 · 결과 화면(HTML)의 공용 그림 (M10c, VISUAL_SPEC 9 · 10장): DOM 도우미, 아이콘, 역할 실루엣 · 문양 인라인 SVG,
 // 맵 설계도 배경. 모양은 게임과 같은 원본(art/shapes.ts · art/icons.ts)에서 만든다 — 그림이 하나다.
 // 외부 이미지 없음(로고만 client/public/logo.svg).
-import { CAPTURE_POINTS, EXITS, MAP_H, MAP_ROWS, MAP_W, PRISON_RECT, type Role } from '@decoy/shared';
+import {
+  CAPTURE_POINTS,
+  EXITS,
+  MAP_H,
+  MAP_ROWS,
+  MAP_W,
+  PRISON_RECT,
+  isMonsterCostume,
+  isSurvivorCostume,
+  type MonsterCostumeId,
+  type Role,
+  type SurvivorCostumeId,
+} from '@decoy/shared';
 import { COMMON_ART, MONSTER_ART, SURVIVOR_ART } from '../art/chars/index';
+import { costumeArtReady } from '../art/chars/costume/registry';
 import { toSvg, type Drawing } from '../art/chars/kit';
 import { FRONT_REST } from '../art/chars/types';
 import { iconSvg, type IconId } from '../art/icons';
@@ -190,35 +203,55 @@ const FRONT_FIGURE: Record<Role | 'common', { size: number; dx: number; dy: numb
 /** 정면 그림 외곽선 (viewBox 단위). 카드 150px에서 약 2.4px, 70px에서 약 1.1px */
 const FRONT_OUTLINE = 2.6;
 
-/** 정면 그림 명령 (역할마다 한 번 만든다). SVG 문자열은 캐시하지 않는다: 그라디언트 id가 화면끼리 겹치지 않게 넣을 때마다 만든다 */
-const frontCache = new Map<Role | 'common', Drawing>();
+/** 그림에 입힐 의상 (내 역할 그림만 — 남의 그림 · 공통 생존자는 늘 기본, meta/wearing.ts) */
+export type FigureCostume = SurvivorCostumeId | MonsterCostumeId;
 
-function frontDrawing(id: Role | 'common'): Drawing {
-  let d = frontCache.get(id);
+/**
+ * 정면 그림 명령 ((역할, 의상)마다 한 번 만든다). SVG 문자열은 캐시하지 않는다: 그라디언트 id가 화면끼리 겹치지 않게 넣을 때마다 만든다.
+ * dress는 dressOf로 거른 값이다 — 의상 그림 조각이 아직이면 'basic'이라, 조각이 온 뒤 그 의상 칸을 새로 만든다
+ */
+const frontCache = new Map<string, Drawing>();
+
+function frontDrawing(id: Role | 'common', dress: FigureCostume): Drawing {
+  const key = `${id}|${dress}`;
+  let d = frontCache.get(key);
   if (!d) {
     const w = FRONT_OUTLINE / (FRONT_FIGURE[id].size / 2);
     d =
       id === 'monster'
-        ? MONSTER_ART.front(FRONT_REST, { w })
+        ? MONSTER_ART.front(FRONT_REST, { w, costume: dress as MonsterCostumeId })
         : id === 'common'
           ? COMMON_ART.front(FRONT_REST, { w })
-          : SURVIVOR_ART[id].front(FRONT_REST, { w });
-    frontCache.set(id, d);
+          : SURVIVOR_ART[id].front(FRONT_REST, { w, costume: dress as SurvivorCostumeId });
+    frontCache.set(key, d);
   }
   return d;
+}
+
+/** 실제로 입힐 의상 (조각이 없거나 공통 생존자면 기본, 팀이 다른 id면 기본) */
+function dressOf(id: Role | 'common', costume: FigureCostume): FigureCostume {
+  if (id === 'common' || costume === 'basic' || !costumeArtReady()) return 'basic';
+  return id === 'monster'
+    ? isMonsterCostume(costume)
+      ? costume
+      : 'basic'
+    : isSurvivorCostume(costume)
+      ? costume
+      : 'basic';
 }
 
 /**
  * 새 캐릭터 정면 그림 (로비 역할 카드 · 연습 역할 고르기 · 결과 화면 · 조작 안내): viewBox −80..80, 발밑 무대 빛 + 그림자 +
  * 정면 캐릭터. stage = false면 무대 빛을 뺀다(결과 화면 팀 문장처럼 여럿을 겹칠 때). svg 하나로 돌려준다
  */
-export function frontFigureSvg(id: Role | 'common', stage = true): string {
-  // 그림 글자는 (그림, 무대 빛)마다 한 번만 만들고, 부를 때마다 id 앞붙이 자리(FRONT_ID_SLOT)만 새 번호로 바꾼다
+export function frontFigureSvg(id: Role | 'common', stage = true, costume: FigureCostume = 'basic'): string {
+  // 그림 글자는 (그림, 무대 빛, 의상)마다 한 번만 만들고, 부를 때마다 id 앞붙이 자리(FRONT_ID_SLOT)만 새 번호로 바꾼다
   // (한 화면에 같은 그림이 여럿이어도 그라디언트 id가 겹치지 않게)
-  const key = `${id}|${stage ? 1 : 0}`;
+  const dress = dressOf(id, costume);
+  const key = `${id}|${stage ? 1 : 0}|${dress}`;
   let parts = frontTemplates.get(key);
   if (parts === undefined) {
-    parts = frontFigureTemplate(id, stage).split(FRONT_ID_SLOT);
+    parts = frontFigureTemplate(id, stage, dress).split(FRONT_ID_SLOT);
     frontTemplates.set(key, parts);
   }
   return parts.join(String(++uid));
@@ -226,14 +259,14 @@ export function frontFigureSvg(id: Role | 'common', stage = true): string {
 
 /** 정면 그림 글자 틀의 id 번호 자리 (그림 글자에 나오지 않는 글자) */
 const FRONT_ID_SLOT = '@@';
-/** (그림, 무대 빛) → id 번호 자리로 자른 그림 글자 (많아야 5 × 2개) */
+/** (그림, 무대 빛, 의상) → id 번호 자리로 자른 그림 글자 (기본 5 × 2개 + 입어 본 의상만큼) */
 const frontTemplates = new Map<string, string[]>();
 
-function frontFigureTemplate(id: Role | 'common', stage: boolean): string {
+function frontFigureTemplate(id: Role | 'common', stage: boolean, costume: FigureCostume): string {
   const n = FRONT_ID_SLOT;
   const { size, dx, dy } = FRONT_FIGURE[id];
   const k = size / 2;
-  const inner = toSvg(frontDrawing(id), { viewBox: [-1, -1, 2, 2], idPrefix: `ff${n}x` })
+  const inner = toSvg(frontDrawing(id, costume), { viewBox: [-1, -1, 2, 2], idPrefix: `ff${n}x` })
     .replace(/^<svg[^>]*>/, '')
     .replace(/<\/svg>$/, '');
   const c = hexCss(id === 'common' ? 0xe2e8f0 : ROLE[id]);
@@ -253,8 +286,9 @@ function frontFigureTemplate(id: Role | 'common', stage: boolean): string {
  * 역할 그림: 캐릭터 스타일 설정을 따른다 (기존 = 위에서 본 실루엣 roleFigureSvg, 새 캐릭터 = 정면 그림 frontFigureSvg).
  * 로비 역할 카드 · 연습 역할 고르기 · 결과 화면이 쓴다
  */
-export function characterFigureSvg(role: Role, stage = true): string {
-  return currentCharStyle() === 'new' ? frontFigureSvg(role, stage) : roleFigureSvg(role, stage);
+export function characterFigureSvg(role: Role, stage = true, costume: FigureCostume = 'basic'): string {
+  // 의상은 새 캐릭터 그림에만 있다 (기존 스타일은 의상 없음 — GAME_DESIGN 12.5)
+  return currentCharStyle() === 'new' ? frontFigureSvg(role, stage, costume) : roleFigureSvg(role, stage);
 }
 
 /** 역할 문양 배지 (게임 머리 위 · HUD와 같은 모양): 어두운 원판 + 역할색 테두리 + 역할색 문양 */

@@ -1,10 +1,11 @@
 // 내 성장 기록 상태 (GAME_DESIGN 12장): 저장소에서 한 번 읽어 메모리에 두고, 판 결과의 평가로 경험치를 적립해 저장한다.
 // 적립 계산은 공용 순수 함수(shared/src/meta) — 나중에 서버 저장으로 바꾸면 서버가 같은 계산을 한다.
 // 저장이 안 되면 이번 접속 동안 메모리에만 두고(결과 화면에 한 줄 안내) 게임은 그대로 간다
-import type { MatchRating } from '@decoy/shared';
+import type { CostumeChoice, MatchRating, Team } from '@decoy/shared';
 import {
   PROGRESSION,
   applyRating,
+  buyCostume,
   claimLogin,
   dailyFor,
   dayKeyOf,
@@ -12,6 +13,7 @@ import {
   levelOf,
   loginAvailable,
   nextLoginStreak,
+  wearCostume,
   type DailyState,
   type DayKey,
   type LevelInfo,
@@ -48,6 +50,10 @@ export interface LoginClaimed {
   streak: number;
   saved: boolean;
 }
+
+/** 의상 해금 결과 (옷장) */
+export type CostumeBought =
+  { ok: true; price: number; saved: boolean } | { ok: false; reason: 'unknown' | 'owned' | 'coins' };
 
 export class MetaState {
   private profile: Profile;
@@ -119,9 +125,60 @@ export class MetaState {
     return { reward: r.reward, streak: r.streak, saved };
   }
 
-  /** 날이 바뀌었을 수 있다 (자정 · 앱으로 돌아옴): 보이는 것을 다시 그리게 알린다 */
+  /** 입은 의상 (팀별, 가진 것만 — 판에 들어갈 때 서버로 보낸다) */
+  costumes(): CostumeChoice {
+    return { ...this.profile.wear };
+  }
+
+  /** 의상 해금 (불씨). 해금 직전에 저장소를 다시 읽는다(다른 탭에서 불씨를 썼으면 그 위에서) */
+  async buyCostume(team: Team, id: string): Promise<CostumeBought> {
+    await this.ready;
+    await this.reread();
+    const r = buyCostume(this.profile, team, id, this.now(), this.prog);
+    if (!r.ok) {
+      // 해금은 안 됐어도 다시 읽은 기록(다른 탭이 쓴 불씨 · 의상)을 보이는 쪽에 알린다
+      this.emit();
+      return r;
+    }
+    this.profile = r.profile;
+    this.emit();
+    const saved = await this.persist();
+    return { ok: true, price: r.price, saved };
+  }
+
+  /** 의상 입기 (가진 것 · 기본만). 못 입으면 null, 입었으면 저장했는가 (저장이 안 되면 이번 접속 동안만) */
+  async wearCostume(team: Team, id: string): Promise<{ saved: boolean } | null> {
+    await this.ready;
+    await this.reread();
+    const next = wearCostume(this.profile, team, id, this.now());
+    if (!next) {
+      this.emit();
+      return null;
+    }
+    // 이미 입은 의상(다른 탭이 그사이 같은 의상을 입었으면 다시 읽어 여기로 온다): 저장할 것은 없지만 다시 읽은 기록을
+    // 알린다 — 앱이 내 역할 그림 · 방 자리 의상을 따라가게
+    if (next === this.profile) {
+      this.emit();
+      return { saved: true };
+    }
+    this.profile = next;
+    this.emit();
+    return { saved: await this.persist() };
+  }
+
+  /**
+   * 날이 바뀌었을 수 있다 (자정 · 앱으로 돌아옴): 보이는 것을 다시 그리게 알리고, 저장소를 다시 읽어 다른 탭이 그사이 바꾼
+   * 기록(입은 의상 · 불씨 · 받은 보상)이 있으면 한 번 더 알린다
+   */
   refresh(): void {
     this.emit();
+    void this.ready
+      .then(async () => {
+        const before = this.profile;
+        await this.reread();
+        if (this.profile !== before) this.emit();
+      })
+      .catch(() => undefined);
   }
 
   private async reread(): Promise<void> {

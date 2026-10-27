@@ -13,7 +13,10 @@
 // 넣지 않는다(게임 화면에서 청록은 시설 · 목표 뜻).
 // 색은 역할색 초록(#22C55E)과 그 짙은/밝은 변형, 어두운 남회색 바지 · 장화 · 끈, 초록 기운 도는 밝은 회색 금속(고글 · 망원경).
 import { OUTLINE, ROLE, ROLE_TEXT } from '../palette';
+import { survivorCostumeArt } from './costume/registry';
+import type { SurvivorFrontAnchor, SurvivorTopAnchor } from './costume/types';
 import {
+  IDENTITY,
   Sketch,
   apply,
   linear,
@@ -55,7 +58,7 @@ import {
 import {
   cleanFrontPose,
   cleanSurvivorPose,
-  type ArtOptions,
+  type SurvivorArtOptions,
   type FrontPose,
   type SurvivorArt,
   type SurvivorPose,
@@ -339,9 +342,10 @@ const REST = { ex: 0.64, ey: 0.56, ang: -0.36, w: 0.8 } as const;
 /** 위 그림 겨눌 때 망원경 폭 배수 */
 const SCOPE_W = 1.2;
 
-function top(p: SurvivorPose, o: ArtOptions): Drawing {
+function top(p: SurvivorPose, o: SurvivorArtOptions): Drawing {
   const ink = inkFor(p.tone);
   const sk = new Sketch(o.w);
+  const cos = survivorCostumeArt(o.costume);
   const r = topRig(p);
   const free = p.mode === 'free';
   const a = free ? p.action : 0;
@@ -405,15 +409,39 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
   for (const [fx, fy] of r.feet) topShoe(sk, fx, fy, C.boot, C.sole, ink, 0.26);
   // 2) 몸통 (야전 재킷). 안쪽 가는 선은 없다 — 소매 테두리와 겹쳐 몸 가장자리에 어두운 띠가 생기지 않게(밝은 몸 덩어리)
   sk.part(scoutTorsoPath(r, bodyX), domePaint(C.jacket, ink, 1.5), ink(OUTLINE), undefined, 0);
-  // 3) 배낭 (등 뒤 중간 초록 둥근 판) + 안테나. 뒤 끝 · 모서리가 판정 원(뒤 1.0r) 안 — 피격 때는 앞쪽만 몸과 같이 밀려 눌린다
-  sk.part(packPath(m, -0.36 + bodyX), domePaint(C.packTop, ink, 1.6), ink(OUTLINE), undefined, 0.3);
-  // 안테나: 끝 빛 점까지 판정 원 안(반경 약 0.98)에 머물게 짧게
-  const sway = 0.04 * Math.sin(p.walk * 2) * p.stride - 0.04 * hit;
-  const [ax0, ay0] = apply(m, -0.66, -0.28);
-  const [ax1, ay1] = apply(m, -0.74, -0.44 + sway);
-  sk.line(path().M(ax0, ay0).L(ax1, ay1).d, solid(ink(C.steel)), 0.07);
-  sk.fill(path().circle(ax1, ay1, 0.08).d, solid(ink(C.neon), 0.3));
-  sk.fill(path().circle(ax1, ay1, 0.045).d, solid(ink(tint(C.neon, 0.4))));
+  // 3) 배낭 (등 뒤 중간 초록 둥근 판) + 안테나. 뒤 끝 · 모서리가 판정 원(뒤 1.0r) 안 — 피격 때는 앞쪽만 몸과 같이 밀려 눌린다.
+  //    등을 덮는 의상(큰 배낭)은 이 배낭 · 안테나 대신 그린다
+  if (!cos?.hidesPack) {
+    sk.part(packPath(m, -0.36 + bodyX), domePaint(C.packTop, ink, 1.6), ink(OUTLINE), undefined, 0.3);
+    // 안테나: 끝 빛 점까지 판정 원 안(반경 약 0.98)에 머물게 짧게
+    const sway = 0.04 * Math.sin(p.walk * 2) * p.stride - 0.04 * hit;
+    const [ax0, ay0] = apply(m, -0.66, -0.28);
+    const [ax1, ay1] = apply(m, -0.74, -0.44 + sway);
+    sk.line(path().M(ax0, ay0).L(ax1, ay1).d, solid(ink(C.steel)), 0.07);
+    sk.fill(path().circle(ax1, ay1, 0.08).d, solid(ink(C.neon), 0.3));
+    sk.fill(path().circle(ax1, ay1, 0.045).d, solid(ink(tint(C.neon, 0.4))));
+  }
+  // 의상 기준점: 등 끝은 배낭 뒤 끝(판정 원 안), 머리 뒤 끝. 의상 등 부품은 배낭 위, 소매 · 머리 밑
+  const anchor: SurvivorTopAnchor | null = cos && {
+    role: 'scout',
+    pose: p,
+    ink,
+    outline: ink(OUTLINE),
+    w: o.w,
+    body: mul(m, translate(bodyX, 0)),
+    head: { x: hx, y: hy, r: R, backX: hx - R },
+    backX: -PACK_R,
+    halfW: r.halfW,
+    neckX: hx - R * 0.8,
+    walk: p.walk,
+    s,
+    stride: p.stride,
+    action: a,
+    hit,
+    captive: p.mode === 'captive' ? 1 : 0,
+    reach: p.mode === 'reach' ? 1 : 0,
+  };
+  if (anchor) cos?.topBack?.(sk, anchor);
   if (!free)
     drawScope(sk, ink, mul(translate(scope.ex, scope.ey), rotate(scope.ang)), scope.k, 1.0, 'top', false);
   // 4) 소매 (머리 밑). 수감 중에는 손도 머리 밑 (가슴 앞에 모은 손)
@@ -453,6 +481,7 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
     sk.fill(path().ellipse(hx + 0.8, gy, 0.055, 0.11).d, solid(ink(C.neon), 0.5));
     sk.fill(path().ellipse(hx + 0.805, gy, 0.03, 0.075).d, solid(ink(tint(C.neon, 0.5))));
   }
+  if (anchor) cos?.topOver?.(sk, anchor);
   // 6) 망원경 · 손. 들어 올려 머리 · 고글 위로 지나갈 때(능력 0.3 넘게)와 구조 중 두 손은 층을 나눠 굵은 외곽선이 머리 위에 그어지게.
   // 들고 걷기 · 피격 때는 같은 층에 그린다 — 막대는 몸 밖에서만 굵은 외곽선이 생기고, 몸통 위에서는 가는 안쪽 선으로만 갈려
   // 망원경 외곽선이 몸통 옆구리를 검게 덮지 않는다 (작은 크기에서 밝은 몸 덩어리가 판정 원을 채우게)
@@ -475,30 +504,58 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
 /** 정면 망원경 크기 배수 (위 그림의 짧게 접은 망원경 인상에 맞춰 조금 작게 — 얼굴 · 고글이 주인공) */
 const FRONT_SCOPE = 0.82;
 
-function frontBody(p: FrontPose, o: ArtOptions): Drawing {
+function frontBody(p: FrontPose, o: SurvivorArtOptions): Drawing {
   const ink = inkFor(p.tone);
   const sk = new Sketch(o.w);
   const neon = frontNeon(sk, p.tone);
   const by = frontBreath(p.t);
   const sway = Math.sin(p.t * 2.2) * 0.035;
   const hy = FRONT.headY + by;
+  const cos = survivorCostumeArt(o.costume);
+  const pack = !cos?.hidesPack;
+  // 의상 기준점 (정면: 어깨 0번 = 화면 왼쪽, 1번 = 화면 오른쪽)
+  const anchor: SurvivorFrontAnchor | null = cos && {
+    role: 'scout',
+    ink,
+    neon,
+    outline: ink(OUTLINE),
+    w: o.w,
+    t: p.t,
+    by,
+    sway: sway / 0.035,
+    bust: p.bust,
+    torso: IDENTITY,
+    neck: [0, FRONT.neckY + by],
+    shoulders: [
+      [-(FRONT.shoulderX - 0.03), FRONT.shoulderY + 0.06 + by],
+      [FRONT.shoulderX - 0.03, FRONT.shoulderY + 0.06 + by],
+    ],
+    shoulderY: FRONT.shoulderY + by,
+    hipY: FRONT.hipY,
+    halfW: FRONT.shoulderX,
+    head: { x: 0, y: hy, r: FRONT.headR },
+    facing: 0,
+  };
+  if (anchor) cos?.frontBehind?.(sk, anchor);
   // 정면은 위 그림과 같은 손: 망원경은 캐릭터 오른손(화면 왼쪽), 안테나는 왼쪽 어깨 뒤(화면 오른쪽)
   // 1) 안테나 (배낭에서 솟아 머리 오른쪽 위로) — 맨 뒤. 끝 빛 번짐까지 상반신(1.5배)에서도 상자 오른쪽 안(x ≤ 0.98)
   const tip: [number, number] = [0.53 - sway, -0.86 + by];
-  sk.part(
-    path().capsule(0.3, 0.02 + by, tip[0], tip[1], 0.045, 0.03).d,
-    solid(ink(C.gunmetal)),
-    ink(OUTLINE),
-  );
-  // 2) 배낭 (어깨 뒤로 양옆이 보인다)
-  sk.part(
-    path().roundRect(-0.38, -0.04 + by, 0.76, 0.42, 0.1).d,
-    linear(-0.38, 0, 0.38, 0, [
-      [0, ink(tint(C.pack, 0.12))],
-      [1, ink(shade(C.pack, 0.3))],
-    ]),
-    ink(OUTLINE),
-  );
+  if (pack) {
+    sk.part(
+      path().capsule(0.3, 0.02 + by, tip[0], tip[1], 0.045, 0.03).d,
+      solid(ink(C.gunmetal)),
+      ink(OUTLINE),
+    );
+    // 2) 배낭 (어깨 뒤로 양옆이 보인다)
+    sk.part(
+      path().roundRect(-0.38, -0.04 + by, 0.76, 0.42, 0.1).d,
+      linear(-0.38, 0, 0.38, 0, [
+        [0, ink(tint(C.pack, 0.12))],
+        [1, ink(shade(C.pack, 0.3))],
+      ]),
+      ink(OUTLINE),
+    );
+  }
   // 3) 다리 (어두운 카고 바지 + 장화)
   if (!p.bust) {
     frontLegs(sk, C.pants, C.boot, C.sole, ink, 0.03, 0.16);
@@ -587,6 +644,7 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
     0.017,
     0.95,
   );
+  if (anchor) cos?.frontTorso?.(sk, anchor);
   // 6) 머리: 얼굴 + 둥근 초록 모자 + 쌍안 렌즈 고글
   frontHead(sk, ink, by);
   // 옆머리 (모자 밑으로 삐져나온 뾰족한 머리칼, 귀 앞)
@@ -700,6 +758,7 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
       .Z().d,
     solid(ink(C.mouth)),
   );
+  if (anchor) cos?.frontNeck?.(sk, anchor);
   // 7) 오른팔(화면 왼쪽) + 접은 망원경 (층을 나눠 굵은 외곽선): 위 그림처럼 오른손에 짧게 접어 쥐고 대물 끝을 바깥 위로
   //    비스듬히 — 얼굴 · 고글이 주인공이고 망원경은 어깨 옆 곁들이. 자리는 화면 오른쪽 기준으로 잡고 좌우로 뒤집어 놓는다
   //    (금속 통 칠은 통 폭 방향이라 뒤집어도 빛이 같다). 상반신은 1.5배로 키워도 대물 끝이 상자 안에 들게 더 세우고 몸 가까이.
@@ -720,15 +779,15 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
   drawScope(sk, ink, sm, 0, 0.66, 'front', true, neon);
   sk.part(path().circle(-hand[0], hand[1], 0.085).d, solid(ink(C.glove)), ink(OUTLINE));
   // 안테나 끝 (청록 LED: 번짐 반지름 0.06 — 상반신에서도 상자 오른쪽 · 위 안)
-  neon.dot(tip[0], tip[1], 0.034, 1, 0.06);
+  if (pack) neon.dot(tip[0], tip[1], 0.034, 1, 0.06);
   return sk.drawing();
 }
 
-function front(p: FrontPose, o: ArtOptions): Drawing {
+function front(p: FrontPose, o: SurvivorArtOptions): Drawing {
   if (!p.bust) return frontBody(p, o);
   // 상반신: 머리 · 고글 · 망원경 · 어깨가 상자를 채우게 1.5배 (외곽선 굵기는 그대로)
   const k = 1.5;
-  return transformDrawing(frontBody(p, { w: o.w / k }), k, 0.04, 0.42);
+  return transformDrawing(frontBody(p, { ...o, w: o.w / k }), k, 0.04, 0.42);
 }
 
 export const SCOUT_ART: SurvivorArt = {

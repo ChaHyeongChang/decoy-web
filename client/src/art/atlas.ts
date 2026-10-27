@@ -11,10 +11,27 @@ import Phaser from 'phaser';
 import { TILE_PX } from '@decoy/shared';
 import { currentCharStyle, type CharStyle } from '../gfx/charStyle';
 import { currentPreset, gfxState } from '../gfx/state';
-import { createCanvasTexture, removeCanvasTexture } from '../render/fogPaint';
+import {
+  createCanvasTexture,
+  removeCanvasTexture,
+  uploadCanvasTexture,
+  type CanvasTextureLike,
+} from '../render/fogPaint';
 import { WORLD_SCALE } from '../ui/layout';
 import { cloakPoseFor, ANIM } from './anim';
-import { DrawingMemo, EMPTY_ALIASES, SHARED_FRAMES, newStyleFrameSpecs, type FrameBox } from './charFrames';
+import {
+  BASIC_COSTUME_SET,
+  DrawingMemo,
+  EMPTY_ALIASES,
+  SHARED_FRAMES,
+  costumeOf,
+  newStyleFrameSpecs,
+  sameCostumeSet,
+  type CostumeSet,
+  type FrameBox,
+  type FrameOwner,
+} from './charFrames';
+import { bakeCostumes } from './costumeBake';
 import { clearPathCache, drawToCanvas } from './chars/kit';
 import { HIDDEN_SURVIVOR, OUTLINE, ROLE } from './palette';
 import {
@@ -83,6 +100,11 @@ export interface AtlasParams {
   monsterR: number;
   /** 캐릭터 스타일 (캐릭터 리디자인 2단계). 없으면 기존 — 고른 스타일 하나만 굽는다(텍스처 예산) */
   style?: CharStyle;
+  /**
+   * 역할마다 입힌 의상 (메타 c, 새 스타일만). 그 판에 나온 의상만 그 역할 프레임 자리에 같은 칸으로 굽는다 — 텍스처가 늘지
+   * 않는다. 없으면 모두 기본
+   */
+  costumes?: CostumeSet;
 }
 
 export interface AtlasFrame {
@@ -106,6 +128,16 @@ export interface AtlasBuild {
   ms: number;
   /** 텍셀 / 월드 px */
   texPerWorld: number;
+  /** 새 스타일 캐릭터 칸 (의상만 바꿔 그 주인 칸을 다시 그릴 때) */
+  cells?: Map<string, BakedCell>;
+}
+
+/** 다시 그릴 수 있게 남겨 둔 칸 (프레임 정의 · 칸 안 그림 중심 · 그 단위의 px) */
+interface BakedCell {
+  def: FrameDef;
+  ox: number;
+  oy: number;
+  unitPx: number;
 }
 
 type Ctx = CanvasRenderingContext2D;
@@ -527,6 +559,9 @@ interface FrameDef {
   draw: (ctx: Ctx, k: number, w: number) => void;
   /** 직사각 칸 (새 스타일 캐릭터 그림). 있으면 ext 대신 이 상자로 칸을 잡고 중심을 pivot으로 적는다 */
   box?: FrameBox;
+  /** 새 스타일 캐릭터 프레임: 주인 · 의상을 바꿔 다시 그리는 함수 (의상만 바뀌면 이 칸만 다시 굽는다) */
+  owner?: FrameOwner;
+  redraw?: (ctx: Ctx, k: number, costumes: Readonly<CostumeSet>) => void;
 }
 
 /** 빈 칸 이름 (EMPTY_ALIASES가 모두 이 칸을 가리킨다) */
@@ -544,26 +579,52 @@ export function cloakFrameName(kind: 'idle' | 'move', i: number): string {
 /** 새 스타일 그림 명령 기억 (판 중 배율이 바뀌어 다시 구울 때 래스터만). 기존 스타일을 구우면 비운다 */
 const drawMemo = new DrawingMemo();
 
-function newFrameDefs(survivorR: number, monsterR: number): FrameDef[] {
+function newFrameDefs(survivorR: number, monsterR: number, costumes: Readonly<CostumeSet>): FrameDef[] {
   const defs = classicFrameDefs().filter((d) => SHARED_FRAMES.includes(d.name));
   const ws = ART.outlineWorldPx / (survivorR * TILE_PX);
   const wm = ART.outlineWorldPx / (monsterR * TILE_PX);
-  for (const spec of newStyleFrameSpecs()) {
+  const specs = newStyleFrameSpecs(costumes);
+  for (const spec of specs) {
     const ow = spec.unit === 's' ? ws : wm;
     defs.push({
       name: spec.name,
       ext: 0,
       unit: spec.unit,
       box: spec.box,
+      owner: spec.owner,
       draw: (c, k) => drawToCanvas(c, drawMemo.get(spec, ow), k),
+      // 의상만 바꿔 다시 그리기: 같은 이름 · 자세의 프레임을 새 의상으로 (이름으로 찾는다 — 프레임 이름은 의상과 상관없이 같다)
+      redraw: (c, k, set) => {
+        const next = newStyleSpec(spec.name, set);
+        if (next) drawToCanvas(c, drawMemo.get(next, ow), k);
+      },
     });
   }
   defs.push({ name: EMPTY_FRAME, ext: 0, unit: 's', draw: () => undefined });
   return defs;
 }
 
+/** 이름 → 그 의상 묶음의 프레임 정의 (의상 묶음마다 한 번 만든다) */
+const specIndex = new Map<string, Map<string, ReturnType<typeof newStyleFrameSpecs>[number]>>();
+function newStyleSpec(
+  name: string,
+  set: Readonly<CostumeSet>,
+): ReturnType<typeof newStyleFrameSpecs>[number] | undefined {
+  const key = `${set.runner}|${set.guard}|${set.scout}|${set.monster}`;
+  let m = specIndex.get(key);
+  if (!m) {
+    m = new Map(newStyleFrameSpecs(set).map((sp) => [sp.name, sp]));
+    // 묶음이 쌓이지 않게 (판마다 하나 — 많아야 둘을 들고 있으면 된다)
+    if (specIndex.size > 4) specIndex.clear();
+    specIndex.set(key, m);
+  }
+  return m.get(name);
+}
+
 function frameDefs(params: AtlasParams): FrameDef[] {
-  return params.style === 'new' ? newFrameDefs(params.survivorR, params.monsterR) : classicFrameDefs();
+  return params.style === 'new'
+    ? newFrameDefs(params.survivorR, params.monsterR, params.costumes ?? BASIC_COSTUME_SET)
+    : classicFrameDefs();
 }
 
 function classicFrameDefs(): FrameDef[] {
@@ -664,6 +725,7 @@ export function atlasParamsFor(survivorR: number, monsterR: number): AtlasParams
     survivorR,
     monsterR,
     style: currentCharStyle(),
+    costumes: bakeCostumes(),
   };
 }
 
@@ -737,6 +799,10 @@ export function bakeAtlas(params: AtlasParams): AtlasBuild {
   // 새 스타일: 쓰지 않는 옛 부품 이름은 빈 칸 하나를 같이 가리킨다
   const empty = frames.get(EMPTY_FRAME);
   if (isNew && empty) for (const name of EMPTY_ALIASES) frames.set(name, empty);
+  const baked = new Map<string, BakedCell>();
+  if (isNew)
+    for (const c of cells)
+      if (c.d.owner) baked.set(c.d.name, { def: c.d, ox: c.ox, oy: c.oy, unitPx: unitPx[c.d.unit] });
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = Math.max(4, y + rowH);
@@ -756,7 +822,133 @@ export function bakeAtlas(params: AtlasParams): AtlasBuild {
   // Path2D는 굽기 한 번 안에서만 다시 쓴다(경로 글자가 커서 들고 있지 않는다). 그림 명령은 다음 굽기를 위해 둔다
   if (isNew) clearPathCache();
   else drawMemo.clear();
-  return { canvas, frames, params, ms: performance.now() - t0, texPerWorld: tpw };
+  return {
+    canvas,
+    frames,
+    params,
+    ms: performance.now() - t0,
+    texPerWorld: tpw,
+    ...(isNew ? { cells: baked } : {}),
+  };
+}
+
+/** 의상이 달라진 주인(역할 · 괴물)의 칸 이름 (다시 그릴 칸) */
+function changedCells(build: AtlasBuild, costumes: Readonly<CostumeSet>): string[] {
+  const before = build.params.costumes ?? BASIC_COSTUME_SET;
+  const out: string[] = [];
+  if (build.params.style !== 'new' || !build.cells) return out;
+  for (const [name, cell] of build.cells) {
+    const owner = cell.def.owner;
+    if (owner && cell.def.redraw && costumeOf(before, owner) !== costumeOf(costumes, owner)) out.push(name);
+  }
+  return out;
+}
+
+/** 칸 하나를 새 의상으로 그린다 (칸을 비우고 칸 안에서만) */
+function drawCell(ctx: Ctx, build: AtlasBuild, name: string, costumes: Readonly<CostumeSet>): void {
+  const cell = build.cells?.get(name);
+  const f = build.frames.get(name);
+  if (!cell?.def.redraw || !f) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(f.x, f.y, f.w, f.h);
+  ctx.clip();
+  ctx.clearRect(f.x, f.y, f.w, f.h);
+  ctx.translate(f.x + cell.ox, f.y + cell.oy);
+  cell.def.redraw(ctx, cell.unitPx, costumes);
+  ctx.restore();
+}
+
+/**
+ * 의상만 바꿔 다시 굽는다 (메타 c, 한 번에): 의상이 달라진 주인(역할 · 괴물)의 칸만 지우고 새 의상으로 그린다. 칸 자리 · 크기 ·
+ * 그림 중심이 같아 프레임 이름 · 텍스처 크기가 그대로다(그림 묶음을 다시 만들지 않는다). 걸린 시간(ms)을 돌려준다.
+ * 판 밖(로비 미리 굽기)에서 쓴다 — 판 중에는 RecostumeJob이 프레임마다 나눠 그린다
+ */
+export function recostumeAtlas(build: AtlasBuild, costumes: Readonly<CostumeSet>): number {
+  const t0 = performance.now();
+  const ctx = build.canvas.getContext('2d');
+  const names = changedCells(build, costumes);
+  if (ctx && names.length > 0) {
+    for (const name of names) drawCell(ctx, build, name, costumes);
+    clearPathCache();
+  }
+  build.params = { ...build.params, costumes: { ...costumes } };
+  return performance.now() - t0;
+}
+
+/** 판 중 의상 바꿔 굽기 한 프레임 예산 (ms, 장식 값): 판 시작 명단으로 의상 칸을 다시 그리는 일을 프레임마다 이만큼만 한다 */
+export const RECOSTUME_STEP_MS = 4;
+
+/**
+ * 판 중 의상 바꿔 굽기 (메타 c): 판 시작 명단 · 늦게 온 의상 그림으로 의상만 바뀌면, 바뀐 칸을 옆 캔버스에 프레임마다 예산만큼
+ * 그리고 다 그리면 한 번에 옮겨 같은 텍스처로 올린다. 판 시작 첫 프레임이 멈추지 않고(한 번에 그리면 헤드리스 실측 0.1~0.25초),
+ * 그리는 동안은 앞 의상 그대로 보인다(칸마다 섞여 걷기 프레임이 깜박이지 않게)
+ */
+interface RecostumeJob {
+  build: AtlasBuild;
+  target: CostumeSet;
+  names: string[];
+  next: number;
+  scratch: HTMLCanvasElement;
+  /** 그리는 데 쓴 시간 합 · 가장 긴 한 프레임 · 프레임 수 */
+  ms: number;
+  maxStepMs: number;
+  steps: number;
+}
+let job: RecostumeJob | null = null;
+
+function startRecostume(build: AtlasBuild, target: Readonly<CostumeSet>): RecostumeJob {
+  const scratch = document.createElement('canvas');
+  scratch.width = build.canvas.width;
+  scratch.height = build.canvas.height;
+  return {
+    build,
+    target: { ...target },
+    names: changedCells(build, target),
+    next: 0,
+    scratch,
+    ms: 0,
+    maxStepMs: 0,
+    steps: 0,
+  };
+}
+
+/** 예산만큼 그린다. 다 그렸으면 바뀐 칸을 그림 캔버스로 옮기고 true (올리기는 부르는 쪽) */
+function stepRecostume(j: RecostumeJob, budgetMs: number): boolean {
+  const t0 = performance.now();
+  const ctx = j.scratch.getContext('2d');
+  if (!ctx) {
+    // 옆 캔버스를 못 쓰면 그림 캔버스에 한 번에 그린다 (칸을 비우고 빈 캔버스를 덮어 그림을 지우지 않게)
+    recostumeAtlas(j.build, j.target);
+    const ms = performance.now() - t0;
+    j.ms += ms;
+    j.maxStepMs = Math.max(j.maxStepMs, ms);
+    j.steps += 1;
+    return true;
+  }
+  while (j.next < j.names.length) {
+    drawCell(ctx, j.build, j.names[j.next] ?? '', j.target);
+    j.next += 1;
+    if (performance.now() - t0 >= budgetMs) break;
+  }
+  const finished = j.next >= j.names.length;
+  if (finished) {
+    const main = j.build.canvas.getContext('2d');
+    if (main)
+      for (const name of j.names) {
+        const f = j.build.frames.get(name);
+        if (!f) continue;
+        main.clearRect(f.x, f.y, f.w, f.h);
+        main.drawImage(j.scratch, f.x, f.y, f.w, f.h, f.x, f.y, f.w, f.h);
+      }
+    clearPathCache();
+    j.build.params = { ...j.build.params, costumes: { ...j.target } };
+  }
+  const ms = performance.now() - t0;
+  j.ms += ms;
+  j.maxStepMs = Math.max(j.maxStepMs, ms);
+  j.steps += 1;
+  return finished;
 }
 
 // ───────────────────────── 텍스처 (게임 전체에 하나) ─────────────────────────
@@ -766,13 +958,31 @@ let current: { key: string; build: AtlasBuild } | null = null;
 let pending: AtlasBuild | null = null;
 let keySeq = 0;
 
-function sameParams(a: AtlasParams, b: AtlasParams): boolean {
+/** 칸 배치까지 같은 굽기 값인가 (의상은 빼고 — 의상만 다르면 칸을 다시 그리면 된다) */
+function sameLayout(a: AtlasParams, b: AtlasParams): boolean {
   return (
     Math.abs(paramsTexels(a) - paramsTexels(b)) < 1e-6 &&
     a.survivorR === b.survivorR &&
     a.monsterR === b.monsterR &&
     (a.style ?? 'classic') === (b.style ?? 'classic')
   );
+}
+
+/** 입힌 의상이 같은가 (기존 스타일은 의상이 없어 늘 같다) */
+function sameDress(a: AtlasParams, b: AtlasParams): boolean {
+  if ((a.style ?? 'classic') !== 'new') return true;
+  return sameCostumeSet(a.costumes ?? BASIC_COSTUME_SET, b.costumes ?? BASIC_COSTUME_SET);
+}
+
+function sameParams(a: AtlasParams, b: AtlasParams): boolean {
+  return sameLayout(a, b) && sameDress(a, b);
+}
+
+/** 의상 묶음 글 (디버그 · 시험: 지금 텍스처에 입힌 의상) */
+function dressText(p: AtlasParams): string {
+  if ((p.style ?? 'classic') !== 'new') return '';
+  const c = p.costumes ?? BASIC_COSTUME_SET;
+  return `runner:${c.runner},guard:${c.guard},scout:${c.scout},monster:${c.monster}`;
 }
 
 /** 텍스처 관리자 (Phaser TextureManager 중 쓰는 부분) */
@@ -782,10 +992,52 @@ type TextureHost = Phaser.Textures.TextureManager;
  * 지금 zoom · 반지름에 맞는 그림 텍스처 (없거나 다르면 굽고 올린다). 키가 바뀌면 이전 텍스처는 지운다:
  * 부르는 쪽은 키가 바뀌었으면 이미지를 다시 만든다
  */
-export function ensureAtlas(textures: TextureHost, params: AtlasParams): { key: string; build: AtlasBuild } {
-  if (current && sameParams(current.build.params, params) && textures.exists(current.key)) return current;
-  const build = pending && sameParams(pending.params, params) ? pending : bakeAtlas(params);
+export function ensureAtlas(
+  textures: TextureHost,
+  params: AtlasParams,
+  /** 판 중(프레임마다 부름): 의상만 바뀌면 이 예산(ms)씩 나눠 그린다. 없으면(로비 미리 굽기) 한 번에 */
+  stepBudgetMs?: number,
+): { key: string; build: AtlasBuild } {
+  if (current && sameLayout(current.build.params, params) && textures.exists(current.key)) {
+    if (sameDress(current.build.params, params)) {
+      job = null;
+      return current;
+    }
+    // 의상만 바뀌었다 (판 시작 명단 · 의상 그림이 늦게 옴): 그 주인 칸만 다시 그려 같은 텍스처에 올린다 — 키 · 그림 묶음 그대로
+    const target = params.costumes ?? BASIC_COSTUME_SET;
+    let done: boolean;
+    if (stepBudgetMs === undefined) {
+      job = null;
+      gfxState.features.atlasRecostumeMs = Math.round(recostumeAtlas(current.build, target) * 10) / 10;
+      gfxState.features.atlasRecostumeSteps = 1;
+      done = true;
+    } else {
+      if (!job || job.build !== current.build || !sameCostumeSet(job.target, target))
+        job = startRecostume(current.build, target);
+      done = stepRecostume(job, stepBudgetMs);
+      if (done) {
+        gfxState.features.atlasRecostumeMs = Math.round(job.ms * 10) / 10;
+        gfxState.features.atlasRecostumeMaxStepMs = Math.round(job.maxStepMs * 10) / 10;
+        gfxState.features.atlasRecostumeSteps = job.steps;
+        job = null;
+      }
+    }
+    if (done) {
+      uploadCanvasTexture(textures.get(current.key) as unknown as CanvasTextureLike);
+      gfxState.features.atlasCostumes = dressText(current.build.params);
+      gfxState.features.atlasDrawingsMade = drawMemo.made;
+    }
+    return current;
+  }
+  job = null;
+  const build = pending && sameLayout(pending.params, params) ? pending : bakeAtlas(params);
   pending = null;
+  // 미리 구운 것과 의상만 다르면: 로비(예산 없음)는 그 칸만 다시 그린 뒤 올리고, 판 중이면 앞 의상 그대로 올린 뒤 다음
+  // 프레임부터 나눠 그린다
+  if (!sameDress(build.params, params) && stepBudgetMs === undefined) {
+    gfxState.features.atlasRecostumeMs =
+      Math.round(recostumeAtlas(build, params.costumes ?? BASIC_COSTUME_SET) * 10) / 10;
+  }
   if (current) removeCanvasTexture(textures, current.key);
   keySeq += 1;
   const key = `decoy-chars-${keySeq}`;
@@ -809,6 +1061,7 @@ export function ensureAtlas(textures: TextureHost, params: AtlasParams): { key: 
   gfxState.features.atlasStyle = build.params.style ?? 'classic';
   gfxState.features.atlasZoom = build.params.zoom;
   gfxState.features.atlasDrawingsMade = drawMemo.made;
+  gfxState.features.atlasCostumes = dressText(build.params);
   return current;
 }
 
@@ -820,6 +1073,10 @@ export function prebakeAtlas(scene: Phaser.Scene | null, survivorR: number, mons
   const params = atlasParamsFor(survivorR, monsterR);
   if (scene) return ensureAtlas(scene.textures, params).build.ms;
   if (current && sameParams(current.build.params, params)) return 0;
+  if (pending && sameLayout(pending.params, params)) {
+    if (!sameDress(pending.params, params)) recostumeAtlas(pending, params.costumes ?? BASIC_COSTUME_SET);
+    return 0;
+  }
   pending = bakeAtlas(params);
   gfxState.features.atlasBakeMs = Math.round(pending.ms * 10) / 10;
   return pending.ms;

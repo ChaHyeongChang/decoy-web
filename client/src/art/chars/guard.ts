@@ -10,8 +10,11 @@
 // (게임 화면에서 청록은 시설 · 목표 뜻).
 // 색은 역할색 보라(#A855F7)와 그 짙은/밝은 변형, 어두운 남회색 바지 · 장갑 · 장화 · 방패 테.
 import { NEON, NEON_DIM, NEON_TEXT, OUTLINE, ROLE, ROLE_TEXT } from '../palette';
+import { survivorCostumeArt } from './costume/registry';
+import type { SurvivorFrontAnchor, SurvivorTopAnchor } from './costume/types';
 import { SIZE_RULE } from './measure';
 import {
+  IDENTITY,
   Sketch,
   apply,
   linear,
@@ -48,7 +51,7 @@ import {
 import {
   cleanFrontPose,
   cleanSurvivorPose,
-  type ArtOptions,
+  type SurvivorArtOptions,
   type FrontPose,
   type SurvivorArt,
   type SurvivorPose,
@@ -259,9 +262,10 @@ function shoveOffset(a: number): number {
   return -0.2 + 0.31 * (1 - (1 - k) * (1 - k));
 }
 
-function top(p: SurvivorPose, o: ArtOptions): Drawing {
+function top(p: SurvivorPose, o: SurvivorArtOptions): Drawing {
   const ink = inkFor(p.tone);
   const sk = new Sketch(o.w);
+  const cos = survivorCostumeArt(o.costume);
   const a = p.action;
   const free = p.mode === 'free';
   const captive = p.mode === 'captive';
@@ -385,6 +389,27 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
   // 6) 헬멧: 보라 돔 + 가운데 볏 + 앞 챙
   const [hx, hy] = r.head;
   const R = r.headR * 1.02;
+  // 의상 기준점: 등 판 뒤 끝 · 헬멧 뒤 끝. 의상 등 부품은 어깨 갑옷 위, 헬멧 밑
+  const anchor: SurvivorTopAnchor | null = cos && {
+    role: 'guard',
+    pose: p,
+    ink,
+    outline: ink(OUTLINE),
+    w: o.w,
+    body,
+    head: { x: hx, y: hy, r: R, backX: hx - R },
+    backX: bcx - brx,
+    halfW: r.halfW,
+    neckX: hx - R * 0.8,
+    walk: p.walk,
+    s,
+    stride: p.stride,
+    action: free ? a : 0,
+    hit: p.hit,
+    captive: captive ? 1 : 0,
+    reach: p.mode === 'reach' ? 1 : 0,
+  };
+  if (anchor) cos?.topBack?.(sk, anchor);
   sk.part(path().circle(hx, hy, R).d, helmetPaint(ink, R * 1.2, hx - 0.04, hy), ink(OUTLINE));
   // 앞 챙 (어두운 보라 띠)
   sk.fill(
@@ -402,6 +427,7 @@ function top(p: SurvivorPose, o: ArtOptions): Drawing {
       .Z().d;
   sk.fill(crestHalf(-1, 0.2), solid(ink(tint(C.armor, 0.2))));
   sk.fill(crestHalf(1, 0.12), solid(ink(shade(C.armor, 0.16))));
+  if (anchor) cos?.topOver?.(sk, anchor);
   // 7) 손 + 방패 (몸 앞, 따로 층): 방패 외곽선이 헬멧 · 몸 위에 굵게. 손은 방패보다 먼저 칠해 바깥 반을 방패가 덮고,
   //    굵은 외곽선 대신 가는 테만 둘러 헬멧 · 방패 사이 짙은 틈에 주먹이 보인다(굵은 외곽선은 헬멧을 깨문 듯 파고든다)
   sk.layer();
@@ -435,13 +461,38 @@ function frontShieldPath(cx: number, y0: number, hw: number, h: number): string 
 /** 정면 다리 벌림 (버티고 선 자세) */
 const LEG_SPREAD = 0.08;
 
-function frontBody(p: FrontPose, o: ArtOptions): Drawing {
+function frontBody(p: FrontPose, o: SurvivorArtOptions): Drawing {
   const ink = inkFor(p.tone);
   const sk = new Sketch(o.w);
   const neon = frontNeon(sk, p.tone);
   const by = frontBreath(p.t);
   const sb = Math.sin(p.t * 1.6) * 0.008;
   const SX = 0.36;
+  const cos = survivorCostumeArt(o.costume);
+  // 의상 기준점 (정면: 어깨 0번 = 화면 왼쪽, 1번 = 화면 오른쪽)
+  const anchor: SurvivorFrontAnchor | null = cos && {
+    role: 'guard',
+    ink,
+    neon,
+    outline: ink(OUTLINE),
+    w: o.w,
+    t: p.t,
+    by,
+    sway: Math.sin(p.t * 2.2),
+    bust: p.bust,
+    torso: IDENTITY,
+    neck: [0, FRONT.neckY + by],
+    shoulders: [
+      [-(SX - 0.02), FRONT.shoulderY + 0.06 + by],
+      [SX - 0.02, FRONT.shoulderY + 0.06 + by],
+    ],
+    shoulderY: FRONT.shoulderY + by,
+    hipY: FRONT.hipY,
+    halfW: SX,
+    head: { x: 0, y: FRONT.headY + by, r: FRONT.headR },
+    facing: 0,
+  };
+  if (anchor) cos?.frontBehind?.(sk, anchor);
   // 1) 다리 (어두운 바지) + 무릎 보호대 + 무거운 장화
   if (!p.bust) {
     frontLegs(sk, C.pants, C.boot, C.sole, ink, LEG_SPREAD, 0.17);
@@ -494,6 +545,7 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
     solid(ink(shade(C.armor, 0.3))),
     0.025,
   );
+  if (anchor) cos?.frontTorso?.(sk, anchor);
   // 4) 어깨 갑옷 (두 겹 둥근 판)
   for (const s of [-1, 1]) {
     const px = s * (SX - 0.02);
@@ -612,6 +664,7 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
   );
   // 볼 가리개 LED (청록 발광 점, 양쪽 가리개 가운데)
   for (const s of [-1, 1]) neon.dot(s * hr * 0.93, hy + 0.08, 0.02, 0.95, 0.06);
+  if (anchor) cos?.frontNeck?.(sk, anchor);
   // 6) 큰 방패 (따로 층: 몸 앞에 떠 있다)
   sk.layer();
   const sh = frontShieldPath(cx, y0, hw, h);
@@ -663,11 +716,11 @@ function frontBody(p: FrontPose, o: ArtOptions): Drawing {
   return sk.drawing();
 }
 
-function front(p: FrontPose, o: ArtOptions): Drawing {
+function front(p: FrontPose, o: SurvivorArtOptions): Drawing {
   if (!p.bust) return frontBody(p, o);
   // 상반신: 헬멧 · 어깨 · 방패 윗부분(문장)이 상자를 채우게 1.45배 (외곽선 굵기는 그대로)
   const k = 1.45;
-  return transformDrawing(frontBody(p, { w: o.w / k }), k, -0.05, 0.36);
+  return transformDrawing(frontBody(p, { ...o, w: o.w / k }), k, -0.05, 0.36);
 }
 
 export const GUARD_ART: SurvivorArt = {

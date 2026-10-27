@@ -1,5 +1,6 @@
 // 방, 로비, 역할 선택, 재접속, 판 진행 (실시간 틱 → Game.step → 플레이어별 스냅샷)
 import {
+  BASIC_COSTUMES,
   MAX_NAME_LENGTH,
   PRACTICE_ROOM_PREFIX,
   ROLE_IDS,
@@ -7,10 +8,13 @@ import {
   ROOM_CODE_LENGTH,
   Rng,
   balanceHash,
+  costumeForRole,
   isKeptNote,
+  sanitizeCostumeChoice,
   teamOf,
   type Balance,
   type ClientMessage,
+  type CostumeChoice,
   type InputFrame,
   type LobbyPlayer,
   type LobbyState,
@@ -20,6 +24,7 @@ import {
   type Role,
   type RoomKind,
   type RoomPhase,
+  type RosterEntry,
   type ServerMessage,
   type TestCommand,
 } from '../index';
@@ -58,6 +63,13 @@ export interface Seat {
   alias: string;
   /** 이 자리에서 마지막으로 메시지(ping 포함)를 받은 시각 (ms, M13c 빠른 매칭 자동 시작 때 쓴다) */
   lastSeen: number;
+  /**
+   * 고른 의상 (메타 c, 받은 값을 거른 것 · 봇은 기본). 판 시작 명단(matchInfo)에만 싣는다: 생존자 명단에 그 역할 팀 의상,
+   * 괴물 명단에는 자기 의상뿐. 로비 · 결과 메시지에는 싣지 않는다 (괴물이 될 사람에게 생존자 의상이 가지 않게)
+   */
+  costume: CostumeChoice;
+  /** 판 중에 받은 의상 (판 시작 명단 · 구운 그림은 그 판 끝까지 같게 두고, 판이 끝나면 costume으로 옮긴다) */
+  nextCostume?: CostumeChoice;
 }
 
 export interface RoomHooks {
@@ -171,7 +183,7 @@ export class Room {
     return free[this.aliasRng.int(free.length)] ?? `플레이어 ${this.joinCounter}`;
   }
 
-  addSeat(conn: Conn | null, name: string, bot: boolean, nowMs = 0): Seat {
+  addSeat(conn: Conn | null, name: string, bot: boolean, nowMs = 0, costume?: unknown): Seat {
     this.joinCounter += 1;
     const alias = this.newAlias();
     const seat: Seat = {
@@ -190,6 +202,7 @@ export class Room {
       droppedAt: null,
       matchesPlayed: 0,
       lastLobby: null,
+      costume: bot ? { ...BASIC_COSTUMES } : sanitizeCostumeChoice(costume),
     };
     this.seats.push(seat);
     if (!bot && this.hostId === null) this.hostId = seat.id;
@@ -219,6 +232,30 @@ export class Room {
       // 끊긴 동안 쌓인 일회성 알림은 버린다 (돌아온 첫 스냅샷에 지난 소리 · 배너가 몰려 오지 않게). 거점 메모(비밀번호)만 남긴다
       p.outbox = p.outbox.filter(isKeptNote);
     }
+  }
+
+  /**
+   * 다시 들어온 자리의 의상 (같은 탭 새로고침 · 다른 탭): 판 중에는 바꾸지 않는다 — 판 시작 명단과 이미 구운 그림이 그 판
+   * 끝까지 같게
+   */
+  recostume(seat: Seat, costume: unknown): void {
+    if (seat.bot) return;
+    if (this.phase === 'playing') {
+      // 판 중에는 바꾸지 않고 두었다가 판이 끝나면 입힌다 (다시 하기 · 다음 판에 — 판 시작과 엇갈린 옷장 · 판 중 새로고침도)
+      seat.nextCostume = sanitizeCostumeChoice(costume);
+      return;
+    }
+    seat.costume = sanitizeCostumeChoice(costume);
+    delete seat.nextCostume;
+  }
+
+  /** 판 중에 받아 둔 의상을 입힌다 (판이 끝날 때) */
+  private applyNextCostumes(): void {
+    for (const s of this.seats)
+      if (s.nextCostume) {
+        s.costume = s.nextCostume;
+        delete s.nextCostume;
+      }
   }
 
   welcome(seat: Seat): void {
@@ -390,6 +427,10 @@ export class Room {
         seat.name = cleanName(msg.name) || seat.name;
         this.sendLobby(seat);
         return;
+      case 'costume':
+        // 로비에 의상 칸이 없어 아무에게도 알리지 않는다 (판 시작 명단에만 실린다)
+        this.recostume(seat, msg.costume);
+        return;
       case 'start':
         if (seat.id !== this.hostId) return;
         if (!this.startCheck().ok) {
@@ -434,15 +475,24 @@ export class Room {
     const role = seat.role ?? 'runner';
     // 빠른 매칭: 다른 사람 이름은 익명, 봇 여부는 보내지 않는다 (결과 화면에서만)
     const quick = this.kind === 'quick';
-    const roster =
+    // 의상: 그 역할 팀 의상 (기본이면 싣지 않는다). 괴물 명단은 자기 하나뿐이라 생존자 의상이 괴물에게 가지 않는다.
+    // 빠른 매칭은 남의 의상도 싣지 않는다: 봇 자리는 늘 기본이라 기본이 아닌 의상이 '사람'이라는 단서가 된다(봇 여부는
+    // 결과 화면에서만 — GAME_DESIGN 11.2 · 12.5). 내 의상은 그대로 싣는다
+    const dressed = (s: Seat, r: Role): Pick<RosterEntry, 'costume'> => {
+      if (quick && s !== seat) return {};
+      const c = costumeForRole(s.costume, r);
+      return c === 'basic' ? {} : { costume: c };
+    };
+    const roster: RosterEntry[] =
       teamOf(role) === 'survivor'
         ? this.seats.map((s) => ({
             id: s.id,
             name: quick && s !== seat ? s.alias : s.name,
             role: s.role ?? 'runner',
             bot: quick && s !== seat ? false : s.bot,
+            ...dressed(s, s.role ?? 'runner'),
           }))
-        : [{ id: seat.id, name: seat.name, role, bot: seat.bot }];
+        : [{ id: seat.id, name: seat.name, role, bot: seat.bot, ...dressed(seat, role) }];
     return {
       you: seat.id,
       role,
@@ -500,6 +550,7 @@ export class Room {
     const result = buildResult(game);
     this.rateFinished(game, nowMs);
     this.phase = 'result';
+    this.applyNextCostumes();
     this.lastResult = { t: 'result', result };
     // 판 중에는 자리가 지워지지 않으므로 여기에 이번 판 자리가 모두 있다
     this.resultSeats = new Map(this.seats.map((s) => [s.id, { alias: s.alias, bot: s.bot }]));
@@ -539,6 +590,7 @@ export class Room {
 
   backToLobby(): void {
     this.phase = 'lobby';
+    this.applyNextCostumes();
     this.game = null;
     this.recorder = null;
     this.ratings.clear();
@@ -784,7 +836,7 @@ export class RoomManager {
    * 빠른 매칭 대기열 (M13c): 대기 중인 빠른 매칭 방(로비 · 4명 미만 · 사람이 붙어 있음)이 있으면 들어가고 없으면 새로 만든다.
    * 방 코드로 만든 방은 섞이지 않는다
    */
-  quick(conn: Conn, name: unknown, nowMs = 0): { room: Room; seat: Seat } {
+  quick(conn: Conn, name: unknown, nowMs = 0, costume?: unknown): { room: Room; seat: Seat } {
     const players = this.config.balance.match.players;
     let room: Room | undefined;
     for (const r of this.rooms.values()) {
@@ -794,7 +846,7 @@ export class RoomManager {
       break;
     }
     room ??= this.createRoom(true, 'quick');
-    return { room, seat: room.addSeat(conn, typeof name === 'string' ? name : '', false, nowMs) };
+    return { room, seat: room.addSeat(conn, typeof name === 'string' ? name : '', false, nowMs, costume) };
   }
 
   /** join 메시지 처리. 성공하면 (방, 자리), 실패하면 오류 메시지 */
@@ -811,6 +863,7 @@ export class RoomManager {
         const own = msg.token ? room.seatByToken(msg.token) : undefined;
         if (own) {
           room.attach(own, conn);
+          room.recostume(own, msg.costume);
           return { room, seat: own };
         }
         // 2) 이 브라우저의 보조 토큰 (localStorage): 지금 끊겨 있는 자리만
@@ -820,6 +873,7 @@ export class RoomManager {
           const seat = room.seatByToken(t);
           if (seat && !seat.bot && seat.conn === null) {
             room.attach(seat, conn);
+            room.recostume(seat, msg.costume);
             return { room, seat };
           }
         }
@@ -835,7 +889,7 @@ export class RoomManager {
         if (room.seats.length >= this.config.balance.match.players) {
           return { error: { t: 'error', code: 'room-full', message: '방이 가득 찼습니다' } };
         }
-        return { room, seat: room.addSeat(conn, msg.name, false, nowMs) };
+        return { room, seat: room.addSeat(conn, msg.name, false, nowMs, msg.costume) };
       }
       if (!msg.create)
         return {
@@ -845,7 +899,7 @@ export class RoomManager {
     if (!msg.create) return { error: { t: 'error', code: 'bad-request', message: '방 코드가 필요합니다' } };
     // 개발용 봇 방(?bots=1)은 개발 서버에서만 (배포 서버에서는 일반 방, 출시 전 검토)
     const room = this.createRoom(Boolean(msg.bots) && this.config.devBots !== false);
-    return { room, seat: room.addSeat(conn, msg.name, false, nowMs) };
+    return { room, seat: room.addSeat(conn, msg.name, false, nowMs, msg.costume) };
   }
 
   /**

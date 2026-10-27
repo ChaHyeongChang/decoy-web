@@ -514,4 +514,29 @@ export const META_TEXT = {
     'a-win': '{n}판 이기기',
     'a-gold': '평가에서 금 이상 {n}개 받기',
   } as Record<string, string>,
+  // ── 옷장 · 의상 (메타 c) ──
+  tabToday: '오늘',
+  tabWardrobe: '옷장',
+  wardrobe: {
+    /** 의상 이름 (id → 이름). 값(불씨)은 config/progression.json costumes */
+    names: {
+      basic: '기본',
+      scarf: '목도리',
+      pack: '탈출 배낭',
+      cape: '망토',
+      hood: '긴 고깔',
+      feathers: '까마귀 깃',
+      chains: '사슬',
+    } as Record<string, string>,
+    wearing: '입는 중',
+    owned: '가짐',
+    wear: '입기',
+    unlock: '해금 · 불씨 {n}',
+    unlockSure: '한 번 더 누르면 해금 (불씨 {n})',
+    lack: '불씨가 {n} 모자라요',
+    unlocked: '{name} 해금! 입기를 누르면 입어요',
+    worn: '{name} — 입었어요',
+    inGame: '게임 화면',
+    note: '꾸미기뿐이라 판에는 차이가 없어요. 괴물 화면에서 생존자는 늘 흰 모습이에요',
+  },
 } as const;

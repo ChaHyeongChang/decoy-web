@@ -32,6 +32,7 @@ import {
 } from './gfx/quality';
 import { currentPreset, gfxState, notifyGfxChange, onGfxChange, probeSlot } from './gfx/state';
 import { prebakeAtlas } from './art/atlas';
+import { loadCostumeArt, onBakeCostumesChange, onCostumeArtReady } from './art/costumeBake';
 import { prebakeFogStep } from './render/baseLayer';
 import { computeRenderSize, type RenderSize } from './render/resolution';
 import { settleSize } from './render/settle';
@@ -611,6 +612,8 @@ function schedulePrebake(): void {
     // 결과 화면 · '내 기록' 창 조각도 판 밖 쉬는 시간에 미리 받는다 (판 중에는 받지 않는다 — 누르거나 결과가 오면 바로 그리게)
     app.resultUi.prefetch();
     app.hub.prefetch();
+    // 의상 그림 조각도 (판이 시작될 때 동료 · 괴물 의상을 바로 굽게 — 판 시작 명단은 판이 시작돼야 온다)
+    void loadCostumeArt();
     // 따라가는 카메라: 판 배율 맵 전체 그림 → 미니맵 → 내가 고른 역할의 시작 자리 둘레 조각 (모르면 감옥 = 생존자 시작).
     // 조각은 판 중에 맵 전체 그림에서 복사만 한다
     idle(fogStep);
@@ -620,6 +623,10 @@ function schedulePrebake(): void {
 onGfxChange(schedulePrebake);
 // 캐릭터 스타일을 바꾸면 그 스타일 그림을 로비에서 미리 굽는다 (판 중이면 판 장면이 다음 프레임에 굽는다)
 onCharStyleChange(schedulePrebake);
+// 의상 그림 조각이 오면 입힐 의상으로 다시 굽는다 (바뀐 역할 칸만, atlas.ts recostumeAtlas)
+onCostumeArtReady(schedulePrebake);
+// 입힐 의상이 바뀌면(로비 내 역할 · 옷장 · 방에서 나옴) 판 밖에서 다시 굽는다 (판 중이면 굽지 않는다 — 판 장면이 나눠 굽는다)
+onBakeCostumesChange(schedulePrebake);
 // 부팅 직후(첫 화면 · 봇과 연습 고르기)에도 한 번 굽는다: Phaser가 생성자 안에서 바로 부팅하면 부팅 때의 그래픽 변경 알림이
 // 위 구독보다 먼저 지나간다. 연습은 고르자마자 판이 시작돼 로비 대기가 없다 (새 캐릭터 아틀라스는 약 90ms)
 schedulePrebake();

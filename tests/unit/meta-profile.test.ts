@@ -74,16 +74,18 @@ describe('기록 읽기', () => {
       coins: 0,
       daily: null,
       login: null,
+      owned: [],
+      wear: { survivor: 'basic', monster: 'basic' },
     });
   });
 
   it('모르는 칸(새 빌드가 더한 칸)은 그대로 두었다가 저장할 때 다시 적는다', () => {
-    const text = JSON.stringify({ ...emptyProfile(1), xp: 50, coins: 340, wear: { survivor: 's-hood' } });
+    const text = JSON.stringify({ ...emptyProfile(1), xp: 50, coins: 340, titles: { now: 't-first' } });
     const p = parseProfile(text, NOW);
-    expect(p.extra).toEqual({ wear: { survivor: 's-hood' } });
+    expect(p.extra).toEqual({ titles: { now: 't-first' } });
     expect(p.profile.coins).toBe(340);
     const again = JSON.parse(serializeProfile({ ...p.profile, xp: 60 }, p.extra)) as Record<string, unknown>;
-    expect(again).toMatchObject({ v: PROFILE_VERSION, xp: 60, coins: 340, wear: { survivor: 's-hood' } });
+    expect(again).toMatchObject({ v: PROFILE_VERSION, xp: 60, coins: 340, titles: { now: 't-first' } });
   });
 
   it('더 높은 판은 읽을 수 있는 칸만 보이고 newer로 알린다 (저장하지 않게)', () => {

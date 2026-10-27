@@ -1,4 +1,5 @@
-// '내 기록' 창 (GAME_DESIGN 12.4, VISUAL_SPEC 9.7, 메타 b): 레벨 · 불씨 · 오늘의 접속 보상(받기) · 오늘의 도전 셋.
+// '내 기록' 창 (GAME_DESIGN 12.4 · 12.5, VISUAL_SPEC 9.7 · 9.8, 메타 b · c): 오늘 탭(레벨 · 불씨 · 오늘의 접속 보상(받기) ·
+// 오늘의 도전 셋) · 옷장 탭(의상 해금 · 입기, 나눠 받는 조각 ui/wardrobe.ts).
 // 나눠 받는 조각(`hub`) — 첫 화면에는 필요 없다(ui/hubHost.ts가 받는다). 설정 화면(9.5)과 같은 막 + 깎은 패널 모양.
 // 접속 보상은 자동으로 주지 않고 여기서 '받기'로 받는다(첫 화면 · 시험을 막지 않게, 칩의 점이 알린다)
 import { PROGRESSION, challengeById, loginReward, type ChallengeTeam } from '@decoy/shared/meta';
@@ -6,6 +7,7 @@ import { META_TEXT } from '../data/storyText';
 import type { MetaState } from '../meta/meta';
 import { EMBER_SVG, fillText } from './levelChip';
 import { h, icon } from './uiArt';
+import type { Wardrobe } from './wardrobe';
 
 const TEAM_TEXT: Record<ChallengeTeam, string> = {
   survivor: META_TEXT.teamSurvivor,
@@ -19,10 +21,17 @@ function ember(): HTMLElement {
   return e;
 }
 
+type HubTab = 'today' | 'wardrobe';
+
 export class HubPanel {
   private readonly veil: HTMLElement;
   private readonly body: HTMLElement;
   private readonly closeBtn: HTMLButtonElement;
+  private readonly tabs = new Map<HubTab, HTMLButtonElement>();
+  private tab: HubTab = 'today';
+  /** 옷장 (나눠 받는 조각 `wardrobe` — 옷장 탭을 처음 열 때 받는다) */
+  private wardrobe: Wardrobe | null = null;
+  private wardrobeLoading = false;
   private notice = '';
   private unsub: (() => void) | null = null;
   private readonly onKey = (e: KeyboardEvent): void => {
@@ -35,6 +44,8 @@ export class HubPanel {
   constructor(
     host: HTMLElement,
     private readonly meta: MetaState,
+    /** 옷장 조각을 받지 못했다 (배포 직후 옛 화면): "새 버전이 있어요" */
+    private readonly onLoadFailed: () => void = () => undefined,
   ) {
     this.closeBtn = h(
       'button',
@@ -43,11 +54,40 @@ export class HubPanel {
       META_TEXT.hubClose,
     );
     this.closeBtn.addEventListener('click', () => this.close());
-    this.body = h('div', { class: 'hub-body' });
+    this.body = h('div', { class: 'hub-body', role: 'tabpanel' });
+    // 탭: 오늘(접속 보상 · 도전) · 옷장(메타 c). 설정 화면과 같은 탭 모양
+    const tabBar = h('div', {
+      class: 'set-tabs hub-tabs',
+      role: 'tablist',
+      'aria-label': META_TEXT.hubTitle,
+    });
+    for (const t of ['today', 'wardrobe'] as const) {
+      const b = h(
+        'button',
+        {
+          class: 'set-tab',
+          type: 'button',
+          role: 'tab',
+          'aria-selected': 'false',
+          'data-testid': `hub-tab-${t}`,
+        },
+        t === 'today' ? META_TEXT.tabToday : META_TEXT.tabWardrobe,
+      );
+      b.addEventListener('click', () => {
+        if (this.tab === t) return;
+        this.tab = t;
+        this.notice = '';
+        this.wardrobe?.reset();
+        this.render();
+      });
+      this.tabs.set(t, b);
+      tabBar.append(b);
+    }
     const card = h(
       'div',
       { class: 'panel hub-card', role: 'dialog', 'aria-modal': 'true', 'aria-label': META_TEXT.hubTitle },
       h('div', { class: 'hub-head' }, h('h2', { class: 'hub-title' }, META_TEXT.hubTitle), this.closeBtn),
+      tabBar,
       this.body,
     );
     this.veil = h('div', { class: 'hub-veil', 'data-testid': 'hub' }, card);
@@ -64,7 +104,10 @@ export class HubPanel {
   }
 
   open(): void {
+    // 늘 오늘 탭부터 (칩의 점 = 받을 접속 보상이 오늘 탭에 있다). 옷장의 해금 확인 · 미리보기는 풀어 둔다
+    this.tab = 'today';
     this.notice = '';
+    this.wardrobe?.reset();
     this.render();
     this.veil.hidden = false;
     this.unsub ??= this.meta.onChange(() => {
@@ -80,6 +123,11 @@ export class HubPanel {
   }
 
   private render(): void {
+    for (const [t, b] of this.tabs) b.setAttribute('aria-selected', String(t === this.tab));
+    if (this.tab === 'wardrobe') {
+      this.renderWardrobe();
+      return;
+    }
     const info = this.meta.level();
     const coins = this.meta.current.coins;
     const ratio = info.max ? 1 : info.need > 0 ? info.into / info.need : 0;
@@ -182,5 +230,30 @@ export class HubPanel {
     );
     notice.hidden = this.notice === '';
     this.body.replaceChildren(summary, loginCard, notice, dailyCard);
+  }
+
+  /** 옷장 탭 (조각을 처음 열 때 받는다 — 불씨는 옷장 팀 줄 끝에) */
+  private renderWardrobe(): void {
+    if (this.wardrobe) {
+      this.wardrobe.render();
+      this.body.replaceChildren(this.wardrobe.el);
+      return;
+    }
+    this.body.replaceChildren();
+    if (this.wardrobeLoading) return;
+    this.wardrobeLoading = true;
+    void import('./wardrobe').then(
+      (m) => {
+        this.wardrobeLoading = false;
+        this.wardrobe = new m.Wardrobe(this.meta);
+        if (this.isOpen && this.tab === 'wardrobe') this.render();
+      },
+      () => {
+        this.wardrobeLoading = false;
+        this.tab = 'today';
+        this.onLoadFailed();
+        if (this.isOpen) this.render();
+      },
+    );
   }
 }

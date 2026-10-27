@@ -17,6 +17,8 @@
 // 위에서 본 그림: 단위 = 몸 반지름 1(판정 반지름 0.35타일), +x = 바라보는 방향. 빛은 위에서 (돔 음영, 회전과 무관).
 // 정면 그림: 상자 [−1, 1]², 빛은 왼쪽 위 (림 라이트는 오른쪽 뒤에서).
 import { OUTLINE, ROLE, ROLE_TEXT } from '../palette';
+import { monsterCostumeArt } from './costume/registry';
+import type { MonsterFrontAnchor, MonsterTopAnchor } from './costume/types';
 import {
   Sketch,
   apply,
@@ -41,7 +43,7 @@ import { frontBreath, inkFor, type Ink } from './survivorBase';
 import {
   cleanFrontPose,
   cleanMonsterPose,
-  type ArtOptions,
+  type MonsterArtOptions,
   type FrontPose,
   type MonsterArt,
   type MonsterPose,
@@ -721,10 +723,11 @@ function faceShape(m: Mat, r: MonsterRig, part: 'all' | 'brim'): string {
     .Z().d;
 }
 
-function top(p: MonsterPose, o: ArtOptions): Drawing {
+function top(p: MonsterPose, o: MonsterArtOptions): Drawing {
   const ink = inkFor(p.tone);
   const C = MONSTER_COLOR;
   const sk = new Sketch(o.w);
+  const cos = monsterCostumeArt(o.costume);
   const r = monsterRig(p);
   const B = r.body;
   const N = r.neck;
@@ -765,6 +768,27 @@ function top(p: MonsterPose, o: ArtOptions): Drawing {
       0.05,
     );
   }
+  // 의상 기준점: 망토 · 주름 위, 두건 그늘 · 팔 밑
+  const anchor: MonsterTopAnchor | null = cos && {
+    pose: p,
+    ink,
+    outline: ink(OUTLINE),
+    w: o.w,
+    body: B,
+    neck: N,
+    headM: H,
+    tail,
+    halfW: r.tipRy,
+    walk: p.walk,
+    s: Math.sin(p.walk) * p.stride,
+    stride: p.stride,
+    cloak: p.cloak,
+    dash: p.dash,
+    roar: p.roar,
+    stun: p.stun,
+    strike: p.strike,
+  };
+  if (anchor) cos?.topCloak?.(sk, anchor);
   // 두건: 둘레에 닫힌 짙은 선 대신 둥근 머리 양옆에서 어깨에 드리운 부드러운 원형 그늘로 갈라 망토에서 솟은 머리로 읽히게
   // 하고, 뒤로 흐르는 끝은 그늘 없이 망토로 이어진다 (뒤 끝에 날카로운 그늘 선을 두르면 작은 크기에서 뒤를 가리키는 V로 읽힌다)
   const hood = hoodPath(H);
@@ -793,6 +817,7 @@ function top(p: MonsterPose, o: ArtOptions): Drawing {
     undefined,
     0,
   );
+  if (anchor) cos?.topHead?.(sk, anchor);
   // 얼굴 그늘: 두건 앞쪽 머리 폭을 덮는 짙은 그늘 (챙 바로 밑은 더 깊은 그늘, 나머지는 얼굴색 #1A0B0E — VISUAL_SPEC 4.3)
   sk.fill(
     faceShape(H, r, 'all'),
@@ -902,10 +927,11 @@ const BUST_EL: Pt = [0.6, 0.45];
 const BUST_WR: Pt = [0.4, 0.3];
 const BUST_CLAW = 0.9;
 
-function front(p: FrontPose, o: ArtOptions): Drawing {
+function front(p: FrontPose, o: MonsterArtOptions): Drawing {
   const ink = inkFor(p.tone);
   const C = MONSTER_COLOR;
   const sk = new Sketch(o.w);
+  const cos = monsterCostumeArt(o.costume);
   const M: Mat = p.bust
     ? mul(translate(0, BUST_DY), scale(BUST_K))
     : mul(translate(0, FULL_DY), scale(FULL_K));
@@ -921,6 +947,23 @@ function front(p: FrontPose, o: ArtOptions): Drawing {
   // ── 층 1: 망토 (뒤, 땅까지 늘어진 톱니 자락. 아래로 갈수록 짙은 그림자).
   // 상반신은 크게 키우므로 자락을 좁혀 좌우 상자 안에 둔다 (아래는 로비 역할 카드 · 결과 화면 상자가 자른다) ──
   const hemW = p.bust ? 0.62 : 0.72;
+  // 의상 기준점 (손목: 전신은 늘어뜨린 손, 상반신은 망토 앞을 쥔 손 — 아래 arms()와 같은 자리)
+  const wrist = (side: -1 | 1): Pt =>
+    p.bust ? [side * BUST_WR[0], BUST_WR[1] + by] : [side * 0.6, 0.58 + Math.sin(t * 1.3 + side) * 0.012];
+  const anchor: MonsterFrontAnchor | null = cos && {
+    ink,
+    outline: ink(OUTLINE),
+    w: o.w,
+    t,
+    by,
+    bust: p.bust,
+    m: M,
+    ls,
+    hy,
+    hemW,
+    wrists: [wrist(-1), wrist(1)],
+    rim,
+  };
   const hem: Pt[] = [];
   const n = 9;
   for (let i = 0; i <= n; i += 1) {
@@ -997,6 +1040,7 @@ function front(p: FrontPose, o: ArtOptions): Drawing {
     ]),
   );
 
+  if (anchor) cos?.frontCloak?.(sk, anchor);
   // ── 층 2 (전신): 길게 늘어뜨린 팔 · 자락 쪽으로 처진 작은 발톱 (어깨 망토 아래에서 나온다. 구부정한 사냥꾼) ──
   const arms = (): void => {
     for (const side of [-1, 1]) {
@@ -1080,6 +1124,7 @@ function front(p: FrontPose, o: ArtOptions): Drawing {
       0.03 * ls,
     );
 
+  if (anchor) cos?.frontMantle?.(sk, anchor);
   // ── 층 4 (상반신): 망토 아랫단을 움켜쥔 손 · 작은 발톱 (어깨 망토 위) ──
   if (p.bust) {
     sk.layer();
@@ -1088,20 +1133,21 @@ function front(p: FrontPose, o: ArtOptions): Drawing {
 
   // ── 층 5: 두건 · 얼굴 ──
   sk.layer();
-  // 두건 (뾰족한 꼭대기 하나 — 뿔 대신 두건 끝만 작게 솟는다)
+  // 두건 (뾰족한 꼭대기 하나 — 뿔 대신 두건 끝만 작게 솟는다). 의상이 두건 윤곽을 바꿀 수 있다(긴 고깔)
+  const hoodPts: readonly Pt[] = [
+    [0, hy - 0.5],
+    [0.26, hy - 0.31],
+    [0.45, hy - 0.03],
+    [0.47, hy + 0.2],
+    [0.32, hy + 0.37],
+    [0, hy + 0.39],
+    [-0.32, hy + 0.37],
+    [-0.47, hy + 0.2],
+    [-0.45, hy - 0.03],
+    [-0.26, hy - 0.31],
+  ];
   const hood = path(M).smooth(
-    [
-      [0, hy - 0.5],
-      [0.26, hy - 0.31],
-      [0.45, hy - 0.03],
-      [0.47, hy + 0.2],
-      [0.32, hy + 0.37],
-      [0, hy + 0.39],
-      [-0.32, hy + 0.37],
-      [-0.47, hy + 0.2],
-      [-0.45, hy - 0.03],
-      [-0.26, hy - 0.31],
-    ],
+    anchor && cos?.frontHood ? [...cos.frontHood(hoodPts, anchor)] : [...hoodPts],
     0.7,
   ).d;
   sk.part(
@@ -1201,6 +1247,7 @@ function front(p: FrontPose, o: ArtOptions): Drawing {
       [1, ink(C.eyeGlow), 0],
     ]),
   );
+  if (anchor) cos?.frontOver?.(sk, anchor);
   return sk.drawing();
 }
 

@@ -1,7 +1,15 @@
 // config/progression.json 모양 검사 (단위 시험 · 서버 시작 때). 틀리면 어디가 틀렸는지 예외를 낸다.
 // 클라이언트 묶음에는 넣지 않는다(progression.ts의 PROGRESSION은 그대로 쓴다 — 같은 파일을 시험이 검사한다)
-import { MONSTER_EMBLEMS, SURVIVOR_EMBLEMS, type EmblemId, type RatingStatId, type Team } from '../types';
-import type { ChallengeDef, ChallengeTeam, EmblemDef, Progression } from './progression';
+import {
+  MONSTER_COSTUMES,
+  MONSTER_EMBLEMS,
+  SURVIVOR_COSTUMES,
+  SURVIVOR_EMBLEMS,
+  type EmblemId,
+  type RatingStatId,
+  type Team,
+} from '../types';
+import type { ChallengeDef, ChallengeTeam, CostumePrices, EmblemDef, Progression } from './progression';
 
 const STAT_IDS: readonly RatingStatId[] = [
   'captureSec',
@@ -131,7 +139,43 @@ export function validateProgression(raw: unknown): Progression {
   for (const k of Object.keys(d)) {
     if (!(k in daily)) fail(`daily.${k}`, '모르는 팀 (survivor · monster · any)');
   }
-  return { version, emblems, xp, level, coins, login, daily };
+  return { version, emblems, xp, level, coins, login, daily, costumes: validateCostumes(o.costumes) };
+}
+
+/** 의상 값: 팀마다 기본을 뺀 모든 의상에 정수 값(불씨 1 이상), 모르는 의상은 안 된다 */
+function validateCostumes(raw: unknown): CostumePrices {
+  const c = obj(raw, 'costumes');
+  const team = <K extends string>(key: 'survivor' | 'monster', ids: readonly K[]): Record<K, number> => {
+    const t = obj(c[key], `costumes.${key}`);
+    const out = {} as Record<K, number>;
+    for (const id of ids) {
+      const v = num(t[id], `costumes.${key}.${id}`, 1);
+      if (!Number.isInteger(v)) fail(`costumes.${key}.${id}`, '정수여야 한다');
+      out[id] = v;
+    }
+    for (const k of Object.keys(t)) {
+      if (!(ids as readonly string[]).includes(k))
+        fail(`costumes.${key}.${k}`, '모르는 의상 (기본은 값이 없다)');
+    }
+    return out;
+  };
+  for (const k of Object.keys(c)) {
+    if (k !== 'survivor' && k !== 'monster') fail(`costumes.${k}`, '모르는 팀 (survivor · monster)');
+  }
+  return {
+    survivor: team(
+      'survivor',
+      SURVIVOR_COSTUMES.filter(
+        (id): id is Exclude<(typeof SURVIVOR_COSTUMES)[number], 'basic'> => id !== 'basic',
+      ),
+    ),
+    monster: team(
+      'monster',
+      MONSTER_COSTUMES.filter(
+        (id): id is Exclude<(typeof MONSTER_COSTUMES)[number], 'basic'> => id !== 'basic',
+      ),
+    ),
+  };
 }
 
 /** 도전 id: 짧은 영문 소문자 · 숫자 · '-' (저장 기록에 그대로 들어간다) */

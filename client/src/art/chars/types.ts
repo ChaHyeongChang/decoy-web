@@ -1,4 +1,5 @@
 // 새 캐릭터 그림의 자세 · 모듈 형식 (캐릭터 리디자인). 순수 타입 + 기본값. 판정과 무관한 장식 값이다.
+import type { MonsterCostumeId, SurvivorCostumeId } from '@decoy/shared';
 import type { Drawing } from './kit';
 
 /** 새 캐릭터 그림 id. common = 괴물 화면의 공통 생존자 (역할 단서 없음) */
@@ -97,13 +98,31 @@ export interface ArtOptions {
   w: number;
 }
 
+/** 역할 생존자 그리는 값: 의상 (없으면 기본). 의상은 모양 장식뿐 — 판정 · 크기 기준과 무관 */
+export interface SurvivorArtOptions extends ArtOptions {
+  costume?: SurvivorCostumeId;
+}
+
+/** 괴물 그리는 값: 의상 (없으면 기본) */
+export interface MonsterArtOptions extends ArtOptions {
+  costume?: MonsterCostumeId;
+}
+
+/**
+ * 괴물 화면 공통 생존자 그리는 값: 의상 칸이 없다(never) — 생존자 그리는 값(SurvivorArtOptions)을 그대로 넘기는 길도
+ * 타입에서 막힌다 (VISUAL_SPEC 0장 ③ 흰색 위장: 의상 · 역할 단서 없음)
+ */
+export interface CommonArtOptions extends ArtOptions {
+  costume?: never;
+}
+
 /** 역할 생존자 그림 모듈 (생존자 화면) */
 export interface SurvivorArt {
   readonly id: RoleCharId;
   /** 위에서 본 그림 (단위 = 몸 반지름 1, +x = 바라보는 방향) */
-  top(p: SurvivorPose, o: ArtOptions): Drawing;
+  top(p: SurvivorPose, o: SurvivorArtOptions): Drawing;
   /** 정면 그림 (상자 [−1, 1]²) */
-  front(p: FrontPose, o: ArtOptions): Drawing;
+  front(p: FrontPose, o: SurvivorArtOptions): Drawing;
   /** 위에서 본 그림이 차지하는 반쪽 크기 (몸 반지름 배수, 외곽선 제외, 모든 자세). 굽기 프레임 크기 */
   readonly topExtent: number;
 }
@@ -111,16 +130,16 @@ export interface SurvivorArt {
 /** 공통 생존자 그림 모듈 (괴물 화면). 자세는 HiddenPose뿐이라 역할 · 체력 · 능력 · 구조 값을 넣을 수 없다 */
 export interface CommonArt {
   readonly id: 'common';
-  top(p: HiddenPose, o: ArtOptions): Drawing;
-  front(p: FrontPose, o: ArtOptions): Drawing;
+  top(p: HiddenPose, o: CommonArtOptions): Drawing;
+  front(p: FrontPose, o: CommonArtOptions): Drawing;
   readonly topExtent: number;
 }
 
 /** 괴물 그림 모듈 */
 export interface MonsterArt {
   readonly id: 'monster';
-  top(p: MonsterPose, o: ArtOptions): Drawing;
-  front(p: FrontPose, o: ArtOptions): Drawing;
+  top(p: MonsterPose, o: MonsterArtOptions): Drawing;
+  front(p: FrontPose, o: MonsterArtOptions): Drawing;
   readonly topExtent: number;
 }
 
