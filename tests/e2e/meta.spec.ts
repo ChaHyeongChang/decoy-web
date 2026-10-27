@@ -7,7 +7,10 @@ import {
   type Role,
   type ServerMessage,
 } from '@decoy/shared';
-import { PROGRESSION, dayKeyOf, loginReward, pickDaily } from '@decoy/shared/meta';
+import { readFileSync } from 'node:fs';
+// @decoy/shared/meta 묶음은 progression.json을 import로 가져와 Playwright(Node ESM)에서 못 읽는다. 수치는 파일로 읽고 계산 함수만 가져온다
+import { dayKeyOf, loginReward, pickDaily } from '../../shared/src/meta/daily';
+import { validateProgression } from '../../shared/src/meta/progressionCheck';
 import { collectFrames } from './frames';
 import {
   BASE_QUERY,
@@ -24,6 +27,7 @@ import {
 } from './helpers';
 
 const KEY = 'decoy:progress';
+const PROGRESSION = validateProgression(JSON.parse(readFileSync('config/progression.json', 'utf8')));
 
 /** 봇과 연습을 그 역할로 시작해 첫 스냅샷까지 */
 async function startPractice(page: Page, role: Role, query = ''): Promise<void> {
