@@ -144,6 +144,27 @@ test(
         .poll(() => atlasDress(p.page), { timeout: 15_000 })
         .toBe('runner:scarf,guard:pack,scout:cape,monster:chains');
 
+    // 같은 칸 바꿔 굽기 비용 (기록용, docs/PERF.md 9.4): 판 시작 명단으로 그 판 의상 칸만 프레임마다 나눠 다시 그린 시간
+    // (합 · 가장 긴 한 프레임 · 프레임 수) · 텍스처 크기(의상이 있어도 그대로)
+    for (const p of players) {
+      const f = await p.page.evaluate(() => {
+        const g = window.__DECOY__!.gfx.features;
+        return [
+          g.atlasRecostumeMs,
+          g.atlasRecostumeMaxStepMs,
+          g.atlasRecostumeSteps,
+          g.atlasBakeMs,
+          g.atlasBytes,
+        ];
+      });
+      console.log(
+        `[costume] ${p.role}: 의상 칸 다시 굽기 합 ${String(f[0])}ms · 한 프레임 최대 ${String(f[1])}ms · ${String(f[2])}프레임 · 처음 굽기 ${String(f[3])}ms · 텍스처 ${String(f[4])}B`,
+      );
+      // 한 프레임에 그리는 일은 예산(4ms) + 칸 하나 몫 · 옮겨 올리기 정도 (한 번에 그리던 0.1~0.25초가 프레임 하나에 몰리지 않는다)
+      // (판 중에 바꿔 굽지 않았으면 — 로비에서 내 의상을 미리 구웠고 명단에 다른 의상이 없으면 — 값이 없다)
+      expect(Number(f[1] ?? 0), `${p.role} 한 프레임 최대`).toBeLessThan(40);
+    }
+
     // 3) 괴물 화면: 셋을 차례로 같은 자리 · 같은 방향에 세우고 같은 그림 시계로 찍은 조각이 같다
     await host.keyboard.press('KeyX');
     await host.waitForFunction(() => (window.__DECOY__?.getBanners() ?? []).length === 0, null, {

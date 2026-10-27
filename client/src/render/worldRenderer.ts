@@ -55,7 +55,7 @@ import {
   writePiece,
   type TravelPiece,
 } from '../art/anim';
-import { MOTE_R, cloakFrameName, ensureAtlas, type AtlasBuild } from '../art/atlas';
+import { MOTE_R, RECOSTUME_STEP_MS, cloakFrameName, ensureAtlas, type AtlasBuild } from '../art/atlas';
 import { NEW_POSE_MS, monsterFrameNew, type MonsterFrameInput } from '../art/charFrames';
 import { starSlot } from '../art/shapes';
 import {
@@ -800,15 +800,20 @@ export class WorldRenderer {
 
   /** 그림 텍스처 (zoom · 반지름 · 캐릭터 스타일이 바뀌면 다시 굽고 그림 묶음을 새로 만든다) */
   private ensureArt(balance: Balance): AtlasBuild {
-    const a = ensureAtlas(this.scene.textures, {
-      zoom: gfxState.zoom,
-      texCap: this.preset.charTexelCap,
-      worldScale: WORLD_SCALE,
-      survivorR: balance.survivor.radius,
-      monsterR: balance.monster.radius,
-      style: currentCharStyle(),
-      costumes: bakeCostumes(),
-    });
+    const a = ensureAtlas(
+      this.scene.textures,
+      {
+        zoom: gfxState.zoom,
+        texCap: this.preset.charTexelCap,
+        worldScale: WORLD_SCALE,
+        survivorR: balance.survivor.radius,
+        monsterR: balance.monster.radius,
+        style: currentCharStyle(),
+        costumes: bakeCostumes(),
+      },
+      // 판 시작 명단으로 의상만 바뀌면 프레임마다 나눠 그린다 (판 시작 첫 프레임이 멈추지 않게)
+      RECOSTUME_STEP_MS,
+    );
     if (a.key !== this.atlasKey) {
       this.resetRigs();
       this.atlasKey = a.key;
