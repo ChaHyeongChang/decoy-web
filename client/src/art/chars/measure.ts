@@ -264,6 +264,17 @@ function pathSubpaths(d: string): SubPath[] {
   return out;
 }
 
+/** 경로 d → 하위 경로 (그림 좌표). 같은 그림을 여러 크기 · 방향으로 칠할 때 다시 읽지 않는다 (많아지면 비운다) */
+const SUBPATH_CACHE = new Map<string, SubPath[]>();
+function cachedSubpaths(d: string): SubPath[] {
+  let v = SUBPATH_CACHE.get(d);
+  if (!v) {
+    if (SUBPATH_CACHE.size >= 20000) SUBPATH_CACHE.clear();
+    SUBPATH_CACHE.set(d, (v = pathSubpaths(d)));
+  }
+  return v;
+}
+
 /** sRGB 채널 0~1 → 선형 (WCAG 상대 휘도 식) */
 function toLinear(v: number): number {
   return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
@@ -318,6 +329,9 @@ function stopLut(stops: readonly Stop[]): Float64Array {
   return lut;
 }
 
+/** 정지점 배열 → 표 (같은 그림을 여러 크기로 칠할 때 다시 만들지 않는다) */
+const LUT_CACHE = new WeakMap<readonly Stop[], Float64Array>();
+
 /** 칠 → 표본기. 그림 좌표의 칠을 rot만큼 돌려 화면 좌표에서 읽는다. alpha = 명령 알파 */
 function sampler(p: Paint, rot: number, alpha: number): Sampler {
   const c = Math.cos(rot);
@@ -335,7 +349,8 @@ function sampler(p: Paint, rot: number, alpha: number): Sampler {
       out[3] = a;
     };
   }
-  const lut = stopLut(p.stops);
+  let lut = LUT_CACHE.get(p.stops);
+  if (!lut) LUT_CACHE.set(p.stops, (lut = stopLut(p.stops)));
   const put = (t: number, out: Float64Array): void => {
     const k = Math.round(Math.max(0, Math.min(1, t)) * 255) * 4;
     out[0] = (lut[k] ?? 0) * alpha;
@@ -356,61 +371,224 @@ function sampler(p: Paint, rot: number, alpha: number): Sampler {
   return (x, y, out) => put(Math.hypot(x - cx, y - cy) / r, out);
 }
 
-/** 칠한 그림: 칸마다 알파 곱한 [r, g, b, a] (sRGB 0~1). 격자는 drawingMask와 같다 (n × n, 범위 ±1.7r, 몸 지름 dpx 칸) */
+/**
+ * 칠한 그림: 칸마다 알파 곱한 [r, g, b, a] (sRGB 0~1). 격자는 n × n (n = ⌈1.7 × dpx⌉, 범위 ±1.7r 이상), 칸 하나 = 1 텍셀,
+ * 그림 단위 1 = dpx / 2 텍셀 (게임 아틀라스와 같은 배율). 그림 원점(몸 중심)은 칸 좌표 (cx, cy) — 칸 i는 x ∈ [i, i + 1)
+ */
 export interface DrawingRaster {
   readonly n: number;
   readonly rgba: Float32Array;
+  /** 그림 원점의 칸 좌표 (없으면 n / 2) */
+  readonly cx?: number;
+  readonly cy?: number;
+}
+
+export interface RasterOptions {
+  /**
+   * 칸마다 가로 표본 줄 수 (기본 4 — Skia 분석 안티에일리어싱이 꼭짓점 y를 1/4 화소에 맞추는 것과 같은 세로 분해능: 칸 안에서
+   * 맞닿은 두 도형의 이음매 몫이 Chromium과 같다). 줄 위 덮임은 구간 길이로 정확히 잰다
+   */
+  readonly ss?: number;
+  /** 그림 원점의 어긋남 (텍셀, 격자 가운데 n / 2에서) — 화소 격자에 대한 위상 */
+  readonly dx?: number;
+  readonly dy?: number;
+}
+
+/** 덮임 누적기: 명령 하나가 칸마다 덮는 몫 (0~1)과 건드린 칸 목록 */
+class Coverage {
+  readonly cov: Float64Array;
+  readonly seen: Uint8Array;
+  readonly touched: number[] = [];
+  constructor(readonly n: number) {
+    this.cov = new Float64Array(n * n);
+    this.seen = new Uint8Array(n * n);
+  }
+
+  /** 칸 줄 j에 가로 구간 [xa, xb) (텍셀)를 무게 wt로 더한다 — 칸마다 겹친 길이만큼 */
+  span(j: number, xa: number, xb: number, wt: number): void {
+    const n = this.n;
+    const a = Math.max(0, xa);
+    const b = Math.min(n, xb);
+    if (!(b > a)) return;
+    const i0 = Math.floor(a);
+    const i1 = Math.min(n - 1, Math.ceil(b) - 1);
+    const row = j * n;
+    for (let i = i0; i <= i1; i += 1) {
+      const o = Math.min(b, i + 1) - Math.max(a, i);
+      if (o <= 0) continue;
+      const p = row + i;
+      if (!this.seen[p]) {
+        this.seen[p] = 1;
+        this.touched.push(p);
+      }
+      this.cov[p] = (this.cov[p] ?? 0) + o * wt;
+    }
+  }
+
+  /** 칸 (i, j)에 덮임 v를 더한다 (격자 밖은 버린다) */
+  add(i: number, j: number, v: number): void {
+    const n = this.n;
+    if (v <= 0 || i < 0 || j < 0 || i >= n || j >= n) return;
+    const p = j * n + i;
+    if (!this.seen[p]) {
+      this.seen[p] = 1;
+      this.touched.push(p);
+    }
+    this.cov[p] = (this.cov[p] ?? 0) + v;
+  }
+
+  /**
+   * 가는 선(머리카락 선) 한 마디: Skia 안티에일리어싱 머리카락 선과 같게 긴 축 칸마다 덮임 1을 짧은 축 두 칸에 나눈다 (칸 가운데에서
+   * 선의 자리 − 0.5의 소수부로). 첫 · 끝 칸은 마디가 걸친 몫만. 선 전체 덮임 합 = 긴 축 길이 × k (비스듬한 선은 길이보다 적다)
+   */
+  hairline(x0: number, y0: number, x1: number, y1: number, k: number): void {
+    const steep = Math.abs(y1 - y0) >= Math.abs(x1 - x0);
+    // 긴 축을 a, 짧은 축을 b로
+    let a0 = steep ? y0 : x0;
+    let b0 = steep ? x0 : y0;
+    let a1 = steep ? y1 : x1;
+    let b1 = steep ? x1 : y1;
+    if (a1 === a0) return;
+    if (a1 < a0) {
+      [a0, a1] = [a1, a0];
+      [b0, b1] = [b1, b0];
+    }
+    const slope = (b1 - b0) / (a1 - a0);
+    for (let i = Math.floor(a0); i < Math.ceil(a1); i += 1) {
+      const f = Math.min(a1, i + 1) - Math.max(a0, i);
+      if (f <= 0) continue;
+      const bb = b0 + slope * (i + 0.5 - a0) - 0.5;
+      const r = Math.floor(bb);
+      const fr = bb - r;
+      if (steep) {
+        this.add(r, i, f * (1 - fr) * k);
+        this.add(r + 1, i, f * fr * k);
+      } else {
+        this.add(i, r, f * (1 - fr) * k);
+        this.add(i, r + 1, f * fr * k);
+      }
+    }
+  }
+
+  reset(): void {
+    for (const p of this.touched) {
+      this.cov[p] = 0;
+      this.seen[p] = 0;
+    }
+    this.touched.length = 0;
+  }
+}
+
+/** [키, 값, 키, 값 …] 짝을 키 순서로 (줄마다 짝이 몇 개뿐이라 끼워 넣기 정렬) */
+function sortPairs(a: number[]): void {
+  for (let i = 2; i < a.length; i += 2) {
+    const k = a[i] ?? 0;
+    const v = a[i + 1] ?? 0;
+    let j = i - 2;
+    while (j >= 0 && (a[j] ?? 0) > k) {
+      a[j + 2] = a[j] ?? 0;
+      a[j + 3] = a[j + 1] ?? 0;
+      j -= 2;
+    }
+    a[j + 2] = k;
+    a[j + 3] = v;
+  }
+}
+
+/** 표본 줄 하나의 구간들을 합쳐(겹치면 한 번) 덮임에 더한다. xs = [시작, 끝, 시작, 끝 …] (정렬한다) */
+function mergeSpans(cv: Coverage, j: number, xs: number[], wt: number): void {
+  if (xs.length > 2) sortPairs(xs);
+  let a = xs[0] ?? 0;
+  let b = xs[1] ?? 0;
+  for (let q = 2; q < xs.length; q += 2) {
+    const s = xs[q] ?? 0;
+    const e = xs[q + 1] ?? 0;
+    if (s <= b) b = Math.max(b, e);
+    else {
+      cv.span(j, a, b, wt);
+      a = s;
+      b = e;
+    }
+  }
+  if (xs.length > 0) cv.span(j, a, b, wt);
 }
 
 /**
- * 그림을 Node에서 칠한다 (Canvas 없이, 결정적): 명령을 앞에서부터 겹쳐 칠하고(source-over, sRGB 공간 — Canvas2D와 같다)
- * 단색 · 선형 · 원형 칠(정지점 알파), 명령 알파, nonzero · evenodd 규칙, 선(경로 꺾은선까지 거리 ≤ 두께/2 — 둥근 이음,
- * 열린 끝의 butt 끝은 자른다)을 넣는다. 칸마다 ss × ss 표본을 칠해 평균한다(안티에일리어싱). rot = 화면에서 돌린 각
- * (drawingMask와 같은 방향). 명령마다 경계 상자 밖 표본은 건너뛴다
+ * 그림을 Node에서 칠한다 (Canvas 없이, 결정적). Canvas2D처럼 명령(칠 · 선)마다 따로 칸 단위로 겹친다:
+ * 명령 하나가 칸을 덮는 몫(안티에일리어싱 덮임 0~1)을 먼저 재고, 칸 가운데의 칠 색 × 덮임을 source-over로 얹는다 (sRGB 공간,
+ * 알파 곱한 값). 그래서 두 도형이 맞닿은 이음매(예: 깃대를 따라 나뉜 두 광택 반쪽)는 Canvas와 같이 두 도형이 각자 반쯤 덮은
+ * 칸에서 밑 색이 비친다 — 표본을 다 칠한 뒤 평균하면(1판 방식) 이음매가 감쪽같이 메워져 실제 화면보다 밝게 나온다.
+ *  - 덮임: 칸마다 가로 표본 줄 ss개(기본 4), 줄 위에서는 도형과 겹친 구간 길이를 정확히 잰다 (Skia 분석 안티에일리어싱에 가깝다)
+ *  - 칠: 단색 · 선형 · 원형(정지점 알파 — 알파 곱한 값으로 보간), 명령 알파, nonzero · evenodd 규칙. 칠 색은 칸 가운데에서 읽는다
+ *  - 선: 경로 꺾은선 마디마다 둥근 캡슐(반폭 = 두께 / 2, 둥근 이음), 열린 끝의 butt 끝은 자른다. 한 명령 안에서 겹친 곳은
+ *    한 번만 덮는다 (Canvas 선과 같다 — 줄마다 캡슐 구간을 합친다). 화면에서 1px 이하인 선은 Skia처럼 머리카락 선 × 두께
+ *  - Chromium과 견준 값 · 남은 차이: scripts/char-art/raster-calibrate.ts (tests/unit/costume-parity.test.ts 'Chromium 기준 값')
+ * rot = 화면에서 돌린 각 (drawingMask와 같은 방향), opts.dx · dy = 원점의 텍셀 어긋남(위상)
  */
-export function drawingRaster(dr: Drawing, dpx: number, rot = 0, ss = 3): DrawingRaster {
+export function drawingRaster(dr: Drawing, dpx: number, rot = 0, opts: RasterOptions = {}): DrawingRaster {
   const ext = 1.7;
+  const ss = Math.max(1, Math.round(opts.ss ?? 4));
   const n = Math.ceil(dpx * ext);
-  const N = n * ss;
-  const h = (2 * ext) / N;
-  const buf = new Float64Array(N * N * 4);
-  const stamp = new Int32Array(N * N);
-  const hits: number[] = [];
+  const u = dpx / 2;
+  const cx = n / 2 + (opts.dx ?? 0);
+  const cy = n / 2 + (opts.dy ?? 0);
+  const M = n * ss;
+  const buf = new Float64Array(n * n * 4);
+  const cv = new Coverage(n);
+  const rows: number[][] = Array.from({ length: M }, () => []);
+  const used: number[] = [];
   const col = new Float64Array(4);
   const c = Math.cos(rot);
   const s = Math.sin(rot);
-  let mark = 0;
-  /** 화면 좌표 → 표본 번호 (가운데가 그 좌표보다 크거나 같은 첫 표본) */
-  const idx = (v: number): number => Math.ceil((v + ext) / h - 0.5);
-  const cover = (k: number): void => {
-    if (stamp[k] !== mark) {
-      stamp[k] = mark;
-      hits.push(k);
-    }
+  /** 표본 줄 m의 텍셀 y */
+  const rowY = (m: number): number => (m + 0.5) / ss;
+  /** 텍셀 y 이상인 첫 표본 줄 */
+  const rowAt = (y: number): number => Math.ceil(y * ss - 0.5);
+  const push = (m: number, a: number, b: number): void => {
+    const r = rows[m];
+    if (!r) return;
+    if (r.length === 0) used.push(m);
+    r.push(a, b);
   };
-  const paint = (smp: Sampler): void => {
-    for (const k of hits) {
-      const i = k % N;
-      const j = (k - i) / N;
-      smp(-ext + (i + 0.5) * h, -ext + (j + 0.5) * h, col);
-      const sa = col[3] ?? 0;
+  /** 선 구간 넣기: 줄의 마지막 구간과 겹치면 늘린다 (꺾은선의 이웃 마디는 거의 늘 겹친다) */
+  const pushSpan = (m: number, a: number, b: number): void => {
+    const r = rows[m];
+    if (!r) return;
+    const L = r.length;
+    if (L === 0) used.push(m);
+    else if (a <= (r[L - 1] ?? 0) && b >= (r[L - 2] ?? 0)) {
+      r[L - 2] = Math.min(r[L - 2] ?? 0, a);
+      r[L - 1] = Math.max(r[L - 1] ?? 0, b);
+      return;
+    }
+    r.push(a, b);
+  };
+  /** 명령 하나의 덮임을 칠 색으로 얹는다 */
+  const composite = (smp: Sampler): void => {
+    for (const p of cv.touched) {
+      const k = Math.min(1, cv.cov[p] ?? 0);
+      if (k <= 0) continue;
+      const i = p % n;
+      const j = (p - i) / n;
+      smp((i + 0.5 - cx) / u, (j + 0.5 - cy) / u, col);
+      const sa = (col[3] ?? 0) * k;
       if (sa <= 0) continue;
-      const o = k * 4;
-      for (let q = 0; q < 4; q += 1) buf[o + q] = (col[q] ?? 0) + (buf[o + q] ?? 0) * (1 - sa);
+      const o = p * 4;
+      for (let q = 0; q < 4; q += 1) buf[o + q] = (col[q] ?? 0) * k + (buf[o + q] ?? 0) * (1 - sa);
     }
+    cv.reset();
   };
+  const toTexel = (x: number, y: number): P2 => [cx + u * (x * c - y * s), cy + u * (x * s + y * c)];
   for (const op of dr.ops) {
     const alpha = op.alpha ?? 1;
     if (alpha <= 0 || (!op.fill && !op.stroke)) continue;
-    const subs = pathSubpaths(op.d).map((sp) => ({
+    // 텍셀 좌표로 옮긴 하위 경로
+    const subs = cachedSubpaths(op.d).map((sp) => ({
       closed: sp.closed,
-      pts: sp.pts.map(([x, y]): P2 => [x * c - y * s, x * s + y * c]),
+      pts: sp.pts.map(([x, y]) => toTexel(x, y)),
     }));
     if (op.fill) {
-      // 칠: 표본 줄마다 변과의 교차점(감김 방향)을 모아 nonzero · evenodd로 구간을 채운다
-      mark += 1;
-      hits.length = 0;
-      const rows = new Map<number, number[]>();
+      // 칠: 표본 줄마다 변과의 교차점(감김 방향)을 모아 nonzero · evenodd로 안쪽 구간을 덮는다 (열린 하위 경로도 닫아 칠한다)
       for (const sp of subs)
         for (let e = 0; e < sp.pts.length; e += 1) {
           const a = sp.pts[e];
@@ -419,44 +597,68 @@ export function drawingRaster(dr: Drawing, dpx: number, rot = 0, ss = 3): Drawin
           const up = a[1] < b[1];
           const y0 = up ? a[1] : b[1];
           const y1 = up ? b[1] : a[1];
-          // 가운데 y가 [y0, y1)인 표본 줄
-          const j0 = Math.max(0, idx(y0));
-          const j1 = Math.min(N - 1, idx(y1) - 1);
-          for (let j = j0; j <= j1; j += 1) {
-            const Y = -ext + (j + 0.5) * h;
-            const x = a[0] + ((Y - a[1]) * (b[0] - a[0])) / (b[1] - a[1]);
-            let row = rows.get(j);
-            if (!row) rows.set(j, (row = []));
-            row.push(x, up ? 1 : -1);
+          const m0 = Math.max(0, rowAt(y0));
+          const m1 = Math.min(M - 1, rowAt(y1) - 1);
+          for (let m = m0; m <= m1; m += 1) {
+            const x = a[0] + ((rowY(m) - a[1]) * (b[0] - a[0])) / (b[1] - a[1]);
+            push(m, x, up ? 1 : -1);
           }
         }
       const evenodd = op.rule === 'evenodd';
-      for (const [j, row] of rows) {
-        const xs: [number, number][] = [];
-        for (let q = 0; q < row.length; q += 2) xs.push([row[q] ?? 0, row[q + 1] ?? 0]);
-        xs.sort((p, q) => p[0] - q[0]);
+      for (const m of used) {
+        const row = rows[m] ?? [];
+        sortPairs(row);
         let wn = 0;
         let cross = 0;
-        for (let q = 0; q + 1 < xs.length; q += 1) {
-          const cur = xs[q];
-          const next = xs[q + 1];
-          if (!cur || !next) continue;
-          wn += cur[1];
+        const j = Math.floor(m / ss);
+        for (let q = 0; q + 2 < row.length; q += 2) {
+          wn += row[q + 1] ?? 0;
           cross += 1;
           if (evenodd ? cross % 2 === 0 : wn === 0) continue;
-          const i0 = Math.max(0, idx(cur[0]));
-          const i1 = Math.min(N - 1, idx(next[0]) - 1);
-          for (let i = i0; i <= i1; i += 1) cover(j * N + i);
+          cv.span(j, row[q] ?? 0, row[q + 2] ?? 0, 1 / ss);
         }
+        row.length = 0;
       }
-      paint(sampler(op.fill, rot, alpha));
+      used.length = 0;
+      composite(sampler(op.fill, rot, alpha));
     }
     if (op.stroke) {
-      // 선: 마디(선분)마다 둥근 캡슐(반폭 hw) 안 표본. 한 명령 안에서 겹친 곳은 한 번만 칠한다 (Canvas 선과 같다)
-      mark += 1;
-      hits.length = 0;
-      const hw = op.stroke.width / 2;
+      const hw = (op.stroke.width / 2) * u;
       const butt = op.stroke.cap === 'butt';
+      // 화면에서 1px 이하인 선은 Skia처럼 머리카락 선으로 긋고 덮임을 두께만큼 줄인다 (SkDrawTreatAAStrokeAsHairline:
+      // 두께 벡터 둘의 빠른 길이(긴 축 + 짧은 축 / 2)가 모두 1 이하면 그 평균이 덮임). 둥근 · 네모 끝은 열린 끝을 π/8 · 0.5px 늘인다
+      const fast = (x: number, y: number): number =>
+        Math.abs(x) > Math.abs(y) ? Math.abs(x) + Math.abs(y) / 2 : Math.abs(y) + Math.abs(x) / 2;
+      const l0 = fast(2 * hw * c, 2 * hw * s);
+      const l1 = fast(-2 * hw * s, 2 * hw * c);
+      if (l0 <= 1 && l1 <= 1) {
+        const k = (l0 + l1) / 2;
+        const out = butt ? 0 : Math.PI / 8;
+        for (const sp of subs) {
+          const P = sp.pts.map((p): P2 => [p[0], p[1]]);
+          const segs = sp.closed ? P.length : P.length - 1;
+          if (segs <= 0) continue;
+          if (!sp.closed && out > 0 && P.length >= 2) {
+            const ext = (p: P2 | undefined, q: P2 | undefined): void => {
+              if (!p || !q) return;
+              const L = Math.hypot(p[0] - q[0], p[1] - q[1]);
+              if (L <= 0) return;
+              p[0] += ((p[0] - q[0]) / L) * out;
+              p[1] += ((p[1] - q[1]) / L) * out;
+            };
+            ext(P[0], P[1]);
+            ext(P[P.length - 1], P[P.length - 2]);
+          }
+          for (let e = 0; e < segs; e += 1) {
+            const a = P[e];
+            const b = P[(e + 1) % P.length];
+            if (a && b) cv.hairline(a[0], a[1], b[0], b[1], k);
+          }
+        }
+        composite(sampler(op.stroke.paint, rot, alpha));
+        continue;
+      }
+      // 선: 마디(선분)마다 둥근 캡슐이 표본 줄과 겹치는 구간(볼록이라 한 구간)을 모아, 줄마다 합쳐 덮는다
       for (const sp of subs) {
         const P = sp.pts;
         const segs = sp.closed ? P.length : P.length - 1;
@@ -465,41 +667,113 @@ export function drawingRaster(dr: Drawing, dpx: number, rot = 0, ss = 3): Drawin
           const a = P[e];
           const b = P[(e + 1) % P.length];
           if (!a || !b) continue;
+          // 열린 끝의 butt 끝: 그 끝의 반원을 빼고 선분 끝에서 자른다
+          const capA = !(butt && !sp.closed && e === 0);
+          const capB = !(butt && !sp.closed && e === segs - 1);
           const dx = b[0] - a[0];
           const dy = b[1] - a[1];
-          const L2 = dx * dx + dy * dy;
-          // 열린 끝의 butt 끝: 선분 끝 너머는 칠하지 않는다
-          const cutStart = butt && !sp.closed && e === 0;
-          const cutEnd = butt && !sp.closed && e === segs - 1;
-          const i0 = Math.max(0, idx(Math.min(a[0], b[0]) - hw));
-          const i1 = Math.min(N - 1, idx(Math.max(a[0], b[0]) + hw) - 1);
-          const j0 = Math.max(0, idx(Math.min(a[1], b[1]) - hw));
-          const j1 = Math.min(N - 1, idx(Math.max(a[1], b[1]) + hw) - 1);
-          for (let j = j0; j <= j1; j += 1) {
-            const Y = -ext + (j + 0.5) * h;
-            for (let i = i0; i <= i1; i += 1) {
-              const X = -ext + (i + 0.5) * h;
-              let t = L2 > 0 ? ((X - a[0]) * dx + (Y - a[1]) * dy) / L2 : 0;
-              if ((cutStart && t < 0) || (cutEnd && t > 1)) continue;
-              t = Math.max(0, Math.min(1, t));
-              if (Math.hypot(X - a[0] - dx * t, Y - a[1] - dy * t) <= hw) cover(j * N + i);
+          const L = Math.hypot(dx, dy);
+          const tx = L > 0 ? dx / L : 1;
+          const ty = L > 0 ? dy / L : 0;
+          const m0 = Math.max(0, rowAt(Math.min(a[1], b[1]) - hw));
+          const m1 = Math.min(M - 1, rowAt(Math.max(a[1], b[1]) + hw) - 1);
+          for (let m = m0; m <= m1; m += 1) {
+            const Y = rowY(m);
+            let lo = Infinity;
+            let hi = -Infinity;
+            // 두 끝의 둥근 끝 (원판)
+            const da = Y - a[1];
+            if (capA && Math.abs(da) <= hw) {
+              const hx = Math.sqrt(hw * hw - da * da);
+              lo = Math.min(lo, a[0] - hx);
+              hi = Math.max(hi, a[0] + hx);
             }
+            const db = Y - b[1];
+            if (capB && Math.abs(db) <= hw) {
+              const hx = Math.sqrt(hw * hw - db * db);
+              lo = Math.min(lo, b[0] - hx);
+              hi = Math.max(hi, b[0] + hx);
+            }
+            if (L > 0) {
+              // 띠: |(X − A)·법선| ≤ hw, 0 ≤ (X − A)·방향 ≤ L — 줄 위에서 x의 구간 둘을 겹친다
+              const ry = Y - a[1];
+              let ra = -Infinity;
+              let rb = Infinity;
+              // 법선 (−ty, tx): f(x) = −(x − ax)·ty + ry·tx
+              if (Math.abs(ty) > 1e-12) {
+                const p = a[0] + (ry * tx - hw) / ty;
+                const q = a[0] + (ry * tx + hw) / ty;
+                ra = Math.max(ra, Math.min(p, q));
+                rb = Math.min(rb, Math.max(p, q));
+              } else if (Math.abs(ry * tx) > hw) rb = -Infinity;
+              // 방향: g(x) = (x − ax)·tx + ry·ty ∈ [0, L]
+              if (Math.abs(tx) > 1e-12) {
+                const p = a[0] + (0 - ry * ty) / tx;
+                const q = a[0] + (L - ry * ty) / tx;
+                ra = Math.max(ra, Math.min(p, q));
+                rb = Math.min(rb, Math.max(p, q));
+              } else if (ry * ty < 0 || ry * ty > L) rb = -Infinity;
+              if (rb > ra) {
+                lo = Math.min(lo, ra);
+                hi = Math.max(hi, rb);
+              }
+            }
+            if (hi > lo) pushSpan(m, lo, hi);
           }
         }
       }
-      paint(sampler(op.stroke.paint, rot, alpha));
+      for (const m of used) {
+        const row = rows[m] ?? [];
+        mergeSpans(cv, Math.floor(m / ss), row, 1 / ss);
+        row.length = 0;
+      }
+      used.length = 0;
+      composite(sampler(op.stroke.paint, rot, alpha));
     }
   }
-  // 칸마다 ss × ss 표본 평균
   const rgba = new Float32Array(n * n * 4);
-  const k2 = 1 / (ss * ss);
-  for (let j = 0; j < N; j += 1)
-    for (let i = 0; i < N; i += 1) {
-      const o = (j * N + i) * 4;
-      const t = (Math.floor(j / ss) * n + Math.floor(i / ss)) * 4;
-      for (let q = 0; q < 4; q += 1) rgba[t + q] = (rgba[t + q] ?? 0) + (buf[o + q] ?? 0) * k2;
+  rgba.set(buf);
+  return { n, rgba, cx, cy };
+}
+
+/**
+ * 화면에 찍기 (게임과 같은 다시 샘플): 아틀라스에 돌리지 않고 구운 그림(src)을 화면에서 rot만큼 돌려, 원점을 텍셀 격자에서
+ * (dx, dy) 어긋난 자리에 1:1로 찍는다. WebGL 선형 보간(텍셀 가운데 기준 쌍선형, 알파 곱한 값 — Phaser는 텍스처를 알파 곱해
+ * 올린다)과 같다. 격자 크기는 src와 같고 원점은 n / 2 + (dx, dy)
+ */
+export function resampleRaster(src: DrawingRaster, rot: number, dx = 0, dy = 0): DrawingRaster {
+  const n = src.n;
+  const sx0 = src.cx ?? n / 2;
+  const sy0 = src.cy ?? n / 2;
+  const cx = n / 2 + dx;
+  const cy = n / 2 + dy;
+  const c = Math.cos(rot);
+  const s = Math.sin(rot);
+  const S = src.rgba;
+  const out = new Float32Array(n * n * 4);
+  const tap = (i: number, j: number, w: number, o: number): void => {
+    if (w <= 0 || i < 0 || j < 0 || i >= n || j >= n) return;
+    const k = (j * n + i) * 4;
+    for (let q = 0; q < 4; q += 1) out[o + q] = (out[o + q] ?? 0) + (S[k + q] ?? 0) * w;
+  };
+  for (let J = 0; J < n; J += 1)
+    for (let I = 0; I < n; I += 1) {
+      const px = I + 0.5 - cx;
+      const py = J + 0.5 - cy;
+      // 화면 → 그림(텍스처): −rot만큼 되돌린다
+      const tx = px * c + py * s + sx0 - 0.5;
+      const ty = -px * s + py * c + sy0 - 0.5;
+      const i0 = Math.floor(tx);
+      const j0 = Math.floor(ty);
+      const fx = tx - i0;
+      const fy = ty - j0;
+      const o = (J * n + I) * 4;
+      tap(i0, j0, (1 - fx) * (1 - fy), o);
+      tap(i0 + 1, j0, fx * (1 - fy), o);
+      tap(i0, j0 + 1, (1 - fx) * fy, o);
+      tap(i0 + 1, j0 + 1, fx * fy, o);
     }
-  return { n, rgba };
+  return { n, rgba: out, cx, cy };
 }
 
 /** 보이는 정도 (칠한 그림 하나). 바닥 = 그림 밑 바닥색 (칸 색은 바닥 위에 얹은 색으로 잰다) */
@@ -675,6 +949,11 @@ export interface VisibilityDetail extends Visibility {
   readonly rimSectorCells: readonly number[];
   /** 바닥 대비 면적: 바닥 위에 얹은 색이 바닥과 WCAG 대비 minContrast 이상인 칸 수 (알파와 상관없이 — 바닥색 칠은 세지 않는다) */
   readonly contrastArea: number;
+  /** 칸마다 바닥 위에 얹은 색의 상대 휘도 (n × n) */
+  readonly pixelLuma: Float64Array;
+  /** 테두리 띠 칸 번호 (k = j × n + i) · 그 칸의 몸 방향 기준 각 (라디안, 0 = 앞, 화면 시계 방향 +, −π ~ π) */
+  readonly rimIndex: Int32Array;
+  readonly rimAngle: Float64Array;
 }
 
 export interface VisibilityDetailOptions {
@@ -687,9 +966,35 @@ export interface VisibilityDetailOptions {
 }
 
 /**
+ * 테두리 띠 칸 값을 조각마다 평균한다 (값 = 칸 번호 k → 값). offset = 조각 배치를 돌리는 몫 (조각 하나 = 1, 0.5면 반 조각
+ * 어긋난 배치 — 조각 0이 앞 가운데가 아니라 앞에서 시계 방향 반 조각 자리에서 시작한다). 칸이 없는 조각은 NaN
+ */
+export function sectorMeans(
+  d: VisibilityDetail,
+  value: (k: number) => number,
+  sectors: number,
+  offset = 0,
+): { mean: number[]; cells: number[] } {
+  const step = (2 * Math.PI) / sectors;
+  const sum = new Float64Array(sectors);
+  const cells = new Float64Array(sectors);
+  for (let q = 0; q < d.rimIndex.length; q += 1) {
+    const a = d.rimAngle[q] ?? 0;
+    const s = ((Math.round(a / step - offset) % sectors) + sectors) % sectors;
+    sum[s] = (sum[s] ?? 0) + value(d.rimIndex[q] ?? 0);
+    cells[s] = (cells[s] ?? 0) + 1;
+  }
+  return {
+    mean: [...sum].map((v, q) => ((cells[q] ?? 0) > 0 ? v / (cells[q] ?? 1) : Number.NaN)),
+    cells: [...cells],
+  };
+}
+
+/**
  * 보이는 정도 자세히 재기. 면적 · 밝기 · 외곽 대비(area · luma · rim · rimCells · rimContrast)는 visibility와 같은 값이다
  * (테두리 띠 거리만 정확한 거리 변환으로 빨리 구한다). 더해서
- *  - 조각별 테두리 띠: 띠 칸을 몸 중심에서 본 각으로 sectors 조각에 나눠 조각마다 평균 상대 휘도
+ *  - 조각별 테두리 띠: 띠 칸을 몸 중심(r.cx, r.cy)에서 본 각으로 sectors 조각에 나눠 조각마다 평균 상대 휘도
+ *    (다른 배치 · 다른 값은 rimIndex · rimAngle로 sectorMeans를 부른다)
  *  - 바닥 대비 면적: 바닥과 대비 minContrast 이상인 칸 수
  */
 export function visibilityDetail(
@@ -714,48 +1019,204 @@ export function visibilityDetail(
   let contrastArea = 0;
   for (let k = 0; k < n * n; k += 1) {
     const a = rgba[k * 4 + 3] ?? 0;
-    const L = luminance01(
-      (rgba[k * 4] ?? 0) + fr * (1 - a),
-      (rgba[k * 4 + 1] ?? 0) + fg * (1 - a),
-      (rgba[k * 4 + 2] ?? 0) + fb * (1 - a),
-    );
+    const L =
+      a <= 0
+        ? lf
+        : luminance01(
+            (rgba[k * 4] ?? 0) + fr * (1 - a),
+            (rgba[k * 4 + 1] ?? 0) + fg * (1 - a),
+            (rgba[k * 4 + 2] ?? 0) + fb * (1 - a),
+          );
+    lum[k] = L;
     if (wcagContrast(L, lf) >= minContrast) contrastArea += 1;
     if (a < 0.5) continue;
     on[k] = 1;
     area += 1;
-    lum[k] = L;
     sum += L;
   }
   const dist = outsideDistance(on, n);
-  const secSum = new Float64Array(sectors);
-  const secCells = new Float64Array(sectors);
-  const step = (2 * Math.PI) / sectors;
-  const c = n / 2;
+  const cx = r.cx ?? n / 2;
+  const cy = r.cy ?? n / 2;
+  const idx: number[] = [];
+  const ang: number[] = [];
   let rim = 0;
-  let rimCells = 0;
   for (let j = 0; j < n; j += 1)
     for (let i = 0; i < n; i += 1) {
       const k = j * n + i;
       if (!on[k]) continue;
       const edge = (dist[k] ?? 0) - 0.5;
       if (!(edge > inPx && edge <= inPx + bandPx)) continue;
-      const L = lum[k] ?? 0;
-      rim += L;
-      rimCells += 1;
-      const s =
-        ((Math.round((Math.atan2(j + 0.5 - c, i + 0.5 - c) - rot) / step) % sectors) + sectors) % sectors;
-      secSum[s] = (secSum[s] ?? 0) + L;
-      secCells[s] = (secCells[s] ?? 0) + 1;
+      rim += lum[k] ?? 0;
+      idx.push(k);
+      let a = Math.atan2(j + 0.5 - cy, i + 0.5 - cx) - rot;
+      a -= 2 * Math.PI * Math.round(a / (2 * Math.PI));
+      ang.push(a);
     }
+  const rimCells = idx.length;
   const rimL = rimCells > 0 ? rim / rimCells : 0;
-  return {
+  const base = {
     area,
     luma: area > 0 ? sum / area : 0,
     rim: rimL,
     rimCells,
     rimContrast: wcagContrast(rimL, lf),
-    rimSectors: [...secSum].map((v, q) => ((secCells[q] ?? 0) > 0 ? v / (secCells[q] ?? 1) : Number.NaN)),
-    rimSectorCells: [...secCells],
     contrastArea,
+    pixelLuma: lum,
+    rimIndex: Int32Array.from(idx),
+    rimAngle: Float64Array.from(ang),
   };
+  const sec = sectorMeans({ ...base, rimSectors: [], rimSectorCells: [] }, (k) => lum[k] ?? 0, sectors);
+  return { ...base, rimSectors: sec.mean, rimSectorCells: sec.cells };
+}
+
+// ───────────── 색 차이 (CIELAB ΔE76 — 바닥 색조 위장 · 몸 가운데 역할색 점검) ─────────────
+
+/** sRGB 0~1 → CIELAB (D65, L 0~100) */
+export function labOf(r: number, g: number, b: number): [number, number, number] {
+  const R = toLinear(r);
+  const G = toLinear(g);
+  const B = toLinear(b);
+  const x = (0.4124564 * R + 0.3575761 * G + 0.1804375 * B) / 0.95047;
+  const y = 0.2126729 * R + 0.7151522 * G + 0.072175 * B;
+  const z = (0.0193339 * R + 0.119192 * G + 0.9503041 * B) / 1.08883;
+  const f = (t: number): number => (t > 216 / 24389 ? Math.cbrt(t) : (24389 / 27 / 116) * t + 16 / 116);
+  const fx = f(x);
+  const fy = f(y);
+  const fz = f(z);
+  return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
+}
+
+/** 0xRRGGBB → CIELAB */
+export function labHex(c: number): [number, number, number] {
+  return labOf(((c >> 16) & 255) / 255, ((c >> 8) & 255) / 255, (c & 255) / 255);
+}
+
+/** CIELAB 두 색의 ΔE76 (유클리드 거리) */
+export function deltaE76(p: readonly number[], q: readonly number[]): number {
+  return Math.hypot((p[0] ?? 0) - (q[0] ?? 0), (p[1] ?? 0) - (q[1] ?? 0), (p[2] ?? 0) - (q[2] ?? 0));
+}
+
+/** 칸 k를 바닥색(0xRRGGBB) 위에 얹은 색의 CIELAB */
+export function pixelLab(r: DrawingRaster, k: number, floor: number): [number, number, number] {
+  const a = r.rgba[k * 4 + 3] ?? 0;
+  const t = 1 - a;
+  return labOf(
+    (r.rgba[k * 4] ?? 0) + (((floor >> 16) & 255) / 255) * t,
+    (r.rgba[k * 4 + 1] ?? 0) + (((floor >> 8) & 255) / 255) * t,
+    (r.rgba[k * 4 + 2] ?? 0) + ((floor & 255) / 255) * t,
+  );
+}
+
+/**
+ * 몸 가운데 원판(원점 둘레 반지름 radiusPx 텍셀, 칸 가운데가 안에 든 칸)에서 두 그림의 색이 ΔE76 > limit만큼 다른 칸의 몫.
+ * 두 그림은 같은 격자 · 같은 원점이어야 한다. 색은 바닥 위에 얹어 견준다
+ */
+export function discDiffShare(
+  a: DrawingRaster,
+  b: DrawingRaster,
+  radiusPx: number,
+  floor: number,
+  limit: number,
+): { share: number; cells: number } {
+  if (a.n !== b.n) throw new Error('discDiffShare: 격자 크기가 다르다');
+  const n = a.n;
+  const cx = a.cx ?? n / 2;
+  const cy = a.cy ?? n / 2;
+  let cells = 0;
+  let diff = 0;
+  for (let j = 0; j < n; j += 1)
+    for (let i = 0; i < n; i += 1) {
+      if (Math.hypot(i + 0.5 - cx, j + 0.5 - cy) > radiusPx) continue;
+      const k = j * n + i;
+      cells += 1;
+      if (deltaE76(pixelLab(a, k, floor), pixelLab(b, k, floor)) > limit) diff += 1;
+    }
+  return { share: cells > 0 ? diff / cells : 0, cells };
+}
+
+// ───────────── 같은 칸 견주기 (의상 유불리 점검 3판) ─────────────
+// 조각 대비 · 색조는 기본 그림의 테두리 띠 칸에서 두 그림을 견준다(같은 칸). 그림마다 제 띠를 쓰면 의상이 실루엣을 1px만
+// 키워도 띠가 바깥으로 밀려 칸 하나가 조각 평균을 몇 %씩 흔든다(24px에서 조각 하나 = 띠 15칸 안팎) — Canvas에서도 같은
+// 그림이 위상에 따라 그렇게 흔들린다. 같은 칸에서 보면 '기본 괴물이 바닥과 갈리던 자리가 의상을 입어도 그만큼 갈리는가'를 잰다.
+// 그 자리 밖으로 나온 짙은 깃 끝 같은 테두리는 바닥과 거의 같아 보이는 크기를 키우지 않는다(바닥 대비 면적이 따로 막는다).
+
+/** 조각 하나의 가장 나쁜 비율과 그 자리 (layout = 배치 어긋남, 조각 몫) */
+export interface PairedWorst {
+  readonly ratio: number;
+  readonly at: number;
+  readonly layout: number;
+}
+
+/**
+ * 조각별 바닥 대비: 기본(b) 띠 칸의 조각마다 평균 상대 휘도의 WCAG 대비(바닥 휘도 floorL과)를 의상(x) · 기본에서 구해
+ * 의상 / 기본 중 가장 작은 값. layouts = 조각 배치 어긋남들 (0 = 앞 가운데에서 시작, 0.5 = 반 조각)
+ */
+export function pairedSectorContrast(
+  x: VisibilityDetail,
+  b: VisibilityDetail,
+  floorL: number,
+  sectors: number,
+  layouts: readonly number[],
+): PairedWorst {
+  let worst: PairedWorst = { ratio: Infinity, at: -1, layout: 0 };
+  for (const layout of layouts) {
+    const xs = sectorMeans(b, (k) => x.pixelLuma[k] ?? 0, sectors, layout).mean;
+    const bs = sectorMeans(b, (k) => b.pixelLuma[k] ?? 0, sectors, layout).mean;
+    for (let q = 0; q < sectors; q += 1) {
+      const bl = bs[q] ?? Number.NaN;
+      if (Number.isNaN(bl)) continue;
+      const ratio = wcagContrast(xs[q] ?? 0, floorL) / wcagContrast(bl, floorL);
+      if (ratio < worst.ratio) worst = { ratio, at: q, layout };
+    }
+  }
+  return worst;
+}
+
+/**
+ * 조각별 바닥 색 차이 (색조 위장): 기본 띠 칸마다 칸 색(바닥 톤 위에 얹은 색)과 바닥 톤의 ΔE76을 조각마다 평균해 의상 / 기본 중
+ * 가장 작은 값 · 그 바닥 톤. 띠 칸은 거의 다 불투명이라 바닥 톤과 상관없이 CIELAB을 한 번만 구한다
+ */
+export function pairedSectorHue(
+  x: DrawingRaster,
+  b: DrawingRaster,
+  bd: VisibilityDetail,
+  floors: readonly number[],
+  sectors: number,
+  layouts: readonly number[],
+): PairedWorst & { readonly floor: number } {
+  const band = bd.rimIndex;
+  const pos = new Map<number, number>();
+  band.forEach((k, q) => pos.set(k, q));
+  const labs = floors.map((f) => labHex(f));
+  const dist = (r: DrawingRaster): Float64Array[] => {
+    const out = floors.map(() => new Float64Array(band.length));
+    for (let q = 0; q < band.length; q += 1) {
+      const k = band[q] ?? 0;
+      const own = (r.rgba[k * 4 + 3] ?? 0) >= 0.999 ? pixelLab(r, k, floors[0] ?? 0) : null;
+      floors.forEach((f, t) => {
+        const arr = out[t];
+        if (arr) arr[q] = deltaE76(own ?? pixelLab(r, k, f), labs[t] ?? [0, 0, 0]);
+      });
+    }
+    return out;
+  };
+  const dx = dist(x);
+  const db = dist(b);
+  let worst: PairedWorst & { floor: number } = { ratio: Infinity, at: -1, layout: 0, floor: floors[0] ?? 0 };
+  floors.forEach((f, t) => {
+    const ax = dx[t];
+    const ab = db[t];
+    if (!ax || !ab) return;
+    for (const layout of layouts) {
+      const xs = sectorMeans(bd, (k) => ax[pos.get(k) ?? 0] ?? 0, sectors, layout).mean;
+      const bs = sectorMeans(bd, (k) => ab[pos.get(k) ?? 0] ?? 0, sectors, layout).mean;
+      for (let q = 0; q < sectors; q += 1) {
+        const bl = bs[q] ?? Number.NaN;
+        if (Number.isNaN(bl) || bl <= 0) continue;
+        const ratio = (xs[q] ?? 0) / bl;
+        if (ratio < worst.ratio) worst = { ratio, at: q, layout, floor: f };
+      }
+    }
+  });
+  return worst;
 }

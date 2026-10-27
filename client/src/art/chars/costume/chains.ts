@@ -1,28 +1,35 @@
 // 의상 '사슬' (괴물 의상 400 불씨, 판 밖 메타 c): 목에 채운 무거운 쇠고리, 왼어깨에서 등 · 가슴을 비스듬히 가로지르는 사슬과
 // 그 끊긴 끝, 두 손목의 끊어진 족쇄. 사슬은 큰 고리 몇 개로 — 눕힌 고리(가운데 구멍이 보이는 둥근 고리)와 선 고리(옆에서 본
-// 막대)가 번갈아 온다. 고리는 짙은 테 → 쇠 → 빛 줄 세 겹 선으로 그려 고리 수와 상관없이 명령 수가 일정하다.
-// 위 그림 (topCloak — 두건 · 소매 밑): 가슴(두건 밑)에서 왼어깨 꼭대기(실루엣 안, 서기에는 소매 밑)를 넘어 굽은 등을
-// 비스듬히 오른쪽 뒤 자락 골까지 가로지르고, 끊긴 끝 고리들이 골 밖으로 나와 뒤로 끌린다(1.12r 안). 소매가 비켜나는 동작에도
-// 고리가 어깨 밖으로 뜨지 않는다. 목 쇠고리는 두건 밑동을 두른 굵은 고리라 두건이 앞쪽을 덮어 머리 뒤 C자만 보인다(사슬 위,
-// 두건 밑 — 정면과 같은 앞뒤). 얼굴 그늘 · 눈 · 발톱 · 두건 가운데는 덮지 않는다.
+// 막대)가 번갈아 온다. 고리 무리마다 명령 수가 일정하다(고리 수와 상관없이).
+// 위 그림 (topCloak — 망토 · 주름 위, 두건 그늘 · 소매 · 발톱 · 두건 밑이라 얼굴 그늘 · 눈 · 발톱을 덮지 못한다): 가슴(두건 밑)에서
+// 어깨 위 안쪽 · 왼어깨를 넘어 굽은 등을 둥글게 감아(자락 골 반지름 × 0.71 ≈ 0.6r) 오른쪽 뒤 자락 골 안쪽까지 오고, 끊긴 끝
+// 고리들이 그 골로 빠져 뒤로 끌린다(1.12r 안). 등을 감는 자리는 몸 가운데 0.45r 원판(VISUAL_SPEC 0장 ② 역할색)과 망토 테두리 띠
+// (외곽선 안쪽 몸 지름 8% — 생존자 화면에서 실루엣을 가르는 곳, 안쪽 끝 0.71 ~ 0.86r) 사이 빈 띠라 둘 다 거의 건드리지 않는다.
+// 가슴 쪽은 두건 옆(0.5r 안팎)으로 두건 밑에 들어간다 — 공격 준비 · 타격 · 포효에 소매가 비켜나도 앞왼쪽 테두리 띠(0.6r까지
+// 들어온다)에 닿지 않게. 돌진 · 기절로 망토가 눌리거나 가라앉아 빈 띠가 좁아지면 고리도 12% 가늘어진다.
+// 목 쇠고리는 위 그림에 그리지 않는다: 위에서 보면 두건 밑동 둘레가 몸 가운데 원판 안이라(옛 그림은 원판의 20 ~ 25%를 바꿨다)
+// 두건이 덮은 것으로 둔다 — 정면 그림에만 보인다. 손목 족쇄도 정면에만(위 그림 발톱 둘레를 어지럽히지 않게).
 // 정면 그림: 사슬이 화면 오른쪽 어깨(괴물 왼어깨) 위에서 두건 뒤를 지나 가슴 · 망토 앞 틈을 비스듬히 가로질러 반대쪽 엉덩이까지
 // 내려오고, 전신에서는 끊긴 끝이 늘어진다(frontMantle — 두건이 위를 덮는다). 쇠고리는 두건 턱 밑으로 드러난 굵은 띠와 리벳.
 // 두 손목에는 두꺼운 족쇄 띠와 바깥 끝에 매달린 끊긴 사슬(frontOver — 발톱 바깥으로 비켜 단다). 상반신은 족쇄 띠만 (작은
-// 카드에서 발톱 둘레가 쇠 고리로 어지럽지 않게).
-// 움직임: 위 그림 끊긴 끝은 걸음 · 망토 물결에 좌우로 흔들리고, 돌진 때 뒤로 곧게 펴지고, 기절 때 짧게 처진다. 정면의 늘어진
-// 끝 · 족쇄 고리는 숨 · 바람(t)에 흔들린다.
-// 색: 쇠 #4B5563, 짙은 쇠 #1F2937, 쇠 빛 #9CA3AF, 반짝임 #E5E7EB, 사슬 밑 그늘 #3F0D12(짙은 진홍 #5A1219를 30% 더
-// 어둡게, 위 그림 12%), 정면 쇠고리 림 라이트 = 기본 괴물 림 색. 녹(주황) · 청록 없음. 뿔 · 가시 없이 둥근 고리뿐.
-// 정면 그림(로비 · 결과 · 옷장)은 검은 외곽선 테 · 왼쪽 위 빛의 쇠 · 반짝임 점 그대로다.
-// 위 그림은 생존자 화면에도 보이므로 보이는 정도(밝기 · 외곽 대비 · 조각별 외곽 대비 · 바닥 대비 면적)를 게임이 굽는 모든
-// 크기(몸 지름 약 24 ~ 90px)에서 기본과 같게 둔다(사용자 결정: 꾸미기는 유불리가 없다 — tests/unit/costume-parity.test.ts).
-// 그래서 위 그림 쇠는 고리 안 명암 폭을 좁힌다. 짙은 테 · 밝은 빛 줄처럼 작은 무늬의 명암이 크면, 작은 크기에서는 칸 안에서
-// 섞여 어두워지고 큰 크기에서는 밝아져 크기마다 밝기가 달라진다(옛 그림: 24px 0.99배 ~ 90px 1.08배):
-//  - 쇠 몸(IRON_DOME): 망토 돔 음영과 같은 중심 · 반지름으로, 사슬이 덮는 망토와 비슷한 휘도의 회색. 목 쪽 · 굽은 등
-//    #6F7885 → 어깨 #626B78 → 자락 끝 짙은 쇠 #1F2937 (목 쪽 은빛을 #ABB1BB에서 낮췄다)
-//  - 고리 테: 검은 외곽선 대신 얇은 짙은 쇠 #2E3846 (바닥과 대비가 없는 검은 테가 바닥 대비 면적 · 어깨 쪽 테두리 띠를 깎았다)
-//  - 빛 줄: 가는 줄로 반짝임 쪽 반(목 쪽 #AAB0B8), 자락 끝으로 옅어져 끌리는 끝이 테두리 띠를 밝히지 않는다
-// 은빛은 휘도보다 망토 붉은색과 갈리는 회색 · 고리 모양 · 빛 줄로 읽힌다.
+// 카드에서 발톱 둘레가 쇠 고리로 어지럽지 않게). 정면(로비 · 결과 · 옷장)은 검은 테 → 쇠 → 빛 줄 · 왼쪽 위 빛 · 반짝임 점.
+// 움직임: 위 그림 사슬은 자락 골 자리를 따라 망토 물결 · 흔들림 · 돌진 · 기절을 같이 따르고, 끊긴 끝은 걸음 · 망토 물결에 좌우로
+// 흔들리고, 돌진 때 뒤로 곧게 펴지고, 기절 때 짧게 처진다. 정면의 늘어진 끝 · 족쇄 고리는 숨 · 바람(t)에 흔들린다.
+// 색: 정면 쇠 #4B5563, 짙은 쇠 #1F2937, 쇠 빛 #9CA3AF, 반짝임 #E5E7EB, 정면 쇠고리 림 라이트 = 기본 괴물 림 색. 녹(주황) ·
+// 청록 없음. 뿔 · 가시 없이 둥근 고리뿐.
+// 위 그림은 생존자 화면에도 보이므로 보이는 정도(밝기 · 외곽 대비 · 조각 대비 · 바닥 대비 면적 · 조각 색조)를 게임이 굽는 모든
+// 크기(몸 지름 21 ~ 90px) · 방향 · 위상에서 기본과 같게 둔다(사용자 결정: 꾸미기는 유불리가 없다 — tests/unit/costume-parity*.test.ts).
+// 그래서 위 그림 쇠는 (3판)
+//  - 휘도 = 같은 자리 망토 × 1.03 (ironStops: 망토 돔 음영과 같은 중심 · 반지름 · 정지점에 쇠 색을 휘도로 맞춘다 — 등의 고리
+//    #82868B → #5A5D63 무렵의 회색 쇠). 1.03 = 사슬 밑 그늘 · 고리 구멍 가장자리의 섞임으로 잃는 몫 (밝기 0.98 ~ 1.01배)
+//  - 짙은 테를 두르지 않는다: Canvas는 명령마다 따로 안티에일리어싱하므로 짙은 테 위에 쇠 · 빛 줄을 겹치면 작은 크기에서 가장자리
+//    칸에 짙은 테가 비쳐 사슬이 어두워졌다(옛 그림: 21px 0.91배 · 90px 1.01배). 지금은 쇠 → 그보다 밝은 빛 줄 한 도형뿐이고,
+//    망토와 갈리는 것은 휘도가 아니라 회색 · 고리 모양 · 빛 줄 · 옅은 진홍 그늘(#3F0D12, 20%)이다
+//  - 끊긴 끝 고리(END_DOME — 바깥 끝이 골 안쪽 E를 지난 고리)는 골 안쪽에서 회색으로 이어 나와 테두리 띠에서 그 자리 망토
+//    진홍을 70 ~ 75% 섞은 짙은 쇠(#7D3031 → #531E1F, 휘도는 망토 × 0.7): 테두리 띠를 지나므로 바닥 청회색과 색으로도 갈려야
+//    하고(옛 끝 #1F2937은 바닥 #17212B와 ΔE76 4.8, 그 자리 망토는 36.9 — 지금 끝은 33 ~ 44), 외곽선 위에 얹혀 테두리 띠를
+//    밝히지 않게 휘도 · 빛 줄을 낮춘다. 정면 그림의 끝은 회색 쇠 그대로다(정면은 바닥 위에 서지 않는다)
+import { relativeLuminance } from '../../palette';
 import { MONSTER_COLOR } from '../monster';
 import {
   apply,
@@ -109,12 +116,24 @@ interface LinkSize {
   readonly wire: number;
 }
 
-/** 고리 하나: 가운데 · 방향(단위) · 눕힘(면이 보이는 고리, 아니면 옆에서 본 막대) · 끊김(벌어진 C자) */
+/** 고리 하나: 가운데 · 방향(단위) · 눕힘(면이 보이는 고리, 아니면 옆에서 본 막대) · 끊김(벌어진 C자) · 등뼈 위 거리 */
 interface Link {
   readonly c: Pt;
   readonly u: Pt;
   readonly flat: boolean;
   readonly broken: boolean;
+  readonly d: number;
+}
+
+/** 꺾은선 길이 */
+function polyLength(pts: readonly Pt[]): number {
+  let sum = 0;
+  for (let i = 1; i < pts.length; i += 1) {
+    const a = pts[i - 1] ?? [0, 0];
+    const b = pts[i] ?? a;
+    sum += Math.hypot(b[0] - a[0], b[1] - a[1]);
+  }
+  return sum;
 }
 
 /**
@@ -158,6 +177,7 @@ function placeLinks(
       u: unit(p1[0] - p0[0], p1[1] - p0[1]),
       flat: i % 2 === 0,
       broken: broken && i === count - 1,
+      d,
     });
   }
   return out;
@@ -196,7 +216,7 @@ function linksPath(m: Mat, links: readonly Link[], s: LinkSize, off: Pt = [0, 0]
   return p.d;
 }
 
-/** 사슬 그리기 모양: 변환 · 테 두께(한쪽, 그림 단위) · 쇠 칠 · 빛 줄 옮김(변환 전 좌표) · 빛 줄 굵기 비율 · 진하기 · 테 칠 */
+/** 정면 사슬 그리기 모양: 변환 · 검은 테 두께(한쪽, 그림 단위) · 쇠 칠 · 빛 줄 옮김(변환 전 좌표) · 빛 줄 굵기 비율 · 진하기 */
 interface ChainLook {
   readonly m: Mat;
   readonly edge: number;
@@ -204,15 +224,11 @@ interface ChainLook {
   readonly hiOff: Pt;
   readonly hiK: number;
   readonly hiA: number;
-  /** 빛 줄 칠 (없으면 쇠 빛 #9CA3AF 단색) */
-  readonly hi?: Paint;
-  /** 테 칠 (없으면 외곽선 색 — 정면) */
-  readonly edgePaint?: Paint;
 }
 
 /**
- * 사슬: 눕힌 고리 무리 → 선 고리 무리 (선 고리가 눕힌 고리 끝 위를 지나 구멍으로 들어간 것처럼). 무리마다 짙은 테 → 쇠 →
- * 빛 줄 (명령 셋)
+ * 정면 사슬: 눕힌 고리 무리 → 선 고리 무리 (선 고리가 눕힌 고리 끝 위를 지나 구멍으로 들어간 것처럼). 무리마다 검은 테 → 쇠 →
+ * 빛 줄 (명령 셋). 정면 그림은 생존자 게임 화면에 나오지 않는다(로비 · 결과 · 옷장)
  */
 function drawChain(
   sk: Sketch,
@@ -227,110 +243,198 @@ function drawChain(
     const g = links.filter((l) => l.flat === flat);
     if (g.length === 0) continue;
     const d = linksPath(look.m, g, s);
-    sk.line(d, look.edgePaint ?? solid(outline), wire + look.edge * 2);
+    sk.line(d, solid(outline), wire + look.edge * 2);
     sk.line(d, look.paint, wire);
-    sk.line(
-      linksPath(look.m, g, s, look.hiOff),
-      look.hi ?? solid(ink(IRON_HI)),
-      wire * look.hiK,
-      'round',
-      look.hiA,
-    );
+    sk.line(linksPath(look.m, g, s, look.hiOff), solid(ink(IRON_HI)), wire * look.hiK, 'round', look.hiA);
   }
 }
 
 // ───────────────────────── 위 그림 ─────────────────────────
 
-/** 위 사슬 고리 (몸 단위: 몸 반지름 1) · 테 두께 (얇게 — 위 그림 쇠 칠 설명) */
-const TOP_LINK: LinkSize = { len: 0.3, wid: 0.18, wire: 0.092 };
-const TOP_EDGE = 0.014;
+/** 위 사슬 고리 (몸 단위: 몸 반지름 1). 사슬 폭(wid + wire 0.22)이 원판 · 테두리 띠 사이 빈 띠(폭 약 0.26 ~ 0.3)에 든다 */
+const TOP_LINK: LinkSize = { len: 0.26, wid: 0.14, wire: 0.08 };
+/**
+ * 그 자세의 위 사슬 고리: 돌진 때 몸이 옆으로 눌리면(몸 변환 y 0.88배 — 선 굵기는 눌린 쪽으로 줄지 않는다) 옆 · 왼쪽 뒤 테두리
+ * 띠가 0.68r까지, 기절 때 자락이 가라앉으면 뒤 테두리 띠가 0.71r까지 들어와 원판과의 빈 띠가 좁아지므로 고리도 TOP_THIN만큼
+ * 가늘게
+ */
+function topLink(a: MonsterTopAnchor): LinkSize {
+  const k = 1 - TOP_THIN * Math.max(a.dash * (1 - a.stun), a.stun);
+  return { len: TOP_LINK.len * k, wid: TOP_LINK.wid * k, wire: TOP_LINK.wire * k };
+}
+const TOP_THIN = 0.12;
 /** 위 사슬 고리 수 (끊긴 끝부터 세어 시작 고리가 두건 밑 가슴에 숨는다) */
 const TOP_COUNT = 13;
 /**
- * 위 사슬이 지나는 곳: 가슴(두건 좌표 — 두건 밑에 숨는다) → 어깨 위 안쪽(몸 좌표 — 서기에는 소매 밑) → 어깨 꼭대기 → 등.
- * 어깨 꼭대기를 실루엣 안(0.76)에 두어 소매가 비켜나는 동작(준비 · 타격 · 포효 · 기절)에도 고리가 어깨 밖으로 뜨지 않고,
- * 고리 바깥 끝(0.92)이 왼쪽 외곽선에 붙지 않는다 (붙으면 휴대폰 크기에서 고리 테가 외곽선과 섞여 왼쪽 테두리 띠가 어두워진다)
+ * 위 사슬이 지나는 곳: 가슴(두건 좌표 — 두건 밑에 숨는다) → 어깨 위 안쪽(그림 좌표) → 왼어깨(몸 좌표) → 등을 둥글게 감아
+ * 오른쪽 뒤 자락 골 안쪽 (자락 골 × TOP_BACK_K). 어깨 위 안쪽은 두건 옆 0.55r 무렵: 더 바깥이면 소매가 비켜나는 동작에서
+ * 앞왼쪽 테두리 띠에 닿고, 더 안쪽이면 몸 가운데 원판에 든다
  */
-const TOP_CHEST_H: Pt = [0.32, -0.2];
-const TOP_SHOULDER_IN: Pt = [0.22, -0.69];
-const TOP_SHOULDER: Pt = [0, -0.76];
-const TOP_BACK_C: Pt = [-0.62, -0.58];
+const TOP_CHEST_H: Pt = [0.45, -0.2];
+const TOP_SHOULDER_IN: Pt = [0.16, -0.53];
+const TOP_SHOULDER: Pt = [-0.1, -0.63];
+/** 등을 감는 반지름: 자락 골(0.84) × 0.71 ≈ 0.6 — 몸 가운데 원판(0.45)과 테두리 띠 안쪽 끝(기절 0.71 ~ 서기 0.79) 사이 */
+const TOP_BACK_K = 0.71;
 /** 끊긴 끝이 닿는 가장 먼 반지름 (다듬기 전 그림 좌표. 다듬은 뒤 1.12 안) · 돌진 (다듬은 뒤 1.15 안) */
 const TOP_REACH = 1.13;
 const TOP_REACH_DASH = 1.2;
-/** 목 쇠고리 (두건 좌표): 가운데 x · 반지름 · 굵기. 두건이 앞쪽을 덮어 머리 뒤를 감싼 C자만 드러난다 */
-const TOP_COLLAR = { cx: 0.3, rx: 0.39, ry: 0.43, wire: 0.08 } as const;
+
+/** 위 망토 칠 정지점 (monster.ts 위 그림 망토와 같은 중심 (0.15, 0) · 반지름 1.45 · 정지점) — 쇠 휘도를 여기에 맞춘다 */
+const CLOAK_DOME: readonly (readonly [number, number])[] = [
+  [0, tint(MONSTER_COLOR.hood, 0.06)],
+  [0.34, MONSTER_COLOR.hood],
+  [0.55, shade(MONSTER_COLOR.hood, 0.3)],
+  [0.78, shade(MONSTER_COLOR.hood, 0.56)],
+  [1, shade(MONSTER_COLOR.hood, 0.66)],
+];
 
 /**
- * 위 그림 쇠 칠: 굽은 등 가운데가 밝고 자락 끝으로 짙어진다 (망토 돔 음영과 같은 결 — monster.ts 위 망토와 같은 중심 · 반지름).
- * 생존자 화면에서 괴물이 보이는 정도를 모든 굽는 크기에서 기본과 같게 둔다(사용자 결정: 꾸미기는 유불리가 없다 —
- * tests/unit/costume-parity.test.ts): 쇠 몸을 사슬이 덮는 망토와 비슷한 휘도로 칠하고(어깨 쪽만 조금 밝게 — 고리 테가 왼쪽
- * 테두리 띠를 깎지 않게), 테 · 빛 줄의 명암 폭을 좁혀 크기가 바뀌어도 밝기가 같다. 자락 끝 쪽은 짙은 망토 끝과 비슷한
- * 어두운 쇠(끌리는 끝이 테두리 띠를 밝히지 않게). shine = 반짝임 쪽으로 섞는 몫 (자락 끝으로 TOP_HI_FADE만큼 옅어진다)
+ * 상대 휘도 y의 쇠 색: 짙은 쇠 → 반짝임 사이 회색을 red만큼 partner(그 자리 망토 색) 쪽으로 섞고, 섞은 뒤 휘도가 y가 되게
+ * 회색 몫을 반 나누기로 찾는다
  */
-function topIron(a: MonsterTopAnchor, shine = 0): Paint {
+function ironAt(y: number, red: number, partner: number): number {
+  const at = (k: number): number => mix(mix(shade(IRON_DARK, 0.5), IRON_SHINE, k), partner, red);
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 24; i += 1) {
+    const k = (lo + hi) / 2;
+    if (relativeLuminance(at(k)) < y) lo = k;
+    else hi = k;
+  }
+  return at((lo + hi) / 2);
+}
+
+/** 망토 돔 음영의 그 자리 색 (정지점 사이는 sRGB로 섞는다 — Canvas 그라디언트와 같게) */
+function cloakAt(t: number): number {
+  let prev = CLOAK_DOME[0] ?? [0, MONSTER_COLOR.hood];
+  for (const stop of CLOAK_DOME) {
+    if (t <= stop[0]) return mix(prev[1], stop[1], (t - prev[0]) / (stop[0] - prev[0] || 1));
+    prev = stop;
+  }
+  return prev[1];
+}
+
+/**
+ * 위 그림 쇠 돔 음영 [정지점, 진홍 몫] — 휘도는 같은 자리 망토 × TOP_GAIN · END_GAIN.
+ *  IRON_DOME: 등에 눕은 사슬 (돔 0.45 ~ 0.55) — 회색 쇠. 바깥으로 갈수록 조금 진홍 (돌진 · 기절로 등이 눌릴 때)
+ *  END_DOME: 자락 골로 빠져 테두리 띠를 지나는 끊긴 끝 고리 — 골 안쪽(돔 0.5)은 회색, 테두리 띠(돔 0.58 ~)는 망토 진홍을 비춘
+ *    짙은 쇠. 바닥 청회색과 갈리게(테두리 띠 색조: 회색 쇠는 바닥과 ΔE76 17 ~ 18, 그 자리 망토는 44 ~ 62, 끝 고리는 33 ~ 44)
+ */
+const IRON_DOME: readonly (readonly [number, number])[] = [
+  [0, 0],
+  [0.55, 0],
+  [0.7, 0.3],
+  [1, 0.6],
+];
+const END_DOME: readonly (readonly [number, number])[] = [
+  [0, 0],
+  [0.5, 0.1],
+  [0.58, 0.7],
+  [1, 0.75],
+];
+/** 위 그림 빛 줄: 같은 돔 음영을 반짝임 쪽으로 TOP_HI_SHINE만큼 (자락 끝으로 TOP_HI_FADE만큼 옅게), 쇠줄 굵기의 TOP_HI_K */
+const TOP_HI_SHINE = 0.45;
+const TOP_HI_FADE = 0.7;
+const TOP_HI_K = 0.32;
+/** 끊긴 끝 고리의 빛 줄 (짙은 진홍 쇠라 반짝임을 줄인다 — 테두리 띠를 밝히지 않게) */
+const TOP_END_SHINE = 0.2;
+/** 사슬 밑 그늘 (망토 위 — 짙은 진홍이라 바닥 색조로 가지 않는다): 사슬 폭보다 양쪽 TOP_SHADOW_PAD 넓게 · 진하기 */
+const TOP_SHADOW_PAD = 0.035;
+const TOP_SHADOW_A = 0.2;
+/** 쇠 휘도 / 같은 자리 망토 휘도: 등의 고리 · 끊긴 끝 고리 (끝은 외곽선 위에 얹혀 테두리 띠를 밝히지 않게 낮춘다) */
+const TOP_GAIN = 1.03;
+const END_GAIN = 0.7;
+
+/** 돔 음영 dome의 그 자리 진홍 몫 (정지점 사이는 선형) */
+function redAt(dome: readonly (readonly [number, number])[], t: number): number {
+  let prev = dome[0] ?? [0, 0];
+  for (const stop of dome) {
+    if (t <= stop[0]) return lerp(prev[1], stop[1], (t - prev[0]) / (stop[0] - prev[0] || 1));
+    prev = stop;
+  }
+  return prev[1];
+}
+
+/**
+ * 쇠 돔 음영 정지점 [돔 위치, 쇠 색] (불러올 때 한 번): 정지점은 망토 정지점 + dome 정지점 (망토 정지점 사이를 쇠도 같이 섞어야
+ * 휘도가 어디서나 같다). 휘도 = 그 자리 망토 × TOP_GAIN, 진홍 몫 = dome
+ */
+function ironStops(
+  dome: readonly (readonly [number, number])[],
+  gain: number,
+): readonly (readonly [number, number])[] {
+  const ts = [...new Set([...CLOAK_DOME.map(([t]) => t), ...dome.map(([t]) => t)])].sort((x, y) => x - y);
+  return ts.map((t) => {
+    const cloak = cloakAt(t);
+    return [t, ironAt(relativeLuminance(cloak) * gain, redAt(dome, t), cloak)] as const;
+  });
+}
+const IRON_STOPS = ironStops(IRON_DOME, TOP_GAIN);
+const END_STOPS = ironStops(END_DOME, END_GAIN);
+
+/**
+ * 위 그림 쇠 칠: 망토와 같은 중심 · 반지름의 돔 음영 (stops = ironStops). shine = 반짝임 쪽으로 섞는 몫 (자락 끝으로
+ * TOP_HI_FADE만큼 옅어진다)
+ */
+function topIron(a: MonsterTopAnchor, stops: readonly (readonly [number, number])[], shine = 0): Paint {
   return rad(
     a.body,
     0.15,
     0,
     1.45,
-    IRON_DOME.map(([t, c]): Stop => [t, a.ink(mix(c, IRON_SHINE, shine * (1 - TOP_HI_FADE * t)))]),
+    stops.map(([t, iron]): Stop => [t, a.ink(mix(iron, IRON_SHINE, shine * (1 - TOP_HI_FADE * t)))]),
   );
 }
 
-/**
- * 위 그림 빛 줄 · 쇠고리 빛: 같은 돔 음영을 반쯤 반짝임 쪽으로, 쇠줄 굵기의 TOP_HI_K만큼 가는 줄. 자락 끝(돔 1)에서는
- * 섞는 몫이 TOP_HI_FADE만큼 줄어 끌리는 끝의 빛 줄이 테두리 띠를 밝히지 않는다
- */
-const TOP_HI_SHINE = 0.5;
-const TOP_HI_FADE = 0.4;
-const TOP_HI_K = 0.3;
-
-/** 위 그림 쇠 돔 음영 정지점 [거리 / 1.45, 색] — 같은 자리 망토(밝은 역할색 → 짙은 끝)와 비슷한 휘도의 회색 */
-const IRON_DOME: readonly (readonly [number, number])[] = [
-  [0, mix(IRON, IRON_HI, 0.45)],
-  [0.34, mix(IRON, IRON_HI, 0.4)],
-  [0.55, mix(IRON, IRON_HI, 0.28)],
-  [0.78, mix(IRON_DARK, IRON, 0.25)],
-  [1, mix(IRON_DARK, IRON, 0)],
-];
-/** 위 그림 고리 테 색 (검은 외곽선 대신 짙은 쇠) · 사슬 밑 그늘 진하기 */
-const TOP_EDGE_COLOR = mix(IRON_DARK, IRON, 0.35);
-const TOP_SHADOW_A = 0.12;
-
-/** 오른쪽 뒤 자락 골 (뒤 자락 점의 80% 자리 근처에서 몸 중심에 가장 가까운 점 — 끝 5 · 골 4 톱니의 넷째 골) */
-function rightNotch(tail: readonly Pt[]): Pt {
-  const i0 = Math.round((tail.length - 1) * 0.8);
-  let best: Pt = [-0.65, 0.53];
-  let bestR = Infinity;
-  for (const i of [i0 - 1, i0, i0 + 1]) {
-    const p = tail[i];
-    if (p && Math.hypot(p[0], p[1]) < bestR) {
-      best = p;
-      bestR = Math.hypot(p[0], p[1]);
+/** 열린 Catmull-Rom 곡선 위 점들 (path().curve와 같은 곡선, 마디마다 n개) */
+function spline(pts: readonly Pt[], n: number): Pt[] {
+  const k = pts.length;
+  const at = (i: number): Pt => pts[Math.max(0, Math.min(k - 1, i))] ?? [0, 0];
+  const out: Pt[] = [at(0)];
+  for (let i = 0; i + 1 < k; i += 1) {
+    const b = at(i);
+    const c = at(i + 1);
+    const p1: Pt = add(b, add(c, at(i - 1), -1), 1 / 6);
+    const p2: Pt = add(c, add(at(i + 2), b, -1), -1 / 6);
+    for (let j = 1; j <= n; j += 1) {
+      const t = j / n;
+      const v = 1 - t;
+      out.push([
+        v * v * v * b[0] + 3 * v * v * t * p1[0] + 3 * v * t * t * p2[0] + t * t * t * c[0],
+        v * v * v * b[1] + 3 * v * v * t * p1[1] + 3 * v * t * t * p2[1] + t * t * t * c[1],
+      ]);
     }
   }
-  return best;
+  return out;
 }
 
 /**
- * 위 사슬 등뼈 (몸 좌표): 가슴(두건 밑) → 왼어깨 꼭대기(서기에는 소매 밑) → 굽은 등을 비스듬히 → 오른쪽 뒤 자락 골 안 →
- * 골 밖으로 끌리는 끊긴 끝. 끝은 뒤로 흐르며 망토 물결 · 걸음에 좌우로 흔들린다. 돌진 = 뒤로 곧게 펴지고, 기절 = 짧게
- * 처진다. 끝 길이는 크기 한도(TOP_REACH) 안으로 줄인다. onCloak = 끌리는 끝 전까지의 점 수 (그늘)
+ * 위 사슬 등뼈 (몸 좌표): 가슴(두건 밑) → 어깨 위 안쪽(서기에는 소매 밑) → 왼어깨 → 자락 골들 안쪽(TOP_BACK_K)을 따라 등을
+ * 둥글게 감아 → 오른쪽 뒤 자락 골 안쪽 → 그 골로 빠져 끌리는 끊긴 끝. 골 자리를 따르므로 망토 물결 · 흔들림 · 돌진 · 기절을
+ * 같이 따른다. 끝은 걸음 · 망토 물결에 좌우로 흔들리고, 돌진 = 뒤로 곧게 펴지고, 기절 = 짧게 처진다. 끝 길이는 크기
+ * 한도(TOP_REACH) 안으로 줄인다. onCloak = 끌리는 끝 전까지의 점 수 (그늘)
  */
-function topSpine(a: MonsterTopAnchor): { spine: Pt[]; onCloak: number } {
-  const notch = rightNotch(a.tail);
+function topSpine(a: MonsterTopAnchor): { spine: Pt[]; onCloak: number; endAt: number } {
+  const tail = a.tail;
+  const valley = (i: number): Pt => {
+    const p = tail[i] ?? [-0.84, 0];
+    return [p[0] * TOP_BACK_K, p[1] * TOP_BACK_K];
+  };
+  // 골: 뒤 자락 점의 짝수 번째 (2 = 왼쪽 뒤 · 4 · 6 · 8 = 오른쪽 뒤)
+  const notch = tail[8] ?? [-0.65, 0.53];
   const dash = a.dash * (1 - a.stun);
   // 가슴 쪽 시작은 두건을 따라 움직인다 (두건 좌표 → 그림 좌표 → 몸 좌표)
-  const chest = apply(invert(a.body), ...apply(a.headM, ...TOP_CHEST_H));
-  const S = TOP_SHOULDER;
-  const E: Pt = [notch[0] * 0.9, notch[1] * 0.9];
+  const toBody = invert(a.body);
+  const chest = apply(toBody, ...apply(a.headM, ...TOP_CHEST_H));
+  // 어깨 위 안쪽은 그림 좌표 (돌진에 몸이 옆으로 눌려도 원판 쪽으로 들어오지 않게)
+  const shoulderIn = apply(toBody, ...TOP_SHOULDER_IN);
+  const E = valley(8);
   const swing = (0.24 * Math.sin(a.cloak + 1.1) + 0.28 * a.s) * (1 - 0.75 * dash) * (1 - 0.6 * a.stun);
-  const ang = lerp(2.76, 3.08, dash) + swing;
+  const ang = lerp(2.62, 2.95, dash) + swing;
   const dir: Pt = [Math.cos(ang), Math.sin(ang)];
   const reach = a.dash > 0 ? TOP_REACH_DASH : TOP_REACH;
   // 끝이 한도 밖이면 길이를 줄인다 (반 나누기)
-  let len = lerp(0.4, 0.44, dash) * (1 - 0.35 * a.stun);
+  let len = lerp(0.3, 0.34, dash) * (1 - 0.35 * a.stun);
   const far = (l: number): number => Math.hypot(...apply(a.body, ...add(notch, dir, l)));
   if (far(len) > reach) {
     let lo = 0;
@@ -343,41 +447,54 @@ function topSpine(a: MonsterTopAnchor): { spine: Pt[]; onCloak: number } {
     len = lo;
   }
   const T = add(notch, dir, len);
-  const over = [...quad(chest, TOP_SHOULDER_IN, S, 8), ...quad(S, TOP_BACK_C, E, 16).slice(1)];
-  return { spine: [...over, ...quad(E, notch, T, 6).slice(1)], onCloak: over.length };
+  const over = spline([chest, shoulderIn, TOP_SHOULDER, valley(2), valley(4), valley(6), E], 5);
+  return {
+    spine: [...over, ...quad(E, notch, T, 6).slice(1)],
+    onCloak: over.length,
+    endAt: polyLength(over),
+  };
 }
 
 function topCloak(sk: Sketch, a: MonsterTopAnchor): void {
   const B = a.body;
-  const { spine, onCloak } = topSpine(a);
+  const { spine, onCloak, endAt } = topSpine(a);
   // 끝에서부터 놓는다: 끊긴 끝 고리가 등뼈 끝에 맞고, 남는 시작은 두건 밑에 숨는다
-  const links = placeLinks(spine, TOP_LINK, TOP_COUNT, true, true);
-  // 사슬 밑 그늘 (위 빛이라 사슬 둘레로 고르게, 망토 위에만)
+  const size = topLink(a);
+  const links = placeLinks(spine, size, TOP_COUNT, true, true);
+  // 사슬 밑 그늘 (위 빛이라 사슬 둘레로 고르게, 망토 위에만 — 짙은 진홍)
   sk.line(
     path(B).curve(spine.slice(0, onCloak)).d,
     solid(a.ink(SHADOW)),
-    (TOP_LINK.wid + TOP_LINK.wire) * 1.05,
+    size.wid + size.wire + TOP_SHADOW_PAD * 2,
     'round',
     TOP_SHADOW_A,
   );
-  // 어깨를 넘어 등을 가로지르는 사슬 + 끌리는 끊긴 끝
-  drawChain(sk, a.ink, a.outline, links, TOP_LINK, {
-    m: B,
-    edge: TOP_EDGE,
-    paint: topIron(a),
-    hiOff: [0, 0],
-    hiK: TOP_HI_K,
-    hiA: 0.95,
-    hi: topIron(a, TOP_HI_SHINE),
-    edgePaint: solid(a.ink(TOP_EDGE_COLOR)),
-  });
-  // 목 쇠고리 (사슬 위 — 정면과 같은 앞뒤. 두건 · 두건 그늘이 위를 덮는다)
-  const H = a.headM;
-  const collar = path(H).ellipse(TOP_COLLAR.cx, 0, TOP_COLLAR.rx, TOP_COLLAR.ry).d;
-  const cw = TOP_COLLAR.wire * lenScale(H);
-  sk.line(collar, solid(a.ink(TOP_EDGE_COLOR)), cw + TOP_EDGE * 2);
-  sk.line(collar, topIron(a), cw);
-  sk.line(collar, topIron(a, TOP_HI_SHINE), cw * TOP_HI_K, 'round', 0.9);
+  // 어깨를 넘어 등을 감는 사슬 + 끌리는 끊긴 끝. 짙은 테 없이 쇠 · 빛 줄 두 겹 (빛 줄은 쇠보다 밝은 한 도형)
+  drawTopChain(sk, links, size, a, endAt);
+}
+
+/**
+ * 위 사슬: 등의 고리 → 끊긴 끝 고리(바깥 끝이 골 안쪽 E를 지난 고리 — END_DOME), 무리마다 눕힌 고리 → 선 고리, 쇠 → 빛 줄
+ * (같은 가운데선 — 밝은 층이 위라 이음매에 짙은 색이 비치지 않는다)
+ */
+function drawTopChain(
+  sk: Sketch,
+  links: readonly Link[],
+  s: LinkSize,
+  a: MonsterTopAnchor,
+  endAt: number,
+): void {
+  const wire = s.wire * lenScale(a.body);
+  for (const end of [false, true]) {
+    const stops = end ? END_STOPS : IRON_STOPS;
+    for (const flat of [true, false]) {
+      const g = links.filter((l) => l.flat === flat && l.d + s.len * 0.5 >= endAt === end);
+      if (g.length === 0) continue;
+      const d = linksPath(a.body, g, s);
+      sk.line(d, topIron(a, stops), wire);
+      sk.line(d, topIron(a, stops, end ? TOP_END_SHINE : TOP_HI_SHINE), wire * TOP_HI_K, 'round', 0.9);
+    }
+  }
 }
 
 // ───────────────────────── 정면 그림 ─────────────────────────

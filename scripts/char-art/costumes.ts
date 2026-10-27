@@ -50,7 +50,7 @@ const DESCS: Record<string, { name: string; desc: string }> = {
   hood: { name: '긴 고깔', desc: '끝이 길게 굽은 고깔 두건. 위에서 보면 두건 끝이 망토 위로 흘러내린다' },
   feathers: {
     name: '까마귀 깃',
-    desc: '어깨를 덮는 깃털 목도리 망토 (정면은 검은 깃, 게임 화면은 망토와 같은 밝기의 진홍 깃 — 유불리 없게)',
+    desc: '어깨와 등 위로 뒤로 누운 검붉은 까마귀 깃 망토에 진홍 광택이 흐른다 (게임 화면에서는 기본 망토와 같은 밝기 — 유불리 없게)',
   },
   chains: {
     name: '사슬',

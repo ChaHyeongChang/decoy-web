@@ -3,16 +3,27 @@
 // 정면 그림: 두건 윤곽(frontHood)의 꼭대기를 위로 올려 괴물 오른쪽(화면 왼쪽)으로 꺾고, 끝이 어깨 위로 처져 늘어진다.
 // 오른쪽 가장자리는 기본 두건 그대로라 림 라이트가 맞고, 꺾인 끝 위쪽은 림 라이트를 이어 긋는다(frontOver — 얼굴보다
 // 한참 위라 얼굴 · 눈 · 발톱을 덮지 않는다). 상반신은 상자 위 끝이 가까워 고깔을 조금 낮춘다.
-// 위 그림: 두건 뒤 끝에서 이어진 긴 천 꼬리가 등 가운데 망토 위로 흘러내리다 끝이 괴물 오른쪽(+y)으로 굽는다(topHead).
-// 꼬리 밑 그늘은 망토 위에만(topCloak — 두건이 덮는다). 얼굴 그늘 · 눈 · 발톱 · 몸 가운데 역할색은 그대로다.
-// 꼬리 끝은 어느 자세 · 물결에서도 톱니 자락의 골 안쪽에 머문다(tailSpine — 자락까지 거리로 부드럽게 줄인다).
-// 휴대폰 크기에서는 '두건에서 뒤로 뻗은 밝은 붉은 줄기 + 끝의 갈고리'로 읽힌다. 위 그림은 생존자 화면에도 보이므로 보이는
-// 정도(밝기 · 외곽 대비 · 면적)를 기본과 같게 둔다(사용자 결정: 꾸미기는 유불리가 없다 — tests/unit/costume-parity.test.ts):
-// 꼬리 밑 그늘은 좁게 한 겹, 천 가장자리 테는 얇고 옅게 (밝은 등 가운데가 어둡게 꺼지지 않게).
+// 위 그림: 두건 뒤 끝이 그대로 자라 긴 천 꼬리가 되어 등 가운데 망토 위로 흘러내리다 끝이 괴물 오른쪽(+y)으로 굽는다.
+// 꼬리 칠(밑 그늘 · 바탕 · 빛 · 끝 그늘)은 두건 밑(topCloak)에 두어 두건 그늘이 기본처럼 그 위에 지고, 두건 위(topHead)에서는
+// 두건과 같은 원형 칠을 꼬리 뿌리 위로 늘여 흐리며(두건 뒤 끝 윤곽 없이 두건이 꼬리로 이어진다) 등줄 · 주름 · 두 변 테를 긋는다.
+// 얼굴 그늘 · 눈 · 발톱은 그 뒤에 그려져 덮이지 않는다. 꼬리 끝은 어느 자세 · 물결에서도 톱니 자락의 골 안쪽에 머문다(tailSpine).
+// 몸 가운데 0.45r 원판(VISUAL_SPEC 0장 ② 역할색): 꼬리 뿌리 쪽 절반이 이 원판 안을 지난다. 그래서 꼬리의 모든 칠을 판정 원
+// 중심에서 잰 거리로 나눠(byCore) 원판 안에서는 기본 망토와 ΔE76 약 10 안(같은 역할색의 명암)에서만 갈리게 하고 — 조금 밝은
+// 줄기 · 옅은 밑 그늘 · 옅은 테 · 옅은 주름 — 짙은 테 · 주름 · 그늘 · 등줄 빛은 원판 밖에서 살아난다
+// (tests/unit/costume-parity-disc.test.ts: 21프레임 모두 ΔE76 15 넘게 다른 칸 0%, 몸 지름 21~90px 모두).
+// 그래서 큰 그림에서는 두건에서 흘러나온 옅은 줄기가 등 가운데 아래에서 테 · 주름이 뚜렷한 천으로 바뀌고, 휴대폰 크기에서는
+// '등 뒤쪽의 밝은 붉은 갈고리'가 주로 읽힌다 (원판 안 줄기는 아주 옅다).
+// 위 그림은 생존자 화면에도 보이므로 보이는 정도(밝기 · 외곽 대비 · 면적 · 조각 대비 · 색조)를 기본과 같게 둔다(사용자 결정:
+// 꾸미기는 유불리가 없다 — tests/unit/costume-parity*.test.ts): 원판 안 밝은 줄기만큼을 원판 밖 밑 그늘 · 짙은 테가 되돌린다.
+// Canvas는 명령마다 따로 안티에일리어싱하므로 밝은 칠 밑에 경계를 나눠 쓰는 짙은 층을 두지 않는다 (밑 그늘은 꼬리보다
+// 넓은 따로 된 모양, 나머지는 같은 윤곽 위 덧칠).
 // 움직임: 꼬리 끝은 망토 물결 · 걸음에 좌우로 흔들리고, 돌진 때 뒤로 곧게 펴지고, 기절 때 축 처진다. 정면 끝은 숨 · 바람에 흔들린다.
-// 색 (모두 괴물 역할색 #EF4444에서): 고깔 · 꼬리 = 기본 두건 칠 그대로, 꼬리 윗면 #F26969(20% 밝힘) · #F16060 → 끝 #E54141,
-// 꼬리 테 #5B1A1A(62% 그늘, 60%), 주름 #8B2727(위) · #782222(정면 꺾인 곳), 정면 끝 아랫면 #832525, 빛 #F47C7C · #F36D6D,
-// 꼬리 밑 그늘 #3F0D12(짙은 진홍 #5A1219를 30% 더 어둡게, 35%), 정면 림 라이트 = 기본 괴물 림 색. 청록 없음.
+// 색 (모두 괴물 역할색 #EF4444에서): 고깔 = 기본 두건 칠 그대로. 위 꼬리: 뿌리 = 두건 칠(#F26262 → #F04B4B → #D73D3D)을
+// 늘여 흐림, 원판 안 줄기 #F15757(바탕 #EF4444 + #F26969 덧칠 0.5), 원판 밖 윗면 #EB5E5E(바탕 #D73D3D + #F26969 덧칠
+// 0.75, 굽은 끝으로 0.4 — #E24F4F) → 끝 #E54141, 등줄 #F47C7C(35%), 테 #5B1A1A(62% 그늘, 원판 안 6% · 밖 60%),
+// 주름 #8B2727(원판 안 15% · 밖 55%) · 굽은 끝 #782222, 밑 그늘 #3F0D12(짙은 진홍 #5A1219를 30% 더 어둡게, 원판 안 16% ·
+// 밖 35%). 정면: 주름 #782222 · 끝 아랫면 #832525 · 빛 #F47C7C · #F36D6D, 림 라이트 = 기본 괴물 림 색.
+// 청록 · 바닥 같은 푸른 회색 없음.
 import { MONSTER_COLOR } from '../monster';
 import {
   apply,
@@ -151,83 +162,139 @@ function along(s: Spine, stops: readonly Stop[]): Paint {
 }
 
 /**
- * 꼬리 밑 그늘 · 테 진하기. 생존자 화면에서 괴물이 보이는 정도를 기본과 같게 둔다(사용자 결정: 꾸미기는 유불리가 없다 —
- * tests/unit/costume-parity.test.ts): 꼬리는 망토 가장 밝은 등 가운데에 얹히므로, 그늘 · 짙은 테가 넓으면 밝은 등이 어둡게
- * 꺼진다 — 그늘은 꼬리 둘레 좁게 한 겹, 테는 얇고 옅게 둔다 (꼬리 칠의 밝은 빛이 그만큼을 되돌린다)
+ * 몸 가운데 원판 반지름 (VISUAL_SPEC 0장 ② '몸 가운데 0.45r 원판은 역할색' — 원판 중심 = 판정 원 중심 = 그림 원점). 꼬리
+ * 뿌리는 원판 안 두건 뒤 끝에서 나오므로, 원판 안의 꼬리는 기본 그림과 ΔE76 약 10 안(같은 역할색의 명암)에서만 갈린다:
+ * 조금 밝은 천 줄기 · 옅은 밑 그늘 · 옅은 테 · 옅은 주름. 짙은 테 · 주름 · 밑 그늘 · 등줄 빛은 원판 밖 CORE_R + CORE_GAP에서
+ * CORE_FADE 폭으로 살아난다 (판정 원 중심에서 잰 원형 칠이라 자세 · 걸음 · 돌진과 상관없이 원판 안은 늘 옅다)
  */
-const SHADOW_GROW = 0.035;
-const SHADOW_A = 0.35;
-const EDGE_A = 0.6;
+const CORE_R = 0.45;
+const CORE_GAP = 0.01;
+const CORE_FADE = 0.1;
+/** 원판 칠의 반지름 (그림 전체보다 크게 — 그 밖은 마지막 값) */
+const CORE_PAINT_R = 1.5;
 
-function topCloak(sk: Sketch, a: MonsterTopAnchor): void {
-  // 꼬리 밑 그늘: 위에서 비춘 빛이라 꼬리 둘레로 고르게 번진다 (뿌리 쪽은 두건이 덮는다)
-  const s = tailSpine(a);
-  const w0 = TAIL_W * lenScale(a.headM);
-  const dark = a.ink(shade(MONSTER_COLOR.cloakDeep, 0.3));
-  sk.fill(path().smooth(tailOutline(s, w0, SHADOW_GROW), 0.8).d, solid(dark, SHADOW_A));
+/**
+ * 판정 원 중심에서 잰 거리로 바뀌는 칠: 원판 안 (cIn, aIn) → CORE_FADE 폭으로 (cOut, aOut). far = [진하기가 줄기 시작하는 거리,
+ * 다 준 거리, 그때 진하기(없으면 0)] (등줄 · 빛처럼 끝으로 흐려지는 것)
+ */
+function byCore(
+  cIn: number,
+  aIn: number,
+  cOut: number,
+  aOut: number,
+  far?: readonly [number, number, number?],
+): Paint {
+  const r0 = CORE_R + CORE_GAP;
+  const R = CORE_PAINT_R;
+  const stops: Stop[] = [
+    [0, cIn, aIn],
+    [r0 / R, cIn, aIn],
+    [(r0 + CORE_FADE) / R, cOut, aOut],
+  ];
+  if (far) stops.push([far[0] / R, cOut, aOut], [far[1] / R, cOut, far[2] ?? 0]);
+  else stops.push([1, cOut, aOut]);
+  return radial(0, 0, R, stops);
 }
 
+/**
+ * 꼬리 진하기 (원판 안 IN · 밖 A). 생존자 화면에서 괴물이 보이는 정도를 기본과 같게 둔다(사용자 결정: 꾸미기는 유불리가 없다 —
+ * tests/unit/costume-parity*.test.ts): 원판 안의 밝은 줄기가 등 가운데를 밝히는 만큼을 원판 밖의 밑 그늘 · 짙은 테가 되돌려
+ * 밝기 비율이 약 0.99~1.02에 머문다 (Node · Chromium 소프트웨어 · GPU Canvas 모두). 원판 안 색 (기본 망토 #EF4444
+ * 근처와 ΔE76): 줄기 #F15757(빛 덧칠 0.5, 9.4) · 밑 그늘 #D33B3C(0.16, 9.5) · 테 0.06 · 주름 0.15 (11 안)
+ */
+const SHADOW_GROW = 0.05;
+const SHADOW_IN = 0.16;
+const SHADOW_A = 0.35;
+const LIGHT_IN = 0.5;
+const LIGHT_A = 0.75;
+/** 빛은 굽은 끝(자락 테두리 띠 가까이)으로 갈수록 줄어든다 — 끝이 망토 뒤 테두리를 밝히지 않게 */
+const LIGHT_FAR = [0.62, 0.8, 0.4] as const;
+const EDGE_IN = 0.06;
+const EDGE_A = 0.6;
+const CREASE_IN = 0.15;
+const CREASE_A = 0.55;
+const RIDGE_A = 0.35;
+
+/** 기본 위 그림 두건 칠의 반지름 (monster.ts: 머리 빛 중심 두건 좌표 (0.42, 0)) · 그 칠이 꼬리 뿌리 위로 흐려지며 이어지는 거리 */
+const HOOD_PAINT_R = 0.56;
+const BRIDGE_END = 0.86;
+
+/** 기본 두건 칠을 BRIDGE_END까지 늘이고, 두건 가장자리(HOOD_PAINT_R)부터 BRIDGE_END까지 흐린다 (두건 안은 기본 칠 그대로) */
+function hoodBridgePaint(a: MonsterTopAnchor): Paint {
+  const kH = lenScale(a.headM);
+  const [hx, hy] = apply(a.headM, 0.42, 0);
+  const at = (r: number): number => r / BRIDGE_END;
+  return radial(hx, hy, BRIDGE_END * kH, [
+    [0, a.ink(tint(HOOD, 0.16)), 1],
+    [at(0.55 * HOOD_PAINT_R), a.ink(tint(HOOD, 0.04)), 1],
+    [at(HOOD_PAINT_R), a.ink(shade(HOOD, 0.1)), 1],
+    [1, a.ink(shade(HOOD, 0.1)), 0],
+  ]);
+}
+
+/**
+ * 위 그림 꼬리 칠 (망토 · 주름 위, 두건 그늘 · 팔 · 두건 밑): 밑 그늘 → 바탕 → 빛 → 끝 그늘. 뿌리는 두건이 덮고, 두건 그늘이
+ * 기본 망토처럼 그 위에 진다 (그래서 두건 둘레 그늘 칸은 기본과 같다). 등줄 · 주름 · 테는 두건 위(topHead).
+ * 밑 그늘은 꼬리보다 SHADOW_GROW 넓은 따로 된 모양이라 꼬리 가장자리와 경계를 나눠 쓰지 않는다 (밝은 칠 밑 짙은 층이
+ * 안티에일리어싱 틈으로 비치지 않는다). 바탕 · 빛 · 끝 그늘은 같은 윤곽 위 덧칠이다 (맞닿은 두 조각이 아니다)
+ */
+function topCloak(sk: Sketch, a: MonsterTopAnchor): void {
+  const s = tailSpine(a);
+  const w0 = TAIL_W * lenScale(a.headM);
+  // 꼬리 밑 그늘: 위에서 비춘 빛이라 꼬리 둘레로 고르게 번진다
+  const dark = a.ink(shade(MONSTER_COLOR.cloakDeep, 0.3));
+  sk.fill(path().smooth(tailOutline(s, w0, SHADOW_GROW), 0.8).d, byCore(dark, SHADOW_IN, dark, SHADOW_A));
+  const d = path().smooth(tailOutline(s, w0), 0.8).d;
+  // 바탕: 원판 안은 망토와 같은 역할색, 밖은 두건 가장자리 색 (빛 덧칠 밑에서 짙어지는 망토와 명암으로 갈린다)
+  sk.fill(d, byCore(a.ink(HOOD), 1, a.ink(shade(HOOD, 0.1)), 1));
+  // 등 위에 얹힌 천은 망토보다 높아 빛을 받는다: 두건 정수리 밝기로 (원판 안은 반만)
+  const light = a.ink(tint(HOOD, 0.2));
+  sk.fill(d, byCore(light, LIGHT_IN, light, LIGHT_A, LIGHT_FAR));
+  // 끝은 조금 가라앉는다
+  const tipC = a.ink(shade(HOOD, 0.04));
+  sk.fill(
+    d,
+    along(s, [
+      [0, tipC, 0],
+      [0.82, tipC, 0],
+      [1, tipC, 0.8],
+    ]),
+  );
+}
+
+/**
+ * 두건 위: 꼬리 뿌리를 두건 칠로 덮어 두건 뒤 끝 윤곽을 지운다 (두건 끝이 그대로 자라 꼬리가 된다 — 두건과 겹친 곳은 두건
+ * 그대로, 그 뒤는 두건 색에서 꼬리 색으로 이어진다). 그 위에 등줄 · 주름 · 두 변 테 (얼굴 그늘 · 눈 · 발톱보다 먼저)
+ */
 function topHead(sk: Sketch, a: MonsterTopAnchor): void {
   const s = tailSpine(a);
-  const H = a.headM;
-  const kH = lenScale(H);
+  const kH = lenScale(a.headM);
   const w0 = TAIL_W * kH;
-  const d = path().smooth(tailOutline(s, w0), 0.8).d;
-  // 두건과 같은 칠 (같은 자리 같은 색이라 뿌리 이음매가 없다)
-  const [hx, hy] = apply(H, 0.42, 0);
-  sk.fill(
-    d,
-    radial(hx, hy, 0.56 * kH, [
-      [0, a.ink(tint(HOOD, 0.16))],
-      [0.55, a.ink(tint(HOOD, 0.04))],
-      [1, a.ink(shade(HOOD, 0.1))],
-    ]),
-  );
-  // 등 위에 얹힌 천은 망토보다 높아 빛을 받는다: 뿌리에서 멀어질수록 두건 정수리 밝기로 (짙어지는 망토와 명암으로 갈린다)
-  sk.fill(
-    d,
-    along(s, [
-      [0, a.ink(tint(HOOD, 0.2)), 0],
-      [0.28, a.ink(tint(HOOD, 0.2)), 0.75],
-      [0.85, a.ink(tint(HOOD, 0.15)), 0.7],
-      [1, a.ink(shade(HOOD, 0.04)), 0.5],
-    ]),
-  );
-  // 둥근 천의 등 (위 빛을 받는 가운데 줄, 광택 없이 흐리게)
+  sk.fill(path().smooth(tailOutline(s, w0), 0.8).d, hoodBridgePaint(a));
+  // 둥근 천의 등 (위 빛을 받는 가운데 줄, 광택 없이 흐리게 — 원판 밖에서 생겨 끝으로 흐려진다)
   const ridge: Pt[] = [];
   for (let i = 0; i <= 5; i += 1) ridge.push(spineAt(s, lerp(0.2, 0.8, i / 5)).p);
-  sk.line(
-    path().curve(ridge).d,
-    along(s, [
-      [0, a.ink(tint(HOOD, 0.3)), 0],
-      [0.3, a.ink(tint(HOOD, 0.3)), 0.35],
-      [0.85, a.ink(tint(HOOD, 0.3)), 0],
-    ]),
-    0.06 * kH,
-  );
+  const ridgeC = a.ink(tint(HOOD, 0.3));
+  sk.line(path().curve(ridge).d, byCore(ridgeC, 0, ridgeC, RIDGE_A, [0.62, 0.78]), 0.06 * kH);
   // 접힌 주름: 뒤통수에서 등으로 넘어가는 곳 · 등 가운데 (꼬리를 가로지르는 얕은 호 둘 — 혀 · 촉수가 아니라 천으로 읽힌다)
   const fold = (t: number, bow: number, k: number): string => {
     const w = w0 * (1 - t) ** TAIL_TAPER * k;
     const mid = spineAt(s, t + bow);
     return path().curve([edge(s, t, w), mid.p, edge(s, t, -w)]).d;
   };
-  const crease = solid(a.ink(shade(HOOD, 0.42)), 0.55);
+  const creaseC = a.ink(shade(HOOD, 0.42));
+  const crease = byCore(creaseC, CREASE_IN, creaseC, CREASE_A);
   sk.line(fold(0.33, 0.05, 0.78), crease, 0.026 * kH);
-  sk.line(fold(0.53, -0.035, 0.72), crease, 0.024 * kH);
-  // 굽은 끝 안쪽 접힌 주름
+  sk.line(fold(0.6, -0.035, 0.72), crease, 0.024 * kH);
+  // 굽은 끝 안쪽 접힌 주름 (원판 밖)
   sk.line(
-    path().curve([edge(s, 0.62, -w0 * 0.1), edge(s, 0.74, -w0 * 0.25), edge(s, 0.84, -w0 * 0.12)]).d,
+    path().curve([edge(s, 0.68, -w0 * 0.1), edge(s, 0.78, -w0 * 0.25), edge(s, 0.88, -w0 * 0.12)]).d,
     solid(a.ink(shade(HOOD, 0.5)), 0.7),
     0.028 * kH,
   );
-  // 두 변: 두건 밖으로 나온 곳부터 짙은 진홍 테 (천 가장자리. 뿌리 쪽은 흐려져 두건 위에 선이 남지 않는다)
+  // 두 변: 두건 밖으로 나온 곳부터 짙은 진홍 테 (천 가장자리. 원판 안은 옅게)
   const edgeC = a.ink(shade(HOOD, 0.62));
-  const rim = along(s, [
-    [0, edgeC, 0],
-    [0.25, edgeC, 0],
-    [0.45, edgeC, EDGE_A],
-    [1, edgeC, EDGE_A],
-  ]);
+  const rim = byCore(edgeC, EDGE_IN, edgeC, EDGE_A);
   for (const side of [1, -1] as const) sk.line(path().curve(tailSide(s, w0, side, 0.12)).d, rim, a.w * 0.4);
 }
 
