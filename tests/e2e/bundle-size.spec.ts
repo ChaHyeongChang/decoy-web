@@ -41,7 +41,12 @@ const CAP = BEFORE_M10 + 88 * 1024;
 // +10 · +8 · +24KiB로 나눈다(셋 합 42KiB, 상한까지 약 6KiB 남김). 나눠 받는 조각(결과 화면 등)도 이 합에 든다
 // a(판 평가 · 경험치 · 레벨): 판 기록 · 평가 · 성장 기록 저장 · 레벨 칩 · 결과 화면 조각(나눠 받기) — PR #26 병합에서 +10KiB
 // b(불씨 · 일일 도전 · 접속 보상): 공용 계산 · 기록 칸 · 레벨 칩 단추 · '내 기록' 창 조각(나눠 받기) — PR #28 병합에서 +8KiB
-const MILESTONE = { name: '불씨 · 도전 · 접속 보상', base: 395_643, baseName: 'PR #28 병합', budget: 8 * 1024 };
+const MILESTONE = {
+  name: '불씨 · 도전 · 접속 보상',
+  base: 395_643,
+  baseName: 'PR #28 병합',
+  budget: 8 * 1024,
+};
 
 test('JS 번들 gzip: 마일스톤 예산 이하, 상한(리마스터 전 + 88KiB) 아래', { tag: '@core' }, () => {
   const dir = join(process.cwd(), 'client/dist/assets');

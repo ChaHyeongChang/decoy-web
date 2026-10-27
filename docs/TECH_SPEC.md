@@ -41,6 +41,7 @@ decoy-web/
 │  └─ meta/                   ← 판 밖 성장 · 보상 (`@decoy/shared/meta`, 순수 계산 — 서버 · 기기가 같이 쓴다)
 │     ├─ progression.ts · progressionCheck.ts ← progression.json 타입 · 모양 검사(시험 · 서버 시작)
 │     ├─ rating.ts            ← 판 기록 → 평가(항목 넷 · 단계 0~4) → 경험치 · 레벨 곡선
+│     ├─ daily.ts             ← 날짜 글 · 일일 도전 고르기(날짜 해시) · 도전 진행 · 판 불씨 · 접속 보상 (메타 b)
 │     └─ profile.ts           ← 성장 기록 형식(판 번호 v) · 읽기 검사 · 판 적립(같은 판 한 번) · 계정으로 올릴 때 합치기
 ├─ server/src/                ← Node 전용 바깥 일만 (shared에는 `node:*` · `ws` · `fs` import 금지, eslint)
 │  ├─ index.ts                ← HTTP(정적 파일 · 테스트 훅) + ws 소켓 + setInterval → ServerCore
@@ -53,7 +54,7 @@ decoy-web/
 │  ├─ main.ts, net.ts         ← 연결, 예측 · 보정, 보간
 │  ├─ scenes/                 ← Lobby, Game, Result
 │  ├─ render/                 ← 맵, 캐릭터, 안개, 부채꼴, 효과
-│  ├─ ui/                     ← HUD, 미니맵, 배너, 튜토리얼, 레벨 칩, 결과 화면(나눠 받는 조각 `result` — resultHost가 받는다)
+│  ├─ ui/                     ← HUD, 미니맵, 배너, 튜토리얼, 레벨 · 불씨 칩, 결과 화면 · '내 기록' 창(나눠 받는 조각 `result` · `hub` — resultHost · hubHost가 받는다)
 │  ├─ meta/                   ← 성장 기록 저장소(profileStore: 바꿔 끼울 수 있는 ProfileStore, 지금은 기기) · 상태(meta)
 │  └─ debug.ts                ← window.__DECOY__ 디버그 훅
 └─ tests/
@@ -100,7 +101,8 @@ decoy-web/
 - **평가**: 판이 끝나는 틱에 `rateMatch`(공용)로 사람 자리마다 평가를 만들어 `resultFor`가 받는 사람 자기 것만 결과에 싣는다(`buildResult`는 그대로 — 골든 해시). 판 ID = 방 코드 · 판 번호 · 끝난 시각(새 난수 없음). 결과 단계에 다시 붙으면 같은 평가를 다시 보낸다
 - **보상**: 지금은 클라이언트가 `applyRating`(공용 순수 함수)으로 경험치를 적립하고 `ProfileStore`(지금은 `DeviceProfileStore` — `decoy:progress`)에 저장한다. 적립 직전에 저장소를 다시 읽어 다른 탭의 적립을 덮지 않는다. 다음 단계 서버 저장은 같은 함수 · 같은 형식으로 서버가 적립하고 `ServerProfileStore`를 끼운다
 - **수치**: `config/progression.json`을 서버 · 클라이언트가 빌드에 넣는다(판정 수치가 아니라 `balance.json`과 따로). 모양 검사는 서버 시작 · 단위 시험
-- **나눠 받기**: 결과 화면 코드(`ui/result.ts` · `ui/resultRating.ts`)는 동적 import 조각이다. 첫 화면을 그린 뒤 판 밖 쉬는 시간에 미리 받고(판 중에는 받지 않는다), 받지 못하면 승리 팀 · 버튼만 있는 작은 결과 + "새 버전이 있어요"(서비스 워커가 옛 셸 캐시를 바로 지우므로 배포 직후 옛 화면이 사라진 조각을 찾을 수 있다). 적립은 첫 묶음 코드가 하므로 조각 실패와 무관하다
+- **불씨 · 일일 도전 · 접속 보상**(b): `applyRating`이 그날 날짜 글을 받아 도전 진행 · 불씨까지 적립하고, 접속 보상은 `claimLogin`(하루 한 번, 연속 날). 날짜 글은 클라이언트가 기기 시계로 만든다(`meta.ts localDay`, 자정 기준) — 자정 + 1초 타이머와 앱으로 돌아올 때 칩 · 창을 다시 그린다. 접속 보상은 자동으로 주지 않고 '내 기록' 창에서 받는다(부팅 때 저장소에 쓰지 않는다)
+- **나눠 받기**: 결과 화면 코드(`ui/result.ts` · `ui/resultRating.ts`)와 '내 기록' 창(`ui/hub.ts`)은 동적 import 조각이다. 첫 화면을 그린 뒤 판 밖 쉬는 시간에 미리 받고(판 중에는 받지 않는다), 받지 못하면 승리 팀 · 버튼만 있는 작은 결과 + "새 버전이 있어요"(서비스 워커가 옛 셸 캐시를 바로 지우므로 배포 직후 옛 화면이 사라진 조각을 찾을 수 있다). 적립은 첫 묶음 코드가 하므로 조각 실패와 무관하다
 
 ## 4. 시야 렌더링
 
