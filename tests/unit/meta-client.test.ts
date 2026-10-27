@@ -103,6 +103,31 @@ describe('기기 저장소 (decoy:progress)', () => {
     expect(m.current.xp).toBe(500 + XP);
   });
 
+  it('읽기는 되고 쓰기만 막히면: 다음 적립이 저장소의 옛 기록으로 돌아가지 않고 메모리 위에 쌓인다 (같은 판은 한 번)', async () => {
+    const seed = serializeProfile({ ...emptyProfile(1), xp: 500 });
+    const m = new MetaState(new DeviceProfileStore(full(seed)), now);
+    await m.ready;
+    expect((await m.applyRating(rating('M.1'))).saved).toBe(false);
+    const second = await m.applyRating(rating('M.2'));
+    expect(second.saved).toBe(false);
+    expect(m.current.xp).toBe(500 + 2 * XP);
+    // 재접속으로 같은 판 결과를 다시 받아도 두 번 주지 않는다
+    expect((await m.applyRating(rating('M.1'))).gain).toBeNull();
+    expect(m.current.xp).toBe(500 + 2 * XP);
+  });
+
+  it('쓰기가 막힌 채 접속 보상을 받고 판을 끝내도 불씨가 둘 다 남는다', async () => {
+    const t = new Date(2026, 9, 27, 12, 0, 0).getTime();
+    const m = new MetaState(new DeviceProfileStore(full(serializeProfile(emptyProfile(1)))), () => t);
+    await m.ready;
+    const claimed = await m.claimLogin();
+    expect(claimed?.saved).toBe(false);
+    const r = await m.applyRating(rating('M.1'));
+    expect(m.current.coins).toBe((claimed?.reward ?? 0) + (r.gain?.coins.total ?? 0));
+    // 받은 날도 메모리에 남아 두 번 받지 않는다
+    expect(await m.claimLogin()).toBeNull();
+  });
+
   it('지워지면(브라우저 데이터 삭제) 레벨 1부터 다시 — 게임은 그대로', async () => {
     const s = mem();
     const a = new MetaState(new DeviceProfileStore(s), now);

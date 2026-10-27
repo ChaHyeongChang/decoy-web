@@ -275,6 +275,26 @@ test('화면 밖 화살표 (괴물): 생존자 화살표는 없고 점령 알림
   await s.send({ kind: 'teleport', target: you, x: 20.5, y: 24.5, face: Math.PI / 2 });
   await s.send({ kind: 'freeze', target: you, frozen: false });
   await settle(page);
+  // 조준을 왼쪽 위로 정해 둔다: settle이 마우스를 둔 (10, 10)에 판 중 '설정' 버튼이 이미 떠 있으면 캔버스가 마우스를 받지 못해
+  // 조준이 그대로였다 — 카메라가 오른쪽으로 앞당겨져 포효로 드러난 가드가 창 안에 들어 화살표가 하나뿐이었다(버튼이 뜨는 때에
+  // 따라 갈리는 시험 경쟁, 8번 중 3번 실패). 괴물 왼쪽 위 칸에 마우스를 두고, 두 자리가 창 밖이 될 때까지 기다린다
+  const aimAt = await page.evaluate(() => window.__DECOY__!.tileToClient(16, 21));
+  if (!aimAt) throw new Error('타일 → 화면 좌표 없음');
+  await page.mouse.move(aimAt.x, aimAt.y);
+  await page.waitForFunction(() => (window.__DECOY__?.getLastSnapshot()?.you.move.face ?? 0) < -1.5, null, {
+    timeout: 10_000,
+  });
+  await page.waitForFunction(
+    () => {
+      const v = window.__DECOY__?.getCamera()?.view;
+      if (!v) return false;
+      const inside = (x: number, y: number): boolean =>
+        x >= v.x && x <= v.x + v.w && y >= v.y && y <= v.y + v.h;
+      return !inside(19.5, 16.5) && !inside(29.5, 25.5);
+    },
+    null,
+    { timeout: 10_000 },
+  );
   await expect
     .poll(() =>
       page.evaluate(() => window.__DECOY__?.getLastSnapshot()?.world.points.find((p) => p.id === 'A')?.state),

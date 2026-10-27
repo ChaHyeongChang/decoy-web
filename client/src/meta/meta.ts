@@ -54,6 +54,12 @@ export class MetaState {
   private extra: ProfileExtra = {};
   /** 더 높은 판의 기록: 보이기만 하고 저장하지 않는다 */
   private readOnly = false;
+  /**
+   * 메모리에만 있는 적립이 있다 (저장 실패 · 더 높은 판 기록). 이때는 저장소를 다시 읽어 메모리를 바꾸지 않는다 — 읽기는 되고
+   * 쓰기만 막힌 저장소(가득 참 · 사생활 보호 창)에서 다시 읽으면 옛 기록으로 돌아가 적립과 받은 판 ID를 잃고, 같은 판 결과를
+   * 다시 받으면(재접속) 또 적립했다
+   */
+  private unsaved = false;
   private readonly listeners = new Set<() => void>();
   readonly ready: Promise<void>;
 
@@ -119,6 +125,7 @@ export class MetaState {
   }
 
   private async reread(): Promise<void> {
+    if (this.unsaved) return;
     const fresh = await this.store.load(this.now()).catch(() => null);
     if (fresh && (fresh.status === 'ok' || fresh.status === 'newer')) {
       this.profile = fresh.profile;
@@ -128,8 +135,9 @@ export class MetaState {
   }
 
   private async persist(): Promise<boolean> {
-    if (this.readOnly) return false;
-    return this.store.save(this.profile, this.extra).catch(() => false);
+    const saved = this.readOnly ? false : await this.store.save(this.profile, this.extra).catch(() => false);
+    this.unsaved = !saved;
+    return saved;
   }
 
   onChange(fn: () => void): () => void {

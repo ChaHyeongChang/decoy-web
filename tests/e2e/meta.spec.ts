@@ -225,6 +225,22 @@ test('내 기록 창: 칩의 점 → 열기 → 접속 보상 받기(불씨 +) �
   await context.close();
 });
 
+test('내 기록 창이 열린 채 판이 시작되면 창을 닫는다 (창이 판 · 결과를 가리지 않게)', async ({ browser }) => {
+  const { context, page, problems } = await newPlayerPage(browser);
+  await page.goto(`/?${BASE_QUERY.slice(1)}`);
+  await page.getByTestId('practice').click();
+  await page.getByTestId('level-chip').click();
+  await expect(page.getByTestId('hub')).toBeVisible();
+  // 창 밑의 역할 카드를 바로 눌러 판을 시작한다 (방 링크로 들어오는 중 · 진행 중인 판에 다시 들어올 때처럼 창이 열린 채 판 시작)
+  await page.evaluate(() =>
+    (document.querySelector('[data-testid="practice-role-runner"]') as HTMLElement).click(),
+  );
+  await waitForSnapshots(page, 3);
+  await expect(page.getByTestId('hub')).toBeHidden();
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
 test('자정(이 기기 시간)을 넘기면 접속 보상을 다시 받고 연속 2일, 오늘의 도전이 새 날 것으로 (가짜 시계 · 서울)', async ({
   browser,
 }) => {

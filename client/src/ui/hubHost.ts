@@ -9,6 +9,8 @@ type HubView = InstanceType<HubModule['HubPanel']>;
 export class HubHost {
   private view: HubView | null = null;
   private loading: Promise<HubModule | null> | null = null;
+  /** 연 요청 번호: 조각을 받는 사이 닫으면(판 시작) 받은 뒤에 열지 않는다 */
+  private openReq = 0;
 
   constructor(
     private readonly host: HTMLElement,
@@ -29,7 +31,9 @@ export class HubHost {
   }
 
   open(): void {
+    const req = ++this.openReq;
     void this.load().then((mod) => {
+      if (req !== this.openReq) return;
       if (!mod) {
         this.onLoadFailed();
         return;
@@ -39,7 +43,9 @@ export class HubHost {
     });
   }
 
+  /** 닫는다 (받는 중인 열기도 취소 — 판이 시작되면 창이 판을 가리지 않게) */
   close(): void {
+    this.openReq += 1;
     this.view?.close();
   }
 }

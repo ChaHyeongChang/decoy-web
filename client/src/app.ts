@@ -909,6 +909,8 @@ export class App {
         this.lobbyUi.matchStarting();
         this.lobbyUi.hide();
         this.resultUi.hide();
+        // '내 기록' 창이 열린 채 판이 시작되면(방 링크로 들어오는 중 · 진행 중인 판에 다시 들어옴) 창이 판을 가리지 않게 닫는다
+        this.hub.close();
         this.setPlaying(true);
         this.emit({ kind: 'match', info: msg.info });
         return;
