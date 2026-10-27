@@ -181,6 +181,16 @@ describe('판 시작 명단의 의상', () => {
     run(room, 5);
     room.handle(seats[1]!, { t: 'costume', costume: { survivor: 'cape', monster: 'basic' } }, clock);
     expect(seats[1]!.costume.survivor).toBe('pack');
+    // 판 중에 받은 의상은 판이 끝나면 입는다 (다시 하기 판 명단에 실린다 — 판 시작과 엇갈린 옷장도 잃지 않게)
+    room.handle(seats[0]!, { t: 'test', cmd: { kind: 'setTime', timeLeft: 0.05 } }, clock);
+    run(room, 5);
+    expect(room.phase).toBe('result');
+    expect(seats[1]!.costume.survivor).toBe('cape');
+    room.handle(seats[0]!, { t: 'rematch' }, clock);
+    seats.forEach((s) => room.handle(s, { t: 'ready', ready: true }, clock));
+    room.handle(seats[0]!, { t: 'start' }, clock);
+    expect(room.phase).toBe('playing');
+    expect(matchOf(conns[2]!).info.roster.find((e) => e.role === 'runner')?.costume).toBe('cape');
     // 이상한 값은 기본
     const other = lobbyRoom();
     other.room.handle(other.seats[2]!, { t: 'costume', costume: 'crown' as unknown as CostumeChoice }, 0);

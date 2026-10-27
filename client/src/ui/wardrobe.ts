@@ -51,6 +51,8 @@ export class Wardrobe {
   private confirm: string | null = null;
   private notice = '';
   private busy = false;
+  /** 해금 · 입기가 막 끝났다: 같은 자리에 새로 그린 단추(해금 뒤 '입기')도 잠깐 포인터를 막는다 */
+  private armNext = false;
 
   constructor(private readonly meta: MetaState) {
     // 의상 그림 조각이 오면 미리보기를 다시 그린다 (못 받으면 기본 그림 — 해금 · 입기는 된다)
@@ -58,6 +60,10 @@ export class Wardrobe {
   }
 
   render(): void {
+    // 다시 그려도 키보드 포커스를 같은 단추(data-testid)에 둔다 (Enter로 해금 → Enter로 확인)
+    const active = document.activeElement;
+    const focusId =
+      active instanceof HTMLElement && this.el.contains(active) ? active.getAttribute('data-testid') : null;
     const team = this.team;
     const p = this.meta.current;
     const worn = p.wear[team];
@@ -210,7 +216,8 @@ export class Wardrobe {
     action.disabled = !act || this.busy;
     // 확인 단추는 그려진 뒤 잠깐 포인터를 막는다: 첫 단추를 두 번 누른(두 번 탭) 두 번째가 같은 자리의 확인 단추에 떨어져
     // 바로 해금되지 않게 (연습 역할 고르기와 같은 가드, 검토 반영 F17 — 키보드는 막지 않는다)
-    if (act && this.confirm === pick) armAgainstDoubleTap(action);
+    if (act && (this.confirm === pick || this.armNext)) armAgainstDoubleTap(action);
+    this.armNext = false;
     if (act) {
       const run = act;
       action.addEventListener('click', () => {
@@ -226,6 +233,8 @@ export class Wardrobe {
       h('div', { class: 'wd-left' }, preview, h('p', { class: 'hub-note' }, W.note)),
       side,
     );
+    if (focusId)
+      this.el.querySelector<HTMLElement>(`[data-testid="${focusId}"]`)?.focus({ preventScroll: true });
   }
 
   /** 창을 다시 열거나 탭을 바꿀 때: 미리보기 · 해금 확인 · 알림을 푼다 (하던 해금 · 입기는 그대로 끝난다) */
@@ -243,6 +252,8 @@ export class Wardrobe {
       this.busy = false;
       this.confirm = null;
       this.notice = text;
+      // 해금 확인을 두 번 누른 두 번째가 같은 자리의 '입기'에 떨어져 바로 입지 않게 (해금만으로 입지 않는다)
+      this.armNext = true;
       this.render();
     });
   }

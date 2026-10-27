@@ -68,6 +68,8 @@ export interface Seat {
    * 괴물 명단에는 자기 의상뿐. 로비 · 결과 메시지에는 싣지 않는다 (괴물이 될 사람에게 생존자 의상이 가지 않게)
    */
   costume: CostumeChoice;
+  /** 판 중에 받은 의상 (판 시작 명단 · 구운 그림은 그 판 끝까지 같게 두고, 판이 끝나면 costume으로 옮긴다) */
+  nextCostume?: CostumeChoice;
 }
 
 export interface RoomHooks {
@@ -237,8 +239,23 @@ export class Room {
    * 끝까지 같게
    */
   recostume(seat: Seat, costume: unknown): void {
-    if (this.phase === 'playing') return;
+    if (seat.bot) return;
+    if (this.phase === 'playing') {
+      // 판 중에는 바꾸지 않고 두었다가 판이 끝나면 입힌다 (다시 하기 · 다음 판에 — 판 시작과 엇갈린 옷장 · 판 중 새로고침도)
+      seat.nextCostume = sanitizeCostumeChoice(costume);
+      return;
+    }
     seat.costume = sanitizeCostumeChoice(costume);
+    delete seat.nextCostume;
+  }
+
+  /** 판 중에 받아 둔 의상을 입힌다 (판이 끝날 때) */
+  private applyNextCostumes(): void {
+    for (const s of this.seats)
+      if (s.nextCostume) {
+        s.costume = s.nextCostume;
+        delete s.nextCostume;
+      }
   }
 
   welcome(seat: Seat): void {
@@ -533,6 +550,7 @@ export class Room {
     const result = buildResult(game);
     this.rateFinished(game, nowMs);
     this.phase = 'result';
+    this.applyNextCostumes();
     this.lastResult = { t: 'result', result };
     // 판 중에는 자리가 지워지지 않으므로 여기에 이번 판 자리가 모두 있다
     this.resultSeats = new Map(this.seats.map((s) => [s.id, { alias: s.alias, bot: s.bot }]));
@@ -572,6 +590,7 @@ export class Room {
 
   backToLobby(): void {
     this.phase = 'lobby';
+    this.applyNextCostumes();
     this.game = null;
     this.recorder = null;
     this.ratings.clear();

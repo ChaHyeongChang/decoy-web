@@ -154,9 +154,19 @@ export class MetaState {
     return { saved: await this.persist() };
   }
 
-  /** 날이 바뀌었을 수 있다 (자정 · 앱으로 돌아옴): 보이는 것을 다시 그리게 알린다 */
+  /**
+   * 날이 바뀌었을 수 있다 (자정 · 앱으로 돌아옴): 보이는 것을 다시 그리게 알리고, 저장소를 다시 읽어 다른 탭이 그사이 바꾼
+   * 기록(입은 의상 · 불씨 · 받은 보상)이 있으면 한 번 더 알린다
+   */
   refresh(): void {
     this.emit();
+    void this.ready
+      .then(async () => {
+        const before = this.profile;
+        await this.reread();
+        if (this.profile !== before) this.emit();
+      })
+      .catch(() => undefined);
   }
 
   private async reread(): Promise<void> {

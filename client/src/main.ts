@@ -32,8 +32,7 @@ import {
 } from './gfx/quality';
 import { currentPreset, gfxState, notifyGfxChange, onGfxChange, probeSlot } from './gfx/state';
 import { prebakeAtlas } from './art/atlas';
-import { loadCostumeArt, onCostumeArtReady } from './art/costumeBake';
-import { onWearingChange } from './meta/wearing';
+import { loadCostumeArt, onBakeCostumesChange, onCostumeArtReady } from './art/costumeBake';
 import { prebakeFogStep } from './render/baseLayer';
 import { computeRenderSize, type RenderSize } from './render/resolution';
 import { settleSize } from './render/settle';
@@ -626,8 +625,8 @@ onGfxChange(schedulePrebake);
 onCharStyleChange(schedulePrebake);
 // 의상 그림 조각이 오면 입힐 의상으로 다시 굽는다 (바뀐 역할 칸만, atlas.ts recostumeAtlas)
 onCostumeArtReady(schedulePrebake);
-// 옷장에서 입은 의상을 바꾸면 로비에서 다시 굽는다 (판 중이면 굽지 않는다 — 판 시작 명단 그대로)
-onWearingChange(schedulePrebake);
+// 입힐 의상이 바뀌면(로비 내 역할 · 옷장 · 방에서 나옴) 판 밖에서 다시 굽는다 (판 중이면 굽지 않는다 — 판 장면이 나눠 굽는다)
+onBakeCostumesChange(schedulePrebake);
 // 부팅 직후(첫 화면 · 봇과 연습 고르기)에도 한 번 굽는다: Phaser가 생성자 안에서 바로 부팅하면 부팅 때의 그래픽 변경 알림이
 // 위 구독보다 먼저 지나간다. 연습은 고르자마자 판이 시작돼 로비 대기가 없다 (새 캐릭터 아틀라스는 약 90ms)
 schedulePrebake();

@@ -264,7 +264,8 @@ export interface RosterEntry {
   bot: boolean;
   /**
    * 그 자리의 의상 (메타 c, 그 역할 팀 의상 · 기본이면 없다). 생존자 명단에만 생존자 의상이 들어가고, 괴물 명단은 자기
-   * 하나뿐이라 괴물은 생존자 의상을 받지 않는다 (GAME_DESIGN 12.5, 정보 숨김)
+   * 하나뿐이라 괴물은 생존자 의상을 받지 않는다. 빠른 매칭은 받는 사람 자기 자리만 (봇 자리는 늘 기본이라 남의 의상이
+   * 사람이라는 단서가 된다) (GAME_DESIGN 12.5, 정보 숨김)
    */
   costume?: SurvivorCostumeId | MonsterCostumeId;
 }

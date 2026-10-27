@@ -9,6 +9,7 @@ import { costumeArtReady } from './chars/costume/registry';
 let wanted: CostumeSet = { ...BASIC_COSTUME_SET };
 let loading: Promise<boolean> | null = null;
 const readyListeners = new Set<() => void>();
+const bakeListeners = new Set<() => void>();
 
 /** 의상 그림 조각을 받는다 (한 번만, 실패하면 다음에 다시). 받으면 등록하고 알린다 */
 export function loadCostumeArt(): Promise<boolean> {
@@ -39,8 +40,16 @@ export function isBasicSet(set: Readonly<CostumeSet>): boolean {
 
 /** 이 판(또는 로비 미리 굽기)에 입힐 의상. 기본이 아닌 의상이 있으면 그림 조각을 받기 시작한다 */
 export function setBakeCostumes(set: Readonly<CostumeSet>): void {
+  const changed = !sameCostumeSet(wanted, set);
   wanted = { ...set };
   if (!isBasicSet(set)) void loadCostumeArt();
+  if (changed) for (const fn of bakeListeners) fn();
+}
+
+/** 입힐 의상이 바뀌었을 때 (판 밖이면 미리 굽기를 다시 — main.ts) */
+export function onBakeCostumesChange(fn: () => void): () => void {
+  bakeListeners.add(fn);
+  return () => bakeListeners.delete(fn);
 }
 
 /** 굽기 값: 조각이 왔으면 입힐 의상, 아직이면 모두 기본 */

@@ -1,5 +1,5 @@
 // 기기 저장소 · 성장 기록 상태 (GAME_DESIGN 12장 '저장'): 저장 · 불러오기 · 저장 실패에도 게임은 그대로 · 다른 탭과 겹쳐도 잃지 않음
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { MatchRating } from '@decoy/shared';
 import { PROFILE_VERSION, PROGRESSION, emptyProfile, serializeProfile } from '@decoy/shared/meta';
 import { MetaState, localDay, msToMidnight } from '../../client/src/meta/meta';
@@ -264,6 +264,21 @@ describe('의상 해금 · 입기 (옷장, 메타 c)', () => {
     expect((await a.buyCostume('survivor', 'pack')).ok).toBe(true);
     expect(await b.buyCostume('monster', 'feathers')).toEqual({ ok: false, reason: 'coins' });
     expect(await b.buyCostume('survivor', 'pack')).toEqual({ ok: false, reason: 'owned' });
+  });
+
+  it('앱으로 돌아오면(refresh) 다른 탭이 그사이 바꾼 입은 의상을 따라간다 (방에 있으면 서버 자리에도 — app.ts)', async () => {
+    const s = mem();
+    s.data.set(KEY, serializeProfile({ ...emptyProfile(1), coins: 0, owned: ['cape'] }));
+    const a = new MetaState(new DeviceProfileStore(s), now);
+    const b = new MetaState(new DeviceProfileStore(s), now);
+    await Promise.all([a.ready, b.ready]);
+    expect(await a.wearCostume('survivor', 'cape')).toEqual({ saved: true });
+    expect(b.costumes().survivor).toBe('basic');
+    let calls = 0;
+    b.onChange(() => (calls += 1));
+    b.refresh();
+    await vi.waitFor(() => expect(b.costumes().survivor).toBe('cape'));
+    expect(calls).toBeGreaterThanOrEqual(2);
   });
 
   it('저장소가 막혀도 이번 접속 동안은 해금 · 입기가 된다 (saved=false)', async () => {
