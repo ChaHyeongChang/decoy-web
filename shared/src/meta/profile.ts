@@ -12,6 +12,17 @@ import {
   type EmblemTier,
   type MatchRating,
 } from '../types';
+import {
+  challengeById,
+  challengeDelta,
+  isDayKey,
+  loginReward,
+  matchCoins,
+  pickDaily,
+  prevDay,
+  type CoinGain,
+  type DayKey,
+} from './daily';
 import type { Progression } from './progression';
 import { levelOf, matchXp, type LevelInfo, type XpGain } from './rating';
 
@@ -40,6 +51,20 @@ export interface Profile {
   /** 처음 만든 · 마지막으로 바뀐 기기 시각 (ms) */
   created: number;
   updated: number;
+  /** 불씨 (판 밖 재화, 메타 b) */
+  coins: number;
+  /** 그날의 도전 진행 (다른 날이면 새로 고른다) */
+  daily: DailyState | null;
+  /** 접속 보상: 마지막으로 받은 날 · 연속 날 */
+  login: { last: DayKey; streak: number } | null;
+}
+
+export interface DailyState {
+  day: DayKey;
+  /** 도전 id 셋 (생존자 · 괴물 · 아무 역할) */
+  ids: string[];
+  progress: number[];
+  done: boolean[];
 }
 
 /** 저장할 때 같이 다시 적는 모르는 칸 (새 빌드가 더한 칸) */
@@ -65,10 +90,26 @@ export function emptyProfile(nowMs: number): Profile {
     recent: [],
     created: nowMs,
     updated: nowMs,
+    coins: 0,
+    daily: null,
+    login: null,
   };
 }
 
-const KNOWN = new Set(['v', 'xp', 'played', 'won', 'best', 'recent', 'created', 'updated']);
+const KNOWN = new Set([
+  'v',
+  'xp',
+  'played',
+  'won',
+  'best',
+  'recent',
+  'created',
+  'updated',
+  'coins',
+  'daily',
+  'login',
+]);
+const CHALLENGE_ID_MAX = 24;
 
 function count(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.min(Math.floor(v), 1e9) : 0;
@@ -92,6 +133,31 @@ function bestTiers(v: unknown): Partial<Record<EmblemId, EmblemTier>> {
     if (typeof t === 'number' && Number.isInteger(t) && t >= 1 && t <= 4) out[id] = t as EmblemTier;
   }
   return out;
+}
+
+function dailyState(v: unknown): DailyState | null {
+  if (typeof v !== 'object' || v === null) return null;
+  const o = v as Record<string, unknown>;
+  if (!isDayKey(o.day) || !Array.isArray(o.ids) || !Array.isArray(o.progress) || !Array.isArray(o.done))
+    return null;
+  const n = o.ids.length;
+  if (n === 0 || n > 6 || o.progress.length !== n || o.done.length !== n) return null;
+  if (!o.ids.every((x) => typeof x === 'string' && x.length > 0 && x.length <= CHALLENGE_ID_MAX)) return null;
+  return {
+    day: o.day,
+    ids: o.ids as string[],
+    progress: o.progress.map((x) =>
+      typeof x === 'number' && Number.isFinite(x) && x > 0 ? Math.min(x, 1e9) : 0,
+    ),
+    done: o.done.map((x) => x === true),
+  };
+}
+
+function loginState(v: unknown): Profile['login'] {
+  if (typeof v !== 'object' || v === null) return null;
+  const o = v as Record<string, unknown>;
+  if (!isDayKey(o.last)) return null;
+  return { last: o.last, streak: Math.max(1, count(o.streak)) };
 }
 
 function matchIds(v: unknown): string[] {
@@ -130,6 +196,9 @@ export function parseProfile(text: string | null, nowMs: number): ParsedProfile 
     recent: matchIds(o.recent),
     created,
     updated: time(o.updated, created),
+    coins: count(o.coins),
+    daily: dailyState(o.daily),
+    login: loginState(o.login),
   };
   return { profile, extra, status: v > PROFILE_VERSION ? 'newer' : 'ok' };
 }
@@ -146,6 +215,31 @@ export interface MatchGain {
   after: LevelInfo;
   /** 이 판에서 새로 오른 최고 단계 */
   newBest: EmblemId[];
+  coins: CoinGain;
+  /** 이 판이 움직인 오늘의 도전 (끝낸 것은 completed) */
+  challenges: ChallengeStep[];
+}
+
+export interface ChallengeStep {
+  id: string;
+  before: number;
+  after: number;
+  target: number;
+  completed: boolean;
+  reward: number;
+}
+
+/**
+ * 오늘의 도전 (보이기 · 적립 공용): 저장된 것이 오늘 것이고 아는 도전이면 그대로, 아니면 오늘 날짜로 새로 고른다(진행 0).
+ * 수치 파일이 바뀌어 모르는 id가 섞였으면 새로 고른다
+ */
+export function dailyFor(p: Profile, day: DayKey, prog: Progression): DailyState {
+  const d = p.daily;
+  if (d && d.day === day && d.ids.every((id) => challengeById(id, prog) !== null)) {
+    return { day, ids: [...d.ids], progress: [...d.progress], done: [...d.done] };
+  }
+  const ids = pickDaily(day, prog);
+  return { day, ids, progress: ids.map(() => 0), done: ids.map(() => false) };
 }
 
 /**
@@ -157,6 +251,8 @@ export function applyRating(
   rating: MatchRating,
   nowMs: number,
   prog: Progression,
+  /** 적립하는 날 (기기 날짜, 일일 도전) */
+  day: DayKey,
 ): { profile: Profile; gain: MatchGain } | null {
   const id = typeof rating.matchId === 'string' ? rating.matchId.slice(0, MATCH_ID_MAX) : '';
   if (id === '' || p.recent.includes(id)) return null;
@@ -178,16 +274,90 @@ export function applyRating(
       newBest.push(e.id);
     }
   }
+  // 불씨 · 오늘의 도전 (판이 끝난 날에 센다 — 자정을 넘겨 끝난 판은 새 날 도전에)
+  const coinBase = matchCoins({ outcome, emblems }, prog);
+  const daily = dailyFor(p, day, prog);
+  const steps: ChallengeStep[] = [];
+  let challengeCoins = 0;
+  daily.ids.forEach((cid, i) => {
+    const found = challengeById(cid, prog);
+    if (!found || daily.done[i]) return;
+    const delta = challengeDelta(found.def, found.team, {
+      role: rating.role,
+      outcome,
+      emblems,
+      stats: rating.stats ?? {},
+    });
+    if (delta <= 0) return;
+    const before = daily.progress[i] ?? 0;
+    const after = Math.min(found.def.target, before + delta);
+    const completed = after >= found.def.target - 1e-9;
+    daily.progress[i] = after;
+    daily.done[i] = completed;
+    if (completed) challengeCoins += found.def.reward;
+    steps.push({
+      id: cid,
+      before,
+      after,
+      target: found.def.target,
+      completed,
+      reward: completed ? found.def.reward : 0,
+    });
+  });
+  const coins: CoinGain = {
+    base: coinBase.base,
+    tiers: coinBase.tiers,
+    win: coinBase.win,
+    challenges: challengeCoins,
+    total: coinBase.sum + challengeCoins,
+  };
   const next: Profile = {
     ...p,
     xp: p.xp + xp.total,
+    coins: p.coins + coins.total,
+    daily,
     played: { ...p.played, [team]: p.played[team] + 1 },
     won: { ...p.won, [team]: p.won[team] + (outcome === 'win' ? 1 : 0) },
     best,
     recent: [...p.recent, id].slice(-RECENT_MATCH_IDS),
     updated: nowMs,
   };
-  return { profile: next, gain: { matchId: id, xp, before, after: levelOf(next.xp, prog), newBest } };
+  return {
+    profile: next,
+    gain: { matchId: id, xp, before, after: levelOf(next.xp, prog), newBest, coins, challenges: steps },
+  };
+}
+
+/** 오늘 접속 보상을 아직 받지 않았는가 */
+export function loginAvailable(p: Profile, day: DayKey): boolean {
+  return p.login?.last !== day;
+}
+
+/**
+ * 오늘 접속 보상 받기 (하루 한 번): 어제 받았으면 연속 +1(maxStreak에서 멈춤), 아니면 1일부터. 이미 받았으면 null.
+ * 시계를 되돌려도 막지 않는다(꾸미기 보상뿐)
+ */
+export function claimLogin(
+  p: Profile,
+  day: DayKey,
+  nowMs: number,
+  prog: Progression,
+): { profile: Profile; reward: number; streak: number } | null {
+  if (!isDayKey(day) || !loginAvailable(p, day)) return null;
+  const streak =
+    p.login && p.login.last === prevDay(day) ? Math.min(prog.login.maxStreak, p.login.streak + 1) : 1;
+  const reward = loginReward(streak, prog);
+  return {
+    profile: { ...p, coins: p.coins + reward, login: { last: day, streak }, updated: nowMs },
+    reward,
+    streak,
+  };
+}
+
+/** 오늘 받을 접속 보상이 몇 일째 연속인가 (보이기용 — 받기 전에) */
+export function nextLoginStreak(p: Profile, day: DayKey, prog: Progression): number {
+  if (p.login?.last === day) return p.login.streak;
+  return p.login && p.login.last === prevDay(day) ? Math.min(prog.login.maxStreak, p.login.streak + 1) : 1;
 }
 
 /**
@@ -217,5 +387,19 @@ export function mergeProfiles(account: Profile, device: Profile, nowMs: number):
     recent: recent.slice(-RECENT_MATCH_IDS),
     created: Math.min(account.created, device.created),
     updated: nowMs,
+    coins: account.coins + device.coins,
+    // 오늘의 도전 · 접속 보상은 더 늦은 날 쪽 (같은 날이면 계정 쪽 — 하루 보상을 두 번 받지 않게)
+    daily:
+      account.daily && device.daily
+        ? device.daily.day > account.daily.day
+          ? device.daily
+          : account.daily
+        : (account.daily ?? device.daily),
+    login:
+      account.login && device.login
+        ? device.login.last > account.login.last
+          ? device.login
+          : account.login
+        : (account.login ?? device.login),
   };
 }

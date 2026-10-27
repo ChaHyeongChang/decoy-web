@@ -7,6 +7,10 @@ import {
   type Role,
   type ServerMessage,
 } from '@decoy/shared';
+import { readFileSync } from 'node:fs';
+// @decoy/shared/meta 묶음은 progression.json을 import로 가져와 Playwright(Node ESM)에서 못 읽는다. 수치는 파일로 읽고 계산 함수만 가져온다
+import { dayKeyOf, loginReward, pickDaily } from '../../shared/src/meta/daily';
+import { validateProgression } from '../../shared/src/meta/progressionCheck';
 import { collectFrames } from './frames';
 import {
   BASE_QUERY,
@@ -23,6 +27,7 @@ import {
 } from './helpers';
 
 const KEY = 'decoy:progress';
+const PROGRESSION = validateProgression(JSON.parse(readFileSync('config/progression.json', 'utf8')));
 
 /** 봇과 연습을 그 역할로 시작해 첫 스냅샷까지 */
 async function startPractice(page: Page, role: Role, query = ''): Promise<void> {
@@ -178,4 +183,123 @@ test('정보 숨김: 판 중 괴물이 받은 모든 메시지(로비 · 판 시
     expect(raw[cut]!.match(/"emblems"/g)).toHaveLength(1);
   });
   await closeAll(players);
+});
+
+// ───────────────────────── 메타 b: 불씨 · 일일 도전 · 접속 보상 ─────────────────────────
+
+/** 시간대를 정해 둔 PC 기기 (자정 = 서울 0시) */
+const SEOUL = { timezoneId: 'Asia/Seoul' } as const;
+
+async function coins(page: Page): Promise<number> {
+  return Number(await page.getByTestId('coin-num').textContent());
+}
+
+test('내 기록 창: 칩의 점 → 열기 → 접속 보상 받기(불씨 +) → 점이 사라지고, 다시 열어도 받은 채', async ({
+  browser,
+}) => {
+  test.setTimeout(90_000);
+  const { context, page, problems } = await newPlayerPage(browser, SEOUL);
+  await page.goto(`/?${BASE_QUERY.slice(1)}`);
+  await expect(page.getByTestId('login-dot')).toBeVisible();
+  expect(await coins(page)).toBe(0);
+  await press(page.getByTestId('level-chip'));
+  await expect(page.getByTestId('hub')).toBeVisible();
+  await expect(page.getByTestId('login-streak')).toHaveText('1일째 연속');
+  await expect(page.getByTestId('hub-daily').locator('li')).toHaveCount(3);
+  await press(page.getByTestId('login-claim'));
+  await expect(page.getByTestId('login-claimed')).toBeVisible();
+  await expect(page.getByTestId('hub-notice')).toContainText(`불씨 +${loginReward(1, PROGRESSION)}`);
+  await press(page.getByTestId('hub-close'));
+  await expect(page.getByTestId('hub')).toBeHidden();
+  await expect(page.getByTestId('login-dot')).toBeHidden();
+  expect(await coins(page)).toBe(loginReward(1, PROGRESSION));
+  await page.reload();
+  expect(await coins(page)).toBe(loginReward(1, PROGRESSION));
+  await expect(page.getByTestId('login-dot')).toBeHidden();
+  await press(page.getByTestId('level-chip'));
+  await expect(page.getByTestId('login-claimed')).toBeVisible();
+  // Esc로 닫는다
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('hub')).toBeHidden();
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
+test('내 기록 창이 열린 채 판이 시작되면 창을 닫는다 (창이 판 · 결과를 가리지 않게)', async ({ browser }) => {
+  const { context, page, problems } = await newPlayerPage(browser);
+  await page.goto(`/?${BASE_QUERY.slice(1)}`);
+  await page.getByTestId('practice').click();
+  await page.getByTestId('level-chip').click();
+  await expect(page.getByTestId('hub')).toBeVisible();
+  // 창 밑의 역할 카드를 바로 눌러 판을 시작한다 (방 링크로 들어오는 중 · 진행 중인 판에 다시 들어올 때처럼 창이 열린 채 판 시작)
+  await page.evaluate(() =>
+    (document.querySelector('[data-testid="practice-role-runner"]') as HTMLElement).click(),
+  );
+  await waitForSnapshots(page, 3);
+  await expect(page.getByTestId('hub')).toBeHidden();
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
+test('자정(이 기기 시간)을 넘기면 접속 보상을 다시 받고 연속 2일, 오늘의 도전이 새 날 것으로 (가짜 시계 · 서울)', async ({
+  browser,
+}) => {
+  test.setTimeout(90_000);
+  const { context, page, problems } = await newPlayerPage(browser, SEOUL);
+  await page.clock.install({ time: new Date('2026-10-27T23:59:20+09:00') });
+  await page.goto(`/?${BASE_QUERY.slice(1)}`);
+  await press(page.getByTestId('level-chip'));
+  await press(page.getByTestId('login-claim'));
+  await expect(page.getByTestId('login-claimed')).toBeVisible();
+  const before = await page
+    .getByTestId('hub-daily')
+    .locator('li')
+    .evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')));
+  expect(before).toEqual(pickDaily('2026-10-27', PROGRESSION).map((id) => `challenge-${id}`));
+  await press(page.getByTestId('hub-close'));
+  await expect(page.getByTestId('login-dot')).toBeHidden();
+  // 자정을 넘긴다: 자정 타이머가 칩을 다시 그린다 (점이 다시 뜬다)
+  await page.clock.fastForward(60_000);
+  await expect(page.getByTestId('login-dot')).toBeVisible();
+  await press(page.getByTestId('level-chip'));
+  await expect(page.getByTestId('login-streak')).toHaveText('2일째 연속');
+  const after = await page
+    .getByTestId('hub-daily')
+    .locator('li')
+    .evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')));
+  expect(after).toEqual(pickDaily('2026-10-28', PROGRESSION).map((id) => `challenge-${id}`));
+  await press(page.getByTestId('login-claim'));
+  await expect(page.getByTestId('hub-notice')).toContainText(`불씨 +${loginReward(2, PROGRESSION)}`);
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
+test('봇과 연습: 결과에 불씨 · 끝낸 도전이 보이고, 내 기록 창 도전이 완료로 (도전이 맞는 날을 골라 가짜 시계)', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  // 생존자 도전이 '탈출하기', 아무 역할 도전이 '이기기'인 날 — 생존자 승리 · 내 탈출로 둘 다 끝난다
+  let day = '';
+  for (let i = 0; i < 400 && !day; i += 1) {
+    const d = new Date(Date.UTC(2026, 10, 1) + i * 86_400_000);
+    const key = dayKeyOf(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+    const ids = pickDaily(key, PROGRESSION);
+    if (ids[0] === 's-escape' && ids[2] === 'a-win') day = key;
+  }
+  expect(day, '도전이 맞는 날').not.toBe('');
+  const { context, page, problems } = await newPlayerPage(browser, SEOUL);
+  await page.clock.install({ time: new Date(`${day}T12:00:00+09:00`) });
+  await startPractice(page, 'runner');
+  await survivorsWin(page);
+  await expect(page.getByTestId('rating')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('coin-gain')).toContainText('불씨 +');
+  await expect(page.getByTestId('challenge-done')).toContainText('도전 완료');
+  await press(page.getByTestId('result-home'));
+  const total = await coins(page);
+  expect(total).toBeGreaterThan(100);
+  await press(page.getByTestId('level-chip'));
+  await expect(page.getByTestId('challenge-s-escape')).toHaveClass(/done/);
+  await expect(page.getByTestId('challenge-a-win')).toHaveClass(/done/);
+  expect(problems).toEqual([]);
+  await context.close();
 });

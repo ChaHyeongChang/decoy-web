@@ -5,6 +5,7 @@ import type { EmblemId, EmblemTier } from '@decoy/shared';
 import type { LevelInfo } from '@decoy/shared/meta';
 import { META_TEXT } from '../data/storyText';
 import type { RatingApplied } from '../meta/meta';
+import { EMBER_SVG } from './levelChip';
 import { h } from './uiArt';
 
 function fill(text: string, params: Record<string, string | number>): string {
@@ -64,6 +65,12 @@ function tile(id: EmblemId, tier: EmblemTier, best: boolean): HTMLElement {
   return el;
 }
 
+function emberIcon(): HTMLElement {
+  const e = h('span', { class: 'lv-ember', 'aria-hidden': 'true' });
+  e.innerHTML = EMBER_SVG;
+  return e;
+}
+
 function levelBar(info: LevelInfo, fromRatio: number | null): HTMLElement {
   const ratio = info.max ? 1 : info.need > 0 ? info.into / info.need : 0;
   const bar = h('span', { class: 'xp-bar', 'aria-hidden': 'true' });
@@ -107,6 +114,9 @@ export function ratingPanel(applied: RatingApplied): HTMLElement {
           'span',
           { class: 'chip xp-chip num', 'data-testid': 'xp-gain', title: parts },
           fill(META_TEXT.xpGain, { n: gain.xp.total }),
+          h('span', { class: 'xp-sep', 'aria-hidden': 'true' }, '·'),
+          emberIcon(),
+          h('span', { 'data-testid': 'coin-gain' }, fill(META_TEXT.coinGain, { n: gain.coins.total })),
         ),
         ...(leveled
           ? [
@@ -120,6 +130,32 @@ export function ratingPanel(applied: RatingApplied): HTMLElement {
       ),
       h('div', { class: 'xp-parts' }, parts),
     );
+    // 오늘의 도전: 끝낸 것은 이름과 보상, 아니면 움직인 개수만 (한 줄)
+    const done = gain.challenges.filter((c) => c.completed);
+    if (done.length > 0) {
+      panel.append(
+        h(
+          'div',
+          { class: 'rate-note rate-challenge done', 'data-testid': 'challenge-done' },
+          done
+            .map((c) =>
+              fill(META_TEXT.challengeDone, {
+                text: fill(META_TEXT.challenges[c.id] ?? c.id, { n: c.target }),
+                n: c.reward,
+              }),
+            )
+            .join(' / '),
+        ),
+      );
+    } else if (gain.challenges.length > 0) {
+      panel.append(
+        h(
+          'div',
+          { class: 'rate-note rate-challenge', 'data-testid': 'challenge-moved' },
+          fill(META_TEXT.challengeMoved, { n: gain.challenges.length }),
+        ),
+      );
+    }
     if (rating.outcome === 'void') panel.append(h('div', { class: 'rate-note' }, META_TEXT.voidHalf));
   } else {
     panel.append(h('div', { class: 'rate-note', 'data-testid': 'rate-already' }, META_TEXT.alreadyGot));

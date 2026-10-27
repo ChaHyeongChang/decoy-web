@@ -14,6 +14,7 @@ import {
 } from '@decoy/shared/meta';
 
 const NOW = 1_793_000_000_000;
+const DAY = '2026-10-27';
 
 function rating(id: string, over: Partial<MatchRating> = {}): MatchRating {
   return {
@@ -70,13 +71,17 @@ describe('기록 읽기', () => {
       recent: ['a', 'b'],
       created: NOW,
       updated: 100,
+      coins: 0,
+      daily: null,
+      login: null,
     });
   });
 
   it('모르는 칸(새 빌드가 더한 칸)은 그대로 두었다가 저장할 때 다시 적는다', () => {
     const text = JSON.stringify({ ...emptyProfile(1), xp: 50, coins: 340, wear: { survivor: 's-hood' } });
     const p = parseProfile(text, NOW);
-    expect(p.extra).toEqual({ coins: 340, wear: { survivor: 's-hood' } });
+    expect(p.extra).toEqual({ wear: { survivor: 's-hood' } });
+    expect(p.profile.coins).toBe(340);
     const again = JSON.parse(serializeProfile({ ...p.profile, xp: 60 }, p.extra)) as Record<string, unknown>;
     expect(again).toMatchObject({ v: PROFILE_VERSION, xp: 60, coins: 340, wear: { survivor: 's-hood' } });
   });
@@ -88,7 +93,7 @@ describe('기록 읽기', () => {
   });
 
   it('쓰고 다시 읽으면 같다', () => {
-    const a = applyRating(emptyProfile(NOW), rating('M.1'), NOW + 5, PROGRESSION)!.profile;
+    const a = applyRating(emptyProfile(NOW), rating('M.1'), NOW + 5, PROGRESSION, DAY)!.profile;
     const b = parseProfile(serializeProfile(a), NOW + 10);
     expect(b.status).toBe('ok');
     expect(b.profile).toEqual(a);
@@ -97,7 +102,7 @@ describe('기록 읽기', () => {
 
 describe('판 적립', () => {
   it('경험치 · 판 수 · 이긴 판 · 최고 단계 · 받은 판 ID, 레벨 전후', () => {
-    const r = applyRating(emptyProfile(NOW), rating('M.1'), NOW + 5, PROGRESSION)!;
+    const r = applyRating(emptyProfile(NOW), rating('M.1'), NOW + 5, PROGRESSION, DAY)!;
     const xp = PROGRESSION.xp.base + 7 * PROGRESSION.xp.perTier + PROGRESSION.xp.win;
     expect(r.profile.xp).toBe(xp);
     expect(r.profile.played).toEqual({ survivor: 1, monster: 0 });
@@ -112,15 +117,15 @@ describe('판 적립', () => {
   });
 
   it('같은 판 ID는 한 번만 (재접속해 결과를 다시 받아도)', () => {
-    const first = applyRating(emptyProfile(NOW), rating('M.1'), NOW, PROGRESSION)!;
-    expect(applyRating(first.profile, rating('M.1'), NOW, PROGRESSION)).toBeNull();
-    expect(applyRating(first.profile, rating(''), NOW, PROGRESSION)).toBeNull();
+    const first = applyRating(emptyProfile(NOW), rating('M.1'), NOW, PROGRESSION, DAY)!;
+    expect(applyRating(first.profile, rating('M.1'), NOW, PROGRESSION, DAY)).toBeNull();
+    expect(applyRating(first.profile, rating(''), NOW, PROGRESSION, DAY)).toBeNull();
   });
 
   it(`받은 판 ID는 최근 ${RECENT_MATCH_IDS}개만 기억한다`, () => {
     let p = emptyProfile(NOW);
     for (let i = 0; i < RECENT_MATCH_IDS + 5; i += 1)
-      p = applyRating(p, rating(`M.${i}`), NOW, PROGRESSION)!.profile;
+      p = applyRating(p, rating(`M.${i}`), NOW, PROGRESSION, DAY)!.profile;
     expect(p.recent).toHaveLength(RECENT_MATCH_IDS);
     expect(p.recent[0]).toBe('M.5');
   });
@@ -140,11 +145,12 @@ describe('판 적립', () => {
       }),
       NOW,
       PROGRESSION,
+      DAY,
     )!;
     expect(m.profile.played).toEqual({ survivor: 0, monster: 1 });
     expect(m.profile.won).toEqual({ survivor: 0, monster: 0 });
     expect(m.profile.best).toEqual({ hunt: 3, track: 2, gate: 1 });
-    const v = applyRating(emptyProfile(NOW), rating('M.3', { outcome: 'void' }), NOW, PROGRESSION)!;
+    const v = applyRating(emptyProfile(NOW), rating('M.3', { outcome: 'void' }), NOW, PROGRESSION, DAY)!;
     expect(v.gain.xp.win).toBe(0);
     expect(v.profile.won.survivor).toBe(0);
   });
@@ -161,6 +167,7 @@ describe('판 적립', () => {
       }),
       NOW,
       PROGRESSION,
+      DAY,
     )!;
     expect(r.gain.xp.tiers).toBe(0);
     expect(r.profile.best).toEqual({});
@@ -170,15 +177,16 @@ describe('판 적립', () => {
 describe('계정으로 올릴 때 합치기 (다음 단계 서버 저장)', () => {
   it('경험치 · 판 수는 더하고, 최고 단계는 큰 쪽, 받은 판 ID는 합친다', () => {
     let acc = emptyProfile(NOW - 1000);
-    acc = applyRating(acc, rating('A.1'), NOW, PROGRESSION)!.profile;
+    acc = applyRating(acc, rating('A.1'), NOW, PROGRESSION, DAY)!.profile;
     let dev = emptyProfile(NOW - 5000);
     dev = applyRating(
       dev,
       rating('D.1', { emblems: [{ id: 'capture', tier: 4, score: 60 }] }),
       NOW,
       PROGRESSION,
+      DAY,
     )!.profile;
-    dev = applyRating(dev, rating('A.1'), NOW, PROGRESSION)!.profile;
+    dev = applyRating(dev, rating('A.1'), NOW, PROGRESSION, DAY)!.profile;
     const m = mergeProfiles(acc, dev, NOW + 1);
     expect(m.xp).toBe(acc.xp + dev.xp);
     expect(m.played.survivor).toBe(3);

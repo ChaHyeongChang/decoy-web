@@ -94,7 +94,7 @@ export const STORAGE_KEYS = {
   progress: {
     key: 'decoy:progress',
     area: 'local',
-    what: '이 기기의 성장 기록 (레벨 · 경험치 · 판 수 · 평가 최고 단계 · 최근 받은 판 번호, 서버로 보내지 않음)',
+    what: '이 기기의 성장 기록 (레벨 · 경험치 · 판 수 · 평가 최고 단계 · 최근 받은 판 번호 · 불씨 · 오늘의 도전 진행 · 접속 보상 받은 날, 서버로 보내지 않음)',
     keep: '브라우저 데이터를 지울 때까지',
   },
   perf: {

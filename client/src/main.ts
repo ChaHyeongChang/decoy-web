@@ -608,8 +608,9 @@ function schedulePrebake(): void {
     prebakeAtlas(game.scene.getScene('idle'), b.survivor.radius, b.monster.radius);
     // HUD 아틀라스도 (배율 2 Canvas에서 약 28ms, 같은 배율이면 아무것도 하지 않는다)
     prebakeHud(game.textures);
-    // 결과 화면 조각도 판 밖 쉬는 시간에 미리 받는다 (판 중에는 받지 않는다 — 결과가 오면 바로 그리게)
+    // 결과 화면 · '내 기록' 창 조각도 판 밖 쉬는 시간에 미리 받는다 (판 중에는 받지 않는다 — 누르거나 결과가 오면 바로 그리게)
     app.resultUi.prefetch();
+    app.hub.prefetch();
     // 따라가는 카메라: 판 배율 맵 전체 그림 → 미니맵 → 내가 고른 역할의 시작 자리 둘레 조각 (모르면 감옥 = 생존자 시작).
     // 조각은 판 중에 맵 전체 그림에서 복사만 한다
     idle(fogStep);

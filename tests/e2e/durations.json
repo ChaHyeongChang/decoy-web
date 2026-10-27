@@ -49,7 +49,7 @@
   "m9-reconnect.spec.ts": 85,
   "m9-screens.spec.ts": 3,
   "menu-resume.spec.ts": 45,
-  "meta.spec.ts": 60,
+  "meta.spec.ts": 70,
   "minimap-sharp.spec.ts": 35,
   "minimap-sharp.webgl.spec.ts": 60,
   "perf-budget.spec.ts": 60,
