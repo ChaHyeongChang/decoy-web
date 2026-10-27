@@ -148,13 +148,21 @@ function along(s: Spine, stops: readonly Stop[]): Paint {
   return linear(s.a[0], s.a[1], s.d[0], s.d[1], stops);
 }
 
+/**
+ * 꼬리 밑 그늘 · 테 진하기. 생존자 화면에서 괴물이 보이는 정도를 기본과 같게 둔다(사용자 결정: 꾸미기는 유불리가 없다 —
+ * tests/unit/costume-parity.test.ts): 꼬리는 망토 가장 밝은 등 가운데에 얹히므로, 그늘 · 짙은 테가 넓으면 밝은 등이 어둡게
+ * 꺼진다 — 그늘은 꼬리 둘레 좁게 한 겹, 테는 얇고 옅게 둔다 (꼬리 칠의 밝은 빛이 그만큼을 되돌린다)
+ */
+const SHADOW_GROW = 0.035;
+const SHADOW_A = 0.35;
+const EDGE_A = 0.6;
+
 function topCloak(sk: Sketch, a: MonsterTopAnchor): void {
   // 꼬리 밑 그늘: 위에서 비춘 빛이라 꼬리 둘레로 고르게 번진다 (뿌리 쪽은 두건이 덮는다)
   const s = tailSpine(a);
   const w0 = TAIL_W * lenScale(a.headM);
   const dark = a.ink(shade(MONSTER_COLOR.cloakDeep, 0.3));
-  sk.fill(path().smooth(tailOutline(s, w0, 0.1), 0.8).d, solid(dark, 0.3));
-  sk.fill(path().smooth(tailOutline(s, w0, 0.05), 0.8).d, solid(dark, 0.5));
+  sk.fill(path().smooth(tailOutline(s, w0, SHADOW_GROW), 0.8).d, solid(dark, SHADOW_A));
 }
 
 function topHead(sk: Sketch, a: MonsterTopAnchor): void {
@@ -215,10 +223,10 @@ function topHead(sk: Sketch, a: MonsterTopAnchor): void {
   const rim = along(s, [
     [0, edgeC, 0],
     [0.25, edgeC, 0],
-    [0.45, edgeC, 0.85],
-    [1, edgeC, 0.85],
+    [0.45, edgeC, EDGE_A],
+    [1, edgeC, EDGE_A],
   ]);
-  for (const side of [1, -1] as const) sk.line(path().curve(tailSide(s, w0, side, 0.12)).d, rim, a.w * 0.5);
+  for (const side of [1, -1] as const) sk.line(path().curve(tailSide(s, w0, side, 0.12)).d, rim, a.w * 0.4);
 }
 
 // ───────────────────────── 정면 그림: 꺾여 늘어진 고깔 ─────────────────────────

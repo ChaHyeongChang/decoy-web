@@ -11,6 +11,7 @@ import type { LeaveKind } from '../lifecycle';
 import { pref } from '../prefs';
 import { effectiveTouchLayout, hudPreview } from './touchControls';
 import { frontFigureSvg, h, icon, roleVars, svgSpan } from './uiArt';
+import { wearingFor } from '../meta/wearing';
 import './lifecycle.css';
 
 // ───────────── 가운데 카드 (확인 창 · 다른 탭 안내) ─────────────
@@ -448,7 +449,7 @@ export class TouchTutorialCard {
 
 /** 터치 안내 카드 제목 옆 내 역할 정면 그림 (새 캐릭터 스타일, 장식: 스크린 리더는 건너뜀) */
 function ttFigure(role: Role): HTMLSpanElement {
-  const s = svgSpan('tt-figure', frontFigureSvg(role));
+  const s = svgSpan('tt-figure', frontFigureSvg(role, true, wearingFor(role)));
   s.dataset.testid = 'touch-tutorial-figure';
   return s;
 }

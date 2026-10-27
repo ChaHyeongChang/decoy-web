@@ -57,7 +57,9 @@ import { Interpolator, Predictor, SnapshotClock, lerpAngle, lerpNum } from './sy
 import type { Transport } from './transport';
 import { LeaveDialog, ReplacedNotice } from './ui/lifecycleUi';
 import { openLayoutEditor } from './ui/layoutEditor';
+import { costumeSetFromRoster, lobbyCostumeSet, setBakeCostumes } from './art/costumeBake';
 import { MetaState, msToMidnight } from './meta/meta';
+import { setWearing } from './meta/wearing';
 import { DeviceProfileStore } from './meta/profileStore';
 import { HubHost } from './ui/hubHost';
 import { LevelChip } from './ui/levelChip';
@@ -307,6 +309,7 @@ export class App {
             token: null,
             altTokens: [],
             bots: params.bots,
+            costume: this.meta.costumes(),
           });
         },
         practice: (role, name) => this.startPractice(role, name),
@@ -314,7 +317,7 @@ export class App {
           saveName(name);
           this.joinFromLink = false;
           this.returning = null;
-          this.net.send({ t: 'quick', name });
+          this.net.send({ t: 'quick', name, costume: this.meta.costumes() });
         },
         leaveQueue: () => this.leaveToHome(),
         leaveRoom: () => this.leaveToHome(),
@@ -335,6 +338,9 @@ export class App {
       { chip: this.levelChip.el, level: () => this.meta.level().level },
     );
     this.hub = new HubHost(uiRoot, this.meta, () => this.showUpdate());
+    // 입은 의상: 판 밖 화면의 내 역할 그림 · 로비 미리 굽기 · 서버 자리 (옷장 · 다른 탭에서 바꾸면 따라간다)
+    setWearing(this.meta.costumes());
+    this.meta.onChange(() => this.wearingChanged());
     this.resultUi = new ResultHost(
       uiRoot,
       () => this.link.send({ t: 'rematch' }),
@@ -508,6 +514,19 @@ export class App {
   }
 
   /**
+   * 입은 의상이 바뀌었다 (옷장 · 다른 탭 · 기록을 처음 읽음): 방에 있으면 서버 자리에 알리고(판 중이면 서버가 무시한다),
+   * 판 밖이면 로비 미리 굽기를 맞춘다. 판 중 · 결과 화면의 그림은 그 판 시작 명단 그대로 둔다
+   */
+  private wearingChanged(): void {
+    if (!setWearing(this.meta.costumes())) return;
+    if (this.you && this.lobby && this.lobby.phase !== 'playing')
+      this.link.send({ t: 'costume', costume: this.meta.costumes() });
+    if (this.match) return;
+    const mine = this.lobby?.players.find((p) => p.id === this.you)?.role ?? null;
+    setBakeCostumes(lobbyCostumeSet(mine, this.meta.costumes()));
+  }
+
+  /**
    * 봇과 연습 (M13b): 기기 안 서버를 만들고 고른 역할로 바로 시작한다. 서버 연결은 쉰다 — 연습 중에는 새 연결을 시도하지
    * 않는다(오프라인 · 서버 잠듦에서도 소켓 시도 0). 주소 ?room= · 자리 토큰 · 마지막 방은 저장하지 않고,
    * 수신 감시 · 재연결 · 다른 탭 처리도 쓰지 않는다(연습은 다른 사람과 무관하다). 뒤로 가기 확인은 쓴다 — 설치 앱(TWA)에서는
@@ -527,7 +546,18 @@ export class App {
     this.local = local;
     this.localUnsub = local.subscribe((msg) => this.onMessage(msg));
     this.renderWake();
-    local.send({ t: 'join', room: null, create: true, name, token: null, altTokens: [], bots: true });
+    // 연습: 고른 역할에 내 의상을 미리 굽는다 (봇 자리는 기본)
+    setBakeCostumes(lobbyCostumeSet(role, this.meta.costumes()));
+    local.send({
+      t: 'join',
+      room: null,
+      create: true,
+      name,
+      token: null,
+      altTokens: [],
+      bots: true,
+      costume: this.meta.costumes(),
+    });
     local.send({ t: 'role', role });
     local.send({ t: 'ready', ready: true });
     local.send({ t: 'start' });
@@ -601,6 +631,7 @@ export class App {
       token: getSeatToken(room),
       altTokens: getAltTokens(room),
       bots: this.params.bots,
+      costume: this.meta.costumes(),
     });
   }
 
@@ -889,6 +920,9 @@ export class App {
           this.result = null;
           this.setPlaying(false);
           this.resultUi.hide();
+          // 미리 굽기 의상: 내가 고른 역할에만 내 의상 (다른 자리 의상은 판 시작 명단으로 안다)
+          const mine = msg.lobby.players.find((p) => p.id === this.you)?.role ?? null;
+          setBakeCostumes(lobbyCostumeSet(mine, this.meta.costumes()));
           // 연습 방은 방 화면 없이 바로 판이 시작된다 (역할 고르기 화면 · 결과 화면에서)
           if (msg.lobby.kind !== 'practice') this.lobbyUi.renderRoom(msg.lobby);
         }
@@ -897,6 +931,8 @@ export class App {
       case 'match':
         if (!this.balance) return;
         this.match = msg.info;
+        // 이 판에 입힐 의상 (판 시작 명단 — 괴물 화면 명단에는 생존자가 없어 생존자 칸은 기본). 그림 조각이 아직이면 오는 대로 그 칸만 다시 굽는다
+        setBakeCostumes(costumeSetFromRoster(msg.info.roster));
         this.result = null;
         this.lastSnap = null;
         this.snapCount = 0;

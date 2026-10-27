@@ -12,6 +12,7 @@
 // 품질은 장식(먼지 · 발먼지 · 눈빛 · 애니메이션 프레임)만 바꾸고, 정보(info · drawn)는 모든 품질에서 같다.
 // 범위 · 부채꼴 정보 항목(info)을 먼저 만들고 그 항목에서 그린다(render/vision.ts): 그림과 정보의 출처가 하나다.
 // 매 프레임 그리는 Graphics는 원호 명령(100분할)을 쓰지 않고 선분으로 편다. 프레임당 원호 · 채우기 수를 features에 남긴다.
+import { bakeCostumes } from '../art/costumeBake';
 import Phaser from 'phaser';
 import {
   CAPTURE_POINTS,
@@ -806,6 +807,7 @@ export class WorldRenderer {
       survivorR: balance.survivor.radius,
       monsterR: balance.monster.radius,
       style: currentCharStyle(),
+      costumes: bakeCostumes(),
     });
     if (a.key !== this.atlasKey) {
       this.resetRigs();

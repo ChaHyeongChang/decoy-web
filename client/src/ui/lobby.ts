@@ -21,6 +21,7 @@ import {
 } from '../touchTutorial';
 import type { ServerStatusView } from '../serverStatus';
 import { currentCharStyle, onCharStyleChange } from '../gfx/charStyle';
+import { onWearingChange, wearingFor } from '../meta/wearing';
 import { TouchTutorialCard } from './lifecycleUi';
 import type { SettingsPanel } from './settingsPanel';
 import {
@@ -33,6 +34,7 @@ import {
   logoImg,
   roleVars,
   svgSpan,
+  type FigureCostume,
 } from './uiArt';
 
 export interface LobbyActions {
@@ -87,9 +89,9 @@ const FRONT_FIGURE_CLASS = 'front';
  * 역할 그림 상자 (방 역할 카드 rc-figure · 연습 역할 고르기 pr-figure): 캐릭터 스타일을 따른다.
  * 기존 = 위에서 본 실루엣, 새 캐릭터 = 정면 그림 + 'front' 클래스. 그림 하나 = svg 하나
  */
-function roleFigure(cls: string, role: Role): HTMLSpanElement {
+function roleFigure(cls: string, role: Role, costume: FigureCostume = 'basic'): HTMLSpanElement {
   const front = currentCharStyle() === 'new';
-  return svgSpan(front ? `${cls} ${FRONT_FIGURE_CLASS}` : cls, characterFigureSvg(role));
+  return svgSpan(front ? `${cls} ${FRONT_FIGURE_CLASS}` : cls, characterFigureSvg(role, true, costume));
 }
 
 /**
@@ -203,6 +205,8 @@ export class LobbyUI {
     // 캐릭터 스타일이 바뀌면 (첫 화면 선택 상자 · 휴대폰 설정 판 · 디버그 훅) 보이는 역할 그림을 맞춘다.
     // LobbyUI는 앱과 수명이 같다(app.ts가 한 번 만든다): 구독을 풀 때가 없다
     onCharStyleChange(() => this.charStyleChanged());
+    // 입은 의상이 바뀌거나(옷장 · 다른 탭) 의상 그림 조각이 오면 내 역할 그림을 다시 그린다 (같은 길)
+    onWearingChange(() => this.charStyleChanged());
   }
 
   /**
@@ -223,7 +227,7 @@ export class LobbyUI {
     for (const role of ROLE_ORDER)
       this.content
         .querySelector(`[data-testid="practice-role-${role}"] > .pr-figure`)
-        ?.replaceWith(roleFigure('pr-figure', role));
+        ?.replaceWith(roleFigure('pr-figure', role, wearingFor(role)));
   }
 
   /** 설정 화면의 '터치 조작 안내 다시 보기': 방에서 준비한 채 기다리는 중이면 그 자리에서 다시 보인다 */
@@ -406,7 +410,7 @@ export class LobbyUI {
       const b = h(
         'button',
         { class: 'practice-role cut', 'data-testid': `practice-role-${role}`, style: roleVars(role) },
-        roleFigure('pr-figure', role),
+        roleFigure('pr-figure', role, wearingFor(role)),
         h(
           'span',
           { class: 'rc-head' },
@@ -709,14 +713,15 @@ export class LobbyUI {
   /**
    * 방 · 빠른 매칭 역할 카드 그림. 로비 상태가 올 때마다 카드를 새로 만들지만, 그림 svg 노드는 같은 역할 · 스타일이면 앞 화면의 것을
    * 새 카드로 옮겨 쓴다(새 캐릭터 정면 그림은 하나에 약 30KB · 경로 100개 — 준비 · 이름이 바뀔 때마다 다시 해석하지 않게).
-   * 한 화면에 역할마다 카드가 하나라 옮겨도 겹치지 않는다
+   * 한 화면에 역할마다 카드가 하나라 옮겨도 겹치지 않는다. 내가 고른 역할 카드만 내 의상을 입는다(남의 의상은 판 밖 화면에 없다)
    */
-  private cardFigure(role: Role): HTMLSpanElement {
+  private cardFigure(role: Role, mine: boolean): HTMLSpanElement {
     const style = currentCharStyle();
-    const key = `${role}|${style}`;
+    const costume = mine ? wearingFor(role) : 'basic';
+    const key = `${role}|${style}|${costume}`;
     const cached = this.cardFigures.get(key);
     if (!cached) {
-      const span = roleFigure('rc-figure', role);
+      const span = roleFigure('rc-figure', role, costume);
       const svg = span.querySelector(':scope > svg');
       if (svg) this.cardFigures.set(key, svg);
       return span;
@@ -735,7 +740,7 @@ export class LobbyUI {
     const owner = lobby.players.find((p) => p.role === role);
     const mine = owner !== undefined && owner.id === this.you;
     const taken = owner !== undefined && !mine;
-    const figure = this.cardFigure(role);
+    const figure = this.cardFigure(role, mine);
     if (mine) {
       figure.removeAttribute('aria-hidden');
       figure.append(h('span', { class: 'rc-tag' }, icon('check', 15), UI_TEXT.myRole));

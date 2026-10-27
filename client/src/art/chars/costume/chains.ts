@@ -240,14 +240,24 @@ const TOP_REACH_DASH = 1.2;
 /** 목 쇠고리 (두건 좌표): 가운데 x · 반지름 · 굵기. 두건이 앞쪽을 덮어 머리 뒤를 감싼 C자만 드러난다 */
 const TOP_COLLAR = { cx: 0.3, rx: 0.39, ry: 0.43, wire: 0.08 } as const;
 
-/** 위 그림 쇠 칠: 굽은 등 가운데가 밝고 자락 끝으로 짙어진다 (망토 돔 음영과 같은 결) */
+/**
+ * 위 그림 쇠 칠: 굽은 등 가운데가 밝고 자락 끝으로 짙어진다 (망토 돔 음영과 같은 결 — monster.ts 위 망토와 같은 중심 · 반지름).
+ * 생존자 화면에서 괴물이 보이는 정도를 기본과 같게 둔다(사용자 결정: 꾸미기는 유불리가 없다 — tests/unit/costume-parity.test.ts):
+ * 쇠 고리 둘레의 짙은 테 · 그늘이 낮춘 밝기를 밝게 닦인 쇠가 되돌리도록, 사슬이 덮는 망토보다 조금 밝은 쇠로 칠하고(목 쪽 ·
+ * 굽은 등은 밝은 은빛), 자락 끝 쪽은 짙은 망토 끝과 비슷한 어두운 쇠로 둔다(끌리는 끝이 테두리 띠를 밝히지 않게)
+ */
 function topIron(a: MonsterTopAnchor): Paint {
-  return rad(a.body, 0.15, 0, 1.3, [
-    [0, a.ink(mix(IRON, IRON_HI, 0.45))],
-    [0.55, a.ink(mix(IRON, IRON_HI, 0.2))],
-    [1, a.ink(mix(IRON, IRON_DARK, 0.3))],
-  ]);
+  return rad(a.body, 0.15, 0, 1.45, IRON_DOME.map(([t, c]): Stop => [t, a.ink(c)]));
 }
+
+/** 위 그림 쇠 돔 음영 정지점 [거리 / 1.45, 색] */
+const IRON_DOME: readonly (readonly [number, number])[] = [
+  [0, mix(IRON_HI, IRON_SHINE, 0.4)],
+  [0.34, mix(IRON_HI, IRON_SHINE, 0.35)],
+  [0.55, mix(IRON, IRON_HI, 0.45)],
+  [0.78, mix(IRON, IRON_DARK, 0.55)],
+  [1, mix(IRON_DARK, MONSTER_COLOR.cloakDeep, 0.3)],
+];
 
 /** 오른쪽 뒤 자락 골 (뒤 자락 점의 80% 자리 근처에서 몸 중심에 가장 가까운 점 — 끝 5 · 골 4 톱니의 넷째 골) */
 function rightNotch(tail: readonly Pt[]): Pt {
@@ -309,7 +319,7 @@ function topCloak(sk: Sketch, a: MonsterTopAnchor): void {
     solid(a.ink(SHADOW)),
     (TOP_LINK.wid + TOP_LINK.wire) * 1.05,
     'round',
-    0.4,
+    0.25,
   );
   // 어깨를 넘어 등을 가로지르는 사슬 + 끌리는 끊긴 끝
   drawChain(sk, a.ink, a.outline, links, TOP_LINK, {

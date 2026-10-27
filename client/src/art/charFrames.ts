@@ -11,6 +11,7 @@
 // 구조 · 수감 인자가 없다. 그림은 COMMON_ART(HiddenPose)의 쉬기 · 걷기뿐이다. 수감 자세도 쓰지 않는다: 기존 스타일은 수감자와
 // 자유 생존자를 같은 흰 몸으로 그리므로(감옥 문은 수감자만 막아 자유 생존자도 감옥 안에 설 수 있다), 새 스타일만 수감 자세를
 // 그리면 괴물이 고른 그림 설정에 따라 읽을 수 있는 판 정보가 달라진다(검토 반영).
+import type { MonsterCostumeId, SurvivorCostumeId } from '@decoy/shared';
 import { COMMON_ART, MONSTER_ART, SURVIVOR_ART } from './chars/index';
 import type { Drawing } from './chars/kit';
 import {
@@ -67,7 +68,41 @@ export interface CharFrameSpec {
   readonly name: string;
   readonly unit: 's' | 'm';
   readonly box: FrameBox;
+  /** 이 프레임의 주인 (역할 · 괴물 · 괴물 화면 공통 생존자) — 의상이 바뀌면 그 주인 칸만 다시 굽는다 */
+  readonly owner: FrameOwner;
+  /** 입힌 의상 id (공통 생존자는 늘 'basic') */
+  readonly costume: string;
   draw(w: number): Drawing;
+}
+
+/** 프레임 주인: 역할 셋 · 괴물 · 공통 생존자(hidden — 의상을 받지 않는다) */
+export type FrameOwner = RoleCharId | 'monster' | 'hidden';
+
+/**
+ * 판 하나에서 역할마다 입은 의상 (메타 c). 판에서 역할은 한 사람씩이라 역할 = 자리다: 그 역할 프레임을 같은 이름 · 같은 칸에
+ * 의상을 입혀 굽는다(텍스처가 늘지 않는다). 괴물 화면 공통 생존자(hidden)는 이 값과 상관없이 늘 기본이다
+ */
+export interface CostumeSet {
+  runner: SurvivorCostumeId;
+  guard: SurvivorCostumeId;
+  scout: SurvivorCostumeId;
+  monster: MonsterCostumeId;
+}
+
+export const BASIC_COSTUME_SET: Readonly<CostumeSet> = {
+  runner: 'basic',
+  guard: 'basic',
+  scout: 'basic',
+  monster: 'basic',
+};
+
+export function sameCostumeSet(a: Readonly<CostumeSet>, b: Readonly<CostumeSet>): boolean {
+  return a.runner === b.runner && a.guard === b.guard && a.scout === b.scout && a.monster === b.monster;
+}
+
+/** 그 주인이 입은 의상 (공통 생존자는 늘 기본) */
+export function costumeOf(set: Readonly<CostumeSet>, owner: FrameOwner): string {
+  return owner === 'hidden' ? 'basic' : set[owner];
 }
 
 /**
@@ -76,16 +111,17 @@ export interface CharFrameSpec {
  * 이름마다 하나만 들고, w가 다르면(반지름이 바뀌면) 그 자리를 바꾼다 — 많아야 프레임 수만큼이다
  */
 export class DrawingMemo {
-  private readonly map = new Map<string, { w: number; d: Drawing }>();
+  /** 이름마다 하나 (w · 의상이 다르면 그 자리를 바꾼다 — 의상을 바꿔 입어도 많아야 프레임 수만큼) */
+  private readonly map = new Map<string, { w: number; costume: string; d: Drawing }>();
   /** 새로 만든 횟수 (시험 · 디버그) */
   made = 0;
 
   get(spec: CharFrameSpec, w: number): Drawing {
     const hit = this.map.get(spec.name);
-    if (hit && hit.w === w) return hit.d;
+    if (hit && hit.w === w && hit.costume === spec.costume) return hit.d;
     const d = spec.draw(w);
     this.made += 1;
-    this.map.set(spec.name, { w, d });
+    this.map.set(spec.name, { w, costume: spec.costume, d });
     return d;
   }
 
@@ -292,59 +328,94 @@ export function monsterFrameNew(p: MonsterFrameInput): string {
 
 const phaseAt = (i: number, n: number): number => (i / n) * TAU;
 
-function survivorSpec(name: string, role: RoleCharId, pose: Partial<SurvivorPose>): CharFrameSpec {
+function survivorSpec(
+  name: string,
+  role: RoleCharId,
+  pose: Partial<SurvivorPose>,
+  costume: SurvivorCostumeId,
+): CharFrameSpec {
   const p: SurvivorPose = { ...SURVIVOR_REST, ...pose };
-  return { name, unit: 's', box: SURVIVOR_BOX, draw: (w) => SURVIVOR_ART[role].top(p, { w }) };
+  return {
+    name,
+    unit: 's',
+    box: SURVIVOR_BOX,
+    owner: role,
+    costume,
+    draw: (w) => SURVIVOR_ART[role].top(p, { w, costume }),
+  };
 }
 
+/** 괴물 화면 공통 생존자: 의상 인자가 없다 (흰색 위장 — 누가 무엇을 입었든 같은 그림) */
 function hiddenSpec(name: string, pose: Partial<HiddenPose>): CharFrameSpec {
   const p: HiddenPose = { ...HIDDEN_REST, ...pose };
-  return { name, unit: 's', box: SURVIVOR_BOX, draw: (w) => COMMON_ART.top(p, { w }) };
+  return {
+    name,
+    unit: 's',
+    box: SURVIVOR_BOX,
+    owner: 'hidden',
+    costume: 'basic',
+    draw: (w) => COMMON_ART.top(p, { w }),
+  };
 }
 
-function monsterSpec(name: string, pose: Partial<MonsterPose>): CharFrameSpec {
+function monsterSpec(name: string, pose: Partial<MonsterPose>, costume: MonsterCostumeId): CharFrameSpec {
   const p: MonsterPose = { ...MONSTER_REST, ...pose };
-  return { name, unit: 'm', box: MONSTER_BOX, draw: (w) => MONSTER_ART.top(p, { w }) };
+  return {
+    name,
+    unit: 'm',
+    box: MONSTER_BOX,
+    owner: 'monster',
+    costume,
+    draw: (w) => MONSTER_ART.top(p, { w, costume }),
+  };
 }
 
-/** 새 스타일 캐릭터 프레임 전부 (역할 · 공통 생존자 · 괴물). 그림자 · 링 · 문양 · 거품 · 먼지는 atlas.ts가 옛 그림 그대로 굽는다 */
-export function newStyleFrameSpecs(): CharFrameSpec[] {
+/**
+ * 새 스타일 캐릭터 프레임 전부 (역할 · 공통 생존자 · 괴물). 그림자 · 링 · 문양 · 거품 · 먼지는 atlas.ts가 옛 그림 그대로 굽는다.
+ * costumes = 역할마다 입힐 의상 (프레임 이름 · 상자는 의상과 상관없이 같다)
+ */
+export function newStyleFrameSpecs(costumes: Readonly<CostumeSet> = BASIC_COSTUME_SET): CharFrameSpec[] {
   const out: CharFrameSpec[] = [];
   for (const role of ['runner', 'guard', 'scout'] as const) {
     const N = ROLE_FRAME_NAMES[role];
-    out.push(survivorSpec(N.rest, role, {}));
-    N.walk.forEach((n, i) => out.push(survivorSpec(n, role, { walk: phaseAt(i, WALK_FRAMES), stride: 1 })));
+    const c = costumes[role];
+    out.push(survivorSpec(N.rest, role, {}, c));
+    N.walk.forEach((n, i) =>
+      out.push(survivorSpec(n, role, { walk: phaseAt(i, WALK_FRAMES), stride: 1 }, c)),
+    );
     ACTION_STEPS[role].forEach((a, i) => {
       const n = N.action[i];
-      if (n) out.push(survivorSpec(n, role, { action: a }));
+      if (n) out.push(survivorSpec(n, role, { action: a }, c));
     });
     N.sprint.forEach((n, i) =>
-      out.push(survivorSpec(n, role, { walk: phaseAt(i, WALK_FRAMES), stride: 1, action: 1 })),
+      out.push(survivorSpec(n, role, { walk: phaseAt(i, WALK_FRAMES), stride: 1, action: 1 }, c)),
     );
-    out.push(survivorSpec(N.captive, role, { mode: 'captive' }));
+    out.push(survivorSpec(N.captive, role, { mode: 'captive' }, c));
     N.captiveWalk.forEach((n, i) =>
-      out.push(survivorSpec(n, role, { mode: 'captive', walk: phaseAt(i, CAPTIVE_WALK_FRAMES), stride: 1 })),
+      out.push(
+        survivorSpec(n, role, { mode: 'captive', walk: phaseAt(i, CAPTIVE_WALK_FRAMES), stride: 1 }, c),
+      ),
     );
-    out.push(survivorSpec(N.reach, role, { mode: 'reach' }));
-    out.push(survivorSpec(N.hit, role, { hit: 1 }));
-    out.push(survivorSpec(N.hitFlash, role, { hit: 1, tone: 'flash' }));
-    out.push(survivorSpec(N.flash, role, { tone: 'flash' }));
-    out.push(survivorSpec(N.gray, role, { tone: 'gray' }));
+    out.push(survivorSpec(N.reach, role, { mode: 'reach' }, c));
+    out.push(survivorSpec(N.hit, role, { hit: 1 }, c));
+    out.push(survivorSpec(N.hitFlash, role, { hit: 1, tone: 'flash' }, c));
+    out.push(survivorSpec(N.flash, role, { tone: 'flash' }, c));
+    out.push(survivorSpec(N.gray, role, { tone: 'gray' }, c));
   }
   const H = HIDDEN_FRAME_NAMES;
   out.push(hiddenSpec(H.rest, {}));
   H.walk.forEach((n, i) => out.push(hiddenSpec(n, { walk: phaseAt(i, WALK_FRAMES), stride: 1 })));
   out.push(hiddenSpec(H.flash, { tone: 'flash' }));
   const M = MONSTER_FRAME_NAMES;
-  M.idle.forEach((n, i) => out.push(monsterSpec(n, { cloak: phaseAt(i, CLOAK_FRAMES) })));
+  M.idle.forEach((n, i) => out.push(monsterSpec(n, { cloak: phaseAt(i, CLOAK_FRAMES) }, costumes.monster)));
   M.move.forEach((n, i) => {
     const ph = phaseAt(i, CLOAK_FRAMES);
-    out.push(monsterSpec(n, { cloak: ph, walk: ph, stride: 1 }));
+    out.push(monsterSpec(n, { cloak: ph, walk: ph, stride: 1 }, costumes.monster));
   });
-  out.push(monsterSpec(M.dash, { dash: 1 }));
-  out.push(monsterSpec(M.stun, { stun: 1, eyes: 'stun' }));
-  out.push(monsterSpec(M.windup, { windup: 1 }));
-  out.push(monsterSpec(M.strike, { strike: 1 }));
-  out.push(monsterSpec(M.roar, { roar: 1 }));
+  out.push(monsterSpec(M.dash, { dash: 1 }, costumes.monster));
+  out.push(monsterSpec(M.stun, { stun: 1, eyes: 'stun' }, costumes.monster));
+  out.push(monsterSpec(M.windup, { windup: 1 }, costumes.monster));
+  out.push(monsterSpec(M.strike, { strike: 1 }, costumes.monster));
+  out.push(monsterSpec(M.roar, { roar: 1 }, costumes.monster));
   return out;
 }

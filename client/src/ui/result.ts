@@ -8,7 +8,18 @@ import { HUD_TEXT, ROLE_CARDS, UI_TEXT, formatText } from '../data/storyText';
 import { currentCharStyle, onCharStyleChange } from '../gfx/charStyle';
 import type { RatingApplied } from '../meta/meta';
 import { ratingPanel } from './resultRating';
-import { characterFigureSvg, frontFigureSvg, glyphSvg, h, icon, logoImg, roleVars, svgSpan } from './uiArt';
+import {
+  characterFigureSvg,
+  frontFigureSvg,
+  glyphSvg,
+  h,
+  icon,
+  logoImg,
+  roleVars,
+  svgSpan,
+  type FigureCostume,
+} from './uiArt';
+import { onWearingChange, wearingFor } from '../meta/wearing';
 
 const STATUS: Record<SurvivorStatus, { text: string; icon: IconId }> = {
   free: { text: UI_TEXT.resultFree, icon: 'heart' },
@@ -54,22 +65,24 @@ const nil = (): HTMLElement => h('span', { class: 'nil' }, '—');
  * 새 캐릭터면 괴물 정면 그림, 무효 = 끊김 아이콘. 새 캐릭터면 'front' 클래스(정면 그림 크기 · 겹침은 style.css).
  * 그림 하나 = svg 하나
  */
-function emblemFor(winner: MatchResult['winner']): HTMLElement {
+function emblemFor(winner: MatchResult['winner'], myRole: Role | null): HTMLElement {
   const front = currentCharStyle() === 'new';
   const cls = (team: string): string => (front ? `emblem ${team} front` : `emblem ${team}`);
+  // 내 역할 그림만 내 의상 (남의 의상은 판 밖 화면에 없다 — 결과 메시지에도 의상 칸이 없다)
+  const dress = (role: Role): FigureCostume => (role === myRole ? wearingFor(role) : 'basic');
   if (winner === 'survivors')
     return h(
       'div',
       { class: cls('survivors') },
       ...(['runner', 'guard', 'scout'] as const).map((role) =>
-        svgSpan('fig', characterFigureSvg(role, false)),
+        svgSpan('fig', characterFigureSvg(role, false, dress(role))),
       ),
     );
   if (winner === 'monster')
     return h(
       'div',
       { class: cls('monster') },
-      svgSpan('fig', front ? frontFigureSvg('monster', false) : glyphSvg('monster')),
+      svgSpan('fig', front ? frontFigureSvg('monster', false, dress('monster')) : glyphSvg('monster')),
     );
   return h('div', { class: 'emblem void' }, icon('disconnected', 64));
 }
@@ -95,7 +108,7 @@ export function oneShotButtons(pairs: readonly (readonly [OneShotButton, () => v
 export class ResultUI {
   private readonly root: HTMLDivElement;
   /** 지금 보이는 팀 문장과 승리 팀 (캐릭터 스타일이 바뀌면 이것만 다시 그린다 — 버튼은 그대로) */
-  private emblem: { el: HTMLElement; winner: MatchResult['winner'] } | null = null;
+  private emblem: { el: HTMLElement; winner: MatchResult['winner']; myRole: Role | null } | null = null;
 
   constructor(
     host: HTMLElement,
@@ -106,14 +119,16 @@ export class ResultUI {
     this.root = h('div', { class: 'result', 'data-testid': 'result' });
     this.root.style.display = 'none';
     host.appendChild(this.root);
-    // 결과 화면이 떠 있는 동안 캐릭터 스타일이 바뀌면(디버그 훅) 팀 문장만 바꾼다. ResultUI는 앱과 수명이 같다
-    onCharStyleChange(() => {
+    // 결과 화면이 떠 있는 동안 캐릭터 스타일이 바뀌거나(디버그 훅) 의상 그림 조각이 오면 팀 문장만 바꾼다. ResultUI는 앱과 수명이 같다
+    const redraw = (): void => {
       const e = this.emblem;
       if (!e || this.root.style.display === 'none') return;
-      const next = emblemFor(e.winner);
+      const next = emblemFor(e.winner, e.myRole);
       e.el.replaceWith(next);
-      this.emblem = { el: next, winner: e.winner };
-    });
+      this.emblem = { ...e, el: next };
+    };
+    onCharStyleChange(redraw);
+    onWearingChange(redraw);
   }
 
   hide(): void {
@@ -144,8 +159,8 @@ export class ResultUI {
         : r.winner === 'monster'
           ? UI_TEXT.winMonster
           : UI_TEXT.winVoid;
-    const emblem = emblemFor(r.winner);
-    this.emblem = { el: emblem, winner: r.winner };
+    const emblem = emblemFor(r.winner, myRole);
+    this.emblem = { el: emblem, winner: r.winner, myRole };
     const title = h(
       'div',
       { class: 'result-title' },

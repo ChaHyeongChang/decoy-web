@@ -64,7 +64,9 @@ export class ServerCore {
       if (msg.t === 'join' || msg.t === 'quick') {
         if (live) return;
         const r =
-          msg.t === 'join' ? this.manager.join(conn, msg, now) : this.manager.quick(conn, msg.name, now);
+          msg.t === 'join'
+            ? this.manager.join(conn, msg, now)
+            : this.manager.quick(conn, msg.name, now, msg.costume);
         if ('error' in r) {
           conn.send(r.error);
           return;
@@ -81,10 +83,11 @@ export class ServerCore {
       // 빠른 매칭은 판 뒤 방을 해산한다: 다시 하기는 누른 사람만 다시 대기열로 (다른 사람은 결과에 그대로, M13c)
       if (msg.t === 'rematch' && live.room.kind === 'quick' && live.room.phase === 'result') {
         const name = live.seat.name;
+        const costume = live.seat.costume;
         live.room.leave(live.seat, now);
         // 마지막 사람이 떠난 결과 방은 바로 지운다 (남은 봇 연결도 닫는다)
         this.manager.dropIfAbandoned(live.room);
-        const r = this.manager.quick(conn, name, now);
+        const r = this.manager.quick(conn, name, now, costume);
         bound = r;
         r.room.welcome(r.seat);
         return;

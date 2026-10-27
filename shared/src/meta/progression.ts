@@ -1,6 +1,6 @@
 // 판 밖 성장 · 보상 수치 (config/progression.json, 수치만 — 이름 · 설명 문구는 client/src/data/storyText.ts META_TEXT)의 타입. 규칙 · 판정 수치(balance.json)와 따로 둔다:
 // 꾸미기 보상뿐이라 판 안에는 영향이 없다(GAME_DESIGN 12장). 서버(평가)와 클라이언트(보상 · 저장)가 빌드에 넣은 같은 파일을 쓴다
-import type { EmblemId, RatingStatId, Team } from '../types';
+import type { EmblemId, MonsterCostumeId, RatingStatId, SurvivorCostumeId, Team } from '../types';
 import progressionJson from '../../../config/progression.json';
 
 export interface EmblemDef {
@@ -32,6 +32,13 @@ export interface Progression {
   login: { base: number; step: number; maxStreak: number };
   /** 일일 도전 후보 (하루에 생존자 · 괴물 · 아무 역할 하나씩, 기기 날짜로 고른다) */
   daily: Record<ChallengeTeam, ChallengeDef[]>;
+  /** 의상 해금 값 (불씨, 메타 c). 기본(basic)은 늘 가져 값이 없다 */
+  costumes: CostumePrices;
+}
+
+export interface CostumePrices {
+  survivor: Record<Exclude<SurvivorCostumeId, 'basic'>, number>;
+  monster: Record<Exclude<MonsterCostumeId, 'basic'>, number>;
 }
 
 export type ChallengeTeam = 'survivor' | 'monster' | 'any';

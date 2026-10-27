@@ -49,10 +49,19 @@ export const SENT_DATA = {
   },
   roomChoice: {
     label: '방 · 역할 선택',
-    fields: ['join.room', 'join.create', 'join.bots', 'role.role', 'ready.ready'],
+    fields: [
+      'join.room',
+      'join.create',
+      'join.bots',
+      'join.costume',
+      'quick.costume',
+      'costume.costume',
+      'role.role',
+      'ready.ready',
+    ],
     playType: '앱 활동 › 앱 상호작용',
     purpose:
-      '방 만들기 · 입장 · 빈자리 봇 채우기 · 역할 고르기 · 준비 (시작 · 다시 하기 · 나가기는 내용 없는 신호)',
+      '방 만들기 · 입장 · 빈자리 봇 채우기 · 역할 고르기 · 준비 · 입은 의상(꾸미기 — 판이 시작될 때 같은 생존자 팀에, 괴물 의상은 모두에게 보임) (시작 · 다시 하기 · 나가기는 내용 없는 신호)',
     confirm: false,
     // 일시적 처리 아니요: 고른 방 · 역할은 방이 살아 있는 동안 메모리에 남는다 (닉네임 · 자리 토큰과 같은 기준)
     form: { required: true, ephemeral: false },

@@ -186,14 +186,14 @@ describe('기기 저장소 (decoy:progress)', () => {
     expect(n).toBeGreaterThan(before);
   });
 
-  it('모르는 칸(다음 마일스톤이 더할 의상 등)은 적립 · 저장 뒤에도 남는다', async () => {
+  it('모르는 칸(다음 빌드가 더할 칸)은 적립 · 저장 뒤에도 남는다', async () => {
     const s = mem();
-    s.data.set(KEY, JSON.stringify({ ...emptyProfile(1), coins: 120, owned: ['x'] }));
+    s.data.set(KEY, JSON.stringify({ ...emptyProfile(1), coins: 120, titles: ['x'] }));
     const m = new MetaState(new DeviceProfileStore(s), now);
     const r = await m.applyRating(rating('M.1'));
     expect(JSON.parse(s.data.get(KEY) ?? '{}')).toMatchObject({
       coins: 120 + (r.gain?.coins.total ?? 0),
-      owned: ['x'],
+      titles: ['x'],
       xp: XP,
     });
   });
@@ -233,5 +233,46 @@ describe('자정 넘김 (가짜 시계, 이 기기 시간)', () => {
     await Promise.all([a.ready, b.ready]);
     expect(await a.claimLogin()).not.toBeNull();
     expect(await b.claimLogin()).toBeNull();
+  });
+});
+
+describe('의상 해금 · 입기 (옷장, 메타 c)', () => {
+  it('불씨로 해금하면 저장되고, 입으면 다음 접속에도 입은 채 (판에 들어갈 때 보내는 값)', async () => {
+    const s = mem();
+    s.data.set(KEY, serializeProfile({ ...emptyProfile(1), coins: 300 }));
+    const m = new MetaState(new DeviceProfileStore(s), now);
+    await m.ready;
+    expect(m.costumes()).toEqual({ survivor: 'basic', monster: 'basic' });
+    expect(await m.wearCostume('survivor', 'pack')).toBe(false);
+    expect(await m.buyCostume('survivor', 'pack')).toEqual({ ok: true, price: 250, saved: true });
+    expect(await m.buyCostume('monster', 'chains')).toEqual({ ok: false, reason: 'coins' });
+    expect(await m.wearCostume('survivor', 'pack')).toBe(true);
+    const again = new MetaState(new DeviceProfileStore(s), now);
+    await again.ready;
+    expect(again.current.coins).toBe(50);
+    expect(again.costumes()).toEqual({ survivor: 'pack', monster: 'basic' });
+  });
+
+  it('다른 탭이 그사이 불씨를 썼으면 그 위에서 센다 (같은 불씨로 두 번 해금하지 않는다)', async () => {
+    const s = mem();
+    s.data.set(KEY, serializeProfile({ ...emptyProfile(1), coins: 300 }));
+    const a = new MetaState(new DeviceProfileStore(s), now);
+    const b = new MetaState(new DeviceProfileStore(s), now);
+    await Promise.all([a.ready, b.ready]);
+    expect((await a.buyCostume('survivor', 'pack')).ok).toBe(true);
+    expect(await b.buyCostume('monster', 'feathers')).toEqual({ ok: false, reason: 'coins' });
+    expect(await b.buyCostume('survivor', 'pack')).toEqual({ ok: false, reason: 'owned' });
+  });
+
+  it('저장소가 막혀도 이번 접속 동안은 해금 · 입기가 된다 (saved=false)', async () => {
+    const m = new MetaState(
+      new DeviceProfileStore(full(serializeProfile({ ...emptyProfile(1), coins: 200 }))),
+      now,
+    );
+    await m.ready;
+    expect(await m.buyCostume('monster', 'hood')).toEqual({ ok: true, price: 150, saved: false });
+    expect(await m.wearCostume('monster', 'hood')).toBe(true);
+    expect(m.costumes().monster).toBe('hood');
+    expect(m.current.coins).toBe(50);
   });
 });

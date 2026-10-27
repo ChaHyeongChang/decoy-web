@@ -262,6 +262,11 @@ export interface RosterEntry {
   name: string;
   role: Role;
   bot: boolean;
+  /**
+   * 그 자리의 의상 (메타 c, 그 역할 팀 의상 · 기본이면 없다). 생존자 명단에만 생존자 의상이 들어가고, 괴물 명단은 자기
+   * 하나뿐이라 괴물은 생존자 의상을 받지 않는다 (GAME_DESIGN 12.5, 정보 숨김)
+   */
+  costume?: SurvivorCostumeId | MonsterCostumeId;
 }
 
 export interface MatchInfo {
@@ -389,6 +394,12 @@ export const MONSTER_COSTUMES = ['basic', 'hood', 'feathers', 'chains'] as const
 export type SurvivorCostumeId = (typeof SURVIVOR_COSTUMES)[number];
 export type MonsterCostumeId = (typeof MONSTER_COSTUMES)[number];
 
+/** 한 사람이 고른 의상 (생존자 역할일 때 · 괴물 역할일 때) */
+export interface CostumeChoice {
+  survivor: SurvivorCostumeId;
+  monster: MonsterCostumeId;
+}
+
 // ───────────────────────── 메시지 ─────────────────────────
 
 export type TestCommand =
@@ -408,6 +419,8 @@ export type ClientMessage =
       token: string | null;
       altTokens: string[];
       bots: boolean;
+      /** 고른 의상 (메타 c). 서버는 id만 거르고(모르는 값 = 기본) 판 시작 명단에만 싣는다 — 로비 · 결과에는 싣지 않는다 */
+      costume?: CostumeChoice;
     }
   | { t: 'role'; role: Role | null }
   | { t: 'ready'; ready: boolean }
@@ -416,8 +429,10 @@ export type ClientMessage =
   | { t: 'input'; frames: InputFrame[] }
   | { t: 'ping'; c: number }
   | { t: 'rematch' }
+  /** 판 밖(로비 · 대기 · 결과)에서 옷장으로 바꾼 의상 (메타 c). 판 중에는 무시 — 판 시작 명단과 구운 그림이 판 끝까지 같게 */
+  | { t: 'costume'; costume: CostumeChoice }
   /** 빠른 매칭 대기열에 들어간다 (M13c). 대기 중이거나 판이 없는 빠른 매칭 방에 넣거나 새로 만든다 */
-  | { t: 'quick'; name: string }
+  | { t: 'quick'; name: string; costume?: CostumeChoice }
   /**
    * 방에서 나간다 (M13b): 결과 화면 "홈으로" · 대기 취소. 로비 · 결과 단계에서는 자리를 지우고, 판 중에는 끊김과 같다
    * (M13c에서 판 중 나가기는 유예 없이 바로 판정). 연결은 방에서 풀려 다른 방에 들어갈 수 있다

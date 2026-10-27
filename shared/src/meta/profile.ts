@@ -4,10 +4,14 @@
 //
 // 형식 판(v): 칸을 더하는 것은 같은 판에서 한다 — 읽을 때 모르는 칸은 그대로 두었다가 저장할 때 다시 적는다(새 빌드가 적은
 // 칸을 옛 빌드가 지우지 않게). 칸의 뜻이 바뀌면 판을 올리고 옮기는 코드를 둔다. 더 높은 판은 읽기만 하고 저장하지 않는다
+import { isMonsterCostume, isSurvivorCostume } from '../costume';
 import {
+  MONSTER_COSTUMES,
   MONSTER_EMBLEMS,
+  SURVIVOR_COSTUMES,
   SURVIVOR_EMBLEMS,
   teamOf,
+  type CostumeChoice,
   type EmblemId,
   type EmblemTier,
   type MatchRating,
@@ -57,6 +61,10 @@ export interface Profile {
   daily: DailyState | null;
   /** 접속 보상: 마지막으로 받은 날 · 연속 날 */
   login: { last: DayKey; streak: number } | null;
+  /** 해금한 의상 id (메타 c, 생존자 · 괴물 id는 겹치지 않는다). 기본(basic)은 늘 가져 적지 않는다 */
+  owned: string[];
+  /** 입은 의상 (팀별 — 가진 것 · 기본만) */
+  wear: CostumeChoice;
 }
 
 export interface DailyState {
@@ -93,6 +101,8 @@ export function emptyProfile(nowMs: number): Profile {
     coins: 0,
     daily: null,
     login: null,
+    owned: [],
+    wear: { survivor: 'basic', monster: 'basic' },
   };
 }
 
@@ -108,7 +118,13 @@ const KNOWN = new Set([
   'coins',
   'daily',
   'login',
+  'owned',
+  'wear',
 ]);
+/** 해금할 수 있는 의상 id (기본 제외) */
+const COSTUME_IDS: readonly string[] = [...SURVIVOR_COSTUMES, ...MONSTER_COSTUMES].filter(
+  (id) => id !== 'basic',
+);
 const CHALLENGE_ID_MAX = 24;
 
 function count(v: unknown): number {
@@ -160,6 +176,24 @@ function loginState(v: unknown): Profile['login'] {
   return { last: o.last, streak: Math.max(1, count(o.streak)) };
 }
 
+/** 가진 의상: 아는 id만, 겹침 없이 (모르는 id — 다음 빌드 의상 — 는 버린다: 그 빌드가 다시 적는다) */
+function ownedIds(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const out: string[] = [];
+  for (const x of v) if (typeof x === 'string' && COSTUME_IDS.includes(x) && !out.includes(x)) out.push(x);
+  return out;
+}
+
+/** 입은 의상: 가진 것만 (아니면 기본) */
+function wearOf(v: unknown, owned: readonly string[]): CostumeChoice {
+  const o = typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : {};
+  const ok = (id: string): boolean => id === 'basic' || owned.includes(id);
+  return {
+    survivor: isSurvivorCostume(o.survivor) && ok(o.survivor) ? o.survivor : 'basic',
+    monster: isMonsterCostume(o.monster) && ok(o.monster) ? o.monster : 'basic',
+  };
+}
+
 function matchIds(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
   return v
@@ -187,6 +221,7 @@ export function parseProfile(text: string | null, nowMs: number): ParsedProfile 
   const extra: ProfileExtra = {};
   for (const [k, val] of Object.entries(o)) if (!KNOWN.has(k)) extra[k] = val;
   const created = time(o.created, nowMs);
+  const owned = ownedIds(o.owned);
   const profile: Profile = {
     v: PROFILE_VERSION,
     xp: count(o.xp),
@@ -199,6 +234,8 @@ export function parseProfile(text: string | null, nowMs: number): ParsedProfile 
     coins: count(o.coins),
     daily: dailyState(o.daily),
     login: loginState(o.login),
+    owned,
+    wear: wearOf(o.wear, owned),
   };
   return { profile, extra, status: v > PROFILE_VERSION ? 'newer' : 'ok' };
 }
@@ -401,5 +438,11 @@ export function mergeProfiles(account: Profile, device: Profile, nowMs: number):
           ? device.login
           : account.login
         : (account.login ?? device.login),
+    // 가진 의상은 합치고, 입은 의상은 계정 쪽 (계정 쪽이 기본이면 기기 쪽)
+    owned: [...account.owned, ...device.owned.filter((id) => !account.owned.includes(id))],
+    wear: {
+      survivor: account.wear.survivor !== 'basic' ? account.wear.survivor : device.wear.survivor,
+      monster: account.wear.monster !== 'basic' ? account.wear.monster : device.wear.monster,
+    },
   };
 }

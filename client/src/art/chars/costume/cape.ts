@@ -1,7 +1,8 @@
 // 의상 '망토' (생존자 의상 400 불씨, 판 밖 메타 c): 어깨를 덮고 등 가운데까지 내려오는 짧은 망토 + 목 앞 쇠 걸쇠.
-// 위 그림 (게임 화면): 휴대폰 크기(몸 반지름 약 7px)에서도 등 뒤 반이 '짙은 망토 + 밝은 아랫단 선'으로 읽히게 실루엣이
-// 아니라 명암 · 무늬로 기본과 가른다 — 몸판(역할색)보다 확실히 어두운 천이 머리 뒤 윗등 · 어깨를 덮고, 아랫단은 몸판보다
-// 밝은 테두리 띠(뒤 아랫단에서 가장 굵고 옆으로 가늘어진다 — 둥근 고리가 아니라 아랫단 선으로 읽힌다)와 물결 셋.
+// 위 그림 (게임 화면): 휴대폰 크기(몸 반지름 약 7px)에서도 등 뒤 반이 '짙은 천 + 넓고 밝은 안감 아랫단' 두 톤으로 읽히게
+// 실루엣(크기)이 아니라 밝기 · 대비로 기본과 가른다 — 몸판(역할색)보다 확실히 어두운 천이 머리 뒤 윗등 · 어깨를 덮고,
+// 아랫단은 접어 올린 밝은 안감 띠(바깥 테 안쪽에만 — 윤곽은 그대로. 뒤 가운데에서 가장 넓고 옆으로 가늘어진다)와 물결 셋.
+// 안감 띠는 접힌 곳(천 쪽)이 가장 밝고 아랫단 끝으로 한 단 내려가며, 접힌 곳 위에 천 그늘 선이 있어 짙은 천과 갈린다.
 // 머리 바로 뒤 목둘레를 따라 어깨를 가로지르는 어깨 망토 띠(아랫단 밝은 결 · 밑 그늘) + 띠 양 끝 쇠 걸쇠를 잇는 사슬,
 // 띠 밑에서 나와 아랫단 물결 배로 퍼지는 넓은 주름 결 셋(어깨 둘 · 목덜미 하나, 빛 받는 쪽)과 그 사이 골 둘.
 // 팔은 망토 위에 남는다: 러너는 팔 안쪽 폭으로 지나 등 뒤로 흐르고(목둘레는 몸 가운데 0.45r 원판 둘레를 따라 돈다),
@@ -18,8 +19,11 @@
 // 정면 색: 겉감 = 역할색 45% 어둡게(러너 #204887 · 가드 #5C2F88 · 스카우트 #136C34), 안감 = 65% 어둡게(#152E56 · #3B1E56 ·
 // #0C4521), 테두리 = 역할색 15% 밝게(#5895F7 · #B56FF8 · #43CE76), 걸쇠 쇠 #CBD5E1.
 // 위 그림 색(topColors): 천 = 역할색 64% 어둡게(#152F59 · #3C1F59 · #0C4722), 아랫단 쪽 74%(#0F2240 · #2C1640 · #093318),
-// 어깨 망토 띠 60%(#183462 · #432263 · #0E4F26), 주름 결 40%(#234E94 · #653394 · #147638), 골 84%, 아랫단 테두리 =
-// 역할색 55% 밝게(#A7C7FB · #D8B3FB · #9CE5B7), 걸쇠 · 사슬 = 쇠 #CBD5E1 그늘. 위 그림에는 청록을 쓰지 않는다.
+// 어깨 망토 띠 60%(#183462 · #432263 · #0E4F26), 주름 결 40%(#234E94 · #653394 · #147638), 골 84%(#091527 · #1B0E28 ·
+// #05200F — 안감 접힌 곳 그늘 선도 이 색), 안감 띠 = 역할색을 밝게 — 접힌 곳 66%(#BCD5FC · #E1C5FC · #B4EBC8) → 가운데
+// 55%(#A7C7FB · #D8B3FB · #9CE5B7) → 아랫단 끝 45%(#93BAFA · #CFA2FB · #85DFA6). 안감은 역할색 계열로만 밝힌다(다른 역할색 ·
+// 빨강 · 주황 · 청록 · 흰색 위장과 겹치지 않게, 66% 넘게 밝히지 않는다). 걸쇠 · 사슬 = 쇠 #CBD5E1 그늘. 위 그림에는 청록을
+// 쓰지 않는다.
 import { ROLE } from '../../palette';
 import {
   apply,
@@ -48,10 +52,10 @@ function capeColors(role: RoleCharId): { outer: number; lining: number; trim: nu
 }
 
 /**
- * 위 그림 망토 색 (입은 역할색에서): 휴대폰 크기에서 등 뒤 반이 '짙은 망토 + 밝은 아랫단 선'으로 읽히게 몸판(역할색)보다
- * 확실히 어둡게 — 천 64% · 아랫단 쪽 74% 어둡게, 어깨 망토 띠는 빛을 받아 한 단 밝게(60%), 주름 결 40% · 골 84%,
- * 띠 아랫단 결 32%, 아랫단 테두리는 역할색 55% 밝게(몸판보다 밝은 선). 띠 · 결은 작은 크기에서 천의 어둠을 깨지 않게
- * 가늘거나 천과 가깝게 둔다
+ * 위 그림 망토 색 (입은 역할색에서): 휴대폰 크기에서 등 뒤 반이 '짙은 천 + 밝은 안감 아랫단' 두 톤으로 읽히게 천은
+ * 몸판(역할색)보다 확실히 어둡게 — 천 64% · 아랫단 쪽 74% 어둡게, 어깨 망토 띠는 빛을 받아 한 단 밝게(60%), 주름 결 40% ·
+ * 골 84%, 띠 아랫단 결 32%. 안감 띠는 몸판보다 확실히 밝게 — 접힌 곳 66% · 가운데 55% · 아랫단 끝 45% 밝게. 띠 · 결은
+ * 작은 크기에서 천의 어둠을 깨지 않게 가늘거나 천과 가깝게 둔다
  */
 function topColors(role: RoleCharId): {
   cloth: number;
@@ -60,7 +64,9 @@ function topColors(role: RoleCharId): {
   ridge: number;
   valley: number;
   lip: number;
-  trim: number;
+  lining: number;
+  liningHi: number;
+  liningLo: number;
 } {
   const c = ROLE[role];
   return {
@@ -70,7 +76,9 @@ function topColors(role: RoleCharId): {
     ridge: shade(c, 0.4),
     valley: shade(c, 0.84),
     lip: shade(c, 0.32),
-    trim: tint(c, 0.55),
+    lining: tint(c, 0.55),
+    liningHi: tint(c, 0.66),
+    liningLo: tint(c, 0.45),
   };
 }
 
@@ -90,7 +98,7 @@ type Polar = readonly (readonly [number, number])[];
 /**
  * 위 그림 역할별 망토 자리 (몸 기준, 오른쪽 반 — 왼쪽은 대칭):
  *  outer = 바깥 테(앞 끝 → 뒤 가운데), inner = 목둘레 안 테(앞 끝 → 뒤 가운데), hem = 아랫단 물결이 시작되는 각,
- *  trim = 테두리 띠가 시작되는 각(가드 · 스카우트는 갑옷 · 소매 밑에서), mantle = 어깨 망토 띠 아랫단 반지름(뒤 가운데),
+ *  trim = 안감 띠가 시작되는 각(가드 · 스카우트는 갑옷 · 소매 밑에서), mantle = 어깨 망토 띠 아랫단 반지름(뒤 가운데),
  *  mantleFrom = 어깨 망토 띠가 시작되는 각(가드는 어깨 갑옷 뒤 끝 밖에서), clasp = 걸쇠 각(머리 · 갑옷 · 소매에 가리지 않는 곳)
  */
 interface TopFit {
@@ -101,6 +109,8 @@ interface TopFit {
   readonly mantle: number;
   readonly mantleFrom: number;
   readonly clasp: number;
+  /** 아랫단 안감 띠 두께 (뒤 가운데, 옆으로 가늘어진다). 띠 안쪽 끝은 어깨 망토 띠 · 머리 뒤보다 밖 — 짙은 천이 남는다 */
+  readonly band: number;
 }
 
 const TOP_FIT: Readonly<Record<RoleCharId, TopFit>> = {
@@ -128,6 +138,7 @@ const TOP_FIT: Readonly<Record<RoleCharId, TopFit>> = {
     mantle: 0.555,
     mantleFrom: 44,
     clasp: 80,
+    band: 0.24,
   },
   // 가드: 어깨 갑옷 뒤 반을 덮고(어깨 망토 — 정면 그림처럼 어깨를 덮는다) 등판을 덮는다. 바깥 테는 갑옷 · 등판 윤곽 바로
   // 안쪽을 따른다 (실루엣 그대로 — 둥근 원판). 갑옷 앞 반 · 방패 · 헬멧은 그대로 보인다
@@ -151,6 +162,7 @@ const TOP_FIT: Readonly<Record<RoleCharId, TopFit>> = {
     mantle: 0.69,
     mantleFrom: 89,
     clasp: 100,
+    band: 0.25,
   },
   // 스카우트: 앞 끝은 소매 어깨 밑, 어깨와 등 사이는 오목하게 좁히고(허리) 등 뒤 배낭 자리에서 퍼진다 — 다 채우면 둥근
   // 가드와 실루엣이 겹친다
@@ -171,6 +183,7 @@ const TOP_FIT: Readonly<Record<RoleCharId, TopFit>> = {
     mantle: 0.69,
     mantleFrom: 99,
     clasp: 116,
+    band: 0.27,
   },
 };
 
@@ -186,8 +199,8 @@ function polarAt(t: Polar, deg: number): number {
   return (t[t.length - 1] ?? first)[1];
 }
 
-/** 아랫단 물결 수(주름 결 셋과 맞춘다) · 깊이 · 테두리 띠 두께 · 바깥 테에서 들인 거리 */
-const HEM = { n: 3, depth: 0.03, trimW: 0.095, trimIn: 0.006 } as const;
+/** 아랫단 물결 수(주름 결 셋과 맞춘다) · 깊이 · 안감 띠를 바깥 테에서 들인 거리 */
+const HEM = { n: 3, depth: 0.03, trimIn: 0.006 } as const;
 
 /** 뒤쪽 크기 한도 (SIZE_RULE 뒤 1.0r, 곡선 · 반올림 여유) · 옆 한도 */
 const BACK_MAX = 0.975;
@@ -336,7 +349,7 @@ function topBack(sk: Sketch, a: SurvivorTopAnchor): void {
     const k0 = ridge && off > 0 ? 0.45 : 0.3;
     const ri1 = polarAt(f.inner, deg);
     const ro1 = outerR(st, deg, side);
-    const k1 = (ro1 - HEM.trimW - 0.02 - ri1) / (ro1 - ri1);
+    const k1 = (ro1 - f.band - 0.02 - ri1) / (ro1 - ri1);
     const pts: Pt[] = [];
     for (let i = 0; i <= 4; i += 1) {
       const t = i / 4;
@@ -381,7 +394,8 @@ function topBack(sk: Sketch, a: SurvivorTopAnchor): void {
     ]),
   );
   sk.line(path().curve(m1).d, solid(ink(col.lip)), 0.018);
-  // 4) 아랫단 테두리 띠 (바깥 테 안쪽을 따라, 끝은 가늘어진다): 몸판보다 밝은 역할색 — 휴대폰 크기에서 등 끝의 밝은 선
+  // 4) 아랫단 안감 띠 (접어 올린 안감, 바깥 테 안쪽을 따라 — 윤곽은 그대로, 끝은 가늘어진다): 몸판보다 확실히 밝은 역할색.
+  //    휴대폰 크기에서 짙은 천과 함께 등 뒤 반이 두 톤(짙은 윗등 · 밝은 아랫단)으로 읽힌다
   const band0: Pt[] = [];
   const band1: Pt[] = [];
   const t0 = Math.max(f.trim, st.tip + 2);
@@ -389,13 +403,27 @@ function topBack(sk: Sketch, a: SurvivorTopAnchor): void {
     const deg = 180 - Math.abs(d);
     const side: 1 | -1 = d < 0 ? -1 : 1;
     const ends = smooth01((deg - t0) / 10);
-    // 옆 테두리는 가늘게, 아랫단(뒤)에서 가장 굵게 — 작은 크기에서 테두리가 둥근 고리가 아니라 등 끝의 아랫단 선으로 읽힌다
+    // 옆은 가늘게, 아랫단(뒤)에서 가장 넓게 — 작은 크기에서 둥근 고리가 아니라 등 끝의 밝은 아랫단으로 읽힌다
     const hemK = smooth01((deg - f.hem + 16) / 24);
     const r = outerR(st, deg, side) - HEM.trimIn;
     band0.push(topPt(st, deg, r, side));
-    band1.push(topPt(st, deg, r - HEM.trimW * (0.15 + 0.85 * ends) * (0.5 + 0.5 * hemK), side));
+    // 안쪽 끝은 목둘레(안 테)보다 밖 — 수감 · 피격으로 아랫단이 눌려도 몸 가운데 0.45r 원판 쪽으로 들어가지 않는다
+    const w = f.band * (0.15 + 0.85 * ends) * (0.55 + 0.45 * hemK);
+    band1.push(topPt(st, deg, Math.max(r - w, polarAt(f.inner, deg) + 0.03), side));
   }
-  sk.fill(path().curve(band0).curve(band1.reverse(), 1, false).Z().d, solid(ink(col.trim)));
+  const bandOut = rOut - HEM.trimIn;
+  const bandIn = bandOut - f.band;
+  sk.fill(
+    path().curve(band0).curve(band1.slice().reverse(), 1, false).Z().d,
+    radial(cx, cy, bandOut, [
+      [bandIn / bandOut, ink(col.liningHi)],
+      [(bandIn + f.band * 0.5) / bandOut, ink(col.lining)],
+      [1, ink(col.liningLo)],
+    ]),
+  );
+  // 접힌 곳 그늘 (천 밑으로 들어가는 안감 윗선) — 큰 크기에서 짙은 천과 밝은 안감 두 겹이 또렷하게. 밝기 띠(radial)는
+  // 몸 중심 기준이라 뒤 가운데에서 접힌 곳 66% → 끝 45%로 맞고, 바깥 테가 안으로 들어간 옆은 접힌 곳 색으로 남는다
+  sk.line(path().curve(band1).d, solid(ink(col.valley)), 0.03, 'round', 0.9);
   // 5) 걸쇠 사슬: 어깨 망토 띠 양 끝의 둥근 쇠 걸쇠 둘을 머리 뒤로 잇는 사슬 (가운데는 머리 밑에 숨는다)
   const chain: Pt[] = [];
   for (let d = -(180 - f.clasp); d <= 180 - f.clasp + 1e-6; d += 3) {
