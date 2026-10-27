@@ -1,17 +1,25 @@
 // 의상 '망토' (생존자 의상 400 불씨, 판 밖 메타 c): 어깨를 덮고 등 가운데까지 내려오는 짧은 망토 + 목 앞 쇠 걸쇠.
-// 위 그림: 어깨 뒤에서 등을 덮는 넓은 천. 목둘레(안 테)는 머리 밑에 숨고(러너는 몸 가운데 0.45r 원판 둘레를 따라 돈다),
-// 아랫단은 등 끝 가까이에서 부드러운 물결 넷 + 밝은 역할색 테두리 띠(끝은 가늘어진다). 목둘레에서 물결 홈으로 흐르는 천 주름.
-// 팔은 망토 위에 남는다: 러너는 팔 안쪽 폭으로 지나 등 뒤로 흐르고, 가드는 어깨 갑옷 뒤 끝 밑으로 접혀 들어가며,
-// 스카우트는 소매 밑에서 시작한다(스카우트 배낭 · 안테나는 망토가 대신한다 — hidesPack). 가드 · 스카우트는 머리 둘레에 깃.
+// 위 그림 (게임 화면): 휴대폰 크기(몸 반지름 약 7px)에서도 등 뒤 반이 '짙은 망토 + 밝은 아랫단 선'으로 읽히게 실루엣이
+// 아니라 명암 · 무늬로 기본과 가른다 — 몸판(역할색)보다 확실히 어두운 천이 머리 뒤 윗등 · 어깨를 덮고, 아랫단은 몸판보다
+// 밝은 테두리 띠(뒤 아랫단에서 가장 굵고 옆으로 가늘어진다 — 둥근 고리가 아니라 아랫단 선으로 읽힌다)와 물결 셋.
+// 머리 바로 뒤 목둘레를 따라 어깨를 가로지르는 어깨 망토 띠(아랫단 밝은 결 · 밑 그늘) + 띠 양 끝 쇠 걸쇠를 잇는 사슬,
+// 띠 밑에서 나와 아랫단 물결 배로 퍼지는 넓은 주름 결 셋(어깨 둘 · 목덜미 하나, 빛 받는 쪽)과 그 사이 골 둘.
+// 팔은 망토 위에 남는다: 러너는 팔 안쪽 폭으로 지나 등 뒤로 흐르고(목둘레는 몸 가운데 0.45r 원판 둘레를 따라 돈다),
+// 가드는 어깨 갑옷 뒤 반을 덮고(정면 그림의 어깨 망토처럼 — 갑옷 앞 반 · 방패 · 헬멧은 그대로), 스카우트는 소매 밑에서
+// 시작한다(스카우트 배낭 · 안테나는 망토가 대신한다 — hidesPack).
 // 역할 실루엣은 지킨다(VISUAL_SPEC 0장 ④ — 역할끼리 겹침 0.8 이하): 러너는 허리 쪽이 좁은 등 윤곽 안에, 스카우트는 어깨와
 // 등 사이 오목한 허리를 남기고 아랫단에서 퍼진다(둥근 가드 원판과 갈린다).
 // 정면 그림: 몸 뒤로 양옆에 펼쳐진 망토 자락(안감이 보이고, 바깥으로 젖힌 끝은 겉감 · 아랫단 테두리) +
 // 어깨를 덮는 짧은 어깨 망토(겉감, 아랫단 테두리 · 청록 네온 솔기) + 목 앞 둥근 쇠 걸쇠(가운데 청록 네온 보석).
 // 러너(3/4)는 자락이 등 쪽(화면 왼쪽)으로 물결치며 날린다. 상반신은 자락을 짧게 해 상자 안에 둔다.
-// 움직임: 위 그림 아랫단은 걸음마다 옆으로 흔들리고 물결이 흐른다. 러너 질주 때 뒤로 길게 모여 펄럭이고, 수감 때 몸에
-// 붙고, 피격 때 눌린다(러너는 옆으로 꺾이는 후드를 같이 따라 돈다). 정면 자락 · 아랫단은 바람(sway)에 흔들린다.
-// 색: 겉감 = 역할색 45% 어둡게(러너 #204887 · 가드 #5C2F88 · 스카우트 #136C34), 안감 = 65% 어둡게(#152E56 · #3B1E56 ·
-// #0C4521), 테두리 = 역할색 15% 밝게(#5895F7 · #B56FF8 · #43CE76), 걸쇠 쇠 #CBD5E1. 위 그림에는 청록을 쓰지 않는다.
+// 움직임: 위 그림 아랫단은 걸음마다 옆으로 흔들리고(목둘레는 제자리, 아랫단일수록 크게) 물결이 흐른다. 러너 질주 때 뒤로
+// 길게 모여 펄럭이고, 수감 때 몸에 붙고, 피격 때 눌린다(러너는 옆으로 꺾이는 후드를 같이 따라 돈다). 정면 자락 ·
+// 아랫단은 바람(sway)에 흔들린다.
+// 정면 색: 겉감 = 역할색 45% 어둡게(러너 #204887 · 가드 #5C2F88 · 스카우트 #136C34), 안감 = 65% 어둡게(#152E56 · #3B1E56 ·
+// #0C4521), 테두리 = 역할색 15% 밝게(#5895F7 · #B56FF8 · #43CE76), 걸쇠 쇠 #CBD5E1.
+// 위 그림 색(topColors): 천 = 역할색 64% 어둡게(#152F59 · #3C1F59 · #0C4722), 아랫단 쪽 74%(#0F2240 · #2C1640 · #093318),
+// 어깨 망토 띠 60%(#183462 · #432263 · #0E4F26), 주름 결 40%(#234E94 · #653394 · #147638), 골 84%, 아랫단 테두리 =
+// 역할색 55% 밝게(#A7C7FB · #D8B3FB · #9CE5B7), 걸쇠 · 사슬 = 쇠 #CBD5E1 그늘. 위 그림에는 청록을 쓰지 않는다.
 import { ROLE } from '../../palette';
 import {
   apply,
@@ -39,6 +47,33 @@ function capeColors(role: RoleCharId): { outer: number; lining: number; trim: nu
   return { outer: shade(c, 0.45), lining: shade(c, 0.65), trim: tint(c, 0.15) };
 }
 
+/**
+ * 위 그림 망토 색 (입은 역할색에서): 휴대폰 크기에서 등 뒤 반이 '짙은 망토 + 밝은 아랫단 선'으로 읽히게 몸판(역할색)보다
+ * 확실히 어둡게 — 천 64% · 아랫단 쪽 74% 어둡게, 어깨 망토 띠는 빛을 받아 한 단 밝게(60%), 주름 결 40% · 골 84%,
+ * 띠 아랫단 결 32%, 아랫단 테두리는 역할색 55% 밝게(몸판보다 밝은 선). 띠 · 결은 작은 크기에서 천의 어둠을 깨지 않게
+ * 가늘거나 천과 가깝게 둔다
+ */
+function topColors(role: RoleCharId): {
+  cloth: number;
+  deep: number;
+  mantle: number;
+  ridge: number;
+  valley: number;
+  lip: number;
+  trim: number;
+} {
+  const c = ROLE[role];
+  return {
+    cloth: shade(c, 0.64),
+    deep: shade(c, 0.74),
+    mantle: shade(c, 0.6),
+    ridge: shade(c, 0.4),
+    valley: shade(c, 0.84),
+    lip: shade(c, 0.32),
+    trim: tint(c, 0.55),
+  };
+}
+
 const DEG = Math.PI / 180;
 
 /** 0~1 부드러운 계단 */
@@ -55,14 +90,17 @@ type Polar = readonly (readonly [number, number])[];
 /**
  * 위 그림 역할별 망토 자리 (몸 기준, 오른쪽 반 — 왼쪽은 대칭):
  *  outer = 바깥 테(앞 끝 → 뒤 가운데), inner = 목둘레 안 테(앞 끝 → 뒤 가운데), hem = 아랫단 물결이 시작되는 각,
- *  trim = 테두리 띠가 시작되는 각(가드 · 스카우트는 갑옷 · 소매 밑에서), collar = 머리 둘레 깃(머리 반지름에 더하는 값, 0 = 없음)
+ *  trim = 테두리 띠가 시작되는 각(가드 · 스카우트는 갑옷 · 소매 밑에서), mantle = 어깨 망토 띠 아랫단 반지름(뒤 가운데),
+ *  mantleFrom = 어깨 망토 띠가 시작되는 각(가드는 어깨 갑옷 뒤 끝 밖에서), clasp = 걸쇠 각(머리 · 갑옷 · 소매에 가리지 않는 곳)
  */
 interface TopFit {
   readonly outer: Polar;
   readonly inner: Polar;
   readonly hem: number;
   readonly trim: number;
-  readonly collar: number;
+  readonly mantle: number;
+  readonly mantleFrom: number;
+  readonly clasp: number;
 }
 
 const TOP_FIT: Readonly<Record<RoleCharId, TopFit>> = {
@@ -87,22 +125,32 @@ const TOP_FIT: Readonly<Record<RoleCharId, TopFit>> = {
     ],
     hem: 126,
     trim: 118,
-    collar: 0,
+    mantle: 0.555,
+    mantleFrom: 44,
+    clasp: 80,
   },
-  // 가드: 어깨 갑옷 뒤 끝 밑에서 나와 등판을 덮는다 (앞 끝은 갑옷 윤곽을 따라 접힌다 — tipEdge)
+  // 가드: 어깨 갑옷 뒤 반을 덮고(어깨 망토 — 정면 그림처럼 어깨를 덮는다) 등판을 덮는다. 바깥 테는 갑옷 · 등판 윤곽 바로
+  // 안쪽을 따른다 (실루엣 그대로 — 둥근 원판). 갑옷 앞 반 · 방패 · 헬멧은 그대로 보인다
   guard: {
     outer: [
-      [106, 0.955],
-      [125, 0.965],
+      [86, 0.965],
+      [96, 0.955],
+      [106, 0.94],
+      [114, 0.935],
+      [124, 0.96],
+      [134, 0.965],
       [180, 0.965],
     ],
     inner: [
+      [86, 0.6],
       [106, 0.56],
       [180, 0.5],
     ],
     hem: 120,
-    trim: 108,
-    collar: 0.035,
+    trim: 90,
+    mantle: 0.69,
+    mantleFrom: 89,
+    clasp: 100,
   },
   // 스카우트: 앞 끝은 소매 어깨 밑, 어깨와 등 사이는 오목하게 좁히고(허리) 등 뒤 배낭 자리에서 퍼진다 — 다 채우면 둥근
   // 가드와 실루엣이 겹친다
@@ -120,7 +168,9 @@ const TOP_FIT: Readonly<Record<RoleCharId, TopFit>> = {
     ],
     hem: 120,
     trim: 100,
-    collar: 0.035,
+    mantle: 0.69,
+    mantleFrom: 99,
+    clasp: 116,
   },
 };
 
@@ -136,8 +186,8 @@ function polarAt(t: Polar, deg: number): number {
   return (t[t.length - 1] ?? first)[1];
 }
 
-/** 아랫단 물결 수 · 깊이 · 테두리 띠 두께 · 바깥 테에서 들인 거리 */
-const HEM = { n: 4, depth: 0.03, trimW: 0.075, trimIn: 0.006 } as const;
+/** 아랫단 물결 수(주름 결 셋과 맞춘다) · 깊이 · 테두리 띠 두께 · 바깥 테에서 들인 거리 */
+const HEM = { n: 3, depth: 0.03, trimW: 0.095, trimIn: 0.006 } as const;
 
 /** 뒤쪽 크기 한도 (SIZE_RULE 뒤 1.0r, 곡선 · 반올림 여유) · 옆 한도 */
 const BACK_MAX = 0.975;
@@ -206,32 +256,16 @@ function topPt(st: TopState, deg: number, r: number, side: 1 | -1): Pt {
   const k = depthOf(st, deg);
   const gather = 0.12 * st.fly * k * k + 0.05 * st.tuck;
   const th = (180 - (180 - deg) * (1 - gather)) * DEG;
-  // 걸음 옆 흔들림: 아랫단일수록 크게 (몸 비틀림보다 늦게 따라온다)
-  const y = side * r * Math.sin(th) - 0.07 * st.a.s * (1 - st.tuck) * k * k;
+  // 걸음 옆 흔들림: 아랫단일수록 크게 (몸 비틀림보다 늦게 따라온다). 목둘레(안 테)는 제자리 — 몸 가운데 원판(0.45r)을
+  // 덮지 않고, 목에 매인 천의 아랫단만 흔들린다
+  const ri = polarAt(st.f.inner, deg);
+  const hang = Math.min(1, Math.max(0, (r - ri) / (polarAt(st.f.outer, deg) - ri || 1)));
+  const y = side * r * Math.sin(th) - 0.09 * st.a.s * (1 - st.tuck) * k * k * hang;
   return clampTop(apply(st.M, r * Math.cos(th), y));
 }
 
-/** 가드 어깨 갑옷 (guard.ts PAD · topRig 어깨 자리와 같은 값): 망토 앞 끝을 갑옷 뒤 끝 윤곽을 따라 접는다 */
-const GUARD_PAD = { sx: -0.02, sy: 0.84, dx: 0.08, ky: 0.977, rx: 0.46, ry: 0.2, gap: 0.012 } as const;
-
-/** 앞 끝 테 점들 (바깥 → 안): 가드는 어깨 갑옷 뒤 끝 윤곽, 나머지는 둥근 끝 */
+/** 앞 끝 테 점들 (바깥 → 안): 둥근 끝 */
 function tipEdge(st: TopState, side: 1 | -1): Pt[] {
-  const { a } = st;
-  if (a.role === 'guard') {
-    const P = GUARD_PAD;
-    const px = P.sx + P.dx;
-    const py = side * a.halfW * P.sy * P.ky;
-    // 갑옷 타원 각: 바깥 뒤(135°) → 뒤 끝(180°) → 안 뒤(228°)
-    return [135, 155, 180, 205, 228].map((t) =>
-      clampTop(
-        apply(
-          a.body,
-          px + (P.rx + P.gap) * Math.cos(t * DEG),
-          py + side * (P.ry + P.gap) * Math.sin(t * DEG),
-        ),
-      ),
-    );
-  }
   const ro = outerR(st, st.tip, side);
   const ri = polarAt(st.f.inner, st.tip);
   return [
@@ -244,7 +278,7 @@ function tipEdge(st: TopState, side: 1 | -1): Pt[] {
 function topBack(sk: Sketch, a: SurvivorTopAnchor): void {
   const { ink } = a;
   const f = TOP_FIT[a.role];
-  const col = capeColors(a.role);
+  const col = topColors(a.role);
   // 몸 비틀림보다 조금 늦게 돈다 (몸 중심 기준 회전 — 크기 그대로). 러너 피격 때는 옆으로 꺾이는 후드(runner.ts E =
   // 0.22 × hit 회전)를 같이 따라 돈다 — 안 돌면 후드가 비켜난 쪽(왼쪽) 앞 끝이 어깨 위에 끈 끝처럼 드러난다
   const turn = -0.05 * a.s * (1 - a.captive) + (a.role === 'runner' ? 0.22 * a.hit : 0);
@@ -258,7 +292,12 @@ function topBack(sk: Sketch, a: SurvivorTopAnchor): void {
     fly: a.role === 'runner' ? a.action : 0,
     tuck: a.captive,
   };
-  // 1) 망토 천: 오른쪽 앞 끝(안 → 바깥) → 바깥 테 → 왼쪽 앞 끝(바깥 → 안) → 목둘레 (위에서 빛: 목둘레가 밝고 아랫단이 어둡다)
+  /** 안 테와 바깥 테 사이 자리 (0 = 목둘레, 1 = 바깥 테) */
+  const at = (deg: number, side: 1 | -1, k: number): number => {
+    const ri = polarAt(f.inner, deg);
+    return ri + (outerR(st, deg, side) - ri) * k;
+  };
+  // 1) 망토 천: 오른쪽 앞 끝(안 → 바깥) → 바깥 테 → 왼쪽 앞 끝(바깥 → 안) → 목둘레. 몸판보다 확실히 어둡고 아랫단 쪽이 더 깊다
   const right: Pt[] = [];
   const left: Pt[] = [];
   for (let d = st.tip + 4; d <= 180; d += 4) {
@@ -272,41 +311,77 @@ function topBack(sk: Sketch, a: SurvivorTopAnchor): void {
   }
   const outline: Pt[] = [...tipEdge(st, 1).reverse(), ...right, ...left, ...tipEdge(st, -1)];
   const [cx, cy] = apply(a.body, 0, 0);
+  const rIn = polarAt(f.inner, 180);
+  const rOut = polarAt(f.outer, 180);
   sk.part(
     path().curve(outline).curve(neck, 1, false).Z().d,
-    radial(cx, cy, 1.0, [
-      [0.46, ink(tint(col.outer, 0.08))],
-      [0.68, ink(col.outer)],
-      [0.84, ink(shade(col.outer, 0.22))],
-      [1, ink(shade(col.outer, 0.42))],
+    radial(cx, cy, rOut, [
+      [rIn / rOut, ink(col.cloth)],
+      [0.8, ink(col.cloth)],
+      [1, ink(col.deep)],
     ]),
     a.outline,
     1,
     0.4,
   );
-  // 2) 천 주름 (아랫단 가까이에서만 — 목둘레에서 뻗는 갈빗살로 읽히지 않게, 시작은 투명하게 사라진다): 물결 홈으로 가는
-  //    어두운 골, 가운데 두 물결 배의 밝은 결
-  for (let j = 2; j < HEM.n * 2 - 1; j += 1) {
-    const { deg, side } = hemDeg(f, j / (HEM.n * 2));
-    const valley = j % 2 === 0;
-    const ri = polarAt(f.inner, deg);
-    const r1 = outerR(st, deg, side) - HEM.trimW - 0.025;
-    const r0 = ri + (r1 - ri) * (valley ? 0.25 : 0.45);
-    const bend = side * 2.5;
-    const p0 = topPt(st, deg + bend, r0, side);
-    const p2 = topPt(st, deg, r1, side);
-    const c = ink(valley ? shade(col.outer, 0.45) : tint(col.outer, 0.22));
+  // 2) 주름: 어깨 망토 밑에서 나와 아랫단 물결 배로 퍼지는 넓은 결 셋(빛 받는 등 · 어깨 쪽) + 그 사이 물결 홈으로 가는 골 둘.
+  //    결은 어깨(옆 결) · 목덜미(가운데 결)에서 시작해 아랫단까지 — 작은 크기에서도 짙은 천 위에 밝은 결이 남는다
+  for (let j = 1; j < HEM.n * 2; j += 1) {
+    const u = j / (HEM.n * 2);
+    const ridge = j % 2 === 1;
+    const { deg, side } = hemDeg(f, u);
+    // 뒤 가운데에서 끝까지 0~1: 옆 결은 어깨(앞 끝 가까이)에서, 골은 그 사이에서, 가운데 결은 목덜미에서 시작한다
+    const off = Math.abs(u - 0.5) * 2;
+    const deg0 = deg - (deg - st.tip - 8) * (ridge ? 1 : 0.6) * Math.min(1, off * 1.5);
+    const k0 = ridge && off > 0 ? 0.45 : 0.3;
+    const ri1 = polarAt(f.inner, deg);
+    const ro1 = outerR(st, deg, side);
+    const k1 = (ro1 - HEM.trimW - 0.02 - ri1) / (ro1 - ri1);
+    const pts: Pt[] = [];
+    for (let i = 0; i <= 4; i += 1) {
+      const t = i / 4;
+      const dg = deg0 + (deg - deg0) * t;
+      pts.push(topPt(st, dg, at(dg, side, k0 + (k1 - k0) * t), side));
+    }
+    const p0 = pts[0] ?? [0, 0];
+    const p2 = pts[4] ?? p0;
+    const c = ink(ridge ? col.ridge : col.valley);
     sk.line(
-      path().curve([p0, topPt(st, deg - bend * 0.4, (r0 + r1) / 2, side), p2]).d,
+      path().curve(pts).d,
       linear(p0[0], p0[1], p2[0], p2[1], [
         [0, c, 0],
-        [0.6, c, valley ? 0.75 : 0.5],
-        [1, c, valley ? 0.85 : 0.55],
+        [0.18, c, 0.85],
+        [1, c, ridge ? 0.7 : 0.85],
       ]),
-      valley ? 0.042 : 0.03,
+      ridge ? 0.08 : 0.05,
     );
   }
-  // 3) 테두리 띠 (바깥 테 안쪽을 따라, 끝은 가늘어진다): 가드 · 스카우트는 갑옷 · 소매 밑에서 시작
+  // 3) 어깨 망토 띠: 목둘레를 따라 어깨를 가로지르는 짧은 겹 (빛을 받아 한 단 밝다). 아랫단 밑 그늘 · 아랫단 밝은 결
+  const mw = f.mantle - rIn;
+  const from = Math.max(f.mantleFrom, st.tip + 3);
+  const m0: Pt[] = [];
+  const m1: Pt[] = [];
+  const mShadow: Pt[] = [];
+  for (let d = -(180 - from); d <= 180 - from + 1e-6; d += 4) {
+    const deg = 180 - Math.abs(d);
+    const side: 1 | -1 = d < 0 ? -1 : 1;
+    const ri = polarAt(f.inner, deg);
+    const ends = smooth01((deg - from) / 12);
+    const ro = Math.min(ri + mw * (0.35 + 0.65 * ends), at(deg, side, 0.6));
+    m0.push(topPt(st, deg, ri, side));
+    m1.push(topPt(st, deg, ro, side));
+    mShadow.push(topPt(st, deg, ro + 0.02, side));
+  }
+  sk.line(path().curve(mShadow).d, solid(ink(col.valley)), 0.05, 'round', 0.7);
+  sk.fill(
+    path().curve(m0).curve(m1.slice().reverse(), 1, false).Z().d,
+    radial(cx, cy, f.mantle, [
+      [rIn / f.mantle, ink(tint(col.mantle, 0.06))],
+      [1, ink(col.mantle)],
+    ]),
+  );
+  sk.line(path().curve(m1).d, solid(ink(col.lip)), 0.018);
+  // 4) 아랫단 테두리 띠 (바깥 테 안쪽을 따라, 끝은 가늘어진다): 몸판보다 밝은 역할색 — 휴대폰 크기에서 등 끝의 밝은 선
   const band0: Pt[] = [];
   const band1: Pt[] = [];
   const t0 = Math.max(f.trim, st.tip + 2);
@@ -314,18 +389,42 @@ function topBack(sk: Sketch, a: SurvivorTopAnchor): void {
     const deg = 180 - Math.abs(d);
     const side: 1 | -1 = d < 0 ? -1 : 1;
     const ends = smooth01((deg - t0) / 10);
+    // 옆 테두리는 가늘게, 아랫단(뒤)에서 가장 굵게 — 작은 크기에서 테두리가 둥근 고리가 아니라 등 끝의 아랫단 선으로 읽힌다
+    const hemK = smooth01((deg - f.hem + 16) / 24);
     const r = outerR(st, deg, side) - HEM.trimIn;
     band0.push(topPt(st, deg, r, side));
-    band1.push(topPt(st, deg, r - HEM.trimW * (0.15 + 0.85 * ends), side));
+    band1.push(topPt(st, deg, r - HEM.trimW * (0.15 + 0.85 * ends) * (0.5 + 0.5 * hemK), side));
   }
-  sk.fill(path().curve(band0).curve(band1.reverse(), 1, false).Z().d, solid(ink(col.trim)), 0.92);
-  // 4) 목깃 (가드 · 스카우트): 머리 뒤를 감싼 세운 깃 — 머리가 안쪽 반을 덮는다. 깃은 겉감 그대로(작은 크기에서 등의 어두운
-  //    띠가 가늘어지지 않게), 접힌 윗등만 가는 밝은 결
-  if (f.collar > 0) {
-    const { x: hx, y: hy, r: R } = a.head;
-    const arc = (rr: number): string => path().arc(hx, hy, rr, 122 * DEG, 238 * DEG).d;
-    sk.line(arc(R + f.collar), solid(ink(col.outer)), 0.075);
-    sk.line(arc(R + f.collar + 0.012), solid(ink(tint(col.outer, 0.3))), 0.018, 'round', 0.8);
+  sk.fill(path().curve(band0).curve(band1.reverse(), 1, false).Z().d, solid(ink(col.trim)));
+  // 5) 걸쇠 사슬: 어깨 망토 띠 양 끝의 둥근 쇠 걸쇠 둘을 머리 뒤로 잇는 사슬 (가운데는 머리 밑에 숨는다)
+  const chain: Pt[] = [];
+  for (let d = -(180 - f.clasp); d <= 180 - f.clasp + 1e-6; d += 3) {
+    const deg = 180 - Math.abs(d);
+    const side: 1 | -1 = d < 0 ? -1 : 1;
+    const ri = polarAt(f.inner, deg);
+    chain.push(topPt(st, deg, ri + mw * 0.55, side));
+  }
+  sk.line(path().curve(chain).d, solid(ink(shade(STEEL, 0.62))), 0.028);
+  // 고리 (밝은 점, 하나 걸러) — 한 경로로
+  const links = path();
+  for (let i = 1; i < chain.length - 1; i += 2) {
+    const [x, y] = chain[i] ?? [0, 0];
+    links.circle(x, y, 0.01);
+  }
+  sk.fill(links.d, solid(ink(shade(STEEL, 0.35))));
+  for (const p of [chain[0], chain[chain.length - 1]]) {
+    if (!p) continue;
+    const [x, y] = p;
+    sk.part(
+      path().circle(x, y, 0.045).d,
+      radial(x - 0.015, y - 0.015, 0.065, [
+        [0, ink(tint(STEEL, 0.4))],
+        [1, ink(shade(STEEL, 0.4))],
+      ]),
+      a.outline,
+      1,
+      0.35,
+    );
   }
 }
 
