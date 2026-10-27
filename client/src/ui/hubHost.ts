@@ -38,7 +38,7 @@ export class HubHost {
         this.onLoadFailed();
         return;
       }
-      this.view ??= new mod.HubPanel(this.host, this.meta);
+      this.view ??= new mod.HubPanel(this.host, this.meta, this.onLoadFailed);
       this.view.open();
     });
   }

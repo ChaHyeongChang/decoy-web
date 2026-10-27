@@ -317,3 +317,18 @@
 | 도전 (괴물) | 생존자를 {n}번 때리기 · 생존자를 {n}번 감옥에 보내기 · 생존자를 {n}번 새로 찾기 · 포효로 생존자를 {n}명 찾기 · 점령을 {n}번 끊기 | `challenges['m-*']` |
 | 도전 (아무 역할) | {n}판 끝까지 하기 · {n}판 이기기 · 평가에서 금 이상 {n}개 받기 | `challenges['a-*']` |
 
+### 옷장 · 의상 (`META_TEXT`, 메타 c)
+
+의상은 꾸미기뿐이다(판정 · 크기 · 소리 · 속도와 무관, `GAME_DESIGN.md` 12.5). 값(불씨)은 `config/progression.json` `costumes`. 남의 의상은 판 밖 화면(로비 · 결과)에 나오지 않는다 — 판 안에서만 같은 생존자 팀끼리, 괴물 의상은 모두에게 보인다. 괴물 화면에서 생존자는 늘 흰 공통 모습이다.
+
+| 자리 | 문구 | 코드 |
+|---|---|---|
+| '내 기록' 창 탭 | 오늘 · 옷장 | `tabToday` · `tabWardrobe` |
+| 의상 이름 (생존자) | 기본 · 목도리 · 탈출 배낭 · 망토 | `wardrobe.names` |
+| 의상 이름 (괴물) | 기본 · 긴 고깔 · 까마귀 깃 · 사슬 | `wardrobe.names` |
+| 의상 칸 상태 (잠김은 자물쇠 아이콘과 불씨 값) | 입는 중 · 가짐 | `wardrobe.wearing` · `wardrobe.owned` |
+| 행동 단추 | 입기 · 해금 · 불씨 {n} · 한 번 더 누르면 해금 (불씨 {n}) · 불씨가 {n} 모자라요 | `wardrobe.wear` · `wardrobe.unlock` · `wardrobe.unlockSure` · `wardrobe.lack` |
+| 알림 | {name} 해금! 입기를 누르면 입어요 · {name} — 입었어요 | `wardrobe.unlocked` · `wardrobe.worn` |
+| 미리보기 위 그림 이름 | 게임 화면 | `wardrobe.inGame` |
+| 옷장 아래 한 줄 | 꾸미기뿐이라 판에는 차이가 없어요. 괴물 화면에서 생존자는 늘 흰 모습이에요 | `wardrobe.note` |
+

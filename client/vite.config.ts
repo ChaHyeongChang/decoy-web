@@ -92,6 +92,16 @@ export default defineConfig(({ command }) => ({
     outDir: 'dist',
     emptyOutDir: true,
     chunkSizeWarningLimit: 2000,
+    // 첫 묶음은 한 조각 (메타 c): 나눠 받는 조각(결과 · '내 기록' · 옷장 · 의상 그림)이 첫 묶음 모듈을 함께 쓰면 번들러가 첫 묶음을
+    // 공용 조각 넷으로 쪼갰다 — 어차피 첫 화면에 모두 받는 코드라 나눌 이득이 없고 조각마다 gzip 사전이 끊겨 약 3.8KiB 컸다.
+    // 처음부터 불러오는 모듈($initial)을 한 묶음으로 모으면 진입 조각에 들어간다 (DECISIONS 14절 c '번들 예산')
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [{ name: 'boot', tags: ['$initial'] }],
+        },
+      },
+    },
   },
   server: {
     port: 5173,
