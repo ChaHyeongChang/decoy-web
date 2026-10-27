@@ -12,7 +12,11 @@
 // 움직임: 위 그림 끊긴 끝은 걸음 · 망토 물결에 좌우로 흔들리고, 돌진 때 뒤로 곧게 펴지고, 기절 때 짧게 처진다. 정면의 늘어진
 // 끝 · 족쇄 고리는 숨 · 바람(t)에 흔들린다.
 // 색: 쇠 #4B5563, 짙은 쇠 #1F2937, 쇠 빛 #9CA3AF, 정면 반짝임 #E5E7EB, 사슬 밑 그늘 #3F0D12(짙은 진홍 #5A1219를 30% 더
-// 어둡게), 정면 쇠고리 림 라이트 = 기본 괴물 림 색. 녹(주황) · 청록 없음. 뿔 · 가시 없이 둥근 고리뿐.
+// 어둡게, 위 그림 25%), 정면 쇠고리 림 라이트 = 기본 괴물 림 색. 녹(주황) · 청록 없음. 뿔 · 가시 없이 둥근 고리뿐.
+// 위 그림 쇠(사슬 · 목 쇠고리)는 망토와 같은 돔 음영을 따른다(IRON_DOME): 목 쪽 · 굽은 등은 밝게 닦인 은빛, 자락 끝 쪽은
+// 짙은 망토 끝과 비슷한 어두운 쇠. 빛 줄도 같은 돔을 반쯤 반짝임 쪽으로. 위 그림은 생존자 화면에도 보이므로 보이는
+// 정도(밝기 · 외곽 대비 · 면적)를 기본과 같게 둔다(사용자 결정: 꾸미기는 유불리가 없다 — tests/unit/costume-parity.test.ts):
+// 고리 둘레 짙은 테가 낮춘 밝기를 밝은 쇠가 되돌리고, 끌리는 끝이 테두리 띠를 밝히지 않는다.
 import { MONSTER_COLOR } from '../monster';
 import {
   apply,
@@ -194,6 +198,8 @@ interface ChainLook {
   readonly hiOff: Pt;
   readonly hiK: number;
   readonly hiA: number;
+  /** 빛 줄 칠 (없으면 쇠 빛 #9CA3AF 단색) */
+  readonly hi?: Paint;
 }
 
 /**
@@ -215,7 +221,13 @@ function drawChain(
     const d = linksPath(look.m, g, s);
     sk.line(d, solid(outline), wire + look.edge * 2);
     sk.line(d, look.paint, wire);
-    sk.line(linksPath(look.m, g, s, look.hiOff), solid(ink(IRON_HI)), wire * look.hiK, 'round', look.hiA);
+    sk.line(
+      linksPath(look.m, g, s, look.hiOff),
+      look.hi ?? solid(ink(IRON_HI)),
+      wire * look.hiK,
+      'round',
+      look.hiA,
+    );
   }
 }
 
@@ -246,14 +258,23 @@ const TOP_COLLAR = { cx: 0.3, rx: 0.39, ry: 0.43, wire: 0.08 } as const;
  * 쇠 고리 둘레의 짙은 테 · 그늘이 낮춘 밝기를 밝게 닦인 쇠가 되돌리도록, 사슬이 덮는 망토보다 조금 밝은 쇠로 칠하고(목 쪽 ·
  * 굽은 등은 밝은 은빛), 자락 끝 쪽은 짙은 망토 끝과 비슷한 어두운 쇠로 둔다(끌리는 끝이 테두리 띠를 밝히지 않게)
  */
-function topIron(a: MonsterTopAnchor): Paint {
-  return rad(a.body, 0.15, 0, 1.45, IRON_DOME.map(([t, c]): Stop => [t, a.ink(c)]));
+function topIron(a: MonsterTopAnchor, shine = 0): Paint {
+  return rad(
+    a.body,
+    0.15,
+    0,
+    1.45,
+    IRON_DOME.map(([t, c]): Stop => [t, a.ink(mix(c, IRON_SHINE, shine))]),
+  );
 }
+
+/** 위 그림 빛 줄 · 쇠고리 빛: 같은 돔 음영을 반쯤 반짝임 쪽으로 (자락 끝에서는 빛 줄도 짙어 테두리 띠를 밝히지 않는다) */
+const TOP_HI_SHINE = 0.45;
 
 /** 위 그림 쇠 돔 음영 정지점 [거리 / 1.45, 색] */
 const IRON_DOME: readonly (readonly [number, number])[] = [
-  [0, mix(IRON_HI, IRON_SHINE, 0.4)],
-  [0.34, mix(IRON_HI, IRON_SHINE, 0.35)],
+  [0, mix(IRON_HI, IRON_SHINE, 0.2)],
+  [0.34, mix(IRON_HI, IRON_SHINE, 0.1)],
   [0.55, mix(IRON, IRON_HI, 0.45)],
   [0.78, mix(IRON, IRON_DARK, 0.55)],
   [1, mix(IRON_DARK, MONSTER_COLOR.cloakDeep, 0.3)],
@@ -329,6 +350,7 @@ function topCloak(sk: Sketch, a: MonsterTopAnchor): void {
     hiOff: [0, 0],
     hiK: 0.42,
     hiA: 0.95,
+    hi: topIron(a, TOP_HI_SHINE),
   });
   // 목 쇠고리 (사슬 위 — 정면과 같은 앞뒤. 두건 · 두건 그늘이 위를 덮는다)
   const H = a.headM;
@@ -336,7 +358,7 @@ function topCloak(sk: Sketch, a: MonsterTopAnchor): void {
   const cw = TOP_COLLAR.wire * lenScale(H);
   sk.line(collar, solid(a.outline), cw + TOP_EDGE * 2);
   sk.line(collar, topIron(a), cw);
-  sk.line(collar, solid(a.ink(IRON_HI)), cw * 0.38, 'round', 0.9);
+  sk.line(collar, topIron(a, TOP_HI_SHINE), cw * 0.38, 'round', 0.9);
 }
 
 // ───────────────────────── 정면 그림 ─────────────────────────

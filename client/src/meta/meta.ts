@@ -53,8 +53,7 @@ export interface LoginClaimed {
 
 /** 의상 해금 결과 (옷장) */
 export type CostumeBought =
-  | { ok: true; price: number; saved: boolean }
-  | { ok: false; reason: 'unknown' | 'owned' | 'coins' };
+  { ok: true; price: number; saved: boolean } | { ok: false; reason: 'unknown' | 'owned' | 'coins' };
 
 export class MetaState {
   private profile: Profile;

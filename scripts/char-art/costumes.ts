@@ -3,6 +3,7 @@
 // 게임 코드는 바꾸지 않는다 (의상 그림 모듈을 등록만 한다).
 import { MONSTER_COSTUMES, SURVIVOR_COSTUMES, validateBalance } from '@decoy/shared';
 import balanceJson from '../../config/balance.json';
+import progressionJson from '../../config/progression.json';
 import { ANIM } from '../../client/src/art/anim';
 import { registerAllCostumeArt } from '../../client/src/art/chars/costume/art';
 import type { CharId, RoleCharId } from '../../client/src/art/chars/types';
@@ -31,39 +32,34 @@ const TAU = Math.PI * 2;
 const B = validateBalance(balanceJson);
 const ROLES: readonly RoleCharId[] = ['runner', 'guard', 'scout'];
 
-/** 의상 이름 · 값(불씨) · 설명 (시안 — 확정되면 storyText · progression.json으로 옮긴다) */
-export const COSTUME_INFO: Record<string, { name: string; price: number; desc: string }> = {
-  scarf: {
-    name: '목도리',
-    price: 150,
-    desc: '두툼한 줄무늬 목도리. 목을 두 번 감고 긴 꼬리 하나가 등 뒤로 날린다',
-  },
+/** 의상 이름 · 설명 (이름은 게임 문구 META_TEXT.wardrobe.names와 같다). 값(불씨)은 수치 파일(config/progression.json costumes) */
+const PRICES: Record<string, number> = {
+  ...progressionJson.costumes.survivor,
+  ...progressionJson.costumes.monster,
+};
+const DESCS: Record<string, { name: string; desc: string }> = {
+  scarf: { name: '목도리', desc: '두툼한 줄무늬 목도리. 목을 두 번 감고 긴 꼬리 하나가 등 뒤로 날린다' },
   pack: {
     name: '탈출 배낭',
-    price: 250,
-    desc: '침낭을 얹은 큰 배낭. 위에서 보면 등에 네모난 짐이 얹혀 있다 (스카우트는 원래 배낭 대신)',
+    desc: '침낭을 얹은 큰 배낭. 위에서 보면 등에 밝은 네모 짐이 얹혀 있다 (스카우트는 원래 배낭 대신)',
   },
   cape: {
     name: '망토',
-    price: 400,
-    desc: '어깨를 덮고 등까지 내려오는 짧은 망토. 목 앞 걸쇠, 걸으면 아랫단이 흔들린다',
+    desc: '어깨를 덮고 등까지 내려오는 짧은 망토. 위에서 보면 짙은 천 + 접어 올린 밝은 안감 띠, 걸으면 아랫단이 흔들린다',
   },
-  hood: {
-    name: '긴 고깔',
-    price: 150,
-    desc: '끝이 길게 굽은 고깔 두건. 위에서 보면 두건 끝이 망토 위로 흘러내린다',
-  },
+  hood: { name: '긴 고깔', desc: '끝이 길게 굽은 고깔 두건. 위에서 보면 두건 끝이 망토 위로 흘러내린다' },
   feathers: {
     name: '까마귀 깃',
-    price: 250,
-    desc: '어깨를 덮는 검은 깃털 목도리 망토. 가장자리가 둥근 깃으로 겹친다 (가시처럼 보이지 않게)',
+    desc: '어깨를 덮는 깃털 목도리 망토 (정면은 검은 깃, 게임 화면은 망토와 같은 밝기의 진홍 깃 — 유불리 없게)',
   },
   chains: {
     name: '사슬',
-    price: 400,
-    desc: '목에 쇠고리, 등을 가로지르는 사슬, 손목에 끊어진 족쇄. 걸으면 사슬 끝이 끌린다',
+    desc: '목에 쇠고리, 등을 가로지르는 사슬, 손목에 끊어진 족쇄. 걸으면 사슬 끝이 끌린다 (쇠는 망토와 같은 밝기)',
   },
 };
+export const COSTUME_INFO: Record<string, { name: string; price: number; desc: string }> = Object.fromEntries(
+  Object.entries(DESCS).map(([id, d]) => [id, { ...d, price: PRICES[id] ?? 0 }]),
+);
 
 function teamOfCostume(id: string): 'survivor' | 'monster' {
   return (MONSTER_COSTUMES as readonly string[]).includes(id) ? 'monster' : 'survivor';
