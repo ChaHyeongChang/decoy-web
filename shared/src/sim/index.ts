@@ -7,6 +7,7 @@ export * from './interest';
 export * from './pathfind';
 export * from './predict';
 export * from './random';
+export * from './record';
 export * from './room';
 export * from './simMatch';
 export * from './state';

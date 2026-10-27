@@ -15,6 +15,7 @@ import {
   type LobbyPlayer,
   type LobbyState,
   type MatchInfo,
+  type MatchRating,
   type MatchResult,
   type Role,
   type RoomKind,
@@ -22,9 +23,12 @@ import {
   type ServerMessage,
   type TestCommand,
 } from '../index';
+import { PROGRESSION } from '../meta/progression';
+import { rateMatch } from '../meta/rating';
 import { Game } from './game';
 import { AliasBook, buildSnapshot, computeVisibility } from './interest';
 import { newSeatToken } from './random';
+import { MatchRecorder } from './record';
 import { applyDropExpired, buildResult, finish } from './systems/match';
 
 export interface Conn {
@@ -107,6 +111,10 @@ export class Room {
   game: Game | null = null;
   /** 괴물에게 보낼 생존자 임시 ID */
   private aliases = new AliasBook();
+  /** 이번 판 기록 (판정 상태를 지켜보기만 한다, GAME_DESIGN 12장) */
+  private recorder: MatchRecorder | null = null;
+  /** 판이 끝난 순간의 사람 자리별 평가 (결과와 함께 자기 것만 보낸다, 재접속하면 다시) */
+  private ratings = new Map<string, MatchRating>();
   /** 이번 판에 괴물이 끊겨 있던 시간의 합 (초). 재접속해도 줄지 않는다 */
   private monsterAway = 0;
   /** 이번 판에 '나가기'로 빠진 사람 자리 (끊김과 달리 돌아오지 않는다고 본다) */
@@ -334,7 +342,8 @@ export class Room {
         return { ...p, name, bot: other?.bot ?? false };
       }),
     };
-    return { t: 'result', result };
+    // 판 평가는 받는 사람 자기 것만 (남의 평가 · 레벨은 판이 끝난 뒤에도 보내지 않는다)
+    return { t: 'result', result, rating: this.ratings.get(seat.id) ?? null };
   }
 
   /** 시작 가능 여부. 봇 방이면 빈 역할은 봇이 채운다 */
@@ -470,6 +479,8 @@ export class Room {
       p.droppedFor = 0;
     }
     this.aliases = new AliasBook();
+    this.recorder = new MatchRecorder(this.game);
+    this.ratings.clear();
     this.monsterAway = 0;
     this.leftInMatch.clear();
     this.phase = 'playing';
@@ -483,10 +494,11 @@ export class Room {
     this.hooks.log?.(`방 ${this.code} 판 시작 (${this.kind}, 사람 ${setup.length - bots} · 봇 ${bots})`);
   }
 
-  /** 판이 끝났다: 결과를 보내고 결과 화면 단계로 */
-  finishMatch(game: Game): void {
+  /** 판이 끝났다: 결과(받는 사람 자기 평가 포함)를 보내고 결과 화면 단계로 */
+  finishMatch(game: Game, nowMs = 0): void {
     if (this.phase !== 'playing') return;
     const result = buildResult(game);
+    this.rateFinished(game, nowMs);
     this.phase = 'result';
     this.lastResult = { t: 'result', result };
     // 판 중에는 자리가 지워지지 않으므로 여기에 이번 판 자리가 모두 있다
@@ -501,9 +513,35 @@ export class Room {
     );
   }
 
+  /**
+   * 판 기록 → 사람 자리별 평가 (봇은 평가하지 않는다). 판 ID는 방 코드 · 판 번호 · 끝난 시각 — 새 난수를 쓰지 않는다
+   * (기기 안 연습의 난수 순서가 그대로이게)
+   */
+  private rateFinished(game: Game, nowMs: number): void {
+    this.ratings.clear();
+    const recorder = this.recorder;
+    this.recorder = null;
+    if (!recorder) return;
+    const matchId = `${this.code}.${this.matchCount}.${Math.max(0, Math.round(nowMs)).toString(36)}`;
+    const record = recorder.finish(game, matchId);
+    for (const p of record.players) {
+      const seat = this.seatById(p.id);
+      if (!seat || seat.bot) continue;
+      this.ratings.set(
+        seat.id,
+        rateMatch(
+          { matchId, role: p.role, winner: record.winner, durationSec: record.durationSec, stats: p.stats },
+          PROGRESSION,
+        ),
+      );
+    }
+  }
+
   backToLobby(): void {
     this.phase = 'lobby';
     this.game = null;
+    this.recorder = null;
+    this.ratings.clear();
     this.lastResult = null;
     this.resultSeats.clear();
     // 봇 자리는 비우고, 사람은 역할을 유지한 채 준비만 푼다
@@ -546,8 +584,10 @@ export class Room {
     this.hooks.beforeStep?.(this);
     game.step();
     this.hooks.recordTruth?.(this);
-    if (this.isSnapshotTick(game.tick) || game.end) {
-      const facts = computeVisibility(game);
+    const facts = this.isSnapshotTick(game.tick) || game.end ? computeVisibility(game) : null;
+    // 판 기록: 상태를 읽기만 한다. 시야 수치는 스냅샷용으로 이미 계산한 시야 사실로만 (GAME_DESIGN 12장)
+    this.recorder?.observe(game, facts);
+    if (facts) {
       this.aliases.update(facts.monsterSees);
       for (const s of this.seats) {
         if (!s.conn) continue;
@@ -555,7 +595,7 @@ export class Room {
         if (snap) s.conn.send({ t: 'snap', s: snap });
       }
     }
-    if (game.end) this.finishMatch(game);
+    if (game.end) this.finishMatch(game, nowMs);
   }
 
   /**
