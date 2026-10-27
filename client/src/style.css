@@ -21,6 +21,12 @@
   --neon: #22d3ee;
   --neon-dim: #0e7490;
   --neon-text: #67e8f9;
+  /* 판 평가 단계 없음 · 동 · 은 · 금 · 빛 (VISUAL_SPEC 9.6, 색은 덧붙인 단서 — 칸 수 · 글자가 정보) */
+  --tier-0: #3b4b5c;
+  --tier-1: #c08457;
+  --tier-2: #cbd5e1;
+  --tier-3: #facc15;
+  --tier-4: #67e8f9;
   --text: #e2e8f0;
   --text-dim: #94a3b8;
   --text-faint: #7c8ca0;
@@ -2646,7 +2652,7 @@ html:not(.touch) #debug-overlay .dbg-toggle {
   list-style: none;
 }
 .rate-tile {
-  --tier: #3b4b5c;
+  --tier: var(--tier-0);
   position: relative;
   display: flex;
   flex-direction: column;
@@ -2658,16 +2664,16 @@ html:not(.touch) #debug-overlay .dbg-toggle {
   background: var(--well);
 }
 .rate-tile.tier-1 {
-  --tier: #c08457;
+  --tier: var(--tier-1);
 }
 .rate-tile.tier-2 {
-  --tier: #cbd5e1;
+  --tier: var(--tier-2);
 }
 .rate-tile.tier-3 {
-  --tier: #facc15;
+  --tier: var(--tier-3);
 }
 .rate-tile.tier-4 {
-  --tier: #67e8f9;
+  --tier: var(--tier-4);
 }
 .rate-badge {
   display: flex;

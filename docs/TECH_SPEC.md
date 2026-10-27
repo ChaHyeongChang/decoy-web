@@ -19,6 +19,7 @@
 decoy-web/
 ├─ CLAUDE.md
 ├─ config/balance.json        ← 수치의 원본
+├─ config/progression.json    ← 판 밖 성장 · 보상(메타) 수치 (판정과 무관, GAME_DESIGN 12장)
 ├─ docs/
 ├─ shared/src/
 │  ├─ balance.ts              ← balance.json 로드 + 타입
@@ -35,7 +36,12 @@ decoy-web/
 │     ├─ interest.ts          ← 플레이어별로 볼 수 있는 것만 담은 스냅샷 생성
 │     ├─ botBrains.ts · pathfind.ts · predict.ts ← 봇 두뇌(자기 스냅샷만), 길찾기, 봇의 내 위치 예측
 │     ├─ simMatch.ts · truth.ts ← 소켓 없는 봇 판(테스트), 테스트 전용 정답 상태
+│     ├─ record.ts            ← 판 기록 MatchRecorder: 판정 상태를 읽기만 하며 평가 수치를 센다 (메타)
 │     └─ random.ts            ← 자리 토큰 · 임시 ID (Web Crypto `globalThis.crypto`)
+│  └─ meta/                   ← 판 밖 성장 · 보상 (`@decoy/shared/meta`, 순수 계산 — 서버 · 기기가 같이 쓴다)
+│     ├─ progression.ts · progressionCheck.ts ← progression.json 타입 · 모양 검사(시험 · 서버 시작)
+│     ├─ rating.ts            ← 판 기록 → 평가(항목 넷 · 단계 0~4) → 경험치 · 레벨 곡선
+│     └─ profile.ts           ← 성장 기록 형식(판 번호 v) · 읽기 검사 · 판 적립(같은 판 한 번) · 계정으로 올릴 때 합치기
 ├─ server/src/                ← Node 전용 바깥 일만 (shared에는 `node:*` · `ws` · `fs` import 금지, eslint)
 │  ├─ index.ts                ← HTTP(정적 파일 · 테스트 훅) + ws 소켓 + setInterval → ServerCore
 │  ├─ config.ts · static.ts   ← 실행 옵션 · balance.json 읽기, 정적 파일(gzip)
@@ -47,7 +53,8 @@ decoy-web/
 │  ├─ main.ts, net.ts         ← 연결, 예측 · 보정, 보간
 │  ├─ scenes/                 ← Lobby, Game, Result
 │  ├─ render/                 ← 맵, 캐릭터, 안개, 부채꼴, 효과
-│  ├─ ui/                     ← HUD, 미니맵, 배너, 튜토리얼
+│  ├─ ui/                     ← HUD, 미니맵, 배너, 튜토리얼, 레벨 칩, 결과 화면(나눠 받는 조각 `result` — resultHost가 받는다)
+│  ├─ meta/                   ← 성장 기록 저장소(profileStore: 바꿔 끼울 수 있는 ProfileStore, 지금은 기기) · 상태(meta)
 │  └─ debug.ts                ← window.__DECOY__ 디버그 훅
 └─ tests/
    ├─ unit/                   ← Vitest
@@ -77,6 +84,7 @@ decoy-web/
 | 생존자 | 팀원 전원(항상), 생존자 시야 합집합 안의 괴물과 부채꼴(모드 · 각도), 스카우트 탐지 · 포효 경고 중의 괴물 위치 | 그 밖의 괴물 정보 |
 | 괴물 | 자기 상태, 부채꼴 · 근접 원 안 생존자(역할 정보 없이 흰색, 능력 사용 직후 1초만 역할 포함), 포효 중 반경 안 생존자 | 그 밖의 생존자 위치, 역할 정보 |
 | 공통 | 거점 게이지 · 상태, 탈출구 상태, 감옥 상태(누가 갇혔는지는 생존자만), 알림 이벤트, 남은 시간 | — |
+| 판 결과 (메타) | 받는 사람 **자기** 판 평가(`result.rating`, 판이 끝날 때 한 번) | 남의 평가 · 레벨(판이 끝난 뒤에도), 판 중의 평가 · 레벨 · 판 기록 |
 
 - 시야 판정은 `shared/visibility.ts` 하나를 서버(필터링)와 클라이언트(안개 그리기)가 같이 쓴다
 - **테스트로 보장한다**: 괴물 클라이언트가 받은 모든 스냅샷에 시야 밖 생존자의 좌표가 없어야 한다
@@ -85,6 +93,14 @@ decoy-web/
 - 방 코드 4글자, 링크 `/?room=ABCD`
 - 연결이 끊기면 30초 동안 자리를 유지하고, 같은 브라우저(localStorage 토큰)로 돌아오면 이어서 한다
 - 괴물이 30초 안에 돌아오지 않으면 판 무효, 생존자는 사망 처리
+
+### 3.5 판 밖 성장 · 보상 (메타, GAME_DESIGN 12장)
+
+- **판 기록**: 방(`room.ts`)이 판마다 `MatchRecorder`를 만들고 `game.step()` 뒤 틱마다 상태를 보인다. 기록기는 상태를 **읽기만** 하고 난수를 쓰지 않는다(규칙 골든 해시 · 봇 판 그대로 — 단위 시험이 켜고 끈 판의 상태를 견준다). 시야가 필요한 수치는 방이 스냅샷 틱에 이미 계산한 시야 사실(`VisibilityFacts`)로만 센다
+- **평가**: 판이 끝나는 틱에 `rateMatch`(공용)로 사람 자리마다 평가를 만들어 `resultFor`가 받는 사람 자기 것만 결과에 싣는다(`buildResult`는 그대로 — 골든 해시). 판 ID = 방 코드 · 판 번호 · 끝난 시각(새 난수 없음). 결과 단계에 다시 붙으면 같은 평가를 다시 보낸다
+- **보상**: 지금은 클라이언트가 `applyRating`(공용 순수 함수)으로 경험치를 적립하고 `ProfileStore`(지금은 `DeviceProfileStore` — `decoy:progress`)에 저장한다. 적립 직전에 저장소를 다시 읽어 다른 탭의 적립을 덮지 않는다. 다음 단계 서버 저장은 같은 함수 · 같은 형식으로 서버가 적립하고 `ServerProfileStore`를 끼운다
+- **수치**: `config/progression.json`을 서버 · 클라이언트가 빌드에 넣는다(판정 수치가 아니라 `balance.json`과 따로). 모양 검사는 서버 시작 · 단위 시험
+- **나눠 받기**: 결과 화면 코드(`ui/result.ts` · `ui/resultRating.ts`)는 동적 import 조각이다. 첫 화면을 그린 뒤 판 밖 쉬는 시간에 미리 받고(판 중에는 받지 않는다), 받지 못하면 승리 팀 · 버튼만 있는 작은 결과 + "새 버전이 있어요"(서비스 워커가 옛 셸 캐시를 바로 지우므로 배포 직후 옛 화면이 사라진 조각을 찾을 수 있다). 적립은 첫 묶음 코드가 하므로 조각 실패와 무관하다
 
 ## 4. 시야 렌더링
 
@@ -138,6 +154,7 @@ decoy-web/
 | 내 움직임 고르기 | 따라가는 카메라에서 내 캐릭터가 프레임마다 고르게 움직이는지 | 가상 시계 60 · 120Hz · 바쁜 120Hz(타이머 0~6ms 늦음 · vsync 25% 건너뜀)로 연습 판을 걸어 그린 자리 이동 = 빠르기 × 프레임 간격(±2%), 화면 위 내 자리 프레임당 변화 < 0.05px, 첫 움직임 ≤ 다음 입력 틱 + 한 프레임 (`tests/e2e/smooth-motion.spec.ts`). 실제 시계 · 지연 장면 수치는 `tests/perf/motion.spec.ts` 기록용(`docs/PERF.md` 5절). 잔렉 고치기에서 144 · 165Hz와 '주사율보다 조금 모자란 fps'(가상 시계 작업 시간 모형: 144Hz에 약 132fps → 적응형이 고른 72, 165Hz → 82.5, 120Hz → 60, 144Hz 제한 60 → 72) 장면을 더했다: 그린 프레임 간격이 모두 목표 주기, 표시 vsync가 계산 시각과 어긋난 프레임 0 |
 | 잔렉 (기록용) | 주사율 × 부하 × 창 크기에서 화면에 보인 프레임이 고른지 | 가상 시계 작업 시간 모형(콜백이 vsync를 넘기면 같은 격자 시각으로 늦게 시작, 표시 = 끝난 뒤 첫 vsync)으로 60~240Hz · PC 1080p/1440p × DPR · 휴대폰을 걸어 표시 vsync마다 맵 스크롤 · 내 자리 · 시야 빛 어긋남을 잰다 (`tests/perf/pacing.spec.ts`, 표 `scripts/pacing-table.mjs`, `docs/PERF.md` 6절). 내 빛 따라가기의 실제 셰이더 화소는 `tests/e2e/fog-follow.webgl.spec.ts` |
 | 일의 양 예산 (렌더링 최적화) | 프레임당 일이 늘지 않는지 | 가상 시계 120Hz 10초 동안 센 2D 명령 · 그리기 호출 · 텍스처 올리기 · 캔버스 크기 바꾸기가 기준값 × 1.05 이하 (`tests/e2e/perf-budget*.spec.ts`, 같은 빌드면 같은 수). 시간 수치는 `npm run perf:frame` 기록용(`docs/PERF.md`) |
+| 판 밖 성장 (메타) | 판 기록 · 평가 · 저장 · 정보 숨김 | 기록기를 켜고 끈 봇 판의 상태가 같다 · 타격 · 수감 · 사망 · 구조 · 따돌림 · 포효 · 끊은 점령 · 탈출 세기(`tests/unit/meta-record.test.ts`), 평가 · 경험치 · 레벨 곡선 · progression.json 검증(`meta-rating`), 저장 형식 · 모르는 칸 보존 · 높은 판 읽기만 · 같은 판 한 번 · 합치기(`meta-profile`), 저장 · 불러오기 · 막힘 · 가득 참 · 지워짐 · 두 탭(`meta-client`), 결과에 자기 평가만 · 판 중 메시지에 평가 칸 없음(`meta-room`), 연습 판 평가 · 저장 · 레벨 칩 · 저장 실패 · 결과 조각 실패 · 괴물이 받은 원문 프레임(`tests/e2e/meta.spec.ts`) |
 | 판정 불변 골든 (Vitest) | 그래픽 · 모바일 작업(M10~) 중 규칙 · 판정 · 정보 차단이 그대로인지 | 고정 시드 + 스크립트 입력(이동 · 조준 · 공격 · 돌진 · 포효 · 능력 · 구조 · 시야 전환) 960틱 → 60틱마다 게임 상태 해시 (`tests/unit/rules-golden.test.ts`). 바뀌면 GAME_DESIGN 변경 이력과 함께 갱신 |
 
 E2E 스크린샷은 `artifacts/`에 저장하고, 사람이 볼 수 있게 마지막 보고에 경로를 적는다.
