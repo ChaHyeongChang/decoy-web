@@ -1,34 +1,36 @@
-// 의상 '까마귀 깃' (괴물 의상 250 불씨, 판 밖 메타 c): 어깨를 덮는 깃털 목도리 망토. 깃은 끝이 둥글고 지붕 기와처럼
+// 의상 '까마귀 깃' (괴물 의상 250 불씨, 판 밖 메타 c): 어깨를 덮는 검은 까마귀 깃 목도리 망토. 깃은 끝이 둥글고 지붕 기와처럼
 // 줄지어 겹친다 — 뾰족한 깃 · 가시는 없다(사용자 결정: 뿔 · 가시 없음). 붉은 두건 · 망토 자락은 그대로 보인다.
 // 위 그림(topCloak — 망토 위, 두건 · 팔 밑): 두건 밑동을 둘러 어깨에서 어깨까지, 등 위쪽으로 넘어가는 말굽 모양 깃 두 줄.
-// 바깥 줄을 먼저 깔고 목 쪽 줄을 얹어 둥근 깃 끝이 바깥을 향한다(띠가 얇은 뒤쪽은 깃을 촘촘히 놓아 넓적한 기와 · 구슬이 아닌
-// 길쭉한 깃으로 읽힌다. 깃 사이 짙은 테는 깃 끝에만 얇게). 목 둘레(안쪽 테)는 안으로 둥글게 솟은 작은 깃 끝이라 붉은 등이
-// 구멍처럼 파여 보이지 않는다 — 끝도 몸 가운데 0.45r 원판 밖(역할색 그대로). 앞 끝은 두건 옆 · 소매 밑으로 숨는다. 어깨에서는
-// 깃 끝이 망토 밖으로 살짝 나와 어깨선이 부드러운 물결이 되고, 뒤는 망토 위쪽만 덮어 톱니 자락 끝이 깃 밖으로 붉게 남는다.
-// 위 그림은 생존자 화면에도 보이므로 보이는 정도(밝기 · 외곽 대비 · 면적)를 기본과 같게 둔다(사용자 결정: 꾸미기는 유불리가
-// 없다 — tests/unit/costume-parity.test.ts). 그래서 위 그림 깃은 검지 않고 덮는 망토와 같은 돔 음영의 진홍이며, 아랫줄 깃
-// 뿌리 그늘 · 위 빛을 받은 깃 끝 광택 · 밝은 깃대로 층진 깃의 결을 낸다. 휴대폰 크기에서는 붉은 몸 둘레의 잔 비늘 결로 읽히고
-// 몸이 어두운 띠로 꺼지지 않는다 (앞은 열려 있어 짙은 얼굴 그늘 · 흰 발톱이 그대로 앞을 알린다).
+// 바깥 줄을 먼저 깔고 목 쪽 줄을 얹어 둥근 깃 끝이 바깥을 향한다. 깃은 좁고 길게(바깥 17 · 목 쪽 15개) 놓고 쉴 때도 끝이 뒤
+// 가운데 쪽으로 눕는다 — 두건 둘레로 고르게 퍼지면 꽃잎 · 톱니로 읽힌다. 목 둘레(안쪽 테)는 안으로 둥글게 솟은 작은 깃 끝이라
+// 붉은 등이 구멍처럼 파여 보이지 않는다 — 끝도 몸 가운데 0.45r 원판 밖(역할색 그대로). 앞 끝은 두건 옆 · 소매 밑으로 숨는다.
+// 어깨에서는 깃 끝이 망토 밖으로 살짝 나와 어깨선이 부드러운 물결이 되고, 뒤는 망토 위쪽만 덮어 톱니 자락 끝이 깃 밖으로 남는다.
+// 위 그림은 정면과 같은 검은 깃이 위 빛을 받은 모습이다: 깃 몸은 검붉은 색, 깃마다 깃대를 따라 갈라진 두 날개 중 빛 쪽(앞 ·
+// 두건 쪽, 좌우 거울 대칭) 날개에 진홍 광택 띠, 그늘 쪽 날개에 옅은 광택, 띠 한가운데 짧은 깃대 빛줄. 목 쪽 줄 뿌리(두건 그늘
+// 속)와 바깥 줄 끝(어깨 비탈)은 검붉게 남아 휴대폰 크기에서는 두건 둘레의 짙은 얼룩 고리로 읽힌다 (기본 괴물은 매끈한 붉은 돔).
+// 위 그림은 생존자 화면에도 보이므로 보이는 정도(밝기 · 외곽 대비 · 조각별 대비 · 바닥 대비 면적 · 면적)를 기본과 같게 둔다
+// (사용자 결정: 꾸미기는 유불리가 없다 — tests/unit/costume-parity.test.ts). 그래서 정면처럼 거의 검게 칠하지 못한다: 거의 검은
+// 칠은 바닥(#0F1A24쯤)과 대비 1.5가 안 되어 '바닥 대비 면적'을 깎고 밝기를 떨어뜨린다 → 깃 몸은 바닥과 대비 1.5를 넘는 가장
+// 짙은 쪽(채도를 죽인 검붉은 색)이고, 덮은 망토(목 둘레가 가장 밝다)보다 짙어진 몫은 채도 높은 진홍 광택이 되돌린다. 분홍 ·
+// 연어색(옅은 칠을 넓게)은 쓰지 않는다. 휴대폰 크기에서 테두리 띠(실루엣 안쪽)는 기본과 같은 밝기로 둔다.
 // 정면 그림(frontMantle — 어깨 망토 위, 두건 밑, 로비 · 옷장): 두건 밑동에서 어깨를 덮는 길쭉한 둥근 검은 깃 세 줄 (가슴은 두
 // 줄이 두건 밑으로 보인다). 깃마다 깃대와 빛 쪽(왼쪽) 날개의 진홍 광택, 줄 밑 그늘. 어깨 위는 깃이 부풀어 둥글고 오른쪽 어깨
 // 테에 붉은 림 라이트, 어깨 망토의 붉은 톱니 끝이 깃 아래로 조금 남는다. 상반신은 손이 깃 아래를 쥔다. 얼굴 · 눈 · 발톱은
-// 덮지 않는다.
-// 움직임: 깃 끝이 망토 물결 · 걸음에 따라 조금씩 들썩이고 옆으로 쏠린다. 포효 = 깃을 곤두세워 부풀고, 돌진 = 바람에
-// 뒤로 눕고, 기절 = 축 처진다. 정면은 숨 · 시각에 따라 들썩인다. 깃 길이는 줄마다 좌우 대칭으로 조금씩 다르다.
-// 색: 위 그림 깃 바탕 #F34C5E(조금 푸른 쪽 진홍)를 망토와 같은 돔 음영 정지점으로(목 쪽 6% 밝게 → 자락 끝 66% 어둡게), 아랫줄
-// 뿌리 그늘 #2A080E 42% · 끝 광택 #FFB3BA(목 쪽 줄 50% · 바깥 줄 30%) · 깃대 #FFC2C8 45%, 윗줄 그늘 · 틈 #2A080E,
-// 깃 밑 그늘 #3F0D12(짙은 진홍 #5A1219를 30% 어둡게). 정면 깃 #2A1416(왼쪽 위) → #1A0B0E → #110709 (거의 검게), 광택 진홍
-// #7F1D1D · 빛 쪽 #9B2C2C, 깃대 #5A2A30, 겹친 깃 그늘 #0B0405, 정면 림 라이트 = 기본 괴물 림 색(어깨 오른쪽 강하게 · 왼쪽
-// 약하게). 청록 없음.
+// 덮지 않는다. 날개 광택은 왼쪽(빛 쪽)일수록 위 그림 광택 쪽 진홍으로 밝아 옷장에서 두 그림이 한 의상으로 읽힌다.
+// 움직임: 깃 끝이 망토 물결 · 걸음에 따라 조금씩 들썩이고 옆으로 쏠린다. 포효 = 깃을 곤두세워 부풀고(광택 띠는 쉴 때 자리,
+// 늘어난 끝은 그늘), 돌진 = 바람에 뒤로 더 눕고, 기절 = 축 처진다(짧아져 누운 깃은 광택 띠가 넓어진다). 정면은 숨 · 시각에
+// 따라 들썩인다. 깃 길이는 줄마다 좌우 대칭으로 조금씩 다르다.
+// 색: 위 그림 깃 몸 #702A2E(채도를 죽인 검붉은 색 — 휘도 0.053, 바닥 대비 1.5 위), 광택 띠 #FF3D4A → #E8323F(채도 높은 진홍,
+// 빛 쪽 날개 100% · 그늘 쪽 60%), 깃대 빛줄 #FF5A64 90%, 깃 사이 틈 · 깃 끝 가는 선 · 목 쪽 줄 그늘 #12050A(옅게, 칸보다 가늘게).
+// 정면 깃 #2A1416(왼쪽 위) → #1A0B0E → #110709 (거의 검게), 날개 광택 #C8283A(빛 쪽) → #9B2C2C → #7F1D1D, 깃대 #5A2A30,
+// 겹친 깃 그늘 #0B0405, 정면 림 라이트 = 기본 괴물 림 색(어깨 오른쪽 강하게 · 왼쪽 약하게). 보라 · 자홍 · 청록 없음.
 import { MONSTER_COLOR } from '../monster';
 import {
   apply,
   linear,
   path,
-  radial,
   shade,
   solid,
-  tint,
   type Mat,
   type Paint,
   type Path,
@@ -43,9 +45,10 @@ const F = {
   deep: MONSTER_COLOR.face,
   sheen: 0x7f1d1d,
   glint: 0x9b2c2c,
+  /** 빛 쪽 가장 밝은 광택 (위 그림 광택 띠와 같은 진홍 쪽 — 두 그림이 한 의상으로 읽히게) */
+  hot: 0xc8283a,
   shaft: 0x5a2a30,
   gap: 0x0b0405,
-  under: shade(MONSTER_COLOR.cloakDeep, 0.3),
 } as const;
 
 const lerp = (a: number, b: number, k: number): number => a + (b - a) * k;
@@ -61,11 +64,6 @@ function lin(m: Mat, x0: number, y0: number, x1: number, y1: number, stops: read
   const [a, b] = apply(m, x0, y0);
   const [c, d] = apply(m, x1, y1);
   return linear(a, b, c, d, stops);
-}
-
-function rad(m: Mat, cx: number, cy: number, r: number, stops: readonly Stop[]): Paint {
-  const [a, b] = apply(m, cx, cy);
-  return radial(a, b, r * lenScale(m), stops);
 }
 
 /** 변환 m 뒤에 (dx, dy) 옮기기 (그늘) */
@@ -84,6 +82,8 @@ interface Feather {
   readonly u: Pt;
   readonly w: number;
   readonly h: number;
+  /** 끝 둥근 정도 (없으면 K_TIP) */
+  readonly kt?: number;
 }
 
 /**
@@ -96,6 +96,7 @@ function feathers(
   h: (j: number) => number,
   lean: (j: number) => number,
   toward = false,
+  kt?: number,
 ): Feather[] {
   const out: Feather[] = [];
   for (let j = 0; j + 1 < notches.length; j += 1) {
@@ -108,7 +109,8 @@ function feathers(
     const away = (mid[0] - from[0]) * o[0] + (mid[1] - from[1]) * o[1] >= 0;
     if (away === toward) o = [u[1], -u[0]];
     const hh = h(j);
-    out.push({ a, t: add(add(mid, o, hh), u, lean(j) * w), b, o, u, w, h: hh });
+    const f: Feather = { a, t: add(add(mid, o, hh), u, lean(j) * w), b, o, u, w, h: hh };
+    out.push(kt === undefined ? f : { ...f, kt });
   }
   return out;
 }
@@ -125,10 +127,11 @@ const K_TIP = 0.27;
 
 /** 깃 하나의 두 3차 곡선 조절점 */
 function tipCtrl(f: Feather): [Pt, Pt, Pt, Pt] {
+  const kt = f.kt ?? K_TIP;
   return [
     add(f.a, f.o, f.h * K_OUT),
-    add(f.t, f.u, -f.w * K_TIP),
-    add(f.t, f.u, f.w * K_TIP),
+    add(f.t, f.u, -f.w * kt),
+    add(f.t, f.u, f.w * kt),
     add(f.b, f.o, f.h * K_OUT),
   ];
 }
@@ -226,9 +229,14 @@ function rOut(phi: number): number {
 
 /** 위 그림 깃 줄 (바깥 → 안): 깃 수 · 반각 · 끝이 띠 안에서 놓이는 비율 · 띠 폭에 대한 끝 높이 */
 const TOP_ROWS: readonly { n: number; span: number; f: number; h: number }[] = [
-  { n: 13, span: 2.2, f: 0.97, h: 0.5 },
-  { n: 12, span: 2.02, f: 0.55, h: 0.5 },
+  { n: 17, span: 2.2, f: 0.97, h: 0.62 },
+  { n: 15, span: 2.02, f: 0.6, h: 0.6 },
 ];
+
+/** 위 그림 깃이 쉴 때도 뒤 가운데 쪽으로 눕는 비율 (깃 폭 기준) — 둘레로 퍼진 꽃잎이 아니라 등을 따라 누운 깃털 */
+const LEAN_REST = 0.6;
+/** 위 그림 깃 끝 둥근 정도 (정면보다 조금 좁은 둥근 끝 — 뾰족하지 않게) */
+const TOP_TIP = 0.2;
 
 /**
  * 깃 간격 (−1~1 → −1~1): 뒤 가운데는 촘촘하고 옆으로 갈수록 넓다. 띠가 얇은 뒤에서도 깃이 넓적한 기와가 되지 않고 띠가
@@ -240,13 +248,19 @@ const spread = (t: number): number => t * (SPREAD_BACK + (1 - SPREAD_BACK) * t *
 /** 뒤에서 잰 각 φ · 반지름 → 목 좌표 점 (φ = 0 뒤, +φ = +y 쪽) */
 const polar = (phi: number, r: number): Pt => [-Math.cos(phi) * r, Math.sin(phi) * r];
 
+/** 깃 길이 배율: 포효 = 곤두세워 부풀고, 돌진 = 바람에 눕고, 기절 = 축 처진다 */
+function topPuff(a: MonsterTopAnchor): number {
+  const dash = a.dash * (1 - a.stun);
+  return 1 + 0.25 * a.roar - 0.25 * dash - 0.3 * a.stun;
+}
+
 /** 위 그림 깃 한 줄 (목 좌표). grow = 그늘용으로 바깥으로 키우기 */
 function topRow(a: MonsterTopAnchor, k: number, grow = 0): { fs: Feather[]; inner: Feather[] } {
   const row = TOP_ROWS[k] ?? { n: 10, span: 2, f: 1, h: 0.34 };
   const dash = a.dash * (1 - a.stun);
   // 들썩임 세기: 서 있어도 조금, 걸으면 더
   const ruffle = 0.1 + 0.14 * a.stride;
-  const puff = 1 + 0.25 * a.roar - 0.25 * dash - 0.3 * a.stun;
+  const puff = topPuff(a);
   const push = 0.02 * a.roar - 0.02 * a.stun;
   const phiAt = (j: number): number => row.span * spread(-1 + (2 * j) / row.n) + 0.05 * a.s * (1 - k * 0.3);
   const notches: Pt[] = [];
@@ -265,8 +279,10 @@ function topRow(a: MonsterTopAnchor, k: number, grow = 0): { fs: Feather[]; inne
     },
     (j) => {
       // 돌진: 끝이 뒤 가운데(φ = 0) 쪽으로 눕는다. 걸음: 옆으로 쏠린다
-      return -Math.sign(phiAt(j + 0.5)) * 0.25 * dash + 0.1 * a.s;
+      return -Math.sign(phiAt(j + 0.5)) * (LEAN_REST + 0.25 * dash) + 0.1 * a.s;
     },
+    false,
+    TOP_TIP,
   );
   // 목 둘레: 안쪽으로 둥글게 솟은 작은 깃 끝 (뒤 끝 → 앞 끝 거꾸로, 원판 쪽을 향한다)
   const span = row.span + 0.02;
@@ -284,47 +300,100 @@ function topRow(a: MonsterTopAnchor, k: number, grow = 0): { fs: Feather[]; inne
 }
 
 /**
- * 위 그림 깃 색 (게임 화면). 생존자 화면에서 괴물이 보이는 정도(밝기 · 외곽 대비)를 기본과 같게 둔다(사용자 결정: 꾸미기는
- * 유불리가 없다 — tests/unit/costume-parity.test.ts). 깃 줄 바탕은 덮는 망토와 같은 돔 음영(monster.ts 위 망토: 몸 좌표
- * (0.15, 0) 중심 · 같은 정지점 — 목 쪽이 밝고 자락 끝으로 짙다)을 망토보다 조금 푸른 쪽 진홍으로 칠하고, 깃마다 뿌리(윗줄 밑)는
- * 짙게 · 끝은 위 빛을 받아 번들거리게 얹는다. 짙은 뿌리가 낮춘 밝기를 밝은 끝이 되돌리고, 겹친 줄마다 밝은 끝이 아랫줄 짙은
- * 뿌리 위에 놓여 층진 깃으로 읽힌다. 바깥 줄 밝은 끝이 어깨 실루엣 가장자리에 오므로 안개 · 어둠 속에서도 붉은 테두리가
- * 바닥과 갈린다. 정면 그림(로비 · 옷장)은 검은 까마귀 깃 그대로다
+ * 위 그림 깃 색 (게임 화면) — 머리 주석 '색' 참고. 깃 몸은 바닥과 대비 1.5를 넘는 가장 짙은 검붉은 색, 밝기는 광택 띠 ·
+ * 깃대 빛줄이 되돌린다 (거의 검은 색은 칸보다 가는 선 · 옅은 그늘에만)
  */
 const TF = {
-  /** 깃 바탕 (괴물 역할색 #EF4444와 밝기가 비슷한, 조금 푸른 쪽 진홍) */
-  body: 0xf34c5e,
-  /** 깃 뿌리 그늘 · 끝 광택 · 깃대 */
-  root: 0x2a080e,
-  gloss: 0xffb3ba,
-  shaft: 0xffc2c8,
-  /** 윗줄 그늘 · 틈 */
-  gap: 0x2a080e,
+  /** 깃 몸 (검붉은 색 — 바닥과 대비 1.5를 넘는 가장 짙은 쪽, 채도를 조금 죽여 검게 읽힌다) */
+  body: 0x702a2e,
+  /** 광택 (채도 높은 진홍 — 분홍 · 연어색으로 바래지 않게) · 가장 밝은 곳 */
+  sheen: 0xe8323f,
+  glint: 0xff3d4a,
+  /** 깃대 (빛을 받은 가는 줄) */
+  quill: 0xff5a64,
+  /** 깃 사이 틈 · 깃 끝 가는 선 · 윗줄 그늘 */
+  gap: 0x12050a,
 } as const;
 
-/** 깃 뿌리 그늘 · 끝 광택 진하기 */
-const ROOT_A = 0.42;
-/** 끝 광택 진하기: 맨 윗줄(목 쪽, 가장 높은 곳) · 바깥 줄 */
-const GLOSS_TOP = 0.55;
-const GLOSS_OUT = 0.28;
-
-/** 망토 돔 음영 정지점 (monster.ts 위 망토와 같다): [거리 / 1.45, 어둡게 할 비율 (음수 = 밝게)] */
-const DOME: readonly (readonly [number, number])[] = [
-  [0, -0.06],
-  [0.34, 0],
-  [0.55, 0.3],
-  [0.78, 0.56],
-  [1, 0.66],
+/**
+ * 줄마다 광택 띠 (바깥 줄 → 목 쪽 줄): 깃 하나를 골 줄 → 끝으로 잰 [위치, 색, 진하기]. 빛 쪽 날개에 그대로, 그늘 쪽 날개에
+ * SHADE_VANE배로 칠해 깃마다 깃대를 따라 길쭉한 광택 줄이 된다. 목 쪽 줄 뿌리는 두건 그늘 속이라 검붉게 남고, 바깥 줄 끝(어깨
+ * 비탈 · 실루엣 테두리 띠)도 검붉게 남는다 — 테두리 띠는 기본 망토 자락만큼 짙어야 조각별 대비가 기본과 같다
+ */
+const TOP_BAND: readonly (readonly (readonly [number, number, number])[])[] = [
+  [
+    [0.28, TF.sheen, 0],
+    [0.4, TF.glint, 1],
+    [0.7, TF.sheen, 1],
+    [0.82, TF.sheen, 0],
+  ],
+  [
+    [0.1, TF.sheen, 0],
+    [0.3, TF.glint, 1],
+    [0.86, TF.sheen, 1],
+    [0.96, TF.sheen, 0],
+  ],
 ];
 
-const domed = (c: number, k: number): number => (k < 0 ? tint(c, -k) : shade(c, k));
-
-/** 깃 하나 (닫힌 경로: 골 a → 둥근 끝 → 골 b → a) */
-function featherPath(m: Mat, f: Feather): string {
-  const p = path(m).M(f.a[0], f.a[1]);
-  tips(p, [f]);
-  return p.Z().d;
+/**
+ * 자세에 맞춘 광택 띠: 포효로 부푼 깃은 띠를 늘어난 만큼 다 따라가지 않고(길이 배율의 제곱근만큼) 늘어난 끝을 그늘로 둔다
+ * (곤두선 깃 끝이 실루엣 테두리 띠를 밝히지 않게). 돌진 · 기절로 짧아져 누운 깃은 위 빛을 더 넓게 받아 띠가 넓어진다(눕는
+ * 만큼 덮는 망토의 밝은 목 둘레 몫)
+ */
+function poseBand(
+  band: readonly (readonly [number, number, number])[],
+  a: MonsterTopAnchor,
+): (readonly [number, number, number])[] {
+  const puff = topPuff(a);
+  const at = 1 / Math.sqrt(Math.max(1, puff));
+  const widen = 1 + BAND_WIDEN * Math.max(0, 1 - puff);
+  const lit = band.filter(([, , al]) => al > 0);
+  const c = lit.reduce((sum, [t]) => sum + t, 0) / Math.max(1, lit.length);
+  return band.map(([t, col, al]) => [Math.min(1, Math.max(0, c + (t - c) * widen)) * at, col, al] as const);
 }
+
+/** 짧아진 깃(돌진 · 기절)의 광택 띠 넓히기 (짧아진 비율당) */
+const BAND_WIDEN = 3;
+
+/** 앞 끝 깃에 광택을 고르게 두기 시작하는 각 (뒤에서 잰 각, 라디안) · 그 진하기 */
+const FRONT_PHI = 1.75;
+const FRONT_A = 0.8;
+
+/** 깃대 광택 (along 범위: 바깥 줄 · 목 쪽 줄) · 진하기 · 굵기 */
+const GLINT_OUT: readonly [number, number] = [0.5, 0.66];
+const GLINT_IN: readonly [number, number] = [0.5, 0.78];
+const GLINT_A = 0.9;
+const GLINT_W = 0.032;
+
+/** 깃대 일부 (along k0 → k1). 한 경로에 깃마다 하위 경로 */
+function quillPath(m: Mat, fs: readonly Feather[], k0: number, k1: number): string {
+  const p = path(m);
+  for (const f of fs) {
+    const r = along(f, k0);
+    const e = along(f, k1);
+    p.M(r[0], r[1]).L(e[0], e[1]);
+  }
+  return p.d;
+}
+
+/** 그늘 쪽 날개 광택 비율 (빛 쪽 = 1) */
+const SHADE_VANE = 0.6;
+
+/** 깃마다 빛 쪽 날개 (앞 · 두건 쪽): u는 오른쪽(+y)에서 앞, 왼쪽에서 뒤를 향한다 → 좌우 거울 대칭 */
+const litSide = (f: Feather): number => (f.t[1] >= 0 ? 1 : -1);
+
+/** 깃 반쪽 (깃대 = 골 가운데 → 끝, 그 옆 날개): side = +1이면 골 b 쪽, −1이면 골 a 쪽 */
+function halfPath(p: Path, f: Feather, side: number): void {
+  const [c1, c2, c3, c4] = tipCtrl(f);
+  const mid: Pt = [(f.a[0] + f.b[0]) / 2, (f.a[1] + f.b[1]) / 2];
+  p.M(mid[0], mid[1]).L(f.t[0], f.t[1]);
+  if (side > 0) p.C(c3[0], c3[1], c4[0], c4[1], f.b[0], f.b[1]);
+  else p.C(c2[0], c2[1], c1[0], c1[1], f.a[0], f.a[1]);
+  p.Z();
+}
+
+/** 윗줄 깃이 아랫줄에 드리운 그늘 진하기 */
+const CAST_A = 0.2;
 
 /** 깃 끝 곡선만 (열린 경로: 첫 골 → 둥근 끝 · 골 … → 마지막 골) */
 function tipLine(m: Mat, fs: readonly Feather[]): string {
@@ -339,47 +408,50 @@ function topCloak(sk: Sketch, a: MonsterTopAnchor): void {
   const N = a.neck;
   const ink = a.ink;
   const ls = lenScale(N);
-  // 깃 밑 그늘 (위 빛: 바깥 테 둘레로 고르게 번진다 — 안쪽 테는 원판 밖 그대로)
-  const shadow = topRow(a, 0, 0.025);
-  sk.fill(rowPath(N, shadow.fs, [], shadow.inner), solid(ink(F.under), 0.3));
-  // 줄 바탕: 망토와 같은 돔 음영
-  const base = rad(
-    a.body,
-    0.15,
-    0,
-    1.45,
-    DOME.map(([t, k]): Stop => [t, ink(domed(TF.body, k))]),
-  );
+  // 바깥 테 밑 그늘은 두지 않는다 — 앞 끝(두건 옆 어깨)에서 망토 테두리 띠에 드리워 그쪽 실루엣을 바닥 쪽으로 꺼뜨린다
   for (let k = 0; k < TOP_ROWS.length; k += 1) {
     const { fs, inner } = topRow(a, k);
+    const top = k === TOP_ROWS.length - 1;
+    const band = poseBand(TOP_BAND[k] ?? [], a);
     // 윗줄 깃이 드리운 그늘 (아랫줄 위로)
     if (k > 0) {
       const g = topRow(a, k, 0.03);
-      sk.fill(rowPath(N, g.fs, [], g.inner), solid(ink(TF.gap), 0.3));
+      sk.fill(rowPath(N, g.fs, [], g.inner), solid(ink(TF.gap), CAST_A));
     }
-    // 안쪽 가는 선은 깃 끝에만 얇게 (굵으면 깃마다 짙은 테가 둘려 구슬 · 기와처럼 읽힌다. 목 둘레 작은 깃 끝에 그으면 가장
-    // 밝은 목 둘레가 짙은 고리로 꺼진다)
-    sk.part(rowPath(N, fs, [], inner), base, a.outline, undefined, 0);
-    sk.line(tipLine(N, fs), solid(a.outline, 0.6), a.w * 0.1);
-    // 깃마다 뿌리 그늘 → 끝 광택 (골 줄 ≈ along 0.375에서 끝까지). 뿌리 그늘은 윗줄 밑에 든 아랫줄만 — 맨 윗줄 뿌리는 목
-    // 둘레 가장 높은 곳이라 위 빛을 받는다
-    const top = k === TOP_ROWS.length - 1;
+    // 줄 바탕 = 깃 몸
+    sk.part(rowPath(N, fs, [], inner), solid(ink(TF.body)), a.outline, undefined, 0);
+    // 광택: 깃마다 골 줄 → 끝으로 흐르는 띠를 빛 쪽 날개에 진하게, 그늘 쪽 날개에 옅게 (깃대를 따라 갈라진 결 — 깃마다
+    // 길쭉한 광택 줄이 되어 둥근 구슬 · 톱니로 읽히지 않는다). 앞 끝(두건 옆 어깨)은 뿌리부터 끝까지 광택을 둔다 — 망토
+    // 자락이 아니라 위 빛을 받는 어깨 앞이라 기본 망토도 거기서 짙어지지 않는다
     for (const f of fs) {
-      const r0 = along(f, 0.35);
-      sk.fill(
-        featherPath(N, f),
-        lin(N, r0[0], r0[1], f.t[0], f.t[1], [
-          [0, ink(TF.root), top ? 0 : ROOT_A],
-          [0.45, ink(TF.root), 0],
-          [0.6, ink(TF.gloss), 0],
-          [1, ink(TF.gloss), top ? GLOSS_TOP : GLOSS_OUT],
-        ]),
-      );
+      const r0 = along(f, 0.375);
+      const front = Math.min(1, Math.max(0, (Math.abs(Math.atan2(f.t[1], -f.t[0])) - FRONT_PHI) / 0.4));
+      const lit = litSide(f);
+      for (const [side, gain] of [
+        [lit, 1],
+        [-lit, SHADE_VANE],
+      ] as const) {
+        const p = path(N);
+        halfPath(p, f, side);
+        sk.fill(
+          p.d,
+          lin(
+            N,
+            r0[0],
+            r0[1],
+            f.t[0],
+            f.t[1],
+            band.map(([t, c, al]): Stop => [t, ink(c), Math.max(al, front * FRONT_A) * gain]),
+          ),
+        );
+      }
     }
-    // 맨 윗줄(목 쪽)은 틈을 긋지 않고 깃대 뿌리를 골 줄에서 시작한다 (안쪽 테 밖 붉은 망토에 금이 생기지 않게)
-    if (!top) sk.line(gapPath(N, fs, 0.08), solid(ink(TF.gap), 0.6), 0.018 * ls);
-    // 깃대: 끝 쪽으로 밝은 가는 줄
-    sk.line(shaftPath(N, fs, top ? 0.42 : 0.3), solid(ink(TF.shaft), 0.45), 0.014 * ls);
+    // 깃 사이 틈 · 깃 끝 가는 선 (칸보다 가늘게)
+    sk.line(gapPath(N, fs, top ? 0.05 : 0.09), solid(ink(TF.gap), 0.3), 0.014 * ls);
+    sk.line(tipLine(N, fs), solid(ink(TF.gap), 0.3), 0.014 * ls);
+    // 깃대 광택: 광택 띠 한가운데의 짧은 빛줄 (뿌리 · 끝의 짙은 곳까지 그으면 흰 가시처럼 읽힌다)
+    const [q0, q1] = top ? GLINT_IN : GLINT_OUT;
+    sk.line(quillPath(N, fs, q0, q1), solid(ink(TF.quill), GLINT_A), GLINT_W * ls);
   }
 }
 
@@ -440,9 +512,9 @@ function frontBody(a: MonsterFrontAnchor): Paint {
 /** 정면 깃 광택 칠 (왼쪽 빛 쪽이 밝은 진홍) */
 function frontSheen(a: MonsterFrontAnchor): Paint {
   return lin(a.m, -0.6, 0, 0.6, 0, [
-    [0, a.ink(F.glint), 0.85],
-    [0.5, a.ink(F.sheen), 0.65],
-    [1, a.ink(F.sheen), 0.4],
+    [0, a.ink(F.hot), 0.9],
+    [0.5, a.ink(F.glint), 0.75],
+    [1, a.ink(F.sheen), 0.5],
   ]);
 }
 

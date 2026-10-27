@@ -580,3 +580,182 @@ export function visibility(r: DrawingRaster, floor: number, inPx: number, bandPx
     rimContrast: (Math.max(rimL, lf) + 0.05) / (Math.min(rimL, lf) + 0.05),
   };
 }
+
+// ───────────── 조각별 외곽 대비 · 바닥 대비 면적 (의상 유불리 점검 2판, tests/unit/costume-parity.test.ts) ─────────────
+// 평균만 보면 한쪽을 어둡게(바닥색으로) 하고 다른 쪽을 밝게 해 평균을 맞추는 의상이 빠져나간다. 그래서 테두리 띠를 몸 둘레
+// 조각으로 나눠 조각마다 보고(가장 많이 잃은 조각), 바닥과 실제로 갈리는 칸 수(바닥 대비 면적)를 따로 센다 — 바닥색으로
+// 칠한 칸은 알파가 1이어도 바닥과 갈리지 않으므로 세지 않는다.
+
+/** 두 상대 휘도의 WCAG 2.x 대비 ((밝은 쪽 + 0.05) / (어두운 쪽 + 0.05), 1 이상) */
+export function wcagContrast(a: number, b: number): number {
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+
+/**
+ * 1차원 제곱 거리 변환 (Felzenszwalb · Huttenlocher 하한 포물선): d[q] = min_p (q − p)² + f[p].
+ * f는 첫 패스에서 0(바깥) · Infinity(안), 두 번째 패스에서 첫 패스의 제곱 거리다. Infinity 칸은 포물선을 두지 않는다
+ */
+function edt1(f: Float64Array, n: number, d: Float64Array, v: Int32Array, z: Float64Array): void {
+  let k = -1;
+  for (let q = 0; q < n; q += 1) {
+    const fq = f[q] ?? Infinity;
+    if (fq === Infinity) continue;
+    if (k < 0) {
+      k = 0;
+      v[0] = q;
+      z[0] = -Infinity;
+      z[1] = Infinity;
+      continue;
+    }
+    let s = 0;
+    for (;;) {
+      const p = v[k] ?? 0;
+      s = (fq + q * q - ((f[p] ?? 0) + p * p)) / (2 * q - 2 * p);
+      // 새 포물선이 앞 포물선을 완전히 덮으면 뺀다 (z[0] = -∞라 첫 포물선에서 멈춘다)
+      if (k > 0 && s <= (z[k] ?? -Infinity)) k -= 1;
+      else break;
+    }
+    k += 1;
+    v[k] = q;
+    z[k] = s;
+    z[k + 1] = Infinity;
+  }
+  if (k < 0) {
+    d.fill(Infinity, 0, n);
+    return;
+  }
+  k = 0;
+  for (let q = 0; q < n; q += 1) {
+    while ((z[k + 1] ?? Infinity) < q) k += 1;
+    const p = v[k] ?? 0;
+    d[q] = (q - p) * (q - p) + (f[p] ?? 0);
+  }
+}
+
+/**
+ * 칸마다 가장 가까운 바깥 칸(on이 0인 칸 · 격자 밖)까지의 거리 (칸 가운데끼리, 칸 단위). 정확한 유클리드 거리 변환이라
+ * visibility의 주변 칸 찾기와 같은 값을 내고 큰 크기(몸 지름 90px)에서도 빠르다. 격자 밖은 한 칸 둘레로 덧대어 바깥으로 본다
+ */
+export function outsideDistance(on: Uint8Array, n: number): Float64Array {
+  const m = n + 2;
+  const g = new Float64Array(m * m);
+  for (let j = 0; j < m; j += 1)
+    for (let i = 0; i < m; i += 1) {
+      const inside = i > 0 && j > 0 && i <= n && j <= n && on[(j - 1) * n + (i - 1)] === 1;
+      g[j * m + i] = inside ? Infinity : 0;
+    }
+  const f = new Float64Array(m);
+  const d = new Float64Array(m);
+  const v = new Int32Array(m);
+  const z = new Float64Array(m + 1);
+  for (let i = 0; i < m; i += 1) {
+    for (let j = 0; j < m; j += 1) f[j] = g[j * m + i] ?? 0;
+    edt1(f, m, d, v, z);
+    for (let j = 0; j < m; j += 1) g[j * m + i] = d[j] ?? 0;
+  }
+  for (let j = 0; j < m; j += 1) {
+    for (let i = 0; i < m; i += 1) f[i] = g[j * m + i] ?? 0;
+    edt1(f, m, d, v, z);
+    for (let i = 0; i < m; i += 1) g[j * m + i] = d[i] ?? 0;
+  }
+  const out = new Float64Array(n * n);
+  for (let j = 0; j < n; j += 1)
+    for (let i = 0; i < n; i += 1) out[j * n + i] = Math.sqrt(g[(j + 1) * m + (i + 1)] ?? 0);
+  return out;
+}
+
+/** 보이는 정도 자세히: visibility 값 + 조각별 테두리 띠 · 바닥 대비 면적 */
+export interface VisibilityDetail extends Visibility {
+  /**
+   * 테두리 띠를 몸 중심(그림 원점) 둘레 같은 각 조각으로 나눈 조각별 평균 상대 휘도. 몸 방향 기준: 0 = 앞(+x) 가운데,
+   * 번호가 늘수록 화면 시계 방향(y 아래) — 8조각이면 2 = 오른쪽, 4 = 뒤, 6 = 왼쪽. 칸이 없는 조각은 NaN
+   */
+  readonly rimSectors: readonly number[];
+  /** 조각별 칸 수 */
+  readonly rimSectorCells: readonly number[];
+  /** 바닥 대비 면적: 바닥 위에 얹은 색이 바닥과 WCAG 대비 minContrast 이상인 칸 수 (알파와 상관없이 — 바닥색 칠은 세지 않는다) */
+  readonly contrastArea: number;
+}
+
+export interface VisibilityDetailOptions {
+  /** 테두리 띠 조각 수 (기본 8) */
+  readonly sectors?: number;
+  /** 그림을 돌려 칠한 각 (drawingRaster의 rot). 조각을 몸 방향 기준으로 맞춘다 (기본 0) */
+  readonly rot?: number;
+  /** 바닥 대비 면적의 대비 하한 (기본 1.5) */
+  readonly minContrast?: number;
+}
+
+/**
+ * 보이는 정도 자세히 재기. 면적 · 밝기 · 외곽 대비(area · luma · rim · rimCells · rimContrast)는 visibility와 같은 값이다
+ * (테두리 띠 거리만 정확한 거리 변환으로 빨리 구한다). 더해서
+ *  - 조각별 테두리 띠: 띠 칸을 몸 중심에서 본 각으로 sectors 조각에 나눠 조각마다 평균 상대 휘도
+ *  - 바닥 대비 면적: 바닥과 대비 minContrast 이상인 칸 수
+ */
+export function visibilityDetail(
+  r: DrawingRaster,
+  floor: number,
+  inPx: number,
+  bandPx: number,
+  opts: VisibilityDetailOptions = {},
+): VisibilityDetail {
+  const sectors = Math.max(1, Math.round(opts.sectors ?? 8));
+  const rot = opts.rot ?? 0;
+  const minContrast = opts.minContrast ?? 1.5;
+  const { n, rgba } = r;
+  const fr = ((floor >> 16) & 255) / 255;
+  const fg = ((floor >> 8) & 255) / 255;
+  const fb = (floor & 255) / 255;
+  const lf = luminance01(fr, fg, fb);
+  const on = new Uint8Array(n * n);
+  const lum = new Float64Array(n * n);
+  let area = 0;
+  let sum = 0;
+  let contrastArea = 0;
+  for (let k = 0; k < n * n; k += 1) {
+    const a = rgba[k * 4 + 3] ?? 0;
+    const L = luminance01(
+      (rgba[k * 4] ?? 0) + fr * (1 - a),
+      (rgba[k * 4 + 1] ?? 0) + fg * (1 - a),
+      (rgba[k * 4 + 2] ?? 0) + fb * (1 - a),
+    );
+    if (wcagContrast(L, lf) >= minContrast) contrastArea += 1;
+    if (a < 0.5) continue;
+    on[k] = 1;
+    area += 1;
+    lum[k] = L;
+    sum += L;
+  }
+  const dist = outsideDistance(on, n);
+  const secSum = new Float64Array(sectors);
+  const secCells = new Float64Array(sectors);
+  const step = (2 * Math.PI) / sectors;
+  const c = n / 2;
+  let rim = 0;
+  let rimCells = 0;
+  for (let j = 0; j < n; j += 1)
+    for (let i = 0; i < n; i += 1) {
+      const k = j * n + i;
+      if (!on[k]) continue;
+      const edge = (dist[k] ?? 0) - 0.5;
+      if (!(edge > inPx && edge <= inPx + bandPx)) continue;
+      const L = lum[k] ?? 0;
+      rim += L;
+      rimCells += 1;
+      const s =
+        ((Math.round((Math.atan2(j + 0.5 - c, i + 0.5 - c) - rot) / step) % sectors) + sectors) % sectors;
+      secSum[s] = (secSum[s] ?? 0) + L;
+      secCells[s] = (secCells[s] ?? 0) + 1;
+    }
+  const rimL = rimCells > 0 ? rim / rimCells : 0;
+  return {
+    area,
+    luma: area > 0 ? sum / area : 0,
+    rim: rimL,
+    rimCells,
+    rimContrast: wcagContrast(rimL, lf),
+    rimSectors: [...secSum].map((v, q) => ((secCells[q] ?? 0) > 0 ? v / (secCells[q] ?? 1) : Number.NaN)),
+    rimSectorCells: [...secCells],
+    contrastArea,
+  };
+}
