@@ -135,7 +135,11 @@ export class MetaState {
     await this.ready;
     await this.reread();
     const r = buyCostume(this.profile, team, id, this.now(), this.prog);
-    if (!r.ok) return r;
+    if (!r.ok) {
+      // 해금은 안 됐어도 다시 읽은 기록(다른 탭이 쓴 불씨 · 의상)을 보이는 쪽에 알린다
+      this.emit();
+      return r;
+    }
     this.profile = r.profile;
     this.emit();
     const saved = await this.persist();
@@ -147,8 +151,16 @@ export class MetaState {
     await this.ready;
     await this.reread();
     const next = wearCostume(this.profile, team, id, this.now());
-    if (!next) return null;
-    if (next === this.profile) return { saved: true };
+    if (!next) {
+      this.emit();
+      return null;
+    }
+    // 이미 입은 의상(다른 탭이 그사이 같은 의상을 입었으면 다시 읽어 여기로 온다): 저장할 것은 없지만 다시 읽은 기록을
+    // 알린다 — 앱이 내 역할 그림 · 방 자리 의상을 따라가게
+    if (next === this.profile) {
+      this.emit();
+      return { saved: true };
+    }
     this.profile = next;
     this.emit();
     return { saved: await this.persist() };

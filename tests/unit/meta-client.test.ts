@@ -281,6 +281,19 @@ describe('의상 해금 · 입기 (옷장, 메타 c)', () => {
     expect(calls).toBeGreaterThanOrEqual(2);
   });
 
+  it('다른 탭이 그사이 같은 의상을 입었으면 입기가 저장 없이 끝나도 다시 읽은 기록을 알린다 (앱이 따라가게)', async () => {
+    const s = mem();
+    s.data.set(KEY, serializeProfile({ ...emptyProfile(1), coins: 0, owned: ['cape'] }));
+    const a = new MetaState(new DeviceProfileStore(s), now);
+    const b = new MetaState(new DeviceProfileStore(s), now);
+    await Promise.all([a.ready, b.ready]);
+    expect(await a.wearCostume('survivor', 'cape')).toEqual({ saved: true });
+    let seen: string | null = null;
+    b.onChange(() => (seen = b.costumes().survivor));
+    expect(await b.wearCostume('survivor', 'cape')).toEqual({ saved: true });
+    expect(seen).toBe('cape');
+  });
+
   it('저장소가 막혀도 이번 접속 동안은 해금 · 입기가 된다 (saved=false)', async () => {
     const m = new MetaState(
       new DeviceProfileStore(full(serializeProfile({ ...emptyProfile(1), coins: 200 }))),
