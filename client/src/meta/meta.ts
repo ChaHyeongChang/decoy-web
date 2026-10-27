@@ -5,8 +5,15 @@ import type { MatchRating } from '@decoy/shared';
 import {
   PROGRESSION,
   applyRating,
+  claimLogin,
+  dailyFor,
+  dayKeyOf,
   emptyProfile,
   levelOf,
+  loginAvailable,
+  nextLoginStreak,
+  type DailyState,
+  type DayKey,
   type LevelInfo,
   type MatchGain,
   type Profile,
@@ -20,6 +27,25 @@ export interface RatingApplied {
   /** 새로 적립한 것 (이미 받은 판이면 null) */
   gain: MatchGain | null;
   /** 저장했는가 (false = 이번 접속 동안만) */
+  saved: boolean;
+}
+
+/** 기기 시계 → 이 기기의 날짜 글 (자정 기준, 일일 도전 · 접속 보상) */
+export function localDay(nowMs: number): DayKey {
+  const d = new Date(nowMs);
+  return dayKeyOf(d.getFullYear(), d.getMonth() + 1, d.getDate());
+}
+
+/** 다음 자정(이 기기 시간)까지 ms */
+export function msToMidnight(nowMs: number): number {
+  const d = new Date(nowMs);
+  const next = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 0, 0, 0, 0).getTime();
+  return Math.max(1, next - nowMs);
+}
+
+export interface LoginClaimed {
+  reward: number;
+  streak: number;
   saved: boolean;
 }
 
@@ -56,6 +82,56 @@ export class MetaState {
     return levelOf(this.profile.xp, this.prog);
   }
 
+  /** 오늘 (이 기기 날짜) */
+  today(): DayKey {
+    return localDay(this.now());
+  }
+
+  /** 오늘의 도전 (보이기용 — 다른 날 기록이면 오늘 것을 새로) */
+  daily(): DailyState {
+    return dailyFor(this.profile, this.today(), this.prog);
+  }
+
+  /** 오늘 접속 보상을 아직 받지 않았는가 · 받으면 몇 일째 연속인가 */
+  login(): { available: boolean; streak: number } {
+    const day = this.today();
+    return {
+      available: loginAvailable(this.profile, day),
+      streak: nextLoginStreak(this.profile, day, this.prog),
+    };
+  }
+
+  /** 오늘 접속 보상 받기 (이미 받았으면 null). 받기 직전에 저장소를 다시 읽는다(다른 탭에서 받았으면 두 번 주지 않게) */
+  async claimLogin(): Promise<LoginClaimed | null> {
+    await this.ready;
+    await this.reread();
+    const r = claimLogin(this.profile, this.today(), this.now(), this.prog);
+    if (!r) return null;
+    this.profile = r.profile;
+    this.emit();
+    const saved = await this.persist();
+    return { reward: r.reward, streak: r.streak, saved };
+  }
+
+  /** 날이 바뀌었을 수 있다 (자정 · 앱으로 돌아옴): 보이는 것을 다시 그리게 알린다 */
+  refresh(): void {
+    this.emit();
+  }
+
+  private async reread(): Promise<void> {
+    const fresh = await this.store.load(this.now()).catch(() => null);
+    if (fresh && (fresh.status === 'ok' || fresh.status === 'newer')) {
+      this.profile = fresh.profile;
+      this.extra = fresh.extra;
+      this.readOnly = fresh.status === 'newer';
+    }
+  }
+
+  private async persist(): Promise<boolean> {
+    if (this.readOnly) return false;
+    return this.store.save(this.profile, this.extra).catch(() => false);
+  }
+
   onChange(fn: () => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
@@ -71,17 +147,12 @@ export class MetaState {
    */
   async applyRating(rating: MatchRating): Promise<RatingApplied> {
     await this.ready;
-    const fresh = await this.store.load(this.now()).catch(() => null);
-    if (fresh && (fresh.status === 'ok' || fresh.status === 'newer')) {
-      this.profile = fresh.profile;
-      this.extra = fresh.extra;
-      this.readOnly = fresh.status === 'newer';
-    }
-    const applied = applyRating(this.profile, rating, this.now(), this.prog);
+    await this.reread();
+    const applied = applyRating(this.profile, rating, this.now(), this.prog, this.today());
     if (!applied) return { rating, gain: null, saved: true };
     this.profile = applied.profile;
     this.emit();
-    const saved = this.readOnly ? false : await this.store.save(this.profile, this.extra).catch(() => false);
+    const saved = await this.persist();
     return { rating, gain: applied.gain, saved };
   }
 }

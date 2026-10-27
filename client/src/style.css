@@ -2545,11 +2545,43 @@ html:not(.touch) #debug-overlay .dbg-toggle {
   gap: 6px;
   min-height: 32px;
   padding: 4px 10px;
+  border: 0;
   background-color: var(--panel-2);
   color: var(--text);
+  font-family: var(--font);
   font-size: 14px;
   font-weight: 700;
   white-space: nowrap;
+  cursor: pointer;
+}
+.lv-chip:hover,
+.lv-chip:focus-visible {
+  --ring: var(--neon);
+}
+@media (pointer: coarse) {
+  .lv-chip {
+    min-height: 48px;
+  }
+}
+/* 불씨: 따뜻한 빛 (경고 주황 #F59E0B와 다른 연한 호박색 — 글자 대비 4.5:1 이상) */
+.lv-ember {
+  display: inline-flex;
+  color: #fdba74;
+  line-height: 0;
+}
+.lv-coins {
+  color: var(--text);
+}
+/* 받을 접속 보상: 점 (모양 + 칩 읽어 주기 글자로도 알린다) */
+.lv-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--neon);
+  box-shadow: 0 0 6px rgba(34, 211, 238, 0.8);
+}
+.lv-dot[hidden] {
+  display: none;
 }
 .lv-label {
   color: var(--neon-text);
@@ -2813,5 +2845,200 @@ html:not(.touch) #debug-overlay .dbg-toggle {
   }
   .rate-name {
     font-size: 13px;
+  }
+}
+
+/* ───── '내 기록' 창 (메타 b, VISUAL_SPEC 9.7): 설정 화면(9.5)과 같은 막 + 깎은 패널 ───── */
+.hub-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 74;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(12px, var(--sa-t)) max(12px, var(--sa-r)) max(12px, var(--sa-b)) max(12px, var(--sa-l));
+  background: rgba(5, 8, 12, 0.72);
+}
+.hub-veil[hidden] {
+  display: none;
+}
+.hub-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(560px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px 20px 18px;
+  zoom: var(--ui-zoom, 1);
+}
+.hub-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.hub-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 800;
+}
+.hub-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-weight: 700;
+}
+.hub-bar {
+  flex: 1 1 auto;
+  width: auto;
+  height: 8px;
+}
+.hub-xp {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.hub-coins {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 16px;
+}
+.hub-sec-title {
+  color: var(--neon-text);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+.hub-login {
+  --cut: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background-color: #0c1720;
+}
+.hub-login-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.hub-login-detail {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text);
+  font-weight: 700;
+}
+.hub-claimed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.hub-notice {
+  color: var(--neon-text);
+  font-size: 13px;
+}
+.hub-notice[hidden] {
+  display: none;
+}
+.hub-daily {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hub-daily-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.hub-ch {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 72px auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  background: var(--well);
+}
+.hub-ch-text {
+  color: var(--text);
+  font-size: 14px;
+  word-break: keep-all;
+}
+.hub-pbar {
+  display: block;
+  height: 8px;
+  overflow: hidden;
+  border: 1px solid var(--edge-2);
+  border-radius: 4px;
+}
+.hub-pfill {
+  display: block;
+  height: 100%;
+  background: var(--neon);
+}
+.hub-ch-count {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.hub-ch-reward,
+.hub-ch-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.hub-ch-reward {
+  color: var(--text);
+}
+/* 끝낸 도전: ✓ 아이콘 + '완료' 글자 + 빗금 막대 (색만으로 구분하지 않기) */
+.hub-ch.done {
+  border-color: rgba(52, 211, 153, 0.55);
+}
+.hub-ch.done .hub-pfill {
+  background: var(--exit)
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.25) 0 3px, transparent 3px 6px);
+}
+.hub-ch-done {
+  color: var(--exit);
+}
+.hub-note {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.rate-challenge.done {
+  color: var(--exit);
+}
+.xp-sep {
+  color: var(--text-faint);
+}
+.xp-chip .lv-ember svg {
+  width: 14px;
+  height: 14px;
+}
+@media (max-width: 560px) {
+  .hub-ch {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .hub-pbar {
+    grid-column: 1 / -1;
+  }
+}
+@media (pointer: coarse) {
+  .hub-card .btn {
+    min-height: 48px;
   }
 }

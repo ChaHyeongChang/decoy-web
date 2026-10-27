@@ -57,8 +57,9 @@ import { Interpolator, Predictor, SnapshotClock, lerpAngle, lerpNum } from './sy
 import type { Transport } from './transport';
 import { LeaveDialog, ReplacedNotice } from './ui/lifecycleUi';
 import { openLayoutEditor } from './ui/layoutEditor';
-import { MetaState } from './meta/meta';
+import { MetaState, msToMidnight } from './meta/meta';
 import { DeviceProfileStore } from './meta/profileStore';
+import { HubHost } from './ui/hubHost';
 import { LevelChip } from './ui/levelChip';
 import { LobbyUI } from './ui/lobby';
 import { SettingsPanel } from './ui/settingsPanel';
@@ -178,8 +179,12 @@ export class App {
    * (meta/profileStore.ts — 다음 단계에서 서버 저장을 끼운다)
    */
   readonly meta = new MetaState(new DeviceProfileStore());
-  /** 첫 화면 · 로비 위 내 레벨 칩 */
-  readonly levelChip = new LevelChip(this.meta);
+  /** 첫 화면 · 연습 고르기 내 레벨 · 불씨 칩 (누르면 '내 기록' 창) */
+  readonly levelChip = new LevelChip(this.meta, () => this.hub.open());
+  /** '내 기록' 창 (나눠 받는 조각, ui/hubHost.ts): 레벨 · 불씨 · 접속 보상 · 오늘의 도전 */
+  readonly hub: HubHost;
+  /** 자정(이 기기 시간)에 칩 · 창을 다시 그린다 (새 도전 · 접속 보상) */
+  private midnightTimer: number | null = null;
   /** 설정 화면 (설정 화면 통합): 로비 · 판 중 메뉴에서 연다 (#ui-root, 로비 · 판 화면 위) */
   readonly settings: SettingsPanel;
   balance: Balance | null = null;
@@ -329,6 +334,7 @@ export class App {
       this.settings,
       { chip: this.levelChip.el, level: () => this.meta.level().level },
     );
+    this.hub = new HubHost(uiRoot, this.meta, () => this.showUpdate());
     this.resultUi = new ResultHost(
       uiRoot,
       () => this.link.send({ t: 'rematch' }),
@@ -399,7 +405,22 @@ export class App {
     };
   }
 
+  /** 다음 자정(이 기기 시간)에 칩 · 창을 다시 그린다. 자정마다 다시 건다 */
+  private armMidnight(): void {
+    if (this.midnightTimer !== null) window.clearTimeout(this.midnightTimer);
+    // 1초 늦게 (자정 바로 그 순간의 시계 반올림을 피해서)
+    this.midnightTimer = window.setTimeout(
+      () => {
+        this.midnightTimer = null;
+        this.meta.refresh();
+        this.armMidnight();
+      },
+      msToMidnight(Date.now()) + 1000,
+    );
+  }
+
   start(): void {
+    this.armMidnight();
     listenLifecycle({
       visibility: (visible) => this.onVisibility(visible),
       online: (on) => {
@@ -588,6 +609,8 @@ export class App {
   /** 화면이 숨겨짐 · 보임: 감시 멈춤 · 재개(즉시 ping + 시계 다시 맞추기), 화면 꺼짐 방지 다시 요청, 오디오 다시 켜기 */
   private onVisibility(visible: boolean): void {
     this.keeper.visibility(visible);
+    // 앱으로 돌아오면 날이 바뀌었을 수 있다 (새 도전 · 접속 보상 점)
+    if (visible) this.meta.refresh();
     // 연습: 숨기면 기기 안 서버 루프만 멈추고(판이 그대로 멈춤), 보이면 시계를 지금으로 맞춰 이어 간다 (따라잡기 0)
     if (this.local) {
       if (visible) {

@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MatchRating } from '@decoy/shared';
 import { PROFILE_VERSION, PROGRESSION, emptyProfile, serializeProfile } from '@decoy/shared/meta';
-import { MetaState } from '../../client/src/meta/meta';
+import { MetaState, localDay, msToMidnight } from '../../client/src/meta/meta';
 import { DeviceProfileStore } from '../../client/src/meta/profileStore';
 import type { StorageLike } from '../../client/src/storageKeys';
 
@@ -161,11 +161,52 @@ describe('기기 저장소 (decoy:progress)', () => {
     expect(n).toBeGreaterThan(before);
   });
 
-  it('모르는 칸(다음 마일스톤이 더할 재화 등)은 적립 · 저장 뒤에도 남는다', async () => {
+  it('모르는 칸(다음 마일스톤이 더할 의상 등)은 적립 · 저장 뒤에도 남는다', async () => {
     const s = mem();
     s.data.set(KEY, JSON.stringify({ ...emptyProfile(1), coins: 120, owned: ['x'] }));
     const m = new MetaState(new DeviceProfileStore(s), now);
-    await m.applyRating(rating('M.1'));
-    expect(JSON.parse(s.data.get(KEY) ?? '{}')).toMatchObject({ coins: 120, owned: ['x'], xp: XP });
+    const r = await m.applyRating(rating('M.1'));
+    expect(JSON.parse(s.data.get(KEY) ?? '{}')).toMatchObject({
+      coins: 120 + (r.gain?.coins.total ?? 0),
+      owned: ['x'],
+      xp: XP,
+    });
+  });
+});
+
+describe('자정 넘김 (가짜 시계, 이 기기 시간)', () => {
+  it('23:59에 접속 보상을 받고, 자정이 지나면 다시 받을 수 있고 연속 2일, 오늘의 도전도 바뀐다', async () => {
+    // 시간대와 무관하게: 이 기기의 지역 시각으로 만든다
+    let t = new Date(2026, 9, 27, 23, 59, 0).getTime();
+    const s = mem();
+    const m = new MetaState(new DeviceProfileStore(s), () => t);
+    await m.ready;
+    expect(localDay(t)).toBe('2026-10-27');
+    expect(m.login()).toEqual({ available: true, streak: 1 });
+    const first = await m.claimLogin();
+    expect(first).toMatchObject({ streak: 1, saved: true });
+    expect(m.login().available).toBe(false);
+    expect(await m.claimLogin()).toBeNull();
+    const before = m.daily();
+    expect(msToMidnight(t)).toBe(60_000);
+    t += 61_000; // 00:00:01
+    expect(localDay(t)).toBe('2026-10-28');
+    expect(m.login()).toEqual({ available: true, streak: 2 });
+    const second = await m.claimLogin();
+    expect(second?.streak).toBe(2);
+    expect(m.current.coins).toBe((first?.reward ?? 0) + (second?.reward ?? 0));
+    const after = m.daily();
+    expect(after.day).toBe('2026-10-28');
+    expect(before.day).toBe('2026-10-27');
+  });
+
+  it('다른 탭이 이미 받았으면 두 번 주지 않는다 (받기 직전에 다시 읽기)', async () => {
+    const t = new Date(2026, 9, 27, 12, 0, 0).getTime();
+    const s = mem();
+    const a = new MetaState(new DeviceProfileStore(s), () => t);
+    const b = new MetaState(new DeviceProfileStore(s), () => t);
+    await Promise.all([a.ready, b.ready]);
+    expect(await a.claimLogin()).not.toBeNull();
+    expect(await b.claimLogin()).toBeNull();
   });
 });

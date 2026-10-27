@@ -1,7 +1,7 @@
 // config/progression.json 모양 검사 (단위 시험 · 서버 시작 때). 틀리면 어디가 틀렸는지 예외를 낸다.
 // 클라이언트 묶음에는 넣지 않는다(progression.ts의 PROGRESSION은 그대로 쓴다 — 같은 파일을 시험이 검사한다)
 import { MONSTER_EMBLEMS, SURVIVOR_EMBLEMS, type EmblemId, type RatingStatId, type Team } from '../types';
-import type { EmblemDef, Progression } from './progression';
+import type { ChallengeDef, ChallengeTeam, EmblemDef, Progression } from './progression';
 
 const STAT_IDS: readonly RatingStatId[] = [
   'captureSec',
@@ -100,5 +100,65 @@ export function validateProgression(raw: unknown): Progression {
   };
   if (level.cap < level.first) fail('level.cap', 'first 이상이어야 한다');
   if (!Number.isInteger(level.max)) fail('level.max', '정수여야 한다');
-  return { version, emblems, xp, level };
+  const c = obj(o.coins, 'coins');
+  const coins = {
+    base: num(c.base, 'coins.base', 0),
+    perTier: num(c.perTier, 'coins.perTier', 0),
+    win: num(c.win, 'coins.win', 0),
+    voidScale: num(c.voidScale, 'coins.voidScale', 0),
+  };
+  if (coins.voidScale > 1) fail('coins.voidScale', '1 이하여야 한다');
+  const lg = obj(o.login, 'login');
+  const login = {
+    base: num(lg.base, 'login.base', 0),
+    step: num(lg.step, 'login.step', 0),
+    maxStreak: num(lg.maxStreak, 'login.maxStreak', 1),
+  };
+  if (!Number.isInteger(login.maxStreak)) fail('login.maxStreak', '정수여야 한다');
+  const d = obj(o.daily, 'daily');
+  const seen = new Set<string>();
+  const daily = {} as Record<ChallengeTeam, ChallengeDef[]>;
+  for (const team of ['survivor', 'monster', 'any'] as const) {
+    const list = d[team];
+    if (!Array.isArray(list) || list.length === 0) fail(`daily.${team}`, '도전이 하나 이상 있어야 한다');
+    daily[team] = list.map((raw, i) => {
+      const def = validateChallenge(raw, `daily.${team}[${i}]`, team);
+      if (seen.has(def.id)) fail(`daily.${team}[${i}].id`, `겹치는 id ${def.id}`);
+      seen.add(def.id);
+      return def;
+    });
+  }
+  for (const k of Object.keys(d)) {
+    if (!(k in daily)) fail(`daily.${k}`, '모르는 팀 (survivor · monster · any)');
+  }
+  return { version, emblems, xp, level, coins, login, daily };
+}
+
+/** 도전 id: 짧은 영문 소문자 · 숫자 · '-' (저장 기록에 그대로 들어간다) */
+const CHALLENGE_ID = /^[a-z0-9-]{1,24}$/;
+
+function validateChallenge(raw: unknown, path: string, team: ChallengeTeam): ChallengeDef {
+  const o = obj(raw, path);
+  const id = o.id;
+  if (typeof id !== 'string' || !CHALLENGE_ID.test(id))
+    fail(`${path}.id`, '영문 소문자 · 숫자 · - 24자 이하');
+  const target = num(o.target, `${path}.target`, 1);
+  const reward = num(o.reward, `${path}.reward`, 0);
+  switch (o.kind) {
+    case 'stat': {
+      if (team === 'any') fail(`${path}.kind`, '판 기록 수치는 팀마다 달라 any 도전에 쓰지 않는다');
+      if (!isRatingStatId(o.stat)) fail(`${path}.stat`, '모르는 판 기록 수치');
+      return { id, kind: 'stat', stat: o.stat, target, reward };
+    }
+    case 'play':
+    case 'win':
+      return { id, kind: o.kind, target, reward };
+    case 'tier': {
+      const minTier = num(o.minTier, `${path}.minTier`, 1);
+      if (!Number.isInteger(minTier) || minTier > 4) fail(`${path}.minTier`, '1~4 정수');
+      return { id, kind: 'tier', minTier, target, reward };
+    }
+    default:
+      return fail(`${path}.kind`, 'stat · play · win · tier 중 하나');
+  }
 }
