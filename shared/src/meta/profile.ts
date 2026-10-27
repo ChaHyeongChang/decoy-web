@@ -6,9 +6,7 @@
 // 칸을 옛 빌드가 지우지 않게). 칸의 뜻이 바뀌면 판을 올리고 옮기는 코드를 둔다. 더 높은 판은 읽기만 하고 저장하지 않는다
 import { isMonsterCostume, isSurvivorCostume } from '../costume';
 import {
-  MONSTER_COSTUMES,
   MONSTER_EMBLEMS,
-  SURVIVOR_COSTUMES,
   SURVIVOR_EMBLEMS,
   teamOf,
   type CostumeChoice,
@@ -122,9 +120,13 @@ const KNOWN = new Set([
   'wear',
 ]);
 /** 해금할 수 있는 의상 id (기본 제외) */
-const COSTUME_IDS: readonly string[] = [...SURVIVOR_COSTUMES, ...MONSTER_COSTUMES].filter(
-  (id) => id !== 'basic',
-);
+/**
+ * 가진 의상 id 모양 (길이 · 수 상한). 이 빌드가 모르는 id(다음 빌드가 더한 의상)도 모양만 맞으면 남긴다 — 옛 빌드 탭이
+ * 새 빌드에서 불씨로 산 의상을 지우지 않게(같은 판 안에서 칸을 더하는 규칙, 이 파일 머리). 보이기 · 입기는 아는 id만
+ * (옷장은 이 빌드의 의상 표만 보이고, 입은 의상은 wearOf가 아는 id만 남긴다)
+ */
+const COSTUME_ID_MAX = 24;
+const OWNED_MAX = 64;
 const CHALLENGE_ID_MAX = 24;
 
 function count(v: unknown): number {
@@ -176,11 +178,20 @@ function loginState(v: unknown): Profile['login'] {
   return { last: o.last, streak: Math.max(1, count(o.streak)) };
 }
 
-/** 가진 의상: 아는 id만, 겹침 없이 (모르는 id — 다음 빌드 의상 — 는 버린다: 그 빌드가 다시 적는다) */
+/** 가진 의상: 겹침 없이, 모양이 맞는 id면 모르는 것(다음 빌드 의상)도 남긴다 (위 COSTUME_ID_MAX) */
 function ownedIds(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
   const out: string[] = [];
-  for (const x of v) if (typeof x === 'string' && COSTUME_IDS.includes(x) && !out.includes(x)) out.push(x);
+  for (const x of v)
+    if (
+      typeof x === 'string' &&
+      x !== 'basic' &&
+      /^[a-z][a-z0-9-]*$/.test(x) &&
+      x.length <= COSTUME_ID_MAX &&
+      !out.includes(x) &&
+      out.length < OWNED_MAX
+    )
+      out.push(x);
   return out;
 }
 

@@ -917,12 +917,21 @@ function startRecostume(build: AtlasBuild, target: Readonly<CostumeSet>): Recost
 function stepRecostume(j: RecostumeJob, budgetMs: number): boolean {
   const t0 = performance.now();
   const ctx = j.scratch.getContext('2d');
-  while (ctx && j.next < j.names.length) {
+  if (!ctx) {
+    // 옆 캔버스를 못 쓰면 그림 캔버스에 한 번에 그린다 (칸을 비우고 빈 캔버스를 덮어 그림을 지우지 않게)
+    recostumeAtlas(j.build, j.target);
+    const ms = performance.now() - t0;
+    j.ms += ms;
+    j.maxStepMs = Math.max(j.maxStepMs, ms);
+    j.steps += 1;
+    return true;
+  }
+  while (j.next < j.names.length) {
     drawCell(ctx, j.build, j.names[j.next] ?? '', j.target);
     j.next += 1;
     if (performance.now() - t0 >= budgetMs) break;
   }
-  const finished = !ctx || j.next >= j.names.length;
+  const finished = j.next >= j.names.length;
   if (finished) {
     const main = j.build.canvas.getContext('2d');
     if (main)

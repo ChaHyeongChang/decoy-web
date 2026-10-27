@@ -142,17 +142,16 @@ export class MetaState {
     return { ok: true, price: r.price, saved };
   }
 
-  /** 의상 입기 (가진 것 · 기본만). 바뀌었으면 true */
-  async wearCostume(team: Team, id: string): Promise<boolean> {
+  /** 의상 입기 (가진 것 · 기본만). 못 입으면 null, 입었으면 저장했는가 (저장이 안 되면 이번 접속 동안만) */
+  async wearCostume(team: Team, id: string): Promise<{ saved: boolean } | null> {
     await this.ready;
     await this.reread();
     const next = wearCostume(this.profile, team, id, this.now());
-    if (!next) return false;
-    if (next === this.profile) return true;
+    if (!next) return null;
+    if (next === this.profile) return { saved: true };
     this.profile = next;
     this.emit();
-    await this.persist();
-    return true;
+    return { saved: await this.persist() };
   }
 
   /** 날이 바뀌었을 수 있다 (자정 · 앱으로 돌아옴): 보이는 것을 다시 그리게 알린다 */

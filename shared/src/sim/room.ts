@@ -458,8 +458,11 @@ export class Room {
     const role = seat.role ?? 'runner';
     // 빠른 매칭: 다른 사람 이름은 익명, 봇 여부는 보내지 않는다 (결과 화면에서만)
     const quick = this.kind === 'quick';
-    // 의상: 그 역할 팀 의상 (기본이면 싣지 않는다). 괴물 명단은 자기 하나뿐이라 생존자 의상이 괴물에게 가지 않는다
+    // 의상: 그 역할 팀 의상 (기본이면 싣지 않는다). 괴물 명단은 자기 하나뿐이라 생존자 의상이 괴물에게 가지 않는다.
+    // 빠른 매칭은 남의 의상도 싣지 않는다: 봇 자리는 늘 기본이라 기본이 아닌 의상이 '사람'이라는 단서가 된다(봇 여부는
+    // 결과 화면에서만 — GAME_DESIGN 11.2 · 12.5). 내 의상은 그대로 싣는다
     const dressed = (s: Seat, r: Role): Pick<RosterEntry, 'costume'> => {
+      if (quick && s !== seat) return {};
       const c = costumeForRole(s.costume, r);
       return c === 'basic' ? {} : { costume: c };
     };

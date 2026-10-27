@@ -185,6 +185,8 @@ export class App {
   readonly levelChip = new LevelChip(this.meta, () => this.hub.open());
   /** '내 기록' 창 (나눠 받는 조각, ui/hubHost.ts): 레벨 · 불씨 · 접속 보상 · 오늘의 도전 */
   readonly hub: HubHost;
+  /** 방에서 바꾼 의상을 아직 서버 자리에 보내지 못했다 (판 중에 바꿈 — 판이 끝나면 보낸다) */
+  private costumePending = false;
   /** 자정(이 기기 시간)에 칩 · 창을 다시 그린다 (새 도전 · 접속 보상) */
   private midnightTimer: number | null = null;
   /** 설정 화면 (설정 화면 통합): 로비 · 판 중 메뉴에서 연다 (#ui-root, 로비 · 판 화면 위) */
@@ -519,11 +521,22 @@ export class App {
    */
   private wearingChanged(): void {
     if (!setWearing(this.meta.costumes())) return;
-    if (this.you && this.lobby && this.lobby.phase !== 'playing')
-      this.link.send({ t: 'costume', costume: this.meta.costumes() });
+    // 방에 있으면 서버 자리에 알린다. 판 중이면 서버가 무시하므로 판이 끝나 로비 상태가 오면 보낸다 (syncCostume).
+    // 방 밖이면 다음 join · quick에 실려 간다
+    if (this.you && this.lobby) {
+      this.costumePending = true;
+      this.syncCostume();
+    }
     if (this.match) return;
     const mine = this.lobby?.players.find((p) => p.id === this.you)?.role ?? null;
     setBakeCostumes(lobbyCostumeSet(mine, this.meta.costumes()));
+  }
+
+  /** 판 밖에서 바꾼(또는 판 중에 바꿔 보내지 못한) 의상을 서버 자리에 보낸다 */
+  private syncCostume(): void {
+    if (!this.costumePending || !this.you || !this.lobby || this.lobby.phase === 'playing') return;
+    this.costumePending = false;
+    this.link.send({ t: 'costume', costume: this.meta.costumes() });
   }
 
   /**
@@ -729,6 +742,10 @@ export class App {
     this.result = null;
     this.lastSnap = null;
     this.resultUi.hide();
+    // 방 밖: 보낼 의상이 남아 있지 않고(다음 join · quick에 실린다), 지난 판 명단 의상을 굽기 값에서 지운다
+    // (첫 화면 미리 굽기가 기본으로 되돌린다 — 다음 연습 판에서 봇 자리에 지난 판 의상이 보이지 않게)
+    this.costumePending = false;
+    setBakeCostumes(lobbyCostumeSet(null, this.meta.costumes()));
     this.lobbyUi.renderHome(prefill, queueDropped);
     if (wasInRoom)
       this.emit({
@@ -915,6 +932,8 @@ export class App {
       }
       case 'lobby':
         this.lobby = msg.lobby;
+        // 판 중에 바꾼 의상: 판이 끝나 결과 · 로비 상태가 오면 보낸다 (다시 하기 · 다음 판에 입게)
+        this.syncCostume();
         if (msg.lobby.phase === 'lobby') {
           this.match = null;
           this.result = null;

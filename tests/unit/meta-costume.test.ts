@@ -147,10 +147,10 @@ describe('기록 형식 (decoy:progress owned · wear)', () => {
     expect(p.wear).toEqual(BASIC_COSTUMES);
   });
 
-  it('믿지 않는다: 모르는 · 겹친 의상은 버리고, 가지지 않은 · 다른 팀 의상을 입었으면 기본', () => {
+  it('믿지 않는다: 겹친 · 모양이 틀린 의상은 버리고, 가지지 않은 · 다른 팀 의상을 입었으면 기본', () => {
     const text = JSON.stringify({
       v: 1,
-      owned: ['scarf', 'scarf', 'crown', 7, 'hood'],
+      owned: ['scarf', 'scarf', 7, 'Bad Id', '', 'basic', 'x'.repeat(25), 'hood'],
       wear: { survivor: 'cape', monster: 'scarf' },
     });
     const p = parseProfile(text, NOW).profile;
@@ -161,6 +161,27 @@ describe('기록 형식 (decoy:progress owned · wear)', () => {
       NOW,
     ).profile;
     expect(p2.wear).toEqual({ survivor: 'basic', monster: 'hood' });
+  });
+
+  it('옛 빌드가 새 빌드 의상을 지우지 않는다: 모르는 id(다음 빌드 의상)는 모양만 맞으면 가진 의상에 남아 다시 저장된다', () => {
+    const text = JSON.stringify({
+      v: 1,
+      coins: 3,
+      owned: ['scarf', 'crown'],
+      wear: { survivor: 'crown', monster: 'basic' },
+    });
+    const p = parseProfile(text, NOW).profile;
+    expect(p.owned).toEqual(['scarf', 'crown']);
+    // 모르는 의상은 이 빌드에서 입지 못한다 (기본으로 보인다) — 가진 것은 그대로
+    expect(p.wear.survivor).toBe('basic');
+    const again = parseProfile(serializeProfile(p), NOW).profile;
+    expect(again.owned).toEqual(['scarf', 'crown']);
+    // 해금 · 입기는 아는 의상만
+    expect(ownsCostume(p, 'crown')).toBe(true);
+    expect(wearCostume(p, 'survivor', 'crown', NOW)).toBeNull();
+    // 가진 의상 수 상한 (겹침 없이 64개까지)
+    const many = Array.from({ length: 80 }, (_, i) => `c${i}`);
+    expect(parseProfile(JSON.stringify({ v: 1, owned: many }), NOW).profile.owned).toHaveLength(64);
   });
 
   it('합치기 (계정으로 올릴 때): 가진 의상은 합치고, 입은 의상은 계정 쪽 (계정이 기본이면 기기 쪽)', () => {

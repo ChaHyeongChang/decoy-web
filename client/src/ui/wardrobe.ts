@@ -19,6 +19,7 @@ import { sfx } from '../audio';
 import { META_TEXT, ROLE_CARDS } from '../data/storyText';
 import type { MetaState } from '../meta/meta';
 import { EMBER_SVG, fillText } from './levelChip';
+import { armAgainstDoubleTap } from './lobby';
 import { frontFigureSvg, h, icon, roleVars, svgSpan, type FigureCostume } from './uiArt';
 
 const ROLES: readonly RoleCharId[] = ['runner', 'guard', 'scout'];
@@ -171,7 +172,9 @@ export class Wardrobe {
         this.run(
           this.meta
             .wearCostume(team, pick)
-            .then((ok) => (ok ? fillText(W.worn, { name: W.names[pick] ?? pick }) : '')),
+            .then((r) =>
+              r ? (r.saved ? fillText(W.worn, { name: W.names[pick] ?? pick }) : META_TEXT.notSaved) : '',
+            ),
         );
     } else if (lack > 0) label = fillText(W.lack, { n: lack });
     else if (this.confirm !== pick) {
@@ -205,6 +208,9 @@ export class Wardrobe {
       label,
     );
     action.disabled = !act || this.busy;
+    // 확인 단추는 그려진 뒤 잠깐 포인터를 막는다: 첫 단추를 두 번 누른(두 번 탭) 두 번째가 같은 자리의 확인 단추에 떨어져
+    // 바로 해금되지 않게 (연습 역할 고르기와 같은 가드, 검토 반영 F17 — 키보드는 막지 않는다)
+    if (act && this.confirm === pick) armAgainstDoubleTap(action);
     if (act) {
       const run = act;
       action.addEventListener('click', () => {
@@ -220,6 +226,13 @@ export class Wardrobe {
       h('div', { class: 'wd-left' }, preview, h('p', { class: 'hub-note' }, W.note)),
       side,
     );
+  }
+
+  /** 창을 다시 열거나 탭을 바꿀 때: 미리보기 · 해금 확인 · 알림을 푼다 (하던 해금 · 입기는 그대로 끝난다) */
+  reset(): void {
+    this.pick = null;
+    this.confirm = null;
+    this.notice = '';
   }
 
   /** 해금 · 입기 (기다리는 동안 단추를 끈다). 끝나면 확인을 풀고 알림을 띄운다 */

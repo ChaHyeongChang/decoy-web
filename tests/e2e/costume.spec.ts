@@ -248,8 +248,19 @@ test('옷장: 망토 해금(두 번 눌러 확인) → 입기 → 다시 열어�
   await expect(page.getByTestId('wd-preview')).toHaveAttribute('data-costume', 'cape');
   const action = page.getByTestId('wd-action');
   await expect(action).toHaveText('해금 · 불씨 400');
+  // 두 번 누름(더블클릭)은 해금하지 않는다: 두 번째 누름이 막 그려진 확인 단추에 떨어지지 않는다 (F17과 같은 가드)
+  await action.dblclick();
+  await expect(action).toHaveText('한 번 더 누르면 해금 (불씨 400)');
+  await expect(page.getByTestId('hub-coins')).toHaveText('500');
+  // 탭을 바꾸면 확인이 풀린다
+  await press(page.getByTestId('hub-tab-today'));
+  await press(page.getByTestId('hub-tab-wardrobe'));
+  await press(page.getByTestId('wd-tile-cape'));
+  await expect(action).toHaveText('해금 · 불씨 400');
   await press(action);
   await expect(action).toHaveText('한 번 더 누르면 해금 (불씨 400)');
+  // 확인 단추 가드(0.4초)가 풀린 뒤 누른다
+  await expect(action).not.toHaveClass(/arming/);
   // 아직 불씨 그대로 (한 번 눌러서는 해금하지 않는다)
   await expect(page.getByTestId('hub-coins')).toHaveText('500');
   await press(action);

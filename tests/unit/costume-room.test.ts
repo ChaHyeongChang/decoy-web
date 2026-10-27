@@ -187,6 +187,31 @@ describe('판 시작 명단의 의상', () => {
     expect(other.seats[2]!.costume).toEqual({ survivor: 'basic', monster: 'basic' });
   });
 
+  it('빠른 매칭: 남의 의상은 판 시작 명단에 싣지 않는다 (봇 자리는 늘 기본이라 의상이 사람이라는 단서가 된다) — 내 의상만', () => {
+    const mgr = new RoomManager({ balance, seed: 6, testHooks: true, devBots: true }, {});
+    const human = new FakeConn();
+    const q = mgr.quick(human, '나', 0, { survivor: 'scarf', monster: 'chains' });
+    const other = new FakeConn();
+    const q2 = mgr.quick(other, '너', 0, { survivor: 'cape', monster: 'hood' });
+    q.room.handle(q.seat, { t: 'role', role: 'runner' }, 0);
+    // 기다림이 끝나면 빈 자리를 봇으로 채워 시작한다 (기다리는 동안 핑으로 살아 있음을 알린다)
+    for (let now = 0; now < 120_000 && q.room.phase === 'lobby'; now += 250) {
+      for (const s of [q.seat, q2.seat]) q.room.handle(s, { t: 'ping', c: now }, now);
+      mgr.tick(now);
+    }
+    expect(q.room.phase).toBe('playing');
+    // 두 사람이 같은 방이고 남은 자리는 봇이다 (봇 자리가 있어야 이 시험이 뜻이 있다)
+    expect(q2.room).toBe(q.room);
+    expect(q.room.seats.filter((s) => s.bot).length).toBeGreaterThan(0);
+    for (const conn of [human, other]) {
+      const info = matchOf(conn).info;
+      for (const e of info.roster)
+        if (e.id !== info.you) expect(e, `${e.role} 남의 자리`).not.toHaveProperty('costume');
+      const mine = info.roster.find((e) => e.id === info.you)!;
+      expect(mine.costume, '내 의상').toBeDefined();
+    }
+  });
+
   it('빠른 매칭: 대기열에 넣을 때 받은 의상이 판 시작 명단에 실린다', () => {
     const mgr = new RoomManager({ balance, seed: 4, testHooks: true }, {});
     const conn = new FakeConn();

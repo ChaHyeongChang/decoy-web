@@ -243,10 +243,12 @@ describe('의상 해금 · 입기 (옷장, 메타 c)', () => {
     const m = new MetaState(new DeviceProfileStore(s), now);
     await m.ready;
     expect(m.costumes()).toEqual({ survivor: 'basic', monster: 'basic' });
-    expect(await m.wearCostume('survivor', 'pack')).toBe(false);
+    expect(await m.wearCostume('survivor', 'pack')).toBeNull();
     expect(await m.buyCostume('survivor', 'pack')).toEqual({ ok: true, price: 250, saved: true });
     expect(await m.buyCostume('monster', 'chains')).toEqual({ ok: false, reason: 'coins' });
-    expect(await m.wearCostume('survivor', 'pack')).toBe(true);
+    expect(await m.wearCostume('survivor', 'pack')).toEqual({ saved: true });
+    // 이미 입은 것을 다시 입어도 그대로 (저장할 것이 없다)
+    expect(await m.wearCostume('survivor', 'pack')).toEqual({ saved: true });
     const again = new MetaState(new DeviceProfileStore(s), now);
     await again.ready;
     expect(again.current.coins).toBe(50);
@@ -271,7 +273,7 @@ describe('의상 해금 · 입기 (옷장, 메타 c)', () => {
     );
     await m.ready;
     expect(await m.buyCostume('monster', 'hood')).toEqual({ ok: true, price: 150, saved: false });
-    expect(await m.wearCostume('monster', 'hood')).toBe(true);
+    expect(await m.wearCostume('monster', 'hood')).toEqual({ saved: false });
     expect(m.costumes().monster).toBe('hood');
     expect(m.current.coins).toBe(50);
   });

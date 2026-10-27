@@ -77,6 +77,7 @@ export class HubPanel {
         if (this.tab === t) return;
         this.tab = t;
         this.notice = '';
+        this.wardrobe?.reset();
         this.render();
       });
       this.tabs.set(t, b);
@@ -103,9 +104,10 @@ export class HubPanel {
   }
 
   open(): void {
-    // 늘 오늘 탭부터 (칩의 점 = 받을 접속 보상이 오늘 탭에 있다)
+    // 늘 오늘 탭부터 (칩의 점 = 받을 접속 보상이 오늘 탭에 있다). 옷장의 해금 확인 · 미리보기는 풀어 둔다
     this.tab = 'today';
     this.notice = '';
+    this.wardrobe?.reset();
     this.render();
     this.veil.hidden = false;
     this.unsub ??= this.meta.onChange(() => {

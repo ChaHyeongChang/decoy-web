@@ -3244,6 +3244,10 @@ html:not(.touch) #debug-overlay .dbg-toggle {
   --ring: var(--warn);
   box-shadow: inset 0 -3px 0 var(--warn);
 }
+/* 해금 확인 단추가 막 그려진 동안 (두 번 누름 가드, 연습 역할 고르기와 같다) */
+.wd-side > .btn.arming {
+  pointer-events: none;
+}
 .wd-seg:focus-visible,
 .wd-tile:focus-visible {
   outline: 2px solid var(--neon);
@@ -3257,11 +3261,34 @@ html:not(.touch) #debug-overlay .dbg-toggle {
     justify-items: center;
   }
 }
-/* 낮은 가로 화면 (휴대폰): 미리보기를 줄이고 칸 사이를 좁혀 스크롤 없이 한 화면에 */
+/* 낮은 가로 화면 (휴대폰): 탭을 제목 줄에 올리고(제목 · 탭 · 닫기), 미리보기를 줄이고 칸 사이를 좁혀 스크롤 없이 한 화면에
+   (손가락 화면 800 × 360에서도 칸 48px) */
 @media (max-height: 520px) {
   .hub-card {
-    gap: 8px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: 'title tabs close' 'body body body';
+    align-items: center;
+    column-gap: 12px;
+    row-gap: 8px;
     padding: 10px 16px 12px;
+  }
+  .hub-head {
+    display: contents;
+  }
+  .hub-title {
+    grid-area: title;
+  }
+  .hub-head > .btn {
+    grid-area: close;
+  }
+  .hub-card .hub-tabs {
+    grid-area: tabs;
+    border-bottom: 0;
+  }
+  .hub-body {
+    grid-area: body;
+    align-self: start;
   }
   .hub-card .hub-tabs .set-tab {
     min-height: 36px;
@@ -3282,5 +3309,13 @@ html:not(.touch) #debug-overlay .dbg-toggle {
   }
   .wd-seg {
     min-height: 32px;
+  }
+}
+/* 손가락 화면: 탭 · 팀 · 역할 · 의상 칸 48px (낮은 화면 규칙보다 뒤 — 같은 무게면 뒤가 이긴다) */
+@media (pointer: coarse) {
+  .hub-card .hub-tabs .set-tab,
+  .wd-tile,
+  .wd-seg {
+    min-height: 48px;
   }
 }

@@ -454,6 +454,8 @@ describe('처리방침 문서', () => {
       { key: 'lastRoom', field: 'join.room', word: '마지막 방 코드' },
       { key: 'seat', field: 'join.token', word: '자리 토큰' },
       { key: 'seats', field: 'join.altTokens', word: '자리 토큰' },
+      // 성장 기록의 입은 의상 (메타 c): 방에 들어갈 때 · 판 밖에서 바꿀 때 보낸다
+      { key: 'progress', field: 'join.costume', word: '입은 의상' },
     ] as const;
     const fields: string[] = Object.values(SENT_DATA).flatMap((d) => [...d.fields]);
     const first = plain(/<p>([\s\S]*?)<\/p>/.exec(section('device'))?.[1] ?? '');
