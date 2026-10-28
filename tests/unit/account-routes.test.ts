@@ -1,14 +1,21 @@
 // 계정 HTTP 경로 (docs/ACCOUNT_PLAN.md 2 · 4 · 8절): 실제 http 서버(0번 포트)에 계정 기능을 얹어 fetch로 두드린다.
 // 꺼짐 상태 · 로그인 전체 흐름(start → 가짜 구글 → callback → 쿠키 → /api/account) · state · 쿠키 · 나쁜 토큰 · 취소 · CSRF ·
 // 본문 크기 · 401 쿠키 지움 · DB 장애 503 · 삭제 즉시 · 삭제 뒤 적립이 계정을 다시 만들지 않음 · 삭제 페이지 · 비율 제한 ·
-// 기기에서 보낸 보상 값을 받는 길이 없음
+// 기기에서 보낸 보상 값을 받는 길이 없음 · 삭제 페이지 로그인은 계정을 만들지 않고 게임 세션 대신 삭제 전용 쿠키(decoy_del) ·
+// 기기 기록 올리기는 구글 로그인 뒤 10분 안만(새로 발급한 세션도 로그인 때 그대로)
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AccountStatus, MatchRating } from '@decoy/shared';
 import { PROGRESSION } from '@decoy/shared/meta';
 import { signJwt, testKeyPair } from '../../server/src/account/testIdp';
 import { StaticKeys } from '../../server/src/account/googleToken';
 import { RateLimiter } from '../../server/src/account/rateLimit';
-import { SESSION_RENEW_SEC, signSession } from '../../server/src/account/session';
+import {
+  IMPORT_WINDOW_SEC,
+  SESSION_RENEW_SEC,
+  accountTag,
+  signDeleteSession,
+  signSession,
+} from '../../server/src/account/session';
 import {
   CookieJar,
   LOGIN_ENV,
@@ -176,8 +183,9 @@ describe('로그인 켜짐 (가짜 구글 · 메모리 저장소)', () => {
     expect(cb.headers.get('location')).toBe('/?login=ok');
     const sid = setCookieLine(cb, 'decoy_sid')!;
     expect(sid).toMatch(
-      /^decoy_sid=v1\.[0-9a-f]{32}\.\d+\.[A-Za-z0-9_-]{43}; Path=\/; Max-Age=15552000; HttpOnly; SameSite=Lax$/,
+      /^decoy_sid=v2\.[0-9a-f]{32}\.\d+\.\d+\.[A-Za-z0-9_-]{43}; Path=\/; Max-Age=15552000; HttpOnly; SameSite=Lax$/,
     );
+    expect(setCookieLine(cb, 'decoy_del')).toBeUndefined();
     expect(setCookieLine(cb, 'decoy_oauth')).toMatch(/Max-Age=0/);
     expect(jar.get('decoy_oauth')).toBeUndefined();
 
@@ -207,11 +215,99 @@ describe('로그인 켜짐 (가짜 구글 · 메모리 저장소)', () => {
     expect(logs).not.toContain(listed.id);
   });
 
-  it('next=delete로 시작하면 끝나고 삭제 페이지로', async () => {
+  it('삭제 페이지 로그인(next=delete): 없는 구글 계정은 계정을 만들지 않고 "계정 없음" — 쿠키도 없다', async () => {
+    const before = await accounts(srv);
+    const jar = new CookieJar();
+    const cb = await loginFlow(srv, jar, { sub: 'never-played', next: 'delete' });
+    expect(cb.status).toBe(303);
+    expect(cb.headers.get('location')).toBe('/account/delete?none=1');
+    expect(cb.headers.getSetCookie().map((l) => l.split('=')[0])).toEqual(['decoy_oauth']);
+    expect(jar.get('decoy_sid')).toBeUndefined();
+    expect(jar.get('decoy_del')).toBeUndefined();
+    expect(await accounts(srv)).toEqual(before);
+    expect((await accounts(srv)).some((a) => a.sub === 'never-played')).toBe(false);
+    const page = await fetch(`${srv.base}/account/delete?none=1`, { headers: { cookie: jar.header() } });
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain('data-state="none"');
+    expect(html).toContain('이 Google 계정으로 만든 DECOY 계정이 없습니다');
+    expect(html).toContain('href="/auth/google/start?next=delete"');
+    expect(html).not.toContain('<form');
+    // 게임 세션이 있어도 (다른 계정으로 게임에 로그인한 브라우저) 그 계정의 삭제 폼을 대신 내밀지 않는다
+    const game = await signedIn(srv, 'game-user-elsewhere');
+    const mixed = await fetch(`${srv.base}/account/delete?none=1`, { headers: { cookie: game.header() } });
+    expect(await mixed.text()).toContain('data-state="none"');
+  });
+
+  it('삭제 페이지 로그인(next=delete): 있는 계정이면 게임 세션 대신 삭제 페이지 전용 쿠키(decoy_del, Path=/account/delete, 10분)만 — 그 쿠키로 계정 API · 게임 연결은 로그인 안 한 것과 같다', async () => {
+    const made = await signedIn(srv, 'to-delete-page');
+    const id = made.get('decoy_sid')!.split('.')[1]!;
     const jar = new CookieJar();
     const cb = await loginFlow(srv, jar, { sub: 'to-delete-page', next: 'delete' });
     expect(cb.headers.get('location')).toBe('/account/delete');
-    expect(jar.get('decoy_sid')).toBeDefined();
+    expect(setCookieLine(cb, 'decoy_sid')).toBeUndefined();
+    expect(setCookieLine(cb, 'decoy_del')).toMatch(
+      /^decoy_del=d1\.[0-9a-f]{32}\.\d+\.[A-Za-z0-9_-]{43}; Path=\/account\/delete; Max-Age=600; HttpOnly; SameSite=Lax$/,
+    );
+    expect(jar.get('decoy_sid')).toBeUndefined();
+    const del = jar.get('decoy_del')!;
+    expect(del.split('.')[1]).toBe(id);
+    // 계정을 새로 만들지 않았다
+    expect((await accounts(srv)).filter((a) => a.sub === 'to-delete-page')).toHaveLength(1);
+    // 브라우저는 /api · /ws에 이 쿠키를 싣지 않지만, 실어 보내도 로그인으로 보지 않는다 (게임 세션 이름에 넣어도)
+    for (const cookie of [`decoy_del=${del}`, `decoy_sid=${del}`]) {
+      const st = await fetch(`${srv.base}/api/account`, { headers: { cookie } });
+      expect(await st.json(), cookie).toEqual({ on: true, signedIn: false });
+      const claim = await fetch(`${srv.base}/api/account/claim-login`, {
+        method: 'POST',
+        headers: { cookie, 'x-decoy-account': '1', origin: srv.origin },
+      });
+      expect(claim.status, cookie).toBe(401);
+      const host = new URL(srv.base).host;
+      expect(srv.system.accountOf({ headers: { cookie, host } } as never), cookie).toBeNull();
+    }
+    // 게임 세션 쿠키는 계정 키 · tag를 준다 (같은 확인 길 — 위가 헛돌지 않는다)
+    const host = new URL(srv.base).host;
+    expect(srv.system.accountOf({ headers: { cookie: made.header(), host } } as never)).toEqual({
+      id,
+      tag: accountTag(id, TEST_SECRET),
+    });
+    // 삭제 페이지는 그 쿠키로 삭제 폼을 보이고, 지우면 두 쿠키를 모두 지운다
+    const page = await fetch(`${srv.base}/account/delete`, { headers: { cookie: jar.header() } });
+    const html = await page.text();
+    expect(html).toContain('data-state="signed-in"');
+    const csrf = hiddenFields(html).csrf!;
+    const done = await fetch(`${srv.base}/account/delete`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie: jar.header(),
+        origin: srv.origin,
+      },
+      body: `csrf=${csrf}`,
+    });
+    expect(await done.text()).toContain('data-state="deleted"');
+    expect(setCookieLine(done, 'decoy_del')).toMatch(/^decoy_del=; Path=\/account\/delete; Max-Age=0/);
+    expect(setCookieLine(done, 'decoy_sid')).toMatch(/^decoy_sid=; Path=\/; Max-Age=0/);
+    expect((await accounts(srv)).some((a) => a.id === id)).toBe(false);
+  });
+
+  it('삭제 전용 쿠키는 10분이 지나면 로그인 안 함 (끝난 쿠키를 지운다), 401 POST는 두 쿠키를 지운다', async () => {
+    await signedIn(srv, 'old-delete-cookie');
+    const id = (await accounts(srv)).find((a) => a.sub === 'old-delete-cookie')!.id;
+    const old = signDeleteSession(id, TEST_SECRET, Date.now() - 11 * 60_000);
+    const page = await fetch(`${srv.base}/account/delete`, { headers: { cookie: `decoy_del=${old}` } });
+    expect(await page.text()).toContain('data-state="signed-out"');
+    expect(setCookieLine(page, 'decoy_del')).toMatch(/Max-Age=0/);
+    const post = await fetch(`${srv.base}/account/delete`, {
+      method: 'POST',
+      headers: { cookie: `decoy_del=${old}`, origin: srv.origin },
+      body: 'csrf=x',
+    });
+    expect(post.status).toBe(401);
+    expect(setCookieLine(post, 'decoy_del')).toMatch(/Max-Age=0/);
+    expect(setCookieLine(post, 'decoy_sid')).toMatch(/Max-Age=0/);
+    expect((await accounts(srv)).some((a) => a.id === id)).toBe(true);
   });
 
   it('state 틀림 · state 쿠키 없음 · 나쁜 토큰은 거절 (/?login=fail, 세션 없음), 구글 취소는 cancel', async () => {
@@ -359,6 +455,50 @@ describe('로그인 켜짐 (가짜 구글 · 메모리 저장소)', () => {
       }),
     );
     expect(JSON.parse(replace.profile).xp).toBe(5);
+  });
+
+  it('기기 글 null은 비어 있지 않은 계정 기록을 덮지 않는다 (choice device여도)', async () => {
+    const jar = await signedIn(srv, 'null-import-user');
+    const device = JSON.stringify({ v: 1, xp: 450, coins: 12 });
+    const up = await json<{ profile: string }>(
+      await apiPost(srv, jar, '/api/account/import', { choice: 'device', device }),
+    );
+    const late = await apiPost(srv, jar, '/api/account/import', { choice: 'device', device: null });
+    expect(late.status).toBe(200);
+    expect((await json<{ profile: string }>(late)).profile).toBe(up.profile);
+    const st = await status(srv, jar);
+    expect(st.body).toMatchObject({ signedIn: true, profile: up.profile });
+  });
+
+  it('기기 기록 올리기는 기기 글 · 비어 있지 않은 글이 있으면 구글 로그인 뒤 10분 안만 — 넘으면 403 relogin (null은 언제나 된다)', async () => {
+    expect(IMPORT_WINDOW_SEC).toBe(600);
+    const id = (await accounts(srv)).find((a) => a.sub === 'null-import-user')!.id;
+    const device = JSON.stringify({ v: 1, xp: 9, coins: 1 });
+    const at = (loginAgoSec: number): CookieJar => {
+      const jar = new CookieJar();
+      jar.values.set('decoy_sid', signSession(id, TEST_SECRET, Date.now(), Date.now() - loginAgoSec * 1000));
+      return jar;
+    };
+    const before = (await accounts(srv)).find((a) => a.id === id)!.profile;
+    for (const choice of ['device', 'account'] as const) {
+      const late = await apiPost(srv, at(IMPORT_WINDOW_SEC + 30), '/api/account/import', { choice, device });
+      expect(late.status, choice).toBe(403);
+      expect(await late.json()).toEqual({ error: 'relogin' });
+    }
+    expect((await accounts(srv)).find((a) => a.id === id)!.profile).toBe(before);
+    // 기기 글이 없으면 (계정 기록 그대로 쓰기) 언제든
+    const keep = await apiPost(srv, at(IMPORT_WINDOW_SEC + 30), '/api/account/import', {
+      choice: 'account',
+      device: null,
+    });
+    expect(keep.status).toBe(200);
+    // 10분 안이면 받는다
+    const ok = await apiPost(srv, at(IMPORT_WINDOW_SEC - 30), '/api/account/import', {
+      choice: 'device',
+      device,
+    });
+    expect(ok.status).toBe(200);
+    expect(JSON.parse((await json<{ profile: string }>(ok)).profile).xp).toBe(9);
   });
 
   it('기기에서 보낸 보상 값을 받는 길이 없다: 접속 보상 날짜 · 보상 · 의상 값 · 적립 경로', async () => {
@@ -546,6 +686,15 @@ describe('세션 새로 발급 · HTTPS 쿠키 · 진짜 구글 주소', () => {
       jar.store(later.res);
       expect(jar.get('decoy_sid')).not.toBe(first);
       expect(jar.get('decoy_sid')!.split('.')[1]).toBe(first.split('.')[1]);
+      // 로그인 때는 그대로라 기기 기록 올리기 10분 창이 다시 열리지 않는다 (오래된 첫 로그인 흐름이 계정 기록을 덮지 않게)
+      expect(jar.get('decoy_sid')!.split('.')[3]).toBe(first.split('.')[3]);
+      expect(jar.get('decoy_sid')!.split('.')[2]).not.toBe(first.split('.')[2]);
+      const late = await apiPost(srv, jar, '/api/account/import', {
+        choice: 'device',
+        device: JSON.stringify({ v: 1, xp: 5 }),
+      });
+      expect(late.status).toBe(403);
+      expect(await late.json()).toEqual({ error: 'relogin' });
     } finally {
       await srv.close();
     }

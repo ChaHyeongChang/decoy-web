@@ -10,7 +10,8 @@ import {
   woff2Codepoints,
   woff2Tables,
 } from '../../scripts/font-subset.mjs';
-import * as story from '../../client/src/data/storyText';
+import * as accountText from '../../client/src/data/accountText';
+import * as storyText from '../../client/src/data/storyText';
 import type * as fontsModule from '../../client/src/ui/fonts';
 import { UI_FONT, UI_FONT_FAMILY } from '../../client/src/ui/fonts';
 
@@ -45,7 +46,8 @@ describe('UI 폰트 파일', () => {
     const need = new Set<string>();
     for (let c = 0x20; c < 0x7f; c += 1) need.add(String.fromCharCode(c));
     for (const ch of hangul) need.add(ch);
-    for (const s of strings(story)) for (const ch of s) need.add(ch);
+    // 계정 문구는 나눠 받는 조각용 파일에 따로 있다 (첫 묶음을 작게)
+    for (const s of strings({ ...storyText, ...accountText })) for (const ch of s) need.add(ch);
     const missing = [...need].filter((ch) => !have.has(ch));
     expect(missing, `목록 밖 글자 → npm run font:subset으로 다시 만든다: ${missing.join('')}`).toEqual([]);
   });

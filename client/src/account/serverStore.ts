@@ -3,9 +3,10 @@
 // 믿지 않는다), 접속 보상 · 해금 · 입기는 계정 API로 요청해 응답의 기록 글로 바꾼다(닿지 않으면 기록을 그대로 두고 실패를 돌려준다 —
 // 기기 쪽으로 몰래 쓰지 않는다). 온라인 판 보상은 서버가 판 평가로 적립해 credit 메시지로 기록 글을 보낸다: 결과 화면 숫자는 같은
 // 공용 함수(applyRating)의 미리보기, 저장 상태는 credit을 기다린다(20초 안에 없으면 상태를 다시 읽어 그 판 ID가 있으면 저장됨,
-// 없으면 모름). 봇과 연습은 적립하지 않는다. 이 계정으로 열지 않은 소켓(계정 모드가 되기 전 · 다른 계정)의 온라인 판은 서버가
-// 소켓을 열 때의 쿠키로 계정을 정해 이 계정에 적립하지 않으니(app.ts) 기기 기록에 적립한다(보상을 잃지 않게). 날짜 · 자정은 계정 시간대(서버 설정). 세션이 끝났으면
-// (401 · 로그인 안 함 · 다른 계정) · 꺼졌으면 lost를 불러 게스트로 돌아가게 한다
+// 없으면 모름). 봇과 연습은 적립하지 않는다. 온라인 판은 그 자리에 서버가 받아들인 계정(welcome.account — 들어갈 때 밝힌 tag가
+// 쿠키 계정과 같을 때만)으로 갈래를 정한다: 없음(계정 모드가 되기 전에 들어온 판 · 쿠키가 다른 소켓) → 기기 기록에(서버가 계정에
+// 적립하지 않으니 보상을 잃지 않게), 이 계정 → credit, 다른 계정 → 적립하지 않음(서버가 그 계정에). 날짜 · 자정은 계정 시간대(서버
+// 설정). 세션이 끝났으면(401 · 로그인 안 함) · 꺼졌으면 · 다른 탭이 다른 계정으로 바꿨으면 lost를 불러 게스트로 · 새 계정으로 간다
 import type { MatchRating, Team } from '@decoy/shared';
 import type { ProfileStore } from '../meta/profileStore';
 import {
@@ -29,6 +30,9 @@ import {
 } from '../meta/meta';
 import type { AccountApi, AccountCall } from './api';
 import { claimLogin, costume, getStatus } from './calls';
+
+/** 계정 저장소를 떠나는 까닭: 세션 끝(로그인 안 함 · 401) · 로그인 꺼짐 · 다른 탭이 다른 계정으로 로그인함 */
+export type LostReason = 'out' | 'off' | 'switched';
 
 /** credit 메시지를 기다리는 시간 (ms). 넘으면 계정 상태를 다시 읽어 판 ID가 있으면 저장된 것으로 본다 */
 export const CREDIT_WAIT_MS = 20_000;
@@ -68,10 +72,10 @@ export class ServerProfileStore implements AccountStore {
     readonly timeZone: string,
     /** 이 계정 표시 */
     readonly tag: string,
-    /** 세션이 끝났다 · 꺼졌다(off) (게스트로 돌아간다) */
-    private readonly lost: (off: boolean) => void = () => undefined,
+    /** 세션이 끝났다 · 꺼졌다 · 다른 계정으로 바뀌었다 (게스트로 · 새 계정으로 간다) */
+    private readonly lost: (why: LostReason) => void = () => undefined,
     private readonly clock: () => number = () => Date.now(),
-    /** 게스트 기록 저장소 (이 계정으로 열지 않은 소켓의 온라인 판을 적립한다) */
+    /** 게스트 기록 저장소 (게스트 자리였던 온라인 판을 적립한다) */
     private readonly device: ProfileStore | null = null,
   ) {
     this.syncedAt = clock();
@@ -94,16 +98,23 @@ export class ServerProfileStore implements AccountStore {
     return msToMidnightInZone(nowMs, this.timeZone);
   }
 
-  /** 계정 상태를 다시 읽는다. ok = 기록을 새로 받음, lost = 세션이 끝났다, fail = 닿지 않음 */
-  async sync(): Promise<'ok' | 'lost' | 'fail'> {
+  /**
+   * 계정 상태를 다시 읽는다. ok = 기록을 새로 받음, switched = 다른 탭이 다른 계정으로 로그인했다(세션 끝이 아니다 — 표시를 지우지
+   * 않고 새 계정으로), lost = 세션이 끝났다 · 꺼졌다, fail = 닿지 않음
+   */
+  async sync(): Promise<'ok' | 'switched' | 'lost' | 'fail'> {
     this.syncedAt = this.clock();
     const r = await getStatus(this.api);
-    if (r.ok && r.body.on && r.body.signedIn && r.body.tag === this.tag) {
-      this.text = r.body.profile;
-      return 'ok';
+    if (r.ok && r.body.on && r.body.signedIn) {
+      if (r.body.tag === this.tag) {
+        this.text = r.body.profile;
+        return 'ok';
+      }
+      this.lost('switched');
+      return 'switched';
     }
     if (r.ok || r.error === 'auth') {
-      this.lost(r.ok && !r.body.on);
+      this.lost(r.ok && !r.body.on ? 'off' : 'out');
       return 'lost';
     }
     return 'fail';
@@ -135,14 +146,19 @@ export class ServerProfileStore implements AccountStore {
     return r.body.result === 'ok' ? { saved: true } : null;
   }
 
+  /**
+   * 판 결과. seat = 그 자리에 서버가 받아들인 계정 tag (welcome.account): 없음 → 기기 기록에 적립(서버가 이 계정에 적립하지 않는다),
+   * 이 계정 → 미리보기 + credit 기다리기, 다른 계정 → 적립하지 않음(서버가 들어올 때의 계정에 적립한다)
+   */
   rate(
     meta: MetaState,
     rating: MatchRating,
     practice: boolean,
-    guest = false,
+    seat: string | null,
   ): RatingApplied | Promise<RatingApplied> {
     if (practice) return { rating, gain: null, saved: true, practice: true };
-    if (guest) return this.rateDevice(meta, rating);
+    if (seat === null) return this.rateDevice(meta, rating);
+    if (seat !== this.tag) return { rating, gain: null, saved: true, elsewhere: true };
     const preview = applyRating(meta.current, rating, meta.now(), meta.prog, meta.today());
     if (!preview) return { rating, gain: null, saved: true };
     return { rating, gain: preview.gain, saved: true, account: this.wait(meta, rating.matchId) };
@@ -170,17 +186,17 @@ export class ServerProfileStore implements AccountStore {
   }
 
   /**
-   * 이 계정으로 열지 않은 소켓의 온라인 판: 서버가 이 계정에 적립하지 않으니 기기 기록에 적립한다 (게스트처럼 — 같은 판 ID는
-   * 거기서 걸러지고, 날짜는 이 기기 날짜). 계정 기록 · 화면 기록은 그대로다
+   * 게스트 자리였던 온라인 판 (계정 모드가 되기 전에 들어왔다 · 쿠키가 다른 소켓): 서버가 이 계정에 적립하지 않으니 기기 기록에
+   * 적립한다 (게스트처럼 — 같은 판 ID는 거기서 걸러지고, 날짜는 이 기기 날짜). 계정 기록 · 화면 기록은 그대로다. 결과에 한 줄
    */
   private async rateDevice(meta: MetaState, rating: MatchRating): Promise<RatingApplied> {
     const nowMs = meta.now();
     const dev = this.device;
     const p = await dev?.load(nowMs).catch(() => null);
     const a = p ? applyRating(p.profile, rating, nowMs, meta.prog, localDay(nowMs)) : null;
-    if (!dev || !p || !a) return { rating, gain: null, saved: true };
+    if (!dev || !p || !a) return { rating, gain: null, saved: true, device: true };
     const saved = p.status !== 'newer' && (await dev.save(a.profile, p.extra).catch(() => false));
-    return { rating, gain: a.gain, saved };
+    return { rating, gain: a.gain, saved, device: true };
   }
 
   private wait(meta: MetaState, matchId: string): CreditState {
@@ -213,7 +229,7 @@ export class ServerProfileStore implements AccountStore {
     if (r.ok) {
       this.text = r.body.profile;
       await meta.reload(this);
-    } else if (r.error === 'auth') this.lost(false);
+    } else if (r.error === 'auth') this.lost('out');
     return r;
   }
 }

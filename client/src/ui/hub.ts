@@ -4,7 +4,8 @@
 // 접속 보상은 자동으로 주지 않고 여기서 '받기'로 받는다(첫 화면 · 시험을 막지 않게, 칩의 점이 알린다)
 // 로그인했으면(선택형 구글 로그인) 받기는 계정 API로 — 닿지 않으면 기록은 그대로 두고 "계정에 연결하지 못했어요" 한 줄
 import { PROGRESSION, challengeById, loginReward, type ChallengeTeam } from '@decoy/shared/meta';
-import { ACCOUNT_TEXT, META_TEXT } from '../data/storyText';
+import { ACCOUNT_TEXT } from '../data/accountText';
+import { META_TEXT } from '../data/storyText';
 import type { MetaState } from '../meta/meta';
 import { EMBER_SVG, fillText } from './levelChip';
 import { h, icon } from './uiArt';

@@ -17,6 +17,8 @@ export const AUTH_CALLBACK_PATH = '/auth/google/callback';
 
 /** 계정 삭제 웹 페이지 (Play 데이터 보안 신고 '계정 삭제 URL'). GET 안내 · POST 삭제 */
 export const ACCOUNT_DELETE_PATH = '/account/delete';
+/** 삭제 페이지에서 로그인한 구글 계정으로 만든 DECOY 계정이 없을 때 돌아오는 주소 표시 (?none=1 — 계정을 만들지 않는다) */
+export const DELETE_NONE_PARAM = 'none';
 
 /**
  * 서비스 워커가 가로채지 않는 경로 앞부분 (로그인 · 계정 요청은 캐시하지 않는다 — 앱 셸 · 깨우기 화면으로 바꿔 주면 로그인이
@@ -33,6 +35,11 @@ export const ACCOUNT_HEADER = 'x-decoy-account';
 /** 세션 쿠키 (HttpOnly — 화면 스크립트가 읽지 못한다) · 로그인 중 state/nonce 쿠키 */
 export const SESSION_COOKIE = 'decoy_sid';
 export const OAUTH_COOKIE = 'decoy_oauth';
+/**
+ * 계정 삭제 페이지 전용 쿠키 (삭제 페이지에서 시작한 로그인 — next=delete). Path가 /account/delete라 게임 연결(/ws) · 계정 API(/api)에는
+ * 실리지 않는다: 삭제하려고 로그인한 브라우저가 게임에서 몰래 계정 모드 · 계정 적립이 되지 않게. 10분, HttpOnly
+ */
+export const DELETE_COOKIE = 'decoy_del';
 
 /** 로그인이 끝나고 돌아온 첫 화면 주소의 표시 (?login=…). 화면이 읽고 주소에서 지운다 */
 export const LOGIN_RESULT_PARAM = 'login';

@@ -17,7 +17,7 @@ import {
   type SurvivorView,
 } from '@decoy/shared';
 import { AccountApi } from './account/api';
-import { bootAccount } from './account/boot';
+import { BOOT_WAIT_MS, bootAccount } from './account/boot';
 import type { AccountController } from './account/controller';
 import { accountMark } from './account/mark';
 import { sfx } from './audio';
@@ -272,12 +272,20 @@ export class App {
    */
   private awaitingWelcome = false;
   /**
-   * 이 소켓을 연 뒤 계정 모드가 바뀌었다 (부팅이 아닌 때 — 로그아웃 · 계정 삭제 · 세션 끝 · 꺼짐 · 다른 탭 로그인). 서버는 소켓을 열
-   * 때의 세션 쿠키로 계정을 정하므로(Conn.account) 이 소켓의 계정은 지금 모드와 다르다: 첫 화면이면 바로, 방 · 판 중이면 첫 화면에
-   * 돌아올 때 다시 연다. 그때까지 계정 모드의 온라인 판은 기기 기록에 적립하고(서버가 이 계정에 적립하지 않는다) credit은 받지 않는다
-   * (다른 계정 것일 수 있다). 게스트 모드는 그대로 기기 기록 — DECISIONS 15절
+   * 이 소켓을 연 뒤 계정 모드가 바뀌었다 (부팅이 아닌 때 — 로그인 · 로그아웃 · 계정 삭제 · 세션 끝 · 꺼짐 · 다른 탭 로그인). 서버는
+   * 화면이 join · quick에서 밝힌 계정 tag가 소켓을 열 때의 세션 쿠키 계정과 같을 때만 그 자리를 계정에 적립한다: 새 쿠키를 실은
+   * 소켓이어야 다음 판의 계정 적립이 받아들여지므로 첫 화면이면 바로, 방 · 판 중이면 첫 화면에 돌아올 때 다시 연다(DECISIONS 15절)
    */
   private staleSocket = false;
+  /**
+   * 지금 방 자리에 서버가 받아들인 계정 tag (welcome.account, 게스트 자리 · 연습은 null). 결과 적립 갈래를 정한다: null → 기기 기록,
+   * 지금 계정 → credit을 기다림, 다른 계정(그사이 로그아웃 · 계정 바뀜) → 어디에도 적립하지 않음(서버가 그 계정에)
+   */
+  private seatAccount: string | null = null;
+  /** 부팅 때 계정 상태를 읽는 중 (끝나면 null): 방 주소로 연 부팅은 이것이 끝난 뒤(최대 3초) 방에 들어간다 */
+  private accountBoot: Promise<void> | null = null;
+  /** 소켓이 열린 횟수 (부팅 입장을 기다리는 사이 소켓이 바뀌었는지) */
+  private opens = 0;
 
   constructor(
     readonly params: AppParams,
@@ -371,6 +379,7 @@ export class App {
             altTokens: [],
             bots: params.bots,
             costume: this.meta.costumes(),
+            account: this.meta.tag,
           });
         },
         practice: (role, name) => this.startPractice(role, name),
@@ -378,7 +387,7 @@ export class App {
           saveName(name);
           this.joinFromLink = false;
           this.returning = null;
-          this.net.send({ t: 'quick', name, costume: this.meta.costumes() });
+          this.net.send({ t: 'quick', name, costume: this.meta.costumes(), account: this.meta.tag });
         },
         leaveQueue: () => this.leaveToHome(),
         leaveRoom: () => this.leaveToHome(),
@@ -431,10 +440,11 @@ export class App {
           window.history.state,
         )
       : null;
-    // 연습 중에는 서버 메시지를 쓰지 않는다 (연결도 쉰다). 계정 적립 알림(credit)은 연습 중에 와도 받는다 (앞 온라인 판의 것)
+    // 연습 중에는 서버 메시지를 쓰지 않는다 (연결도 쉰다). 계정 적립 알림(credit)은 연습 중에 와도 받는다 (앞 온라인 판의 것 —
+    // 지금 계정 tag 것만)
     this.net.on((msg) => {
       if (msg.t === 'credit') {
-        if (!this.staleSocket) this.meta.credit(msg.matchId, msg.ok, msg.profile);
+        this.meta.credit(msg.tag, msg.matchId, msg.ok, msg.profile);
         return;
       }
       if (this.local) return;
@@ -459,7 +469,17 @@ export class App {
       this.renderWake();
       if (this.roomCode) {
         this.joinFromLink = true;
-        this.sendJoin(params.name ?? getSavedName());
+        // 부팅 때 계정 상태를 읽는 중이면 끝난 뒤(최대 3초) 들어간다: 들어갈 때 밝힌 계정으로만 서버가 적립한다 (새로고침한 판도)
+        const n = ++this.opens;
+        const join = (): void => {
+          if (n === this.opens && this.wasOpen && this.roomCode) this.sendJoin(params.name ?? getSavedName());
+        };
+        if (this.accountBoot)
+          void Promise.race([this.accountBoot, new Promise((r) => setTimeout(r, BOOT_WAIT_MS))]).then(
+            join,
+            join,
+          );
+        else join();
       } else if (!this.lobbyUi.atHome) this.lobbyUi.renderHome(this.homePrefill);
     };
     this.net.onClose = () => {
@@ -526,9 +546,9 @@ export class App {
   }
 
   /**
-   * 부팅이 아닌 때 계정 모드가 바뀌었다 (로그아웃 · 계정 삭제 · 세션 끝 · 꺼짐 · 다른 탭 로그인): 이 소켓은 옛 계정 상태로 열렸다.
-   * 첫 화면이면 바로, 방 · 판 중이면 첫 화면에 돌아올 때(forgetRoom) 다시 연다 — 옛 계정 소켓으로 하는 판이 계속 그 계정에
-   * 적립되거나(공용 기기면 다음 사람 판이 앞사람 계정에), 게스트 소켓의 판이 어디에도 적립되지 않는 일이 없게
+   * 부팅이 아닌 때 계정 모드가 바뀌었다 (로그아웃 · 계정 삭제 · 세션 끝 · 꺼짐 · 다른 탭 로그인): 이 소켓은 옛 쿠키로 열렸다.
+   * 첫 화면이면 바로, 방 · 판 중이면 첫 화면에 돌아올 때(forgetRoom) 다시 연다 — 새 쿠키를 실은 소켓이어야 다음 판에 밝힌 계정이
+   * 쿠키 계정과 같아 서버가 받아들인다(다른 탭에서 로그인한 뒤 들어간 계정 모드). 그 전 판은 welcome.account로 갈래가 정해진다
    */
   private accountChanged(): void {
     this.staleSocket = true;
@@ -547,7 +567,7 @@ export class App {
     // 선택형 구글 로그인: 이 기기 표시가 있거나 로그인하고 돌아왔으면(?login=) 계정 상태를 읽는다 — 게스트는 요청 없음.
     // ?login=은 아래에서 주소에서 지운다
     const login = new URLSearchParams(window.location.search).get(LOGIN_RESULT_PARAM);
-    void bootAccount(
+    const boot = bootAccount(
       {
         api: this.accountApi,
         mark: accountMark(),
@@ -556,6 +576,10 @@ export class App {
       },
       login,
     );
+    const done = (): void => {
+      this.accountBoot = null;
+    };
+    this.accountBoot = boot && boot.then(done, done);
     listenLifecycle({
       visibility: (visible) => this.onVisibility(visible),
       online: (on) => {
@@ -800,6 +824,7 @@ export class App {
       altTokens: getAltTokens(room),
       bots: this.params.bots,
       costume: this.meta.costumes(),
+      account: this.meta.tag,
     });
   }
 
@@ -1067,6 +1092,8 @@ export class App {
         this.balance = validateBalance(msg.balance);
         this.balanceHash = msg.balanceHash;
         this.you = msg.you;
+        // 이 자리에 서버가 받아들인 계정 (재접속마다 다시 받는다)
+        this.seatAccount = msg.account ?? null;
         this.lobbyUi.setYou(msg.you);
         // 연습 방: 주소 · 자리 토큰 · 마지막 방을 저장하지 않는다 (연습 중 새로고침 → 첫 화면)
         if (this.local) return;
@@ -1142,10 +1169,10 @@ export class App {
         this.result = msg.result;
         this.setPlaying(false);
         // 내 평가 적립 (같은 판이면 다시 주지 않는다 — 재접속해 결과를 다시 받아도). 저장이 안 돼도 화면은 그대로
-        // 로그인했으면 온라인 판은 서버가 계정에 적립하고(credit을 기다린다), 연습 판은 적립하지 않는다 (meta.ts). 연 뒤 계정
-        // 모드가 바뀐 소켓의 판은 서버가 이 계정에 적립하지 않으니 기기 기록에 (staleSocket)
+        // 로그인했으면 온라인 판은 그 자리에 서버가 받아들인 계정(welcome.account)으로 갈래를 정한다: 지금 계정이면 서버가 적립하고
+        // credit을 기다린다, 게스트 자리면 기기 기록, 다른 계정이면 적립하지 않는다. 연습 판은 계정 모드면 적립하지 않는다 (meta.ts)
         const rated = msg.rating
-          ? this.meta.applyRating(msg.rating, this.local !== null, this.staleSocket)
+          ? this.meta.applyRating(msg.rating, this.local !== null, this.seatAccount)
           : null;
         this.resultUi.show(msg.result, this.match?.role ?? null, rated);
         this.emit({ kind: 'result', result: msg.result });

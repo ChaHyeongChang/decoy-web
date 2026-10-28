@@ -5,7 +5,8 @@
 // (저장하는 중 → 저장했어요 / 못 했어요 / 확인하지 못했어요). 연습 판은 계정에 적립하지 않는다는 한 줄
 import type { EmblemId, EmblemTier } from '@decoy/shared';
 import type { LevelInfo } from '@decoy/shared/meta';
-import { ACCOUNT_TEXT, META_TEXT } from '../data/storyText';
+import { ACCOUNT_TEXT } from '../data/accountText';
+import { META_TEXT } from '../data/storyText';
 import type { AccountCredit, AccountSaveState, RatingApplied } from '../meta/meta';
 import { EMBER_SVG } from './levelChip';
 import { h } from './uiArt';
@@ -184,9 +185,15 @@ export function ratingPanel(applied: RatingApplied): HTMLElement {
     if (rating.outcome === 'void') panel.append(h('div', { class: 'rate-note' }, META_TEXT.voidHalf));
   } else if (applied.practice) {
     panel.append(h('div', { class: 'rate-note', 'data-testid': 'rate-practice' }, ACCOUNT_TEXT.practice));
+  } else if (applied.elsewhere) {
+    // 들어온 뒤 로그아웃 · 계정이 바뀐 판: 서버가 들어올 때의 계정에 적립한다 (이 화면은 어디에도 적립하지 않았다)
+    panel.append(h('div', { class: 'rate-note', 'data-testid': 'rate-elsewhere' }, ACCOUNT_TEXT.elsewhere));
   } else {
     panel.append(h('div', { class: 'rate-note', 'data-testid': 'rate-already' }, META_TEXT.alreadyGot));
   }
+  // 계정 모드인데 게스트 자리였던 판 (계정 모드가 되기 전에 들어왔다): 이 기기 기록에 적립했다
+  if (applied.device)
+    panel.append(h('div', { class: 'rate-note', 'data-testid': 'rate-device' }, ACCOUNT_TEXT.deviceMatch));
   if (applied.account) panel.append(accountLine(applied.account));
   if (!saved) {
     panel.append(

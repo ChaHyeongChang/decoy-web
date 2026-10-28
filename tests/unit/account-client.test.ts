@@ -2,8 +2,10 @@
 //  계정 API 요청 모양 · 5초 제한 · 실패 갈래 / 이 기기 표시 decoy:account / 부팅: 게스트는 요청 없음 · 표시 있음 → 계정 모드 ·
 //  3초 칩 기다림 / 401 · 로그인 안 함 · 꺼짐 → 게스트 · 표시 지움, 503 · 시간 초과 → 이번 접속 게스트 + 안내 / ?login= 안내 /
 //  첫 로그인 세 갈래(빈 기기 · 빈 계정 · 둘 다 → 고르기) / 계정 모드 받기 · 해금 · 입기는 API로, 실패하면 기록 그대로 /
-//  온라인 판 credit 기다림 → 저장함 · 못 함 · 모름(20초 뒤 다시 읽기) / 연습 판은 계정 · 기기 모두 적립 안 함 / 계정 날짜 · 자정 /
-//  로그아웃 · 삭제 · 세션 끝 → 기기 모드
+//  온라인 판 결과 세 갈래(자리 계정 welcome.account: 없음 → 기기 · 지금 계정 → credit 기다림 → 저장함 · 못 함 · 모름(20초 뒤 다시
+//  읽기) · 다른 계정 → 적립 안 함) / credit은 지금 계정 tag 것만 / 판에 밝히는 계정 tag(join · quick) / 연습 판은 계정 · 기기 모두 적립
+//  안 함 / 계정 날짜 · 자정 / 로그아웃 · 삭제 · 세션 끝 → 기기 모드 / 다른 탭이 다른 계정으로 바꿈(switched) / 꺼짐 안내는 한 번 ·
+//  다시 켜짐 / 첫 로그인 빈 기기 + 빈 계정 · 로그인 뒤 10분이 지나 올리기 거절(relogin)
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MatchRating } from '@decoy/shared';
 import {
@@ -22,7 +24,7 @@ import { AccountController, type AccountScreens } from '../../client/src/account
 import { accountMark } from '../../client/src/account/mark';
 import { reopenForAccount } from '../../client/src/lifecycle';
 import { CREDIT_WAIT_MS, ServerProfileStore } from '../../client/src/account/serverStore';
-import { ACCOUNT_TEXT } from '../../client/src/data/storyText';
+import { ACCOUNT_TEXT } from '../../client/src/data/accountText';
 import { MetaState } from '../../client/src/meta/meta';
 import { DeviceProfileStore } from '../../client/src/meta/profileStore';
 import type { StorageLike } from '../../client/src/storageKeys';
@@ -437,11 +439,11 @@ describe('첫 로그인 (이 기기 표시 tag ≠ 계정 tag)', () => {
     (c) =>
       c.path === '/api/account' ? json(200, statusBody) : json(200, body(imported));
 
-  it('빈 기기 + 빈 계정: 묻지 않고 빈 기록으로 계정을 연다 (import device:null), 올리기 안내 없음', async () => {
+  it("빈 기기 + 빈 계정: 묻지 않고 빈 기록으로 계정을 연다 ({choice:'account', device:null} — 그사이 다른 기기가 올린 기록을 덮지 않게), 올리기 안내 없음", async () => {
     const r = await rig({ route: importRoute(statusIn('T1', null), emptyProfile(clock)) });
     await r.boot('ok');
     const imp = r.calls.find((c) => c.path === '/api/account/import');
-    expect(imp?.body).toEqual({ choice: 'device', device: null });
+    expect(imp?.body).toEqual({ choice: 'account', device: null });
     expect(imp?.headers['x-decoy-account']).toBe('1');
     expect(r.chosen).toEqual([]);
     expect(markOf(r)).toEqual({ v: 1, tag: 'T1' });
@@ -671,7 +673,8 @@ describe('계정 모드 판 결과: 서버 적립 (credit)', () => {
   it('온라인 판: 숫자는 같은 공용 함수의 미리보기, 기록은 credit을 기다린다 → 저장했어요', async () => {
     const acc = profileWith({ xp: 40 });
     const { meta, storage } = await accountMeta(acc, () => json(503, {}));
-    const applied = await meta.applyRating(rating('M.1'));
+    // 이 자리에 서버가 받아들인 계정 = 지금 계정 (welcome.account)
+    const applied = await meta.applyRating(rating('M.1'), false, 'T1');
     const expected = applyRating(acc, rating('M.1'), clock, PROGRESSION, dayKeyInZone(clock, TZ));
     expect(applied.gain).toEqual(expected?.gain);
     expect(applied.gain?.xp.total).toBe(XP);
@@ -680,7 +683,7 @@ describe('계정 모드 판 결과: 서버 적립 (credit)', () => {
     expect(meta.current.xp).toBe(40);
     const seen: string[] = [];
     applied.account?.subscribe((s) => seen.push(s));
-    meta.credit('M.1', true, serializeProfile(expected?.profile ?? acc));
+    meta.credit('T1', 'M.1', true, serializeProfile(expected?.profile ?? acc));
     expect(applied.account?.state).toBe('saved');
     expect(seen).toEqual(['saved']);
     await vi.waitFor(() => expect(meta.current.xp).toBe(40 + XP));
@@ -689,12 +692,12 @@ describe('계정 모드 판 결과: 서버 적립 (credit)', () => {
 
   it('credit ok:false면 저장하지 못했어요 — 기록은 그대로. 같은 계정 다른 탭 판의 credit은 기록만 바꾼다', async () => {
     const { meta } = await accountMeta(profileWith({ xp: 40 }), () => json(503, {}));
-    const applied = await meta.applyRating(rating('M.2'));
-    meta.credit('M.2', false, null);
+    const applied = await meta.applyRating(rating('M.2'), false, 'T1');
+    meta.credit('T1', 'M.2', false, null);
     expect(applied.account?.state).toBe('failed');
     expect(meta.current.xp).toBe(40);
     // 다른 탭 판 (기다리는 판이 아님)
-    meta.credit('M.other', true, serializeProfile(profileWith({ xp: 777 })));
+    meta.credit('T1', 'M.other', true, serializeProfile(profileWith({ xp: 777 })));
     await vi.waitFor(() => expect(meta.current.xp).toBe(777));
     expect(applied.account?.state).toBe('failed');
   });
@@ -703,8 +706,8 @@ describe('계정 모드 판 결과: 서버 적립 (credit)', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     let serverProfile = profileWith({ xp: 40 });
     const { meta, calls } = await accountMeta(serverProfile, () => json(200, statusIn('T1', serverProfile)));
-    const a = await meta.applyRating(rating('M.3'));
-    const b = await meta.applyRating(rating('M.4'));
+    const a = await meta.applyRating(rating('M.3'), false, 'T1');
+    const b = await meta.applyRating(rating('M.4'), false, 'T1');
     // 서버가 M.3만 적립해 두었다 (credit은 잃음)
     serverProfile =
       applyRating(serverProfile, rating('M.3'), clock, PROGRESSION, dayKeyInZone(clock, TZ))?.profile ??
@@ -717,7 +720,7 @@ describe('계정 모드 판 결과: 서버 적립 (credit)', () => {
     expect(a.account?.state).toBe('saved');
     expect(b.account?.state).toBe('unknown');
     expect(meta.current.recent).toContain('M.3');
-    meta.credit('M.4', true, serializeProfile(serverProfile));
+    meta.credit('T1', 'M.4', true, serializeProfile(serverProfile));
     expect(b.account?.state).toBe('saved');
   });
 
@@ -740,15 +743,16 @@ describe('계정 모드 판 결과: 서버 적립 (credit)', () => {
     expect(r.gain?.xp.total).toBe(XP);
     expect(r.saved).toBe(true);
     expect(r.practice).toBeUndefined();
-    meta.credit('L.2', true, serializeProfile(profileWith({ xp: 99999 })));
+    meta.credit('T1', 'L.2', true, serializeProfile(profileWith({ xp: 99999 })));
     expect(meta.current.xp).toBe(XP);
     expect(parseProfile(storage.data.get(PROGRESS) ?? null, clock).profile.xp).toBe(XP);
   });
 
-  it('계정 모드인데 이 소켓은 계정 모드가 되기 전에 열었다(게스트 소켓): 서버가 적립하지 않으니 기기 기록에 적립한다', async () => {
+  it('계정 모드인데 게스트 자리(welcome.account 없음 — 계정 모드가 되기 전에 들어온 판): 서버가 적립하지 않으니 기기 기록에 적립하고 한 줄', async () => {
     const { meta, storage, calls } = await accountMeta(profileWith({ xp: 40 }), () => json(503, {}));
-    const r = await meta.applyRating(rating('M.9'), false, true);
+    const r = await meta.applyRating(rating('M.9'), false, null);
     expect(r.account).toBeUndefined();
+    expect(r.device).toBe(true);
     expect(r.gain?.xp.total).toBe(XP);
     expect(r.saved).toBe(true);
     // 기기 기록(경험치 11)에 더했다. 계정 기록은 그대로 · 계정 요청 없음
@@ -757,16 +761,62 @@ describe('계정 모드 판 결과: 서버 적립 (credit)', () => {
     expect(meta.mode).toBe('server');
     expect(calls).toEqual([]);
     // 같은 판 결과를 다시 받아도(재접속) 두 번 적립하지 않는다
-    expect((await meta.applyRating(rating('M.9'), false, true)).gain).toBeNull();
+    expect((await meta.applyRating(rating('M.9'), false, null)).gain).toBeNull();
     expect(parseProfile(storage.data.get(PROGRESS) ?? null, clock).profile.xp).toBe(11 + XP);
     // 연습 판은 그대로 어디에도 적립하지 않는다
-    expect(await meta.applyRating(rating('L.9'), true, true)).toMatchObject({ practice: true, gain: null });
-    // 게스트 모드는 소켓과 상관없이 기기 기록 (계정 소켓이어도 — 화면이 '이 기기 기록으로 해요'라고 했다)
+    expect(await meta.applyRating(rating('L.9'), true, null)).toMatchObject({ practice: true, gain: null });
+  });
+
+  it('들어올 때의 계정 자리인데 지금 모드가 다르다(그사이 로그아웃 · 다른 계정): 서버가 그 계정에 적립하므로 화면은 어디에도 적립하지 않고 한 줄', async () => {
+    // 지금은 다른 계정 모드 (T1) — 자리는 T0 계정
+    const { meta, storage, calls } = await accountMeta(profileWith({ xp: 40 }), () => json(503, {}));
+    const other = await meta.applyRating(rating('M.7'), false, 'T0');
+    expect(other).toMatchObject({ gain: null, saved: true, elsewhere: true });
+    expect(other.account).toBeUndefined();
+    expect(meta.current.xp).toBe(40);
+    expect(storage.writes).toEqual([]);
+    expect(calls).toEqual([]);
+    // 지금은 게스트 모드 (그사이 로그아웃) — 자리는 계정
     const guestStorage = mem();
     const guest = new MetaState(new DeviceProfileStore(guestStorage), now);
     await guest.ready;
-    expect((await guest.applyRating(rating('M.8'), false, true)).gain?.xp.total).toBe(XP);
+    const out = await guest.applyRating(rating('M.8'), false, 'T1');
+    expect(out).toMatchObject({ gain: null, saved: true, elsewhere: true });
+    expect(guestStorage.writes).toEqual([]);
+    expect(guest.current.xp).toBe(0);
+    // 게스트 모드 · 게스트 자리는 지금처럼 기기 기록 (한 줄 없음)
+    const plain = await guest.applyRating(rating('M.6'), false, null);
+    expect(plain.gain?.xp.total).toBe(XP);
+    expect(plain.device).toBeUndefined();
+    expect(plain.elsewhere).toBeUndefined();
     expect(parseProfile(guestStorage.data.get(PROGRESS) ?? null, clock).profile.xp).toBe(XP);
+  });
+
+  it('credit은 지금 계정 tag 것만 받는다 (다른 계정 tag는 무시 — 다른 계정 기록으로 화면을 바꾸지 않는다)', async () => {
+    const { meta } = await accountMeta(profileWith({ xp: 40 }), () => json(503, {}));
+    const applied = await meta.applyRating(rating('M.5'), false, 'T1');
+    meta.credit('T9', 'M.5', true, serializeProfile(profileWith({ xp: 5000 })));
+    await new Promise((r) => setTimeout(r, 5));
+    expect(meta.current.xp).toBe(40);
+    expect(applied.account?.state).toBe('pending');
+    meta.credit('T1', 'M.5', true, serializeProfile(profileWith({ xp: 90 })));
+    expect(applied.account?.state).toBe('saved');
+    await vi.waitFor(() => expect(meta.current.xp).toBe(90));
+  });
+
+  it('판에 들어갈 때 밝히는 계정 tag (join · quick의 account): 계정 모드면 그 계정 tag, 게스트면 없음(칸이 빠져 메시지가 전과 같다)', async () => {
+    const { meta } = await accountMeta(profileWith({ xp: 40 }), () => json(503, {}));
+    expect(meta.tag).toBe('T1');
+    expect(JSON.stringify({ t: 'quick', name: 'a', account: meta.tag })).toBe(
+      '{"t":"quick","name":"a","account":"T1"}',
+    );
+    const guest = new MetaState(new DeviceProfileStore(mem()), now);
+    await guest.ready;
+    expect(guest.tag).toBeUndefined();
+    expect(JSON.stringify({ t: 'quick', name: 'a', account: guest.tag })).toBe('{"t":"quick","name":"a"}');
+    // 로그아웃하면 다시 없음
+    await meta.useStore(new DeviceProfileStore(mem()));
+    expect(meta.tag).toBeUndefined();
   });
 
   it('앱으로 돌아오면(refresh) 계정 기록을 다시 읽는다 — 15초에 한 번까지', async () => {
@@ -836,24 +886,65 @@ describe('로그아웃 · 계정 삭제 · 세션 끝 → 기기 모드', () => 
   });
 });
 
-describe('로그인 꺼짐(on:false)은 표시를 지우지 않는다', () => {
-  it('부팅 때 꺼짐: 이번 접속은 게스트 + 한 줄, 표시는 남겨 다시 켜지면 같은 계정으로 바로(고르기 · 올리기 없음)', async () => {
+describe('로그인 꺼짐(on:false)은 표시를 지우지 않는다 — 안내는 처음 한 번만', () => {
+  it('부팅 때 꺼짐: 이번 접속은 게스트 + 한 줄, 표시는 남기고 off를 적는다. 다음 부팅부터는 안내 · 칩 기다림 없이 상태만 읽고, 다시 켜지면 같은 계정으로 바로(고르기 · 올리기 없음, off 지움)', async () => {
     let route: Route = () => json(200, { on: false });
     const r = await rig({ mark: 'T1', device: profileWith({ xp: 130 }), route: (c) => route(c) });
-    await r.boot(null);
+    const first = r.boot(null);
+    expect(r.meta.waiting).toBe(true);
+    await first;
     expect(r.meta.mode).toBe('device');
     expect(r.meta.current.xp).toBe(130);
     expect(r.ctl.view).toBe('off');
     expect(r.notes).toEqual([T.results.off]);
-    expect(markOf(r)).toEqual({ v: 1, tag: 'T1' });
-    // 다시 켜짐 (쿠키는 그대로라 서버는 그 계정에 적립한다): 다음 부팅이 읽어 계정 모드
+    expect(markOf(r)).toEqual({ v: 1, tag: 'T1', off: true });
+    // 꺼진 채 다음 부팅: 상태 요청은 하되(다시 켜졌는지) 안내 없음 · 칩 기다림 없음, 표시 그대로
+    const again = await rig({ storage: r.storage, route: (c) => route(c) });
+    const second = again.boot(null);
+    expect(second).not.toBeNull();
+    expect(again.meta.waiting).toBe(false);
+    await second;
+    expect(again.calls.map((c) => c.path)).toEqual(['/api/account']);
+    expect(again.notes).toEqual([]);
+    expect(again.meta.mode).toBe('device');
+    expect(markOf(again)).toEqual({ v: 1, tag: 'T1', off: true });
+    // 다시 켜짐 (쿠키는 그대로): 다음 부팅이 읽어 같은 계정 모드, off를 지운다. 칩은 기다리지 않는다(꺼짐을 알린 표시)
     route = () => json(200, statusIn('T1', profileWith({ xp: 900 })));
     const next = await rig({ storage: r.storage, route: (c) => route(c) });
-    await next.boot(null);
+    const third = next.boot(null);
+    expect(next.meta.waiting).toBe(false);
+    await third;
     expect(next.meta.mode).toBe('server');
     expect(next.meta.current.xp).toBe(900);
     expect(next.chosen).toEqual([]);
+    expect(next.notes).toEqual([]);
     expect(next.calls.map((c) => c.path)).toEqual(['/api/account']);
+    expect(markOf(next)).toEqual({ v: 1, tag: 'T1' });
+    // 다시 꺼지면 다시 한 번 알린다
+    route = () => json(200, { on: false });
+    const off2 = await rig({ storage: r.storage, route: (c) => route(c) });
+    await off2.boot(null);
+    expect(off2.notes).toEqual([T.results.off]);
+  });
+
+  it('꺼짐을 알린 표시인데 다시 켜져 세션이 끝났으면(로그인 안 함) 표시를 지우고 한 줄 (다른 계정이면 첫 로그인)', async () => {
+    const storage = mem();
+    storage.data.set(MARK, JSON.stringify({ v: 1, tag: 'T1', off: true }));
+    const out = await rig({ storage, route: () => json(200, { on: true, signedIn: false }) });
+    await out.boot(null);
+    expect(out.storage.data.has(MARK)).toBe(false);
+    expect(out.notes).toEqual([T.expired]);
+    const other = mem();
+    other.data.set(MARK, JSON.stringify({ v: 1, tag: 'T1', off: true }));
+    const dev = profileWith({ xp: 130 });
+    const r = await rig({
+      storage: other,
+      device: dev,
+      route: (c) => (c.path === '/api/account' ? json(200, statusIn('T2', null)) : json(200, body(dev))),
+    });
+    await r.boot(null);
+    expect(r.calls.map((c) => c.path)).toEqual(['/api/account', '/api/account/import']);
+    expect(markOf(r)).toEqual({ v: 1, tag: 'T2' });
   });
 
   it('계정 모드 중 꺼짐(다시 읽기에서 on:false): 게스트로 돌아가되 표시는 남긴다. 세션 끝(로그인 안 함)은 지운다', async () => {
@@ -872,6 +963,7 @@ describe('로그인 꺼짐(on:false)은 표시를 지우지 않는다', () => {
       expect(r.meta.current.xp).toBe(9);
       expect(r.ctl.view, view).toBe(view);
       expect(r.storage.data.has(MARK), view).toBe(kept);
+      if (kept) expect(markOf(r)).toEqual({ v: 1, tag: 'T1', off: true });
       expect(r.left()).toBe(1);
     }
   });
@@ -933,7 +1025,109 @@ describe('로그인 시도 중 표시 (첫 로그인을 마치기 전)', () => {
   });
 });
 
-describe('계정 모드가 바뀐 소켓 (서버는 소켓을 열 때의 쿠키로 계정을 정한다)', () => {
+describe('다른 탭이 다른 계정으로 로그인함 (switched — 세션 끝이 아니다)', () => {
+  it('다시 읽은 tag가 다르면 표시를 지우지 않고 상태를 다시 읽어 새 계정 모드로 (표시가 이미 새 tag면 묻지 않음), 소켓을 다시 열게 entered', async () => {
+    let status: unknown = statusIn('T1', profileWith({ xp: 500 }));
+    const r = await rig({ mark: 'T1', device: profileWith({ xp: 9 }), route: () => json(200, status) });
+    await r.boot(null);
+    expect(r.meta.mode).toBe('server');
+    expect(r.meta.tag).toBe('T1');
+    // 다른 탭이 T2로 로그인해 첫 로그인을 마치고 표시를 적었다
+    status = statusIn('T2', profileWith({ xp: 1200 }));
+    r.storage.data.set(MARK, JSON.stringify({ v: 1, tag: 'T2' }));
+    clock += 16_000;
+    r.meta.refresh();
+    await vi.waitFor(() => expect(r.meta.tag).toBe('T2'));
+    await vi.waitFor(() => expect(r.meta.current.xp).toBe(1200));
+    expect(r.meta.mode).toBe('server');
+    expect(markOf(r)).toEqual({ v: 1, tag: 'T2' });
+    expect(r.chosen).toEqual([]);
+    expect(r.calls.filter((c) => c.path !== '/api/account')).toEqual([]);
+    // 세션 끝 안내 · 게스트로 내려가기가 없었다
+    expect(r.notes).toEqual([]);
+    expect(r.left()).toBe(0);
+    expect(r.entered()).toBe(1);
+    expect(r.ctl.view).toBe('in');
+    // 옛 계정의 credit은 이제 받지 않는다
+    r.meta.credit('T1', 'M.1', true, serializeProfile(profileWith({ xp: 3 })));
+    await new Promise((res) => setTimeout(res, 5));
+    expect(r.meta.current.xp).toBe(1200);
+  });
+
+  it('다른 계정으로 바뀌었는데 새 계정에 들어가지 못하면(첫 로그인 올리기 503) 옛 계정 모드에 남지 않고 게스트로', async () => {
+    let status: unknown = statusIn('T1', profileWith({ xp: 500 }));
+    let importRes = (): Response => json(503, { error: 'db' });
+    const r = await rig({
+      mark: 'T1',
+      device: profileWith({ xp: 9, coins: 2 }),
+      route: (c) => (c.path === '/api/account' ? json(200, status) : importRes()),
+    });
+    await r.boot(null);
+    expect(r.meta.tag).toBe('T1');
+    // 다른 탭이 새 계정 T2로 로그인했지만 첫 로그인을 아직 마치지 못했다 (표시는 로그인 시도 중)
+    status = statusIn('T2', null);
+    r.storage.data.set(MARK, JSON.stringify({ v: 1, tag: '' }));
+    clock += 16_000;
+    r.meta.refresh();
+    await vi.waitFor(() => expect(r.meta.mode).toBe('device'));
+    expect(r.meta.tag).toBeUndefined();
+    expect(r.meta.current.xp).toBe(9);
+    expect(r.left()).toBe(1);
+    expect(r.notes).toEqual([T.offline]);
+    expect(r.ctl.view).toBe('unknown');
+    // 다음에 닿으면 새 계정으로
+    importRes = () => json(200, body(profileWith({ xp: 9, coins: 2 })));
+    expect(await r.ctl.ensure()).toBe('in');
+    expect(r.meta.tag).toBe('T2');
+  });
+
+  it('credit을 기다리다(20초) 다시 읽었더니 다른 계정이면: 그 판은 모름, 새 계정 모드로', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let status: unknown = statusIn('T1', profileWith({ xp: 500 }));
+    const r = await rig({ mark: 'T1', device: profileWith({ xp: 9 }), route: () => json(200, status) });
+    await r.boot(null);
+    const applied = await r.meta.applyRating(rating('M.2'), false, 'T1');
+    expect(applied.account?.state).toBe('pending');
+    status = statusIn('T2', profileWith({ xp: 1200 }));
+    r.storage.data.set(MARK, JSON.stringify({ v: 1, tag: 'T2' }));
+    await vi.advanceTimersByTimeAsync(CREDIT_WAIT_MS + 10);
+    vi.useRealTimers();
+    await vi.waitFor(() => expect(r.meta.tag).toBe('T2'));
+    expect(applied.account?.state).toBe('unknown');
+    expect(markOf(r)).toEqual({ v: 1, tag: 'T2' });
+    expect(r.left()).toBe(0);
+  });
+});
+
+describe('기기 기록 올리기는 로그인 직후에만 (서버 403 relogin)', () => {
+  it('첫 로그인 올리기가 relogin이면 표시를 지우고 게스트 + "다시 로그인해 주세요", 기기 기록 그대로 (다음 부팅은 요청 없음)', async () => {
+    const dev = profileWith({ xp: 130 });
+    // 로그인 시도 중 표시(앞 접속의 첫 로그인이 실패해 남음) — 이번 부팅은 로그인한 지 10분이 지난 뒤
+    const storage = mem();
+    storage.data.set(MARK, JSON.stringify({ v: 1, tag: '' }));
+    const r = await rig({
+      storage,
+      device: dev,
+      route: (c) =>
+        c.path === '/api/account' ? json(200, statusIn('T1', null)) : json(403, { error: 'relogin' }),
+    });
+    await r.boot(null);
+    expect(r.calls.map((c) => c.path)).toEqual(['/api/account', '/api/account/import']);
+    expect(r.meta.mode).toBe('device');
+    expect(r.meta.current.xp).toBe(130);
+    expect(r.notes).toEqual([T.relogin]);
+    expect(r.ctl.view).toBe('out');
+    expect(r.storage.data.has(MARK)).toBe(false);
+    expect(r.storage.data.get(PROGRESS)).toBe(serializeProfile(dev));
+    const next = (await rig({ storage: r.storage, route: () => json(200, statusIn('T1', null)) })) as Rig & {
+      loads: number;
+    };
+    expect(next.boot(null)).toBeNull();
+    expect(next.calls).toEqual([]);
+  });
+});
+
+describe('계정 모드가 바뀐 소켓 (새 쿠키를 싣게 첫 화면에서 다시 연다)', () => {
   it('어긋난 소켓은 방 · 판 밖(첫 화면)에서 다시 연다 — 방 · 판 중이면 첫 화면에 돌아올 때까지 미룬다', () => {
     expect(reopenForAccount(true, false)).toBe(true);
     expect(reopenForAccount(true, true)).toBe(false);

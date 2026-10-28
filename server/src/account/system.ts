@@ -10,7 +10,7 @@ import { readCookie } from './cookies';
 import { GoogleJwks, type KeyProvider } from './googleToken';
 import { createAccountRoutes, originMatchesHost, type AccountHandler } from './routes';
 import { AccountService, type AccountServiceOptions, type CreditMessage } from './service';
-import { verifySession } from './session';
+import { accountTag, verifySession } from './session';
 import { createAccountStore } from './storeFactory';
 import { MemoryAccountStore, type AccountStore } from './store';
 import { TestIdp } from './testIdp';
@@ -79,8 +79,11 @@ export interface AccountSystem {
   readonly handle: AccountHandler;
   /** 저장소 시작 (실패해도 예외 없이 — 서버는 뜨고 계정 요청만 503) */
   start(): Promise<void>;
-  /** WebSocket 업그레이드 요청의 계정 (세션 쿠키 서명만 확인 — DB 조회 없음). 꺼짐 · 게스트 · 다른 출처면 null */
-  accountOf(req: IncomingMessage): string | null;
+  /**
+   * WebSocket 업그레이드 요청의 세션 쿠키 계정 (서명만 확인 — DB 조회 없음): 계정 키와 표시 tag. 꺼짐 · 게스트 · 다른 출처면 null.
+   * 이것만으로는 적립하지 않는다 — 화면이 join · quick에서 같은 tag를 밝혀야 자리의 계정이 된다(ServerCore.connect)
+   */
+  accountOf(req: IncomingMessage): { id: string; tag: string } | null;
   /** 판이 끝나 평가가 나왔다 (RoomHooks.rated): 계정이 있으면 서버가 적립하고 결과를 그 계정 연결에 보낸다 */
   rated(account: string | null, rating: MatchRating): void;
   close(): Promise<void>;
@@ -91,6 +94,7 @@ export function createAccountSystem(opts: AccountSystemOptions): AccountSystem {
   const now = opts.now ?? Date.now;
   const log = opts.log ?? ((m: string) => console.log(m));
   const conns = new AccountConnections();
+  const secret = config.enabled ? config.sessionSecret : '';
   let store: AccountStore | null = null;
   let service: AccountService | null = null;
   let keys: KeyProvider | null = null;
@@ -103,6 +107,7 @@ export function createAccountSystem(opts: AccountSystemOptions): AccountSystem {
       now,
       log,
       push: (id, msg) => conns.send(id, msg),
+      tag: (id) => accountTag(id, secret),
       ...opts.service,
     });
     if (config.testIdp) testIdp = new TestIdp(config.clientId);
@@ -119,7 +124,6 @@ export function createAccountSystem(opts: AccountSystemOptions): AccountSystem {
     now,
     log,
   });
-  const secret = config.enabled ? config.sessionSecret : '';
 
   return {
     config,
@@ -137,7 +141,8 @@ export function createAccountSystem(opts: AccountSystemOptions): AccountSystem {
       if (!config.enabled) return null;
       // 다른 사이트 페이지가 연 소켓에는 계정을 붙이지 않는다 (게스트로는 그대로 받는다)
       if (!originMatchesHost(req)) return null;
-      return verifySession(readCookie(req.headers.cookie, SESSION_COOKIE), secret, now())?.accountId ?? null;
+      const id = verifySession(readCookie(req.headers.cookie, SESSION_COOKIE), secret, now())?.accountId;
+      return id ? { id, tag: accountTag(id, secret) } : null;
     },
     rated: (account, rating) => {
       if (!account || !service) return;

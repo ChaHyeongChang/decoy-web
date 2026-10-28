@@ -58,7 +58,11 @@ const GROUPS = [
     '판 HUD (미니맵 · 화면 밖 화살표 · 터치 조작 · 글자 · 디버그 표)',
     (p) => p.startsWith('client/src/ui/'),
   ],
-  ['UI', '문구 (STORY_TEXT)', (p) => p === 'client/src/data/storyText.ts'],
+  [
+    'UI',
+    '문구 (STORY_TEXT)',
+    (p) => p === 'client/src/data/storyText.ts' || p === 'client/src/data/accountText.ts',
+  ],
   [
     '네트워크 · 입력',
     '네트워크 · 동기화 (접속 · 재접속 · 예측 · 보간)',

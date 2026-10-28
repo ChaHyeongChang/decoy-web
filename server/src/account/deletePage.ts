@@ -1,6 +1,7 @@
 // 계정 삭제 웹 페이지 /account/delete (docs/ACCOUNT_PLAN.md 8절, Play 데이터 보안 신고 '계정 삭제 URL'). 서버가 그리는 HTML,
 // 스크립트 없음(폼 POST만). 처리방침(client/public/privacy.html)과 같은 어두운 바탕 · 넉넉한 글자, 휴대폰 폭에서 가로 스크롤 없게.
-// 상태: 로그인 꺼짐 · 로그인 안 함 · 로그인함(삭제 폼) · 지움 · 저장소 장애 · 다시 열기(CSRF 값이 맞지 않음)
+// 상태: 로그인 꺼짐 · 로그인 안 함 · 그 구글 계정으로 만든 계정 없음 · 로그인함(삭제 폼) · 지움 · 저장소 장애 · 다시 열기(CSRF 값이 맞지 않음).
+// 이 페이지의 로그인은 계정을 만들지 않고 게임 세션도 주지 않는다(삭제 페이지 전용 10분 쿠키 decoy_del — routes.ts)
 import { ACCOUNT_DELETE_PATH, AUTH_START_PATH } from '@decoy/shared';
 
 /**
@@ -20,6 +21,8 @@ export type DeletePageState =
   | { kind: 'off' }
   /** 켜져 있고 로그인하지 않았다 */
   | { kind: 'signed-out' }
+  /** 이 페이지에서 로그인한 구글 계정으로 만든 DECOY 계정이 없다 (계정을 만들지 않았다 — 지울 것이 없다) */
+  | { kind: 'none' }
   /** 로그인했다: 레벨 · 판 수만 보이고 삭제 폼 */
   | { kind: 'signed-in'; level: number; played: number; csrf: string }
   /** 지웠다 (deleted false = 이미 없었다) */
@@ -44,6 +47,12 @@ function stateBlock(state: DeletePageState): string {
         '<p>계정을 지우려면 먼저 그 Google 계정으로 로그인해 주세요. 로그인하면 이 페이지로 돌아와 삭제 버튼이 보입니다. ' +
         '로그인만으로는 아무것도 지우지 않습니다.</p>' +
         `<p><a class="button" data-testid="delete-login" href="${AUTH_START_PATH}?next=delete">Google 계정으로 로그인해 삭제하기</a></p>`
+      );
+    case 'none':
+      return (
+        '<p data-testid="delete-none"><strong>이 Google 계정으로 만든 DECOY 계정이 없습니다.</strong> 서버에 지울 기록이 없고, ' +
+        '이 로그인으로 계정을 만들지도 않았습니다. 다른 Google 계정으로 로그인했었다면 그 계정으로 다시 로그인해 주세요.</p>' +
+        `<p><a class="button" data-testid="delete-login" href="${AUTH_START_PATH}?next=delete">다른 Google 계정으로 로그인하기</a></p>`
       );
     case 'signed-in':
       return (
@@ -125,7 +134,7 @@ export function renderDeletePage(state: DeletePageState, contact: string | null)
 <ul>
 <li><strong>바로 지웁니다.</strong> 삭제 버튼을 누르는 즉시 서버에서 지우고 되돌릴 수 없습니다.</li>
 ${backup}<li>이메일 · 이름 · 프로필 사진은 처음부터 받지 않았습니다. Google 계정 자체는 지워지지 않습니다.</li>
-<li>나중에 같은 Google 계정으로 다시 로그인하면 빈 새 계정으로 시작합니다.</li>
+<li>나중에 같은 Google 계정으로 다시 로그인하면 새 계정으로 시작합니다. 그 기기에 로그인하지 않고 쌓은 기록(아래 「이 기기의 기록」)이 남아 있으면 그 기록을 새 계정에 올립니다.</li>
 </ul>
 <h2>이 기기의 기록</h2>
 <p>로그인하지 않고 쌓은 기록(게스트 기록)은 서버가 아니라 이 기기에만 있어 위 삭제로 지워지지 않습니다.

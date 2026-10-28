@@ -5,11 +5,16 @@
 //  2. 계정 · 이 기기 둘 다 기록이 있으면 고르기 창 (이 기기 기록 → 계정이 바뀜, 계정 기록 → 그대로), 새로고침하면 다시 묻지 않음
 //  3. 로그인한 채 봇과 연습: 계정에 적립하지 않고 기기 기록도 그대로
 //  4. 로그아웃(첫 화면 소켓을 새로 열어 다음 온라인 판은 계정에 적립하지 않음) · 설정에서 계정 삭제(두 번 확인) · 웹 삭제
-//     페이지(로그인해 삭제 — 리퍼러 정책 때문에 Origin: null로 거절되던 것을 고쳤다) · 로그인 꺼진 서버의 삭제 페이지
-//  5. 로그인 꺼짐(기본 서버): 첫 화면 · 연습 판에 계정 요청 · 계정 조각 없음, 설정을 열면 상태 요청 한 번 뒤 계정 탭 없음
-//  6. DB 장애: 새로고침하면 게스트 안내 · 기기 기록으로 연습 · 온라인 판 끝까지, 되돌리면 계정, 로그인 중 장애는 ?login=db
+//     페이지(로그인해 삭제 — 리퍼러 정책 때문에 Origin: null로 거절되던 것을 고쳤다. 없던 구글 계정은 만들지 않는다) · 삭제 페이지로
+//     로그인하고 지우지 않은 채 게임을 해도 계정에 적립되지 않음 · 로그인 꺼진 서버의 삭제 페이지
+//  4b. 탭 A가 계정 모드로 방에 들어간 뒤 같은 브라우저 탭 B에서 로그아웃: A의 그 판은 들어올 때의 계정에 적립되고 기기에는 안 함
+//  5. 로그인 꺼짐(기본 서버): 첫 화면 · 연습 판에 계정 요청 · 계정 조각 없음, 설정을 열면 상태 요청 한 번 뒤 계정 탭 없음.
+//     예전에 로그인했던 기기는 꺼짐 안내를 처음 한 번만
+//  6. DB 장애: 새로고침하면 게스트 안내 · 기기 기록으로 연습 · 온라인 판 끝까지(화면이 계정을 밝히지 않아 서버도 적립하지 않음),
+//     되돌리면 계정, 로그인 중 장애는 ?login=db
 //  7. 나쁜 토큰(만료 · 가짜 서명 · 다른 aud · nonce) · 취소: 안내만, 쿠키 · 계정 없음
-//  8. 정보 숨김: 로그인한 생존자 셋 + 로그인 안 한 괴물의 친구 방 — 괴물이 받은 원문에 계정 단서 없음, credit은 그 생존자 연결에만
+//  8. 정보 숨김: 로그인한 생존자 셋 + 로그인 안 한 괴물의 친구 방 — 괴물이 받은 원문에 계정 단서 없음, credit은 그 생존자 연결에만,
+//     계정 tag는 본인 welcome · credit에만 (방 주소로 연 부팅은 계정 상태를 읽은 뒤 계정을 밝혀 들어간다)
 //  9. 서비스 워커: 계정 · 로그인 요청은 워커 캐시를 거치지 않고, 서버를 끄고 오프라인으로 다시 열어도 첫 화면 · 봇과 연습(게스트 안내)
 // 콘솔 오류 · 경고는 0이다. 브라우저가 스스로 찍는 것만 허용한다: 서버를 끈 시험(9)의 연결 실패(m13-offline과 같은 기준),
 // DB 장애 시험(6)의 503 응답 실패 로그, 크롬의 글꼴 미리 받기 경고(issues)
@@ -19,7 +24,7 @@ import type { ServerMessage } from '@decoy/shared';
 // @decoy/shared/meta 묶음은 progression.json을 import로 가져와 Playwright(Node ESM)에서 못 읽는다 (meta.spec과 같이 파일로 읽는다)
 import { levelOf } from '../../shared/src/meta/rating';
 import { validateProgression } from '../../shared/src/meta/progressionCheck';
-import { ACCOUNT_TEXT } from '../../client/src/data/storyText';
+import { ACCOUNT_TEXT } from '../../client/src/data/accountText';
 import { freePort, startServer, type RunningServer } from '../helpers/serverProcess';
 import { collectFrames, type CollectedFrames } from './frames';
 import { myId, newPlayerPage, pickRoleAndReady, press, sendTest, waitForSnapshots } from './helpers';
@@ -292,11 +297,13 @@ async function playOnline(
 }
 
 /**
- * 게임 소켓 엿보기 (page.routeWebSocket — 페이지 소켓을 서버로 그대로 잇는다): 서버가 보낸 원문을 모으고, holdCredit이면 계정 적립
- * 알림(credit)만 붙잡아 두었다가 release로 보낸다. 페이지를 열기 전에 건다
+ * 게임 소켓 엿보기 (page.routeWebSocket — 페이지 소켓을 서버로 그대로 잇는다): 서버가 보낸 원문 · 화면이 보낸 원문을 모으고,
+ * holdCredit이면 계정 적립 알림(credit)만 붙잡아 두었다가 release로 보낸다. 페이지를 열기 전에 건다
  */
 interface SocketTap {
   frames: string[];
+  /** 화면이 서버로 보낸 원문 */
+  sent: string[];
   held: string[];
   /** 이 페이지가 연 게임 소켓 수 */
   opened: number;
@@ -308,6 +315,7 @@ async function tapSocket(page: Page, holdCredit: boolean): Promise<SocketTap> {
   let hold = holdCredit;
   const tap: SocketTap = {
     frames: [],
+    sent: [],
     held: [],
     opened: 0,
     release() {
@@ -318,7 +326,10 @@ async function tapSocket(page: Page, holdCredit: boolean): Promise<SocketTap> {
   await page.routeWebSocket(/\/ws$/, (ws) => {
     tap.opened += 1;
     const server = ws.connectToServer();
-    ws.onMessage((m) => server.send(m));
+    ws.onMessage((m) => {
+      tap.sent.push(typeof m === 'string' ? m : m.toString('utf8'));
+      server.send(m);
+    });
     server.onMessage((m) => {
       const text = typeof m === 'string' ? m : m.toString('utf8');
       tap.frames.push(text);
@@ -347,6 +358,22 @@ function ratedMatchId(raw: readonly string[]): string {
 
 function credits(raw: readonly string[]): Extract<ServerMessage, { t: 'credit' }>[] {
   return messages(raw).filter((m): m is Extract<ServerMessage, { t: 'credit' }> => m.t === 'credit');
+}
+
+/** 화면이 보낸 마지막 입장(join · quick) 메시지 */
+function lastEntry(sent: readonly string[]): { t: string; account?: string } {
+  const all = sent.map((t) => JSON.parse(t) as { t: string; account?: string });
+  const hit = all.filter((m) => m.t === 'join' || m.t === 'quick').at(-1);
+  if (!hit) throw new Error('입장 메시지 없음');
+  return hit;
+}
+
+/** 서버가 보낸 마지막 welcome의 계정 tag (없으면 null) */
+function lastWelcomeAccount(raw: readonly string[]): string | null {
+  const w = messages(raw).filter((m): m is Extract<ServerMessage, { t: 'welcome' }> => m.t === 'welcome');
+  const last = w.at(-1);
+  if (!last) throw new Error('welcome 없음');
+  return last.account ?? null;
 }
 
 /** 이 기기 기록을 미리 둔다 (첫 접속에만 — 시험 중 바뀐 기록은 덮지 않는다) */
@@ -413,6 +440,10 @@ test('로그인: 연습 판 기기 기록이 첫 로그인에 계정으로 올�
     });
     const matchId = ratedMatchId(tap.frames);
     expect(device?.recent).not.toContain(matchId);
+    // 계정 모드 화면은 방에 들어갈 때 계정 tag를 밝히고, 서버는 쿠키 계정과 같아 이 자리를 계정으로 받아들였다 (본인 welcome에만)
+    const aliceTag = await markTag(a.page);
+    expect(lastEntry(tap.sent)).toMatchObject({ t: 'join', account: aliceTag });
+    expect(lastWelcomeAccount(tap.frames)).toBe(aliceTag);
     const line = a.page.getByTestId('rate-account');
     await expect(line).toHaveAttribute('data-state', 'pending');
     await expect(line).toHaveText(T.saving);
@@ -424,7 +455,7 @@ test('로그인: 연습 판 기기 기록이 첫 로그인에 계정으로 올�
     // 서버는 이미 적립했지만 화면은 credit을 기다린다
     await expect(line).toHaveAttribute('data-state', 'pending');
     const credit = credits(tap.held)[0]!;
-    expect(credit).toMatchObject({ matchId, ok: true });
+    expect(credit).toMatchObject({ tag: aliceTag, matchId, ok: true });
     expect(view(credit.profile)).toEqual(after);
     tap.release();
     await expect(line).toHaveAttribute('data-state', 'saved');
@@ -618,7 +649,7 @@ test('로그아웃하면 이 기기 기록으로 · 첫 화면 소켓을 새로 
     expect(await cookieNames(c.context)).not.toContain('decoy_sid');
     // 로그아웃은 계정을 지우지 않는다
     expect(await srv.account('dave')).not.toBeNull();
-    // 서버는 소켓을 열 때의 쿠키로 계정을 정한다: 첫 화면이면 로그아웃한 쿠키로 소켓을 새로 연다
+    // 첫 화면에서 계정 모드가 바뀌면 소켓을 새로 연다 (새 쿠키를 싣게 — 서버는 밝힌 계정이 쿠키와 같을 때만 적립한다)
     await expect.poll(() => tap.opened).toBe(sockets + 1);
     await press(c.page.getByTestId('settings-close'));
     // 같은 문서에서 바로 온라인 판: 게스트로 적립(이 기기 기록), 계정에는 적립하지 않고 credit도 없다
@@ -630,6 +661,9 @@ test('로그아웃하면 이 기기 기록으로 · 첫 화면 소켓을 새로 
     await sendTest(c.page, { kind: 'setTime', timeLeft: 0.1, elapsed: 300 });
     await expect(c.page.getByTestId('rating')).toBeVisible({ timeout: 20_000 });
     const matchId = ratedMatchId(tap.frames);
+    // 게스트 화면은 계정을 밝히지 않고 들어갔다 — 게스트 자리
+    expect(lastEntry(tap.sent).account).toBeUndefined();
+    expect(lastWelcomeAccount(tap.frames)).toBeNull();
     await expect(c.page.getByTestId('xp-gain')).toContainText('경험치 +');
     expect(await c.page.locator('[data-testid="rate-account"]').count()).toBe(0);
     await expect.poll(async () => view(await readKey(c.page, PROGRESS_KEY))?.recent ?? []).toContain(matchId);
@@ -681,7 +715,7 @@ test('로그아웃하면 이 기기 기록으로 · 첫 화면 소켓을 새로 
   }
 });
 
-test('웹 삭제 페이지: 로그인 안 한 브라우저로 /account/delete → "로그인해 삭제하기" → 가짜 구글 → 삭제 폼 → 지웠어요 (계정 사라짐), 로그인 꺼진 서버는 안내만', async ({
+test('웹 삭제 페이지: 로그인 안 한 브라우저로 /account/delete → "로그인해 삭제하기" → 가짜 구글 → 없던 구글 계정이면 계정을 만들지 않고 "계정 없음", 있는 계정이면 삭제 폼(삭제 전용 쿠키만) → 지웠어요 (계정 사라짐), 로그인 꺼진 서버는 안내만', async ({
   browser,
   baseURL,
 }) => {
@@ -693,17 +727,43 @@ test('웹 삭제 페이지: 로그인 안 한 브라우저로 /account/delete �
     await expect(link).toBeVisible();
     await expect(link).toHaveAttribute('href', '/auth/google/start?next=delete');
     await loginAs(c.page, 'erin');
+    // 아직 게임에 로그인한 적이 없는 구글 계정: 계정을 만들지 않고 '계정 없음' (쿠키도 없다)
     await press(link);
-    // 로그인 뒤 삭제 페이지로 돌아온다 (next=delete)
+    await expect(c.page.getByTestId('delete-none')).toBeVisible({ timeout: 15_000 });
+    await expect(c.page.getByTestId('delete-none')).toContainText(
+      '이 Google 계정으로 만든 DECOY 계정이 없습니다',
+    );
+    expect(await srv.accounts()).toEqual([]);
+    expect(await cookieNames(c.context)).not.toContain('decoy_sid');
+    expect(await cookieNames(c.context)).not.toContain('decoy_del');
+
+    // 게임에서 erin 계정을 만든다 (다른 브라우저)
+    const maker = await newClient(browser);
+    try {
+      await home(maker.page, srv.base);
+      await loginByUrl(maker.page, srv.base, 'erin');
+      await expectStore(maker.page, 'server');
+      expect(issues(maker)).toEqual([]);
+    } finally {
+      await maker.context.close();
+    }
+    expect(await srv.account('erin')).not.toBeNull();
+
+    // 다시 로그인: 로그인 뒤 삭제 페이지로 돌아온다 (next=delete) — 게임 세션 없이 삭제 페이지 전용 쿠키만
+    await press(c.page.getByTestId('delete-login'));
     await expect(c.page.getByTestId('delete-account')).toBeVisible({ timeout: 15_000 });
     expect(new URL(c.page.url()).pathname).toBe('/account/delete');
     await expect(c.page.getByTestId('delete-account')).toContainText('레벨 1');
-    expect(await srv.account('erin')).not.toBeNull();
+    const cookies = await c.context.cookies();
+    expect(cookies.map((k) => k.name)).not.toContain('decoy_sid');
+    expect(cookies.find((k) => k.name === 'decoy_del')?.path).toBe('/account/delete');
+    expect(await srv.accounts()).toHaveLength(1);
     await press(c.page.getByTestId('delete-submit'));
     await expect(c.page.getByTestId('delete-done')).toBeVisible();
     await expect(c.page.getByTestId('delete-done')).toContainText('지웠습니다');
     expect(await srv.accounts()).toEqual([]);
     expect(await cookieNames(c.context)).not.toContain('decoy_sid');
+    expect(await cookieNames(c.context)).not.toContain('decoy_del');
     // 다시 열면 로그인 안 한 안내
     await c.page.goto(`${srv.base}/account/delete`);
     await expect(c.page.getByTestId('delete-login')).toBeVisible();
@@ -715,6 +775,118 @@ test('웹 삭제 페이지: 로그인 안 한 브라우저로 /account/delete �
     expect(issues(c)).toEqual([]);
   } finally {
     await c.context.close();
+    await srv.stop();
+  }
+});
+
+test('삭제 페이지로 로그인만 하고 지우지 않은 채 게임을 열어 온라인 판을 해도 계정에 적립되지 않는다 (게스트 — 계정 기록 그대로, credit 없음)', async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const srv = await startLoginServer();
+  const c = await newClient(browser);
+  try {
+    // 계정 frida를 만들어 둔다 (다른 브라우저 — 빈 기기라 빈 기록으로 계정을 연다)
+    const maker = await newClient(browser);
+    try {
+      await home(maker.page, srv.base);
+      await loginByUrl(maker.page, srv.base, 'frida');
+      await expectStore(maker.page, 'server');
+    } finally {
+      await maker.context.close();
+    }
+    const before = (await srv.account('frida'))?.profile ?? null;
+    expect(before).not.toBeNull();
+
+    // 이 브라우저: 삭제 페이지에서 frida로 로그인 → 삭제 폼까지만
+    await c.page.goto(`${srv.base}/account/delete`);
+    await loginAs(c.page, 'frida');
+    await press(c.page.getByTestId('delete-login'));
+    await expect(c.page.getByTestId('delete-account')).toBeVisible({ timeout: 15_000 });
+    expect(await cookieNames(c.context)).not.toContain('decoy_sid');
+
+    // 지우지 않고 게임을 연다: 게스트 (계정 요청 · 표시 없음), 온라인 판은 이 기기 기록에
+    const tap = await tapSocket(c.page, false);
+    await playOnline(c.page, srv.base, 'device');
+    const matchId = ratedMatchId(tap.frames);
+    expect(lastEntry(tap.sent).account).toBeUndefined();
+    expect(lastWelcomeAccount(tap.frames)).toBeNull();
+    expect(await readKey(c.page, MARK_KEY)).toBeNull();
+    await expect(c.page.getByTestId('xp-gain')).toContainText('경험치 +');
+    expect(await c.page.locator('[data-testid="rate-account"]').count()).toBe(0);
+    await expect.poll(async () => view(await readKey(c.page, PROGRESS_KEY))?.recent ?? []).toContain(matchId);
+    // 결과 뒤에 받은 프레임이 있을 때까지 (서버는 결과를 보낸 바로 뒤에 적립한다 — 그 뒤에도 credit이 없다)
+    const afterResult = tap.frames.length;
+    await expect.poll(() => tap.frames.length, { timeout: 30_000 }).toBeGreaterThan(afterResult);
+    expect(credits(tap.frames)).toEqual([]);
+    expect((await srv.account('frida'))?.profile).toBe(before);
+    expect(await srv.accounts()).toHaveLength(1);
+    expect(issues(c)).toEqual([]);
+  } finally {
+    await c.context.close();
+    await srv.stop();
+  }
+});
+
+test('탭 A가 계정 모드로 방에 들어간 뒤 같은 브라우저 탭 B에서 로그아웃: A의 그 판은 들어올 때의 계정에 적립되고(credit) 이 기기 기록에는 적립되지 않는다 (두 번 쌓이지 않음)', async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const srv = await startLoginServer();
+  const a = await newClient(browser);
+  try {
+    await home(a.page, srv.base);
+    await loginByUrl(a.page, srv.base, 'tabby');
+    await expectStore(a.page, 'server');
+    const tag = await markTag(a.page);
+    expect(tag).toMatch(/^[\w-]{16}$/);
+    const before = view((await srv.account('tabby'))?.profile);
+    const tap = await tapSocket(a.page, false);
+    // A: 계정 모드로 개발 봇 방에 들어가 판을 시작한다
+    await a.page.goto(`${srv.base}/?${Q}&bots=1`);
+    await expectStore(a.page, 'server');
+    await press(a.page.getByTestId('create-room'));
+    await expect(a.page.getByTestId('room-code')).toHaveText(/^[A-Z]{4}$/);
+    expect(lastEntry(tap.sent)).toMatchObject({ t: 'join', account: tag });
+    expect(lastWelcomeAccount(tap.frames)).toBe(tag);
+    await pickRoleAndReady(a.page, 'runner');
+    await expect(a.page.getByTestId('settings-modal')).toBeAttached({ timeout: 15_000 });
+    await press(a.page.getByTestId('start-button'));
+    await waitForSnapshots(a.page, 3);
+
+    // B (같은 브라우저 · 같은 쿠키 · 같은 기기 저장소): 로그아웃
+    const b = await a.context.newPage();
+    await b.goto(`${srv.base}/?${Q}`);
+    await expect(b.getByTestId('practice')).toBeVisible();
+    await expectStore(b, 'server');
+    await openAccountTab(b);
+    await press(b.getByTestId('account-logout'));
+    await expectStore(b, 'device');
+    expect(await cookieNames(a.context)).not.toContain('decoy_sid');
+    expect(await readKey(b, MARK_KEY)).toBeNull();
+    const deviceBefore = await readKey(b, PROGRESS_KEY);
+
+    // A: 판을 끝낸다 — 서버는 들어올 때의 계정에 적립하고 그 계정 연결(A)에 credit
+    await sendTest(a.page, { kind: 'setTime', timeLeft: 0.1, elapsed: 300 });
+    await expect(a.page.getByTestId('rating')).toBeVisible({ timeout: 20_000 });
+    const matchId = ratedMatchId(tap.frames);
+    await expect.poll(() => credits(tap.frames).length, { timeout: 15_000 }).toBe(1);
+    expect(credits(tap.frames)[0]).toMatchObject({ tag, matchId, ok: true });
+    const after = view((await srv.account('tabby'))?.profile);
+    expect(after?.recent.filter((id) => id === matchId)).toHaveLength(1);
+    expect(after?.xp ?? 0).toBeGreaterThan(before?.xp ?? 0);
+    // A의 결과: 계정 모드 그대로면 '저장했어요', 그사이 로그아웃을 알아챘으면 '들어올 때의 계정에 적립돼요' — 어느 쪽이든 기기에는 안 함
+    const saved = a.page.getByTestId('rate-account');
+    const elsewhere = a.page.getByTestId('rate-elsewhere');
+    await expect(saved.or(elsewhere)).toBeVisible();
+    if ((await saved.count()) > 0) await expect(saved).toHaveAttribute('data-state', 'saved');
+    expect(await a.page.locator('[data-testid="rate-device"]').count()).toBe(0);
+    await new Promise((r) => setTimeout(r, 500));
+    expect(view(await readKey(a.page, PROGRESS_KEY))?.recent ?? []).not.toContain(matchId);
+    expect(await readKey(a.page, PROGRESS_KEY)).toBe(deviceBefore);
+    expect(issues(a)).toEqual([]);
+  } finally {
+    await a.context.close();
     await srv.stop();
   }
 });
@@ -771,7 +943,7 @@ test('로그인 꺼짐(기본 서버): 첫 화면 · 봇과 연습에 계정 요
   }
 });
 
-test('로그인 꺼짐: 예전에 로그인했던 기기(표시가 남음)는 부팅마다 상태를 읽어 "지금은 로그인을 쓸 수 없어요" 한 줄 · 게스트, 표시는 남긴다(다시 켜면 같은 계정으로)', async ({
+test('로그인 꺼짐: 예전에 로그인했던 기기(표시가 남음)는 부팅마다 상태를 읽고 게스트, "지금은 로그인을 쓸 수 없어요"는 처음 한 번만 — 표시는 남긴다(다시 켜면 같은 계정으로)', async ({
   browser,
 }) => {
   const c = await newClient(browser, { serviceWorkers: 'block' });
@@ -790,19 +962,28 @@ test('로그인 꺼짐: 예전에 로그인했던 기기(표시가 남음)는 �
     await expectNotice(c.page, T.results.off);
     await expectStore(c.page, 'device');
     expect(statusReqs).toHaveLength(1);
-    // 표시는 남긴다: 지우면 다시 켰을 때 화면은 게스트인데 남은 쿠키로 서버가 계정에 적립한다(DECISIONS 15절)
+    // 표시는 남기고 '꺼짐을 알렸다'를 적는다 (다시 켜지면 같은 계정으로 — 서버는 화면이 계정을 밝힐 때만 적립하므로 꺼진 동안의 판은
+    // 기기 기록에만 쌓인다)
     expect(JSON.parse((await readKey(c.page, MARK_KEY)) ?? 'null')).toEqual({
       v: 1,
       tag: 'oldtag0123456789',
+      off: true,
     });
+    // 다음 부팅: 상태는 읽되(다시 켜졌는지) 안내도 레벨 칩 기다림도 없다
+    const second = c.page.waitForResponse((r) => new URL(r.url()).pathname === '/api/account');
     await c.page.reload();
     await expect(c.page.getByTestId('practice')).toBeVisible();
-    await expectNotice(c.page, T.results.off);
     await expectStore(c.page, 'device');
+    expect(await (await second).json()).toEqual({ on: false });
     expect(statusReqs).toHaveLength(2);
+    // 계정 흐름 조각이 상태를 다 읽을 동안 (안내가 뜬다면 이 사이에 뜬다)
+    await c.page.waitForTimeout(1500);
+    expect(await notices(c.page)).toEqual([]);
+    await expectStore(c.page, 'device');
     expect(JSON.parse((await readKey(c.page, MARK_KEY)) ?? 'null')).toEqual({
       v: 1,
       tag: 'oldtag0123456789',
+      off: true,
     });
     expect(issues(c).filter((p) => !SW_BLOCKED.test(p))).toEqual([]);
   } finally {
@@ -838,16 +1019,19 @@ test('DB 장애: 새로고침하면 "계정에 연결하지 못해 이 기기 �
     await expect.poll(async () => view(await readKey(c.page, PROGRESS_KEY))?.recent.length ?? 0).toBe(1);
     await press(c.page.getByTestId('result-home'));
 
-    // 온라인 판: 결과 화면이 뜨고 이번 접속은 게스트(이 기기 기록에 적립, 계정 저장 줄 없음).
-    // 소켓은 세션 쿠키로 계정이 붙어 서버가 적립을 시도하지만 DB가 죽어 다시 시도 끝에 실패(ok:false) — 게스트 화면은 무시한다
+    // 온라인 판: 결과 화면이 뜨고 이번 접속은 게스트(이 기기 기록에 적립, 계정 저장 줄 없음). 소켓에는 세션 쿠키가 실렸지만 화면이
+    // 계정을 밝히지 않고 들어가 서버는 이 판을 계정에 적립하지 않는다 (전에는 쿠키만으로 적립을 시도해 두 번 쌓일 수 있었다)
     const tap = await tapSocket(c.page, false);
     await playOnline(c.page, srv.base, 'device');
     const matchId = ratedMatchId(tap.frames);
+    expect(lastEntry(tap.sent).account).toBeUndefined();
+    expect(lastWelcomeAccount(tap.frames)).toBeNull();
     await expect(c.page.getByTestId('xp-gain')).toContainText('경험치 +');
     expect(await c.page.locator('[data-testid="rate-account"]').count()).toBe(0);
     await expect.poll(async () => view(await readKey(c.page, PROGRESS_KEY))?.recent ?? []).toContain(matchId);
-    await expect.poll(() => credits(tap.frames).length, { timeout: 30_000 }).toBe(1);
-    expect(credits(tap.frames)[0]).toEqual({ t: 'credit', matchId, ok: false, profile: null });
+    const afterResult = tap.frames.length;
+    await expect.poll(() => tap.frames.length, { timeout: 30_000 }).toBeGreaterThan(afterResult);
+    expect(credits(tap.frames)).toEqual([]);
     expect(await c.page.locator('[data-testid="rate-account"]').count()).toBe(0);
     await press(c.page.getByTestId('result-home'));
     await expect(c.page.getByTestId('practice')).toBeVisible();
@@ -924,7 +1108,7 @@ test('나쁜 토큰(만료 · 가짜 서명 · 다른 aud · nonce)은 "로그�
 
 // ───────────────────────── 8. 정보 숨김 ─────────────────────────
 
-test('정보 숨김: 로그인한 생존자 셋 + 로그인 안 한 괴물의 친구 방 — 괴물이 받은 모든 원문에 계정 ID · tag · credit · account가 없고, credit은 그 생존자 연결에만 하나씩', async ({
+test('정보 숨김: 로그인한 생존자 셋 + 로그인 안 한 괴물의 친구 방 — 괴물이 받은 모든 원문에 계정 ID · tag · credit이 없고("account"는 자기 welcome의 null뿐), credit은 그 생존자 연결에만 하나씩 · 계정 tag는 본인 welcome · credit에만', async ({
   browser,
 }) => {
   test.setTimeout(240_000);
@@ -952,7 +1136,7 @@ test('정보 숨김: 로그인한 생존자 셋 + 로그인 안 한 괴물의 �
       await loginByUrl(c.page, srv.base, s.sub);
       await expectStore(c.page, 'server');
       tags.push((await markTag(c.page)) ?? '');
-      // 로그인한 쿠키로 새 소켓을 열고 방에 들어간다
+      // 로그인한 쿠키로 새 소켓을 열고 방에 들어간다 (방 주소로 연 부팅은 계정 상태를 읽은 뒤 계정 tag를 밝혀 들어간다)
       await c.page.goto(`${srv.base}/?room=${code}&${Q}`);
       await expect(c.page.getByTestId('room-code')).toHaveText(code);
     }
@@ -984,22 +1168,31 @@ test('정보 숨김: 로그인한 생존자 셋 + 로그인 안 한 괴물의 �
     expect(mRaw.length).toBeGreaterThan(20);
     for (const t of mRaw) {
       for (const s of secrets) expect(t.includes(s), `괴물 원문에 계정 단서 ${s}`).toBe(false);
-      expect(t, '괴물 원문').not.toMatch(/credit|account/i);
+      // 계정 낱말은 자기 welcome의 "account":null(게스트 자리)뿐
+      if (t.startsWith('{"t":"welcome"')) expect(t).toContain('"account":null');
+      else expect(t, '괴물 원문').not.toMatch(/credit|account/i);
     }
-    // 생존자: credit은 자기 판 · 자기 계정 기록, 계정 ID · tag는 어떤 원문에도 없다
+    expect(mRaw.filter((t) => /account/i.test(t)).every((t) => t.startsWith('{"t":"welcome"'))).toBe(true);
+    // 생존자: credit은 자기 판 · 자기 계정 기록 · 자기 tag, 계정 ID와 다른 사람의 tag는 어떤 원문에도 없다
     const rows = await srv.accounts();
     for (const [i, c] of clients.slice(1).entries()) {
       const mine = credits(c.frames.raw);
       const matchId = ratedMatchId(c.frames.raw);
       expect(mine).toHaveLength(1);
-      expect(mine[0]).toMatchObject({ matchId, ok: true });
+      expect(mine[0]).toMatchObject({ tag: tags[i], matchId, ok: true });
       const row = rows.find((r) => r.sub === survivors[i]!.sub);
       expect(mine[0]!.profile).toBe(row?.profile);
+      expect(lastWelcomeAccount(c.frames.raw)).toBe(tags[i]);
+      const others = secrets.filter((x) => x !== tags[i]);
       for (const t of c.frames.raw)
-        for (const s of secrets) expect(t.includes(s), `${c.role} 원문 ${s}`).toBe(false);
-      // credit 말고는 계정 낱말이 없다
-      for (const t of c.frames.raw.filter((x) => !x.startsWith('{"t":"credit"')))
+        for (const s of others) expect(t.includes(s), `${c.role} 원문 ${s}`).toBe(false);
+      // 자기 tag는 본인 welcome · credit에만, 그 밖에는 계정 낱말이 없다
+      for (const t of c.frames.raw.filter(
+        (x) => !x.startsWith('{"t":"credit"') && !x.startsWith('{"t":"welcome"'),
+      )) {
         expect(t, `${c.role} 원문`).not.toMatch(/credit|account/i);
+        expect(t.includes(tags[i]!), `${c.role} 원문 자기 tag`).toBe(false);
+      }
     }
     for (const c of clients) expect(issues(c), c.role).toEqual([]);
   } finally {
