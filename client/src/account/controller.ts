@@ -193,7 +193,7 @@ export class AccountController {
    * 계정 모드로 (첫 로그인이면 기기 기록 올리기 · 고르기). 올렸으면 true, 실패면 null · 'relogin'(로그인 뒤 10분이 지나 서버가 기기
    * 기록을 받지 않음) — 게스트 그대로
    */
-  private async enter(st: SignedIn): Promise<boolean | null | 'relogin'> {
+  private async enter(st: SignedIn, again = false): Promise<boolean | null | 'relogin'> {
     const { api, mark } = this.d;
     let text = st.profile;
     let imported = false;
@@ -207,7 +207,8 @@ export class AccountController {
       const accountBlank = st.fresh || isBlankProfile(parseProfile(text, this.d.now()).profile);
       // 빈 기기 + 빈 계정: 빈 기록으로 계정을 연다 (기기 글 없이 — 그사이 다른 기기가 올렸어도 서버가 덮지 않는다)
       if (blank) req = st.fresh ? { choice: 'account', device: null } : null;
-      else if (accountBlank) req = { choice: 'device', device: raw };
+      // 묻지 않고 올린다 — 서버에서 그새 다른 기기가 채웠으면 덮지 않고 409 conflict (아래에서 다시 읽어 고르게 한다)
+      else if (accountBlank) req = { choice: 'device', device: raw, ifBlank: true };
       else {
         const choice = await this.d.screens.choose(parseProfile(text, this.d.now()).profile, dev.profile);
         // 고른 대로 올린다: '계정 기록'이면 이 기기 기록 글을 보내지 않는다
@@ -215,6 +216,12 @@ export class AccountController {
       }
       if (req) {
         const r = await importDevice(api, req);
+        if (!r.ok && r.error === 'conflict' && !again) {
+          // 비었던 계정이 그새 채워졌다 (다른 기기가 먼저 첫 로그인): 상태를 다시 읽어 고르기 창으로 (한 번만)
+          const fresh = await getStatus(api);
+          const now = fresh.ok && fresh.body.on && fresh.body.signedIn ? fresh.body : null;
+          return now && now.tag === st.tag ? this.enter(now, true) : null;
+        }
         if (!r.ok) return r.error === 'relogin' ? 'relogin' : null;
         text = r.body.profile;
         imported = req.choice === 'device' && req.device !== null;

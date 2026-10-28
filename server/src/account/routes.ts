@@ -35,6 +35,7 @@ import { verifyIdToken, type KeyProvider } from './googleToken';
 import { RateLimiter } from './rateLimit';
 import {
   AccountBadRequest,
+  AccountImportConflict,
   AccountUnavailable,
   parseCostumeRequest,
   parseImportRequest,
@@ -427,6 +428,18 @@ export function createAccountRoutes(ctx: AccountRoutesContext): AccountHandler {
       return;
     }
     const id = s.accountId;
+    if (op === 'import' && importReq?.ifBlank) {
+      // 비었다고 보고 올렸는데 그새 채워졌다: 덮지 않고 409 (화면이 다시 읽어 고르게 한다)
+      try {
+        const out = await service.importDevice(id, importReq);
+        if (out === null) sendError(res, 401, 'auth', [clearSession(o)]);
+        else sendJson(res, 200, out);
+      } catch (err) {
+        if (!(err instanceof AccountImportConflict)) throw err;
+        sendError(res, 409, 'conflict');
+      }
+      return;
+    }
     const out =
       op === 'import' && importReq
         ? await service.importDevice(id, importReq)

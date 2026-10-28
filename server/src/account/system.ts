@@ -96,6 +96,22 @@ export const DB_TLS_WARNINGS: Readonly<Record<'prefer' | 'disable', string>> = {
   disable: '계정 DB 연결: 암호화하지 않음 (DATABASE_URL이 sslmode=disable — 처리방침 10번 확인)',
 };
 
+/**
+ * 계정 DB 드라이버 안쪽의 비동기 오류(예: DB 쪽이 보낸 깨진 인증 메시지 — 드라이버가 기다리지 않는 약속에서 난다)가 처리되지 않은
+ * 거부로 서버 프로세스를 끝내 모든 판을 죽이지 않게 한다. PostgreSQL 저장소를 쓸 때만 건다(server/src/index.ts). 로그에는 오류
+ * 이름 · 코드만 (값 · 메시지 · 주소 없이)
+ */
+export function unhandledRejectionLine(reason: unknown): string {
+  const o = typeof reason === 'object' && reason !== null ? (reason as Record<string, unknown>) : {};
+  const code = typeof o.code === 'string' && /^[A-Z0-9_]{1,40}$/.test(o.code) ? o.code : null;
+  const name = reason instanceof Error ? reason.name : typeof reason;
+  return `서버: 처리되지 않은 비동기 오류 (${code ?? name}) — 판은 그대로 계속`;
+}
+
+export function guardUnhandledRejections(log: (msg: string) => void): void {
+  process.on('unhandledRejection', (reason) => log(unhandledRejectionLine(reason)));
+}
+
 export function createAccountSystem(opts: AccountSystemOptions): AccountSystem {
   let config = readAccountConfig(opts.env, { testHooks: opts.testHooks, dev: opts.dev });
   const now = opts.now ?? Date.now;

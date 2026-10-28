@@ -13,6 +13,7 @@ import {
   claimLogin,
   dayKeyInZone,
   emptyProfile,
+  isBlankProfile,
   isTeamCostume,
   parseProfile,
   serializeProfile,
@@ -56,6 +57,9 @@ export class AccountUnavailable extends Error {
 
 /** 요청 본문이 틀렸다 → 400 */
 export class AccountBadRequest extends Error {}
+
+/** 비었다고 보고 올린 기기 기록(import ifBlank)인데 계정 기록이 그새 채워졌다 → 409 conflict (덮지 않는다) */
+export class AccountImportConflict extends Error {}
 
 export interface AccountServiceOptions {
   store: AccountStore;
@@ -108,7 +112,10 @@ export function parseImportRequest(raw: unknown): AccountImportRequest | null {
   if (o.choice !== 'device' && o.choice !== 'account') return null;
   if (o.device !== null && typeof o.device !== 'string') return null;
   if (typeof o.device === 'string' && o.device.length > DEVICE_PROFILE_MAX) return null;
-  return { choice: o.choice, device: o.device };
+  if (o.ifBlank !== undefined && o.ifBlank !== true) return null;
+  return o.ifBlank === true
+    ? { choice: o.choice, device: o.device, ifBlank: true }
+    : { choice: o.choice, device: o.device };
 }
 
 /** costume 본문 → 요청 (모양이 틀리면 null) */
@@ -240,6 +247,9 @@ export class AccountService {
       const now = this.now();
       if (rec.profile !== null && (req.choice === 'account' || req.device === null))
         return { profile: rec.profile, day: this.today(now) };
+      // 화면은 비었다고 보고 묻지 않고 올렸는데 그새 다른 기기가 채웠다: 덮지 않는다 (화면이 다시 읽어 고르게 한다)
+      if (req.ifBlank && rec.profile !== null && !this.blank(rec.profile, now))
+        throw new AccountImportConflict();
       // 계정 기록이 더 높은 판이면 덮지 않는다
       if (rec.profile !== null) this.readable(rec.profile, now);
       const dev = parseProfile(req.device, now);
@@ -354,6 +364,12 @@ export class AccountService {
     const text = serializeProfile(r.profile, cur.extra);
     const saved = await this.db(job, () => this.store.saveProfile(id, text, now, rec.rev));
     return saved ? { ok: true, profile: text } : { ok: false, profile: null };
+  }
+
+  /** 아무것도 쌓지 않은 기록인가 (빈 기기로 처음 로그인해 만든 빈 기록 — 화면의 '빈 계정'과 같은 판단, isBlankProfile) */
+  private blank(text: string, now: number): boolean {
+    const parsed = parseProfile(text, now);
+    return parsed.status !== 'ok' || isBlankProfile(parsed.profile);
   }
 
   /** 계정 기록 → 고칠 수 있는 기록. 없으면 빈 기록, 더 높은 판이면 쓰지 않는다(예외) */

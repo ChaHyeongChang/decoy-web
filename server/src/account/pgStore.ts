@@ -8,6 +8,8 @@
 // - 무료 한도를 넘으면(compute 시간 · 저장 용량) 오류를 그대로 올린다(다시 시도하지 않는다) → 계정 요청 503, 화면은 게스트로, 판은 그대로
 // - 로그에는 오류 코드와 짧은 힌트만 (DB 주소 · 비밀번호 · 호스트를 찍지 않는다)
 import { readFileSync } from 'node:fs';
+import { connect as netConnect, type Socket } from 'node:net';
+import { checkServerIdentity, type PeerCertificate } from 'node:tls';
 import postgres from 'postgres';
 import { AccountConflict, newAccountId, type AccountRecord, type AccountStore } from './store';
 
@@ -32,6 +34,11 @@ export const PG_IDLE_TIMEOUT_S = 60;
 export const PG_MAX_CONNECTIONS = 2;
 /** 연결 하나를 쓰는 최대 시간 (초) */
 export const PG_MAX_LIFETIME_S = 30 * 60;
+/** 1초 안에 연결 묶음 하나가 이만큼 새 연결을 열려 하면 '오류 없이 닫는 서버'로 보고 그 시도를 바로 끝낸다(RECONNECT_LOOP) */
+export const PG_STORM_SOCKETS = 5;
+const PG_STORM_WINDOW_MS = 1_000;
+/** 호출 하나의 시도 수 상한 (다른 요청이 연결 묶음을 버려 함께 끊긴 시도 포함) */
+export const PG_MAX_TRIES = 5;
 /** 같은 오류 코드 로그는 이 간격에 한 번 (ms) */
 export const PG_LOG_EVERY_MS = 60_000;
 /** 기본 표 이름 */
@@ -140,22 +147,21 @@ export function postgresOptions(
   conf: PgConfig,
   ca: string | null = null,
 ): postgres.Options<Record<string, postgres.PostgresType>> {
+  // 인증서 확인: 인증 기관(공인 · sslrootcert)과 호스트 이름을 Node가 확인한다. 이름은 DATABASE_URL의 호스트로 직접 비교한다 —
+  // 드라이버는 IP 주소 호스트면 servername을 비워 Node가 'localhost'와 비교하게 되므로
+  const verify = {
+    rejectUnauthorized: true,
+    checkServerIdentity: (_name: string, cert: PeerCertificate) => checkServerIdentity(conf.host, cert),
+    ...(ca !== null ? { ca } : {}),
+  };
   return {
     host: conf.host,
     port: conf.port,
     user: conf.user,
     pass: conf.password,
     database: conf.database,
-    // 'verify-full' · 객체: 드라이버가 인증서 확인을 끄지 않는다(Node 기본 — 인증 기관 · 호스트 이름 확인, SNI는 호스트 이름).
-    // 'prefer'는 확인하지 않는다
-    ssl:
-      conf.ssl === 'disable'
-        ? false
-        : conf.ssl === 'prefer'
-          ? 'prefer'
-          : ca !== null
-            ? { ca, rejectUnauthorized: true }
-            : 'verify-full',
+    // 'prefer'는 확인하지 않는다 (sslmode가 없는 주소 — 시작 로그가 경고한다)
+    ssl: conf.ssl === 'disable' ? false : conf.ssl === 'prefer' ? 'prefer' : verify,
     max: PG_MAX_CONNECTIONS,
     idle_timeout: PG_IDLE_TIMEOUT_S,
     connect_timeout: PG_CONNECT_TIMEOUT_S,
@@ -176,35 +182,107 @@ export function postgresOptions(
 
 const noop = (): void => undefined;
 
+function codeError(code: string, message: string): Error {
+  return Object.assign(new Error(message), { code });
+}
+
+/** 연결 묶음 하나: 드라이버 · 이 묶음이 연 소켓 · 최근에 연 시각 */
+interface Pool {
+  sql: postgres.Sql;
+  sockets: Set<Socket>;
+  opened: number[];
+  dropped: boolean;
+}
+
 /**
- * postgres.js 연결 묶음. 접속은 첫 질의 때 한다. 질의가 timeoutMs 안에 끝나지 않으면 그 묶음을 버리고(end timeout 0 — 접속 중 ·
- * 질의 중 연결을 모두 끊는다) 다음 질의부터 새 묶음을 쓴다: 소리 없이 죽은 연결에 질의가 매달리거나, 서버가 오류 없이 접속을 닫을 때
- * 드라이버가 끝없이 다시 접속하는 것(접속 제한도 매번 새로 잰다)을 끊는다. 버린 질의의 늦은 실패는 삼킨다.
- * sslrootcert 파일을 읽지 못하면 예외 (만드는 쪽이 로그인을 끈다)
+ * postgres.js 연결 묶음. 접속은 첫 질의 때 한다. 소켓은 이 함수가 직접 연다(드라이버 socket 설정):
+ * - 질의가 timeoutMs 안에 끝나지 않으면 그 묶음을 버린다 — 드라이버를 끝내고(end timeout 0) 그 묶음의 소켓을 바로 부순다(드라이버는
+ *   우아하게 닫기만 해서, 멈춘 서버 쪽 연결이 끝없이 남는다). 다음 질의부터 새 묶음
+ * - 서버가 오류 없이 접속을 닫으면 드라이버가 쉬지 않고 다시 접속한다(접속 제한도 매번 새로 잰다): 1초에 5번 넘게 열려 하면 그 시도를
+ *   바로 끝낸다(RECONNECT_LOOP)
+ * - 다른 질의가 묶음을 버려 함께 끊긴 질의는 POOL_DROPPED로 알린다(저장소가 한 번 더의 몫을 쓰지 않고 새 묶음으로 다시 한다)
+ * - TCP 접속도 4초 제한 (드라이버의 접속 제한은 소켓을 받은 뒤부터 잰다)
+ * 버린 질의의 늦은 실패는 삼킨다. sslrootcert 파일을 읽지 못하면 예외 (만드는 쪽이 로그인을 끈다)
  */
 export function createPostgresClient(conf: PgConfig): PgClient {
   const ca = conf.caFile !== null ? readFileSync(conf.caFile, 'utf8') : null;
-  const make = (): postgres.Sql => postgres(postgresOptions(conf, ca));
-  let sql = make();
   let closed = false;
-  const drop = (old: postgres.Sql): void => {
-    if (sql === old && !closed) sql = make();
-    old.end({ timeout: 0 }).catch(noop);
+  let drops = 0;
+
+  const openSocket = (pool: Pool): Promise<Socket> => {
+    if (pool.dropped || closed)
+      return Promise.reject(codeError('CONNECTION_DESTROYED', '계정 DB: 버린 연결 묶음'));
+    const t = Date.now();
+    pool.opened = pool.opened.filter((x) => t - x < PG_STORM_WINDOW_MS);
+    if (pool.opened.length >= PG_STORM_SOCKETS)
+      return Promise.reject(codeError('RECONNECT_LOOP', '계정 DB: 서버가 오류 없이 연결을 거듭 닫음'));
+    pool.opened.push(t);
+    return new Promise<Socket>((resolve, reject) => {
+      const sock = netConnect({ host: conf.host, port: conf.port });
+      pool.sockets.add(sock);
+      // 오류는 드라이버가 받는다 — 그 사이 · 그 뒤에도 처리되지 않은 'error'로 서버가 죽지 않게
+      sock.on('error', noop);
+      sock.once('close', () => pool.sockets.delete(sock));
+      const timer = setTimeout(() => {
+        sock.destroy();
+        reject(codeError('CONNECT_TIMEOUT', '계정 DB: 접속 시간 넘김'));
+      }, PG_CONNECT_TIMEOUT_S * 1000);
+      const fail = (e: Error): void => {
+        clearTimeout(timer);
+        sock.destroy();
+        reject(e);
+      };
+      sock.once('error', fail);
+      sock.once('connect', () => {
+        clearTimeout(timer);
+        sock.removeListener('error', fail);
+        // 드라이버가 TLS SNI · 오류 문구에 쓴다
+        resolve(Object.assign(sock, { host: conf.host, port: conf.port }));
+      });
+    });
   };
+
+  const make = (): Pool => {
+    // socket: 드라이버 설정이지만 타입 정의에 없다 (Options와 교차 타입으로 넘긴다). 드라이버는 첫 질의 때 부른다
+    const options: postgres.Options<Record<string, postgres.PostgresType>> & {
+      socket: () => Promise<Socket>;
+    } = { ...postgresOptions(conf, ca), socket: () => openSocket(pool) };
+    const pool: Pool = { sql: postgres(options), sockets: new Set(), opened: [], dropped: false };
+    return pool;
+  };
+
+  let current = make();
+
+  const drop = (pool: Pool): void => {
+    if (pool.dropped) return;
+    pool.dropped = true;
+    drops += 1;
+    if (current === pool && !closed) current = make();
+    pool.sql.end({ timeout: 0 }).catch(noop);
+    for (const sock of pool.sockets) sock.destroy();
+  };
+
   return {
     async query(text, params, timeoutMs) {
-      const cur = sql;
-      const run = cur.unsafe(text, [...params]).then((res) => ({
-        rows: [...res] as Record<string, unknown>[],
-        count: res.count,
-      }));
+      if (closed) throw codeError('CONNECTION_ENDED', '계정 DB: 닫힘');
+      const pool = current;
+      const startDrops = drops;
+      const run = pool.sql.unsafe(text, [...params]).then(
+        (res) => ({ rows: [...res] as Record<string, unknown>[], count: res.count }),
+        (e: unknown) => {
+          // 다른 질의가 묶음을 버려 함께 끊겼다 (이 질의 탓이 아니다)
+          throw drops !== startDrops
+            ? codeError('POOL_DROPPED', '계정 DB: 다른 요청이 연결 묶음을 새로 만듦')
+            : e;
+        },
+      );
       // 시간을 넘겨 버린 질의가 나중에 실패해도 처리되지 않은 거부가 되지 않게
       run.catch(noop);
       let timer: ReturnType<typeof setTimeout> | undefined;
       const expired = new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
-          drop(cur);
-          reject(Object.assign(new Error('계정 DB: 응답 없음'), { code: 'QUERY_TIMEOUT' }));
+          reject(codeError('QUERY_TIMEOUT', '계정 DB: 응답 없음'));
+          drop(pool);
         }, timeoutMs);
       });
       try {
@@ -215,7 +293,8 @@ export function createPostgresClient(conf: PgConfig): PgClient {
     },
     async end() {
       closed = true;
-      await sql.end({ timeout: 2 });
+      await current.sql.end({ timeout: 2 }).catch(noop);
+      for (const sock of current.sockets) sock.destroy();
     },
   };
 }
@@ -238,6 +317,8 @@ const RETRY_CODES = new Set([
   'CONNECTION_DESTROYED',
   'CONNECT_TIMEOUT',
   'QUERY_TIMEOUT',
+  'RECONNECT_LOOP',
+  'POOL_DROPPED',
   'ECONNRESET',
   'ECONNREFUSED',
   'ETIMEDOUT',
@@ -262,10 +343,13 @@ const TLS_CODES = new Set([
 ]);
 
 const TIMEOUT_CODES = new Set(['CONNECT_TIMEOUT', 'QUERY_TIMEOUT']);
+/** 시도 실패지만 이 시도 탓이 아니다 — 한 번 더의 몫을 쓰지 않고, 로그도 남기지 않는다 */
+const VICTIM_CODE = 'POOL_DROPPED';
 
 const HINTS: Readonly<Record<string, string>> = {
   CONNECT_TIMEOUT: 'DB가 깨는 중이거나 닿지 않음',
   QUERY_TIMEOUT: 'DB 응답 없음 (연결을 새로 만든다)',
+  RECONNECT_LOOP: 'DB가 오류 없이 연결을 거듭 끊음 (DATABASE_URL · DB 상태 확인)',
   '28P01': 'DB 사용자 · 비밀번호가 틀림 (DATABASE_URL 확인)',
   '28000': 'DB 사용자 · 비밀번호가 틀림 (DATABASE_URL 확인)',
   '3D000': 'DB 이름이 틀림',
@@ -350,6 +434,8 @@ export class PgAccountStore implements AccountStore {
   private pausedUntil = Number.NEGATIVE_INFINITY;
   /** 잇달아 쉰 횟수 (쉬는 시간을 두 배씩) */
   private pauses = 0;
+  /** 마지막으로 질의가 성공한 시각 (그 뒤에 시작한 호출의 실패만 쉬기를 부른다) */
+  private lastOkAt = Number.NEGATIVE_INFINITY;
 
   constructor(
     private readonly client: PgClient,
@@ -442,38 +528,71 @@ export class PgAccountStore implements AccountStore {
 
   /**
    * 질의 하나: 시도마다 4.5초 제한, 연결 오류(잠든 compute가 끊은 연결 · 깨는 중 시간 넘김)면 0.3초 뒤 한 번 더 — 예산 9초가 1초 넘게
-   * 남을 때만. 한도 초과 · 비밀번호 틀림 등은 바로 올린다. 두 시도가 다 시간을 넘기면 DB를 잠시 쉰다(PAUSED)
+   * 남을 때만. 다른 요청이 연결 묶음을 버려 함께 끊긴 시도(POOL_DROPPED)는 그 한 번 더의 몫을 쓰지 않고 새 묶음으로 바로 다시
+   * (예산 안, 모두 다섯 번까지). 한도 초과 · 비밀번호 틀림 등은 바로 올린다. 이 호출의 시도가 모두 시간을 넘기면 DB를 잠시 쉰다(PAUSED)
    */
   private async run(text: string, params: readonly (string | number | null)[]): Promise<PgResult> {
     const start = this.now();
     if (start < this.pausedUntil) throw Object.assign(new Error('계정 DB: 잠시 쉼'), { code: 'PAUSED' });
     const deadline = start + this.budgetMs;
+    let tries = 0;
+    let victims = 0;
     let timeouts = 0;
-    for (let attempt = 0; ; attempt += 1) {
+    let retried = false;
+    for (;;) {
+      tries += 1;
       const left = Math.max(1, deadline - this.now());
       try {
         const res = await this.client.query(text, params, Math.min(this.attemptTimeoutMs, left));
-        this.pauses = 0;
+        this.succeeded();
         return res;
       } catch (err) {
         const info = classifyPgError(err);
+        const victim = info.code === VICTIM_CODE;
+        if (victim) victims += 1;
         if (info.timeout) timeouts += 1;
+        const room = deadline - this.now();
         const again =
-          attempt === 0 && info.retry && deadline - this.now() - PG_RETRY_WAIT_MS >= PG_RETRY_MIN_LEFT_MS;
-        if (again) this.report(info, true);
-        else if (info.timeout && timeouts === attempt + 1) this.pause(info);
-        else this.report(info, false);
-        if (!again) throw err;
+          tries < PG_MAX_TRIES &&
+          (victim
+            ? room >= PG_RETRY_MIN_LEFT_MS
+            : !retried && info.retry && room - PG_RETRY_WAIT_MS >= PG_RETRY_MIN_LEFT_MS);
+        if (again) {
+          if (!victim) {
+            retried = true;
+            this.report(info, true);
+            await this.sleep(PG_RETRY_WAIT_MS);
+          }
+          continue;
+        }
+        if (timeouts > 0 && timeouts === tries - victims) this.pause(info, start);
+        else if (!victim) this.report(info, false);
+        throw err;
       }
-      await this.sleep(PG_RETRY_WAIT_MS);
     }
   }
 
-  /** 모든 시도가 시간을 넘겼다: 15초 · 30초 · 1분 … 최대 5분 동안 DB를 쉰다 (같은 일이 계속되면 접속 시도를 줄인다) */
-  private pause(info: PgErrorInfo): void {
+  /** 질의가 됐다: 쉬기를 풀고 처음으로 */
+  private succeeded(): void {
+    this.pauses = 0;
+    this.pausedUntil = Number.NEGATIVE_INFINITY;
+    this.lastOkAt = this.now();
+  }
+
+  /**
+   * 이 호출의 시도가 모두 시간을 넘겼다: 15초 · 30초 · 1분 … 최대 5분 동안 DB를 쉰다(같은 일이 계속되면 접속 시도를 줄인다).
+   * 한 장애에 한 번만: 이미 쉬는 중이거나(동시에 실패한 다른 호출이 시작했다) 이 호출이 시작한 뒤 다른 질의가 됐으면(DB가 돌아왔다)
+   * 쉬지 않는다
+   */
+  private pause(info: PgErrorInfo, runStart: number): void {
+    const now = this.now();
+    if (now < this.pausedUntil || this.lastOkAt >= runStart) {
+      this.report(info, false);
+      return;
+    }
     const ms = Math.min(this.pauseMs * 2 ** this.pauses, PG_PAUSE_MAX_MS);
     this.pauses += 1;
-    this.pausedUntil = this.now() + ms;
+    this.pausedUntil = now + ms;
     this.log(
       `계정 DB 오류 ${info.code} — 응답이 없어 ${Math.round(ms / 1000)}초 동안 DB를 쉰다 (계정 요청은 503, 판은 그대로)`,
     );

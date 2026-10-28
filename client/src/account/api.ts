@@ -15,7 +15,7 @@ export type AccountCall<T> = { ok: true; body: T } | { ok: false; status: number
 
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
-const ERRORS: readonly string[] = ['off', 'auth', 'csrf', 'bad-request', 'rate', 'db', 'relogin'];
+const ERRORS: readonly string[] = ['off', 'auth', 'csrf', 'bad-request', 'rate', 'db', 'relogin', 'conflict'];
 
 /** 이 기기 표시 tag 모양 (서버가 계정 ID에서 만든 불투명한 값) */
 export const TAG_RE = /^[\w-]{1,64}$/;
