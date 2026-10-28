@@ -23,7 +23,7 @@ import type { ServerStatusView } from '../serverStatus';
 import { currentCharStyle, onCharStyleChange } from '../gfx/charStyle';
 import { onWearingChange, wearingFor } from '../meta/wearing';
 import { TouchTutorialCard } from './lifecycleUi';
-import type { SettingsPanel } from './settingsPanel';
+import type { SettingsHost } from './settingsHost';
 import {
   blueprintSvg,
   characterFigureSvg,
@@ -147,6 +147,8 @@ export class LobbyUI {
   private readonly cardFigures = new Map<string, Element>();
   /** 역할 카드 능력 줄의 입력 방식 */
   private readonly mode: InputMode = device.touch ? 'touch' : 'keyboard';
+  /** 봇과 연습 역할 고르기를 그린 횟수 (practicePicker) */
+  private pickerSeq = 0;
   /** 첫 화면 서버 상태 줄 (M13b): 연결과 상관없이 첫 화면을 그리고 이 줄로 알린다 */
   private readonly statusLine: HTMLDivElement;
   private readonly statusText: HTMLSpanElement;
@@ -166,7 +168,7 @@ export class LobbyUI {
      * 설정 화면 (설정 화면 통합: PC · 터치 같은 화면). 첫 화면 패널 아래 · 방 화면 · 빠른 매칭 대기 명령 줄에 '설정' 단추를 둔다.
      * 화면 자체는 #ui-root에 있다(판 중에도 열린다 — App이 만든다)
      */
-    private readonly settings: SettingsPanel,
+    private readonly settings: SettingsHost,
     /**
      * 내 레벨 (GAME_DESIGN 12장, 내 기기 기록으로만 — 남의 레벨은 그리지 않는다): 첫 화면은 이름 칸 옆, 연습 고르기는 취소 옆에 칩
      * (요소 하나를 옮겨 붙인다 — 높이를 늘리지 않는 자리), 방 · 빠른 매칭 대기는 내 줄의 '나' 옆에 "Lv n" 꼬리표
@@ -244,6 +246,15 @@ export class LobbyUI {
   /** 첫 화면이 보이는 중인가 */
   get atHome(): boolean {
     return this.root.style.display !== 'none' && this.content.classList.contains('lobby-home');
+  }
+
+  /**
+   * 지금 보이는 봇과 연습 역할 고르기 화면의 번호 (없으면 null). 고르기를 그릴 때마다 새 번호다 — 연습 조각을 받은 뒤 시작해도
+   * 되는지 app.ts startPractice가 역할을 누를 때의 번호와 견준다(받는 사이 취소했다 다시 연 고르기에서 옛 선택으로 시작하지 않게)
+   */
+  get practicePicker(): number | null {
+    const shown = this.atHome && this.content.querySelector('[data-testid="practice-picker"]') !== null;
+    return shown ? this.pickerSeq : null;
   }
 
   private get atRoom(): boolean {
@@ -398,6 +409,7 @@ export class LobbyUI {
    * 터치 기기에서 아직 조작 안내를 보지 않았으면 안내 카드 대신 그 판의 처음 10초 위치 표시만 한다
    */
   renderPracticePicker(name: string): void {
+    this.pickerSeq += 1;
     this.lastLobby = null;
     this.quickCountdown = null;
     this.netButtonsExtra = null;

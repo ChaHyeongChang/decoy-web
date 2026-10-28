@@ -9,9 +9,12 @@
 //    `?practice=1` 이동은 캐시 먼저(잠든 서버를 기다리지 않는다).
 //    처리방침(M15 /privacy)은 네트워크 먼저: 이 서버의 응답이면 그대로 내고, 같은 빌드의 200이면 셸 사본도 그 판으로 바꾼다
 //    (문의처 환경 변수만 바꾼 재배포처럼 빌드 ID가 같아도 따라가게). 실패 · 느림 · 표시 없는 응답이면 깨우기 화면이 아니라 셸 사본
-//  - 자산(같은 출처 GET, 페이지 이동 아님)은 이 빌드 셸에 있으면 캐시, 없으면 네트워크
+//  - 자산(같은 출처 GET, 페이지 이동 아님)은 이 빌드 셸에 있으면 캐시, 없으면 앞 빌드 셸(assets/만), 그래도 없으면 네트워크
 //  - /ws · /healthz · /test/* · /.well-known/*는 가로채지 않는다
-//  - 옛 `decoy-shell-*`는 새 워커가 켜질 때 지운다(동적 import가 없어 열린 화면은 더 받을 자산이 없다)
+//  - 새 워커가 켜질 때 바로 앞 빌드의 `decoy-shell-*` 하나만 남기고 그보다 옛 것은 지운다. 화면은 나눠 받는 조각(결과 · 설정 ·
+//    봇과 연습 등 동적 import)을 쓴다 — 배포 직후 열려 있던 옛 화면이 아직 받지 않은 옛 조각을 찾으면, 서버에는 이미 없으니(404)
+//    앞 빌드 셸에서 준다(이름에 해시가 있는 assets/만 — 같은 이름이면 같은 내용). 두 번 넘게 배포된 동안 열려 있던 화면은
+//    조각마다의 실패 대처("새 버전이 있어요")로 간다 (DECISIONS 11절 '번들 줄이기')
 // 빌드하지 않은 원본(개발 · 시험)에서는 BUILD가 null이라 앱 셸 없이 깨우기 화면만 한다
 
 const BUILD = null; // 빌드 때 바뀐다 (vite.config.ts decoyBuild)
@@ -86,17 +89,20 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) =>
-        Promise.all(
+      .then((keys) => {
+        // 캐시 이름은 만든 순서로 온다: 이 빌드가 아닌 셸 가운데 마지막이 바로 앞 빌드다 (남긴다)
+        const others = keys.filter((k) => k.startsWith('decoy-shell-') && k !== SHELL_CACHE);
+        const previous = others.length > 0 ? others[others.length - 1] : null;
+        return Promise.all(
           keys
             .filter(
               (k) =>
                 (k.startsWith('decoy-wake-') && k !== WAKE_CACHE) ||
-                (k.startsWith('decoy-shell-') && k !== SHELL_CACHE),
+                (k.startsWith('decoy-shell-') && k !== SHELL_CACHE && k !== previous),
             )
             .map((k) => caches.delete(k)),
-        ),
-      )
+        );
+      })
       .then(() => self.clients.claim()),
   );
 });
@@ -125,9 +131,23 @@ async function shellMatch(url) {
   return cache.match(url, { ignoreSearch: true });
 }
 
-/** 자산: 이 빌드 셸에 있으면 캐시, 없으면 네트워크 */
+/**
+ * 앞 빌드 셸에서 찾는다 (이름에 해시가 있는 assets/만): 배포 직후 열려 있던 옛 화면이 아직 받지 않은 옛 조각.
+ * 새 서버에는 그 파일이 없다(404) — 이 빌드 셸에도 없으니 네트워크로 가기 전에 본다
+ */
+async function previousShellMatch(url) {
+  if (!SHELL_CACHE || !new URL(url).pathname.includes('/assets/')) return undefined;
+  const keys = (await caches.keys()).filter((k) => k.startsWith('decoy-shell-') && k !== SHELL_CACHE);
+  for (const k of keys.reverse()) {
+    const hit = await (await caches.open(k)).match(url, { ignoreSearch: true });
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+/** 자산: 이 빌드 셸에 있으면 캐시, 없으면 앞 빌드 셸(assets/), 그래도 없으면 네트워크 */
 async function asset(req) {
-  const cached = await shellMatch(req.url);
+  const cached = (await shellMatch(req.url)) || (await previousShellMatch(req.url));
   return cached || fetch(req);
 }
 

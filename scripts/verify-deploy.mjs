@@ -1,12 +1,20 @@
 // 배포 검증 (M9): 배포와 같은 방식으로 띄운 서버에 HTTP · WebSocket으로 접속해 본다.
 //   node scripts/verify-deploy.mjs           → Docker 이미지를 빌드해 컨테이너로 띄운다 (Docker가 없으면 빌드 결과물로 직접)
 //   node scripts/verify-deploy.mjs --no-docker → 빌드 결과물(server/dist, client/dist)을 PORT 환경 변수로 직접 띄운다
+//   node scripts/verify-deploy.mjs --url=https://<배포 주소> → 이미 배포된 서버(Render 등)를 본다. 띄우지 않고, 가짜 환경 변수가
+//     필요한 검사(assetlinks · 처리방침 문의처)는 건너뛴다. 잠든 무료 서버가 깨어날 때까지 3분 기다린다
+//     (GitHub Actions '배포판 검증' 작업 — .github/workflows/verify-live.yml)
+// 번들 줄이기: 첫 화면 JS와 앱 셸(sw.js)의 모든 JS 조각 · CSS · HTML이 brotli를 받는 쪽에는 br, gzip만 받는 쪽에는 gzip,
+// 압축을 받지 않는 쪽에는 원본으로 오고, 풀면 원본과 같은지 · 빌드 헤더가 sw.js 빌드와 같은지 본다. 받은 바이트(압축된 채)를 적는다
 // 환경 변수: NODE_IMAGE(베이스 이미지 바꾸기), HTTPS_PROXY · HTTP_PROXY(빌드 중 npm), NPM_CA(사설 인증서 파일)
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { brotliDecompressSync, gunzipSync } from 'node:zlib';
 import WebSocket from 'ws';
 
 const PORT_IN_CONTAINER = 3000;
@@ -100,18 +108,113 @@ function wsWelcome(url) {
   });
 }
 
-async function check(base) {
-  await waitHealthy(base, 30_000);
+/** 압축을 풀지 않고 받는다 (fetch는 저절로 풀어 받은 바이트를 알 수 없다). 상태 · 헤더 · 받은 본문 그대로 */
+function rawGet(url, headers) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = (u.protocol === 'https:' ? httpsRequest : httpRequest)(u, { headers }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () =>
+        resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks) }),
+      );
+      res.on('error', reject);
+    });
+    req.setTimeout(60_000, () => req.destroy(new Error(`시간 초과 ${url}`)));
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+/** 받은 본문을 content-encoding대로 푼다 */
+function decode(r) {
+  const enc = r.headers['content-encoding'];
+  if (enc === 'br') return brotliDecompressSync(r.body);
+  if (enc === 'gzip') return gunzipSync(r.body);
+  if (enc === undefined || enc === 'identity') return r.body;
+  throw new Error(`모르는 content-encoding ${enc}`);
+}
+
+/**
+ * 압축 전송 (번들 줄이기): 경로마다 br · gzip · 원본을 받아 본다. brotli를 받으면 br, gzip만 받으면 gzip, 압축을 받지 않으면 원본이고,
+ * 풀면 셋이 같아야 한다. 빌드 헤더가 있으면 build와 같아야 한다. 경로별 받은 바이트 { path: { br, gzip, raw } }
+ */
+async function checkEncodings(base, paths, build) {
+  const sizes = {};
+  for (const path of paths) {
+    const raw = await rawGet(`${base}${path}`, { 'accept-encoding': 'identity' });
+    if (raw.status !== 200) throw new Error(`${path} HTTP ${raw.status}`);
+    if (raw.headers['content-encoding'] && raw.headers['content-encoding'] !== 'identity')
+      throw new Error(`${path}: 압축을 받지 않는 요청에 ${raw.headers['content-encoding']}`);
+    const got = { raw: raw.body.length };
+    for (const [ae, want] of [
+      ['gzip, deflate, br, zstd', 'br'],
+      ['gzip, deflate', 'gzip'],
+    ]) {
+      const r = await rawGet(`${base}${path}`, { 'accept-encoding': ae });
+      if (r.status !== 200) throw new Error(`${path} (${ae}) HTTP ${r.status}`);
+      const enc = r.headers['content-encoding'];
+      if (enc !== want)
+        throw new Error(`${path}: Accept-Encoding '${ae}'에 ${enc ?? '압축 없음'} (기대 ${want})`);
+      if (!decode(r).equals(raw.body)) throw new Error(`${path}: ${want}를 풀면 원본과 다릅니다`);
+      if (build && r.headers['x-decoy-build'] !== undefined && r.headers['x-decoy-build'] !== build)
+        throw new Error(`${path}: 빌드 헤더 ${r.headers['x-decoy-build']} ≠ sw.js 빌드 ${build}`);
+      got[want] = r.body.length;
+    }
+    sizes[path] = got;
+  }
+  return sizes;
+}
+
+/** sw.js의 빌드 ID · 앱 셸 목록 (빌드 때 넣은 두 줄) */
+async function shellOf(base) {
+  const r = await rawGet(`${base}/sw.js`, { 'accept-encoding': 'identity' });
+  if (r.status !== 200) throw new Error(`sw.js HTTP ${r.status}`);
+  const src = r.body.toString('utf8');
+  const build = /^const BUILD = "([^"]+)";/m.exec(src)?.[1];
+  const shell = /^const SHELL = (\[.*\]);/m.exec(src)?.[1];
+  if (!build || !shell) throw new Error('sw.js에 빌드 ID · 셸 목록이 없습니다 (빌드하지 않은 원본?)');
+  return { build, shell: JSON.parse(shell) };
+}
+
+/** 압축 전송 · 나눠 받는 조각: 첫 화면 JS와 셸의 모든 JS · CSS · index.html */
+async function checkCompression(base, firstJs) {
+  const { build, shell } = await shellOf(base);
+  const js = shell.filter((f) => f.endsWith('.js')).map((f) => `/${f}`);
+  if (!js.includes(firstJs)) throw new Error(`첫 화면 JS ${firstJs}가 sw.js 셸 목록에 없습니다`);
+  const css = shell.filter((f) => f.endsWith('.css')).map((f) => `/${f}`);
+  const sizes = await checkEncodings(base, ['/', ...css, ...js], build);
+  const sum = (paths, k) => paths.reduce((a, p) => a + (sizes[p]?.[k] ?? 0), 0);
+  const lazy = js.filter((p) => p !== firstJs);
+  log(
+    `압축 전송 통과 (빌드 ${build}): 첫 화면 JS br ${sizes[firstJs].br}B · gzip ${sizes[firstJs].gzip}B · 원본 ${sizes[firstJs].raw}B, ` +
+      `JS 전체 ${js.length}개 br ${sum(js, 'br')}B · gzip ${sum(js, 'gzip')}B · 원본 ${sum(js, 'raw')}B, ` +
+      `나눠 받는 조각 ${lazy.length}개 (${lazy.map((p) => p.replace(/^\/assets\//, '').replace(/-[\w-]+\.js$/, '')).join(' · ')})`,
+  );
+}
+
+async function check(base, { remote = false } = {}) {
+  await waitHealthy(base, remote ? 180_000 : 30_000);
   const index = await fetch(`${base}/`);
   if (index.status !== 200) throw new Error(`첫 화면 HTTP ${index.status}`);
+  if (index.headers.get('x-decoy-server') !== '1')
+    throw new Error('첫 화면에 x-decoy-server 표시가 없습니다');
   const html = await index.text();
   const asset = /src="\.?(\/assets\/[^"]+\.js)"/.exec(html)?.[1];
   if (!asset) throw new Error('첫 화면에 스크립트가 없습니다');
   const js = await fetch(`${base}${asset}`);
   if (js.status !== 200) throw new Error(`스크립트 HTTP ${js.status}`);
   log(`HTTP 200 (첫 화면, ${asset})`);
+  await checkCompression(base, asset);
   const room = await wsWelcome(`${base.replace('http', 'ws')}/ws`);
   log(`WebSocket 접속 · 방 만들기 성공 (방 ${room})`);
+  if (remote) {
+    // 배포된 서버: manifest만 (assetlinks · 처리방침 문의처는 대시보드 환경 변수 값이라 가짜 값과 견주지 않는다)
+    const mr = await fetch(`${base}/manifest.webmanifest`);
+    if (mr.status !== 200) throw new Error(`manifest HTTP ${mr.status}`);
+    log('manifest 200');
+    return;
+  }
   await checkPwa(base);
 }
 
@@ -231,8 +334,14 @@ async function viaNode() {
 }
 
 const noDocker = process.argv.includes('--no-docker');
+const remoteUrl = process.argv.find((a) => a.startsWith('--url='))?.slice('--url='.length) ?? null;
 try {
-  if (!noDocker && hasDocker()) await viaDocker();
+  if (remoteUrl) {
+    const base = remoteUrl.replace(/\/+$/, '');
+    if (!/^https?:\/\//.test(base)) throw new Error(`--url은 http(s) 주소여야 합니다: ${remoteUrl}`);
+    log(`배포된 서버 ${base}`);
+    await check(base, { remote: true });
+  } else if (!noDocker && hasDocker()) await viaDocker();
   else {
     if (!noDocker) log('Docker를 쓸 수 없어 빌드 결과물로 직접 띄웁니다');
     await viaNode();

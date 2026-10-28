@@ -25,7 +25,13 @@ export interface Session {
 }
 
 /** 봇 방을 열어 role로 시작하고 봇은 모두 멈춘다 (FPS는 60으로 덮어써 판 중 자동 하향을 막는다) */
-export async function startBotRoom(browser: Browser, query: string, role = 'runner'): Promise<Session> {
+export async function startBotRoom(
+  browser: Browser,
+  query: string,
+  role = 'runner',
+  /** 시작 단추를 누르기 직전 (로비에서 기다릴 것 — 나눠 받는 조각 미리 받기 등) */
+  beforeStart?: (page: Page) => Promise<void>,
+): Promise<Session> {
   const context = await browser.newContext({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
   const page = await context.newPage();
   const problems: string[] = [];
@@ -36,6 +42,7 @@ export async function startBotRoom(browser: Browser, query: string, role = 'runn
   await page.getByTestId('create-room').click();
   await page.getByTestId(`role-${role}`).click();
   await page.getByTestId('ready-button').click();
+  await beforeStart?.(page);
   await page.getByTestId('start-button').click();
   await page.waitForFunction(() => (window.__DECOY__?.snapCount ?? 0) > 5, null, { timeout: 30_000 });
   const room = await page.evaluate(() => window.__DECOY__?.room ?? '');

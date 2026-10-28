@@ -52,7 +52,9 @@ async function canvasInfo(page: Page): Promise<CanvasInfo> {
 /** 혼자(봇과) 방을 만들고 판을 시작한다. 방 코드를 돌려준다 */
 async function startSolo(page: Page, extra: string, role: Role): Promise<string> {
   await page.goto(`/${QUERY}${extra}`);
-  // 판 중 자동 하향을 막는다 (덮어쓴 FPS는 페이지 전역이라 판 시작 전에 넣어도 된다. 기록용 __DECOY__.fps는 그대로)
+  // 판 중 자동 하향을 막는다 (덮어쓴 FPS는 페이지 전역이라 판 시작 전에 넣어도 된다. 기록용 __DECOY__.fps는 그대로).
+  // 디버그 훅은 나눠 받는 조각이라 페이지를 연 직후에는 아직 없을 수 있다 — 생길 때까지 기다린다
+  await page.waitForFunction(() => window.__DECOY__ !== undefined);
   await page.evaluate(() => window.__DECOY__?.injectFps(60));
   await page.getByTestId('create-room').click();
   const code = page.getByTestId('room-code');

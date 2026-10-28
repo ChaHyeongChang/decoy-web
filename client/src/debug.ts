@@ -1,5 +1,6 @@
 // window.__DECOY__ 디버그 훅과 ?debug=1 오버레이 (FPS · 프레임 시간 · 그리기 호출 · 핑 · 서버 틱 · 예측 오차 · 품질 …,
-// 표시는 ui/debugOverlay.ts). 오버레이는 배포 빌드에서도 ?debug=1이면 뜨고, 그때만 그리기 호출을 센다
+// 표시는 ui/debugOverlay.ts). 오버레이는 배포 빌드에서도 ?debug=1이면 뜨고, 그때만 그리기 호출을 센다.
+// 이 파일은 나눠 받는 조각 'debug'다 — 주소에 ?debug가 있을 때만 main.ts가 받는다
 import Phaser from 'phaser';
 import type { ControlLayoutInfo, DecoyDebug, HudLayout, MatchPrefsDebug, TouchTarget } from '@decoy/shared';
 import type { App } from './app';
@@ -23,7 +24,7 @@ import { installDebugOverlay, type DebugOverlayData, type OverlayAnchor } from '
 import { MAP_RECT, VIEW_H, VIEW_W, layout, tileToScreen } from './ui/layout';
 import { fontState, uiFontsReady } from './ui/fonts';
 import { auditTexts } from './ui/text';
-import { editorControlLayout, openLayoutEditor } from './ui/layoutEditor';
+import { layoutEditorModule, loadLayoutEditor } from './ui/layoutEditorLoader';
 import { liveControlLayout } from './ui/touchControls';
 
 declare global {
@@ -231,14 +232,17 @@ export function installDebug(app: App, overlay: boolean): void {
       return { x: rect.left + (p.x / VIEW_W) * rect.width, y: rect.top + (p.y / VIEW_H) * rect.height };
     },
     // ── 조작 배치 편집 ──
+    // 편집 화면은 나눠 받는 조각: 받은 뒤 연다 (시험은 편집 화면이 보일 때까지 기다린다)
     openLayoutEditor: (team) => {
-      openLayoutEditor({
-        host: document.getElementById('ui-root') ?? document.body,
-        role: team,
-        onClose: () => undefined,
-      });
+      void loadLayoutEditor().then((mod) =>
+        mod?.openLayoutEditor({
+          host: document.getElementById('ui-root') ?? document.body,
+          role: team,
+          onClose: () => undefined,
+        }),
+      );
     },
-    getControlLayout: () => editorControlLayout() ?? matchControlLayout(),
+    getControlLayout: () => layoutEditorModule()?.editorControlLayout() ?? matchControlLayout(),
   };
   window.__DECOY__ = hook;
   if (!overlay) return;

@@ -39,7 +39,8 @@ import {
   type LastRoom,
   type LifecycleDebug,
 } from './lifecycle';
-import { LocalTransport } from './localServer';
+import type * as PracticeModuleNs from './localServer';
+import type { LocalTransport } from './localServer';
 import { NetClient, defaultWsUrl } from './net';
 import { parseScale } from './render/resolution';
 import {
@@ -56,7 +57,7 @@ import { serverStatus } from './serverStatus';
 import { Interpolator, Predictor, SnapshotClock, lerpAngle, lerpNum } from './sync';
 import type { Transport } from './transport';
 import { LeaveDialog, ReplacedNotice } from './ui/lifecycleUi';
-import { openLayoutEditor } from './ui/layoutEditor';
+import { loadLayoutEditor } from './ui/layoutEditorLoader';
 import { costumeSetFromRoster, lobbyCostumeSet, setBakeCostumes } from './art/costumeBake';
 import { MetaState, msToMidnight } from './meta/meta';
 import { setWearing } from './meta/wearing';
@@ -64,7 +65,7 @@ import { DeviceProfileStore } from './meta/profileStore';
 import { HubHost } from './ui/hubHost';
 import { LevelChip } from './ui/levelChip';
 import { LobbyUI } from './ui/lobby';
-import { SettingsPanel } from './ui/settingsPanel';
+import { SettingsHost } from './ui/settingsHost';
 import { ResultHost } from './ui/resultHost';
 import { WakeNoticeUI } from './ui/wakeNotice';
 import { WakeNoticeState, wakeOffersHome } from './wakeNotice';
@@ -187,8 +188,8 @@ export class App {
   readonly hub: HubHost;
   /** 자정(이 기기 시간)에 칩 · 창을 다시 그린다 (새 도전 · 접속 보상) */
   private midnightTimer: number | null = null;
-  /** 설정 화면 (설정 화면 통합): 로비 · 판 중 메뉴에서 연다 (#ui-root, 로비 · 판 화면 위) */
-  readonly settings: SettingsPanel;
+  /** 설정 화면 (설정 화면 통합): 로비 · 판 중 메뉴에서 연다 (#ui-root, 로비 · 판 화면 위). 화면 코드는 나눠 받는 조각 */
+  readonly settings: SettingsHost;
   balance: Balance | null = null;
   balanceHash = '';
   you: string | null = null;
@@ -243,6 +244,13 @@ export class App {
   private local: LocalTransport | null = null;
   private localUnsub: (() => void) | null = null;
   /**
+   * 기기 안 연습 서버 코드(localServer.ts + 공유 시뮬레이션 · 봇 두뇌)는 나눠 받는 조각 'localServer'다 (DECISIONS 11절 '번들 줄이기: 나눠 받는 조각 넷 더').
+   * 판 밖 쉬는 시간에 미리 받고(prefetchPractice), 역할을 누를 때 아직이면 받은 뒤 시작한다. 받지 못하면 null
+   */
+  private practiceModule: Promise<typeof PracticeModuleNs | null> | null = null;
+  /** 연습 시작 요청 번호: 조각을 받는 사이 다른 역할을 누르거나 첫 화면 · 방으로 가면 앞 요청은 시작하지 않는다 */
+  private practiceReq = 0;
+  /**
    * 이 소켓으로 'leave'를 보냈고 아직 다음 welcome을 받지 않았다 (검토 반영 F07): 그사이 온 lobby · match · snap · result는
    * 서버가 leave를 처리하기 전에 보낸 떠난 방 것이라 버린다(staleAfterLeave). 새 소켓이 열리면 푼다
    */
@@ -274,28 +282,55 @@ export class App {
       },
       browserClock,
     );
-    this.settings = new SettingsPanel(uiRoot, {
-      touch: device.touch,
-      haptics: {
-        supported: device.touch && haptics.supported,
-        enabled: () => haptics.enabled,
-        setEnabled: (on) => haptics.setEnabled(on),
-      },
-      role: () => this.match?.role ?? this.lobby?.players.find((p) => p.id === this.you)?.role ?? null,
-      replayTutorial: () => this.lobbyUi.tutorialReset(),
-      openLayoutEditor: (done) => {
-        const role = this.lobby?.players.find((p) => p.id === this.you)?.role ?? null;
-        return openLayoutEditor({
-          host: uiRoot,
-          role: role === 'monster' ? 'monster' : 'survivor',
-          onClose: () => {
+    this.settings = new SettingsHost(
+      uiRoot,
+      {
+        touch: device.touch,
+        haptics: {
+          supported: device.touch && haptics.supported,
+          enabled: () => haptics.enabled,
+          setEnabled: (on) => haptics.setEnabled(on),
+        },
+        role: () => this.match?.role ?? this.lobby?.players.find((p) => p.id === this.you)?.role ?? null,
+        replayTutorial: () => this.lobbyUi.tutorialReset(),
+        // 편집 화면은 나눠 받는 조각(ui/layoutEditorLoader.ts): 로비에서 설정을 열 때 미리 받는다. 아직이면 받은 뒤 열고,
+        // 그사이 닫히면(판 시작) 열지 않는다. 받지 못하면 설정 화면으로 돌아가 "새 버전이 있어요"
+        openLayoutEditor: (done) => {
+          const role = this.lobby?.players.find((p) => p.id === this.you)?.role ?? null;
+          let editor: { close(): void } | null = null;
+          let ended = false;
+          const end = (): void => {
+            if (ended) return;
+            ended = true;
             done();
-            // 판 직전 터치 안내 그림이 바꾼 배치를 따르게 방 화면을 다시 그린다
-            this.lobbyUi.refreshTutorial();
-          },
-        });
+          };
+          void loadLayoutEditor().then((mod) => {
+            if (ended) return;
+            if (!mod) {
+              end();
+              this.showUpdate();
+              return;
+            }
+            editor = mod.openLayoutEditor({
+              host: uiRoot,
+              role: role === 'monster' ? 'monster' : 'survivor',
+              onClose: () => {
+                end();
+                // 판 직전 터치 안내 그림이 바꾼 배치를 따르게 방 화면을 다시 그린다
+                this.lobbyUi.refreshTutorial();
+              },
+            });
+          });
+          return {
+            close: () => {
+              if (editor) editor.close();
+              else end();
+            },
+          };
+        },
       },
-    });
+      () => this.showUpdate(),
+    );
     this.lobbyUi = new LobbyUI(
       uiRoot,
       {
@@ -409,6 +444,9 @@ export class App {
       this.renderWake();
       this.keeper.closed();
     };
+    // 생명주기 디버그 훅(window.__DECOY_LIFE__, 시험 · ?debug)은 만들 때 건다: 주소에 ?debug가 있으면 main.ts가 디버그 조각을
+    // 받은 뒤 start()를 부르는데, 시험은 문서가 준비될 때(사용자 활성화 전) 이 훅을 쓴다 (예전 순서 그대로 — 모듈 실행 안)
+    if (this.params.debug !== 'off' || import.meta.env.DEV) this.installLifecycleDebug();
   }
 
   /** 다음 자정(이 기기 시간)에 칩 · 창을 다시 그린다. 자정마다 다시 건다 */
@@ -442,7 +480,6 @@ export class App {
       },
       popstate: () => void this.backGuard?.popped(),
     });
-    if (this.params.debug !== 'off' || import.meta.env.DEV) this.installLifecycleDebug();
     this.wake.setOffline(navigator.onLine === false);
     this.wake.connecting(performance.now());
     this.keeper.start();
@@ -451,8 +488,11 @@ export class App {
       // 연습 판 중 새로고침 · 탭 폐기 뒤 복원으로 왔으면 그 판의 뒤로 가기 항목({decoyGuard:1})이 남아 있다: 첫 화면을 그리기
       // 전에 걷는다. 남기면 첫 화면에서 누른 첫 뒤로 가기가 아무 일 없이 먹힌다 (검토 반영 F16. 방 판은 다시 들어가 그 항목을 쓴다)
       this.backGuard?.disarm();
-      if (this.params.practice) this.lobbyUi.renderPracticePicker(this.params.name ?? getSavedName());
-      else this.lobbyUi.renderHome(this.homePrefill);
+      if (this.params.practice) {
+        // 깨우기 화면의 "봇과 연습": 역할을 고르는 동안 연습 조각을 받는다
+        this.prefetchPractice();
+        this.lobbyUi.renderPracticePicker(this.params.name ?? getSavedName());
+      } else this.lobbyUi.renderHome(this.homePrefill);
     }
     // ?practice=1은 읽었으면 주소에서 지운다 (검토 반영 F12): 남으면 연습 → '홈으로' 뒤 새로고침 · '새 버전' 새로고침이 다시
     // 역할 고르기를 열고, 서비스 워커는 이 주소를 캐시 먼저로 준다. 뒤로 가기 항목 표시(history.state)는 그대로 둔다
@@ -535,6 +575,36 @@ export class App {
    */
   private startPractice(role: Role, name: string): void {
     if (this.local) return;
+    const req = ++this.practiceReq;
+    // 역할을 누른 그 고르기 화면 (받는 사이 취소했다가 다시 연 고르기는 번호가 다르다)
+    const picker = this.lobbyUi.practicePicker;
+    void this.loadPractice().then((mod) => {
+      // 받는 사이 다른 역할을 눌렀거나, 그 고르기를 떠났거나(취소 · 방 링크 · 다시 연 고르기), 이미 연습 중이면 그만
+      if (req !== this.practiceReq || this.local || picker === null || this.lobbyUi.practicePicker !== picker)
+        return;
+      if (!mod) {
+        // 새 배포로 옛 조각이 사라졌다(옛 화면): '새 버전이 있어요' — 새로고침하면 새 조각을 받는다
+        this.showUpdate();
+        return;
+      }
+      this.beginPractice(mod, role, name);
+    });
+  }
+
+  /** 연습 조각을 판 밖 쉬는 시간에 미리 받는다 (main.ts schedulePrebake · 연습 고르기를 열 때) */
+  prefetchPractice(): void {
+    void this.loadPractice();
+  }
+
+  private loadPractice(): Promise<typeof PracticeModuleNs | null> {
+    this.practiceModule ??= import('./localServer').catch(() => {
+      this.practiceModule = null;
+      return null;
+    });
+    return this.practiceModule;
+  }
+
+  private beginPractice(mod: typeof PracticeModuleNs, role: Role, name: string): void {
     saveName(name);
     this.quietClose = true;
     this.keeper.stop();
@@ -543,7 +613,7 @@ export class App {
     this.clearRejoin();
     this.returning = null;
     this.roomCode = null;
-    const local = new LocalTransport({ testHooks: this.params.debug !== 'off' || import.meta.env.DEV });
+    const local = new mod.LocalTransport({ testHooks: this.params.debug !== 'off' || import.meta.env.DEV });
     this.local = local;
     this.localUnsub = local.subscribe((msg) => this.onMessage(msg));
     this.renderWake();

@@ -1,0 +1,33 @@
+# 배포판 검증: 이미 배포된 서버(Render)에 접속해 본다 — 첫 화면 · 나눠 받는 JS 조각 · brotli/gzip 압축 전송 · WebSocket · manifest.
+# main 병합 뒤 Render가 새 빌드를 띄우면 수동으로 실행한다(Actions 탭 → 배포판 검증 → Run workflow → 주소).
+# 무료 플랜이 잠들어 있으면 깨어날 때까지(최대 3분) 기다린다. 비밀 값은 쓰지 않는다 (scripts/verify-deploy.mjs --url)
+name: 배포판 검증
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: '배포 주소 (예: https://decoy-web.onrender.com)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    name: 배포판 검증 (압축 전송 · 조각 · 접속)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      - run: node scripts/verify-deploy.mjs --url="$DEPLOY_URL"
+        env:
+          DEPLOY_URL: ${{ inputs.url }}

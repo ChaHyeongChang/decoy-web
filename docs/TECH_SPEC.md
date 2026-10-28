@@ -46,7 +46,7 @@ decoy-web/
 │     └─ profile.ts           ← 성장 기록 형식(판 번호 v) · 읽기 검사 · 판 적립(같은 판 한 번) · 계정으로 올릴 때 합치기
 ├─ server/src/                ← Node 전용 바깥 일만 (shared에는 `node:*` · `ws` · `fs` import 금지, eslint)
 │  ├─ index.ts                ← HTTP(정적 파일 · 테스트 훅) + ws 소켓 + setInterval → ServerCore
-│  ├─ config.ts · static.ts   ← 실행 옵션 · balance.json 읽기, 정적 파일(gzip)
+│  ├─ config.ts · static.ts   ← 실행 옵션 · balance.json 읽기, 정적 파일(빌드가 미리 압축한 brotli · gzip 사본을 받는 쪽에 맞춰, 없으면 gzip)
 │  ├─ quickBots.ts            ← 빠른 매칭 같은 프로세스 실전 봇 드라이버(시작 때 실전 봇 지도 준비)
 │  ├─ sendPolicy.ts           ← 연결별 송신 큐 · 밀림 처리
 │  ├─ truthLog.ts             ← 정답 상태 파일 기록 (--truth-log)
@@ -55,11 +55,13 @@ decoy-web/
 │  ├─ main.ts, net.ts         ← 연결, 예측 · 보정, 보간
 │  ├─ scenes/                 ← Lobby, Game, Result
 │  ├─ render/                 ← 맵, 캐릭터, 안개, 부채꼴, 효과
-│  ├─ ui/                     ← HUD, 미니맵, 배너, 튜토리얼, 레벨 · 불씨 칩, 결과 화면 · '내 기록' 창 · 옷장(나눠 받는 조각 `result` · `hub` · `wardrobe` — resultHost · hubHost · hub가 받는다)
+│  ├─ ui/                     ← HUD, 미니맵, 배너, 튜토리얼, 레벨 · 불씨 칩, 결과 화면 · '내 기록' 창 · 옷장 · 설정 화면 · 조작 배치 편집(나눠 받는 조각 `result` · `hub` · `wardrobe` · `settingsPanel` · `layoutEditor` — resultHost · hubHost · hub · settingsHost · layoutEditorLoader가 받는다)
 │  ├─ art/chars/costume/      ← 의상 그림 (나눠 받는 조각 `art`: 의상 여섯, 역할 그림의 의상 자리에 얹는다) · registry(첫 묶음, 등록부)
 │  ├─ art/costumeBake.ts      ← 굽기에 입힐 의상 (판 시작 명단 · 로비 내 역할 → 역할마다 의상, 조각이 오기 전엔 기본)
 │  ├─ meta/                   ← 성장 기록 저장소(profileStore: 바꿔 끼울 수 있는 ProfileStore, 지금은 기기) · 상태(meta) · 입은 의상(wearing, 판 밖 화면 그림용)
-│  └─ debug.ts                ← window.__DECOY__ 디버그 훅
+│  ├─ localServer.ts          ← 기기 안 연습 서버 (나눠 받는 조각 `localServer`: 공유 시뮬레이션 · 봇 두뇌까지, app.ts가 받는다). 수치는 practiceBalance.ts(첫 묶음)
+│  ├─ phaserCore.js           ← Phaser 사용자 빌드 (배포 빌드의 'phaser' — 쓰는 이름 공간만, vite.config.ts가 FX 등을 빈 모듈로)
+│  └─ debug.ts                ← window.__DECOY__ 디버그 훅 · ?debug=1 오버레이 (나눠 받는 조각 `debug`: 주소에 ?debug가 있을 때만 받고 받은 뒤 앱 시작)
 └─ tests/
    ├─ unit/                   ← Vitest
    ├─ bots/                   ← 헤드리스 봇 시나리오
@@ -108,7 +110,8 @@ decoy-web/
 - **불씨 · 일일 도전 · 접속 보상**(b): `applyRating`이 그날 날짜 글을 받아 도전 진행 · 불씨까지 적립하고, 접속 보상은 `claimLogin`(하루 한 번, 연속 날). 날짜 글은 클라이언트가 기기 시계로 만든다(`meta.ts localDay`, 자정 기준) — 자정 + 1초 타이머와 앱으로 돌아올 때 칩 · 창을 다시 그린다. 접속 보상은 자동으로 주지 않고 '내 기록' 창에서 받는다(부팅 때 저장소에 쓰지 않는다)
 - **의상**(c): 고른 의상(팀마다 하나)을 `join.costume` · `quick.costume` · 판 밖 `costume` 메시지로 보낸다. 서버(`room.ts`)는 id만 거르고(`sanitizeCostumeChoice`, 모르는 값 = 기본) 자리에 두며, 판 중에는 바꾸지 않는다(다시 들어와도 판 시작 의상). 봇 자리는 기본. 판 시작 명단에만 싣고(`matchInfo` — 위 3.3 표) 클라이언트는 그 명단으로 굽기 의상을 정한다(`costumeBake.ts`). 괴물 클라이언트는 생존자 의상을 받지 않으니 굽지도 않고, 괴물 화면 공통 생존자 그림은 의상 인자가 없다(`CommonArtOptions.costume?: never`)
 - **같은 칸 바꿔 굽기**(c): 의상은 그 역할 프레임을 같은 이름 · 같은 칸 · 같은 상자로 다시 그린다 — 텍스처 크기 그대로. 판 시작 명단 · 늦게 온 의상 그림으로 의상만 바뀌면 그 주인 칸만 지우고 다시 그려 같은 텍스처 키로 다시 올린다(`atlas.ts recostumeAtlas`, 리그를 다시 만들지 않는다). 기존 캐릭터 스타일에는 의상이 없다
-- **나눠 받기**: 결과 화면 코드(`ui/result.ts` · `ui/resultRating.ts`)와 '내 기록' 창(`ui/hub.ts`)은 동적 import 조각이다. 첫 화면을 그린 뒤 판 밖 쉬는 시간에 미리 받고(판 중에는 받지 않는다), 받지 못하면 승리 팀 · 버튼만 있는 작은 결과 + "새 버전이 있어요"(서비스 워커가 옛 셸 캐시를 바로 지우므로 배포 직후 옛 화면이 사라진 조각을 찾을 수 있다). 적립은 첫 묶음 코드가 하므로 조각 실패와 무관하다. 의상 그림(조각 `art`)과 옷장(조각 `wardrobe`, 옷장 탭을 열 때)도 같다 — 의상 그림을 받지 못하면 기본 그림으로 굽고(장식뿐이라 판은 같다) 해금 · 입기는 된다. 첫 묶음은 한 조각이다(`vite.config.ts` codeSplitting `$initial` — 나눠 받는 조각이 첫 묶음 모듈을 함께 써도 첫 묶음을 공용 조각으로 쪼개지 않는다)
+- **나눠 받기**: 결과 화면 코드(`ui/result.ts` · `ui/resultRating.ts`)와 '내 기록' 창(`ui/hub.ts`)은 동적 import 조각이다. 첫 화면을 그린 뒤 판 밖 쉬는 시간에 미리 받고(판 중에는 받지 않는다), 받지 못하면 승리 팀 · 버튼만 있는 작은 결과 + "새 버전이 있어요"(새 배포의 서버에는 옛 조각이 없다 — 서비스 워커가 바로 앞 빌드 셸을 남겨 옛 화면의 옛 조각을 거기서 주지만(번들 줄이기), 그 셸에도 없으면 이 대처로 간다). 적립은 첫 묶음 코드가 하므로 조각 실패와 무관하다. 의상 그림(조각 `art`)과 옷장(조각 `wardrobe`, 옷장 탭을 열 때)도 같다 — 의상 그림을 받지 못하면 기본 그림으로 굽고(장식뿐이라 판은 같다) 해금 · 입기는 된다. 첫 묶음은 한 조각이다(`vite.config.ts` codeSplitting `$initial` — 나눠 받는 조각이 첫 묶음 모듈을 함께 써도 첫 묶음을 공용 조각으로 쪼개지 않는다)
+- **나눠 받기 (번들 줄이기, DECISIONS 11절)**: 기기 안 연습 서버(`localServer` — 공유 시뮬레이션 · 봇 두뇌), 설정 화면(`settingsPanel`), 조작 배치 편집(`layoutEditor`), 디버그 훅 · 오버레이(`debug`)도 조각이다. 연습 · 설정은 판 밖 쉬는 시간에 미리 받고 설정은 화면(DOM)까지 만들어 둔다 — 판 중 메뉴로 처음 열 때 받거나 만들지 않는다(아직이면 판 시작 때 받기 시작). 배치 편집은 로비에서 설정을 열 때(터치), 디버그는 주소에 `?debug`가 있을 때만 받고 그때는 받은 뒤 앱을 시작한다(첫 화면이 그려질 때 훅이 있다). 받지 못하면 "새 버전이 있어요"(설정 · 연습 · 배치 편집은 그 화면을 열지 않고 첫 화면 · 설정 화면은 그대로). CSS는 첫 CSS에 둔다. 서비스 워커 셸에는 모든 조각이 들어가 오프라인 · 설치 앱에서도 같다. 배포 빌드의 Phaser는 사용자 빌드(`client/src/phaserCore.js` — 로더 · 트윈 · 시계 · 씬 입력 플러그인 · 스프라이트 · FX를 뺐다, 게임 설정 `disablePreFX` · `disablePostFX`)이고, 빠진 기능을 쓰면 `tests/unit/phaser-core.test.ts`가 잡는다
 
 ## 4. 시야 렌더링
 
@@ -142,7 +145,7 @@ decoy-web/
 
 ## 6. 디버그와 테스트 훅
 
-- `window.__DECOY__ = { role, getLocalState(), getLastSnapshot(), fps, ping }` (개발 빌드와 `?debug=1`에서만)
+- `window.__DECOY__ = { role, getLocalState(), getLastSnapshot(), fps, ping }` (개발 빌드와 `?debug=1` · `?debug=hook`에서만 — 배포 빌드는 그때만 디버그 조각을 받아 앱을 시작하기 전에 건다)
 - `?debug=1` 오버레이 (`client/src/ui/debugOverlay.ts`, 배포 빌드에서도 뜬다): FPS · 목표 · 화면 주사율 · 프레임 제한, 프레임 간격(평균 · p95 · 늦은 프레임 % — 간격 ≥ 목표 주기 + 반 vsync · 넘김 % — rAF 시각부터 그리기를 마칠 때까지가 한 vsync보다 긴 프레임) · 작업 시간(평균 · p95 · 안개 주기 프레임 p95), 그리기 호출(WebGL 호출 수 · Canvas는 그린 객체 수, 이 오버레이를 켰을 때만 센다), 핑 · 서버 틱 · 스냅샷, 예측 오차 · 대기 입력, 품질 · 자동 조정, DPR · 백버퍼, 렌더러 · 입력 방식 · 밸런스 해시. 칩을 눌러 접고 펼친다(터치 기기는 접은 채, PC는 펼친 채 시작, 저장하지 않음). 칩만 입력을 받고 판 입력으로 보내지 않는다. 터치 기기의 칩은 맵 왼쪽 위(판 HUD · 터치 대상과 겹치지 않음, `tests/e2e/debug-overlay.spec.ts`)
 - M10 그래픽 검사 훅: `gfx`(렌더 해상도 · 품질 · 안개 방식 · 프레임 제한 · 화면 주사율 · 목표 FPS · 내림 · 올림 횟수), `freezeClock`(장식 애니메이션 시계 고정), `injectFps`(품질 자동 하향 시험), `probeText`(선명도 탐침).
 - 렌더링 최적화 훅: `getFrameStats()`(최근 1초 FPS · 프레임 간격 · 작업 시간 평균 · p95 · 그리기 호출 · 건너뛴 rAF, `gfx/frameStats.ts`), `getAnimState()`(보간 · 연출 · 걷기 상태, 60 · 120Hz 프레임 독립성 E2E가 같은 시각끼리 견준다), `setFrameLimit(limit)`(프레임 제한 'auto' · '60' · '120' · 'half' 바꾸기, 저장은 로비 설정만), `setFogFollowDisabled(off)`(내 빛 따라가기 끄기 — 같은 빌드에서 예전 그림과 화소 비교). 진단 주소 `?camSnap=0`은 따라가는 카메라 창을 기기 픽셀 격자에 맞추지 않는다(저장하지 않음). 캐릭터 리디자인: `setCharStyle(style)`(캐릭터 스타일 'classic' · 'new' 바꾸기, 저장하지 않음 — 판 중이면 다음 프레임에 그림을 다시 굽는다), `gfx.charStyle`. 주소 `?chars=new|classic`은 이번 접속만. 타입은 `shared/src/debugTypes.ts`. 리마스터 전후 비교 촬영은 `npm run shots:remaster`(`scripts/remaster-shots.mjs`)
@@ -164,6 +167,7 @@ decoy-web/
 | 일의 양 예산 (렌더링 최적화) | 프레임당 일이 늘지 않는지 | 가상 시계 120Hz 10초 동안 센 2D 명령 · 그리기 호출 · 텍스처 올리기 · 캔버스 크기 바꾸기가 기준값 × 1.05 이하 (`tests/e2e/perf-budget*.spec.ts`, 같은 빌드면 같은 수). 시간 수치는 `npm run perf:frame` 기록용(`docs/PERF.md`) |
 | 판 밖 성장 (메타) | 판 기록 · 평가 · 저장 · 정보 숨김 | 기록기를 켜고 끈 봇 판의 상태가 같다 · 타격 · 수감 · 사망 · 구조 · 따돌림 · 포효 · 끊은 점령 · 탈출 세기(`tests/unit/meta-record.test.ts`), 평가 · 경험치 · 레벨 곡선 · progression.json 검증(`meta-rating`), 저장 형식 · 모르는 칸 보존 · 높은 판 읽기만 · 같은 판 한 번 · 합치기(`meta-profile`), 저장 · 불러오기 · 막힘 · 가득 참 · 지워짐 · 두 탭(`meta-client`), 결과에 자기 평가만 · 판 중 메시지에 평가 칸 없음(`meta-room`), 연습 판 평가 · 저장 · 레벨 칩 · 저장 실패 · 결과 조각 실패 · 괴물이 받은 원문 프레임(`tests/e2e/meta.spec.ts`) |
 | 의상 (메타 c) | 정보 숨김 · 굽기 · 유불리 없음 · 해금 | 판 시작 명단(생존자끼리 · 괴물은 자기만 · 빠른 매칭은 자기만) · 로비 · 결과 · 스냅샷에 의상 칸 없음 · 받은 의상 거르기 · 판 중 받은 의상은 판 뒤에(`tests/unit/costume-room.test.ts`), 값 · 해금 · 입기 · 기록 칸 · 다음 빌드 의상 보존(`meta-costume` · `meta-client`), 같은 칸 · 같은 상자 · 공통 생존자 칸은 의상과 무관 · 크기 기준 · 청록 없음(`char-frames-costume`), 괴물 의상 보이는 정도 = 기본 · 몸 가운데 원판 — Canvas처럼 칠하는 Node 래스터 · 게임 크기 10가지 × 21프레임 × 회전 · 위상 · Chromium 기준 값(`costume-parity*.test.ts`), 괴물이 받은 원문 프레임 · 의상이 다른 생존자 셋의 괴물 화면 조각이 같다 · 옷장 해금 · 두 번 누름 · 조각 막힘(`tests/e2e/costume.spec.ts`) |
+| 번들 · 나눠 받기 · 압축 (번들 줄이기) | 첫 로딩이 늘지 않는지 · 조각이 제때 오는지 · 오프라인 · 새 배포 직후 | 첫 로딩 JS(첫 묶음) · 전체 JS(모든 조각) gzip이 상한 · 마일스톤 예산 아래, 나눠 받는 조각 여덟이 따로 있다(`tests/e2e/bundle-size.spec.ts` @core), 첫 화면 HTML은 첫 묶음 하나 · 쉬는 시간에 결과 · 내 기록 · 설정(화면까지) · 연습 · 의상 그림을 받고 ?debug가 없으면 디버그 조각을 받지 않는다 · 연습 시작 · 판 중 설정 처음 열기에 JS를 더 받지 않고 긴 작업 없음 · 조각을 못 받으면 "새 버전이 있어요"(`lazy-chunks.spec.ts`), 셸에 모든 조각 · 오프라인으로 다시 열어 설정 · 배치 편집 · 연습 · 새 배포 뒤 옛 화면이 앞 빌드 셸에서 옛 조각을 연다(`m13-offline.spec.ts`), 서비스 워커 결정표 · 미리 압축(`sw-shell.test.ts`), brotli · gzip 사본 전송 · 옛 사본 안 씀(`static-gzip.test.ts`), Phaser 사용자 빌드에 없는 기능을 쓰지 않음(`phaser-core.test.ts`). 배포판은 `verify:deploy --url`(GitHub Actions '배포판 검증') |
 | 판정 불변 골든 (Vitest) | 그래픽 · 모바일 작업(M10~) 중 규칙 · 판정 · 정보 차단이 그대로인지 | 고정 시드 + 스크립트 입력(이동 · 조준 · 공격 · 돌진 · 포효 · 능력 · 구조 · 시야 전환) 960틱 → 60틱마다 게임 상태 해시 (`tests/unit/rules-golden.test.ts`). 바뀌면 GAME_DESIGN 변경 이력과 함께 갱신 |
 
 E2E 스크린샷은 `artifacts/`에 저장하고, 사람이 볼 수 있게 마지막 보고에 경로를 적는다.
@@ -175,4 +179,5 @@ E2E 스크린샷은 `artifacts/`에 저장하고, 사람이 볼 수 있게 마�
 - **같은 와이파이 플레이**: `npm start` 후 `http://<내 PC IP>:8080/?room=...`
 - **인터넷 플레이**: Dockerfile로 서버를 배포한다. 한국 · 일본 리전을 쓴다(핑 30~60ms 목표). 서비스별 무료 플랜 조건은 바뀌므로 배포 시점에 확인한다. 무료 플랜이 잠드는 서비스라면 테스트 전에 한 번 접속해 깨운다
 - 배포는 계정 인증이 필요하므로 Claude는 Dockerfile과 배포 안내(`docs/DEPLOY.md`)까지만 만들고, 실제 배포는 사람이 한다
+- **압축 전송**: 빌드가 텍스트 자산마다 brotli(11) · gzip(9) 사본(`.br` · `.gz`)을 만들고(`client/shellBuild.ts precompressDist`), 서버가 Accept-Encoding으로 고른다(brotli를 받으면 br). 사본은 처음 한 번 풀어 원본과 같은지 확인한다. 배포판에서 실제로 br이 오는지는 `node scripts/verify-deploy.mjs --url=<주소>`(Actions '배포판 검증' 수동 실행)
 - **그래픽 품질 높음 · 중간 · 낮음** (`?quality=high|medium|low` > 로비에서 고른 값 > 자동). 느린 PC는 로비의 그래픽 품질을 낮음으로(또는 주소에 `&quality=low`). 자동은 Canvas 렌더러 · 소프트웨어 WebGL이면 낮음, 하드웨어 WebGL PC는 높음(PC는 코어 수 · 메모리로 내리지 않는다). 판 중 FPS가 오래 낮으면 한 번 한 단계 내린다. `?scale`은 해상도 배율(0.25~1, 빈 값 · 0 · 음수 · 숫자 아님은 무시)이고 옛 `&scale=0.5` 링크도 "가볍게"로 계속 동작한다

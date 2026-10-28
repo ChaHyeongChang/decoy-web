@@ -2,9 +2,8 @@
 import Phaser from 'phaser';
 import { App, camOverrideAllowed, readParams } from './app';
 import { MONSTER_SPAWN, PRISON_CENTER } from '@decoy/shared';
-import { PRACTICE_BALANCE } from './localServer';
+import { PRACTICE_BALANCE } from './practiceBalance';
 import { sfx } from './audio';
-import { installDebug } from './debug';
 import { canOfferFullscreen, device, enterFullscreen, initDevice, onDeviceChange } from './device';
 import { matchTuning } from './controlLayout';
 import { initCharStyle, onCharStyleChange } from './gfx/charStyle';
@@ -285,6 +284,10 @@ const game = new Phaser.Game({
   backgroundColor: '#0B1622',
   banner: false,
   disableContextMenu: true,
+  // Phaser 기본 FX(preFX · postFX의 빛남 · 흐림 등)는 쓰지 않는다: 켜 두면 부팅 때 FX 셰이더 십여 개와 크기별 렌더 타깃을 만든다.
+  // 배포 빌드는 그 코드를 빼고(phaserCore.js · vite.config.ts PHASER_STUBS), 우리 후처리(WorldGradePipeline)는 그대로다
+  disablePreFX: true,
+  disablePostFX: true,
   // 크기는 직접 정한다: 백버퍼 = 표시 크기 × 기기 픽셀 배율, 캔버스는 기기 픽셀 격자에 맞춰 놓는다.
   // Scale.FIT은 devicePixelRatio를 보지 않고 캔버스를 CSS로 늘려서 흐렸다 (DECISIONS)
   scale: {
@@ -600,7 +603,14 @@ function schedulePrebake(): void {
   };
   const run = (): void => {
     prebakeTimer = null;
-    if (!game.isBooted || game.scene.isActive('game')) return;
+    if (game.scene.isActive('game')) return;
+    // 나눠 받는 조각을 판 밖 쉬는 시간에 미리 받는다 (판 중에는 받지 않는다 — 누르거나 결과가 오면 바로 그리게):
+    // 결과 화면 · '내 기록' 창 · 설정 화면(DOM까지 만들어 둔다 — 판 중 메뉴로 처음 열 때 멈칫하지 않게) · 봇과 연습 서버
+    app.resultUi.prefetch();
+    app.hub.prefetch();
+    app.settings.prefetch();
+    app.prefetchPractice();
+    if (!game.isBooted) return;
     // 터치: 판 배치(논리 크기 → 배율 · HUD 서명)로 굽는다. 아니면 첫 판 시작 때 맵 · 캐릭터 · HUD를 모두 다시 굽는다
     if (device.touch) applyMatchLayout();
     // welcome 전(첫 화면 · 봇과 연습 고르기)에는 빌드에 넣은 수치의 반지름으로 굽는다: 연습은 고르자마자 판이 시작돼
@@ -609,9 +619,6 @@ function schedulePrebake(): void {
     prebakeAtlas(game.scene.getScene('idle'), b.survivor.radius, b.monster.radius);
     // HUD 아틀라스도 (배율 2 Canvas에서 약 28ms, 같은 배율이면 아무것도 하지 않는다)
     prebakeHud(game.textures);
-    // 결과 화면 · '내 기록' 창 조각도 판 밖 쉬는 시간에 미리 받는다 (판 중에는 받지 않는다 — 누르거나 결과가 오면 바로 그리게)
-    app.resultUi.prefetch();
-    app.hub.prefetch();
     // 의상 그림 조각도 (판이 시작될 때 동료 · 괴물 의상을 바로 굽게 — 판 시작 명단은 판이 시작돼야 온다)
     void loadCostumeArt();
     // 따라가는 카메라: 판 배율 맵 전체 그림 → 미니맵 → 내가 고른 역할의 시작 자리 둘레 조각 (모르면 감옥 = 생존자 시작).
@@ -707,6 +714,9 @@ let fromLobby = false;
 app.subscribe((e) => {
   if (e.kind === 'match') {
     const req = ++sceneRequest;
+    // 판 중 설정 화면 조각: 판 밖 쉬는 시간에 받아 만들어 두었으면 아무 일도 하지 않는다. 아직이면(로비를 거의 거치지 않은 판 ·
+    // 진행 중인 판에 다시 들어옴) 판 장면을 만들기 전에 받기 시작한다 — 메뉴를 처음 누를 때 받지 않게
+    app.settings.prefetch();
     // 로비에서 시작한 판은 폰트를 받은 뒤(보통 로비에서 이미 끝남, 최대 loadUiFonts 시간 제한) 판 장면을 만든다.
     // 진행 중인 판에 다시 들어왔으면 기다리지 않는다(판은 계속 흐른다). 늦게 받은 폰트는 onUiFontsLate가 다시 그린다
     const fonts = fromLobby ? loadUiFonts() : Promise.resolve(uiFontsReady());
@@ -739,8 +749,18 @@ app.subscribe((e) => {
   }
 });
 
-if (params.debug !== 'off' || import.meta.env.DEV) installDebug(app, params.debug === 'overlay');
-app.start();
+// 디버그 훅(window.__DECOY__) · ?debug=1 측정 오버레이(debug.ts · ui/debugOverlay.ts)는 나눠 받는 조각 'debug'다: 주소에 ?debug가
+// 있을 때(시험 · 휴대폰 측정)만 받는다. 그때는 받은 뒤 앱을 시작해 첫 화면이 그려질 때 훅이 이미 있게 한다(예전과 같은 순서).
+// 받지 못하면(새 배포 직후 옛 화면 등) 훅 없이 시작한다 (DECISIONS 11절 '번들 줄이기')
+if (params.debug !== 'off' || import.meta.env.DEV) {
+  import('./debug').then(
+    (mod) => {
+      mod.installDebug(app, params.debug === 'overlay');
+      app.start();
+    },
+    () => app.start(),
+  );
+} else app.start();
 
 // 잠든 서버(무료 호스팅)가 깨어나는 동안 보여 줄 화면을 미리 받아 둔다 (client/public/sw.js · wake.html).
 // 서비스 워커는 HTTPS(또는 localhost)에서만 동작한다. 개발 서버(Vite)에서는 쓰지 않는다

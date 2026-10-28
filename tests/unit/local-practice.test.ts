@@ -1,7 +1,8 @@
 // M13b 기기 안 연습 서버(LocalTransport)와 첫 화면 상태 줄(serverStatus). 가짜 시계로 30Hz 루프 · 숨김 · JSON 왕복을 본다
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerMessage } from '@decoy/shared';
-import { LocalTransport, PRACTICE_BALANCE } from '../../client/src/localServer';
+import { LocalTransport } from '../../client/src/localServer';
+import { PRACTICE_BALANCE } from '../../client/src/practiceBalance';
 import { UNREACHABLE_AFTER_MS, serverStatus } from '../../client/src/serverStatus';
 import { loadTestBalance } from '../helpers/fixtures';
 

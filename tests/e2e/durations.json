@@ -13,6 +13,7 @@
   "frame-limit.spec.ts": 45,
   "hud-fit.spec.ts": 50,
   "layout-editor.spec.ts": 40,
+  "lazy-chunks.spec.ts": 25,
   "m1-sync.spec.ts": 15,
   "m10-fog.spec.ts": 18,
   "m10-fog.webgl.spec.ts": 625,

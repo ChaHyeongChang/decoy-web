@@ -699,7 +699,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * 창 밖 컬링 (성능, 확대 화면만): 월드 그림(깊이 36 아래의 Image · Sprite · Text) 가운데 맵 창 밖(가리개 밑 · 캔버스 밖)에
+   * 창 밖 컬링 (성능, 확대 화면만): 월드 그림(깊이 36 아래의 Image · Text) 가운데 맵 창 밖(가리개 밑 · 캔버스 밖)에
    * 통째로 있는 것은 이번 프레임 그리지 않는다. visible은 건드리지 않고 카메라 거르기(cameraFilter)만 쓴다 — 캐릭터 · 정보 코드가
    * 정하는 보이기 상태와 디버그 목록은 그대로다. 지난 프레임에 거른 것은 먼저 되돌린다(깊이 · 부모가 바뀌어도 숨은 채로 남지 않게).
    * 가리개가 불투명이라 같은 화소다 (render/camera.ts cullable)
@@ -723,12 +723,8 @@ export class GameScene extends Phaser.Scene {
         if (o.visible) for (const c of o.list) visit(c);
         return;
       }
-      if (
-        !(o instanceof Phaser.GameObjects.Image) &&
-        !(o instanceof Phaser.GameObjects.Sprite) &&
-        !(o instanceof Phaser.GameObjects.Text)
-      )
-        return;
+      // 스프라이트는 쓰지 않는다 (배포 빌드의 Phaser 사용자 빌드에 없다 — phaserCore.js)
+      if (!(o instanceof Phaser.GameObjects.Image) && !(o instanceof Phaser.GameObjects.Text)) return;
       if (!o.visible) return;
       o.getBounds(r);
       if (cullable(r, MAP_RECT, pad, view)) {
@@ -1269,8 +1265,9 @@ export class GameScene extends Phaser.Scene {
       this.aimHold.reset();
       return me.face;
     }
-    // 손가락 포인터는 조준을 바꾸지 않는다(터치스크린 노트북의 손가락 · 손바닥): 마우스 포인터만
-    const p = this.input.mousePointer ?? this.input.activePointer;
+    // 손가락 포인터는 조준을 바꾸지 않는다(터치스크린 노트북의 손가락 · 손바닥): 마우스 포인터만.
+    // 게임 입력 관리자에서 직접 읽는다 — 씬 입력 플러그인(scene.input)은 같은 값을 넘겨줄 뿐이라 배포 빌드에서 뺐다(phaserCore.js)
+    const p = this.game.input.mousePointer ?? this.game.input.activePointer;
     // 조준 = 괴물에서 커서 쪽. 커서가 움직였을 때 커서 월드 자리를 재고(지난 프레임의 창), 그 사이에는 그 자리를 기준 카메라
     // (앞당김 · 따라가기 지연 없이 괴물 가운데, 맵 안으로 자름)를 따라 옮긴 곳을 겨눈다 (aimHold.ts: 앞당김이 조준을 끌지 않고,
     // 맵 끝에 막힌 화면에서는 커서 쪽으로 돈다). 괴물 자리는 이 입력 틱의 예측 상태(me)다 — 그리는 자리(localPos)는 프레임마다

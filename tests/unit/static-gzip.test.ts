@@ -1,15 +1,18 @@
 // M12 정적 파일 gzip (server/src/static.ts): 임시 폴더의 가짜 빌드로 실제 HTTP 서버를 띄워 본다.
 // 텍스트 자산은 Accept-Encoding에 gzip이 있을 때만 압축(content-encoding · Vary), png · woff2는 그대로,
-// 지금의 헤더(x-decoy-server) · 캐시 정책 · 경로 처리(없는 경로 → index.html) · 404는 그대로
-import { mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+// 지금의 헤더(x-decoy-server) · 캐시 정책 · 경로 처리(없는 경로 → index.html) · 404는 그대로.
+// 번들 줄이기: 빌드가 미리 압축한 사본(.br · .gz)이 있으면 받는 쪽에 맞춰 그것을, 원본이 바뀐 옛 사본은 쓰지 않는다
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer, request, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { gunzipSync } from 'node:zlib';
+import { brotliDecompressSync, gunzipSync } from 'node:zlib';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { precompressDist } from '../../client/shellBuild';
 import {
   GZIP_MIN_BYTES,
+  acceptedCodings,
   acceptsGzip,
   clearGzipCache,
   gzipCacheSize,
@@ -302,5 +305,96 @@ describe('정적 파일 gzip', () => {
     // URL 파서가 ..를 접어 루트 안으로 오므로(index.html), 인코딩된 구분자로 밖을 가리켜 본다
     const out = await get('/..%2f..%2fetc%2fpasswd', 'gzip');
     expect(out.status).toBe(403);
+  });
+});
+
+describe('미리 압축한 사본 (번들 줄이기: brotli · gzip)', () => {
+  let preRoot = '';
+  let preServer: Server;
+  let prePort = 0;
+  const BIG_JS = `// 미리 압축\n${'export const decoy = "생존자 셋과 괴물 하나";\n'.repeat(600)}`;
+
+  beforeAll(async () => {
+    preRoot = mkdtempSync(join(tmpdir(), 'decoy-static-pre-'));
+    mkdirSync(join(preRoot, 'assets'));
+    writeFileSync(join(preRoot, 'index.html'), HTML);
+    writeFileSync(join(preRoot, 'assets', 'index-pre.js'), BIG_JS);
+    writeFileSync(join(preRoot, 'assets', 'stale-pre.js'), BIG_JS);
+    writeFileSync(join(preRoot, 'assets', 'logo-pre.png'), PNG);
+    expect(precompressDist(preRoot)).toBe(6);
+    preServer = makeServer(preRoot);
+    prePort = await listen(preServer);
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((r) => preServer.close(() => r()));
+    rmSync(preRoot, { recursive: true, force: true });
+  });
+
+  it('Accept-Encoding에서 보낼 방식을 고른다 (q 큰 것 먼저, 같으면 brotli, *는 적지 않은 방식, q=0은 거절)', () => {
+    expect(acceptedCodings('gzip, deflate, br, zstd')).toEqual(['br', 'gzip']);
+    expect(acceptedCodings('gzip')).toEqual(['gzip']);
+    expect(acceptedCodings('br')).toEqual(['br']);
+    expect(acceptedCodings('br;q=0.5, gzip')).toEqual(['gzip', 'br']);
+    expect(acceptedCodings('BR, X-GZIP')).toEqual(['br', 'gzip']);
+    expect(acceptedCodings('*')).toEqual(['br', 'gzip']);
+    expect(acceptedCodings('gzip;q=0, *')).toEqual(['br']);
+    expect(acceptedCodings('br;q=0, gzip')).toEqual(['gzip']);
+    expect(acceptedCodings('identity')).toEqual([]);
+    expect(acceptedCodings('')).toEqual([]);
+    expect(acceptedCodings(undefined)).toEqual([]);
+    expect(acceptedCodings(['gzip', 'br'])).toEqual(['br', 'gzip']);
+  });
+
+  it('brotli를 받으면 미리 압축한 .br를 그대로 (content-encoding · 길이 · Vary · 캐시 정책 · ETag는 원본과 같다)', async () => {
+    const raw = await get('/assets/index-pre.js', 'identity', prePort);
+    const r = await get('/assets/index-pre.js', 'gzip, deflate, br, zstd', prePort);
+    expect(r.status).toBe(200);
+    expect(r.headers['content-encoding']).toBe('br');
+    expect(r.headers.vary).toBe('Accept-Encoding');
+    expect(r.headers['cache-control']).toBe('public, max-age=31536000, immutable');
+    expect(r.headers['content-type']).toBe('text/javascript; charset=utf-8');
+    expect(r.headers.etag).toBe(raw.headers.etag);
+    expect(Number(r.headers['content-length'])).toBe(r.body.length);
+    expect(r.body.equals(readFileSync(join(preRoot, 'assets', 'index-pre.js.br')))).toBe(true);
+    expect(brotliDecompressSync(r.body).toString('utf8')).toBe(BIG_JS);
+    expect(raw.headers['content-encoding']).toBeUndefined();
+    expect(raw.body.toString('utf8')).toBe(BIG_JS);
+  });
+
+  it('gzip만 받으면 미리 압축한 .gz, gzip을 더 높이 치면 brotli를 받아도 .gz', async () => {
+    for (const ae of ['gzip, deflate', 'gzip;q=1, br;q=0.5']) {
+      const r = await get('/assets/index-pre.js', ae, prePort);
+      expect(r.headers['content-encoding']).toBe('gzip');
+      expect(r.body.equals(readFileSync(join(preRoot, 'assets', 'index-pre.js.gz')))).toBe(true);
+      expect(gunzipSync(r.body).toString('utf8')).toBe(BIG_JS);
+    }
+    // 확장자 없는 경로(index.html)도 같다
+    const home = await get('/', 'br', prePort);
+    expect(home.headers['content-encoding']).toBe('br');
+    expect(brotliDecompressSync(home.body).toString('utf8')).toBe(HTML);
+  });
+
+  it('원본만 바뀌고 옛 사본이 남았으면 사본을 쓰지 않는다 (풀어 보고 다르면 그 자리 gzip · brotli만 받으면 원본)', async () => {
+    const next = BIG_JS.replace('미리 압축', '바꾼 원본');
+    writeFileSync(join(preRoot, 'assets', 'stale-pre.js'), next);
+    const both = await get('/assets/stale-pre.js', 'gzip, br', prePort);
+    expect(both.headers['content-encoding']).toBe('gzip');
+    expect(gunzipSync(both.body).toString('utf8')).toBe(next);
+    const brOnly = await get('/assets/stale-pre.js', 'br', prePort);
+    expect(brOnly.headers['content-encoding']).toBeUndefined();
+    expect(brOnly.body.toString('utf8')).toBe(next);
+  });
+
+  it('png는 사본도 압축도 없다, If-None-Match가 맞으면 304 그대로', async () => {
+    const png = await get('/assets/logo-pre.png', 'br, gzip', prePort);
+    expect(png.headers['content-encoding']).toBeUndefined();
+    expect(png.body.equals(PNG)).toBe(true);
+    const first = await get('/assets/index-pre.js', 'br', prePort);
+    const again = await get('/assets/index-pre.js', 'br', prePort, {
+      'if-none-match': String(first.headers.etag),
+    });
+    expect(again.status).toBe(304);
+    expect(again.body.length).toBe(0);
   });
 });
