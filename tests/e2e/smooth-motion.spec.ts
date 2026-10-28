@@ -8,7 +8,7 @@
 //  - 입력 지연: 키를 누른 뒤 첫 움직임이 다음 입력 틱 + 한 프레임 안에 그려진다 (보간 때문에 늘지 않는다)
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { installVirtualClock, type VirtualClockConfig, type VirtualFrameLog } from '../helpers/virtualClock';
-import { newPlayerPage } from './helpers';
+import { newPlayerPage, waitPrefetched } from './helpers';
 
 const QUERY = '/?debug=hook&renderer=canvas&quality=low';
 const SEED = 20_261_024;
@@ -122,6 +122,7 @@ async function walk(browser: Browser, cfg: VirtualClockConfig, opts: WalkOpts = 
     await page.goto(opts.limit ? `${QUERY}&fpsLimit=${opts.limit}` : QUERY);
     await expect(page.getByTestId('practice')).toBeVisible();
     await expect.poll(() => page.evaluate(() => window.__DECOY__?.fonts.ready === true)).toBe(true);
+    await waitPrefetched(page);
     await context.setOffline(true);
     await page.waitForTimeout(300);
     await page.evaluate(() => window.__VCLOCK__?.pump(false));

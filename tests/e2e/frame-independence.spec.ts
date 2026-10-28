@@ -14,7 +14,7 @@ import { expect, test, type Browser, type BrowserContext, type Page } from '@pla
 import type { AnimDebug, DrawnEntity, InfoItem } from '@decoy/shared';
 import type { TruthFrame } from '@decoy/shared/sim';
 import { installVirtualClock } from '../helpers/virtualClock';
-import { newPlayerPage } from './helpers';
+import { newPlayerPage, waitPrefetched } from './helpers';
 
 /** 품질 높음: 장식(발먼지 · 빛 속 먼지 · 걷기 위상 끊지 않음)까지 비교한다 */
 // 따라가는 카메라: 마우스 조준은 커서가 움직인 순간의 화면(창 자리)에 달려 있어 확대 화면에서는 프레임 속도마다 조금 다를 수
@@ -52,6 +52,7 @@ async function openRun(browser: Browser, hz: number): Promise<Run> {
   await page.goto(QUERY);
   await expect(page.getByTestId('practice')).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.__DECOY__?.fonts.ready === true)).toBe(true);
+  await waitPrefetched(page);
   // 오프라인으로 두면 다시 연결하지 않는다: 멈춘 뒤 진짜 입출력(소켓 닫힘)이 가상 시각 어디에도 끼지 않는다
   await context.setOffline(true);
   await page.waitForTimeout(300);

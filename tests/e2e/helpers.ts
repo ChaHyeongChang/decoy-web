@@ -143,6 +143,41 @@ export function watchConsole(page: Page, problems: string[]): void {
  * 플레이어 한 명의 브라우저 컨텍스트 · 페이지. device를 주지 않으면 PC(960×540, 마우스).
  * 페이지마다 포인터 이벤트 수를 센다(pointerCounts — 탭이 정말 터치로 들어갔는지, pointercancel이 났는지)
  */
+/**
+ * 판 밖 쉬는 시간에 미리 받는 조각(결과 · 내 기록 · 설정 · 봇과 연습 · 의상 그림과 그것들이 함께 쓰는 계정 문구 조각)을 다 받을 때까지
+ * 기다린다. 첫 화면이 뜬 뒤 오프라인으로 바꾸는 시험은 이것을 먼저 부른다 — 미리 받기가 끝나기 전에 끊으면 남은 조각 받기가
+ * 실패해 콘솔 오류('Failed to load resource') · 연습 서버 없음(transport 'net')이 된다. 느린 러너에서 조각 하나(accountText,
+ * 선택형 구글 로그인)가 늘자 드러났다
+ */
+export const PREFETCH_CHUNKS = [
+  'art',
+  'hub',
+  'localServer',
+  'result',
+  'settingsPanel',
+  'accountText',
+] as const;
+
+export async function waitPrefetched(page: Page, timeout = 30_000): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          (names) => {
+            const got = new Set<string>();
+            for (const e of performance.getEntriesByType('resource') as PerformanceResourceTiming[]) {
+              const m = /\/assets\/([A-Za-z]+)-[\w-]+\.js$/.exec(new URL(e.name).pathname);
+              if (m?.[1] && e.responseEnd > 0) got.add(m[1]);
+            }
+            return names.filter((n) => !got.has(n));
+          },
+          [...PREFETCH_CHUNKS],
+        ),
+      { timeout, message: '미리 받는 조각을 다 받을 때까지 (오프라인으로 바꾸기 전)' },
+    )
+    .toEqual([]);
+}
+
 export async function newPlayerPage(
   browser: Browser,
   device?: DeviceOptions,
