@@ -95,8 +95,16 @@ export interface AccountStore extends ProfileStore {
   claimLogin(meta: MetaState): Promise<LoginClaimed | null>;
   buyCostume(meta: MetaState, team: Team, id: string): Promise<CostumeBought>;
   wearCostume(meta: MetaState, team: Team, id: string): Promise<CostumeWorn | null>;
-  /** 판 결과: 온라인 판은 미리보기 + credit 기다리기, 연습 판은 적립하지 않음 */
-  rate(meta: MetaState, rating: MatchRating, practice: boolean): RatingApplied;
+  /**
+   * 판 결과: 온라인 판은 미리보기 + credit 기다리기, 연습 판은 적립하지 않음. guest = 이 계정으로 열지 않은 소켓의 온라인 판
+   * (소켓을 연 뒤 계정 모드가 바뀜 — 서버가 이 계정에 적립하지 않는다, 기기 기록에 적립)
+   */
+  rate(
+    meta: MetaState,
+    rating: MatchRating,
+    practice: boolean,
+    guest: boolean,
+  ): RatingApplied | Promise<RatingApplied>;
   credit(meta: MetaState, matchId: string, ok: boolean, text: string | null): void;
   /** 앱으로 돌아옴 · 자정: 계정 기록을 다시 읽었으면 true */
   refresh(): Promise<boolean>;
@@ -335,11 +343,13 @@ export class MetaState {
    * 게스트: 적립 직전에 저장소를 다시 읽는다 — 다른 탭이 그사이 적립했으면 그 위에 더한다(덮어써 잃지 않게, 같은 판 ID도
    * 거기서 걸러진다). 다시 읽지 못하면 메모리의 기록에 더한다.
    * 계정: 온라인 판은 같은 공용 함수로 미리보기만 하고 기록은 서버의 credit을 기다린다(계정 저장소가 곧바로 기다림을 건다 —
-   * credit이 이 함수가 끝나기 전에 와도 놓치지 않게). 연습 판은 적립하지 않는다(기기 기록에도 쓰지 않는다)
+   * credit이 이 함수가 끝나기 전에 와도 놓치지 않게). 연습 판은 적립하지 않는다(기기 기록에도 쓰지 않는다).
+   * stale = 이 판의 소켓을 연 뒤 계정 모드가 바뀌었다(app.ts): 서버는 소켓을 열 때의 쿠키로 계정을 정하므로 계정 모드면 이 계정에
+   * 적립되지 않는다 — 기기 기록에 적립한다. 게스트 모드는 소켓과 상관없이 기기 기록
    */
-  async applyRating(rating: MatchRating, practice = false): Promise<RatingApplied> {
+  async applyRating(rating: MatchRating, practice = false, stale = false): Promise<RatingApplied> {
     const s = this.store;
-    if (s.kind === 'server') return s.rate(this, rating, practice);
+    if (s.kind === 'server') return s.rate(this, rating, practice, stale);
     await this.ready;
     await this.reread();
     const applied = applyRating(this.profile, rating, this.now(), this.prog, this.today());

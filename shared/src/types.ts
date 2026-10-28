@@ -533,7 +533,7 @@ export interface AccountImportRequest {
    * 'account'면 계정 기록을 그대로 둔다
    */
   choice: 'device' | 'account';
-  /** 이 기기 기록 글 (decoy:progress 그대로, 없으면 null) */
+  /** 이 기기 기록 글 (decoy:progress 그대로, 없으면 null). choice가 'account'면 null (고른 대로 올린다 — 보내지 않는다) */
   device: string | null;
 }
 
