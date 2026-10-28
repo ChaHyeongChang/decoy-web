@@ -147,6 +147,8 @@ export class LobbyUI {
   private readonly cardFigures = new Map<string, Element>();
   /** 역할 카드 능력 줄의 입력 방식 */
   private readonly mode: InputMode = device.touch ? 'touch' : 'keyboard';
+  /** 봇과 연습 역할 고르기를 그린 횟수 (practicePicker) */
+  private pickerSeq = 0;
   /** 첫 화면 서버 상태 줄 (M13b): 연결과 상관없이 첫 화면을 그리고 이 줄로 알린다 */
   private readonly statusLine: HTMLDivElement;
   private readonly statusText: HTMLSpanElement;
@@ -246,9 +248,13 @@ export class LobbyUI {
     return this.root.style.display !== 'none' && this.content.classList.contains('lobby-home');
   }
 
-  /** 봇과 연습 역할 고르기가 보이는 중인가 (연습 조각을 받은 뒤 시작해도 되는지 — app.ts startPractice) */
-  get atPracticePicker(): boolean {
-    return this.atHome && this.content.querySelector('[data-testid="practice-picker"]') !== null;
+  /**
+   * 지금 보이는 봇과 연습 역할 고르기 화면의 번호 (없으면 null). 고르기를 그릴 때마다 새 번호다 — 연습 조각을 받은 뒤 시작해도
+   * 되는지 app.ts startPractice가 역할을 누를 때의 번호와 견준다(받는 사이 취소했다 다시 연 고르기에서 옛 선택으로 시작하지 않게)
+   */
+  get practicePicker(): number | null {
+    const shown = this.atHome && this.content.querySelector('[data-testid="practice-picker"]') !== null;
+    return shown ? this.pickerSeq : null;
   }
 
   private get atRoom(): boolean {
@@ -403,6 +409,7 @@ export class LobbyUI {
    * 터치 기기에서 아직 조작 안내를 보지 않았으면 안내 카드 대신 그 판의 처음 10초 위치 표시만 한다
    */
   renderPracticePicker(name: string): void {
+    this.pickerSeq += 1;
     this.lastLobby = null;
     this.quickCountdown = null;
     this.netButtonsExtra = null;

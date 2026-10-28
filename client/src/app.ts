@@ -574,9 +574,12 @@ export class App {
   private startPractice(role: Role, name: string): void {
     if (this.local) return;
     const req = ++this.practiceReq;
+    // 역할을 누른 그 고르기 화면 (받는 사이 취소했다가 다시 연 고르기는 번호가 다르다)
+    const picker = this.lobbyUi.practicePicker;
     void this.loadPractice().then((mod) => {
-      // 받는 사이 다른 역할을 눌렀거나, 연습 고르기를 떠났거나(취소 · 방 링크), 이미 연습 중이면 그만
-      if (req !== this.practiceReq || this.local || !this.lobbyUi.atPracticePicker) return;
+      // 받는 사이 다른 역할을 눌렀거나, 그 고르기를 떠났거나(취소 · 방 링크 · 다시 연 고르기), 이미 연습 중이면 그만
+      if (req !== this.practiceReq || this.local || picker === null || this.lobbyUi.practicePicker !== picker)
+        return;
       if (!mod) {
         // 새 배포로 옛 조각이 사라졌다(옛 화면): '새 버전이 있어요' — 새로고침하면 새 조각을 받는다
         this.showUpdate();

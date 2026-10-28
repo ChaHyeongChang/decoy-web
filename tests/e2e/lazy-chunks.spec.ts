@@ -175,3 +175,34 @@ test('터치 로비 설정: 배치 편집 조각은 설정을 열 때 받고, �
   expect(bad.problems.filter((p) => !BLOCKED.test(p) && !/layoutEditor-/.test(p))).toEqual([]);
   await bad.context.close();
 });
+
+test('연습 조각을 받는 사이 역할을 누르고 취소했다가 연습 고르기를 다시 열면, 받기가 끝나도 옛 선택으로 시작하지 않는다 (Codex 검토 반영)', async ({
+  browser,
+}) => {
+  const { context, page, problems } = await newPlayerPage(browser, { serviceWorkers: 'block' });
+  // 연습 조각을 늦게 준다 (느린 회선 · 아직 미리 받지 못한 때)
+  let release = (): void => undefined;
+  const gate = new Promise<void>((r) => (release = r));
+  await page.route(/\/assets\/localServer-[^/]*\.js$/, async (route) => {
+    await gate;
+    await route.continue();
+  });
+  await page.goto('/?debug=hook&renderer=canvas&quality=low');
+  await press(page.getByTestId('practice'));
+  await press(page.getByTestId('practice-role-runner'));
+  await press(page.getByTestId('practice-cancel'));
+  await press(page.getByTestId('practice'));
+  await expect(page.getByTestId('practice-picker')).toBeVisible();
+  release();
+  await page.waitForTimeout(1500);
+  expect(await page.evaluate(() => window.__DECOY__?.transport)).toBe('net');
+  await expect(page.getByTestId('practice-picker')).toBeVisible();
+  // 다시 연 고르기에서 누른 역할은 시작한다
+  await press(page.getByTestId('practice-role-scout'));
+  await expect
+    .poll(() => page.evaluate(() => window.__DECOY__?.transport), { timeout: 15_000 })
+    .toBe('local');
+  expect(await page.evaluate(() => window.__DECOY__?.role)).toBe('scout');
+  expect(problems.filter((p) => !BLOCKED.test(p))).toEqual([]);
+  await context.close();
+});
