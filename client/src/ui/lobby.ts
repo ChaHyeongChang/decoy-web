@@ -23,7 +23,7 @@ import type { ServerStatusView } from '../serverStatus';
 import { currentCharStyle, onCharStyleChange } from '../gfx/charStyle';
 import { onWearingChange, wearingFor } from '../meta/wearing';
 import { TouchTutorialCard } from './lifecycleUi';
-import type { SettingsPanel } from './settingsPanel';
+import type { SettingsHost } from './settingsHost';
 import {
   blueprintSvg,
   characterFigureSvg,
@@ -166,7 +166,7 @@ export class LobbyUI {
      * 설정 화면 (설정 화면 통합: PC · 터치 같은 화면). 첫 화면 패널 아래 · 방 화면 · 빠른 매칭 대기 명령 줄에 '설정' 단추를 둔다.
      * 화면 자체는 #ui-root에 있다(판 중에도 열린다 — App이 만든다)
      */
-    private readonly settings: SettingsPanel,
+    private readonly settings: SettingsHost,
     /**
      * 내 레벨 (GAME_DESIGN 12장, 내 기기 기록으로만 — 남의 레벨은 그리지 않는다): 첫 화면은 이름 칸 옆, 연습 고르기는 취소 옆에 칩
      * (요소 하나를 옮겨 붙인다 — 높이를 늘리지 않는 자리), 방 · 빠른 매칭 대기는 내 줄의 '나' 옆에 "Lv n" 꼬리표
@@ -244,6 +244,11 @@ export class LobbyUI {
   /** 첫 화면이 보이는 중인가 */
   get atHome(): boolean {
     return this.root.style.display !== 'none' && this.content.classList.contains('lobby-home');
+  }
+
+  /** 봇과 연습 역할 고르기가 보이는 중인가 (연습 조각을 받은 뒤 시작해도 되는지 — app.ts startPractice) */
+  get atPracticePicker(): boolean {
+    return this.atHome && this.content.querySelector('[data-testid="practice-picker"]') !== null;
   }
 
   private get atRoom(): boolean {

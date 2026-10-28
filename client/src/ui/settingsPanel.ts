@@ -1,5 +1,6 @@
 // 설정 화면 (설정 화면 통합, VISUAL_SPEC 9.5): PC · 휴대폰이 같은 구성의 한 화면. 탭 그래픽 · 화면 · 소리 · 조작.
-// 여는 곳: 첫 화면 · 방 화면 · 빠른 매칭 대기의 '설정' 단추(button()), 판 중 메뉴 버튼(matchMenu — 판 중에는 조작 탭 없음).
+// 여는 곳: 첫 화면 · 방 화면 · 빠른 매칭 대기의 '설정' 단추, 판 중 메뉴 버튼(matchMenu — 판 중에는 조작 탭 없음).
+// 이 파일은 나눠 받는 조각 'settings'다 — 단추 · 받기 · 미리 만들기는 settingsHost.ts, CSS(settings.css)도 그쪽에서 첫 CSS로 부른다.
 // 온라인 판이라 판은 멈추지 않는다: 판 중에 열면 맨 위에 그 사실을 적고, 판 장면은 열려 있는 동안 입력을 받지 않는다(GameScene).
 // 값은 settingsModel(그래픽 · 진동 · 배치) · prefs(화면 · 소리 · 조이스틱)에서 읽고 쓴다 — 고르면 바로 적용하고 저장한다.
 // 저장이 막히면(사생활 보호 · 가득 참) 아래에 '저장되지 않아요' 안내 하나. 주소 옵션이 있는 줄은 잠그고 그 사실을 적는다.
@@ -49,7 +50,6 @@ import {
 } from '../settingsModel';
 import { onCharStyleChange } from '../gfx/charStyle';
 import { h, icon } from './uiArt';
-import './settings.css';
 
 /** 연 손가락의 click을 버리는 시간 (ms, 연 뒤 설정 화면 안에서 누른 적 없는 포인터 click만 — ghostUntil) */
 const GHOST_CLICK_MS = 800;
@@ -272,26 +272,6 @@ export class SettingsPanel {
   /** 지금 연 곳 (판 · 로비) */
   get context(): SettingsContext {
     return this.ctx;
-  }
-
-  /**
-   * 로비 화면의 '설정' 단추 (화면을 다시 그릴 때마다 새로 만든다 — 방 화면은 로비 상태가 올 때마다 다시 그려진다).
-   * 누르면 로비 설정을 연다
-   */
-  button(): HTMLButtonElement {
-    const b = h(
-      'button',
-      {
-        class: 'btn life-gear',
-        type: 'button',
-        'aria-haspopup': 'dialog',
-        'data-testid': 'settings-button',
-      },
-      icon('sliders', 18),
-      APP_TEXT.settings,
-    );
-    b.addEventListener('click', () => this.open('lobby'));
-    return b;
   }
 
   /** 연다. ctx = 'match'면 그래픽 · 화면 · 소리 탭만, 맨 위에 '판은 멈추지 않아요' */

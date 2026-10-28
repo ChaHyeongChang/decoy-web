@@ -41,7 +41,7 @@ import {
 import { EDITOR_TEXT, HUD_TEXT, TOUCH_TEXT, UI_TEXT } from '../data/storyText';
 import { canOfferFullscreen } from '../device';
 import { stickAlphaOf } from '../prefs';
-import './layoutEditor.css';
+// CSS(layoutEditor.css)는 첫 CSS에 둔다 (settingsHost.ts에서 부른다 — 이 파일은 나눠 받는 조각)
 import { thumbMetrics, tuningOf } from './layout';
 import {
   controlBoxes,

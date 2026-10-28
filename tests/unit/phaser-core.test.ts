@@ -7,37 +7,67 @@ import { join } from 'node:path';
 import * as ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
-/** phaser-core.js의 `var Phaser = { ... }`에서 require로 붙은 경로(그 아래는 모두 있다) */
+const CORE = 'client/src/phaserCore.js';
+
+/**
+ * phaserCore.js의 `Extend(false, { ... }, CONST)` 객체에서 붙은 경로(그 아래는 모두 있다). 줄임 속성(`Game,`)과
+ * `Name: 식별자`는 잎, `Name: { ... }`는 중첩이다. 구문 트리로 읽는다
+ */
 function coreLeaves(): Set<string> {
-  const src = readFileSync('node_modules/phaser/src/phaser-core.js', 'utf8');
-  const start = src.indexOf('var Phaser = {');
-  const end = src.indexOf('\n};', start);
-  if (start < 0 || end < 0) throw new Error('phaser-core.js 구조가 바뀌었다');
-  const body = src.slice(start + 'var Phaser = {'.length, end);
+  const src = readFileSync(CORE, 'utf8');
+  const sf = ts.createSourceFile(CORE, src, ts.ScriptTarget.Latest, true);
+  let root: ts.ObjectLiteralExpression | null = null;
+  const find = (n: ts.Node): void => {
+    if (
+      ts.isCallExpression(n) &&
+      ts.isIdentifier(n.expression) &&
+      n.expression.text === 'Extend' &&
+      n.arguments.length === 3 &&
+      n.arguments[1] !== undefined &&
+      ts.isObjectLiteralExpression(n.arguments[1]) &&
+      n.arguments[2] !== undefined &&
+      ts.isIdentifier(n.arguments[2]) &&
+      n.arguments[2].text === 'CONST'
+    )
+      root = n.arguments[1];
+    ts.forEachChild(n, find);
+  };
+  find(sf);
+  if (root === null) throw new Error('phaserCore.js 구조가 바뀌었다 (Extend(false, { ... }, CONST))');
   const leaves = new Set<string>();
-  const stack: string[] = [];
-  // 키: `Name: {` (중첩 열기), `Name: require(...)` (잎), `Name: { Inner: require(...) }` (한 줄 중첩)
-  const token = /([A-Za-z0-9_]+)\s*:\s*(\{|require\()|\}/g;
-  for (let m = token.exec(body); m; m = token.exec(body)) {
-    if (m[0] === '}') {
-      stack.pop();
-      continue;
+  const walk = (obj: ts.ObjectLiteralExpression, prefix: string[]): void => {
+    for (const p of obj.properties) {
+      if (ts.isShorthandPropertyAssignment(p)) leaves.add([...prefix, p.name.text].join('.'));
+      else if (ts.isPropertyAssignment(p) && ts.isIdentifier(p.name)) {
+        if (ts.isObjectLiteralExpression(p.initializer)) walk(p.initializer, [...prefix, p.name.text]);
+        else leaves.add([...prefix, p.name.text].join('.'));
+      } else throw new Error(`phaserCore.js: 읽지 못하는 칸 ${p.getText()}`);
     }
-    const key = m[1] ?? '';
-    if (m[2] === '{') stack.push(key);
-    else leaves.add(['Phaser', ...stack, key].join('.'));
-  }
-  // `Phaser = Extend(false, Phaser, CONST)`: 상수(AUTO · CANVAS · WEBGL …)
-  if (!src.includes('Extend(false, Phaser, CONST)')) throw new Error('phaser-core.js 상수 붙이기가 바뀌었다');
+  };
+  walk(root, ['Phaser']);
+  // 상수(AUTO · CANVAS · WEBGL …)
   const consts = readFileSync('node_modules/phaser/src/const.js', 'utf8');
   for (const m of consts.matchAll(/^ {4}([A-Z_0-9]+):/gm)) leaves.add(`Phaser.${m[1] ?? ''}`);
   return leaves;
 }
 
-/** phaserCore.js가 덧붙인 경로 (`Phaser.GameObjects.Container = Container;`) */
-function patched(): Set<string> {
-  const src = readFileSync('client/src/phaserCore.js', 'utf8');
-  return new Set([...src.matchAll(/^(Phaser\.[A-Za-z0-9_.]+)\s*=/gm)].map((m) => m[1] ?? ''));
+/**
+ * 붙은 묶음 안이지만 사용자 빌드가 빈 모듈로 바꾼 것 (vite.config.ts PHASER_STUBS — 미리 FX · FX 파이프라인).
+ * 값으로 쓰면 배포 빌드에서만 멈춘다
+ */
+const STUBBED: readonly string[] = [
+  'Phaser.Renderer.WebGL.Pipelines.FX',
+  'Phaser.Renderer.WebGL.Pipelines.FXPipeline',
+  'Phaser.Renderer.WebGL.Pipelines.PreFXPipeline',
+];
+
+/** 사용자 빌드가 등록하는 만들기 함수 (scene.add.* · scene.make.*, GameObjectFactory.existing 포함) */
+function registeredFactories(): Set<string> {
+  const src = readFileSync(CORE, 'utf8');
+  const names = new Set(['existing']);
+  for (const m of src.matchAll(/gameobjects\/[a-z/]+\/([A-Za-z]+)(?:Factory|Creator)\.js'/g))
+    names.add((m[1] ?? '').charAt(0).toLowerCase() + (m[1] ?? '').slice(1));
+  return names;
 }
 
 function tsFiles(dir: string): string[] {
@@ -100,11 +130,60 @@ function valueUses(): { file: string; path: string }[] {
   return uses;
 }
 
+/** 사용자 빌드가 불러오지 않아 씬에 붙지 않는 기본 플러그인 (scene.tweens · scene.time · scene.load · scene.input · scene.data · scene.lights) */
+const DROPPED_SCENE_PLUGINS: ReadonlySet<string> = new Set([
+  'tweens',
+  'time',
+  'load',
+  'input',
+  'data',
+  'lights',
+]);
+
+/**
+ * 소스 하나에서 사용자 빌드에 없는 Phaser 기능을 쓰는 곳: Phaser.Scene을 이어받은 클래스의 `this.<빠진 플러그인>`,
+ * `scene.<빠진 플러그인>` · `.scene.<…>` · `.sys.<…>`, 등록하지 않은 만들기 함수 `.add.<이름>` · `.make.<이름>`,
+ * 누르기 판정(`setInteractive` — 씬 입력 플러그인), 기본 FX 추가(`.preFX.add…` · `.postFX.add…`)
+ */
+function scanMissingFeatures(file: string, src: string, factories: ReadonlySet<string>): string[] {
+  const out: string[] = [];
+  const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true);
+  const sceneClass = (n: ts.Node): boolean =>
+    ts.isClassDeclaration(n) &&
+    (n.heritageClauses ?? []).some((h) => h.types.some((t) => t.expression.getText(sf) === 'Phaser.Scene'));
+  const visit = (n: ts.Node, inScene: boolean): void => {
+    const scene = inScene || sceneClass(n);
+    if (ts.isPropertyAccessExpression(n)) {
+      const name = n.name.text;
+      const left = n.expression;
+      const where = `${file}:${sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1}`;
+      if (DROPPED_SCENE_PLUGINS.has(name)) {
+        const sceneLike =
+          (scene && left.kind === ts.SyntaxKind.ThisKeyword) ||
+          (ts.isIdentifier(left) && left.text === 'scene') ||
+          (ts.isPropertyAccessExpression(left) && (left.name.text === 'scene' || left.name.text === 'sys'));
+        if (sceneLike) out.push(`${where} ${n.getText(sf)}`);
+      }
+      if (ts.isPropertyAccessExpression(left) && (left.name.text === 'add' || left.name.text === 'make'))
+        if (!factories.has(name)) out.push(`${where} ${n.getText(sf)}`);
+      if (name === 'setInteractive') out.push(`${where} ${n.getText(sf)}`);
+      if (
+        name.startsWith('add') &&
+        ts.isPropertyAccessExpression(left) &&
+        (left.name.text === 'preFX' || left.name.text === 'postFX')
+      )
+        out.push(`${where} ${n.getText(sf)}`);
+    }
+    ts.forEachChild(n, (c) => visit(c, scene));
+  };
+  visit(sf, false);
+  return out;
+}
+
 describe('Phaser 사용자 빌드 (배포 빌드)', () => {
   const leaves = coreLeaves();
-  const extra = patched();
   const has = (path: string): boolean => {
-    if (extra.has(path)) return true;
+    if (STUBBED.some((x) => path === x || path.startsWith(`${x}.`))) return false;
     const parts = path.split('.');
     for (let n = 2; n <= parts.length; n += 1) if (leaves.has(parts.slice(0, n).join('.'))) return true;
     return false;
@@ -116,10 +195,18 @@ describe('Phaser 사용자 빌드 (배포 빌드)', () => {
     expect(leaves.has('Phaser.Math.Vector2')).toBe(true);
     expect(leaves.has('Phaser.Renderer')).toBe(true);
     expect(leaves.has('Phaser.WEBGL')).toBe(true);
-    expect(extra.has('Phaser.GameObjects.Container')).toBe(true);
-    // 코어에 없는 것 (예전 실수)
+    expect(leaves.has('Phaser.GameObjects.Container')).toBe(true);
+    // 사용자 빌드에 없는 것 (예전 실수 · 번들 줄이기에서 뺀 것)
     expect(has('Phaser.Geom.Rectangle')).toBe(false);
     expect(has('Phaser.Math.Clamp')).toBe(false);
+    expect(has('Phaser.GameObjects.Sprite')).toBe(false);
+    expect(has('Phaser.Tweens.TweenManager')).toBe(false);
+    expect(has('Phaser.Loader.LoaderPlugin')).toBe(false);
+    expect(has('Phaser.Renderer.WebGL.Pipelines.FXPipeline')).toBe(false);
+    expect(has('Phaser.Renderer.WebGL.Pipelines.PostFXPipeline')).toBe(true);
+    expect(registeredFactories()).toEqual(
+      new Set(['existing', 'blitter', 'container', 'graphics', 'image', 'layer', 'rectangle', 'text']),
+    );
   });
 
   it('스캔: 값 자리는 모두 잡고 타입 자리는 뺀다', () => {
@@ -162,5 +249,49 @@ describe('Phaser 사용자 빌드 (배포 빌드)', () => {
     expect(uses.some((u) => u.path.startsWith('Phaser.GameObjects.'))).toBe(true);
     const missing = uses.filter((u) => !has(u.path)).map((u) => `${u.file}: ${u.path}`);
     expect(missing).toEqual([]);
+  });
+  it('빠진 씬 플러그인 · 등록하지 않은 만들기 함수 · 누르기 판정 · 기본 FX를 쓰지 않는다', () => {
+    const factories = registeredFactories();
+    // 스캔이 잡는지 (반례)
+    const bad = [
+      "import Phaser from 'phaser';",
+      'class S extends Phaser.Scene {',
+      '  create(): void {',
+      '    this.tweens.add({});',
+      '    this.add.sprite(0, 0, "k");',
+      '    this.time.delayedCall(1, () => undefined);',
+      '  }',
+      '}',
+      'function f(scene: Phaser.Scene, img: Phaser.GameObjects.Image): void {',
+      '  scene.input.on("pointerdown", () => undefined);',
+      '  img.setInteractive();',
+      '  img.preFX?.addGlow();',
+      '  scene.add.image(0, 0, "k");',
+      '}',
+    ].join('\n');
+    expect(scanMissingFeatures('x.ts', bad, factories).map((x) => x.split(' ')[1])).toEqual([
+      'this.tweens',
+      'this.add.sprite',
+      'this.time',
+      'scene.input',
+      'img.setInteractive',
+      'img.preFX?.addGlow',
+    ]);
+    const found: string[] = [];
+    for (const file of tsFiles('client/src')) {
+      const src = readFileSync(file, 'utf8');
+      if (!/^import Phaser from 'phaser';$/m.test(src)) continue;
+      found.push(...scanMissingFeatures(file, src, factories));
+    }
+    expect(found).toEqual([]);
+  });
+
+  it('게임 설정이 미리 FX · 기본 후처리 FX를 끈다 (빈 모듈로 바꾼 FX 파이프라인을 부팅 때 만들지 않게)', () => {
+    const main = readFileSync('client/src/main.ts', 'utf8');
+    expect(main).toMatch(/^\s*disablePreFX: true,$/m);
+    expect(main).toMatch(/^\s*disablePostFX: true,$/m);
+    const vite = readFileSync('client/vite.config.ts', 'utf8');
+    for (const f of ['renderer/webgl/pipelines/FXPipeline.js', 'renderer/webgl/pipelines/fx/index.js'])
+      expect(vite).toContain(`'${f}'`);
   });
 });
