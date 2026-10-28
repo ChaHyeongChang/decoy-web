@@ -3,15 +3,28 @@
 //    그림 표의 파일이 artifacts/store/에 있다
 //  - docs/PLAY_STORE_GUIDE.md: 요청한 단계 제목이 모두 있고, 적힌 환경 변수 이름 · 경로가 서버 코드와 글자 그대로 같다
 //  - render.yaml: 처리방침 문의처 환경 변수는 값 없이 키 자리만
+//  - 선택형 구글 로그인: STORE_LISTING 4장(로그인을 켤 때 바꾸는 값)의 바꾼 설명도 4000자 이하 · ⚠ 자리, docs/LOGIN_GUIDE.md의
+//    경로가 shared/src/account.ts와 같고 적힌 환경 변수 이름이 설계(docs/ACCOUNT_PLAN.md 3절) · 서버 코드에 있는 이름이다
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
+import { ACCOUNT_DATA, type AccountDataInfo } from '../../client/src/privacyData';
 import { MAX_BOT_ROOMS_ENV } from '../../server/src/config';
 import { PRIVACY_CONTACT_ENV, PRIVACY_PATHS } from '../../server/src/privacy';
 import { ASSETLINKS_PATH, TWA_FINGERPRINTS_ENV, TWA_PACKAGE_ENV } from '../../server/src/wellKnown';
+import {
+  ACCOUNT_API,
+  ACCOUNT_DELETE_PATH,
+  AUTH_CALLBACK_PATH,
+  AUTH_START_PATH,
+} from '../../shared/src/account';
 
 const LISTING = readFileSync('docs/STORE_LISTING.md', 'utf8');
 const GUIDE = readFileSync('docs/PLAY_STORE_GUIDE.md', 'utf8');
+const LOGIN_GUIDE = readFileSync('docs/LOGIN_GUIDE.md', 'utf8');
+const LOGIN_HEAD = '## 4. 로그인을 켤 때 바꾸는 값';
+/** 자세한 설명에서 로그인을 켤 때 바꾸는 줄 (STORE_LISTING 4.1) */
+const NO_LOGIN_LINE = '· 광고 · 결제 · 채팅이 없고, 계정이나 로그인이 필요 없습니다';
 
 /** '### 제목' 아래 첫 ```text 블록 */
 function textBlock(heading: string): string {
@@ -95,14 +108,49 @@ describe('STORE_LISTING.md', () => {
     expect(access).toContain('봇과 연습');
   });
 
-  it('남은 ⚠ 확인 필요는 지연 측정값 · 태그 둘뿐 — 데이터 보안 · 콘텐츠 등급 · 타깃 연령은 2026-10-13 결정 반영', () => {
+  it('1~3장에 남은 ⚠ 확인 필요는 지연 측정값 · 태그 둘뿐 — 데이터 보안 · 콘텐츠 등급 · 타깃 연령은 2026-10-13 결정 반영', () => {
     const lines = LISTING.split('\n');
     const head = lines.indexOf('---');
+    const login = lines.indexOf(`${LOGIN_HEAD} (선택형 구글 로그인)`);
+    expect(login).toBeGreaterThan(head);
     const flagged = lines.map((l, i) => ({ l, i })).filter(({ l }) => l.includes('⚠'));
-    // 표 밖의 ⚠는 머리의 안내 줄(표시를 설명하는 줄)에만
+    // 표 밖의 ⚠는 머리의 안내 줄(표시를 설명하는 줄)에만 (4장 포함)
     expect(flagged.filter(({ l, i }) => !l.startsWith('|') && i > head)).toEqual([]);
-    const rows = flagged.filter(({ l }) => l.startsWith('|')).map(({ l }) => l.split('|')[1]?.trim() ?? '');
+    const rowName = ({ l }: { l: string }): string => l.split('|')[1]?.trim() ?? '';
+    const rows = flagged.filter(({ l, i }) => l.startsWith('|') && i < login).map(rowName);
     expect(rows.sort()).toEqual(['지연 측정값', '태그 (최대 5개, Console 목록에서 고름)']);
+    // 4장(로그인을 켤 때)의 ⚠: 사람이 판단할 데이터 유형(ACCOUNT_DATA confirm) + 앱 액세스 선택
+    const loginRows = flagged.filter(({ l, i }) => l.startsWith('|') && i > login).map(rowName);
+    const confirmLabels = (Object.values(ACCOUNT_DATA) as AccountDataInfo[])
+      .filter((d) => d.confirm)
+      .map((d) => d.label);
+    expect(loginRows.sort()).toEqual([...confirmLabels, '앱 액세스 Console 선택'].sort());
+  });
+
+  it('4장: 로그인을 켤 때 바꾼 자세한 설명도 4000자 이하 · 과장 없음, 앱 액세스 · 계정 만들기 · 계정 삭제 URL', () => {
+    const full = textBlock('자세한 설명');
+    expect(full.split('\n')).toContain(NO_LOGIN_LINE);
+    const line = textBlock('4.1 자세한 설명에서 바꿀 한 줄');
+    expect(line.includes('\n')).toBe(false);
+    expect(LISTING.slice(LISTING.indexOf(LOGIN_HEAD))).toContain(`\`${NO_LOGIN_LINE}\``);
+    const changed = full.replace(NO_LOGIN_LINE, line);
+    expect(changed).not.toBe(full);
+    expect(chars(changed)).toBeLessThanOrEqual(4000);
+    expect(line).not.toMatch(/최고|1위|최초|무료 아이템|보상|이벤트|#1|best|top/i);
+    if (/채팅|결제/.test(line)) expect(line).toMatch(/없/);
+    expect(line).toContain('Google 계정');
+    const access = textBlock('4.2 앱 액세스 (2.1 대신)');
+    expect(access).toContain('로그인');
+    expect(access).toContain('봇과 연습');
+    expect(access).toContain('아무 Google 계정');
+    const summary = firstTable('4.3 데이터 보안 양식 바뀐 답 (2.5 대신)');
+    const answer = (q: string): string => summary.find((r) => r[0] === q)?.[1] ?? '';
+    expect(answer('계정 만들기')).toContain('OAuth');
+    expect(answer('계정 삭제 URL')).toContain(`\`https://<서비스 주소>${ACCOUNT_DELETE_PATH}\``);
+    expect(lead(answer('데이터를 공유하나요(제3자 전송)?'))).toBe('아니요');
+    expect(lead(answer('사용자가 데이터 삭제를 요청할 수 있나요?'))).toBe('예');
+    // 지금(로그인 꺼짐) 값은 그대로
+    expect(firstTable('2.5 데이터 보안 양식').find((r) => r[0] === '계정 만들기')?.[1]).toMatch(/^없음/);
   });
 
   it('콘텐츠 등급의 소통 문항 답이 결정 문구 그대로이고 안내서 Console 표와 같다', () => {
@@ -204,6 +252,53 @@ describe('PLAY_STORE_GUIDE.md', () => {
   it('서명 키를 저장소에 넣지 말라는 경고와 두 곳 보관이 있다', () => {
     expect(GUIDE).toMatch(/저장소\(GitHub\)에 올리지 않는다/);
     expect(GUIDE).toMatch(/두 곳 이상/);
+  });
+});
+
+describe('LOGIN_GUIDE.md (선택형 구글 로그인 — 사람이 할 일)', () => {
+  it('단계 제목이 순서대로 있다 (구글 클라우드 → 동의 화면 → 클라이언트 ID → DB → Render → Play 신고 → 켜기 → 확인 → 끄기 → 문제 해결)', () => {
+    const heads = [...LOGIN_GUIDE.matchAll(/^## (\d+)\. (.+)$/gm)].map(
+      (m) => [Number(m[1]), m[2] ?? ''] as const,
+    );
+    const want = [
+      '구글 클라우드 프로젝트',
+      'Google Auth Platform',
+      'OAuth 클라이언트 ID',
+      'DB',
+      'Render 환경 변수',
+      'Play Console 신고',
+      '켜기',
+      '확인',
+      '끄기',
+      '문제 해결',
+    ];
+    want.forEach((w, i) => {
+      const h = heads.find(([n]) => n === i + 1);
+      expect(h?.[1], `${i + 1}단계`).toContain(w);
+    });
+  });
+
+  it('경로가 shared/src/account.ts와 같다 (리디렉션 URI · 시작 · 계정 삭제 · 상태)', () => {
+    expect(LOGIN_GUIDE).toContain(`\`https://<서비스 주소>${AUTH_CALLBACK_PATH}\``);
+    expect(LOGIN_GUIDE).toContain(`\`https://<서비스 주소>${AUTH_START_PATH}\``);
+    expect(LOGIN_GUIDE).toContain(`\`https://<서비스 주소>${ACCOUNT_DELETE_PATH}\``);
+    expect(LOGIN_GUIDE).toContain(`\`https://<서비스 주소>${ACCOUNT_API.status}\``);
+  });
+
+  it('적힌 환경 변수 이름이 설계(ACCOUNT_PLAN 3절) · 서버 코드에 있는 이름이고, 비밀값 경고가 있다', () => {
+    const plan = readFileSync('docs/ACCOUNT_PLAN.md', 'utf8');
+    const planEnv = new Set([...plan.matchAll(/`([A-Z][A-Z0-9]*_[A-Z0-9_]+)`/g)].map((m) => m[1] ?? ''));
+    for (const name of ['DECOY_LOGIN', 'GOOGLE_CLIENT_ID', 'DECOY_SESSION_SECRET', 'DECOY_ACCOUNT_TIMEZONE'])
+      expect(planEnv.has(name), name).toBe(true);
+    const known = new Set([...planEnv, PRIVACY_CONTACT_ENV]);
+    const mentioned = [...LOGIN_GUIDE.matchAll(/`([A-Z][A-Z0-9]*_[A-Z0-9_]+)`/g)].map((m) => m[1] ?? '');
+    expect(mentioned.length).toBeGreaterThan(5);
+    expect(mentioned.filter((n) => !known.has(n))).toEqual([]);
+    expect(LOGIN_GUIDE).toMatch(/비밀값은 저장소\(GitHub\) · 메신저 · 이메일에 두지 않는다/);
+    // 로고를 올리지 않고(브랜드 확인 심사), 범위를 더하지 않고, 프로덕션으로 게시
+    expect(LOGIN_GUIDE).toMatch(/앱 로고: 올리지 않는다/);
+    expect(LOGIN_GUIDE).toMatch(/아무 범위도 추가하지 않는다/);
+    expect(LOGIN_GUIDE).toContain('프로덕션');
   });
 });
 
