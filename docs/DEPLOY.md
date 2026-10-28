@@ -127,9 +127,9 @@ docker run -d --name decoy --restart unless-stopped -p 80:8080 decoy-web
 | `GOOGLE_CLIENT_ID` | 값 없음 (`sync: false`, 대시보드에서 넣는다) | 구글 클라우드 OAuth 클라이언트 ID(`…apps.googleusercontent.com`, LOGIN_GUIDE 3단계). 로그인을 켤 때만 필요 |
 | `DECOY_SESSION_SECRET` | 자동 (`generateValue: true` — Blueprint가 무작위 값을 만든다) | 세션 쿠키 서명 비밀(32자 이상). 대시보드에 보이는지만 확인하고 저장소 · 메신저에 옮겨 적지 않는다. 바꾸면 로그인한 모든 사람이 로그아웃된다(계정 기록은 그대로) |
 | `DECOY_ACCOUNT_TIMEZONE` | 넣지 않음 (기본 `Asia/Seoul`) | 계정의 하루(일일 도전 · 접속 보상)가 바뀌는 시간대(IANA 이름). 게스트(이 기기 기록)는 그대로 기기 자정 |
-| `DATABASE_URL` | 값 없음 (`sync: false`, 대시보드에서 넣는다) | 계정 기록 저장소(PostgreSQL) 접속 주소 — Neon 대시보드 **Connect**에서 복사한 접속 문자열 그대로(`postgresql://…ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require`, LOGIN_GUIDE 4단계). **DB 비밀번호가 들어 있어** 저장소에 적지 않는다. 로그인을 켤 때만 필요(`DECOY_LOGIN`이 없으면 서버가 DB에 접속하지 않는다). 다른 Postgres로 옮길 때는 이 값만 바꾼다(LOGIN_GUIDE 11절) |
+| `DATABASE_URL` | 값 없음 (`sync: false`, 대시보드에서 넣는다) | 계정 기록 저장소(PostgreSQL) 접속 주소 — Neon 대시보드 **Connect**에서 복사한 접속 문자열 그대로(`postgresql://…ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require`, LOGIN_GUIDE 4단계). **DB 비밀번호가 들어 있어** 저장소에 적지 않는다. 끝의 `?sslmode=require`를 지우지 않는다 — 지우면 서버가 켤 때 `계정 DB 연결: 인증서를 확인하지 않음 …` 경고를 찍고 처리방침 10번(DB 연결 TLS + 인증서 확인)과 달라진다(LOGIN_GUIDE 7단계에서 이 경고가 없는지 본다). 로그인을 켤 때만 필요(`DECOY_LOGIN`이 `1`이 아니면 서버가 DB에 접속하지 않는다). 다른 Postgres로 옮길 때는 이 값만 바꾼다(LOGIN_GUIDE 11절) |
 
-> **계정 기록 저장소 = Neon 무료 플랜, 지역 AWS Asia Pacific 1 (Singapore) `aws-ap-southeast-1`** (DECISIONS 15절). 무료 조건(2026-10 확인 — 바뀔 수 있으니 `https://neon.com/pricing`에서 다시 본다): 5분 쉬면 compute가 잠든다(무료는 끌 수 없다 — 다음 첫 계정 요청이 보통 1초 안팎, 드물게 몇 초 늦다), compute 프로젝트당 월 100 CU-시간(넘으면 그달은 계정 요청이 503 → 게스트로, 판은 그대로), 저장 0.5GB, 복원(PITR) 기간 6시간(지운 계정 기록이 최대 6시간 남는다 — 처리방침 3 · 8번). 서버 쪽: 접속 제한 6초 · 저장소 호출 하나 최대 10초 · 연결 오류면 0.3초 뒤 한 번 더 · 쉬는 연결은 60초 뒤 닫기(연결 최대 2개). `/healthz`는 DB에 닿지 않는다(잠든 DB를 깨우지 않는다). DB 오류 로그는 코드와 짧은 힌트만(주소 · 비밀번호를 찍지 않는다) — 뜻은 LOGIN_GUIDE 10단계 표
+> **계정 기록 저장소 = Neon 무료 플랜, 지역 AWS Asia Pacific 1 (Singapore) `aws-ap-southeast-1`** (DECISIONS 15절). 무료 조건(2026-10에 검색으로 본 Neon 문서 · 요금 페이지 값 — 콘솔 화면은 직접 보지 못했다, 바뀔 수 있으니 `https://neon.com/pricing`에서 다시 본다): 5분 쉬면 compute가 잠든다(무료는 끌 수 없다 — 다음 첫 계정 요청이 보통 1초 안팎, 드물게 몇 초 늦다), compute 프로젝트당 월 100 CU-시간(넘으면 그달은 계정 요청이 모두 503 → 게스트로, 판은 그대로, 다음 달에 풀린다), 저장 0.5GB(넘으면 읽기는 되고 기록 쓰기만 실패 — 다음 달에 풀리지 않는다, 행을 지우거나 유료로), 복원(PITR) 기간 6시간(지운 계정 기록이 최대 6시간 남는다 — 처리방침 3 · 7 · 8번). 서버 쪽: 시도 하나 4.5초(그중 접속 4초, 넘으면 연결 묶음을 새로 만든다) · 연결 오류면 0.3초 뒤 한 번 더(호출 하나 9초 예산 안에서만) · 서비스 호출 제한 10초 · 화면 요청 제한 12초 · 시도가 모두 시간을 넘기면 DB를 15초(이어지면 최대 5분) 쉬며 계정 요청은 바로 503 · 쉬는 연결은 60초 뒤 닫기(연결 최대 2개). 방 주소로 연 부팅은 계정 상태를 3초까지만 기다린다(잠든 Neon이 늦게 깨면 그 판은 게스트). `/healthz`는 DB에 닿지 않는다(잠든 DB를 깨우지 않는다). DB 오류 로그는 코드와 짧은 힌트만(주소 · 비밀번호를 찍지 않는다) — 뜻은 LOGIN_GUIDE 10단계 표. 켠 뒤 Logs에 `계정 DB 연결: …` 경고(인증서를 확인하지 않음 · 암호화하지 않음)가 **없어야** 한다
 
 환경 변수는 Render 대시보드 → 서비스 → **Environment**에서 넣는다. **저장하면 서버가 다시 배포되어 열려 있던 방이 사라진다** — 아무도 없을 때 넣는다.
 
@@ -214,6 +214,8 @@ Railway 같은 서비스도 Dockerfile로 배포된다. 다만 아시아 리전�
 | 화면이 끊긴다 | 로비의 그래픽 품질을 낮음으로(또는 주소에 `&quality=low`), 다른 탭 · 프로그램 닫기, `&debug=1`로 FPS 확인 |
 | 설정에 '계정' 칸이 없다 · `/api/account`가 `{"on":false}` | 로그인 기능이 꺼져 있다(기본). 켰는데도 그렇다면 `DECOY_LOGIN` · `GOOGLE_CLIENT_ID` · `DECOY_SESSION_SECRET` · `DATABASE_URL` 중 빠지거나 틀린 것 — 서버 로그에 그 이름이 적힌다(`docs/LOGIN_GUIDE.md` 7단계) |
 | 서버 로그에 `계정 DB 오류 …` · `계정 저장소 시작 실패 …` · 주소 끝 `?login=db` | 계정 기록 저장소(Neon)에 닿지 않는다. 판과 게스트 플레이는 그대로 된다. 오류 코드별 원인 · 할 일은 `docs/LOGIN_GUIDE.md` 10단계 'DB(Neon) 문제' 표 |
+| 서버 로그에 `계정 DB 연결: 인증서를 확인하지 않음 …` · `계정 DB 연결: 암호화하지 않음 …` | `DATABASE_URL`에 `sslmode=require`가 없다(또는 `disable`) — 처리방침 10번과 달라진다. Neon Connect 창에서 접속 문자열을 고치지 않고 다시 복사해 넣는다(`docs/LOGIN_GUIDE.md` 7단계 · 10단계) |
+| 서버 로그에 `계정 저장소를 만들지 못함 (DATABASE_URL 확인)` | 주소의 `sslrootcert` 인증서 파일을 읽지 못하는 등 DB 연결을 준비하지 못해 로그인이 꺼진 채 떴다(판은 그대로). `docs/LOGIN_GUIDE.md` 10단계 |
 | 구글 로그인 오류 (`redirect_uri_mismatch` · `403 disallowed_useragent` · "액세스 차단됨" · 주소 끝 `?login=fail` · `off` · `db`) | `docs/LOGIN_GUIDE.md` 10단계 표. 로그인이 안 돼도 게임은 게스트(이 기기 기록)로 그대로 된다 |
 
 ## 7. 옛 화면과 맞지 않는 배포 (프로토콜 버전)

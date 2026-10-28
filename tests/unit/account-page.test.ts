@@ -1,5 +1,6 @@
 // 계정 삭제 웹 페이지 (docs/ACCOUNT_PLAN.md 8절, Play '계정 삭제 URL'): 상태마다 글 · 스크립트 없음 · 처리방침 링크 · 문의처 ·
-// 휴대폰 폭에서 가로 스크롤이 생길 고정 폭이 없다 · 백업 보관 기간 문장은 정해질 때까지 없다
+// 휴대폰 폭에서 가로 스크롤이 생길 고정 폭이 없다 · 지운 기록이 DB 업체(Neon)의 복원용 기록에 남는 기간(복원 기간 6시간,
+// ACCOUNT_BACKUP_RETENTION — 처리방침 3 · 7 · 8번과 같은 값)을 모든 상태에 보여 준다
 import { describe, expect, it } from 'vitest';
 import {
   ACCOUNT_BACKUP_RETENTION,
