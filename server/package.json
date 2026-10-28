@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "@decoy/shared": "0.1.0",
+    "postgres": "3.4.9",
     "ws": "8.22.0"
   }
 }

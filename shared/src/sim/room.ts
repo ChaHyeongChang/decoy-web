@@ -38,8 +38,25 @@ import { applyDropExpired, buildResult, finish } from './systems/match';
 
 export interface Conn {
   readonly id: number;
+  /**
+   * 세션 쿠키의 계정 키 (선택형 구글 로그인, docs/ACCOUNT_PLAN.md): 서버가 WebSocket을 열 때 쿠키 서명으로 알아낸 불투명한 값.
+   * 게스트 · 기기 안 연습 · 봇은 없음. 이것만으로는 적립하지 않는다 — 화면이 join · quick에서 같은 계정 tag를 밝혔을 때만 자리의
+   * 계정이 된다(ServerCore.connect). 어떤 메시지에도 싣지 않는다
+   */
+  readonly account?: string | null;
+  /** 그 계정의 표시 tag (서버가 세션 비밀로 계정 ID에서 만든다 — DB 없이). account가 없으면 없음 */
+  readonly accountTag?: string | null;
   send(msg: ServerMessage): void;
   close(): void;
+}
+
+/**
+ * 자리에 받아들인 계정 (선택형 구글 로그인): 화면이 밝힌 tag와 그 연결의 세션 쿠키 계정 tag가 같을 때만 생긴다(ServerCore.connect).
+ * id는 계정 키(적립에), tag는 그 자리 본인 welcome에만 싣는다
+ */
+export interface SeatAccount {
+  id: string;
+  tag: string;
 }
 
 export interface Seat {
@@ -70,6 +87,17 @@ export interface Seat {
   costume: CostumeChoice;
   /** 판 중에 받은 의상 (판 시작 명단 · 구운 그림은 그 판 끝까지 같게 두고, 판이 끝나면 costume으로 옮긴다) */
   nextCostume?: CostumeChoice;
+  /**
+   * 이 자리의 계정 키 (선택형 구글 로그인): 마지막으로 붙은 연결이 들어올 때 화면이 밝힌 계정 tag와 그 연결의 세션 쿠키 계정이 같을
+   * 때만(SeatAccount), 아니면 null(게스트 · 봇 · 안 밝힘 · 다름). 판이 끝날 때 RoomHooks.rated로 넘겨 서버가 그 계정에 보상을
+   * 적립한다. 로비 · 판 시작 명단 · 스냅샷 · 결과 어디에도 싣지 않는다 (정보 숨김 — 로그인 여부가 사람 단서가 되지 않게)
+   */
+  account: string | null;
+  /**
+   * 그 계정의 표시 tag (없으면 null). 그 자리 본인 연결의 welcome에만 싣고, 판이 끝난 순간의 값은 본인 result에 싣는다(ratedTags —
+   * 화면이 그 판의 적립 갈래를 정한다)
+   */
+  accountTag: string | null;
 }
 
 export interface RoomHooks {
@@ -87,6 +115,11 @@ export interface RoomHooks {
   canFillBots?: (room: Room) => boolean;
   /** 틱마다 정답 상태 기록 (테스트 전용) */
   recordTruth?: (room: Room) => void;
+  /**
+   * 판이 끝나 사람 자리마다 평가를 만들고 결과를 보낸 뒤 (선택형 구글 로그인): 서버가 seat.account가 있으면 그 계정에 이 평가로
+   * 보상을 적립한다(docs/ACCOUNT_PLAN.md). 기기 안 연습 서버는 넘기지 않는다. 방 상태를 바꾸지 않는다
+   */
+  rated?: (room: Room, seat: Seat, rating: MatchRating) => void;
   log?: (msg: string) => void;
 }
 
@@ -127,6 +160,11 @@ export class Room {
   private recorder: MatchRecorder | null = null;
   /** 판이 끝난 순간의 사람 자리별 평가 (결과와 함께 자기 것만 보낸다, 재접속하면 다시) */
   private ratings = new Map<string, MatchRating>();
+  /**
+   * 판이 끝난 순간 서버가 적립한 자리별 계정 tag (평가와 함께 고정 — 게스트 자리는 null). 결과 단계에 다시 붙어(새로고침 · 다른 탭
+   * 넘겨받기 · 재연결) 자리 계정이 바뀌어도 다시 보내는 결과에는 이 값을 싣는다 — 화면이 그 판의 적립 갈래를 정한다. 본인 결과에만
+   */
+  private ratedTags = new Map<string, string | null>();
   /** 이번 판에 괴물이 끊겨 있던 시간의 합 (초). 재접속해도 줄지 않는다 */
   private monsterAway = 0;
   /** 이번 판에 '나가기'로 빠진 사람 자리 (끊김과 달리 돌아오지 않는다고 본다) */
@@ -183,7 +221,15 @@ export class Room {
     return free[this.aliasRng.int(free.length)] ?? `플레이어 ${this.joinCounter}`;
   }
 
-  addSeat(conn: Conn | null, name: string, bot: boolean, nowMs = 0, costume?: unknown): Seat {
+  /** account: 이 자리에 받아들인 계정 (ServerCore.connect가 정한다 — 봇 · 기기 안 연습은 늘 null) */
+  addSeat(
+    conn: Conn | null,
+    name: string,
+    bot: boolean,
+    nowMs = 0,
+    costume?: unknown,
+    account: SeatAccount | null = null,
+  ): Seat {
     this.joinCounter += 1;
     const alias = this.newAlias();
     const seat: Seat = {
@@ -203,6 +249,8 @@ export class Room {
       matchesPlayed: 0,
       lastLobby: null,
       costume: bot ? { ...BASIC_COSTUMES } : sanitizeCostumeChoice(costume),
+      account: bot ? null : (account?.id ?? null),
+      accountTag: bot ? null : (account?.tag ?? null),
     };
     this.seats.push(seat);
     if (!bot && this.hostId === null) this.hostId = seat.id;
@@ -213,14 +261,17 @@ export class Room {
     return seat;
   }
 
-  /** 기존 자리에 새 연결을 붙인다 (재접속) */
-  attach(seat: Seat, conn: Conn): void {
+  /** 기존 자리에 새 연결을 붙인다 (재접속). account: 그 연결이 이번에 받아들여진 계정 (없으면 게스트 자리로) */
+  attach(seat: Seat, conn: Conn, account: SeatAccount | null = null): void {
     if (seat.conn && seat.conn.id !== conn.id) {
       // 다른 탭이 이 자리를 넘겨받았다: 이전 탭은 재접속하지 않도록 알리고 닫는다
       seat.conn.send({ t: 'error', code: 'replaced', message: '다른 탭에서 이 자리로 접속했습니다' });
       seat.conn.close();
     }
     seat.conn = conn;
+    // 마지막으로 붙은 연결이 받아들여진 계정 (로그아웃한 탭 · 계정을 밝히지 않은 화면이 다시 붙으면 null — 그 판은 적립하지 않는다)
+    seat.account = seat.bot ? null : (account?.id ?? null);
+    seat.accountTag = seat.bot ? null : (account?.tag ?? null);
     seat.droppedAt = null;
     seat.lastLobby = null;
     this.leftInMatch.delete(seat.id);
@@ -267,6 +318,9 @@ export class Room {
       balance: this.config.balance,
       balanceHash: this.balanceHash,
       build: this.config.buildId ?? null,
+      // 이 자리에 받아들인 계정 tag: 본인 연결에만 (화면이 다음 판의 결과 적립 갈래를 정한다 — 이미 끝난 판은 result.account로.
+      // 다른 참가자 메시지에는 없다)
+      account: seat.accountTag,
     });
     this.sendLobby(seat);
     if (this.phase === 'playing' && this.game) seat.conn?.send({ t: 'match', info: this.matchInfo(seat) });
@@ -379,8 +433,13 @@ export class Room {
         return { ...p, name, bot: other?.bot ?? false };
       }),
     };
-    // 판 평가는 받는 사람 자기 것만 (남의 평가 · 레벨은 판이 끝난 뒤에도 보내지 않는다)
-    return { t: 'result', result, rating: this.ratings.get(seat.id) ?? null };
+    // 판 평가 · 그 판을 적립한 계정 tag는 받는 사람 자기 것만 (남의 평가 · 레벨 · 계정은 판이 끝난 뒤에도 보내지 않는다)
+    return {
+      t: 'result',
+      result,
+      rating: this.ratings.get(seat.id) ?? null,
+      account: this.ratedTags.get(seat.id) ?? null,
+    };
   }
 
   /** 시작 가능 여부. 봇 방이면 빈 역할은 봇이 채운다 */
@@ -531,6 +590,7 @@ export class Room {
     this.aliases = new AliasBook();
     this.recorder = new MatchRecorder(this.game);
     this.ratings.clear();
+    this.ratedTags.clear();
     this.monsterAway = 0;
     this.leftInMatch.clear();
     this.phase = 'playing';
@@ -558,6 +618,13 @@ export class Room {
       const last = this.lastResult;
       s.conn?.send(this.resultFor(s, last));
     }
+    // 계정 적립 (서버만, 결과를 보낸 뒤): 평가가 있는 사람 자리마다 바깥에 넘긴다 — 계정이 있는지는 바깥이 seat.account로 본다
+    if (this.hooks.rated) {
+      for (const s of this.seats) {
+        const rating = this.ratings.get(s.id);
+        if (rating && !s.bot) this.hooks.rated(this, s, rating);
+      }
+    }
     this.sendLobby();
     this.hooks.log?.(
       `방 ${this.code} 판 끝: ${result.winner} (${game.end?.reason ?? ''}, 탈출 ${result.escaped})`,
@@ -570,6 +637,7 @@ export class Room {
    */
   private rateFinished(game: Game, nowMs: number): void {
     this.ratings.clear();
+    this.ratedTags.clear();
     const recorder = this.recorder;
     this.recorder = null;
     if (!recorder) return;
@@ -585,6 +653,8 @@ export class Room {
           PROGRESSION,
         ),
       );
+      // 이 판을 적립할 계정 (바로 뒤 finishMatch가 rated 훅으로 넘기는 seat.account와 같은 순간의 값)
+      this.ratedTags.set(seat.id, seat.accountTag);
     }
   }
 
@@ -594,6 +664,7 @@ export class Room {
     this.game = null;
     this.recorder = null;
     this.ratings.clear();
+    this.ratedTags.clear();
     this.lastResult = null;
     this.resultSeats.clear();
     // 봇 자리는 비우고, 사람은 역할을 유지한 채 준비만 푼다
@@ -836,7 +907,13 @@ export class RoomManager {
    * 빠른 매칭 대기열 (M13c): 대기 중인 빠른 매칭 방(로비 · 4명 미만 · 사람이 붙어 있음)이 있으면 들어가고 없으면 새로 만든다.
    * 방 코드로 만든 방은 섞이지 않는다
    */
-  quick(conn: Conn, name: unknown, nowMs = 0, costume?: unknown): { room: Room; seat: Seat } {
+  quick(
+    conn: Conn,
+    name: unknown,
+    nowMs = 0,
+    costume?: unknown,
+    account: SeatAccount | null = null,
+  ): { room: Room; seat: Seat } {
     const players = this.config.balance.match.players;
     let room: Room | undefined;
     for (const r of this.rooms.values()) {
@@ -846,14 +923,18 @@ export class RoomManager {
       break;
     }
     room ??= this.createRoom(true, 'quick');
-    return { room, seat: room.addSeat(conn, typeof name === 'string' ? name : '', false, nowMs, costume) };
+    return {
+      room,
+      seat: room.addSeat(conn, typeof name === 'string' ? name : '', false, nowMs, costume, account),
+    };
   }
 
-  /** join 메시지 처리. 성공하면 (방, 자리), 실패하면 오류 메시지 */
+  /** join 메시지 처리. 성공하면 (방, 자리), 실패하면 오류 메시지. account: 이 연결이 받아들여진 계정 (ServerCore.connect) */
   join(
     conn: Conn,
     msg: Extract<ClientMessage, { t: 'join' }>,
     nowMs = 0,
+    account: SeatAccount | null = null,
   ): { room: Room; seat: Seat } | { error: Extract<ServerMessage, { t: 'error' }> } {
     const code = typeof msg.room === 'string' ? msg.room.trim().toUpperCase() : null;
     if (code) {
@@ -862,7 +943,7 @@ export class RoomManager {
         // 1) 이 탭의 토큰 (sessionStorage): 연결 중이어도 새 연결로 바꾼다 (새로고침)
         const own = msg.token ? room.seatByToken(msg.token) : undefined;
         if (own) {
-          room.attach(own, conn);
+          room.attach(own, conn, account);
           room.recostume(own, msg.costume);
           return { room, seat: own };
         }
@@ -872,7 +953,7 @@ export class RoomManager {
           if (typeof t !== 'string') continue;
           const seat = room.seatByToken(t);
           if (seat && !seat.bot && seat.conn === null) {
-            room.attach(seat, conn);
+            room.attach(seat, conn, account);
             room.recostume(seat, msg.costume);
             return { room, seat };
           }
@@ -889,7 +970,7 @@ export class RoomManager {
         if (room.seats.length >= this.config.balance.match.players) {
           return { error: { t: 'error', code: 'room-full', message: '방이 가득 찼습니다' } };
         }
-        return { room, seat: room.addSeat(conn, msg.name, false, nowMs, msg.costume) };
+        return { room, seat: room.addSeat(conn, msg.name, false, nowMs, msg.costume, account) };
       }
       if (!msg.create)
         return {
@@ -899,7 +980,7 @@ export class RoomManager {
     if (!msg.create) return { error: { t: 'error', code: 'bad-request', message: '방 코드가 필요합니다' } };
     // 개발용 봇 방(?bots=1)은 개발 서버에서만 (배포 서버에서는 일반 방, 출시 전 검토)
     const room = this.createRoom(Boolean(msg.bots) && this.config.devBots !== false);
-    return { room, seat: room.addSeat(conn, msg.name, false, nowMs, msg.costume) };
+    return { room, seat: room.addSeat(conn, msg.name, false, nowMs, msg.costume, account) };
   }
 
   /**

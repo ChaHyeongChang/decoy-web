@@ -7,6 +7,11 @@ let counter = 1000;
 export class FakeConn implements Conn {
   readonly id = ++counter;
   readonly inbox: ServerMessage[] = [];
+  /** 세션 쿠키의 계정 키 · 표시 tag (선택형 구글 로그인 — 서버가 세션 쿠키로 둔다, 게스트는 null) */
+  constructor(
+    readonly account: string | null = null,
+    readonly accountTag: string | null = null,
+  ) {}
   closed = false;
   send(msg: ServerMessage): void {
     this.inbox.push(msg);

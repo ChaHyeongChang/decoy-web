@@ -1,7 +1,15 @@
 // 연결 처리와 틱 스케줄러 (M13a). 서버(server/src/index.ts: HTTP · ws 소켓 · setInterval)와
 // 기기 안 연습(M13b)이 같은 코드를 쓴다. 소켓 · 타이머는 바깥이 맡고, 여기서는 받은 원문을 방에 잇고 틱을 돌린다
 import type { ClientMessage } from '../types';
-import { RoomManager, type Conn, type Room, type RoomConfig, type RoomHooks, type Seat } from './room';
+import {
+  RoomManager,
+  type Conn,
+  type Room,
+  type RoomConfig,
+  type RoomHooks,
+  type Seat,
+  type SeatAccount,
+} from './room';
 
 /** 한 번에 따라잡는 최대 틱 수. 그보다 밀리면 시간을 버린다 */
 export const MAX_CATCHUP_TICKS = 5;
@@ -41,11 +49,20 @@ export class ServerCore {
 
   /**
    * 새 연결. join 전에는 join과 ping만 받고, 묶인 뒤에는 그 자리가 지금도 이 연결일 때만 방에 넘긴다
-   * (다른 탭이 자리를 넘겨받은 뒤 옛 연결의 메시지는 무시). 메시지 하나의 오류는 onError로 넘긴다
+   * (다른 탭이 자리를 넘겨받은 뒤 옛 연결의 메시지는 무시). 메시지 하나의 오류는 onError로 넘긴다.
+   * 계정 적립 (선택형 구글 로그인, docs/ACCOUNT_PLAN.md 5절): 마지막 join · quick · 빠른 매칭 rematch가 밝힌 계정 tag(account)를 기억하고,
+   * 그 값이 이 연결의 세션 쿠키 계정 tag(Conn.accountTag)와 같을 때만 자리를 그 계정으로 묶는다(새 자리 · 재접속 · 다시 하기 재대기열
+   * 모두). 안 밝혔거나 다르거나 쿠키가 없으면 게스트 자리 — 화면이 모르는 계정에 몰래 적립하지 않는다
    */
   connect(conn: Conn, onError: (err: unknown) => void): CoreLink {
     let bound: { room: Room; seat: Seat } | null = null;
     let closed = false;
+    /** 마지막 join · quick · 빠른 매칭 rematch가 밝힌 계정 tag (화면이 계정 모드일 때만 보낸다) */
+    let declared: string | null = null;
+    const seatAccount = (): SeatAccount | null =>
+      conn.account && conn.accountTag && declared === conn.accountTag
+        ? { id: conn.account, tag: conn.accountTag }
+        : null;
 
     const handle = (raw: string): void => {
       let msg: ClientMessage;
@@ -63,10 +80,11 @@ export class ServerCore {
       if (!live) bound = null;
       if (msg.t === 'join' || msg.t === 'quick') {
         if (live) return;
+        declared = typeof msg.account === 'string' ? msg.account : null;
         const r =
           msg.t === 'join'
-            ? this.manager.join(conn, msg, now)
-            : this.manager.quick(conn, msg.name, now, msg.costume);
+            ? this.manager.join(conn, msg, now, seatAccount())
+            : this.manager.quick(conn, msg.name, now, msg.costume, seatAccount());
         if ('error' in r) {
           conn.send(r.error);
           return;
@@ -87,7 +105,9 @@ export class ServerCore {
         live.room.leave(live.seat, now);
         // 마지막 사람이 떠난 결과 방은 바로 지운다 (남은 봇 연결도 닫는다)
         this.manager.dropIfAbandoned(live.room);
-        const r = this.manager.quick(conn, name, now, costume);
+        // 새 자리는 다시 하기가 지금 밝힌 계정으로 (결과에서 로그아웃 · 계정 삭제한 화면이 들어올 때 밝힌 옛 계정에 묶이지 않게)
+        declared = typeof msg.account === 'string' ? msg.account : null;
+        const r = this.manager.quick(conn, name, now, costume, seatAccount());
         bound = r;
         r.room.welcome(r.seat);
         return;

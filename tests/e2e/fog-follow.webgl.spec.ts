@@ -23,7 +23,7 @@ import {
 import { FOG } from '../../client/src/render/colors';
 import { ambientRgb, lightAt } from '../../client/src/render/fogMath';
 import { installVirtualClock } from '../helpers/virtualClock';
-import { CAM1, newPlayerPage } from './helpers';
+import { CAM1, newPlayerPage, waitPrefetched } from './helpers';
 
 const balance = validateBalance(JSON.parse(readFileSync('config/balance.json', 'utf8')));
 const HZ = 120;
@@ -209,6 +209,7 @@ async function startPractice(
   await page.goto(`/?debug=hook&renderer=webgl${query}`);
   await expect(page.getByTestId('practice')).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.__DECOY__?.fonts.ready === true)).toBe(true);
+  await waitPrefetched(page);
   await context.setOffline(true);
   await page.waitForTimeout(300);
   await page.evaluate(async () => {

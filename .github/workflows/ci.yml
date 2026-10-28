@@ -1,5 +1,6 @@
 # 자동 검사.
-# - push · PR마다(그리고 main에 들어갈 때): 빠른 검사 작업 하나 (타입 · 린트 · 포맷 · 단위 · 핵심 E2E @core, 3분 안팎)
+# - push · PR마다(그리고 main에 들어갈 때): 빠른 검사 작업 하나 (타입 · 린트 · 포맷 · 단위(실제 PostgreSQL 포함) · 핵심 E2E @core,
+#   3분 안팎)
 # - PR 병합 직전 수동 실행(workflow_dispatch, 그 PR 브랜치에서): 빠른 검사 + 전체 E2E(4개 작업으로 나눠 동시에) +
 #   지연 봇 전체 판 + 배포 검증. 모두 success여야 병합한다 (docs/MOBILE_PLAN.md 3절, DECISIONS 4절 "CI 나누기")
 #   Actions 탭 → CI → Run workflow → 브랜치 고르기 (또는 API workflow_dispatch, ref = PR 브랜치)
@@ -38,6 +39,16 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      # 계정 저장소(PostgreSQL) 실제 DB 시험용: 러너(ubuntu)에 깔린 PostgreSQL을 켠다. 비밀번호는 실행 때마다 새로 만들고
+      # 가린다(커밋하지 않는다). tests/unit/account-pg-live.test.ts가 DECOY_TEST_DATABASE_URL로 붙는다(CI에서 없으면 실패)
+      - name: 계정 DB 시험용 PostgreSQL 켜기
+        run: |
+          sudo systemctl start postgresql.service
+          pg_isready -h 127.0.0.1 -t 30
+          PW="$(openssl rand -hex 16)"
+          echo "::add-mask::$PW"
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -q -c "CREATE USER decoy WITH PASSWORD '$PW'" -c "CREATE DATABASE decoy_test OWNER decoy"
+          echo "DECOY_TEST_DATABASE_URL=postgres://decoy:$PW@127.0.0.1:5432/decoy_test" >> "$GITHUB_ENV"
       - run: npm test
       # CI에는 설치된 Chromium이 없으므로 @playwright/test 버전에 맞는 Chromium을 받는다
       - run: npx playwright install --with-deps chromium

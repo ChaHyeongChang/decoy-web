@@ -1,6 +1,7 @@
 // 내 레벨 · 불씨 칩 (GAME_DESIGN 12장, VISUAL_SPEC 9.6 · 9.7): 첫 화면 · 연습 고르기에 내 레벨 · 다음 레벨까지 막대 · 불씨 ·
-// 받을 접속 보상 점. 누르면 '내 기록' 창(나눠 받는 조각 `hub`)을 연다. 내 기기 기록으로만 그린다 — 서버에서 받은 것이 없고,
-// 남의 레벨은 어디에도 그리지 않는다. 요소 하나를 만들어 화면을 다시 그릴 때 옮겨 붙인다. 판 중 HUD에는 붙이지 않는다
+// 받을 접속 보상 점. 누르면 '내 기록' 창(나눠 받는 조각 `hub`)을 연다. 내 기록(게스트: 이 기기, 로그인: 계정)으로만 그린다 —
+// 남의 레벨은 어디에도 그리지 않는다. 계정 기록을 읽는 동안(최대 3초)은 '…'. 요소 하나를 만들어 화면을 다시 그릴 때 옮겨 붙인다.
+// 판 중 HUD에는 붙이지 않는다. data-store: device · server · wait (시험이 본다)
 import { META_TEXT } from '../data/storyText';
 import type { MetaState } from '../meta/meta';
 import { h } from './uiArt';
@@ -50,6 +51,15 @@ export class LevelChip {
   }
 
   update(): void {
+    const wait = this.meta.waiting;
+    this.el.dataset.store = wait ? 'wait' : this.meta.mode;
+    if (wait) {
+      this.num.textContent = META_TEXT.waiting;
+      this.coins.textContent = META_TEXT.waiting;
+      this.bar.style.width = '0%';
+      this.dot.hidden = true;
+      return;
+    }
     const info = this.meta.level();
     const coins = this.meta.current.coins;
     const login = this.meta.login();

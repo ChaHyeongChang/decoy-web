@@ -1,10 +1,13 @@
 // 결과 화면 '내 평가' (GAME_DESIGN 12장, VISUAL_SPEC 9.6): 평가 넷(모양 아이콘 + 단계 칸 + 단계 글자) · 경험치 · 레벨 막대 · 레벨 업.
 // 결과 화면 묶음(나눠 받는 `result` 조각)에만 들어 있다 — 첫 화면에는 필요 없다. 받는 사람 자기 평가만 그린다(서버도 자기 것만 보낸다).
-// 단계는 색만으로 구분하지 않는다: 칸 수(0~4) + 글자(없음 · 동 · 은 · 금 · 빛) + 테두리 색
+// 단계는 색만으로 구분하지 않는다: 칸 수(0~4) + 글자(없음 · 동 · 은 · 금 · 빛) + 테두리 색.
+// 로그인했으면(선택형 구글 로그인) 온라인 판 숫자는 같은 공용 함수의 미리보기이고 아래 줄이 계정 저장 상태를 따라간다
+// (저장하는 중 → 저장했어요 / 못 했어요 / 확인하지 못했어요). 연습 판은 계정에 적립하지 않는다는 한 줄
 import type { EmblemId, EmblemTier } from '@decoy/shared';
 import type { LevelInfo } from '@decoy/shared/meta';
+import { ACCOUNT_TEXT } from '../data/accountText';
 import { META_TEXT } from '../data/storyText';
-import type { RatingApplied } from '../meta/meta';
+import type { AccountCredit, AccountSaveState, RatingApplied } from '../meta/meta';
 import { EMBER_SVG } from './levelChip';
 import { h } from './uiArt';
 
@@ -85,6 +88,29 @@ function levelBar(info: LevelInfo, fromRatio: number | null): HTMLElement {
   return bar;
 }
 
+const SAVE_TEXT: Record<AccountSaveState, string> = {
+  pending: ACCOUNT_TEXT.saving,
+  saved: ACCOUNT_TEXT.saved,
+  failed: ACCOUNT_TEXT.failed,
+  unknown: ACCOUNT_TEXT.unknown,
+};
+
+/** 계정 저장 상태 한 줄 (credit이 오면 바뀐다). data-state = pending · saved · failed · unknown */
+function accountLine(c: AccountCredit): HTMLElement {
+  const el = h('div', { class: 'rate-note', role: 'status', 'data-testid': 'rate-account' });
+  const set = (s: AccountSaveState): void => {
+    el.textContent = SAVE_TEXT[s];
+    el.dataset.state = s;
+    el.classList.toggle('warn', s === 'failed' || s === 'unknown');
+  };
+  set(c.state);
+  const off = c.subscribe((s) => {
+    set(s);
+    if (s === 'saved' || s === 'failed') off();
+  });
+  return el;
+}
+
 /** 결과 화면 '내 평가' 패널: 항목 넷 → 레벨 막대 · 경험치(레벨 업) → 경험치 나눔 → 안내 */
 export function ratingPanel(applied: RatingApplied): HTMLElement {
   const { rating, gain, saved } = applied;
@@ -157,9 +183,18 @@ export function ratingPanel(applied: RatingApplied): HTMLElement {
       );
     }
     if (rating.outcome === 'void') panel.append(h('div', { class: 'rate-note' }, META_TEXT.voidHalf));
+  } else if (applied.practice) {
+    panel.append(h('div', { class: 'rate-note', 'data-testid': 'rate-practice' }, ACCOUNT_TEXT.practice));
+  } else if (applied.elsewhere) {
+    // 들어온 뒤 로그아웃 · 계정이 바뀐 판: 서버가 들어올 때의 계정에 적립한다 (이 화면은 어디에도 적립하지 않았다)
+    panel.append(h('div', { class: 'rate-note', 'data-testid': 'rate-elsewhere' }, ACCOUNT_TEXT.elsewhere));
   } else {
     panel.append(h('div', { class: 'rate-note', 'data-testid': 'rate-already' }, META_TEXT.alreadyGot));
   }
+  // 계정 모드인데 게스트 자리였던 판 (계정 모드가 되기 전에 들어왔다) · 이 화면에서 지운 계정 자리의 판: 이 기기 기록에 적립했다
+  if (applied.device)
+    panel.append(h('div', { class: 'rate-note', 'data-testid': 'rate-device' }, ACCOUNT_TEXT.deviceMatch));
+  if (applied.account) panel.append(accountLine(applied.account));
   if (!saved) {
     panel.append(
       h(

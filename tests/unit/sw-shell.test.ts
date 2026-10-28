@@ -3,7 +3,8 @@
 //  /privacy 네트워크 먼저 + 같은 빌드면 셸 사본 갱신, 실패 · 느림 · 표시 없음이면 셸 사본 /
 //  자산 캐시 우선 / 제외 경로 / JS 자리에 HTML이 오면 설치 실패 / 빌드 헤더가 다르면 설치 실패 / 사전 캐시는 'no-cache' 재검증 /
 //  새 빌드면 바로 앞 빌드 셸 하나만 남기고 더 옛 decoy-shell-*를 정리 · 옛 화면의 옛 조각(assets/)은 앞 빌드 셸에서 /
-//  dist의 새 파일이 셸 목록에 자동 포함(icons/ · 미리 압축한 .br · .gz 제외)
+//  dist의 새 파일이 셸 목록에 자동 포함(icons/ · 미리 압축한 .br · .gz 제외) /
+//  로그인 · 계정 경로(/api/ · /auth/ · /account/ — 공용 ACCOUNT_PASS_PREFIXES)는 가로채지 않음
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,6 +21,12 @@ import {
   swWithBuild,
 } from '../../client/shellBuild';
 import { COMPRESSIBLE_EXT, GZIP_MIN_BYTES } from '../../server/src/static';
+import {
+  ACCOUNT_API,
+  ACCOUNT_DELETE_PATH,
+  ACCOUNT_PASS_PREFIXES,
+  AUTH_START_PATH,
+} from '../../shared/src/account';
 
 const ORIGIN = 'https://decoy.test';
 const SW_SOURCE = readFileSync('client/public/sw.js', 'utf8');
@@ -309,6 +316,36 @@ describe('페이지 이동 세 갈래', () => {
     for (const p of ['/ws', '/healthz', '/test/state?room=AB', '/.well-known/assetlinks.json'])
       expect(await w.fetch(p, 'no-cors'), p).toBeNull();
     for (const p of ['/healthz', '/test/stall']) expect(await w.fetch(p), p).toBeNull();
+  });
+});
+
+describe('로그인 · 계정 요청은 가로채지 않는다 (선택형 구글 로그인)', () => {
+  it('sw.js PASS가 공용 ACCOUNT_PASS_PREFIXES(/api/ · /auth/ · /account/)를 모두 담는다', () => {
+    const m = /const PASS = (\[[^\]]*\]);/.exec(SW_SOURCE);
+    const pass = JSON.parse((m?.[1] ?? '[]').replace(/'/g, '"')) as string[];
+    expect(pass.length).toBeGreaterThan(0);
+    for (const p of ACCOUNT_PASS_PREFIXES) expect(pass, p).toContain(p);
+  });
+
+  it('구글 로그인 시작(페이지 이동)이 잠든 서버 · 오프라인에서도 깨우기 화면 · 앱 셸로 바뀌지 않고, 계정 API · 삭제 페이지도 캐시 없이 네트워크로', async () => {
+    const w = loadWorker('b1');
+    await w.install();
+    await w.caches.caches
+      .get('decoy-wake-v2')
+      ?.put(`${ORIGIN}/wake.html`, new Response('WAKE', { headers: { 'content-type': 'text/html' } }));
+    // 잠든 서버(표시 없는 응답) · 오프라인 어느 쪽이든 워커는 손대지 않는다 (가로채면 WAKE · 앱 셸이 나왔다)
+    for (const route of [
+      () => new Response('Service waking up', { status: 503 }),
+      () => Promise.reject(new TypeError('offline')),
+    ]) {
+      w.setRoute(route);
+      for (const p of [AUTH_START_PATH, `${AUTH_START_PATH}?next=delete`, ACCOUNT_DELETE_PATH])
+        expect(await w.fetch(p), p).toBeNull();
+      expect(await w.fetch(ACCOUNT_API.status, 'no-cors')).toBeNull();
+    }
+    // 앞부분이 같은 다른 경로는 그대로 앱 셸 갈래 (지나치게 넓게 비키지 않는다)
+    w.setRoute(() => Promise.reject(new TypeError('offline')));
+    expect(await text(await w.fetch('/accounting'))).toBe('ok');
   });
 });
 

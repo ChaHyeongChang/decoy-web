@@ -16,6 +16,7 @@ npm start              # 기본 포트 8080. PORT=3000 npm start 처럼 바꿀 �
 
 - 헬스 체크: `GET /healthz` → `ok` (모든 응답에 `x-decoy-server: 1` 헤더가 붙는다. 깨우기 화면이 호스팅 서비스의 대기 화면과 이 서버의 응답을 구별하는 표시)
 - 서버 옵션: `--port` (또는 `PORT`), `--host` (또는 `HOST`, 기본 `0.0.0.0`), `--balance <파일>` (또는 `DECOY_BALANCE`), `--dev` (또는 `DECOY_DEV_BOTS=1`, 개발용 봇 방 `?bots=1`을 받는다 — 배포 서버에서는 넣지 않는다)
+- 계정(선택형 구글 로그인 · 계정 저장, `docs/ACCOUNT_PLAN.md`): **기본 꺼짐.** 환경 변수 `DECOY_LOGIN=1`과 `GOOGLE_CLIENT_ID` · `DECOY_SESSION_SECRET` · `DATABASE_URL`(계정 기록 저장소 PostgreSQL 주소 — 배포는 Neon 무료 · 싱가포르)이 모두 있을 때만 `/auth/google/start` · `/auth/google/callback` · `/api/account…` · `/account/delete`를 연다. 하나라도 없거나 틀리면 꺼진 채로 뜨고 서버 로그에 빠진 값의 이름만 적는다(예: `계정 로그인: 꺼짐 (DATABASE_URL 없음)`, 꺼져 있으면 `/api/account`가 `{"on":false}`). 켜지면 `계정 로그인: 켜짐 (postgres)`이고, 서버가 시작할 때 `decoy_accounts` 표를 스스로 만든다. 켜는 순서는 `docs/LOGIN_GUIDE.md`(사람이 할 일)
 - 배포 전 확인: `npm run verify:deploy` — Docker가 있으면 이미지를 빌드해 컨테이너로 띄우고, 없으면 빌드 결과물을 `PORT`로 띄워서 첫 화면 HTTP 200 · 스크립트 · WebSocket 방 만들기까지 확인한다
 
 ## 1. 로컬 (한 컴퓨터)
@@ -122,6 +123,13 @@ docker run -d --name decoy --restart unless-stopped -p 80:8080 decoy-web
 | `PRIVACY_CONTACT` | 값 없음 (`sync: false`, 대시보드에서 넣는다) | 개인정보 처리방침(`/privacy`, M15)의 문의처. 비어 있으면 "스토어의 개발자 연락처로 문의" |
 | `DECOY_MAX_BOT_ROOMS` | 무료 플랜: 넣지 않음(기본 2) · **Starter로 바꾸면 `16`** | 빠른 매칭에서 동시에 봇을 채울 방 수(M13c, 출시 전 검토에서 6 → 2). CPU 할당량 흉내 실측(DECISIONS 5절)에서 무료(CPU 0.1개)는 봇 방 3개부터 끊겼고, Starter(CPU 0.5개)는 코어가 2배 느리다고 쳐도 16개까지 여유가 있었다. 넘은 방은 '사람만 기다리는 중'으로 다른 판이 끝나기를 기다린다 |
 | `DECOY_DEV_BOTS` | **넣지 않는다** | 개발용 봇 방(`?bots=1`)을 켠다. 이 방은 봇 방 상한 밖이라 배포 서버에서 켜면 연결 하나가 봇 판을 계속 만들 수 있다 |
+| `DECOY_LOGIN` | **넣지 않는다** (기본 꺼짐) — Play 데이터 보안 신고를 고친 뒤 `1` | 선택형 구글 로그인 · 계정 저장을 켠다(`docs/ACCOUNT_PLAN.md`). 켜는 순서 · 확인 · 끄기는 `docs/LOGIN_GUIDE.md` 5~9단계 |
+| `GOOGLE_CLIENT_ID` | 값 없음 (`sync: false`, 대시보드에서 넣는다) | 구글 클라우드 OAuth 클라이언트 ID(`…apps.googleusercontent.com`, LOGIN_GUIDE 3단계). 로그인을 켤 때만 필요 |
+| `DECOY_SESSION_SECRET` | 자동 (`generateValue: true` — Blueprint가 무작위 값을 만든다) | 세션 쿠키 서명 비밀(32자 이상). 대시보드에 보이는지만 확인하고 저장소 · 메신저에 옮겨 적지 않는다. 바꾸면 로그인한 모든 사람이 로그아웃된다(계정 기록은 그대로) |
+| `DECOY_ACCOUNT_TIMEZONE` | 넣지 않음 (기본 `Asia/Seoul`) | 계정의 하루(일일 도전 · 접속 보상)가 바뀌는 시간대(IANA 이름). 게스트(이 기기 기록)는 그대로 기기 자정 |
+| `DATABASE_URL` | 값 없음 (`sync: false`, 대시보드에서 넣는다) | 계정 기록 저장소(PostgreSQL) 접속 주소 — Neon 대시보드 **Connect**에서 복사한 접속 문자열 그대로(`postgresql://…ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require`, LOGIN_GUIDE 4단계). **DB 비밀번호가 들어 있어** 저장소에 적지 않는다. 끝의 `?sslmode=require`를 지우지 않는다 — 지우면 서버가 켤 때 `계정 DB 연결: 인증서를 확인하지 않음 …` 경고를 찍고 처리방침 10번(DB 연결 TLS + 인증서 확인)과 달라진다(LOGIN_GUIDE 7단계에서 이 경고가 없는지 본다). 로그인을 켤 때만 필요(`DECOY_LOGIN`이 `1`이 아니면 서버가 DB에 접속하지 않는다). 다른 Postgres로 옮길 때는 이 값만 바꾼다(LOGIN_GUIDE 11절) |
+
+> **계정 기록 저장소 = Neon 무료 플랜, 지역 AWS Asia Pacific 1 (Singapore) `aws-ap-southeast-1`** (DECISIONS 15절). 무료 조건(2026-10에 검색으로 본 Neon 문서 · 요금 페이지 값 — 콘솔 화면은 직접 보지 못했다, 바뀔 수 있으니 `https://neon.com/pricing`에서 다시 본다): 5분 쉬면 compute가 잠든다(무료는 끌 수 없다 — 다음 첫 계정 요청이 보통 1초 안팎, 드물게 몇 초 늦다), compute 프로젝트당 월 100 CU-시간(넘으면 그달은 계정 요청이 모두 503 → 게스트로, 판은 그대로, 다음 달에 풀린다), 저장 0.5GB(넘으면 읽기는 되고 기록 쓰기만 실패 — 다음 달에 풀리지 않는다, 행을 지우거나 유료로), 복원(PITR) 기간 6시간(지운 계정 기록이 최대 6시간 남는다 — 처리방침 3 · 7 · 8번). 서버 쪽: 시도 하나 4.5초(그중 접속 4초, 넘으면 연결 묶음을 새로 만든다) · 연결 오류면 0.3초 뒤 한 번 더(호출 하나 9초 예산 안에서만) · 서비스 호출 제한 10초 · 화면 요청 제한 12초 · 시도가 모두 시간을 넘기면 DB를 15초(이어지면 최대 5분) 쉬며 계정 요청은 바로 503 · 쉬는 연결은 60초 뒤 닫기(연결 최대 2개). 방 주소로 연 부팅은 계정 상태를 3초까지만 기다린다(잠든 Neon이 늦게 깨면 그 판은 게스트). `/healthz`는 DB에 닿지 않는다(잠든 DB를 깨우지 않는다). DB 오류 로그는 코드와 짧은 힌트만(주소 · 비밀번호를 찍지 않는다) — 뜻은 LOGIN_GUIDE 10단계 표. 켠 뒤 Logs에 `계정 DB 연결: …` 경고(인증서를 확인하지 않음 · 암호화하지 않음)가 **없어야** 한다
 
 환경 변수는 Render 대시보드 → 서비스 → **Environment**에서 넣는다. **저장하면 서버가 다시 배포되어 열려 있던 방이 사라진다** — 아무도 없을 때 넣는다.
 
@@ -164,7 +172,7 @@ docker run -d --name decoy --restart unless-stopped -p 80:8080 decoy-web
   - 이미 열려 있던 페이지(태블릿이 잠자기에서 깨어난 경우 등): 화면 가운데에 **"서버에 다시 연결하는 중…"** 안내가 뜨고, 연결되면 저절로 다시 들어간다
   - **잠들기 전의 방은 사라진다.** 깨어난 뒤 방 링크로 들어가면 "방을 찾을 수 없습니다. 서버가 잠들었다 깨어나거나 다시 시작하면 방이 사라져요…" 안내와 함께 첫 화면이 나온다. 방장이 새 방을 만들어 링크를 다시 보낸다 (서버가 잠들지 않은 짧은 끊김이면 같은 방으로 돌아간다)
 - **플레이테스트 1~2분 전에 개발자가 주소를 한 번 열어** 깨워 둔다
-- 잠들거나 다시 배포되면 **방과 진행 중인 판이 사라진다** (메모리에만 있다). 판이 끝나면 새로 방을 만든다
+- 잠들거나 다시 배포되면 **방과 진행 중인 판이 사라진다** (메모리에만 있다). 판이 끝나면 새로 방을 만든다. 로그인을 켰다면 계정 기록은 DB(Neon)에 있어 사라지지 않고, 로그인 상태(서명한 쿠키)도 그대로다. Neon(DB)은 서버와 따로 5분 쉬면 잠들고, 서버가 DB를 쓸 때(서버 시작 · 계정 요청 · 판 적립) 깨어난다
 - 싱가포르라 한국에서 핑이 70~100ms 안팎 나올 수 있다(목표 30~60ms보다 높다). 게임은 예측 · 보간으로 지연을 가리고 lag 100 · 200 봇 전체 판 검사를 통과하지만, 손맛은 `&debug=1`로 핑을 보며 확인한다 (`docs/HUMAN_CHECKS.md`)
 - 무료 인스턴스 시간은 한 달 750시간(워크스페이스의 무료 서비스 합산)이다. 서비스 하나는 한 달 내내 깨어 있어도(최대 744시간) 넘지 않는다. 무료 인스턴스는 CPU 0.1개 · 메모리 512MB다. 작업 환경에서 WebSocket 봇 4명으로 판을 돌렸을 때 서버는 CPU 한 코어의 약 3% · 메모리 약 70MB를 썼으니 여유는 있다. 그래도 판 중에 끊기는 느낌이 들면 유료(Starter) 플랜으로 올린다(`render.yaml`의 `plan: starter` → 잠들지도 않는다)
 - 무료 플랜 조건(잠드는 시간, 무료 시간, 리전)은 Render 요금 · 문서 페이지에서 배포 시점에 다시 확인한다
@@ -175,7 +183,7 @@ Railway 같은 서비스도 Dockerfile로 배포된다. 다만 아시아 리전�
 
 ## 4. Docker 이미지
 
-- 빌드: `docker build -t decoy-web .` (빌드 단계 Node 22, 실행 단계는 서버 한 파일 + 정적 파일 + `ws`만 담는다. 약 330MB)
+- 빌드: `docker build -t decoy-web .` (빌드 단계 Node 22, 실행 단계는 서버 한 파일 + 정적 파일 + `ws`만 담는다. 계정 DB 드라이버 `postgres`는 서버 한 파일에 함께 묶인다. 약 330MB)
 - 실행: `docker run -p 8080:8080 decoy-web` (`-e PORT=3000`처럼 포트를 바꿀 수 있다). 컨테이너 안에 헬스 체크(`/healthz`)가 들어 있다
 - **Docker Hub 요청 제한**(429)에 걸리면 미러 이미지를 쓴다: `docker build --build-arg NODE_IMAGE=mirror.gcr.io/library/node:22-bookworm-slim -t decoy-web .`
 - **회사 프록시 · 사설 인증서** 환경에서 `npm ci`가 실패하면 `npm run verify:deploy`에 환경 변수 `HTTPS_PROXY`(프록시 주소), `NPM_CA`(인증서 파일)를 주고 돌린다. 이때만 인증서를 빌드 비밀로 넘기는 임시 Dockerfile을 써서 빌드하므로 BuildKit(최신 Docker 기본)이 필요하다. 기본 `Dockerfile`은 BuildKit 없이도 빌드된다
@@ -189,6 +197,7 @@ Railway 같은 서비스도 Dockerfile로 배포된다. 다만 아시아 리전�
 3. 주소에 `&debug=1`을 붙이면 FPS · 프레임 시간 · 핑 · 서버 틱이 보인다(PC는 왼쪽 아래에 펼친 표, 휴대폰은 맵 왼쪽 위의 작은 칩 — 누르면 펼친다). 핑이 80ms를 넘으면 더 가까운 리전을 고른다
 4. 느린 노트북은 로비의 그래픽 품질을 낮음으로(또는 주소에 `&quality=low`)
 5. **압축 전송 · 나눠 받는 조각** (번들 줄이기): GitHub 저장소 → Actions → **배포판 검증** → Run workflow → 배포 주소(`https://<주소>`)를 넣고 실행한다. 잠든 서버는 깨어날 때까지(최대 3분) 기다린 뒤, 첫 화면 JS와 앱 셸의 모든 JS 조각 · CSS · HTML이 brotli를 받는 쪽에는 `content-encoding: br`, gzip만 받는 쪽에는 `gzip`, 압축을 받지 않는 쪽에는 원본으로 오는지(풀면 같은지), WebSocket 접속 · manifest를 본다. 받은 바이트를 로그에 적는다. 컴퓨터에서는 `node scripts/verify-deploy.mjs --url=https://<주소>`로 같은 검사를 한다. 빌드가 텍스트 자산마다 `.br` · `.gz` 사본을 미리 만들고 서버가 고른다(요청마다 압축하지 않는다)
+6. **선택형 구글 로그인**(켰을 때만): 서버 로그에 `계정 로그인: 켜짐 (postgres)`, `https://<주소>/api/account` → 로그인하지 않은 브라우저에서 `{"on":true,"signedIn":false}`. 꺼져 있으면 `{"on":false}`(기본). 기기마다 로그인 · 같은 기록 · 로그아웃 · 계정 삭제 확인은 `docs/LOGIN_GUIDE.md` 8단계
 
 ## 6. 문제 해결
 
@@ -203,6 +212,11 @@ Railway 같은 서비스도 Dockerfile로 배포된다. 다만 아시아 리전�
 | 깨우기 기능을 아예 빼고 싶다 | `client/public/sw.js`를 지우기만 하면 이미 설치된 기기에 남는다. 대신 내용을 `self.addEventListener('install', () => self.skipWaiting()); self.addEventListener('activate', () => self.registration.unregister());`로 바꿔 배포하고, `client/src/main.ts`의 등록 코드를 뺀다 |
 | Render 배포가 "Waiting for checks"에서 멈춰 있다 | `main`의 GitHub Actions 검사가 실패했거나 아직 도는 중이다 (`autoDeployTrigger: checksPass`). 검사를 고치거나 **Manual Deploy** |
 | 화면이 끊긴다 | 로비의 그래픽 품질을 낮음으로(또는 주소에 `&quality=low`), 다른 탭 · 프로그램 닫기, `&debug=1`로 FPS 확인 |
+| 설정에 '계정' 칸이 없다 · `/api/account`가 `{"on":false}` | 로그인 기능이 꺼져 있다(기본). 켰는데도 그렇다면 `DECOY_LOGIN` · `GOOGLE_CLIENT_ID` · `DECOY_SESSION_SECRET` · `DATABASE_URL` 중 빠지거나 틀린 것 — 서버 로그에 그 이름이 적힌다(`docs/LOGIN_GUIDE.md` 7단계) |
+| 서버 로그에 `계정 DB 오류 …` · `계정 저장소 시작 실패 …` · 주소 끝 `?login=db` | 계정 기록 저장소(Neon)에 닿지 않는다. 판과 게스트 플레이는 그대로 된다. 오류 코드별 원인 · 할 일은 `docs/LOGIN_GUIDE.md` 10단계 'DB(Neon) 문제' 표 |
+| 서버 로그에 `계정 DB 연결: 인증서를 확인하지 않음 …` · `계정 DB 연결: 암호화하지 않음 …` | `DATABASE_URL`에 `sslmode=require`가 없다(또는 `disable`) — 처리방침 10번과 달라진다. Neon Connect 창에서 접속 문자열을 고치지 않고 다시 복사해 넣는다(`docs/LOGIN_GUIDE.md` 7단계 · 10단계) |
+| 서버 로그에 `계정 저장소를 만들지 못함 (DATABASE_URL 확인)` | 주소의 `sslrootcert` 인증서 파일을 읽지 못하는 등 DB 연결을 준비하지 못해 로그인이 꺼진 채 떴다(판은 그대로). `docs/LOGIN_GUIDE.md` 10단계 |
+| 구글 로그인 오류 (`redirect_uri_mismatch` · `403 disallowed_useragent` · "액세스 차단됨" · 주소 끝 `?login=fail` · `off` · `db`) | `docs/LOGIN_GUIDE.md` 10단계 표. 로그인이 안 돼도 게임은 게스트(이 기기 기록)로 그대로 된다 |
 
 ## 7. 옛 화면과 맞지 않는 배포 (프로토콜 버전)
 

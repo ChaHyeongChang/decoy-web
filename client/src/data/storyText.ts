@@ -1,4 +1,5 @@
-// 게임 내 문구는 이 파일 한 곳에 모은다 (docs/STORY_TEXT.md).
+// 게임 내 문구는 이 파일 한 곳에 모은다 (docs/STORY_TEXT.md). 계정 문구(ACCOUNT_TEXT)만 나눠 받는 조각에서 쓰므로 accountText.ts에 따로
+// 둔다(첫 묶음을 작게 — DECISIONS 15절).
 import type { Role, TextId } from '@decoy/shared';
 
 export interface TextEntry {
@@ -452,6 +453,8 @@ export const EDITOR_TEXT = {
  */
 export const META_TEXT = {
   levelShort: 'Lv',
+  /** 레벨 칩: 계정 기록을 읽는 동안 (선택형 구글 로그인, 최대 3초) */
+  waiting: '…',
   levelAria: '레벨 {level} — 다음 레벨까지 경험치 {into}/{need}',
   levelMaxAria: '레벨 {level} — 최고 레벨',
   ratingTitle: '내 평가',

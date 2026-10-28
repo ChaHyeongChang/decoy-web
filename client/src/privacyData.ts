@@ -4,6 +4,9 @@
 // 표의 이름 · 유형이 두 문서에 없으면 같은 시험이 실패한다. 게임 코드는 이 파일을 쓰지 않는다(빌드에 들어가지 않음).
 //
 // '봇과 연습'은 기기 안에서 판정하므로 아래 어느 것도 서버로 가지 않는다 (M13b).
+// 선택형 구글 로그인으로 로그인한 경우에만 처리하는 항목은 아래 ACCOUNT_DATA · ACCOUNT_COOKIES (HTTP · 쿠키, 그리고 로그인한 화면만
+// 보내는 게임 메시지 칸 join.account · quick.account · rematch.account — 그 칸은 SENT_DATA가 아니라 ACCOUNT_DATA에 적는다)
+import { DELETE_COOKIE, OAUTH_COOKIE, SESSION_COOKIE } from '@decoy/shared';
 
 export interface SentDataInfo {
   /** 처리방침 · STORE_LISTING 표 첫 칸에 그대로 쓰는 이름 */
@@ -99,10 +102,117 @@ export const SENT_DATA = {
   },
 } as const satisfies Record<string, SentDataInfo>;
 
-/** 데이터 보안 양식 한 유형의 답 글자 (STORE_LISTING 표 4번째 칸 · PLAY_STORE_GUIDE 7단계 표가 이 글자를 그대로 쓴다) */
-export function formAnswer(form: { required: boolean; ephemeral: boolean }): string {
-  return `수집 예 · 공유 아니요 · ${form.required ? '필수' : '선택'} · 목적 앱 기능 · 일시적 처리 ${form.ephemeral ? '예' : '아니요'}`;
+/**
+ * 데이터 보안 양식 한 유형의 답 글자 (STORE_LISTING 표 4번째 칸 · PLAY_STORE_GUIDE 7단계 표가 이 글자를 그대로 쓴다).
+ * 목적은 따로 적지 않으면 '앱 기능' 하나 (게임 메시지로 보내는 항목). 계정 항목은 '앱 기능 · 계정 관리'
+ */
+export function formAnswer(form: {
+  required: boolean;
+  ephemeral: boolean;
+  purposes?: readonly string[];
+}): string {
+  const purposes = (form.purposes ?? ['앱 기능']).join(' · ');
+  return `수집 예 · 공유 아니요 · ${form.required ? '필수' : '선택'} · 목적 ${purposes} · 일시적 처리 ${form.ephemeral ? '예' : '아니요'}`;
 }
+
+// ───────────────────────── 선택형 구글 로그인 (docs/ACCOUNT_PLAN.md) ─────────────────────────
+// 로그인한 경우에만 처리하는 항목. 주로 구글 ID 토큰 · 세션 쿠키 · 계정 API(HTTP)로 오가고, 게임 메시지에는 계정 tag가 본인이 보내는
+// join · quick · rematch의 account와 본인 welcome · result의 account에만, 계정 기록 글은 그 계정 연결의 credit에만 실린다 — 다른
+// 참가자에게 가는 게임 메시지(로비 · 판 시작 명단 · 스냅샷 · 결과 · 남의 welcome)에는 계정 · 로그인 여부 · 레벨을 싣지 않는다.
+// 처리방침 1번 '로그인한 경우에만' 표(data-testid="account-data") · 4번 쿠키 표(data-testid="cookies"), STORE_LISTING 4장
+// '로그인을 켤 때 바꾸는 값', PLAY_STORE_GUIDE 7단계 '로그인을 켤 때' 표에 그대로 옮겨 적는다(tests/unit/privacy.test.ts).
+// 로그인 기능은 기본 꺼짐(환경 변수 DECOY_LOGIN) — 켜기 전에 Play Console 신고를 이 표대로 고친다(docs/LOGIN_GUIDE.md)
+
+export interface AccountDataInfo {
+  /** 처리방침 · STORE_LISTING 표 첫 칸에 그대로 쓰는 이름 */
+  label: string;
+  /**
+   * 어디서 오는가: 구글 ID 토큰 클레임('id_token.sub'), 쿠키('cookie.<이름>'), 계정 API 요청 본문 필드('<요청 타입>.<필드>' —
+   * shared/src/types.ts '계정' 절의 Account…Request), 로그인한 화면만 보내는 게임 메시지 칸('<메시지>.<필드>' — ClientMessage).
+   * 요청 타입에 필드를 더하면 여기 적어야 시험이 통과한다
+   */
+  sources: readonly string[];
+  /** Play Console 데이터 보안 양식의 데이터 유형 (공개 처리방침에 그대로 나간다 — 초안 표시를 넣지 않는다) */
+  playType: string;
+  /** 무엇이고 왜 처리하는가 */
+  purpose: string;
+  /** 판단을 사람이 다시 확인해야 하는가 (STORE_LISTING 4장 표 4번째 칸에 ⚠ 확인 필요, docs/HUMAN_CHECKS.md '선택형 구글 로그인') */
+  confirm: boolean;
+  /** 데이터 보안 양식의 답. 로그인은 선택 기능이라 모두 '선택', 계정을 지울 때까지 두므로 일시적 처리 아니요 */
+  form: { required: boolean; ephemeral: boolean; purposes: readonly string[] };
+}
+
+const ACCOUNT_FORM = { required: false, ephemeral: false, purposes: ['앱 기능', '계정 관리'] } as const;
+
+export const ACCOUNT_DATA = {
+  googleId: {
+    label: '구글 고유 ID',
+    sources: ['id_token.sub'],
+    playType: '개인 정보 › 사용자 ID',
+    purpose:
+      '구글 계정마다 정해진 번호(로그인하면 구글이 알려 주는 값). 같은 사람의 계정을 다시 찾는 데만 쓴다. 요청 범위가 openid뿐이라 이메일 · 이름 · 사진은 받지 않는다. 화면 · 쿠키 · 게임 메시지에 싣지 않는다',
+    confirm: false,
+    form: ACCOUNT_FORM,
+  },
+  accountSession: {
+    label: '계정 ID · 세션 쿠키',
+    // 계정 표시 tag(join.account · quick.account · rematch.account)는 계정 ID에서 만든 불투명한 값으로, 같은 계정을 가리키는 값이라
+    // 여기에 넣었다
+    sources: [
+      `cookie.${SESSION_COOKIE}`,
+      `cookie.${DELETE_COOKIE}`,
+      'join.account',
+      'quick.account',
+      'rematch.account',
+    ],
+    // 세션 쿠키는 계정 ID를 담은 인증 수단이라 따로 유형을 신고하지 않고 '사용자 ID'에 넣었다 (사람 확인)
+    playType: '개인 정보 › 사용자 ID',
+    purpose:
+      '로그인 상태 유지. 서버가 무작위로 만든 계정 ID(구글 ID가 아니다)를 발급 · 로그인 시각과 함께 서명해 HttpOnly 쿠키에 둔다(계정 삭제 페이지에서 로그인하면 그 페이지에만 쓰는 10분 쿠키). 로그인한 화면은 온라인 판에 들어갈 때(다시 하기 포함) 계정 표시(계정 ID에서 만든 불투명한 값)를 함께 보내고, 서버는 그 표시가 쿠키의 계정과 같을 때만 그 판 보상을 그 계정에 적립한다',
+    confirm: true,
+    form: ACCOUNT_FORM,
+  },
+  accountProgress: {
+    label: '계정 성장 기록',
+    sources: [
+      'AccountImportRequest.choice',
+      'AccountImportRequest.device',
+      // 화면이 계정이 비었다고 보고 올리는 표시 (그새 채워졌으면 서버가 덮지 않는다) — 기록 자체는 아니지만 올리기 요청의 칸
+      'AccountImportRequest.ifBlank',
+      'AccountCostumeRequest.action',
+      'AccountCostumeRequest.team',
+      'AccountCostumeRequest.id',
+    ],
+    // Google 정의의 '기타 작업'(게임 플레이 등 앱 안의 그 밖의 활동)으로 판단 (사람 확인)
+    playType: '앱 활동 › 기타 작업',
+    purpose:
+      '레벨 · 경험치 · 판 수 · 평가 최고 단계 · 최근 받은 판 번호 · 불씨 · 오늘의 도전 진행 · 접속 보상 받은 날 · 해금한 의상 · 입은 의상. 첫 로그인 때 고른 대로 이 기기 기록을 올리고, 그 뒤 온라인 판 보상은 서버가 판 평가로 직접 적립한다(봇과 연습은 적립하지 않음). 접속 보상 받기 · 의상 해금 · 입기도 계정에서 한다',
+    confirm: true,
+    form: ACCOUNT_FORM,
+  },
+} as const satisfies Record<string, AccountDataInfo>;
+
+/** 로그인할 때 · 로그인한 동안에만 서버가 두는 쿠키 (처리방침 4번 쿠키 표). 화면 스크립트는 쿠키를 읽거나 쓰지 않는다(HttpOnly) */
+export const ACCOUNT_COOKIES = [
+  {
+    name: OAUTH_COOKIE,
+    when: '구글 로그인을 시작할 때',
+    what: '로그인 요청과 구글에서 돌아온 응답이 같은 요청인지 확인하는 무작위 값(state · nonce)',
+    keep: '최대 10분',
+  },
+  {
+    name: SESSION_COOKIE,
+    when: '로그인한 동안',
+    what: '로그인 상태(세션): 서버가 만든 무작위 계정 ID · 발급 시각 · 로그인 시각 · 서명. 구글 ID · 이메일이 아님',
+    keep: '발급부터 180일(쓰는 동안 새로 발급), 로그아웃 · 계정 삭제 때 지움',
+  },
+  {
+    name: DELETE_COOKIE,
+    when: '계정 삭제 페이지에서 구글로 로그인했을 때',
+    what: '계정 삭제 페이지(/account/delete)에만 쓰는 로그인 표시: 서버가 만든 무작위 계정 ID · 발급 시각 · 서명. 게임 · 계정 기록 요청에는 실리지 않음',
+    keep: '최대 10분, 계정을 지우면 지움',
+  },
+] as const;
 
 /**
  * 타깃 연령 (2026-10-13 사용자 결정). 처리방침 머리 · 2번 '대상 연령', STORE_LISTING 2.4, PLAY_STORE_GUIDE 7단계가 같은 값을 쓴다.

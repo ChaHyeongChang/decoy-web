@@ -422,6 +422,11 @@ export type ClientMessage =
       bots: boolean;
       /** 고른 의상 (메타 c). 서버는 id만 거르고(모르는 값 = 기본) 판 시작 명단에만 싣는다 — 로비 · 결과에는 싣지 않는다 */
       costume?: CostumeChoice;
+      /**
+       * 화면이 계정 모드일 때 그 계정 표시 tag (선택형 구글 로그인 — GET /api/account의 tag, 계정 ID에서 만든 불투명한 값). 게스트면
+       * 보내지 않는다. 서버는 이 값이 그 연결의 세션 쿠키 계정 tag와 같을 때만 이 자리의 판을 계정에 적립한다(docs/ACCOUNT_PLAN.md 5절)
+       */
+      account?: string;
     }
   | { t: 'role'; role: Role | null }
   | { t: 'ready'; ready: boolean }
@@ -429,11 +434,15 @@ export type ClientMessage =
   | { t: 'start' }
   | { t: 'input'; frames: InputFrame[] }
   | { t: 'ping'; c: number }
-  | { t: 'rematch' }
+  /**
+   * 다시 하기. account: 화면이 지금 계정 모드면 그 계정 tag (join · quick의 account와 같다 — 게스트면 보내지 않는다). 빠른 매칭
+   * 재대기열은 이 값으로 새 자리의 계정을 정한다(들어올 때 밝힌 옛 값이 아니라 — 결과에서 로그아웃 · 계정 삭제했으면 게스트 자리)
+   */
+  | { t: 'rematch'; account?: string }
   /** 판 밖(로비 · 대기 · 결과)에서 옷장으로 바꾼 의상 (메타 c). 판 중에는 무시 — 판 시작 명단과 구운 그림이 판 끝까지 같게 */
   | { t: 'costume'; costume: CostumeChoice }
   /** 빠른 매칭 대기열에 들어간다 (M13c). 대기 중이거나 판이 없는 빠른 매칭 방에 넣거나 새로 만든다 */
-  | { t: 'quick'; name: string; costume?: CostumeChoice }
+  | { t: 'quick'; name: string; costume?: CostumeChoice; account?: string }
   /**
    * 방에서 나간다 (M13b): 결과 화면 "홈으로" · 대기 취소. 로비 · 결과 단계에서는 자리를 지우고, 판 중에는 끊김과 같다
    * (M13c에서 판 중 나가기는 유예 없이 바로 판정). 연결은 방에서 풀려 다른 방에 들어갈 수 있다
@@ -461,12 +470,128 @@ export type ServerMessage =
       balanceHash: string;
       /** 서버 빌드 ID (M13d, client/dist/build-id.json). 화면 빌드와 다르면 "새 버전이 있어요". 없으면 비교 안 함 */
       build?: string | null;
+      /**
+       * 서버가 이 자리에 받아들인 계정 tag (선택형 구글 로그인 — join · quick의 account가 세션 쿠키 계정과 같을 때만). 그 자리 본인
+       * 연결에만 간다(다른 참가자에게 가는 메시지에는 없다). 없거나 null = 게스트 자리(서버가 이 판을 계정에 적립하지 않는다)
+       */
+      account?: string | null;
     }
   | { t: 'lobby'; lobby: LobbyState }
   | { t: 'match'; info: MatchInfo }
   | { t: 'snap'; s: Snapshot }
   /** build: 서버 빌드 ID (M13d, join 전에도 비교) */
   | { t: 'pong'; c: number; s: number; build?: string | null }
-  /** rating: 받는 사람 자기 판 평가 (봇 자리 · 평가할 수 없는 판이면 없음, GAME_DESIGN 12장) */
-  | { t: 'result'; result: MatchResult; rating?: MatchRating | null }
-  | { t: 'error'; code: ErrorCode; message: string };
+  /**
+   * rating: 받는 사람 자기 판 평가 (봇 자리 · 평가할 수 없는 판이면 없음, GAME_DESIGN 12장).
+   * account: 이 판을 서버가 적립한 계정 tag, 받는 사람 본인 것만 (선택형 구글 로그인 — 판이 끝난 순간 그 자리 계정, 게스트 자리면 null).
+   * 결과 단계에 다시 붙어 welcome.account가 바뀌어도 그대로다 — 화면은 이 값으로 결과 적립 갈래를 정한다(welcome.account는 다음 판용)
+   */
+  | { t: 'result'; result: MatchResult; rating?: MatchRating | null; account?: string | null }
+  | { t: 'error'; code: ErrorCode; message: string }
+  /**
+   * 로그인한 사람의 판 보상을 서버가 계정에 적립한 결과 (선택형 구글 로그인, docs/ACCOUNT_PLAN.md). 그 계정의 연결에만 보낸다 —
+   * 같은 방 다른 사람에게는 로그인 여부 · 레벨 · 기록이 가지 않는다. tag: 적립한 계정의 표시(같은 사람의 다른 탭 · 다른 계정 모드
+   * 화면이 거른다). profile: 적립 뒤 계정 기록 글(serializeProfile, ok일 때만)
+   */
+  | { t: 'credit'; tag: string; matchId: string; ok: boolean; profile: string | null };
+
+// ───────────────────────── 계정 (선택형 구글 로그인, HTTP) ─────────────────────────
+// 게임 메시지(WebSocket)와 따로 HTTP로 오간다(docs/ACCOUNT_PLAN.md). 경로 · 쿠키 이름은 shared/src/account.ts
+
+/** 계정 기록이 오가는 형식: 기록 글(serializeProfile) + 계정의 오늘(계정 시간대 자정 기준) */
+export interface AccountProfileBody {
+  /** 계정 기록 글 (parseProfile로 읽는다) */
+  profile: string;
+  /** 계정의 오늘 날짜 글 'YYYY-MM-DD' (서버 시계 + 계정 시간대) */
+  day: string;
+}
+
+/** GET /api/account 응답 */
+export type AccountStatus =
+  /** 로그인 기능이 꺼져 있다 (환경 변수 DECOY_LOGIN, 기본 꺼짐) — 계정 화면을 보이지 않는다 */
+  | { on: false }
+  /** 켜져 있고 로그인하지 않았다 (또는 세션이 끝났다 · 계정이 지워졌다) */
+  | { on: true; signedIn: false }
+  | {
+      on: true;
+      signedIn: true;
+      /** 이 계정을 이 기기에서 알아보는 표시 (계정 ID에서 만든 불투명한 값 — 구글 ID · 이메일이 아니다) */
+      tag: string;
+      /** 계정 기록이 아직 없다 (첫 로그인 — 기기 기록을 올리기 전) */
+      fresh: boolean;
+      /** 계정 기록 글 (fresh면 null) */
+      profile: string | null;
+      day: string;
+      /** 계정의 하루가 바뀌는 시간대 (IANA, 예: Asia/Seoul) — 자정 타이머 · 날짜 표시 */
+      timeZone: string;
+    };
+
+/** 계정 API 오류 응답 (HTTP 4xx · 5xx 본문) */
+export interface AccountErrorBody {
+  error: AccountErrorCode;
+}
+
+export type AccountErrorCode =
+  /** 로그인 기능이 꺼져 있다 */
+  | 'off'
+  /** 로그인하지 않았다 · 세션이 끝났다 · 계정이 지워졌다 (401) */
+  | 'auth'
+  /** 요청 출처 · 표시 헤더가 맞지 않는다 (403) */
+  | 'csrf'
+  /** 본문이 틀렸다 · 너무 크다 (400 · 413) */
+  | 'bad-request'
+  /** 너무 자주 (429) */
+  | 'rate'
+  /** 로그인한 지 10분이 지나 이 기기 기록을 받지 않는다 (403, import) — 다시 로그인하면 올릴 수 있다 */
+  | 'relogin'
+  /**
+   * 화면이 비었다고 보고 묻지 않고 올린 계정 기록이 그새 다른 기기에서 채워졌다 (409, import ifBlank) — 덮지 않았다. 화면은 상태를
+   * 다시 읽어 계정 기록 · 이 기기 기록 중 고르게 한다
+   */
+  | 'conflict'
+  /** 계정 저장소(DB)에 닿지 않는다 (503) — 게스트로 계속한다 */
+  | 'db';
+
+/** POST /api/account/import: 첫 로그인 때 기기 기록 올리기 (응답 AccountProfileBody) */
+export interface AccountImportRequest {
+  /**
+   * 계정 기록이 이미 있을 때 어느 쪽을 쓸지 (사용자가 고른다). 계정이 비었으면(fresh) 무엇이든 기기 기록을 올린다.
+   * 'account'면 계정 기록을 그대로 둔다
+   */
+  choice: 'device' | 'account';
+  /**
+   * 이 기기 기록 글 (decoy:progress 그대로, 없으면 null). choice가 'account'면 null (고른 대로 올린다 — 보내지 않는다).
+   * 글이 있으면 서버는 로그인(구글 로그인) 뒤 10분 안일 때만 받는다(아니면 403 relogin). null은 비어 있지 않은 계정 기록을 덮지 않는다
+   */
+  device: string | null;
+  /**
+   * 화면이 계정 기록이 비었다고 보고(첫 로그인 · 빈 기록) 묻지 않고 올린다: 서버에서 계정 기록이 그새 비어 있지 않으면(다른 기기가
+   * 먼저 올렸다) 덮지 않고 409 conflict. 고르기 창에서 고른 경우에는 보내지 않는다
+   */
+  ifBlank?: true;
+}
+
+/** POST /api/account/claim-login: 오늘 접속 보상 받기 (계정 날짜로 서버가 계산) */
+export interface AccountClaimResponse extends AccountProfileBody {
+  /** 받은 보상 (이미 받았으면 null) */
+  claimed: { reward: number; streak: number } | null;
+}
+
+/** POST /api/account/costume: 의상 해금 · 입기 (서버가 불씨 · 가진 의상으로 판단) */
+export interface AccountCostumeRequest {
+  action: 'buy' | 'wear';
+  team: Team;
+  id: string;
+}
+
+export interface AccountCostumeResponse extends AccountProfileBody {
+  /** ok · 모르는 의상 · 이미 가짐 · 불씨 모자람 · 가지지 않아 못 입음 */
+  result: 'ok' | 'unknown' | 'owned' | 'coins' | 'not-owned';
+  /** 해금한 값 (buy · ok일 때) */
+  price?: number;
+}
+
+/** POST /api/account/delete 응답: 서버 기록을 바로 지웠는가 */
+export interface AccountDeleteResponse {
+  deleted: boolean;
+}
