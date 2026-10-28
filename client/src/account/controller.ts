@@ -157,8 +157,10 @@ export class AccountController {
       const dev = parseProfile(raw, this.d.now());
       const blank = dev.status === 'empty' || dev.status === 'corrupt' || isBlankProfile(dev.profile);
       let req: AccountImportRequest | null = null;
+      // 계정 기록이 아직 아무것도 쌓지 않았으면(빈 기기로 처음 로그인해 만든 빈 기록) 비어 있는 계정처럼 묻지 않고 올린다
+      const accountBlank = st.fresh || isBlankProfile(parseProfile(text, this.d.now()).profile);
       if (blank) req = st.fresh ? { choice: 'device', device: null } : null;
-      else if (st.fresh) req = { choice: 'device', device: raw };
+      else if (accountBlank) req = { choice: 'device', device: raw };
       else {
         const choice = await this.d.screens.choose(parseProfile(text, this.d.now()).profile, dev.profile);
         // 고른 대로 올린다: '계정 기록'이면 이 기기 기록 글을 보내지 않는다

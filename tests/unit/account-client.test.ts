@@ -474,6 +474,22 @@ describe('첫 로그인 (이 기기 표시 tag ≠ 계정 tag)', () => {
     expect(r.storage.data.get(PROGRESS)).toBe(text);
   });
 
+  it('기기 기록 + 아무것도 쌓지 않은 계정 기록(빈 기기로 처음 로그인해 만든 것): 묻지 않고 이 기기 기록을 올린다', async () => {
+    const dev = profileWith({ xp: 130, coins: 40, played: { survivor: 2, monster: 0 } });
+    const text = serializeProfile(dev);
+    const r = await rig({
+      device: text,
+      route: importRoute(statusIn('T5', profileWith({})), { ...dev, updated: 9 }),
+    });
+    await r.boot('ok');
+    expect(r.chosen).toEqual([]);
+    const imp = r.calls.find((c) => c.path === '/api/account/import');
+    expect(imp?.body).toEqual({ choice: 'device', device: text });
+    expect(r.meta.current.xp).toBe(130);
+    expect(r.notes).toEqual([T.results.ok, T.imported]);
+    expect(markOf(r)).toEqual({ v: 1, tag: 'T5' });
+  });
+
   it('둘 다 있으면 고르기 창(계정 · 이 기기 기록) → 고른 쪽으로 import, 고른 뒤 표시를 적는다', async () => {
     const dev = profileWith({ xp: 130, coins: 40 });
     const acc = profileWith({ xp: 900, coins: 5, owned: ['pack'] });
