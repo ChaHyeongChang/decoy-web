@@ -429,6 +429,9 @@ describe('로그인 켜짐 (가짜 구글 · 메모리 저장소)', () => {
     expect(anon.status).toBe(200);
     expect(anon.headers.get('cache-control')).toBe('no-store');
     expect(anon.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
+    // 리퍼러 정책은 같은 출처에만: 'no-referrer'면 브라우저가 삭제 폼 POST에 Origin: null을 실어 아래 Origin 검사에 걸린다
+    // (계정 E2E에서 찾음 — 실제 브라우저로는 웹에서 지울 수 없었다)
+    expect(anon.headers.get('referrer-policy')).toBe('same-origin');
     const anonHtml = await anon.text();
     expect(anonHtml).toContain('data-state="signed-out"');
     expect(anonHtml).toContain('href="/auth/google/start?next=delete"');
@@ -438,6 +441,7 @@ describe('로그인 켜짐 (가짜 구글 · 메모리 저장소)', () => {
     const id = jar.get('decoy_sid')!.split('.')[1]!;
     await srv.system.service!.credit(id, RATING);
     const page = await fetch(`${srv.base}/account/delete`, { headers: { cookie: jar.header() } });
+    expect(page.headers.get('referrer-policy')).toBe('same-origin');
     const html = await page.text();
     expect(html).toContain('data-state="signed-in"');
     expect(html).toContain('레벨 ');
@@ -464,6 +468,7 @@ describe('로그인 켜짐 (가짜 구글 · 메모리 저장소)', () => {
     expect(await noToken.text()).toContain('data-state="retry"');
     expect((await post(`csrf=${'A'.repeat(32)}`)).status).toBe(403);
     expect((await post(`csrf=${csrf}`, { origin: 'https://evil.example' })).status).toBe(403);
+    expect((await post(`csrf=${csrf}`, { origin: 'null' })).status).toBe(403);
     expect((await accounts(srv)).some((a) => a.id === id)).toBe(true);
     // 다른 세션(같은 계정이라도)의 CSRF 값은 맞지 않는다
     const otherSession = signSession(id, TEST_SECRET, Date.now() - 10_000);

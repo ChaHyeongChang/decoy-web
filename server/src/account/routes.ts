@@ -196,6 +196,11 @@ function sendError(
 // img-src 'self': 브라우저가 스스로 받는 파비콘이 막혀 콘솔 오류가 나지 않게
 const PAGE_CSP =
   "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+/**
+ * 삭제 페이지의 리퍼러 정책: 다른 출처로는 주소를 넘기지 않고 같은 출처 요청에만. 'no-referrer'면 브라우저가 이 페이지의 삭제 폼
+ * POST에 `Origin: null`을 실어(Fetch 표준) 요청 위조 막기(originMatchesHost)에 걸려 웹에서 지울 수 없었다 (계정 E2E에서 찾음)
+ */
+const PAGE_REFERRER_POLICY = 'same-origin';
 
 function sendHtml(
   res: ServerResponse,
@@ -212,7 +217,7 @@ function sendHtml(
           'content-type': 'text/html; charset=utf-8',
           'content-security-policy': PAGE_CSP,
           'x-frame-options': 'DENY',
-          'referrer-policy': 'no-referrer',
+          'referrer-policy': PAGE_REFERRER_POLICY,
         },
         cookies,
         close,
