@@ -2,8 +2,9 @@
 // 오늘의 도전 셋) · 옷장 탭(의상 해금 · 입기, 나눠 받는 조각 ui/wardrobe.ts).
 // 나눠 받는 조각(`hub`) — 첫 화면에는 필요 없다(ui/hubHost.ts가 받는다). 설정 화면(9.5)과 같은 막 + 깎은 패널 모양.
 // 접속 보상은 자동으로 주지 않고 여기서 '받기'로 받는다(첫 화면 · 시험을 막지 않게, 칩의 점이 알린다)
+// 로그인했으면(선택형 구글 로그인) 받기는 계정 API로 — 닿지 않으면 기록은 그대로 두고 "계정에 연결하지 못했어요" 한 줄
 import { PROGRESSION, challengeById, loginReward, type ChallengeTeam } from '@decoy/shared/meta';
-import { META_TEXT } from '../data/storyText';
+import { ACCOUNT_TEXT, META_TEXT } from '../data/storyText';
 import type { MetaState } from '../meta/meta';
 import { EMBER_SVG, fillText } from './levelChip';
 import { h, icon } from './uiArt';
@@ -155,7 +156,14 @@ export class HubPanel {
       if (claim.disabled) return;
       claim.disabled = true;
       void this.meta.claimLogin().then((r) => {
-        this.notice = r ? (r.saved ? fillText(META_TEXT.loginGot, { n: r.reward }) : META_TEXT.notSaved) : '';
+        // 계정 API에 닿지 않으면 기록은 그대로 두고 한 줄 (선택형 구글 로그인)
+        this.notice = r
+          ? r.fail
+            ? ACCOUNT_TEXT.callFailed
+            : r.saved
+              ? fillText(META_TEXT.loginGot, { n: r.reward })
+              : META_TEXT.notSaved
+          : '';
         this.render();
       });
     });
@@ -187,6 +195,7 @@ export class HubPanel {
 
     // 오늘의 도전 셋
     const daily = this.meta.daily();
+    const tz = this.meta.timeZone;
     const list = h('ul', { class: 'hub-daily-list' });
     daily.ids.forEach((id, i) => {
       const found = challengeById(id, PROGRESSION);
@@ -221,7 +230,12 @@ export class HubPanel {
       { class: 'hub-daily', 'data-testid': 'hub-daily' },
       h('span', { class: 'hub-sec-title' }, META_TEXT.dailyTitle),
       list,
-      h('p', { class: 'hub-note' }, META_TEXT.dailyReset),
+      // 로그인했으면 계정 시간대 자정에 바뀌고 연습 판은 세지 않는다
+      h(
+        'p',
+        { class: 'hub-note', 'data-testid': 'hub-daily-reset' },
+        tz === null ? META_TEXT.dailyReset : fillText(ACCOUNT_TEXT.dailyReset, { zone: tz }),
+      ),
     );
     const notice = h(
       'div',

@@ -442,6 +442,21 @@
     bottom: 44px;
   }
 }
+/* 가장 낮은 휴대폰(802×293): 로그인 기능이 켜져 '계정' 탭까지 다섯이면 왼쪽 탭 칸을 두 줄로 놓는다 — 48px 그대로 스크롤 없이
+   (탭 넷일 때는 위 세로 칸 그대로) */
+@media (max-height: 330px) {
+  .set-card.has-account .set-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-content: start;
+    gap: 2px;
+    padding-right: 6px;
+  }
+  .set-card.has-account .set-tab {
+    padding: 0 4px;
+    text-align: center;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .set-card {
     animation: none;

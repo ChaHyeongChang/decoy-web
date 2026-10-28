@@ -1,6 +1,7 @@
 // 클라이언트 상태와 흐름: 연결 → 로비 → 판 → 결과. 앱 생명주기(숨김 · 재접속 · 마지막 방 · 뒤로 가기 · 화면 꺼짐 방지)는 M12
 import type Phaser from 'phaser';
 import {
+  LOGIN_RESULT_PARAM,
   isKeptNote,
   validateBalance,
   type Balance,
@@ -15,6 +16,10 @@ import {
   type Snapshot,
   type SurvivorView,
 } from '@decoy/shared';
+import { AccountApi } from './account/api';
+import { bootAccount } from './account/boot';
+import type { AccountController } from './account/controller';
+import { accountMark } from './account/mark';
 import { sfx } from './audio';
 import { buildMismatch } from './buildInfo';
 import { UI_TEXT } from './data/storyText';
@@ -54,14 +59,16 @@ import {
   saveSeatToken,
 } from './session';
 import { serverStatus } from './serverStatus';
+import { readKey } from './storageKeys';
 import { Interpolator, Predictor, SnapshotClock, lerpAngle, lerpNum } from './sync';
 import type { Transport } from './transport';
 import { LeaveDialog, ReplacedNotice } from './ui/lifecycleUi';
 import { loadLayoutEditor } from './ui/layoutEditorLoader';
 import { costumeSetFromRoster, lobbyCostumeSet, setBakeCostumes } from './art/costumeBake';
-import { MetaState, msToMidnight } from './meta/meta';
+import { MetaState } from './meta/meta';
 import { setWearing } from './meta/wearing';
 import { DeviceProfileStore } from './meta/profileStore';
+import type * as AccountUiNs from './ui/account';
 import { HubHost } from './ui/hubHost';
 import { LevelChip } from './ui/levelChip';
 import { LobbyUI } from './ui/lobby';
@@ -177,17 +184,25 @@ export class App {
   readonly lobbyUi: LobbyUI;
   /** 결과 화면 (나눠 받는 조각, ui/resultHost.ts) */
   readonly resultUi: ResultHost;
+  /** 게스트 기록 저장소 (decoy:progress) */
+  private readonly deviceStore = new DeviceProfileStore();
   /**
-   * 내 성장 기록 (GAME_DESIGN 12장): 기기 저장소에서 읽고 판 결과의 내 평가로 경험치를 적립한다. 저장 부분은 떼어 두었다
-   * (meta/profileStore.ts — 다음 단계에서 서버 저장을 끼운다)
+   * 내 성장 기록 (GAME_DESIGN 12장): 게스트는 기기 저장소에서 읽고 판 결과의 내 평가로 경험치를 적립한다. 로그인하면 계정
+   * 저장소로 바꿔 끼운다(서버가 적립 — docs/ACCOUNT_PLAN.md)
    */
-  readonly meta = new MetaState(new DeviceProfileStore());
+  readonly meta = new MetaState(this.deviceStore);
+  /** 계정 API (선택형 구글 로그인) */
+  private readonly accountApi = new AccountApi();
+  /** 계정 흐름 · 화면 (나눠 받는 조각 'account' — 로그인한 기기의 부팅 · 설정을 열 때만 받는다) */
+  private accountUi: Promise<{ mod: typeof AccountUiNs; ctl: AccountController } | null> | null = null;
   /** 첫 화면 · 연습 고르기 내 레벨 · 불씨 칩 (누르면 '내 기록' 창) */
   readonly levelChip = new LevelChip(this.meta, () => this.hub.open());
   /** '내 기록' 창 (나눠 받는 조각, ui/hubHost.ts): 레벨 · 불씨 · 접속 보상 · 오늘의 도전 */
   readonly hub: HubHost;
-  /** 자정(이 기기 시간)에 칩 · 창을 다시 그린다 (새 도전 · 접속 보상) */
+  /** 자정(게스트: 이 기기 시간, 로그인: 계정 시간대)에 칩 · 창을 다시 그린다 (새 도전 · 접속 보상) */
   private midnightTimer: number | null = null;
+  /** 자정 타이머를 건 기록 저장소 (바뀌면 다시 건다) */
+  private midnightMode: 'device' | 'server' = 'device';
   /** 설정 화면 (설정 화면 통합): 로비 · 판 중 메뉴에서 연다 (#ui-root, 로비 · 판 화면 위). 화면 코드는 나눠 받는 조각 */
   readonly settings: SettingsHost;
   balance: Balance | null = null;
@@ -293,6 +308,7 @@ export class App {
         },
         role: () => this.match?.role ?? this.lobby?.players.find((p) => p.id === this.you)?.role ?? null,
         replayTutorial: () => this.lobbyUi.tutorialReset(),
+        account: (page, show) => this.fillAccountTab(page, show),
         // 편집 화면은 나눠 받는 조각(ui/layoutEditorLoader.ts): 로비에서 설정을 열 때 미리 받는다. 아직이면 받은 뒤 열고,
         // 그사이 닫히면(판 시작) 열지 않는다. 받지 못하면 설정 화면으로 돌아가 "새 버전이 있어요"
         openLayoutEditor: (done) => {
@@ -373,9 +389,13 @@ export class App {
       { chip: this.levelChip.el, level: () => this.meta.level().level },
     );
     this.hub = new HubHost(uiRoot, this.meta, () => this.showUpdate());
-    // 입은 의상: 판 밖 화면의 내 역할 그림 · 로비 미리 굽기 · 서버 자리 (옷장 · 다른 탭에서 바꾸면 따라간다)
+    // 입은 의상: 판 밖 화면의 내 역할 그림 · 로비 미리 굽기 · 서버 자리 (옷장 · 다른 탭에서 바꾸면 따라간다).
+    // 기록 저장소가 바뀌면(로그인 · 로그아웃) 자정 타이머를 그 시간대로 다시 건다
     setWearing(this.meta.costumes());
-    this.meta.onChange(() => this.wearingChanged());
+    this.meta.onChange(() => {
+      this.wearingChanged();
+      if (this.midnightMode !== this.meta.mode && this.midnightTimer !== null) this.armMidnight();
+    });
     this.resultUi = new ResultHost(
       uiRoot,
       () => this.link.send({ t: 'rematch' }),
@@ -401,8 +421,12 @@ export class App {
           window.history.state,
         )
       : null;
-    // 연습 중에는 서버 메시지를 쓰지 않는다 (연결도 쉰다)
+    // 연습 중에는 서버 메시지를 쓰지 않는다 (연결도 쉰다). 계정 적립 알림(credit)은 연습 중에 와도 받는다 (앞 온라인 판의 것)
     this.net.on((msg) => {
+      if (msg.t === 'credit') {
+        this.meta.credit(msg.matchId, msg.ok, msg.profile);
+        return;
+      }
       if (this.local) return;
       // 'leave' 뒤 같은 소켓으로 늦게 온 떠난 방 메시지는 다음 welcome까지 버린다 (검토 반영 F07)
       if (staleAfterLeave(this.awaitingWelcome, msg.t)) return;
@@ -449,22 +473,71 @@ export class App {
     if (this.params.debug !== 'off' || import.meta.env.DEV) this.installLifecycleDebug();
   }
 
-  /** 다음 자정(이 기기 시간)에 칩 · 창을 다시 그린다. 자정마다 다시 건다 */
+  /** 다음 자정(게스트: 이 기기 시간, 로그인: 계정 시간대)에 칩 · 창을 다시 그린다. 자정마다 다시 건다 */
   private armMidnight(): void {
     if (this.midnightTimer !== null) window.clearTimeout(this.midnightTimer);
+    this.midnightMode = this.meta.mode;
     // 1초 늦게 (자정 바로 그 순간의 시계 반올림을 피해서)
-    this.midnightTimer = window.setTimeout(
+    this.midnightTimer = window.setTimeout(() => {
+      this.midnightTimer = null;
+      this.meta.refresh();
+      this.armMidnight();
+    }, this.meta.untilMidnight() + 1000);
+  }
+
+  /** 계정 흐름 · 화면 조각 (설정 '계정' 탭 · 고르기 창 · 안내). 받지 못하면 "새 버전이 있어요" */
+  private loadAccount(): Promise<{ mod: typeof AccountUiNs; ctl: AccountController } | null> {
+    this.accountUi ??= import('./ui/account').then(
+      (mod) => ({
+        mod,
+        ctl: mod.createAccount({
+          api: this.accountApi,
+          meta: this.meta,
+          mark: accountMark(),
+          device: this.deviceStore,
+          deviceText: () => readKey('progress'),
+          left: () => this.accountLeft(),
+          now: () => Date.now(),
+        }),
+      }),
       () => {
-        this.midnightTimer = null;
-        this.meta.refresh();
-        this.armMidnight();
+        this.accountUi = null;
+        this.showUpdate();
+        return null;
       },
-      msToMidnight(Date.now()) + 1000,
     );
+    return this.accountUi;
+  }
+
+  /** 설정 '계정' 탭 (로비에서 열 때 — 조각을 받아 상태를 보고 채운다. 받지 못하면 숨긴다) */
+  private fillAccountTab(page: HTMLElement, show: (on: boolean) => void): void {
+    void this.loadAccount().then((a) => (a ? a.mod.fillTab(page, a.ctl, show) : show(false)));
+  }
+
+  /**
+   * 로그아웃 · 계정 삭제 · 세션 끝으로 게스트가 됐다: 첫 화면이면 연결을 새로 연다 — 서버는 연결을 열 때의 세션 쿠키로 계정을
+   * 정하므로(Conn.account), 옛 연결로 하는 판이 그 계정에 적립되지 않게. 방 · 판 중이면 그대로 둔다(그 판은 계정에 적립될 수 있다)
+   */
+  private accountLeft(): void {
+    if (this.local || this.lobby || this.match || !this.net.connected) return;
+    this.quietClose = true;
+    this.keeper.restart();
   }
 
   start(): void {
     this.armMidnight();
+    // 선택형 구글 로그인: 이 기기 표시가 있거나 로그인하고 돌아왔으면(?login=) 계정 상태를 읽는다 — 게스트는 요청 없음.
+    // ?login=은 아래에서 주소에서 지운다
+    const login = new URLSearchParams(window.location.search).get(LOGIN_RESULT_PARAM);
+    void bootAccount(
+      {
+        api: this.accountApi,
+        mark: accountMark(),
+        meta: this.meta,
+        controller: () => this.loadAccount().then((a) => a?.ctl ?? null),
+      },
+      login,
+    );
     listenLifecycle({
       visibility: (visible) => this.onVisibility(visible),
       online: (on) => {
@@ -495,10 +568,12 @@ export class App {
       } else this.lobbyUi.renderHome(this.homePrefill);
     }
     // ?practice=1은 읽었으면 주소에서 지운다 (검토 반영 F12): 남으면 연습 → '홈으로' 뒤 새로고침 · '새 버전' 새로고침이 다시
-    // 역할 고르기를 열고, 서비스 워커는 이 주소를 캐시 먼저로 준다. 뒤로 가기 항목 표시(history.state)는 그대로 둔다
-    if (this.params.practice) {
+    // 역할 고르기를 열고, 서비스 워커는 이 주소를 캐시 먼저로 준다. 뒤로 가기 항목 표시(history.state)는 그대로 둔다.
+    // ?login=(로그인 결과)도 같다 — 새로고침할 때마다 안내가 다시 뜨지 않게
+    if (this.params.practice || login !== null) {
       const url = new URL(window.location.href);
       url.searchParams.delete('practice');
+      url.searchParams.delete(LOGIN_RESULT_PARAM);
       window.history.replaceState(window.history.state, '', url.toString());
     }
     // 기다린 시간(초)을 세려고 주기적으로 다시 그린다. 바뀐 게 없으면 DOM을 건드리지 않는다
@@ -1045,7 +1120,8 @@ export class App {
         this.result = msg.result;
         this.setPlaying(false);
         // 내 평가 적립 (같은 판이면 다시 주지 않는다 — 재접속해 결과를 다시 받아도). 저장이 안 돼도 화면은 그대로
-        const rated = msg.rating ? this.meta.applyRating(msg.rating) : null;
+        // 로그인했으면 온라인 판은 서버가 계정에 적립하고(credit을 기다린다), 연습 판은 적립하지 않는다 (meta.ts)
+        const rated = msg.rating ? this.meta.applyRating(msg.rating, this.local !== null) : null;
         this.resultUi.show(msg.result, this.match?.role ?? null, rated);
         this.emit({ kind: 'result', result: msg.result });
         return;
