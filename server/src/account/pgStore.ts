@@ -40,10 +40,17 @@ export const PG_MAX_LIFETIME_S = 30 * 60;
  * - 빠른 신호: 어떤 질의도 끝나지 않은(성공 · 실패 모두 없이) 채 이 묶음이 연결을 다섯 번 넘게 열었다. 질의마다 실패가 오는
  *   경우(비밀번호 틀림 · 한도 초과 · 접속 거절 · 서버 쪽 강제 종료)는 질의가 끝나 다시 세므로 걸리지 않는다
  * - 늦은 신호(한 연결만 그러고 다른 연결은 정상으로 질의를 끝내 빠른 신호가 계속 지워질 때): 가장 오래 기다린 질의가 기다리는
- *   동안 묶음이 연결을 예순 번 넘게 열었다. 정상이면 연결 둘을 다시 쓰므로 한 질의가 기다리는 4.5초 동안 그만큼 열 일이 없다
+ *   동안 묶음이 연결을 예순 번 넘게 열었다. 정상이면 연결 둘을 다시 쓰므로 한 질의가 기다리는 4.5초 동안 그만큼 열 일이 없다.
+ *   그동안 실패로 끝난 질의 수만큼은 빼고 센다 — 접속마다 오류가 오면(비밀번호 틀림 · 접속 거절 등) 접속 하나가 질의 하나를
+ *   실패시키므로, 한꺼번에 예순 넘게 줄 선 질의가 차례로 실패하는 것은 폭주가 아니다
  */
 export const PG_STORM_SOCKETS = 5;
 export const PG_STORM_BACKSTOP = 60;
+/**
+ * 버린 묶음에서 TLS로 감싼 연결이 우아하게 닫히기를 기다리는 시간 (ms). 넘기면 TLS 쪽부터 부순다 — 상대가 얼어(읽지도 · 닫지도
+ * 않음) 반쯤 열린 연결이 서버에 쌓이지 않게
+ */
+export const PG_TLS_CLOSE_GRACE_MS = 5_000;
 /** 호출 하나의 시도 수 상한 (다른 요청이 연결 묶음을 버려 함께 끊긴 시도 포함) */
 export const PG_MAX_TRIES = 5;
 /** 같은 오류 코드 로그는 이 간격에 한 번 (ms) */
@@ -213,28 +220,47 @@ interface Pool {
   opened: number;
   /** 마지막으로 질의가 끝난 뒤 연 연결 수 */
   sinceSettle: number;
-  /** 기다리는 질의 → 그 질의를 보낼 때의 opened */
-  waiting: Map<number, number>;
+  /** 이 묶음에서 실패로 끝난 질의 수 (늦은 신호에서 뺀다) */
+  failed: number;
+  /** 기다리는 질의 → 그 질의를 보낼 때의 opened · failed */
+  waiting: Map<number, { opened: number; failed: number }>;
   dropped: boolean;
 }
 
 /**
  * postgres.js 연결 묶음. 접속은 첫 질의 때 한다. 소켓은 이 함수가 직접 연다(드라이버 socket 설정):
- * - 질의가 timeoutMs 안에 끝나지 않으면 그 묶음을 버린다 — 드라이버를 끝내고(end timeout 0) 그 묶음의 소켓을 바로 부순다(드라이버는
- *   우아하게 닫기만 해서, 멈춘 서버 쪽 연결이 끝없이 남는다). 다음 질의부터 새 묶음
+ * - 질의가 timeoutMs 안에 끝나지 않거나 접속 제한(CONNECT_TIMEOUT)으로 실패하면 그 묶음을 버린다 — 드라이버를 끝내고(end timeout 0)
+ *   그 묶음의 소켓을 닫는다(드라이버는 우아하게 닫기만 해서, 멈춘 서버 쪽 연결이 끝없이 남는다). TLS로 감싸지 않은 소켓은 바로
+ *   부수고, 감싼 것은 우아하게 닫히기를 5초 기다린 뒤 TLS 쪽부터 부순다(forceClose). 다음 질의부터 새 묶음.
+ *   접속 제한에도 버리는 까닭: 드라이버(3.4.9)는 소켓이 닫히는 같은 차례에 그 연결로 질의를 쓰면 쓰기 예약을 지우고도 '예약됨'으로
+ *   남겨, 그 연결 자리의 다음 접속들이 시작 글을 영영 보내지 못하고 접속 제한(4초)마다 실패한다(검증에서 재현). 새 묶음은 새 자리다
  * - 서버가 시작 중 오류 없이 접속을 닫으면 드라이버가 쉬지 않고 다시 접속한다(접속 제한도 매번 새로 잰다): 어떤 질의도 끝나지
  *   않은 채 다섯 번 넘게 열면 그 시도를 바로 끝낸다(RECONNECT_LOOP — 질의가 하나라도 끝나면 다시 센다)
  * - 다른 질의가 묶음을 버려 함께 끊긴 질의는 POOL_DROPPED로 알린다(저장소가 한 번 더의 몫을 쓰지 않고 새 묶음으로 다시 한다)
  * 버린 질의의 늦은 실패는 삼킨다. sslrootcert 파일을 읽지 못하면 예외 (만드는 쪽이 로그인을 끈다)
  */
-/** 연결 묶음 + 진단: 지금 묶음이 들고 있는 소켓 수 (시험 — 다시 접속이 쌓여 새지 않는지, 마지막으로 연 뒤 닫힌 것도 센다) */
-export type PostgresClient = PgClient & { openSockets(): number };
+/**
+ * 연결 묶음 + 진단 (시험): openSockets 지금 묶음이 들고 있는 소켓 수(다시 접속이 쌓여 새지 않는지 — 마지막으로 연 뒤 닫힌 것도
+ * 센다) · liveSockets 이 클라이언트가 연 소켓 가운데 아직 닫히지 않은 것(버린 묶음 포함)
+ */
+export type PostgresClient = PgClient & { openSockets(): number; liveSockets(): number };
 
-export function createPostgresClient(conf: PgConfig): PostgresClient {
+/** 시험용 설정 */
+export interface PostgresClientOptions {
+  /** 버린 묶음의 TLS 연결을 기다리는 시간 (기본 PG_TLS_CLOSE_GRACE_MS) */
+  tlsCloseGraceMs?: number;
+  /** 연 소켓마다 부른다 (드라이버가 받기 전 — 시험이 연결을 직접 끊어 본다) */
+  onSocket?: (sock: Socket) => void;
+}
+
+export function createPostgresClient(conf: PgConfig, opts: PostgresClientOptions = {}): PostgresClient {
   const ca = conf.caFile !== null ? readFileSync(conf.caFile, 'utf8') : null;
+  const tlsGraceMs = opts.tlsCloseGraceMs ?? PG_TLS_CLOSE_GRACE_MS;
   let closed = false;
   let drops = 0;
   let queryIds = 0;
+  /** 이 클라이언트가 연 모든 소켓 (버린 묶음 포함 — 닫기 · 진단. 닫힌 것은 열 때마다 걸러 낸다) */
+  const everything = new Set<Socket>();
 
   /**
    * 드라이버가 접속마다 부른다. 언제나 접속 중인 실제 소켓을 돌려준다 — 드라이버는 받은 소켓의 'error' · 'close'로 그 연결 자리를
@@ -250,16 +276,21 @@ export function createPostgresClient(conf: PgConfig): PostgresClient {
     // 오류는 드라이버가 받는다 — 그 사이 · 그 뒤에도 처리되지 않은 'error'로 서버가 죽지 않게
     sock.on('error', rawErrorGuard);
     for (const old of pool.sockets) if (old.destroyed) pool.sockets.delete(old);
+    for (const old of everything) if (old.destroyed) everything.delete(old);
     pool.sockets.add(sock);
+    everything.add(sock);
     sock.once('close', () => pool.sockets.delete(sock));
+    opts.onSocket?.(sock);
     pool.opened += 1;
     pool.sinceSettle += 1;
-    let oldest = pool.opened;
-    for (const at of pool.waiting.values()) if (at < oldest) oldest = at;
+    // 늦은 신호: 기다리는 질의마다 (그 뒤 연 연결 수 - 그 뒤 실패로 끝난 질의 수)의 가장 큰 값
+    let behind = 0;
+    for (const at of pool.waiting.values())
+      behind = Math.max(behind, pool.opened - at.opened - (pool.failed - at.failed));
     const why =
       pool.dropped || closed
         ? codeError('CONNECTION_DESTROYED', '계정 DB: 버린 연결 묶음')
-        : pool.sinceSettle > PG_STORM_SOCKETS || pool.opened - oldest > PG_STORM_BACKSTOP
+        : pool.sinceSettle > PG_STORM_SOCKETS || behind > PG_STORM_BACKSTOP
           ? codeError('RECONNECT_LOOP', '계정 DB: 서버가 오류 없이 연결을 거듭 닫음')
           : null;
     // 드라이버가 소켓을 받은 다음 차례에 (TLS로 감싸기 전이다 — 감쌌으면 우리 리스너가 지워져 있어 건드리지 않는다)
@@ -277,6 +308,7 @@ export function createPostgresClient(conf: PgConfig): PostgresClient {
       sockets: new Set(),
       opened: 0,
       sinceSettle: 0,
+      failed: 0,
       waiting: new Map(),
       dropped: false,
     };
@@ -286,12 +318,26 @@ export function createPostgresClient(conf: PgConfig): PostgresClient {
   let current = make();
 
   /**
-   * 소켓을 부순다 — 드라이버가 TLS로 감싼 날 소켓은 부수지 않는다: 감싼 TLS 소켓에 아직 못 보낸 쓰기가 있으면 닫힌 fd에 쓰다 EBADF가
-   * 나는데, 그때는 드라이버가 TLS 소켓의 리스너를 이미 지워 처리되지 않은 'error'로 서버 프로세스가 끝난다(검증에서 재현). 감쌌는지는
-   * 우리 리스너(rawErrorGuard)가 남았는지로 안다. 감싼 것은 드라이버의 끝내기(TLS end)에 맡긴다
+   * 소켓을 바로 닫는다. TLS로 감싸지 않은 것은 부순다. 드라이버가 TLS로 감싼 날 소켓은 직접 부수지 않는다: 감싼 TLS 소켓에 아직 못
+   * 보낸 쓰기가 있으면 닫힌 fd에 쓰다 오류(EBADF · ECANCELED)가 나는데, 그때는 드라이버가 TLS 소켓의 리스너를 이미 지워 처리되지 않은
+   * 'error'로 서버 프로세스가 끝난다(검증에서 재현). 감쌌는지는 우리 리스너(rawErrorGuard)가 남았는지로 안다. 감싼 것은 날 소켓에
+   * 'close'를 낸다 — Node TLS가 날 소켓에 단 '날 소켓이 닫히면 TLS 소켓도 부순다' 리스너가 TLS 소켓을 먼저 부수고(못 보낸 쓰기는
+   * 버린다) 이어서 날 소켓을 닫는다(Node 22에서 확인: 쓰기가 밀린 채로도 처리되지 않은 오류 없음). 그 리스너가 없는 Node면 아무 일도
+   * 없고 드라이버의 끝내기(TLS end)에 맡긴 채 남는다
    */
-  const hardClose = (sock: Socket): void => {
+  const forceClose = (sock: Socket): void => {
+    if (sock.destroyed) return;
     if (!wrappedByTls(sock)) sock.destroy();
+    else sock.emit('close', false);
+  };
+
+  /**
+   * 감싸지 않은 것은 바로 부수고, TLS로 감싼 것은 우아하게 닫히기를 tlsGraceMs 기다린 뒤 forceClose (기다림은 프로세스를 붙잡지
+   * 않는다. 0이면 바로 — 시험이 날 소켓을 부수던 때와 같은 차례에 닫아 본다)
+   */
+  const closeSoon = (sock: Socket): void => {
+    if (tlsGraceMs <= 0 || !wrappedByTls(sock)) forceClose(sock);
+    else if (!sock.destroyed) setTimeout(() => forceClose(sock), tlsGraceMs).unref();
   };
 
   const drop = (pool: Pool): void => {
@@ -299,12 +345,12 @@ export function createPostgresClient(conf: PgConfig): PostgresClient {
     pool.dropped = true;
     drops += 1;
     if (current === pool && !closed) current = make();
-    // 드라이버가 먼저 연결을 끝낸 뒤(시작 중 질의를 지운 뒤) 소켓을 부순다 — 먼저 부수면 드라이버가 시작 중 닫힘으로 보고 한 번 더 접속한다
+    // 드라이버가 먼저 연결을 끝낸 뒤(시작 중 질의를 지운 뒤) 소켓을 닫는다 — 먼저 부수면 드라이버가 시작 중 닫힘으로 보고 한 번 더 접속한다
     void pool.sql
       .end({ timeout: 0 })
       .catch(noop)
       .finally(() => {
-        for (const sock of pool.sockets) hardClose(sock);
+        for (const sock of pool.sockets) closeSoon(sock);
       });
   };
 
@@ -314,7 +360,7 @@ export function createPostgresClient(conf: PgConfig): PostgresClient {
       const pool = current;
       const startDrops = drops;
       const id = (queryIds += 1);
-      pool.waiting.set(id, pool.opened);
+      pool.waiting.set(id, { opened: pool.opened, failed: pool.failed });
       const run = pool.sql.unsafe(text, [...params]).then(
         (res) => {
           pool.waiting.delete(id);
@@ -324,10 +370,13 @@ export function createPostgresClient(conf: PgConfig): PostgresClient {
         (e: unknown) => {
           pool.waiting.delete(id);
           pool.sinceSettle = 0;
+          pool.failed += 1;
           // 다른 질의가 묶음을 버려 함께 끊겼다 (이 질의 탓이 아니다)
-          throw drops !== startDrops
-            ? codeError('POOL_DROPPED', '계정 DB: 다른 요청이 연결 묶음을 새로 만듦')
-            : e;
+          if (drops !== startDrops)
+            throw codeError('POOL_DROPPED', '계정 DB: 다른 요청이 연결 묶음을 새로 만듦');
+          // 접속 제한: 그 연결 자리가 드라이버 결함으로 망가졌을 수 있다 — 묶음을 버린다 (위 설명)
+          if (classifyPgError(e).code === 'CONNECT_TIMEOUT') drop(pool);
+          throw e;
         },
       );
       // 시간을 넘겨 버린 질의가 나중에 실패해도 처리되지 않은 거부가 되지 않게
@@ -347,10 +396,12 @@ export function createPostgresClient(conf: PgConfig): PostgresClient {
     },
     // 걸러 내지 않은 그대로 (마지막으로 연 뒤 닫힌 것까지 — 열 때마다 걸러 내는지 보는 시험용)
     openSockets: () => current.sockets.size,
+    liveSockets: () => [...everything].filter((sock) => !sock.destroyed).length,
     async end() {
       closed = true;
       await current.sql.end({ timeout: 2 }).catch(noop);
-      for (const sock of current.sockets) hardClose(sock);
+      // 드라이버가 2초 안에 닫지 못한 것(얼어 버린 상대) · 버린 묶음에서 아직 기다리는 것까지 모두
+      for (const sock of everything) forceClose(sock);
     },
   };
 }

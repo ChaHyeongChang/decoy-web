@@ -4,7 +4,8 @@
 // - 오류 분류: 연결 오류만 한 번 더 · 한도 초과는 바로 실패 · 로그에는 코드와 힌트만(1분에 한 번)
 // - 가짜 연결로 저장소: 행 모양 · 만들기 충돌 · 다시 하기는 예산(9초) 안에서만 · 시도 제한 4.5초 · 두 시도가 다 시간을 넘기면 DB를
 //   쉼(15초부터 두 배) · 서비스가 저장소의 호출 제한(10초)을 쓴다
-// - 실제 드라이버: 닫힌 포트(장애) · 오류 없이 접속을 닫는 서버(드라이버의 끝없는 다시 접속을 끊는다) · 답하지 않는 서버
+// - 실제 드라이버: 닫힌 포트(장애) · 오류 없이 접속을 닫는 서버(드라이버의 끝없는 다시 접속을 끊는다) · 답하지 않는 서버 ·
+//   접속마다 오류로 답하는 서버(줄 선 질의 일흔이 모두 그 오류 — 폭주로 잘못 보지 않는다) · 접속 제한(4초)이면 묶음을 버린다
 // - 계정 기능 묶음: 닿지 않는 DB면 서버는 뜨고 계정 요청만 503(db), 적립은 실패 알림 — 판은 그대로. 인증서를 확인하지 않는 주소는
 //   시작 로그에 경고, 저장소를 만들 수 없으면(sslrootcert 파일) 로그인을 끈 채로
 // 실제 PostgreSQL 시험은 account-pg-live.test.ts (DECOY_TEST_DATABASE_URL이 있을 때)
@@ -28,6 +29,7 @@ import {
   PG_RETRY_MIN_LEFT_MS,
   PG_RETRY_WAIT_MS,
   PG_RUN_BUDGET_MS,
+  PG_STORM_BACKSTOP,
   PG_STORM_SOCKETS,
   PG_MAX_TRIES,
   PgAccountStore,
@@ -716,11 +718,21 @@ async function closedPort(): Promise<number> {
   return port;
 }
 
+/** PostgreSQL 오류 응답(ErrorResponse) 한 통: 심각도 · SQLSTATE · 메시지 */
+function errorResponse(code: string): Buffer {
+  const body = Buffer.from(`SFATAL\0VFATAL\0C${code}\0Mpassword authentication failed\0\0`, 'latin1');
+  const head = Buffer.alloc(5);
+  head.write('E', 0, 'latin1');
+  head.writeInt32BE(body.length + 4, 1);
+  return Buffer.concat([head, body]);
+}
+
 /**
  * 가짜 DB 서버: 'close'는 받자마자 오류 없이 닫는다(드라이버가 시작 중 닫힘을 보고 끝없이 다시 접속하는 경우),
- * 'silent'는 받고 아무 답도 하지 않는다(소리 없이 멈춘 연결), 'stuck'은 인증까지 끝낸 뒤 질의에 답하지 않는다(멈춘 백엔드)
+ * 'silent'는 받고 아무 답도 하지 않는다(소리 없이 멈춘 연결), 'stuck'은 인증까지 끝낸 뒤 질의에 답하지 않는다(멈춘 백엔드),
+ * 'reject'는 시작 글에 비밀번호 틀림(28P01)으로 답하고 닫는다(접속마다 오류)
  */
-async function fakePg(mode: 'close' | 'silent' | 'stuck') {
+async function fakePg(mode: 'close' | 'silent' | 'stuck' | 'reject') {
   const open = new Set<Socket>();
   let accepted = 0;
   let ended = 0;
@@ -738,6 +750,7 @@ async function fakePg(mode: 'close' | 'silent' | 'stuck') {
       sock.once('data', () =>
         sock.write(Buffer.from([0x52, 0, 0, 0, 8, 0, 0, 0, 0, 0x5a, 0, 0, 0, 5, 0x49])),
       );
+    if (mode === 'reject') sock.once('data', () => sock.end(errorResponse('28P01')));
   });
   await new Promise<void>((resolve) => srv.listen(0, '127.0.0.1', resolve));
   return {
@@ -917,6 +930,65 @@ describe('멈춘 DB (실제 드라이버 · 가짜 서버)', () => {
       await pg.close();
     }
   });
+});
+
+describe('접속마다 오류 · 접속 제한 (실제 드라이버 · 가짜 서버)', () => {
+  const codeOf = (p: Promise<unknown>): Promise<string> =>
+    p.then(
+      () => 'ok',
+      (e: { code?: string }) => String(e.code),
+    );
+
+  it(`접속마다 오류로 답하는 DB에 질의 일흔이 한꺼번에 줄 서도 모두 그 오류 — 늦은 신호(${PG_STORM_BACKSTOP})가 차례로 실패하는 접속을 폭주로 잘못 보지 않는다 (비밀번호 틀림 · 닫힌 포트)`, async () => {
+    const n = PG_STORM_BACKSTOP + 10;
+    const pg = await fakePg('reject');
+    const port = await closedPort();
+    try {
+      for (const [conf, want] of [
+        [localConf(pg.port), '28P01'],
+        [localConf(port), 'ECONNREFUSED'],
+      ] as const) {
+        const c = createPostgresClient(conf);
+        const got = await Promise.all(
+          Array.from({ length: n }, () => codeOf(c.query('SELECT 1', [], 4_500))),
+        );
+        await c.end();
+        expect(got).toEqual(Array.from({ length: n }, () => want));
+      }
+      // 저장소: 폭주 로그 없이, 다시 하지 않는 오류(28P01)는 한 번만 시도
+      const logs: string[] = [];
+      const before = pg.accepted();
+      const store = new PgAccountStore(createPostgresClient(localConf(pg.port)), {
+        log: (m) => logs.push(m),
+      });
+      const got = await Promise.all(Array.from({ length: n }, () => codeOf(store.get('a'.repeat(32)))));
+      await store.close();
+      expect(got).toEqual(Array.from({ length: n }, () => '28P01'));
+      expect(pg.accepted() - before).toBe(n);
+      expect(logs.join('\n')).not.toContain('RECONNECT_LOOP');
+    } finally {
+      await pg.close();
+    }
+  }, 20_000);
+
+  it(`접속 제한(${PG_CONNECT_TIMEOUT_S}초)으로 실패하면 그 묶음을 버린다 — 같은 묶음의 다른 질의는 POOL_DROPPED(저장소가 새 묶음으로 다시), 망가진 연결 자리가 남지 않는다`, async () => {
+    const pg = await fakePg('silent');
+    const c = createPostgresClient(localConf(pg.port));
+    try {
+      const got = await Promise.all([
+        codeOf(c.query('SELECT 1', [], 8_000)),
+        codeOf(c.query('SELECT 1', [], 8_000)),
+      ]);
+      expect(got.sort()).toEqual(['CONNECT_TIMEOUT', 'POOL_DROPPED']);
+      expect(pg.accepted()).toBe(2);
+      // 다음 질의는 새 묶음에서 새로 접속한다 (질의 하나 — 연결 하나)
+      expect(await codeOf(c.query('SELECT 1', [], 300))).toBe('QUERY_TIMEOUT');
+      expect(pg.accepted()).toBe(3);
+    } finally {
+      await c.end();
+      await pg.close();
+    }
+  }, 20_000);
 });
 
 describe('계정 기능 묶음: DB 주소 확인', () => {
