@@ -102,6 +102,8 @@ test('판 중 설정을 처음 열 때: 로비에서 받아 만들어 둔 화면
   const { page } = s;
   const chunks = recordChunks(page);
   await expect(page.getByTestId('match-menu')).toBeVisible({ timeout: 15_000 });
+  // 판 시작 직후의 굽기(맵 조각 · 아틀라스 올리기)가 지나간 뒤 잰다 — 설정을 처음 여는 일만 보려고 (settings-match.spec과 같은 조건)
+  await page.waitForTimeout(1500);
   await watchLongTasks(page);
   const t0 = Date.now();
   await page.getByTestId('match-menu').click();
@@ -110,10 +112,10 @@ test('판 중 설정을 처음 열 때: 로비에서 받아 만들어 둔 화면
   await page.waitForTimeout(500);
   const long = await page.evaluate(() => (window as unknown as { __longTasks: number[] }).__longTasks);
   console.log(
-    `[lazy-chunks] 판 중 설정 처음 열기: 누름 → 보임 ${openMs}ms (Playwright 왕복 포함), 긴 작업 ${JSON.stringify(long)}`,
+    `[lazy-chunks] 판 중 설정 처음 열기: 누름 → 보임 ${openMs}ms (Playwright 왕복 포함), 긴 작업 ${JSON.stringify(long)}, 판 중 받은 JS ${JSON.stringify(chunks)}`,
   );
-  expect(long).toEqual([]);
-  expect(chunks).toEqual([]);
+  expect(chunks, '판 중에 받은 JS 조각 (로비에서 다 받아 두어야 한다)').toEqual([]);
+  expect(long, '판 중 설정을 처음 열 때 50ms 넘는 긴 작업').toEqual([]);
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('settings-panel')).toBeHidden();
   expect(s.problems).toEqual([]);

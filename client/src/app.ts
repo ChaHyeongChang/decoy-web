@@ -444,6 +444,9 @@ export class App {
       this.renderWake();
       this.keeper.closed();
     };
+    // 생명주기 디버그 훅(window.__DECOY_LIFE__, 시험 · ?debug)은 만들 때 건다: 주소에 ?debug가 있으면 main.ts가 디버그 조각을
+    // 받은 뒤 start()를 부르는데, 시험은 문서가 준비될 때(사용자 활성화 전) 이 훅을 쓴다 (예전 순서 그대로 — 모듈 실행 안)
+    if (this.params.debug !== 'off' || import.meta.env.DEV) this.installLifecycleDebug();
   }
 
   /** 다음 자정(이 기기 시간)에 칩 · 창을 다시 그린다. 자정마다 다시 건다 */
@@ -477,7 +480,6 @@ export class App {
       },
       popstate: () => void this.backGuard?.popped(),
     });
-    if (this.params.debug !== 'off' || import.meta.env.DEV) this.installLifecycleDebug();
     this.wake.setOffline(navigator.onLine === false);
     this.wake.connecting(performance.now());
     this.keeper.start();
