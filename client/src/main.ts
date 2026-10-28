@@ -285,6 +285,10 @@ const game = new Phaser.Game({
   backgroundColor: '#0B1622',
   banner: false,
   disableContextMenu: true,
+  // Phaser 기본 FX(preFX · postFX의 빛남 · 흐림 등)는 쓰지 않는다: 켜 두면 부팅 때 FX 셰이더 십여 개와 크기별 렌더 타깃을 만든다.
+  // 배포 빌드는 그 코드를 빼고(phaserCore.js · vite.config.ts PHASER_STUBS), 우리 후처리(WorldGradePipeline)는 그대로다
+  disablePreFX: true,
+  disablePostFX: true,
   // 크기는 직접 정한다: 백버퍼 = 표시 크기 × 기기 픽셀 배율, 캔버스는 기기 픽셀 격자에 맞춰 놓는다.
   // Scale.FIT은 devicePixelRatio를 보지 않고 캔버스를 CSS로 늘려서 흐렸다 (DECISIONS)
   scale: {

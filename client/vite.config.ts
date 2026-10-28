@@ -22,10 +22,32 @@ const PHASER_FLAGS: Readonly<Record<string, boolean>> = {
   EXPERIMENTAL: false,
 };
 
+/**
+ * 사용자 빌드에서 빈 모듈로 바꾸는 Phaser 파일 (phaser/src 기준): 미리 FX(preFX) 파이프라인 · FX 셰이더 묶음 · FX 컨트롤러.
+ * 게임 설정이 disablePreFX · disablePostFX를 켜(main.ts) 부팅 때 만들지 않고, 게임 오브젝트의 FX 추가 함수(addGlow 등)는 부르지 않는다.
+ * 만들려 하면 바로 알 수 있게 생성자는 오류를 던진다 (DECISIONS 11절 '번들 줄이기')
+ */
+const PHASER_STUBS: Readonly<Record<string, string>> = {
+  'renderer/webgl/pipelines/fx/index.js': 'module.exports = {};',
+  'fx/index.js': 'module.exports = {};',
+  'renderer/webgl/pipelines/FXPipeline.js':
+    "module.exports = function FXPipeline () { throw new Error('FXPipeline: Phaser 사용자 빌드에 없다 (disablePreFX)'); };",
+  'renderer/webgl/pipelines/PreFXPipeline.js':
+    "module.exports = function PreFXPipeline () { throw new Error('PreFXPipeline: Phaser 사용자 빌드에 없다 (disablePreFX)'); };",
+  // math 묶음(행렬 · 사원수 · 3D 벡터 · 보간 등)을 통째로 부르는 곳은 Config(RND를 만든다) · GetAdvancedValue(RND를 읽는다) 둘뿐이다.
+  // 그 둘이 쓰는 칸만 둔다 — 다른 Phaser 모듈은 math 파일을 하나씩 부른다(Vector2 · 각도 · 이징 등은 그대로 들어간다)
+  'math/index.js':
+    "module.exports = { RandomDataGenerator: require('./random-data-generator/RandomDataGenerator'), RND: null };",
+};
+
 /** Phaser 소스의 빌드 깃발 `typeof X`(Phaser 자체 빌드의 DefinePlugin과 같은 값)와 `global.Phaser`를 바꾼다. define으로는 `typeof X` 꼴을 못 바꾼다 */
 const phaserFlags: Plugin = {
   name: 'decoy-phaser-flags',
   apply: 'build',
+  load(id) {
+    const m = /\/node_modules\/phaser\/src\/(.+)$/.exec(id.split('?')[0] ?? '');
+    return m ? (PHASER_STUBS[m[1] ?? ''] ?? null) : null;
+  },
   transform(code, id) {
     if (!id.includes('/node_modules/phaser/src/')) return null;
     const out = code
