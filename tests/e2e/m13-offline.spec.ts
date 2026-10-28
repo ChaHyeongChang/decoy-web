@@ -5,10 +5,11 @@
 //  - Render 정지 흉내: 표시 헤더 없이 503을 주는 가짜 서버 → 깨우기 화면의 "기다리는 동안 봇과 연습"으로 판 시작
 //  - (검토 반영) 오프라인 + 서버 꺼짐에서 방 주소(?room=)로 열면 깨우기 패널의 "첫 화면으로" → 봇과 연습
 //  - (수정 검토) 뒤로 가기 항목이 남은 채 다시 열려도 "첫 화면으로" 뒤 주소에 room이 돌아오지 않는다
-//  - 서비스 워커 업데이트: 빌드 ID만 다른 두 빌드를 차례로 서빙하면 새 워커로 바뀌고 옛 셸 캐시가 지워지고,
-//    화면은 "새 버전이 있어요"를 띄운다
+//  - 서비스 워커 업데이트: 빌드 ID가 다른 두 빌드를 차례로 서빙하면 새 워커로 바뀌고 바로 앞 빌드 셸만 남으며(옛 화면이
+//    새 서버에 없는 옛 조각을 그 셸에서 연다), 화면은 "새 버전이 있어요"를 띄운다
+//  - 앱 셸: 나눠 받는 조각도 모두 셸 캐시에 있고, 서버를 끄고 오프라인으로 다시 열어도 설정 · 배치 편집 · 봇과 연습이 열린다
 // 서버를 일부러 끄는 시험이라 브라우저가 스스로 찍는 연결 실패 로그만 허용한다(MOBILE_PLAN 3절 콘솔 규칙의 예외)
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -113,6 +114,53 @@ for (const d of DEVICES) {
     }
   });
 }
+
+test('앱 셸: 나눠 받는 조각도 모두 셸 캐시에 있고(미리 압축한 사본은 없다), 서버를 끄고 오프라인으로 다시 열어도 설정 · 배치 편집 · 봇과 연습이 캐시 조각으로 열린다 (휴대폰)', async ({
+  browser,
+}) => {
+  const port = await freePort();
+  const server = await startServer(['--test-hooks'], { port });
+  const base = `http://127.0.0.1:${port}`;
+  const { context, page, problems } = await newPlayerPage(browser, dpr1(PHONE_LANDSCAPE));
+  try {
+    await page.goto(`${base}/?debug=hook&renderer=canvas`);
+    await shellReady(page);
+    const cached = await page.evaluate(async () => {
+      const key = (await caches.keys()).find((k) => k.startsWith('decoy-shell-'));
+      if (!key) return [];
+      return (await (await caches.open(key)).keys()).map((r) => new URL(r.url).pathname);
+    });
+    const lazy = readdirSync('client/dist/assets').filter(
+      (f) => f.endsWith('.js') && !f.startsWith('index-'),
+    );
+    expect(lazy.length).toBeGreaterThanOrEqual(8);
+    for (const f of lazy) expect(cached).toContain(`/assets/${f}`);
+    expect(cached.filter((p) => /\.(br|gz)$/.test(p))).toEqual([]);
+    await context.setOffline(true);
+    await server.stop();
+    await page.reload();
+    await expect(page.getByTestId('server-status')).toHaveAttribute('data-state', 'offline');
+    // 설정 → 조작 탭 → 배치 편집: 조각을 셸 캐시에서
+    await press(page.getByTestId('settings-button').first());
+    await expect(page.getByTestId('settings-panel')).toBeVisible();
+    await press(page.getByTestId('settings-tab-controls'));
+    await press(page.getByTestId('layout-edit'));
+    await expect(page.getByTestId('layout-editor')).toBeVisible();
+    await press(page.getByTestId('le-cancel'));
+    await expect(page.getByTestId('settings-panel')).toBeVisible();
+    await press(page.getByTestId('settings-close'));
+    await expect(page.getByTestId('settings-panel')).toBeHidden();
+    // 봇과 연습: 연습 조각도 셸 캐시에서
+    await press(page.getByTestId('practice'));
+    await press(page.getByTestId('practice-role-guard'));
+    await expect.poll(() => phase(page), { timeout: 15_000 }).toBe('playing');
+    await expect(page.getByTestId('update-available')).toHaveCount(0);
+    expect(unexpected(problems)).toEqual([]);
+  } finally {
+    await context.close();
+    await server.stop();
+  }
+});
 
 test('서버만 꺼짐(온라인): 새로 열면 앱 셸 첫 화면이 상태 줄 안내 · 봇과 연습을 보이고 판이 시작된다', async ({
   browser,
@@ -268,20 +316,28 @@ test('뒤로 가기 항목이 남은 채 방 주소로 다시 열려도 "첫 화
   }
 });
 
-test('서비스 워커 업데이트: 빌드 ID만 다른 새 빌드를 서빙하면 새 워커로 바뀌고 옛 셸 캐시가 지워지며 "새 버전이 있어요"', async ({
+test('서비스 워커 업데이트: 새 빌드를 서빙하면 새 워커로 바뀌고 바로 앞 빌드 셸만 남아, 옛 화면이 새 서버에 없는 옛 조각을 그 셸에서 열며 "새 버전이 있어요"', async ({
   browser,
 }) => {
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
-  // 빌드 B: 지금 빌드를 복사해 빌드 ID만 바꾼다 (index.html에 표시를 남겨 셸이 B로 바뀐 것을 본다)
+  // 빌드 B: 지금 빌드를 복사해 빌드 ID만 바꾸고(index.html에 표시를 남겨 셸이 B로 바뀐 것을 본다), 옛 화면이 아직 받지 않은
+  // 조각 하나(배치 편집 — PC에서는 미리 받지 않는다)를 B에서 지운다: 새 배포에서 이름(해시)이 바뀐 조각과 같다.
+  // 미리 압축한 사본(.br · .gz)은 옛 원본 것이 남는다 — 서버가 풀어 보고 다르면 쓰지 않는다(static.ts)
   const distB = mkdtempSync(join(tmpdir(), 'decoy-dist-b-'));
   cpSync('client/dist', distB, { recursive: true });
   const idA = (JSON.parse(readFileSync('client/dist/build-id.json', 'utf8')) as { id: string }).id;
   const idB = `${idA.slice(0, -4)}beef`;
+  const editorChunk = readdirSync(join(distB, 'assets')).find((f) => /^layoutEditor-[\w-]+\.js$/.test(f));
+  if (!editorChunk) throw new Error('배치 편집 조각이 없다');
+  for (const f of [editorChunk, `${editorChunk}.br`, `${editorChunk}.gz`])
+    rmSync(join(distB, 'assets', f), { force: true });
   writeFileSync(join(distB, 'build-id.json'), JSON.stringify({ id: idB }));
   writeFileSync(
     join(distB, 'sw.js'),
-    readFileSync(join(distB, 'sw.js'), 'utf8').replace(`"${idA}"`, `"${idB}"`),
+    readFileSync(join(distB, 'sw.js'), 'utf8')
+      .replace(`"${idA}"`, `"${idB}"`)
+      .replace(`"assets/${editorChunk}",`, ''),
   );
   writeFileSync(
     join(distB, 'index.html'),
@@ -305,7 +361,7 @@ test('서비스 워커 업데이트: 빌드 ID만 다른 새 빌드를 서빙하
     });
     await expect
       .poll(() => cacheKeys(page), { timeout: 20_000 })
-      .toEqual(['decoy-shell-' + idB, 'decoy-wake-v2'].sort());
+      .toEqual(['decoy-shell-' + idA, 'decoy-shell-' + idB, 'decoy-wake-v2'].sort());
     console.log(
       '[m13-offline] 업데이트 뒤 캐시',
       await page.evaluate(async () => {
@@ -325,6 +381,17 @@ test('서비스 워커 업데이트: 빌드 ID만 다른 새 빌드를 서빙하
     }, idB);
     expect(new Set(cached.builds)).toEqual(new Set([idB]));
     expect(cached.index).toContain(`build ${idB}`);
+    // 옛 화면(빌드 A)이 아직 받지 않은 옛 조각: 새 서버에는 없고(404), 새 워커가 앞 빌드 셸에서 준다 → 실제로 열린다
+    expect((await page.request.get(`${base}/assets/${editorChunk}`)).status()).toBe(404);
+    expect(
+      await page.evaluate(async (u) => {
+        const r = await fetch(u);
+        return [r.status, r.headers.get('x-decoy-build')];
+      }, `/assets/${editorChunk}`),
+    ).toEqual([200, idA]);
+    await page.evaluate(() => window.__DECOY__?.openLayoutEditor('survivor'));
+    await expect(page.getByTestId('layout-editor')).toBeVisible();
+    await press(page.getByTestId('le-cancel'));
     // 이 화면(빌드 A)은 서버(빌드 B)와 다르다 → 새 버전 안내
     await expect(page.getByTestId('update-available')).toBeVisible({ timeout: 10_000 });
     await expect(page.getByTestId('update-available')).toContainText('새 버전이 있어요');

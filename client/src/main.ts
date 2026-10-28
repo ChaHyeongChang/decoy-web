@@ -714,6 +714,9 @@ let fromLobby = false;
 app.subscribe((e) => {
   if (e.kind === 'match') {
     const req = ++sceneRequest;
+    // 판 중 설정 화면 조각: 판 밖 쉬는 시간에 받아 만들어 두었으면 아무 일도 하지 않는다. 아직이면(로비를 거의 거치지 않은 판 ·
+    // 진행 중인 판에 다시 들어옴) 판 장면을 만들기 전에 받기 시작한다 — 메뉴를 처음 누를 때 받지 않게
+    app.settings.prefetch();
     // 로비에서 시작한 판은 폰트를 받은 뒤(보통 로비에서 이미 끝남, 최대 loadUiFonts 시간 제한) 판 장면을 만든다.
     // 진행 중인 판에 다시 들어왔으면 기다리지 않는다(판은 계속 흐른다). 늦게 받은 폰트는 onUiFontsLate가 다시 그린다
     const fonts = fromLobby ? loadUiFonts() : Promise.resolve(uiFontsReady());

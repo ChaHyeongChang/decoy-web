@@ -1,7 +1,7 @@
 // JS 번들 크기 예산 (MOBILE_PLAN M10 성능 · 비용): 휴대폰 첫 접속 시간을 지킨다.
-// 빌드 결과(client/dist, test:e2e가 먼저 빌드한다)의 모든 JS를 zlib 기본 수준으로 압축해 더한다.
+// 빌드 결과(client/dist, test:e2e가 먼저 빌드한다)의 JS를 zlib 기본 수준으로 압축해 두 줄로 잰다: 첫 로딩 JS(첫 묶음) · 전체 JS(모든 조각).
 // M10c부터 배포 빌드는 Phaser 사용자 빌드(client/src/phaserCore.js)라 리마스터 전보다 작다. 예산은 그 기준에서 잰다
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { expect, test } from '@playwright/test';
@@ -9,7 +9,7 @@ import { expect, test } from '@playwright/test';
 /** M10 시작 전(7d79dee) 같은 방법으로 잰 값 (바이트). Vite 표시로는 348.45kB */
 const BEFORE_M10 = 346_679;
 /**
- * 늘 지키는 상한 (휴대폰 첫 접속): M10 전 값 + 2KiB (DECISIONS 8절 '번들 예산'). 캐릭터 리디자인(PR #21)에서 처음 M10 전 값을
+ * 전체 JS 상한 (경보): M10 전 값 + 2KiB (DECISIONS 8절 '번들 예산'). 캐릭터 리디자인(PR #21)에서 처음 M10 전 값을
  * 넘었다(실측 347,785B = M10 전 +1.1KiB, 새 캐릭터 그림 명령 gzip 약 21.6KB). 따라가는 카메라에서 M10 전 + 18KiB로 올린다
  * (카메라 · 맵 조각 굽기 · 화면 밖 표시 · 관전 · 미니맵, DECISIONS 9절 '번들 예산'). 설정 화면 통합에서 M10 전 + 36KiB로 올린다
  * (설정 화면 · 조작 배치 편집 · 판 중 설정 효과, DECISIONS 11절 '번들 예산'). 잔렉 고치기에서 M10 전 + 40KiB로 올린다
@@ -44,31 +44,73 @@ const CAP = BEFORE_M10 + 88 * 1024;
 // c(의상): 의상 그림 조각 · 옷장 조각(나눠 받기) · 역할 그림 의상 자리 · 같은 칸 바꿔 굽기 · 해금 · 입기 — PR #29 병합에서 +24KiB.
 // 첫 묶음을 한 조각으로 모은다(vite.config.ts codeSplitting '$initial' — 나눠 받는 조각이 늘며 첫 묶음이 공용 조각 넷으로 쪼개져
 // gzip이 약 3.8KiB 늘던 것, DECISIONS 14절 c '번들 예산')
+// 번들 줄이기(PR #30 뒤, DECISIONS 11절 '번들 예산 두 줄'): Phaser 사용자 빌드를 더 줄이고(로더 · 트윈 · 시계 · 씬 입력 · FX · math 묶음)
+// 기기 안 연습 · 설정 화면 · 조작 배치 편집 · 디버그 훅을 나눠 받는 조각으로 뺐다. 예산을 두 줄로 나눈다:
+//  - 첫 로딩 JS(index-*.js — 첫 화면에 받는 것): 상한 = M10 전 전체 번들(346,679B). 휴대폰 첫 접속 시간을 정한다
+//  - 전체 JS(모든 조각 합 — 쉬는 시간 · 필요할 때 받는 것 포함, 서비스 워커 셸이 첫 방문에 모두 받는다): 상한 = M10 전 + 88KiB 그대로
+// 측정은 예전처럼 zlib 기본 수준 gzip(역사 값과 같은 잣대 · brotli를 받지 않는 쪽의 전송량)이고, 실제 전송(빌드가 만든 .br 사본)은
+// 기록으로 함께 적는다. 이 PR은 줄이는 작업이라 두 줄 모두 PR #30 병합 값보다 커지면 안 된다(예산 0)
+/** 첫 로딩 JS 상한: M10 전 전체 번들 크기 (첫 화면에 받는 JS가 비주얼 리마스터 전 전체보다 크지 않게) */
+const INITIAL_CAP = BEFORE_M10;
+/** 첫 묶음(첫 화면) 조각 파일 이름 앞부분 */
+const INITIAL_PREFIX = 'index-';
+/** 나눠 받는 조각 (빠지면 첫 묶음에 다시 섞였다는 뜻 — 정적 import를 더했는지 본다) */
+const LAZY_CHUNKS = [
+  'art',
+  'debug',
+  'hub',
+  'layoutEditor',
+  'localServer',
+  'result',
+  'settingsPanel',
+  'wardrobe',
+];
 const MILESTONE = {
-  name: '의상',
-  base: 400_319,
-  baseName: 'PR #29 병합',
-  budget: 24 * 1024,
+  name: '번들 줄이기',
+  baseName: 'PR #30 병합',
+  base: { total: 424_151, initial: 400_036 },
+  budget: { total: 0, initial: 0 },
 };
 
-test('JS 번들 gzip: 마일스톤 예산 이하, 상한(리마스터 전 + 88KiB) 아래', { tag: '@core' }, () => {
-  const dir = join(process.cwd(), 'client/dist/assets');
-  let total = 0;
-  /** 첫 묶음(index-*) 밖의 나눠 받는 조각 (기록용: 첫 화면에 받지 않는다) */
-  const lazy: string[] = [];
-  for (const f of readdirSync(dir)) {
-    if (!f.endsWith('.js')) continue;
-    const n = gzipSync(readFileSync(join(dir, f))).length;
-    total += n;
-    if (!f.startsWith('index-')) lazy.push(`${f.replace(/-[\w-]+\.js$/, '')} ${n}B`);
-  }
-  const kib = (n: number): string => `${n >= 0 ? '+' : ''}${(n / 1024).toFixed(1)}KiB`;
-  const M = MILESTONE;
-  console.log(
-    `[번들] JS gzip ${total}B (${M.baseName} ${M.base}B ${kib(total - M.base)} / ${M.name} 예산 +${M.budget / 1024}KiB, M10 전 ${BEFORE_M10}B ${kib(total - BEFORE_M10)}, 상한 ${CAP}B까지 ${CAP - total}B)` +
-      (lazy.length > 0 ? ` · 나눠 받기: ${lazy.join(', ')}` : ''),
-  );
-  expect(total).toBeGreaterThan(M.base / 2);
-  expect(total - M.base).toBeLessThanOrEqual(M.budget);
-  expect(total).toBeLessThan(CAP);
-});
+test(
+  'JS 번들 gzip: 첫 로딩 JS · 전체 JS가 상한 아래, 마일스톤 예산 이하, 나눠 받는 조각이 따로 있다',
+  { tag: '@core' },
+  () => {
+    const dir = join(process.cwd(), 'client/dist/assets');
+    let total = 0;
+    let initial = 0;
+    let brTotal = 0;
+    let brInitial = 0;
+    /** 첫 묶음(index-*) 밖의 나눠 받는 조각 (첫 화면에 받지 않는다) */
+    const lazy: { name: string; gzip: number }[] = [];
+    for (const f of readdirSync(dir)) {
+      if (!f.endsWith('.js')) continue;
+      const raw = readFileSync(join(dir, f));
+      const n = gzipSync(raw).length;
+      // 실제 전송 (빌드가 만든 brotli 사본, 없으면 0 — 기록용)
+      const br = existsSync(join(dir, `${f}.br`)) ? statSync(join(dir, `${f}.br`)).size : 0;
+      total += n;
+      brTotal += br;
+      if (f.startsWith(INITIAL_PREFIX)) {
+        initial += n;
+        brInitial += br;
+      } else lazy.push({ name: f.replace(/-[\w-]+\.js$/, ''), gzip: n });
+    }
+    const kib = (n: number): string => `${n >= 0 ? '+' : ''}${(n / 1024).toFixed(1)}KiB`;
+    const M = MILESTONE;
+    console.log(
+      `[번들] 첫 로딩 JS gzip ${initial}B (${M.baseName} ${M.base.initial}B ${kib(initial - M.base.initial)}, 상한 ${INITIAL_CAP}B까지 ${INITIAL_CAP - initial}B) · ` +
+        `전체 JS gzip ${total}B (${M.baseName} ${M.base.total}B ${kib(total - M.base.total)}, 상한 ${CAP}B까지 ${CAP - total}B) · ` +
+        `실제 전송 brotli 첫 로딩 ${brInitial}B · 전체 ${brTotal}B · ` +
+        `나눠 받기: ${lazy.map((l) => `${l.name} ${l.gzip}B`).join(', ')}`,
+    );
+    expect(initial).toBeGreaterThan(M.base.initial / 2);
+    expect(initial - M.base.initial).toBeLessThanOrEqual(M.budget.initial);
+    expect(total - M.base.total).toBeLessThanOrEqual(M.budget.total);
+    expect(initial).toBeLessThan(INITIAL_CAP);
+    expect(total).toBeLessThan(CAP);
+    // 첫 묶음은 한 조각 (vite.config.ts codeSplitting '$initial')
+    expect(readdirSync(dir).filter((f) => f.startsWith(INITIAL_PREFIX) && f.endsWith('.js'))).toHaveLength(1);
+    expect(lazy.map((l) => l.name).sort()).toEqual([...LAZY_CHUNKS].sort());
+  },
+);
