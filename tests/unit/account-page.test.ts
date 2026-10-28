@@ -41,7 +41,14 @@ describe('계정 삭제 페이지', () => {
   });
 
   it('상태별 글: 꺼짐 · 로그인 링크 · 레벨과 판 수 + 폼 · 지움 · 장애 · 다시 열기', () => {
-    expect(renderDeletePage({ kind: 'off' }, null)).toContain('문의처로 삭제를 요청');
+    // 꺼짐: 서버는 이메일이 없어 요청한 계정을 찾을 수 없다 — 받는 대로 지운다고 약속하지 않고 할 수 있는 길(잠시 켜 직접 · 전체 지우기)만
+    const off = renderDeletePage({ kind: 'off' }, null);
+    expect(off).toContain(
+      '<strong>예전에 Google 계정으로 로그인한 적이 있다면</strong> 아래 문의처로 알려 주세요. ' +
+        '서버는 이메일을 저장하지 않아 요청한 계정을 따로 찾을 수 없으므로, 로그인 기능을 잠시 다시 켜 이 페이지에서 ' +
+        '직접 지우실 수 있게 하거나 서버의 계정 기록 전체를 지운 뒤 알려 드립니다.',
+    );
+    expect(off).not.toContain('받는 대로');
     const out = renderDeletePage({ kind: 'signed-out' }, null);
     expect(out).toContain(
       '<a class="button" data-testid="delete-login" href="/auth/google/start?next=delete">Google 계정으로 로그인해 삭제하기</a>',

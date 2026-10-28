@@ -11,7 +11,7 @@ import {
   isTimeZone,
   msToMidnightInZone,
 } from '@decoy/shared/meta';
-import { RoomManager, type Room, type Seat } from '@decoy/shared/sim';
+import { BotDriver, RoomManager, devBotBrain, type Room, type Seat } from '@decoy/shared/sim';
 import { FakeConn } from '../helpers/fakeConn';
 import { loadTestBalance } from '../helpers/fixtures';
 
@@ -151,5 +151,74 @@ describe('방: 계정은 자리에만 (메시지에 없음)', () => {
     expect(seat.account).toBeNull();
     s.room.attach(seat, new FakeConn(ACCOUNT));
     expect(seat.account).toBe(ACCOUNT);
+  });
+});
+
+interface QuickRun {
+  room: Room;
+  conns: FakeConn[];
+  rated: { account: string | null; rating: MatchRating }[];
+}
+
+/**
+ * 빠른 매칭 두 사람(accounts[i]가 그 연결의 계정) → 대기 시간이 지나 빈자리 둘을 봇으로 채워 시작 → 판 끝(시험 setTime).
+ * 봇 두뇌는 quick-match.test.ts와 같이 같은 프로세스 봇 드라이버(hooks.spawnBot · beforeStep)로 붙인다. canFillBots는 기본(늘 허용)
+ */
+function quickRun(accounts: (string | null)[]): QuickRun {
+  const rated: QuickRun['rated'] = [];
+  const driver = new BotDriver((info) => devBotBrain(info.role), balance);
+  const mgr = new RoomManager(
+    { balance, seed: 9, testHooks: true, devBots: true },
+    { ...driver.hooks(), rated: (_room, seat, rating) => rated.push({ account: seat.account, rating }) },
+  );
+  const tickMs = 1000 / balance.network.serverTickHz;
+  const waitMs = balance.matchmaking.quickMatchWait * 1000;
+  let clock = 1000;
+  const conns = accounts.map((a) => new FakeConn(a));
+  const joined = conns.map((c, i) => mgr.quick(c, `사람${i}`, clock));
+  const room = joined[0]!.room;
+  expect(joined.every((j) => j.room === room)).toBe(true);
+  // 대기 시간이 지날 때까지 사람은 1초마다 ping (클라이언트처럼 — 소식이 없는 자리는 자동 시작 때 대기열에서 빠진다)
+  let nextPing = clock;
+  while (room.phase === 'lobby') {
+    clock += tickMs;
+    if (clock >= nextPing) {
+      for (const j of joined) room.handle(j.seat, { t: 'ping', c: clock }, clock);
+      nextPing += 1000;
+    }
+    mgr.tick(clock);
+    if (clock > 1000 + waitMs + 2000) throw new Error('빠른 매칭이 시작하지 않았다');
+  }
+  expect(room.kind).toBe('quick');
+  expect(room.seats.filter((s) => s.bot)).toHaveLength(2);
+  expect(driver.botsOf(room)).toHaveLength(2);
+  for (let t = 0; t < 90; t += 1) mgr.tick((clock += tickMs));
+  room.handle(joined[0]!.seat, { t: 'test', cmd: { kind: 'setTime', timeLeft: 0.05 } }, clock);
+  for (let t = 0; t < 5; t += 1) mgr.tick((clock += tickMs));
+  expect(room.phase).toBe('result');
+  return { room, conns, rated };
+}
+
+describe('빠른 매칭: 로그인 여부가 단서가 되지 않는다', () => {
+  it('로그인 여부만 다른 두 판(봇으로 채운 빠른 매칭): 사람 자리 둘이 받은 메시지가 같고, 계정 ID가 없고, 적립은 계정 자리만', () => {
+    const guest = quickRun([null, null]);
+    const mixed = quickRun([ACCOUNT, null]);
+    for (let i = 0; i < 2; i += 1) {
+      const a = guest.conns[i]!.inbox;
+      const b = mixed.conns[i]!.inbox;
+      // 로비 · 판 시작 명단 · 스냅샷 · 결과까지 받았다
+      for (const t of ['lobby', 'match', 'snap', 'result'] as const)
+        expect(mixed.conns[i]!.count(t), t).toBeGreaterThan(0);
+      expect(b.map(shape), `사람 ${i}`).toEqual(a.map(shape));
+      for (const m of b) {
+        const raw = JSON.stringify(m);
+        expect(raw).not.toContain(ACCOUNT);
+        expect(raw).not.toMatch(/"account"\s*:/);
+      }
+    }
+    // rated 훅: 사람 자리 둘만, 계정은 로그인한 자리만 (봇 자리는 평가하지 않는다)
+    expect(mixed.rated.map((r) => r.account)).toEqual([ACCOUNT, null]);
+    expect(guest.rated.map((r) => r.account)).toEqual([null, null]);
+    expect(mixed.rated.map((r) => r.rating.role)).toEqual(guest.rated.map((r) => r.rating.role));
   });
 });

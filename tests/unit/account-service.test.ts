@@ -153,6 +153,9 @@ describe('서버 적립', () => {
     expect(res).toEqual({ ok: true, profile: text });
     expect(r.store.list()[0]!.profile).toBe(text);
     expect(r.pushed).toEqual([{ id, msg: { t: 'credit', matchId: 'ROOM.1.a', ok: true, profile: text } }]);
+    // 적립 성공도 로그에 횟수만 (계정 ID · 판 ID 없이 — 문서: '로그인 · 적립 횟수와 실패 종류만')
+    expect(r.logs).toContain('계정 적립 (누적 1)');
+    for (const v of [id, 'ROOM.1.a']) expect(r.logs.join('\n')).not.toContain(v);
     // 이미 기록이 있으면 그 위에 (모르는 칸도 그대로 다시 적는다)
     const withExtra = JSON.stringify({ ...JSON.parse(text), futureField: { a: 1 } });
     await r.store.saveProfile(id, withExtra, T);

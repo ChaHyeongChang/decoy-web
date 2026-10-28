@@ -13,7 +13,10 @@ export const ACCOUNT_BACKUP_RETENTION: string | null = null;
 export const DELETE_CSRF_FIELD = 'csrf';
 
 export type DeletePageState =
-  /** 로그인 기능이 꺼져 있다 — 이 페이지로는 지울 수 없다(켠 적이 있으면 DB에 남아 있을 수 있다) */
+  /**
+   * 로그인 기능이 꺼져 있다 — 이 페이지로는 지울 수 없다(켠 적이 있으면 DB에 남아 있을 수 있다). 서버는 이메일이 없어 요청한
+   * 계정을 찾을 수 없으므로 문의가 오면 잠시 켜 직접 지우게 하거나 계정 기록 전체를 지운다(docs/LOGIN_GUIDE.md 9단계)
+   */
   | { kind: 'off' }
   /** 켜져 있고 로그인하지 않았다 */
   | { kind: 'signed-out' }
@@ -32,7 +35,9 @@ function stateBlock(state: DeletePageState): string {
       return (
         '<p data-testid="delete-off">지금 DECOY는 로그인 기능을 쓰지 않아 이 페이지에서 로그인해 지울 수 없습니다. ' +
         '로그인하지 않고 한 기록은 이 기기에만 있으니 아래 「이 기기의 기록」을 따라 지워 주세요. ' +
-        '<strong>예전에 Google 계정으로 로그인한 적이 있다면</strong> 아래 문의처로 삭제를 요청해 주세요 — 받는 대로 서버의 계정 기록을 지웁니다.</p>'
+        '<strong>예전에 Google 계정으로 로그인한 적이 있다면</strong> 아래 문의처로 알려 주세요. ' +
+        '서버는 이메일을 저장하지 않아 요청한 계정을 따로 찾을 수 없으므로, 로그인 기능을 잠시 다시 켜 이 페이지에서 ' +
+        '직접 지우실 수 있게 하거나 서버의 계정 기록 전체를 지운 뒤 알려 드립니다.</p>'
       );
     case 'signed-out':
       return (

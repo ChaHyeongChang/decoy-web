@@ -1,8 +1,10 @@
 // 계정 HTTP 경로 (docs/ACCOUNT_PLAN.md 2 · 4 · 8절): 구글 로그인 리디렉트 · 계정 API · 계정 삭제 페이지 · 시험 훅.
 // - 출처는 x-forwarded-proto(Render) + Host로 만든다. POST API는 x-decoy-account: 1 + Origin(있으면 같은 출처) — 아니면 403 csrf
 // - 본문 상한: import 32KB, 콜백 16KB, 그 밖 2KB(넘으면 413). 401은 세션 쿠키도 지운다. 모든 응답 cache-control: no-store
-// - 꺼짐: GET /api/account는 200 {on:false}, 나머지 API는 404 off, /auth/*는 /?login=off로, 삭제 페이지는 '서버에 기록 없음'
-// - 비율 제한: IP마다 /auth/* 1분 20번, 계정마다 POST 1분 60번 → 429 rate
+// - 꺼짐: GET /api/account는 200 {on:false}, 나머지 API는 404 off, /auth/*는 비율 제한(IP 담기) 없이 /?login=off로,
+//   삭제 페이지는 '여기서 지울 수 없음 — 문의처'
+// - 비율 제한: IP마다 /auth/* 1분 20번, 계정마다 POST 1분 60번 → 429 rate (열쇠는 늦어도 2분 안에 메모리에서 지운다)
+// - 삭제 페이지는 referrer-policy same-origin (폼 POST의 Origin이 'null'이 되지 않게), 리디렉트는 no-referrer
 // - 로그에는 실패 종류만 (토큰 · sub · 계정 ID를 찍지 않는다)
 // 시험 훅(--test-hooks)이 없으면 /test/*는 404 (index.ts의 다른 시험 경로와 같다)
 import { randomBytes } from 'node:crypto';
@@ -50,6 +52,8 @@ export const SMALL_BODY_MAX = 2 * 1024;
 export const OAUTH_MAX_AGE_SEC = 600;
 export const AUTH_RATE_PER_MIN = 20;
 export const POST_RATE_PER_MIN = 60;
+/** 비율 제한 창 (ms). 열쇠(IP · 계정 ID)는 늦어도 다음 창에 지운다 — 처리방침 3번 '최대 2분' */
+export const RATE_WINDOW_MS = 60_000;
 /** 상한을 넘은 본문을 이만큼까지는 읽어 버리고 413으로 답한다 (그보다 크면 연결을 닫는다) */
 const DRAIN_MAX = 256 * 1024;
 
@@ -196,16 +200,18 @@ function sendError(
 // img-src 'self': 브라우저가 스스로 받는 파비콘이 막혀 콘솔 오류가 나지 않게
 const PAGE_CSP =
   "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+
 /**
- * 삭제 페이지의 리퍼러 정책: 다른 출처로는 주소를 넘기지 않고 같은 출처 요청에만. 'no-referrer'면 브라우저가 이 페이지의 삭제 폼
- * POST에 `Origin: null`을 실어(Fetch 표준) 요청 위조 막기(originMatchesHost)에 걸려 웹에서 지울 수 없었다 (계정 E2E에서 찾음)
+ * referrer: 폼이 있는 페이지(삭제 페이지)는 'same-origin'. 'no-referrer'면 브라우저가 같은 출처 폼 POST의 Origin을 'null'로
+ * 보내 출처 확인(originMatchesHost)이 늘 거절한다. 'same-origin'은 같은 출처에만 출처를 싣고 다른 사이트로는 보내지 않는다
  */
-const PAGE_REFERRER_POLICY = 'same-origin';
+type PageReferrer = 'same-origin' | 'no-referrer';
 
 function sendHtml(
   res: ServerResponse,
   status: number,
   html: string,
+  referrer: PageReferrer,
   cookies: readonly string[] = [],
   close = false,
 ) {
@@ -217,7 +223,7 @@ function sendHtml(
           'content-type': 'text/html; charset=utf-8',
           'content-security-policy': PAGE_CSP,
           'x-frame-options': 'DENY',
-          'referrer-policy': PAGE_REFERRER_POLICY,
+          'referrer-policy': referrer,
         },
         cookies,
         close,
@@ -258,8 +264,8 @@ export function createAccountRoutes(ctx: AccountRoutesContext): AccountHandler {
   const cfg = ctx.config;
   const on = cfg.enabled && ctx.service !== null;
   const secret = cfg.enabled ? cfg.sessionSecret : '';
-  const authRate = new RateLimiter(AUTH_RATE_PER_MIN, 60_000, ctx.now);
-  const postRate = new RateLimiter(POST_RATE_PER_MIN, 60_000, ctx.now);
+  const authRate = new RateLimiter(AUTH_RATE_PER_MIN, RATE_WINDOW_MS, ctx.now);
+  const postRate = new RateLimiter(POST_RATE_PER_MIN, RATE_WINDOW_MS, ctx.now);
 
   const sessionCookie = (accountId: string, o: Origin): string =>
     setCookie(SESSION_COOKIE, signSession(accountId, secret, ctx.now()), {
@@ -521,7 +527,7 @@ export function createAccountRoutes(ctx: AccountRoutesContext): AccountHandler {
       state: DeletePageState,
       cookies: readonly string[] = [],
       close = false,
-    ): void => sendHtml(res, status, renderDeletePage(state, ctx.contact), cookies, close);
+    ): void => sendHtml(res, status, renderDeletePage(state, ctx.contact), 'same-origin', cookies, close);
     const service = ctx.service;
     if (!on || !service) {
       page(req.method === 'POST' ? 404 : 200, { kind: 'off' });
@@ -659,7 +665,8 @@ export function createAccountRoutes(ctx: AccountRoutesContext): AccountHandler {
       return;
     }
     if (path.startsWith('/auth/')) {
-      if (!authRate.take(clientIp(req))) {
+      // 꺼짐이면 IP를 담지 않고 바로 off로 (authStart · authCallback이 먼저 꺼짐을 본다)
+      if (on && !authRate.take(clientIp(req))) {
         sendText(res, 429, 'too many requests');
         return;
       }
@@ -701,6 +708,7 @@ export function createAccountRoutes(ctx: AccountRoutesContext): AccountHandler {
           res,
           unavailable ? 503 : 500,
           renderDeletePage({ kind: unavailable ? 'db' : 'retry' }, ctx.contact),
+          'same-origin',
         );
         return;
       }
