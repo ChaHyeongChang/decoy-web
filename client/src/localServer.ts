@@ -2,7 +2,7 @@
 // 서버에 가지 않는다(오프라인 · 서버가 잠들어도 된다). 판정은 이 기기 안 Room이 한다 — CLAUDE.md '서버만 판정한다'의 예외로,
 // 온라인 판 · 기록과 섞이지 않는다(DECISIONS M13b). 수치는 빌드에 넣은 config/balance.json(빌드 시점 수치).
 // 메시지는 서버와 똑같이 JSON 문자열로 왕복하고, 받는 쪽은 다음 마이크로태스크에 받는다(같은 호출 안에서 되돌아오지 않게).
-// 이 파일과 공유 시뮬레이션(@decoy/shared/sim · 봇 두뇌)은 나눠 받는 조각 'practice'다: 첫 화면에 필요 없고, 판 밖 쉬는 시간에
+// 이 파일과 공유 시뮬레이션(@decoy/shared/sim · 봇 두뇌)은 나눠 받는 조각 'localServer'다: 첫 화면에 필요 없고, 판 밖 쉬는 시간에
 // 미리 받는다(app.ts prefetchPractice — 연습 역할을 누르면 바로 시작). 수치는 practiceBalance.ts (첫 묶음)
 import type { ClientMessage, ServerMessage } from '@decoy/shared';
 import {

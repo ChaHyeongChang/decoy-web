@@ -7,11 +7,13 @@
 //  - gzip 몫: 갈래마다 자기 조각만 이어 붙여 따로 gzip한 크기를, 합이 전체 gzip과 같아지게 비례로 맞춘 값
 //    (따로 압축하면 갈래 사이의 겹치는 말을 못 써서 합이 전체보다 크다)
 //  - 빼면 줄어드는 양: 전체 gzip − 그 갈래 조각을 뺀 나머지의 gzip (그 갈래를 통째로 덜어 내면 줄어들 어림)
-// gzip은 bundle-size 시험과 같은 zlib 기본 수준이다. 빌드 ID가 빌드마다 무작위라 전체가 1~2B 다를 수 있다
+// gzip은 bundle-size 시험과 같은 zlib 기본 수준이다. 빌드 ID가 빌드마다 무작위라 전체가 1~2B 다를 수 있다.
+// 번들 줄이기: 조각별 표(첫 묶음 · 나눠 받는 조각, gzip · brotli 11 — 서버가 실제로 보내는 사본과 같은 수준)와, 갈래마다
+// 첫 묶음에 든 압축 전 바이트(첫 로딩에 받는 몫)를 함께 적는다
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
-import { gzipSync } from 'node:zlib';
+import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib';
 import { build } from 'vite';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -47,7 +49,7 @@ const GROUPS = [
     'UI',
     '로비 · 설정 · 결과 · 조작 배치 편집 (DOM)',
     (p) =>
-      /^client\/src\/ui\/(lobby|settingsPanel|layoutEditor|result|lifecycleUi|wakeNotice|uiArt)\.ts$/.test(
+      /^client\/src\/ui\/(lobby|settingsPanel|settingsHost|layoutEditor|layoutEditorLoader|result|lifecycleUi|wakeNotice|uiArt)\.ts$/.test(
         p,
       ) || /^client\/src\/(settingsModel|prefs|controlLayout|touchTutorial|matchMenu)\.ts$/.test(p),
   ],
@@ -136,10 +138,25 @@ try {
   const ordered = [];
   let totalGzip = 0;
   let totalRaw = 0;
+  /** 조각별: 이름 · 첫 묶음인가 · 압축 전 · gzip · brotli */
+  const chunks = [];
+  /** 갈래 → 첫 묶음에 든 압축 전 바이트 */
+  const initialRaw = new Map(groupKeys.map((k) => [k, 0]));
   for (const f of jsFiles) {
     // 소스맵 주석은 소스맵을 켠 빌드에만 붙는다 — 빼야 배포 빌드와 같은 글이다
     const code = readFileSync(join(assets, f), 'utf8').replace(/\n?\/\/# sourceMappingURL=\S+\s*$/, '');
-    totalGzip += gzipSync(Buffer.from(code)).length;
+    const buf = Buffer.from(code);
+    const gz = gzipSync(buf).length;
+    const br = brotliCompressSync(buf, {
+      params: {
+        [zlibConstants.BROTLI_PARAM_QUALITY]: zlibConstants.BROTLI_MAX_QUALITY,
+        [zlibConstants.BROTLI_PARAM_MODE]: zlibConstants.BROTLI_MODE_TEXT,
+        [zlibConstants.BROTLI_PARAM_SIZE_HINT]: buf.length,
+      },
+    }).length;
+    const initial = f.startsWith('index-');
+    chunks.push({ name: f.replace(/-[\w-]+\.js$/, ''), initial, raw: buf.length, gzip: gz, brotli: br });
+    totalGzip += gz;
     totalRaw += Buffer.byteLength(code);
     const map = JSON.parse(readFileSync(join(assets, `${f}.map`), 'utf8'));
     const sources = map.sources.map((s) => relative(ROOT, resolve(assets, map.sourceRoot ?? '', s)));
@@ -155,6 +172,7 @@ try {
       const key = src < 0 ? UNMAPPED.join('|') : groupOfSrc[src];
       parts.get(key).push(text);
       ordered.push([key, text]);
+      if (initial) initialRaw.set(key, initialRaw.get(key) + Buffer.byteLength(text));
       if (src >= 0) {
         const p = sources[src];
         fileBytes.set(p, (fileBytes.get(p) ?? 0) + Buffer.byteLength(text));
@@ -182,6 +200,7 @@ try {
       big: key.split('|')[0],
       name: key.split('|')[1],
       raw: Buffer.byteLength(text),
+      initialRaw: initialRaw.get(key),
       alone: text === '' ? 0 : gzipSync(Buffer.from(text)).length,
       removed: totalGzip - gzipSync(Buffer.from(rest)).length,
     };
@@ -192,21 +211,44 @@ try {
     .map(([p, raw]) => ({ path: p, raw, group: fileGroup.get(p).split('|')[1] }))
     .sort((a, b) => b.raw - a.raw);
 
+  chunks.sort((a, b) => Number(b.initial) - Number(a.initial) || b.gzip - a.gzip);
   if (asJson) {
-    console.log(JSON.stringify({ totalGzip, totalRaw, aloneSum, rows, files }, null, 2));
+    console.log(JSON.stringify({ totalGzip, totalRaw, aloneSum, chunks, rows, files }, null, 2));
   } else {
     const kib = (n) => (n / 1024).toFixed(1);
     const pct = (n, d) => `${((100 * n) / d).toFixed(1)}%`;
     console.log(
       `JS ${jsFiles.length}개 · 압축 전 ${totalRaw}B · gzip ${totalGzip}B (갈래마다 따로 압축한 합 ${aloneSum}B)\n`,
     );
-    console.log('| 큰 갈래 | 갈래 | 압축 전 KiB | gzip 몫 KiB | 비율 | 빼면 줄어드는 gzip KiB |');
-    console.log('|---|---|---|---|---|---|');
+    const sumOf = (list, k) => list.reduce((a, c) => a + c[k], 0);
+    console.log('| 조각 | 받는 때 | 압축 전 B | gzip B | brotli B |');
+    console.log('|---|---|---|---|---|');
+    for (const c of chunks)
+      console.log(
+        `| ${c.name} | ${c.initial ? '첫 화면' : '나눠 받기'} | ${c.raw} | ${c.gzip} | ${c.brotli} |`,
+      );
+    const first = chunks.filter((c) => c.initial);
+    const lazyChunks = chunks.filter((c) => !c.initial);
+    console.log(
+      `| **첫 로딩 JS** | | **${sumOf(first, 'raw')}** | **${sumOf(first, 'gzip')}** | **${sumOf(first, 'brotli')}** |`,
+    );
+    console.log(
+      `| **나눠 받는 조각 ${lazyChunks.length}개** | | **${sumOf(lazyChunks, 'raw')}** | **${sumOf(lazyChunks, 'gzip')}** | **${sumOf(lazyChunks, 'brotli')}** |`,
+    );
+    console.log(
+      `| **전체 JS** | | **${sumOf(chunks, 'raw')}** | **${totalGzip}** | **${sumOf(chunks, 'brotli')}** |\n`,
+    );
+    console.log(
+      '| 큰 갈래 | 갈래 | 압축 전 KiB | 그중 첫 묶음 KiB | gzip 몫 KiB | 비율 | 빼면 줄어드는 gzip KiB |',
+    );
+    console.log('|---|---|---|---|---|---|---|');
     for (const r of rows)
       console.log(
-        `| ${r.big} | ${r.name} | ${kib(r.raw)} | ${kib(r.gzip)} | ${pct(r.gzip, totalGzip)} | ${kib(r.removed)} |`,
+        `| ${r.big} | ${r.name} | ${kib(r.raw)} | ${kib(r.initialRaw)} | ${kib(r.gzip)} | ${pct(r.gzip, totalGzip)} | ${kib(r.removed)} |`,
       );
-    console.log(`| **합** | | **${kib(totalRaw)}** | **${kib(totalGzip)}** | 100% | |\n`);
+    console.log(
+      `| **합** | | **${kib(totalRaw)}** | **${kib(rows.reduce((a, r) => a + r.initialRaw, 0))}** | **${kib(totalGzip)}** | 100% | |\n`,
+    );
     const bigs = [...new Set(rows.map((r) => r.big))];
     console.log('| 큰 갈래 | 압축 전 KiB | gzip 몫 KiB | 비율 |');
     console.log('|---|---|---|---|');

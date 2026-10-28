@@ -1,4 +1,4 @@
-// 설정 화면 받기 (번들 줄이기, DECISIONS 11절 '나눠 받기'): 설정 화면 코드(ui/settingsPanel.ts)는 나눠 받는 조각 'settings'다.
+// 설정 화면 받기 (번들 줄이기, DECISIONS 11절 '번들 줄이기'): 설정 화면 코드(ui/settingsPanel.ts)는 나눠 받는 조각 'settings'다.
 // 첫 화면 · 방 화면의 '설정' 단추와 판 중 메뉴(main.ts matchMenu)는 이 껍데기만 안다.
 //  - 판 밖 쉬는 시간에 조각을 받고 DOM까지 만들어 둔다(prefetch — main.ts schedulePrebake): 판 중에 처음 열 때 받거나 DOM을
 //    만드느라 멈칫하지 않게. 판 중에는 받지 않는다

@@ -244,7 +244,7 @@ export class App {
   private local: LocalTransport | null = null;
   private localUnsub: (() => void) | null = null;
   /**
-   * 기기 안 연습 서버 코드(localServer.ts + 공유 시뮬레이션 · 봇 두뇌)는 나눠 받는 조각 'practice'다 (DECISIONS 11절 '나눠 받기').
+   * 기기 안 연습 서버 코드(localServer.ts + 공유 시뮬레이션 · 봇 두뇌)는 나눠 받는 조각 'localServer'다 (DECISIONS 11절 '번들 줄이기: 나눠 받는 조각 넷 더').
    * 판 밖 쉬는 시간에 미리 받고(prefetchPractice), 역할을 누를 때 아직이면 받은 뒤 시작한다. 받지 못하면 null
    */
   private practiceModule: Promise<typeof PracticeModuleNs | null> | null = null;

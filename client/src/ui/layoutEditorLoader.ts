@@ -1,4 +1,4 @@
-// 조작 배치 편집 받기 (번들 줄이기, DECISIONS 11절 '나눠 받기'): 편집 화면(ui/layoutEditor.ts)은 로비 설정의 조작 탭(터치)에서만
+// 조작 배치 편집 받기 (번들 줄이기, DECISIONS 11절 '번들 줄이기'): 편집 화면(ui/layoutEditor.ts)은 로비 설정의 조작 탭(터치)에서만
 // 여는 나눠 받는 조각이다. 로비에서 설정을 열 때 미리 받고(settingsHost.ts), 편집을 누를 때 아직이면 받은 뒤 연다.
 // 받은 모듈은 디버그 훅(편집 중 배치 읽기)도 같이 쓴다. CSS(layoutEditor.css)는 첫 CSS에 둔다(settingsHost.ts)
 import type * as LayoutEditorNs from './layoutEditor';

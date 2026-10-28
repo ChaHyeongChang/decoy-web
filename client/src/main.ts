@@ -751,7 +751,7 @@ app.subscribe((e) => {
 
 // 디버그 훅(window.__DECOY__) · ?debug=1 측정 오버레이(debug.ts · ui/debugOverlay.ts)는 나눠 받는 조각 'debug'다: 주소에 ?debug가
 // 있을 때(시험 · 휴대폰 측정)만 받는다. 그때는 받은 뒤 앱을 시작해 첫 화면이 그려질 때 훅이 이미 있게 한다(예전과 같은 순서).
-// 받지 못하면(새 배포 직후 옛 화면 등) 훅 없이 시작한다 (DECISIONS 11절 '나눠 받기')
+// 받지 못하면(새 배포 직후 옛 화면 등) 훅 없이 시작한다 (DECISIONS 11절 '번들 줄이기')
 if (params.debug !== 'off' || import.meta.env.DEV) {
   import('./debug').then(
     (mod) => {
