@@ -265,7 +265,7 @@ describe.runIf(URL_TEXT !== '')('PgAccountStore (실제 PostgreSQL)', () => {
     }
   }, 30_000);
 
-  it('비밀번호가 틀린 요청이 한꺼번에 와도 모두 28P01 (다시 접속 폭주로 잘못 보지 않는다)', async () => {
+  it('비밀번호가 틀린 요청이 스물다섯 한꺼번에 와도 모두 28P01 (다시 접속 폭주로 잘못 보지 않는다)', async () => {
     const logs: string[] = [];
     const bad = new PgAccountStore(createPostgresClient({ ...conf, password: `${conf.password}-wrong` }), {
       table,
@@ -273,9 +273,9 @@ describe.runIf(URL_TEXT !== '')('PgAccountStore (실제 PostgreSQL)', () => {
     });
     try {
       const got = await Promise.all(
-        Array.from({ length: 8 }, () => bad.get('0'.repeat(32)).catch((e: { code?: string }) => e.code)),
+        Array.from({ length: 25 }, () => bad.get('0'.repeat(32)).catch((e: { code?: string }) => e.code)),
       );
-      expect(got).toEqual(Array.from({ length: 8 }, () => '28P01'));
+      expect(got).toEqual(Array.from({ length: 25 }, () => '28P01'));
       expect(logs.join('\n')).not.toContain('RECONNECT_LOOP');
     } finally {
       await bad.close();
@@ -302,6 +302,100 @@ describe.runIf(URL_TEXT !== '')('PgAccountStore (실제 PostgreSQL)', () => {
       await tls.close();
     }
   });
+
+  it('TLS 연결 묶음을 버리는 순간 다른 연결이 막 TLS를 맺어도 서버 프로세스가 끝나지 않는다 (감싼 날 소켓은 부수지 않는다 — 처리되지 않은 EBADF)', async () => {
+    let uncaught = 0;
+    const onUncaught = (): void => {
+      uncaught += 1;
+    };
+    process.on('uncaughtException', onUncaught);
+    try {
+      // 연결 A의 질의가 시도 제한(200ms)을 넘겨 묶음을 버리기 몇 ms 전에 연결 B를 연다 (그 순간 B는 TLS를 맺고 시작 글을 쓰는 중)
+      for (let delta = 3; delta <= 12; delta += 1) {
+        for (let r = 0; r < 4; r += 1) {
+          const c = createPostgresClient({ ...conf, ssl: 'prefer' });
+          const a = c.query('SELECT pg_sleep(0.6)', [], 200).catch(() => undefined);
+          await new Promise((res) => setTimeout(res, 200 - delta));
+          const b = c.query('SELECT 1', [], 3_000).catch(() => undefined);
+          await Promise.all([a, b]);
+          await new Promise((res) => setTimeout(res, 30));
+          await c.end();
+        }
+      }
+      await new Promise((res) => setTimeout(res, 200));
+      expect(uncaught).toBe(0);
+    } finally {
+      process.off('uncaughtException', onUncaught);
+    }
+  }, 60_000);
+
+  it('연결 하나만 시작 중 오류 없이 닫히고 다른 연결은 정상일 때도 다시 접속 폭주를 알아채 시도 제한(4.5초)까지 매달리지 않는다', async () => {
+    const rec = await store.create('live-partial', 1);
+    // 동시에 하나만 실제 DB로 잇고, 넘는 연결은 받자마자 오류 없이 닫는다
+    let passing = 0;
+    let accepted = 0;
+    const socks = new Set<Socket>();
+    const proxy = createServer((client) => {
+      accepted += 1;
+      socks.add(client);
+      client.on('error', () => undefined);
+      if (passing >= 1) {
+        client.resume();
+        client.end();
+        return;
+      }
+      passing += 1;
+      const up = netConnect({ host: conf.host, port: conf.port });
+      socks.add(up);
+      up.on('error', () => client.destroy());
+      client.on('close', () => {
+        passing -= 1;
+        up.destroy();
+      });
+      up.on('close', () => client.destroy());
+      client.pipe(up).pipe(client);
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+    const port = (proxy.address() as AddressInfo).port;
+    const half = new PgAccountStore(
+      createPostgresClient({ ...conf, host: '127.0.0.1', port, ssl: 'disable' }),
+      {
+        table,
+      },
+    );
+    const codes = new Map<string, number>();
+    let slowest = 0;
+    let stop = false;
+    const worker = async (): Promise<void> => {
+      while (!stop) {
+        const t = Date.now();
+        try {
+          await half.get(rec.id);
+          codes.set('ok', (codes.get('ok') ?? 0) + 1);
+        } catch (e) {
+          const code = (e as { code?: string }).code ?? 'unknown';
+          codes.set(code, (codes.get(code) ?? 0) + 1);
+        }
+        slowest = Math.max(slowest, Date.now() - t);
+      }
+    };
+    try {
+      const workers = [worker(), worker()];
+      await new Promise((r) => setTimeout(r, 3_000));
+      stop = true;
+      await Promise.all(workers);
+      expect(codes.get('ok') ?? 0).toBeGreaterThan(10);
+      expect(codes.get('RECONNECT_LOOP') ?? 0).toBeGreaterThan(0);
+      expect(codes.get('QUERY_TIMEOUT') ?? 0).toBe(0);
+      expect(slowest).toBeLessThan(2_000);
+      expect(accepted).toBeGreaterThan(5);
+    } finally {
+      stop = true;
+      await half.close();
+      for (const sock of socks) sock.destroy();
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+    }
+  }, 30_000);
 
   it('서비스: 로그인 → 기기 기록 올리기 → 서버 적립(같은 판은 한 번) → 삭제', async () => {
     const t = Date.UTC(2026, 9, 28, 3, 0, 0);
