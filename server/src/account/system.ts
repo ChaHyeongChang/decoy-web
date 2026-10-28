@@ -112,6 +112,44 @@ export function guardUnhandledRejections(log: (msg: string) => void): void {
   process.on('unhandledRejection', (reason) => log(unhandledRejectionLine(reason)));
 }
 
+/** 소켓 수준 오류 코드 (닫힌 · 끊긴 연결에 쓰거나 읽다 난 것) — 계정 DB 연결에서만 나도 판에는 영향이 없다 */
+const SOCKET_ERROR_CODES = new Set([
+  'EBADF',
+  'EPIPE',
+  'ECONNRESET',
+  'ECONNABORTED',
+  'ETIMEDOUT',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ERR_STREAM_DESTROYED',
+  'ERR_STREAM_WRITE_AFTER_END',
+  'ERR_SOCKET_CLOSED',
+]);
+
+/** 처리되지 않은 예외가 소켓 수준 오류인가 (TLS · SSL 오류 포함) */
+export function isSocketError(err: unknown): boolean {
+  const code = typeof err === 'object' && err !== null ? (err as { code?: unknown }).code : undefined;
+  return typeof code === 'string' && (SOCKET_ERROR_CODES.has(code) || /^ERR_(SSL|TLS)_/.test(code));
+}
+
+/**
+ * 계정 DB 드라이버의 소켓 처리에서 듣는 이 없는 'error'가 나도(드라이버는 연결을 닫을 때 소켓 리스너를 모두 지운다) 서버 프로세스를
+ * 끝내지 않는다 — 판은 그대로. 소켓 수준 오류만 삼키고 로그 `서버: 처리되지 않은 소켓 오류 (<코드>) — 판은 그대로 계속`, 그 밖의
+ * 예외는 Node 기본처럼 찍고 끝낸다. PostgreSQL 저장소를 쓸 때만 건다(server/src/index.ts)
+ */
+export function guardSocketErrors(log: (msg: string) => void): void {
+  process.on('uncaughtException', (err) => {
+    if (isSocketError(err)) {
+      log(
+        `서버: 처리되지 않은 소켓 오류 (${String((err as Error & { code?: unknown }).code)}) — 판은 그대로 계속`,
+      );
+      return;
+    }
+    console.error(err);
+    process.exit(1);
+  });
+}
+
 export function createAccountSystem(opts: AccountSystemOptions): AccountSystem {
   let config = readAccountConfig(opts.env, { testHooks: opts.testHooks, dev: opts.dev });
   const now = opts.now ?? Date.now;

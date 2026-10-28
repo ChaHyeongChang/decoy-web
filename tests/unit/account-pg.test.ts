@@ -46,6 +46,7 @@ import { AccountConflict, MemoryAccountStore, type AccountStore } from '../../se
 import {
   DB_TLS_WARNINGS,
   createAccountSystem,
+  isSocketError,
   unhandledRejectionLine,
 } from '../../server/src/account/system';
 import {
@@ -988,6 +989,25 @@ describe('계정 기능 묶음: DB 주소 확인', () => {
     expect(sys.on).toBe(false);
     expect(sys.summary).toBe('계정 로그인: 꺼짐 (DATABASE_URL 틀림)');
   });
+  it('듣는 이 없는 소켓 오류 가드: 소켓 수준 오류(닫힌 fd에 쓰기 · 끊김 · TLS)만 삼키고 그 밖의 예외는 그대로 끝낸다', () => {
+    for (const code of [
+      'EBADF',
+      'EPIPE',
+      'ECONNRESET',
+      'ERR_STREAM_DESTROYED',
+      'ERR_SSL_WRONG_VERSION_NUMBER',
+      'ERR_TLS_CERT_ALTNAME_INVALID',
+    ])
+      expect(isSocketError(Object.assign(new Error('x'), { code })), code).toBe(true);
+    for (const e of [
+      new TypeError('bug'),
+      Object.assign(new Error('x'), { code: 'ERR_INVALID_ARG_TYPE' }),
+      'str',
+      null,
+    ])
+      expect(isSocketError(e)).toBe(false);
+  });
+
   it('드라이버 안쪽 비동기 오류 가드: 로그에는 오류 코드 · 이름만 (메시지 · 값 없이)', () => {
     expect(
       unhandledRejectionLine(

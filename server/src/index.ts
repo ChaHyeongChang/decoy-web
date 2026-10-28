@@ -22,7 +22,7 @@ import { TruthLog } from './truthLog';
 import { ASSETLINKS_PATH, assetLinksFromEnv } from './wellKnown';
 import { spawnLocalBot } from './bots';
 import { createQuickBots } from './quickBots';
-import { createAccountSystem, guardUnhandledRejections } from './account/system';
+import { createAccountSystem, guardSocketErrors, guardUnhandledRejections } from './account/system';
 
 const options = parseOptions(process.argv.slice(2), process.env);
 const balance = loadBalance(options.balancePath);
@@ -48,8 +48,11 @@ const accounts = createAccountSystem({
 });
 if (accounts.config.requested && !accounts.on) console.warn(accounts.summary);
 else console.log(accounts.summary);
-// 계정 DB(PostgreSQL)를 쓰면: 드라이버 안쪽 비동기 오류가 서버(모든 판)를 끝내지 않게
-if (accounts.store?.kind === 'postgres') guardUnhandledRejections((m) => console.error(m));
+// 계정 DB(PostgreSQL)를 쓰면: 드라이버 안쪽 비동기 오류 · 듣는 이 없는 소켓 오류가 서버(모든 판)를 끝내지 않게
+if (accounts.store?.kind === 'postgres') {
+  guardUnhandledRejections((m) => console.error(m));
+  guardSocketErrors((m) => console.error(m));
+}
 void accounts.start();
 const lagRng = new Rng(options.seed ^ 0x5bd1e995);
 
