@@ -1502,6 +1502,11 @@ export function resizeCanvasTexture<C extends { width: number; height: number }>
   trackTexture(key, width, height);
 }
 
+/** 시험 · 진단: 키마다 올린 텍스처 바이트의 사본 (합계는 gfxState.features.textureBytes) */
+export function textureBytesByKey(): Record<string, number> {
+  return Object.fromEntries(textureBytes);
+}
+
 export function removeCanvasTexture<C, T>(host: CanvasTextureHost<C, T>, key: string): void {
   if (host.exists(key)) host.remove(key);
   textureBytes.delete(key);

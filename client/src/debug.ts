@@ -18,6 +18,7 @@ import {
 import { lateWindowFor } from './gfx/quality';
 import { freezeGfxClock, gfxState, probeSlot, setFogFollowDisabled, setFpsOverride } from './gfx/state';
 import { matchMenu } from './matchMenu';
+import { textureBytesByKey } from './render/fogPaint';
 import { setPref } from './prefs';
 import type { GameScene } from './scenes/GameScene';
 import { installDebugOverlay, type DebugOverlayData, type OverlayAnchor } from './ui/debugOverlay';
@@ -140,6 +141,7 @@ export function installDebug(app: App, overlay: boolean): void {
     // ── 판 중 설정 효과 ──
     getMatchPrefs: () => matchPrefs(app),
     getDrawnMinimapBig: () => gameScene(app)?.minimapBigDrawn.map((d) => ({ ...d })) ?? [],
+    getTextureBytesByKey: () => textureBytesByKey(),
     setMinimapBigSharp: (on) => gameScene(app)?.setMinimapBigSharp(on),
     fakeMatchMenu: (on) => setFakeMatchMenu(on),
     setMatchPref: (key, on) => void setPref(key, on),

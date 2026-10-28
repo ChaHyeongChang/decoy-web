@@ -373,6 +373,11 @@ export interface DecoyDebug {
   /** 크게 본 지도에 그린 엔티티 (layer 'minimap', 닫혀 있으면 빈 배열). 같은 프레임의 getDrawn ⊆ 비교용 */
   getDrawnMinimapBig(): DrawnEntity[];
   /**
+   * 키마다 올린 캔버스 텍스처 바이트 (gfx.features.textureBytes의 내역 — 크게 본 지도는 'minimap-big'). 시험이 한 텍스처만 본다:
+   * 판이 흐르는 동안 다른 텍스처는 제 때에 생기고 사라진다(첫 판 안내 그림 · 안개 색 등)
+   */
+  getTextureBytesByKey(): Record<string, number>;
+  /**
    * 시험 · 선명도 비교: 지도 크게 보기의 화면 해상도 바닥을 끄면(false) 예전처럼 작은 미니맵 합성을 늘려 그린다. 판 장면이
    * 새로 만들어지면 켜짐으로 돌아온다
    */

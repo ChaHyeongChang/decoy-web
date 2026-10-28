@@ -1,6 +1,9 @@
 // 지도 크게 보기 선명도 — WebGL 텍스처 예산 (남은 문제 정리). 크게 본 지도 바닥을 화면 해상도로 합성하되 열린 동안에도 올린 텍스처
 // 바이트가 예산(높음 32MiB)을 넘지 않는다: 가장 빠듯한 PC 1920×1080 · 배율 2 · 품질 높음(닫혀 있어도 약 29.4MiB)은 남은 만큼만
-// 키운다(작은 미니맵 합성 768px보다는 크게). 닫으면 놓는다. 선명도 스크린샷 비교는 minimap-sharp.spec.ts(Canvas)
+// 키운다(작은 미니맵 합성 768px보다는 크게). 닫으면 놓는다 — 크게 본 지도 텍스처('minimap-big') 하나만 본다: 굽기를 기다리는 동안
+// (CI 러너에서는 수십 초) 판이 흘러 다른 텍스처가 제 때에 생기고 사라지므로(첫 판 안내 그림이 사라짐 · 안개 색 텍스처가 생김)
+// 합계를 열기 전과 견주면 지도와 무관하게 틀린다(전체 검사 194 · 196: 닫은 뒤 합계가 열기 전보다 64~128KiB 많았다 — 지도 텍스처는 4바이트).
+// 선명도 스크린샷 비교는 minimap-sharp.spec.ts(Canvas)
 import { expect, test } from '@playwright/test';
 import type { MatchPrefsDebug } from '@decoy/shared';
 import { newPlayerPage, press, waitForSnapshots } from './helpers';
@@ -28,10 +31,13 @@ test('지도 크게 보기 (WebGL PC 1920×1080@2 높음): 열린 동안에도 �
     (await page.evaluate(() => window.__DECOY__!.getMatchPrefs()))!;
   const bytes = (): Promise<number> =>
     page.evaluate(() => Number(window.__DECOY__!.gfx.features.textureBytes ?? 0));
+  const bigBytes = (): Promise<number> =>
+    page.evaluate(() => window.__DECOY__!.getTextureBytesByKey()['minimap-big'] ?? 0);
   const g = await page.evaluate(() => ({ q: window.__DECOY__!.gfx.quality, r: window.__DECOY__!.renderer }));
   expect(g).toEqual({ q: 'high', r: 'webgl' });
   await expect.poll(async () => (await prefs()).minimapTap !== null).toBe(true);
   const closed = await bytes();
+  expect(await bigBytes()).toBeLessThanOrEqual(4);
   const tap = (await prefs()).minimapTap!;
   await page.mouse.click(tap.x + tap.w / 2, tap.y + tap.h / 2);
   await expect.poll(async () => (await prefs()).minimapBig.open).toBe(true);
@@ -52,12 +58,16 @@ test('지도 크게 보기 (WebGL PC 1920×1080@2 높음): 열린 동안에도 �
     `[minimap-sharp.webgl] 바닥 ${big.smallTexW} → ${big.tex.w}×${big.tex.h} (화면 ${big.needW.toFixed(0)}px), 텍스처 ${(closed / MiB).toFixed(2)} → ${(open / MiB).toFixed(2)}MiB`,
   );
   expect(open).toBeLessThanOrEqual(HIGH_BUDGET);
+  // 열린 동안 지도 텍스처 바이트 = 바닥 크기 (합계에 들어 있다)
+  expect(await bigBytes()).toBe(big.tex.w * big.tex.h * 4);
   expect(big.tex.w).toBeGreaterThan(big.smallTexW);
   expect(big.tex.w).toBeLessThanOrEqual(Math.ceil(big.needW));
   await page.keyboard.press('Escape');
   await expect.poll(async () => (await prefs()).minimapBig.open).toBe(false);
   expect((await prefs()).minimapBig.tex).toEqual({ w: 1, h: 1 });
-  expect(await bytes()).toBeLessThanOrEqual(closed + 4);
+  // 닫으면 지도 텍스처는 1×1(4바이트)로 놓는다
+  expect(await bigBytes()).toBeLessThanOrEqual(4);
+  expect(await bytes()).toBeLessThanOrEqual(HIGH_BUDGET);
   expect(problems).toEqual([]);
   await context.close();
 });
