@@ -6,6 +6,7 @@ import type { MatchRating } from '@decoy/shared';
 import { SESSION_COOKIE } from '@decoy/shared';
 import type { Conn } from '@decoy/shared/sim';
 import { describeAccountConfig, readAccountConfig, type AccountConfig } from './config';
+import { ACCOUNT_ENV } from './env';
 import { readCookie } from './cookies';
 import { GoogleJwks, type KeyProvider } from './googleToken';
 import { createAccountRoutes, originMatchesHost, type AccountHandler } from './routes';
@@ -89,18 +90,34 @@ export interface AccountSystem {
   close(): Promise<void>;
 }
 
+/** DB 연결이 인증서를 확인하지 않을 때 시작 로그 (처리방침 10번은 TLS + 인증서 확인 — DATABASE_URL의 sslmode=require) */
+export const DB_TLS_WARNINGS: Readonly<Record<'prefer' | 'disable', string>> = {
+  prefer: '계정 DB 연결: 인증서를 확인하지 않음 (DATABASE_URL에 sslmode=require가 없다 — 처리방침 10번 확인)',
+  disable: '계정 DB 연결: 암호화하지 않음 (DATABASE_URL이 sslmode=disable — 처리방침 10번 확인)',
+};
+
 export function createAccountSystem(opts: AccountSystemOptions): AccountSystem {
-  const config = readAccountConfig(opts.env, { testHooks: opts.testHooks, dev: opts.dev });
+  let config = readAccountConfig(opts.env, { testHooks: opts.testHooks, dev: opts.dev });
   const now = opts.now ?? Date.now;
   const log = opts.log ?? ((m: string) => console.log(m));
   const conns = new AccountConnections();
-  const secret = config.enabled ? config.sessionSecret : '';
   let store: AccountStore | null = null;
+  if (config.enabled) {
+    try {
+      store = opts.store ?? createAccountStore(config.store, opts.env, log);
+    } catch {
+      // 저장소를 만들 수 없다(sslrootcert 파일 등): 로그인을 끈 채로 뜬다 — 판은 그대로
+      log(`계정 저장소를 만들지 못함 (${ACCOUNT_ENV.dbUrl} 확인)`);
+      config = { enabled: false, requested: true, problems: [{ name: ACCOUNT_ENV.dbUrl, kind: 'invalid' }] };
+    }
+  }
+  if (config.enabled && config.store.kind === 'postgres' && config.store.ssl !== 'verify')
+    log(DB_TLS_WARNINGS[config.store.ssl]);
+  const secret = config.enabled ? config.sessionSecret : '';
   let service: AccountService | null = null;
   let keys: KeyProvider | null = null;
   let testIdp: TestIdp | null = null;
-  if (config.enabled) {
-    store = opts.store ?? createAccountStore(config.store, opts.env, log);
+  if (config.enabled && store) {
     service = new AccountService({
       store,
       timeZone: config.timeZone,

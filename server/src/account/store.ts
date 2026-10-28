@@ -14,6 +14,19 @@ export interface AccountRecord {
   /** 만든 · 마지막으로 바꾼 서버 시각 (ms) */
   created: number;
   updated: number;
+  /**
+   * 기록을 바꾼 횟수 (0부터). 조건부 쓰기에 쓴다: 서비스는 읽은 rev로만 쓰므로, 시간을 넘겨 버린 옛 쓰기가 늦게 도착해도
+   * 그 사이의 새 기록을 덮지 못한다
+   */
+  rev: number;
+}
+
+/** 조건부 쓰기 실패: 읽은 뒤 기록이 그새 바뀌었다 (서비스는 503 · 적립은 다시 읽고 다시 시도) */
+export class AccountConflict extends Error {
+  readonly code = 'CONFLICT';
+  constructor() {
+    super('계정 기록이 그새 바뀌었다');
+  }
 }
 
 export interface AccountStore {
@@ -30,8 +43,11 @@ export interface AccountStore {
   get(id: string): Promise<AccountRecord | null>;
   /** 새 계정 (기록 없음). 같은 sub가 이미 있으면 새로 만들지 않고 그 계정을 돌려준다(동시에 두 번 첫 로그인) */
   create(sub: string, nowMs: number): Promise<AccountRecord>;
-  /** 기록 글을 바꾼다. 계정이 없으면(지워짐) 만들지 않고 false */
-  saveProfile(id: string, profile: string, nowMs: number): Promise<boolean>;
+  /**
+   * 기록 글을 바꾸고 rev를 1 올린다. 계정이 없으면(지워짐) 만들지 않고 false. expectRev가 있으면 지금 rev가 같을 때만 쓰고, 다르면
+   * AccountConflict — 단 지금 글이 쓰려던 글과 같으면(앞 시도가 이미 썼다) true
+   */
+  saveProfile(id: string, profile: string, nowMs: number, expectRev?: number): Promise<boolean>;
   /** 계정과 기록을 바로 지운다. 있었으면 true */
   delete(id: string): Promise<boolean>;
   /** 연결 정리 (서버 종료) */
@@ -86,19 +102,31 @@ export class MemoryAccountStore implements AccountStore {
         const rec = this.copy(this.byId.get(have));
         if (rec) return rec;
       }
-      const rec: AccountRecord = { id: newAccountId(), sub, profile: null, created: nowMs, updated: nowMs };
+      const rec: AccountRecord = {
+        id: newAccountId(),
+        sub,
+        profile: null,
+        created: nowMs,
+        updated: nowMs,
+        rev: 0,
+      };
       this.byId.set(rec.id, rec);
       this.bySub.set(sub, rec.id);
       return { ...rec };
     });
   }
 
-  saveProfile(id: string, profile: string, nowMs: number): Promise<boolean> {
+  saveProfile(id: string, profile: string, nowMs: number, expectRev?: number): Promise<boolean> {
     return this.run(() => {
       const rec = this.byId.get(id);
       if (!rec) return false;
+      if (expectRev !== undefined && rec.rev !== expectRev) {
+        if (rec.profile === profile) return true;
+        throw new AccountConflict();
+      }
       rec.profile = profile;
       rec.updated = nowMs;
+      rec.rev += 1;
       return true;
     });
   }

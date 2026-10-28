@@ -72,10 +72,10 @@ describe('계정 설정', () => {
     expect(describeAccountConfig(cfg)).toBe('계정 로그인: 켜짐 (postgres)');
     expect(chooseAccountStore({ DATABASE_URL: DB }, DEPLOY)).toEqual({
       ok: true,
-      choice: { kind: 'postgres' },
+      choice: { kind: 'postgres', ssl: 'verify' },
     });
     // 만들기는 접속하지 않는다
-    const store = createAccountStore({ kind: 'postgres' }, { DATABASE_URL: DB });
+    const store = createAccountStore({ kind: 'postgres', ssl: 'verify' }, { DATABASE_URL: DB });
     expect(store.kind).toBe('postgres');
     void store.close();
     for (const bad of [

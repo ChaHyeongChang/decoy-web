@@ -72,10 +72,15 @@ class TestStore extends MemoryAccountStore {
     await this.gate();
     return super.get(id);
   }
-  override async saveProfile(id: string, profile: string, nowMs: number): Promise<boolean> {
+  override async saveProfile(
+    id: string,
+    profile: string,
+    nowMs: number,
+    expectRev?: number,
+  ): Promise<boolean> {
     this.saves += 1;
     await this.gate();
-    return super.saveProfile(id, profile, nowMs);
+    return super.saveProfile(id, profile, nowMs, expectRev);
   }
 }
 

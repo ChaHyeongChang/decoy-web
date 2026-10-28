@@ -1,5 +1,6 @@
 // 계정 저장소 PostgreSQL 구현을 실제 PostgreSQL에서 (DECOY_TEST_DATABASE_URL이 있을 때만 — CI 빠른 검사는 러너에 깔린
-// PostgreSQL을 켜고 실행 때마다 만든 무작위 비밀번호로 이 값을 준다. CI에서 값이 없으면 실패한다). Neon 자체(잠들기 · 한도)는
+// PostgreSQL을 켜고 실행 때마다 만든 무작위 비밀번호로 이 값을 준다. CI에서 값이 없으면 실패한다). 시험은 표를 지우므로 이 컴퓨터의
+// PostgreSQL(localhost · 127.0.0.1)만 받는다 — 실수로 배포 DB 주소를 넣어도 계정 기록을 지우지 않게. Neon 자체(잠들기 · 한도)는
 // 여기서 볼 수 없어 HUMAN_CHECKS로 — 대신 서버가 연결을 끊는 경우(잠든 compute가 연결을 닫는 것과 같은 모양)를 흉내 낸다.
 // - 저장소 약속: 만들기(같은 sub 동시 다섯 번 → 계정 하나) · 읽기 · 기록 쓰기 · 지우기 · 긴 글 · bigint 시각
 // - 서버가 연결을 끊은 뒤 다음 요청이 저절로 다시 붙는다
@@ -13,9 +14,11 @@ import {
   PgAccountStore,
   createPostgresClient,
   parseDatabaseUrl,
-  type PgClient,
+  type PgConfig,
+  type PgResult,
 } from '../../server/src/account/pgStore';
 import { AccountService } from '../../server/src/account/service';
+import { AccountConflict } from '../../server/src/account/store';
 import {
   CookieJar,
   TEST_CLIENT_ID,
@@ -25,13 +28,33 @@ import {
   startAccountServer,
 } from '../helpers/accountServer';
 
-const URL_TEXT = process.env.DECOY_TEST_DATABASE_URL ?? '';
+const RAW_URL = process.env.DECOY_TEST_DATABASE_URL ?? '';
+const LOCAL_HOSTS = ['localhost', '127.0.0.1'];
+/** 이 컴퓨터의 PostgreSQL 주소일 때만 시험한다 (아니면 빈 값 — 아래 '준비' 시험이 실패시킨다) */
+const URL_TEXT = LOCAL_HOSTS.includes(parseDatabaseUrl(RAW_URL)?.host ?? '') ? RAW_URL : '';
+
+/** 시험이 직접 쓰는 관리 연결 (질의마다 10초) */
+interface Admin {
+  query(text: string, params?: readonly (string | number | null)[]): Promise<PgResult>;
+  end(): Promise<void>;
+}
+
+function adminOf(conf: PgConfig): Admin {
+  const c = createPostgresClient(conf);
+  return { query: (text, params = []) => c.query(text, params, 10_000), end: () => c.end() };
+}
 
 describe('실제 PostgreSQL 시험 준비', () => {
   it.runIf(process.env.CI === 'true')(
     'CI에서는 DECOY_TEST_DATABASE_URL이 있어 실제 DB 시험을 건너뛰지 않는다',
     () => {
       expect(URL_TEXT).not.toBe('');
+    },
+  );
+  it.runIf(RAW_URL !== '')(
+    '시험 DB는 이 컴퓨터의 PostgreSQL만 (표를 지우므로 배포 DB 주소는 받지 않는다)',
+    () => {
+      expect(LOCAL_HOSTS).toContain(parseDatabaseUrl(RAW_URL)?.host);
     },
   );
   it.runIf(URL_TEXT !== '')('시험 DB 주소가 맞는 모양이다', () => {
@@ -58,12 +81,12 @@ function rating(matchId: string): MatchRating {
 describe.runIf(URL_TEXT !== '')('PgAccountStore (실제 PostgreSQL)', () => {
   const conf = parseDatabaseUrl(URL_TEXT)!;
   const table = `t_${process.pid}_${Date.now()}`;
-  let admin: PgClient;
+  let admin: Admin;
   let store: PgAccountStore;
   const logs: string[] = [];
 
   beforeAll(async () => {
-    admin = createPostgresClient(conf);
+    admin = adminOf(conf);
     store = new PgAccountStore(createPostgresClient(conf), { table, log: (m) => logs.push(m) });
     await store.init();
   });
@@ -87,13 +110,14 @@ describe.runIf(URL_TEXT !== '')('PgAccountStore (실제 PostgreSQL)', () => {
       { column_name: 'profile', data_type: 'text', is_nullable: 'YES' },
       { column_name: 'created', data_type: 'bigint', is_nullable: 'NO' },
       { column_name: 'updated', data_type: 'bigint', is_nullable: 'NO' },
+      { column_name: 'rev', data_type: 'bigint', is_nullable: 'NO' },
     ]);
   });
 
   it('만들기 · 읽기 · 기록 쓰기 · 지우기 (없는 계정은 만들지 않는다)', async () => {
     const now = Date.UTC(2026, 9, 28, 3, 0, 0);
     const rec = await store.create('live-sub-1', now);
-    expect(rec).toMatchObject({ sub: 'live-sub-1', profile: null, created: now, updated: now });
+    expect(rec).toMatchObject({ sub: 'live-sub-1', profile: null, created: now, updated: now, rev: 0 });
     expect(rec.id).toMatch(/^[0-9a-f]{32}$/);
     expect(await store.findBySub('live-sub-1')).toEqual(rec);
     expect(await store.get(rec.id)).toEqual(rec);
@@ -103,7 +127,7 @@ describe.runIf(URL_TEXT !== '')('PgAccountStore (실제 PostgreSQL)', () => {
     // 긴 글 · 한글 · 따옴표 (기기 기록 상한 32KB)
     const text = `{"v":1,"x":"${'가\'"\\'.repeat(8000)}"}`;
     expect(await store.saveProfile(rec.id, text, now + 5)).toBe(true);
-    expect(await store.get(rec.id)).toMatchObject({ profile: text, updated: now + 5, created: now });
+    expect(await store.get(rec.id)).toMatchObject({ profile: text, updated: now + 5, created: now, rev: 1 });
     expect(await store.saveProfile('0'.repeat(32), text, now)).toBe(false);
 
     expect(await store.delete(rec.id)).toBe(true);
@@ -112,6 +136,17 @@ describe.runIf(URL_TEXT !== '')('PgAccountStore (실제 PostgreSQL)', () => {
     // 지운 뒤 기록 쓰기는 계정을 되살리지 않는다
     expect(await store.saveProfile(rec.id, text, now)).toBe(false);
     expect(await store.findBySub('live-sub-1')).toBeNull();
+  });
+
+  it('조건부 쓰기(rev): 읽은 rev일 때만 쓰고 rev+1 · 옛 rev의 다른 글은 충돌(새 기록 그대로) · 같은 글은 이미 쓴 것', async () => {
+    const rec = await store.create('live-rev', 1);
+    expect(rec.rev).toBe(0);
+    expect(await store.saveProfile(rec.id, 'A', 2, 0)).toBe(true);
+    expect(await store.get(rec.id)).toMatchObject({ profile: 'A', rev: 1, updated: 2 });
+    expect(await store.saveProfile(rec.id, 'A', 3, 0)).toBe(true);
+    await expect(store.saveProfile(rec.id, 'OLD', 3, 0)).rejects.toBeInstanceOf(AccountConflict);
+    expect(await store.get(rec.id)).toMatchObject({ profile: 'A', rev: 1 });
+    expect(await store.saveProfile('0'.repeat(32), 'A', 3, 0)).toBe(false);
   });
 
   it('같은 sub로 동시에 다섯 번 만들어도 계정은 하나', async () => {
@@ -163,7 +198,7 @@ describe.runIf(URL_TEXT !== '')('PgAccountStore (실제 PostgreSQL)', () => {
 
 describe.runIf(URL_TEXT !== '')('계정 기능 전체 (DATABASE_URL로 켠 서버, 실제 PostgreSQL)', () => {
   it('가짜 구글 로그인 → 상태(첫 로그인) → 기기 기록 올리기 → 다시 읽기 → 계정 삭제', async () => {
-    const admin = createPostgresClient(parseDatabaseUrl(URL_TEXT)!);
+    const admin = adminOf(parseDatabaseUrl(URL_TEXT)!);
     // 기본 표 이름을 쓰므로 비우고 시작한다 (시험 DB 전용)
     await admin.query(`DROP TABLE IF EXISTS ${PG_TABLE}`, []);
     const srv = await startAccountServer({
@@ -196,7 +231,7 @@ describe.runIf(URL_TEXT !== '')('계정 기능 전체 (DATABASE_URL로 켠 서�
         profile: { coins: 11 },
       });
       const rows = await admin.query(`SELECT sub, profile FROM ${PG_TABLE}`, []);
-      // DB에는 구글 고유 ID(sub)와 기록 글만
+      // DB에는 구글 고유 ID(sub)와 기록 글만 (그 밖의 열은 계정 ID · 시각 · rev)
       expect(rows.rows).toHaveLength(1);
       expect(Object.keys(rows.rows[0]!).sort()).toEqual(['profile', 'sub']);
       const del = await apiPost(srv, jar, '/api/account/delete', {});

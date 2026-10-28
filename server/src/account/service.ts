@@ -2,7 +2,8 @@
 // - 판 보상은 서버가 판 평가(rateMatch)로 applyRating을 그대로 불러 적립한다. 기기에서 보낸 보상 값을 받는 길은 없다
 //   (기기 기록은 첫 로그인 올리기 importDevice로만 — 사용자가 고른 경우)
 // - 접속 보상 · 해금 · 입기도 공용 claimLogin · buyCostume · wearCostume. 날짜는 서버 시계 + 계정 시간대(dayKeyInZone)
-// - 계정마다 프로세스 안에서 한 줄로 세운다(읽기 → 고치기 → 쓰기가 섞이지 않게, 인스턴스 1개). 지운 계정은 다시 만들지 않는다
+// - 계정마다 프로세스 안에서 한 줄로 세운다(읽기 → 고치기 → 쓰기가 섞이지 않게, 인스턴스 1개). 쓰기는 읽은 rev일 때만(조건부 —
+//   시간을 넘겨 버린 옛 쓰기가 늦게 도착해도 새 기록을 덮지 않는다, 어긋나면 503 · 적립은 다시 읽고 다시 시도). 지운 계정은 다시 만들지 않는다
 // - 저장소 호출은 3초 제한(DB 저장소는 저장소가 정한 값 — Neon이 깨는 시간을 담아 10초). 계정 기록이 이 서버보다 높은 판('newer')이면 쓰지 않는다(옛 서버가 새 기록을 덮지 않게 — 공용 규칙)
 // - 로그에는 수만 (sub · 계정 ID · 토큰을 찍지 않는다)
 import {
@@ -245,7 +246,7 @@ export class AccountService {
       if (dev.status === 'newer') throw new AccountBadRequest('기기 기록이 서버보다 높은 판');
       const base: Readable = dev.status === 'ok' ? dev : { profile: emptyProfile(now), extra: {} };
       const text = serializeProfile(base.profile, base.extra);
-      const saved = await this.db(job, () => this.store.saveProfile(id, text, now));
+      const saved = await this.db(job, () => this.store.saveProfile(id, text, now, rec.rev));
       return saved ? { profile: text, day: this.today(now) } : null;
     });
   }
@@ -261,7 +262,7 @@ export class AccountService {
       const r = claimLogin(cur.profile, day, now, this.prog);
       if (!r) return { profile: rec.profile ?? serializeProfile(cur.profile, cur.extra), day, claimed: null };
       const text = serializeProfile(r.profile, cur.extra);
-      const saved = await this.db(job, () => this.store.saveProfile(id, text, now));
+      const saved = await this.db(job, () => this.store.saveProfile(id, text, now, rec.rev));
       return saved ? { profile: text, day, claimed: { reward: r.reward, streak: r.streak } } : null;
     });
   }
@@ -291,7 +292,7 @@ export class AccountService {
         next = w;
       }
       const text = serializeProfile(next, cur.extra);
-      const saved = await this.db(job, () => this.store.saveProfile(id, text, now));
+      const saved = await this.db(job, () => this.store.saveProfile(id, text, now, rec.rev));
       if (!saved) return null;
       return price === undefined
         ? { profile: text, day, result: 'ok' }
@@ -351,7 +352,7 @@ export class AccountService {
     // 같은 판 (이미 적립했다): 저장 없이 지금 기록
     if (!r) return rec.profile !== null ? { ok: true, profile: rec.profile } : { ok: false, profile: null };
     const text = serializeProfile(r.profile, cur.extra);
-    const saved = await this.db(job, () => this.store.saveProfile(id, text, now));
+    const saved = await this.db(job, () => this.store.saveProfile(id, text, now, rec.rev));
     return saved ? { ok: true, profile: text } : { ok: false, profile: null };
   }
 
