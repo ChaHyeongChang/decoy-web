@@ -51,6 +51,11 @@ export const PG_STORM_BACKSTOP = 60;
  * 않음) 반쯤 열린 연결이 서버에 쌓이지 않게
  */
 export const PG_TLS_CLOSE_GRACE_MS = 5_000;
+/**
+ * 망가진 연결 자리 알아채기 (ms): 접속(TCP)이 된 뒤 이만큼 지나도 드라이버가 그 소켓에 한 바이트도 쓰지 않았으면 묶음을 버린다(아래
+ * createPostgresClient 설명). 성한 자리는 접속 전에 이미 시작 글(SSLRequest · StartupMessage)을 써 둔다
+ */
+export const PG_STALL_CHECK_MS = 100;
 /** 호출 하나의 시도 수 상한 (다른 요청이 연결 묶음을 버려 함께 끊긴 시도 포함) */
 export const PG_MAX_TRIES = 5;
 /** 같은 오류 코드 로그는 이 간격에 한 번 (ms) */
@@ -229,11 +234,13 @@ interface Pool {
 
 /**
  * postgres.js 연결 묶음. 접속은 첫 질의 때 한다. 소켓은 이 함수가 직접 연다(드라이버 socket 설정):
- * - 질의가 timeoutMs 안에 끝나지 않거나 접속 제한(CONNECT_TIMEOUT)으로 실패하면 그 묶음을 버린다 — 드라이버를 끝내고(end timeout 0)
- *   그 묶음의 소켓을 닫는다(드라이버는 우아하게 닫기만 해서, 멈춘 서버 쪽 연결이 끝없이 남는다). TLS로 감싸지 않은 소켓은 바로
- *   부수고, 감싼 것은 우아하게 닫히기를 5초 기다린 뒤 TLS 쪽부터 부순다(forceClose). 다음 질의부터 새 묶음.
- *   접속 제한에도 버리는 까닭: 드라이버(3.4.9)는 소켓이 닫히는 같은 차례에 그 연결로 질의를 쓰면 쓰기 예약을 지우고도 '예약됨'으로
- *   남겨, 그 연결 자리의 다음 접속들이 시작 글을 영영 보내지 못하고 접속 제한(4초)마다 실패한다(검증에서 재현). 새 묶음은 새 자리다
+ * - 질의가 timeoutMs 안에 끝나지 않으면 그 묶음을 버린다 — 드라이버를 끝내고(end timeout 0) 그 묶음의 소켓을 닫는다(드라이버는
+ *   우아하게 닫기만 해서, 멈춘 서버 쪽 연결이 끝없이 남는다). TLS로 감싸지 않은 소켓은 바로 부수고, 감싼 것은 우아하게 닫히기를
+ *   5초 기다린 뒤 TLS 쪽부터 부순다(forceClose). 다음 질의부터 새 묶음
+ * - 망가진 연결 자리도 묶음을 버린다: 드라이버(3.4.9)는 소켓이 닫히는 같은 차례에 그 연결로 질의를 쓰면 쓰기 예약을 지우고도
+ *   '예약됨'으로 남겨, 그 연결 자리의 다음 접속들이 시작 글을 영영 보내지 못하고 접속 제한(4초)마다 실패한다(검증에서 재현). 표지는
+ *   '접속이 됐는데 0.1초가 지나도 드라이버가 한 바이트도 쓰지 않음'이다 — 성한 자리는 접속 전에 시작 글을 써 둔다. 접속 제한마다
+ *   묶음을 버리면 새 연결만 느린 DB(DNS · 바쁜 프록시)나 8초 넘게 걸려 깨는 DB에서 멀쩡한 질의까지 함께 끊었다(6차 검증)
  * - 서버가 시작 중 오류 없이 접속을 닫으면 드라이버가 쉬지 않고 다시 접속한다(접속 제한도 매번 새로 잰다): 어떤 질의도 끝나지
  *   않은 채 다섯 번 넘게 열면 그 시도를 바로 끝낸다(RECONNECT_LOOP — 질의가 하나라도 끝나면 다시 센다)
  * - 다른 질의가 묶음을 버려 함께 끊긴 질의는 POOL_DROPPED로 알린다(저장소가 한 번 더의 몫을 쓰지 않고 새 묶음으로 다시 한다)
@@ -280,6 +287,12 @@ export function createPostgresClient(conf: PgConfig, opts: PostgresClientOptions
     pool.sockets.add(sock);
     everything.add(sock);
     sock.once('close', () => pool.sockets.delete(sock));
+    // 망가진 연결 자리: 접속이 됐는데 드라이버가 아무것도 쓰지 않았다 (위 설명. 타이머는 프로세스를 붙잡지 않는다)
+    sock.once('connect', () => {
+      setTimeout(() => {
+        if (!sock.destroyed && sock.bytesWritten === 0 && !pool.dropped && !closed) drop(pool);
+      }, PG_STALL_CHECK_MS).unref();
+    });
     opts.onSocket?.(sock);
     pool.opened += 1;
     pool.sinceSettle += 1;
@@ -372,11 +385,9 @@ export function createPostgresClient(conf: PgConfig, opts: PostgresClientOptions
           pool.sinceSettle = 0;
           pool.failed += 1;
           // 다른 질의가 묶음을 버려 함께 끊겼다 (이 질의 탓이 아니다)
-          if (drops !== startDrops)
-            throw codeError('POOL_DROPPED', '계정 DB: 다른 요청이 연결 묶음을 새로 만듦');
-          // 접속 제한: 그 연결 자리가 드라이버 결함으로 망가졌을 수 있다 — 묶음을 버린다 (위 설명)
-          if (classifyPgError(e).code === 'CONNECT_TIMEOUT') drop(pool);
-          throw e;
+          throw drops !== startDrops
+            ? codeError('POOL_DROPPED', '계정 DB: 다른 요청이 연결 묶음을 새로 만듦')
+            : e;
         },
       );
       // 시간을 넘겨 버린 질의가 나중에 실패해도 처리되지 않은 거부가 되지 않게
@@ -646,6 +657,8 @@ export class PgAccountStore implements AccountStore {
     let victims = 0;
     let timeouts = 0;
     let retried = false;
+    /** 이 호출 자신의 마지막 오류 (함께 끊긴 시도 말고 — 쉬기 로그에 쓴다) */
+    let own: PgErrorInfo | null = null;
     for (;;) {
       tries += 1;
       const left = Math.max(1, deadline - this.now());
@@ -657,6 +670,7 @@ export class PgAccountStore implements AccountStore {
         const info = classifyPgError(err);
         const victim = info.code === VICTIM_CODE;
         if (victim) victims += 1;
+        else own = info;
         if (info.timeout) timeouts += 1;
         const room = deadline - this.now();
         const again =
@@ -672,7 +686,8 @@ export class PgAccountStore implements AccountStore {
           }
           continue;
         }
-        if (timeouts > 0 && timeouts === tries - victims) this.pause(info, start);
+        // 함께 끊긴 시도는 로그에 남기지 않는다: 쉬기 · 로그의 코드는 이 호출 자신의 마지막 오류
+        if (own && timeouts > 0 && timeouts === tries - victims) this.pause(own, start);
         else if (!victim) this.report(info, false);
         throw err;
       }

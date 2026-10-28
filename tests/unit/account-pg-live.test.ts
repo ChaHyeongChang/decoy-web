@@ -337,7 +337,7 @@ describe.runIf(URL_TEXT !== '')('PgAccountStore (실제 PostgreSQL)', () => {
     }
   }, 60_000);
 
-  it('소켓이 닫히는 같은 차례에 그 연결로 질의를 써도(드라이버 3.4.9 결함: 그 연결 자리가 시작 글을 영영 보내지 못하게 된다) 접속 제한 한 번 뒤 묶음을 새로 만들어 회복한다', async () => {
+  it('소켓이 닫히는 같은 차례에 그 연결로 질의를 써도(드라이버 3.4.9 결함: 그 연결 자리가 시작 글을 영영 보내지 못하게 된다) 망가진 자리를 곧바로 알아채 묶음을 새로 만든다 — 접속 제한(4초)을 맞지 않는다', async () => {
     const socks: Socket[] = [];
     const c = createPostgresClient({ ...conf, ssl: 'disable' }, { onSocket: (sock) => socks.push(sock) });
     const codeOf = (p: Promise<unknown>): Promise<string> =>
@@ -367,18 +367,72 @@ describe.runIf(URL_TEXT !== '')('PgAccountStore (실제 PostgreSQL)', () => {
         ]);
         rounds.push({ codes, ms: Date.now() - t });
       }
-      // 망가진 자리는 많아야 한 번 접속 제한(4초)을 맞고, 그 뒤로는 새 묶음이라 빠르다 (고치기 전: 두 번에 한 번 4초)
-      expect(
-        rounds.flatMap((r) => r.codes).filter((x) => x === 'CONNECT_TIMEOUT').length,
-      ).toBeLessThanOrEqual(1);
-      for (const r of rounds.slice(2)) {
-        expect(r.codes).toEqual(['ok', 'ok']);
-        expect(r.ms).toBeLessThan(1_500);
-      }
+      // 망가진 자리는 접속하자마자(0.1초) 알아채 묶음을 버린다: 접속 제한(4초)이 없고, 둘째 판부터는 새 묶음이라 모두 된다
+      // (고치기 전: 두 번에 한 번 4초 — 접속 제한마다 묶음을 버리던 5차 고침은 한 번 4초)
+      expect(rounds.flatMap((r) => r.codes)).not.toContain('CONNECT_TIMEOUT');
+      for (const r of rounds) expect(r.ms).toBeLessThan(1_500);
+      for (const r of rounds.slice(1)) expect(r.codes).toEqual(['ok', 'ok']);
     } finally {
       await c.end();
     }
   }, 40_000);
+
+  it('새 연결만 느린 DB(새 연결은 5초 붙듦 — DNS · 바쁜 프록시)에서 접속 제한이 난 질의만 다시 하고, 이미 열린 연결의 질의는 끊지 않는다 (모두 된다)', async () => {
+    const rec = await store.create('live-slownew', 1);
+    let holdMs = 0;
+    const socks = new Set<Socket>();
+    const proxy = createServer((client) => {
+      socks.add(client);
+      client.on('error', () => undefined);
+      client.pause();
+      const link = (): void => {
+        if (client.destroyed) return;
+        const up = netConnect({ host: conf.host, port: conf.port });
+        socks.add(up);
+        up.on('error', () => client.destroy());
+        client.on('close', () => up.destroy());
+        up.on('close', () => client.destroy());
+        client.pipe(up).pipe(client);
+        client.resume();
+      };
+      if (holdMs > 0) setTimeout(link, holdMs);
+      else link();
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+    const port = (proxy.address() as AddressInfo).port;
+    const logs: string[] = [];
+    const slow = new PgAccountStore(
+      createPostgresClient({ ...conf, host: '127.0.0.1', port, ssl: 'disable' }),
+      {
+        table,
+        log: (m) => logs.push(m),
+      },
+    );
+    try {
+      // 연결 하나를 열어 둔 뒤, 새 연결은 5초 붙든다 (접속 제한 4초보다 길다)
+      expect((await slow.get(rec.id))?.sub).toBe('live-slownew');
+      holdMs = 5_000;
+      const t0 = Date.now();
+      const got = await Promise.all(
+        Array.from({ length: 3 }, () =>
+          slow.get(rec.id).then(
+            (r) => r?.sub ?? 'none',
+            (e: { code?: string }) => String(e.code),
+          ),
+        ),
+      );
+      expect(got).toEqual(['live-slownew', 'live-slownew', 'live-slownew']);
+      // 접속 제한 4초 + 한 번 더(열린 연결로) — 예산 안
+      expect(Date.now() - t0).toBeLessThan(6_000);
+      expect(logs.join('\n')).not.toMatch(/POOL_DROPPED|DB를 쉰다/);
+      // 쉬지 않았다: 다음 요청도 된다
+      expect((await slow.get(rec.id))?.sub).toBe('live-slownew');
+    } finally {
+      await slow.close();
+      for (const sock of socks) sock.destroy();
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+    }
+  }, 30_000);
 
   it('TLS 연결의 상대가 얼어(읽지도 · 닫지도 않음) 묶음을 버려도 감싼 소켓이 반쯤 열린 채 남지 않는다 — 기다린 뒤 TLS 쪽부터 부순다(못 보낸 쓰기가 밀려 있어도 처리되지 않은 오류 없이) · 닫기(end)도 같다', async () => {
     const pairs: { client: Socket; up: Socket }[] = [];

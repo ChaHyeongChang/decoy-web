@@ -5,7 +5,8 @@
 // - 가짜 연결로 저장소: 행 모양 · 만들기 충돌 · 다시 하기는 예산(9초) 안에서만 · 시도 제한 4.5초 · 두 시도가 다 시간을 넘기면 DB를
 //   쉼(15초부터 두 배) · 서비스가 저장소의 호출 제한(10초)을 쓴다
 // - 실제 드라이버: 닫힌 포트(장애) · 오류 없이 접속을 닫는 서버(드라이버의 끝없는 다시 접속을 끊는다) · 답하지 않는 서버 ·
-//   접속마다 오류로 답하는 서버(줄 선 질의 일흔이 모두 그 오류 — 폭주로 잘못 보지 않는다) · 접속 제한(4초)이면 묶음을 버린다
+//   접속마다 오류로 답하는 서버(줄 선 질의 일흔이 모두 그 오류 — 폭주로 잘못 보지 않는다) · 접속 제한(4초)은 묶음을 버리지 않고,
+//   망가진 연결 자리(접속했는데 드라이버가 쓰지 않음)만 버린다
 // - 계정 기능 묶음: 닿지 않는 DB면 서버는 뜨고 계정 요청만 503(db), 적립은 실패 알림 — 판은 그대로. 인증서를 확인하지 않는 주소는
 //   시작 로그에 경고, 저장소를 만들 수 없으면(sslrootcert 파일) 로그인을 끈 채로
 // 실제 PostgreSQL 시험은 account-pg-live.test.ts (DECOY_TEST_DATABASE_URL이 있을 때)
@@ -30,6 +31,7 @@ import {
   PG_RETRY_WAIT_MS,
   PG_RUN_BUDGET_MS,
   PG_STORM_BACKSTOP,
+  PG_STALL_CHECK_MS,
   PG_STORM_SOCKETS,
   PG_MAX_TRIES,
   PgAccountStore,
@@ -565,6 +567,17 @@ describe('PgAccountStore (가짜 연결)', () => {
     expect(late.client.calls).toHaveLength(1);
   });
 
+  it('시간을 넘긴 뒤 함께 끊긴 시도(POOL_DROPPED)로 끝나면 쉬기 로그의 코드는 이 호출 자신의 오류 — 함께 끊긴 것은 로그에 남기지 않는다', async () => {
+    const { store, logs } = rig([
+      { took: 4_500, then: err('QUERY_TIMEOUT') },
+      { took: 3_300, then: err('POOL_DROPPED') },
+      { rows: [], count: 0 },
+    ]);
+    await expect(store.get('i')).rejects.toMatchObject({ code: 'POOL_DROPPED' });
+    expect(logs.at(-1)).toMatch(/^계정 DB 오류 QUERY_TIMEOUT — 응답이 없어 15초 동안 DB를 쉰다/);
+    expect(logs.join('\n')).not.toContain('POOL_DROPPED');
+  });
+
   it('쉬는 시간은 5분을 넘지 않는다, 시간 넘김이 한 번뿐이면(두 번째는 다른 오류 · 성공) 쉬지 않는다', async () => {
     const clock = new Clock();
     const timeout = (): Answer => ({ took: PG_ATTEMPT_TIMEOUT_MS, then: err('QUERY_TIMEOUT') });
@@ -971,7 +984,7 @@ describe('접속마다 오류 · 접속 제한 (실제 드라이버 · 가짜 �
     }
   }, 20_000);
 
-  it(`접속 제한(${PG_CONNECT_TIMEOUT_S}초)으로 실패하면 그 묶음을 버린다 — 같은 묶음의 다른 질의는 POOL_DROPPED(저장소가 새 묶음으로 다시), 망가진 연결 자리가 남지 않는다`, async () => {
+  it(`접속 제한(${PG_CONNECT_TIMEOUT_S}초)은 그 질의만 실패시킨다 — 묶음을 버리지 않아 같은 묶음의 다른 질의를 끊지 않는다 (새 연결만 느린 DB · 늦게 깨는 DB)`, async () => {
     const pg = await fakePg('silent');
     const c = createPostgresClient(localConf(pg.port));
     try {
@@ -979,11 +992,32 @@ describe('접속마다 오류 · 접속 제한 (실제 드라이버 · 가짜 �
         codeOf(c.query('SELECT 1', [], 8_000)),
         codeOf(c.query('SELECT 1', [], 8_000)),
       ]);
-      expect(got.sort()).toEqual(['CONNECT_TIMEOUT', 'POOL_DROPPED']);
+      expect(got).toEqual(['CONNECT_TIMEOUT', 'CONNECT_TIMEOUT']);
       expect(pg.accepted()).toBe(2);
-      // 다음 질의는 새 묶음에서 새로 접속한다 (질의 하나 — 연결 하나)
-      expect(await codeOf(c.query('SELECT 1', [], 300))).toBe('QUERY_TIMEOUT');
-      expect(pg.accepted()).toBe(3);
+    } finally {
+      await c.end();
+      await pg.close();
+    }
+  }, 20_000);
+
+  it(`망가진 연결 자리(접속이 됐는데 드라이버가 ${PG_STALL_CHECK_MS}ms 동안 한 바이트도 쓰지 않음 — 드라이버 3.4.9 결함)면 묶음을 버린다: 접속 제한(4초)까지 매달리지 않는다`, async () => {
+    const pg = await fakePg('silent');
+    let first = true;
+    // 드라이버 결함 흉내: 첫 소켓에 드라이버가 쓰는 것을 삼킨다 (쓰기 예약이 망가진 자리는 시작 글을 영영 보내지 않는다)
+    const c = createPostgresClient(localConf(pg.port), {
+      onSocket: (sock) => {
+        if (!first) return;
+        first = false;
+        Object.assign(sock, { write: () => true });
+      },
+    });
+    try {
+      const t0 = Date.now();
+      // 버린 묶음에 있던 질의 = 함께 끊긴 질의 (저장소가 새 묶음으로 바로 다시 한다)
+      expect(await codeOf(c.query('SELECT 1', [], 8_000))).toBe('POOL_DROPPED');
+      expect(Date.now() - t0).toBeLessThan(1_500);
+      // 성한 소켓(시작 글을 썼다)은 답이 없어도 버리지 않는다 — 시도 제한까지 기다린다
+      expect(await codeOf(c.query('SELECT 1', [], 600))).toBe('QUERY_TIMEOUT');
     } finally {
       await c.end();
       await pg.close();
