@@ -1,6 +1,7 @@
 // 옷장 ('내 기록' 창의 옷장 탭, 메타 c, GAME_DESIGN 12.5 · VISUAL_SPEC 9.8): 생존자 · 괴물 의상 넷씩(기본 + 셋). 칸을 누르면
 // 미리보기(정면 · 게임 화면 위 그림)가 바뀌고, 가진 의상은 '입기', 잠긴 의상은 불씨로 '해금'(두 번 눌러 확인). 결제 · 뽑기 · 광고 없음.
 // 나눠 받는 조각(`wardrobe`) — 옷장 탭을 열 때 받는다. 의상 그림 조각(costume/art)도 그때 받아 미리보기를 다시 그린다
+// 로그인했으면(선택형 구글 로그인) 해금 · 입기는 계정 API로 — 닿지 않으면 기록은 그대로 두고 "계정에 연결하지 못했어요" 한 줄
 import {
   MONSTER_COSTUMES,
   SURVIVOR_COSTUMES,
@@ -16,7 +17,7 @@ import { MONSTER_REST, SURVIVOR_REST, type RoleCharId } from '../art/chars/types
 import { costumeArtReady } from '../art/chars/costume/registry';
 import { loadCostumeArt } from '../art/costumeBake';
 import { sfx } from '../audio';
-import { META_TEXT, ROLE_CARDS } from '../data/storyText';
+import { ACCOUNT_TEXT, META_TEXT, ROLE_CARDS } from '../data/storyText';
 import type { MetaState } from '../meta/meta';
 import { EMBER_SVG, fillText } from './levelChip';
 import { armAgainstDoubleTap } from './lobby';
@@ -179,7 +180,13 @@ export class Wardrobe {
           this.meta
             .wearCostume(team, pick)
             .then((r) =>
-              r ? (r.saved ? fillText(W.worn, { name: W.names[pick] ?? pick }) : META_TEXT.notSaved) : '',
+              r
+                ? r.fail
+                  ? ACCOUNT_TEXT.callFailed
+                  : r.saved
+                    ? fillText(W.worn, { name: W.names[pick] ?? pick })
+                    : META_TEXT.notSaved
+                : '',
             ),
         );
     } else if (lack > 0) label = fillText(W.lack, { n: lack });
@@ -200,7 +207,9 @@ export class Wardrobe {
                 ? r.saved
                   ? fillText(W.unlocked, { name: W.names[pick] ?? pick })
                   : META_TEXT.notSaved
-                : '',
+                : r.reason === 'account'
+                  ? ACCOUNT_TEXT.callFailed
+                  : '',
             ),
         );
     }

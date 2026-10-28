@@ -10,7 +10,9 @@
 //    처리방침(M15 /privacy)은 네트워크 먼저: 이 서버의 응답이면 그대로 내고, 같은 빌드의 200이면 셸 사본도 그 판으로 바꾼다
 //    (문의처 환경 변수만 바꾼 재배포처럼 빌드 ID가 같아도 따라가게). 실패 · 느림 · 표시 없는 응답이면 깨우기 화면이 아니라 셸 사본
 //  - 자산(같은 출처 GET, 페이지 이동 아님)은 이 빌드 셸에 있으면 캐시, 없으면 앞 빌드 셸(assets/만), 그래도 없으면 네트워크
-//  - /ws · /healthz · /test/* · /.well-known/*는 가로채지 않는다
+//  - /ws · /healthz · /test/* · /.well-known/*는 가로채지 않는다. 로그인 · 계정 요청(/api/ · /auth/ · /account/ — 선택형 구글 로그인,
+//    shared/src/account.ts ACCOUNT_PASS_PREFIXES와 같다)도 가로채지 않는다: 캐시하지 않고, 구글 로그인으로 가는 페이지 이동
+//    (/auth/google/start) · 삭제 페이지(/account/delete)가 깨우기 화면 · 앱 셸로 바뀌지 않게. POST는 원래 가로채지 않는다
 //  - 새 워커가 켜질 때 바로 앞 빌드의 `decoy-shell-*` 하나만 남기고 그보다 옛 것은 지운다. 화면은 나눠 받는 조각(결과 · 설정 ·
 //    봇과 연습 등 동적 import)을 쓴다 — 배포 직후 열려 있던 옛 화면이 아직 받지 않은 옛 조각을 찾으면, 서버에는 이미 없으니(404)
 //    앞 빌드 셸에서 준다(이름에 해시가 있는 assets/만 — 같은 이름이면 같은 내용). 두 번 넘게 배포된 동안 열려 있던 화면은
@@ -30,7 +32,7 @@ const NETWORK_WAIT_MS = 5000;
 const MARK_HEADER = 'x-decoy-server';
 const BUILD_HEADER = 'x-decoy-build';
 /** 가로채지 않는 경로 (앞부분) */
-const PASS = ['/ws', '/healthz', '/test/', '/.well-known/'];
+const PASS = ['/ws', '/healthz', '/test/', '/.well-known/', '/api/', '/auth/', '/account/'];
 
 /** 확장자별로 와야 하는 content-type 앞부분 (JS 자리에 HTML이 오면 설치 실패) */
 const TYPE_PREFIX = {

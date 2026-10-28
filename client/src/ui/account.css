@@ -1,0 +1,134 @@
+/* 계정 화면 (선택형 구글 로그인, ui/account.ts — 나눠 받는 조각 'account'와 같이 온다). 색은 style.css 토큰만.
+   설정 '계정' 탭 줄은 settings.css의 .set-row 위에 단추 줄만 더한다. 손가락 화면은 .btn · .privacy-link가 48px(style.css) */
+
+/* 넓은 카드의 설정 줄 격자(이름 · 칸 · 기본값)를 쓰지 않고 위에서 아래로 (글 · 단추 줄 · 링크) */
+.set-row.acct-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+.acct-intro {
+  font-size: 14px;
+}
+.acct-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--neon-text);
+  font-size: 15px;
+  font-weight: 700;
+}
+.acct-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.acct-warn {
+  margin: 0;
+  padding: 8px 12px;
+  background: var(--well);
+  box-shadow: inset 3px 0 0 var(--danger);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.acct-msg {
+  color: var(--warn);
+  font-size: 14px;
+}
+.acct-msg[hidden] {
+  display: none;
+}
+.acct-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+/* 첫 로그인 고르기 창: 설정 화면(74) · '내 기록' 창(74) 위, 세로 안내(80) 아래 */
+.acct-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 76;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(8px, env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px))
+    max(8px, env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
+  background: rgba(5, 8, 12, 0.72);
+  font-family: var(--font);
+}
+.acct-choose {
+  --ring: var(--neon-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(560px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 16px 18px;
+  color: var(--text);
+}
+.acct-title {
+  margin: 0;
+  color: var(--neon-text);
+  font-size: 18px;
+  font-weight: 800;
+}
+.acct-picks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.acct-pick {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-height: 72px;
+  padding: 10px 14px;
+  text-align: left;
+}
+.acct-pick-name {
+  font-size: 16px;
+  font-weight: 800;
+}
+.acct-pick-sum {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+/* 안내: 화면 아래 가운데 작은 줄. 포인터를 받지 않는다(누르기 · 시험을 가리지 않게) */
+.acct-tray {
+  position: fixed;
+  left: 50%;
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  z-index: 78;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 32px);
+  transform: translateX(-50%);
+  pointer-events: none;
+  font-family: var(--font);
+}
+.acct-tray:empty {
+  display: none;
+}
+.acct-note {
+  padding: 8px 16px 8px 18px;
+  background-color: var(--panel);
+  background-image: linear-gradient(90deg, var(--neon) 0 4px, transparent 4px);
+  box-shadow: 0 0 0 1px var(--edge-2);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  animation: life-in 0.14s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .acct-note {
+    animation: none;
+  }
+}

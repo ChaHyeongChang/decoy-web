@@ -6,11 +6,13 @@
 // 저장이 막히면(사생활 보호 · 가득 참) 아래에 '저장되지 않아요' 안내 하나. 주소 옵션이 있는 줄은 잠그고 그 사실을 적는다.
 // 줄마다 '기본값'(항목별 되돌리기), 아래에 '모두 기본값으로'(두 번 눌러 확인). 고른 쪽은 ✓ + 바탕(색만으로 구분하지 않기).
 // DOM은 한 번 만들고 열 때 값만 맞춘다(판 중에 열어도 프레임을 떨어뜨리지 않게: 열기 = hidden 해제 + 줄마다 속성 몇 개).
-// 흐림 필터(backdrop-filter)는 쓰지 않는다(판이 뒤에서 매 프레임 다시 그려진다)
+// 흐림 필터(backdrop-filter)는 쓰지 않는다(판이 뒤에서 매 프레임 다시 그려진다).
+// '계정' 탭(선택형 구글 로그인): 로비에서 열 때만 바깥(env.account)이 상태를 보고 채운 뒤 보인다. 로그인 기능이 꺼졌거나 상태를
+// 읽지 못하면 숨긴 채(탭 넷 그대로), 판 중에는 늘 숨긴다(로그인은 페이지를 떠난다). DOM을 미리 만들 때는 자리만 둔다
 import type { Role } from '@decoy/shared';
 import { teamOf } from '@decoy/shared';
 import { sfx } from '../audio';
-import { APP_TEXT, CONTROLS, HELP_TEXT, SETTINGS_TEXT, UI_TEXT } from '../data/storyText';
+import { ACCOUNT_TEXT, APP_TEXT, CONTROLS, HELP_TEXT, SETTINGS_TEXT, UI_TEXT } from '../data/storyText';
 import type { FrameLimit } from '../gfx/framePacing';
 import type { QualityChoice } from '../gfx/quality';
 import type { CharStyle } from '../gfx/charStyle';
@@ -71,13 +73,22 @@ export interface SettingsEnv {
   openLayoutEditor(done: () => void): { close(): void };
   /** 닫힌 뒤 (판 중이면 판 장면이 입력을 다시 받는다) */
   onClose?(): void;
+  /**
+   * '계정' 탭 (선택형 구글 로그인): 로비에서 열 때마다 부른다. 바깥이 상태를 보고 page를 채운 뒤 show(true), 기능이 꺼졌거나
+   * 읽지 못하면 show(false)
+   */
+  account?(page: HTMLElement, show: (on: boolean) => void): void;
 }
 
-const TAB_LABEL: Record<TabId, string> = {
+/** 탭: 설정 넷 + 계정 (계정은 로비에서 로그인 기능이 켜졌을 때만) */
+type PanelTab = TabId | 'account';
+
+const TAB_LABEL: Record<PanelTab, string> = {
   graphics: SETTINGS_TEXT.tabGraphics,
   screen: SETTINGS_TEXT.tabScreen,
   sound: SETTINGS_TEXT.tabSound,
   controls: SETTINGS_TEXT.tabControls,
+  account: ACCOUNT_TEXT.tab,
 };
 
 /** 줄 하나: 만들기 · 값 맞추기 · 기본값인가 · 되돌리기 */
@@ -110,8 +121,12 @@ export class SettingsPanel {
   readonly root: HTMLDivElement;
   private readonly card: HTMLElement;
   private readonly tabBar: HTMLDivElement;
-  private readonly tabs = new Map<TabId, HTMLButtonElement>();
-  private readonly pages = new Map<TabId, HTMLDivElement>();
+  private readonly tabs = new Map<PanelTab, HTMLButtonElement>();
+  private readonly pages = new Map<PanelTab, HTMLDivElement>();
+  /** '계정' 탭을 보인다 (로비에서 연 뒤 바깥이 정한다) */
+  private accountOn = false;
+  /** 계정 탭 요청 번호 (닫았다 다시 열면 앞 요청의 답은 버린다) */
+  private accountReq = 0;
   private readonly rows: Row[] = [];
   private readonly inMatchNote: HTMLParagraphElement;
   private readonly unsaved: HTMLDivElement;
@@ -119,7 +134,7 @@ export class SettingsPanel {
   private readonly resetDone: HTMLSpanElement;
   private readonly replayDone: HTMLDivElement;
   private ctx: SettingsContext = 'lobby';
-  private tab: TabId = 'graphics';
+  private tab: PanelTab = 'graphics';
   private prevFocus: HTMLElement | null = null;
   /** '모두 기본값으로'를 한 번 눌렀다 (두 번째에 되돌린다) */
   private resetArmedUntil = 0;
@@ -224,7 +239,7 @@ export class SettingsPanel {
       true,
     );
 
-    for (const t of ['graphics', 'screen', 'sound', 'controls'] as const) {
+    for (const t of ['graphics', 'screen', 'sound', 'controls', 'account'] as const) {
       const panelId = nextId(`settings-page-${t}`);
       const tabId = nextId(`settings-tab-${t}`);
       const b = h(
@@ -274,9 +289,24 @@ export class SettingsPanel {
     return this.ctx;
   }
 
+  /** 지금 보이는 탭 (판 중 셋 · 로비 넷 + 계정이 켜졌으면 계정) */
+  private visibleTabs(): readonly PanelTab[] {
+    const base = tabsFor(this.ctx);
+    return this.accountOn && this.ctx === 'lobby' ? [...base, 'account'] : base;
+  }
+
+  /** '계정' 탭 보이기 · 숨기기 (숨기면서 그 탭에 있었으면 그래픽 탭으로) */
+  private setAccountTab(on: boolean): void {
+    this.accountOn = on;
+    const visible = this.visibleTabs();
+    for (const [t, b] of this.tabs) b.hidden = !visible.includes(t);
+    // 탭 다섯: 가장 낮은 휴대폰에서 탭 칸을 두 줄로 (settings.css .has-account)
+    this.card.classList.toggle('has-account', visible.includes('account'));
+    if (!visible.includes(this.tab) && this.isOpen) this.showTab('graphics');
+  }
+
   /** 연다. ctx = 'match'면 그래픽 · 화면 · 소리 탭만, 맨 위에 '판은 멈추지 않아요' */
   open(ctx: SettingsContext, tab?: TabId): void {
-    const tabs = tabsFor(ctx);
     if (!this.isOpen) {
       const active = document.activeElement;
       this.prevFocus = active instanceof HTMLElement ? active : null;
@@ -285,9 +315,11 @@ export class SettingsPanel {
       this.downSinceOpen = false;
     }
     this.ctx = ctx;
+    const tabs = this.visibleTabs();
     this.card.classList.toggle('in-match', ctx === 'match');
     this.inMatchNote.hidden = ctx !== 'match';
     for (const [t, b] of this.tabs) b.hidden = !tabs.includes(t);
+    this.card.classList.toggle('has-account', tabs.includes('account'));
     for (const r of this.rows) r.el.hidden = r.when ? !r.when(ctx) : false;
     this.resetArmedUntil = 0;
     this.resetDone.textContent = '';
@@ -297,6 +329,14 @@ export class SettingsPanel {
     this.showTab(want);
     this.syncAll();
     this.tabs.get(want)?.focus({ preventScroll: true });
+    // 계정 탭: 로비에서만 바깥이 상태를 보고 채운다 (이번에 연 화면에 대한 답만 받는다)
+    const page = this.pages.get('account');
+    if (ctx === 'lobby' && page && this.env.account) {
+      const opened = ++this.accountReq;
+      this.env.account(page, (on) => {
+        if (opened === this.accountReq && this.isOpen && this.ctx === 'lobby') this.setAccountTab(on);
+      });
+    }
   }
 
   /**
@@ -367,7 +407,7 @@ export class SettingsPanel {
     this.env.onClose?.();
   }
 
-  private showTab(t: TabId): void {
+  private showTab(t: PanelTab): void {
     this.tab = t;
     for (const [id, b] of this.tabs) {
       const on = id === t;
@@ -391,7 +431,7 @@ export class SettingsPanel {
       e.target instanceof HTMLElement &&
       e.target.getAttribute('role') === 'tab'
     ) {
-      const tabs = tabsFor(this.ctx);
+      const tabs = this.visibleTabs();
       const i = tabs.indexOf(this.tab);
       const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length] ?? this.tab;
       this.showTab(next);

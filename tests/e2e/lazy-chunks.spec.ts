@@ -4,6 +4,7 @@
 //  - 봇과 연습: 역할을 누를 때는 연습 조각을 이미 받아 두어 새로 받지 않는다
 //  - 판 중 설정을 처음 열 때: 조각 · 화면을 로비에서 이미 받아 만들어 두어 판 중에는 JS를 더 받지 않고, 긴 작업(50ms 넘게)이 없다
 //  - 조각을 받지 못하면(새 배포 직후 옛 화면): 설정 · 봇과 연습 · 배치 편집은 "새 버전이 있어요"를 띄우고 화면은 그대로 쓸 수 있다
+//  - 선택형 구글 로그인: 게스트 첫 화면은 계정 조각(account)도 계정 요청(/api/ · /auth/)도 없다 (로그인한 기기 · 설정을 열 때만)
 // 요청을 세려고 서비스 워커는 막는다 (워커 캐시 · 오프라인은 m13-offline.spec.ts)
 import { readFileSync, readdirSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
@@ -52,6 +53,11 @@ test('쉬는 시간에 결과 · 내 기록 · 설정(화면까지) · 연습 ·
 }) => {
   const { context, page, problems } = await newPlayerPage(browser, { serviceWorkers: 'block' });
   const chunks = recordChunks(page);
+  const accountRequests: string[] = [];
+  page.on('request', (r) => {
+    const path = new URL(r.url()).pathname;
+    if (path.startsWith('/api/') || path.startsWith('/auth/')) accountRequests.push(path);
+  });
   await page.goto('/?renderer=canvas');
   await expect(page.getByTestId('create-room')).toBeVisible();
   // 설정 화면은 받은 뒤 DOM까지 만들어 둔다 (숨긴 채)
@@ -63,6 +69,9 @@ test('쉬는 시간에 결과 · 내 기록 · 설정(화면까지) · 연습 ·
   expect(chunks).not.toContain('debug');
   // 배치 편집(터치 로비 설정의 조작 탭)은 PC에서 받지 않는다
   expect(chunks).not.toContain('layoutEditor');
+  // 게스트(이 기기 계정 표시 없음 · ?login= 없음): 계정 조각도 계정 요청도 없다 — 미리 만든 설정 화면도 열기 전에는 묻지 않는다
+  expect(chunks).not.toContain('account');
+  expect(accountRequests).toEqual([]);
   expect(await page.evaluate(() => window.__DECOY__ === undefined)).toBe(true);
   // 같은 조각을 두 번 받지 않는다
   expect(new Set(chunks).size).toBe(chunks.length);
