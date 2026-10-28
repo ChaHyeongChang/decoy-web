@@ -6,7 +6,8 @@
 //  - 안내: 화면 아래 가운데 작은 줄, 몇 초 뒤 사라진다. 포인터를 받지 않아 누르기 · 시험을 가리지 않는다
 import { ACCOUNT_DELETE_PATH, AUTH_START_PATH } from '@decoy/shared';
 import { PROGRESSION, levelOf, type Profile } from '@decoy/shared/meta';
-import { ACCOUNT_TEXT, UI_TEXT } from '../data/storyText';
+import { ACCOUNT_TEXT } from '../data/accountText';
+import { UI_TEXT } from '../data/storyText';
 import { AccountController, type AccountDeps } from '../account/controller';
 import { fillText } from './levelChip';
 import { h, icon } from './uiArt';

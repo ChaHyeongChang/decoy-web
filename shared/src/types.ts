@@ -422,6 +422,11 @@ export type ClientMessage =
       bots: boolean;
       /** 고른 의상 (메타 c). 서버는 id만 거르고(모르는 값 = 기본) 판 시작 명단에만 싣는다 — 로비 · 결과에는 싣지 않는다 */
       costume?: CostumeChoice;
+      /**
+       * 화면이 계정 모드일 때 그 계정 표시 tag (선택형 구글 로그인 — GET /api/account의 tag, 계정 ID에서 만든 불투명한 값). 게스트면
+       * 보내지 않는다. 서버는 이 값이 그 연결의 세션 쿠키 계정 tag와 같을 때만 이 자리의 판을 계정에 적립한다(docs/ACCOUNT_PLAN.md 5절)
+       */
+      account?: string;
     }
   | { t: 'role'; role: Role | null }
   | { t: 'ready'; ready: boolean }
@@ -433,7 +438,7 @@ export type ClientMessage =
   /** 판 밖(로비 · 대기 · 결과)에서 옷장으로 바꾼 의상 (메타 c). 판 중에는 무시 — 판 시작 명단과 구운 그림이 판 끝까지 같게 */
   | { t: 'costume'; costume: CostumeChoice }
   /** 빠른 매칭 대기열에 들어간다 (M13c). 대기 중이거나 판이 없는 빠른 매칭 방에 넣거나 새로 만든다 */
-  | { t: 'quick'; name: string; costume?: CostumeChoice }
+  | { t: 'quick'; name: string; costume?: CostumeChoice; account?: string }
   /**
    * 방에서 나간다 (M13b): 결과 화면 "홈으로" · 대기 취소. 로비 · 결과 단계에서는 자리를 지우고, 판 중에는 끊김과 같다
    * (M13c에서 판 중 나가기는 유예 없이 바로 판정). 연결은 방에서 풀려 다른 방에 들어갈 수 있다
@@ -461,6 +466,11 @@ export type ServerMessage =
       balanceHash: string;
       /** 서버 빌드 ID (M13d, client/dist/build-id.json). 화면 빌드와 다르면 "새 버전이 있어요". 없으면 비교 안 함 */
       build?: string | null;
+      /**
+       * 서버가 이 자리에 받아들인 계정 tag (선택형 구글 로그인 — join · quick의 account가 세션 쿠키 계정과 같을 때만). 그 자리 본인
+       * 연결에만 간다(다른 참가자에게 가는 메시지에는 없다). 없거나 null = 게스트 자리(서버가 이 판을 계정에 적립하지 않는다)
+       */
+      account?: string | null;
     }
   | { t: 'lobby'; lobby: LobbyState }
   | { t: 'match'; info: MatchInfo }
@@ -472,9 +482,10 @@ export type ServerMessage =
   | { t: 'error'; code: ErrorCode; message: string }
   /**
    * 로그인한 사람의 판 보상을 서버가 계정에 적립한 결과 (선택형 구글 로그인, docs/ACCOUNT_PLAN.md). 그 계정의 연결에만 보낸다 —
-   * 같은 방 다른 사람에게는 로그인 여부 · 레벨 · 기록이 가지 않는다. profile: 적립 뒤 계정 기록 글(serializeProfile, ok일 때만)
+   * 같은 방 다른 사람에게는 로그인 여부 · 레벨 · 기록이 가지 않는다. tag: 적립한 계정의 표시(같은 사람의 다른 탭 · 다른 계정 모드
+   * 화면이 거른다). profile: 적립 뒤 계정 기록 글(serializeProfile, ok일 때만)
    */
-  | { t: 'credit'; matchId: string; ok: boolean; profile: string | null };
+  | { t: 'credit'; tag: string; matchId: string; ok: boolean; profile: string | null };
 
 // ───────────────────────── 계정 (선택형 구글 로그인, HTTP) ─────────────────────────
 // 게임 메시지(WebSocket)와 따로 HTTP로 오간다(docs/ACCOUNT_PLAN.md). 경로 · 쿠키 이름은 shared/src/account.ts
@@ -523,6 +534,8 @@ export type AccountErrorCode =
   | 'bad-request'
   /** 너무 자주 (429) */
   | 'rate'
+  /** 로그인한 지 10분이 지나 이 기기 기록을 받지 않는다 (403, import) — 다시 로그인하면 올릴 수 있다 */
+  | 'relogin'
   /** 계정 저장소(DB)에 닿지 않는다 (503) — 게스트로 계속한다 */
   | 'db';
 
@@ -533,7 +546,10 @@ export interface AccountImportRequest {
    * 'account'면 계정 기록을 그대로 둔다
    */
   choice: 'device' | 'account';
-  /** 이 기기 기록 글 (decoy:progress 그대로, 없으면 null). choice가 'account'면 null (고른 대로 올린다 — 보내지 않는다) */
+  /**
+   * 이 기기 기록 글 (decoy:progress 그대로, 없으면 null). choice가 'account'면 null (고른 대로 올린다 — 보내지 않는다).
+   * 글이 있으면 서버는 로그인(구글 로그인) 뒤 10분 안일 때만 받는다(아니면 403 relogin). null은 비어 있지 않은 계정 기록을 덮지 않는다
+   */
   device: string | null;
 }
 

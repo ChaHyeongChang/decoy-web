@@ -71,6 +71,8 @@ export interface AccountServiceOptions {
   sleep?: (ms: number) => Promise<void>;
   /** 적립 결과를 그 계정의 연결들에 보낸다 */
   push?: (accountId: string, msg: CreditMessage) => void;
+  /** 계정 ID → 표시 tag (credit에 싣는다 — 화면이 자기 계정 것만 받게). 시스템이 세션 비밀로 만든다(session.ts accountTag) */
+  tag?: (accountId: string) => string;
   log?: (msg: string) => void;
 }
 
@@ -135,6 +137,7 @@ export class AccountService {
   private readonly retryDelaysMs: readonly number[];
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly push: ((accountId: string, msg: CreditMessage) => void) | null;
+  private readonly tagOf: (accountId: string) => string;
   private readonly log: (msg: string) => void;
   private readonly lanes = new Map<string, Promise<void>>();
   private ready = false;
@@ -151,6 +154,7 @@ export class AccountService {
     this.retryDelaysMs = opts.retryDelaysMs ?? CREDIT_RETRY_MS;
     this.sleep = opts.sleep ?? delay;
     this.push = opts.push ?? null;
+    this.tagOf = opts.tag ?? (() => '');
     this.log = opts.log ?? noop;
   }
 
@@ -201,6 +205,14 @@ export class AccountService {
     return id;
   }
 
+  /**
+   * 구글 sub의 계정 ID — 없으면 null이고 만들지 않는다 (계정 삭제 페이지에서 시작한 로그인: 지울 계정을 찾기만 한다)
+   */
+  async find(sub: string): Promise<string | null> {
+    const rec = await this.db({ pending: [] }, () => this.store.findBySub(sub));
+    return rec ? rec.id : null;
+  }
+
   /** 계정 상태 (없으면 null — 지워졌다) */
   status(id: string): Promise<AccountState | null> {
     return this.lane(id, async (job) => {
@@ -216,15 +228,16 @@ export class AccountService {
   }
 
   /**
-   * 첫 로그인 때 기기 기록 올리기: 계정 기록이 없으면 기기 글을 공용 parseProfile로 걸러 저장한다(choice 무관, 빈 · 깨진 글이면
-   * 빈 기록). 계정 기록이 있으면 choice가 'device'일 때만 바꾼다. 계정이 없으면 null
+   * 첫 로그인 때 기기 기록 올리기: 계정 기록이 없으면 기기 글을 공용 parseProfile로 걸러 저장한다(choice 무관, 빈 · 깨진 글 · null이면
+   * 빈 기록). 계정 기록이 있으면 choice가 'device'이고 기기 글이 있을 때만 바꾼다 — 기기 글 null은 있는 계정 기록을 절대 덮지 않는다
+   * (화면이 '빈 기기'라고 본 사이 다른 기기가 올렸어도). 계정이 없으면 null. 로그인 뒤 10분 확인은 라우트(routes.ts)가 한다
    */
   importDevice(id: string, req: AccountImportRequest): Promise<AccountProfileBody | null> {
     return this.lane(id, async (job) => {
       const rec = await this.db(job, () => this.store.get(id));
       if (!rec) return null;
       const now = this.now();
-      if (rec.profile !== null && req.choice === 'account')
+      if (rec.profile !== null && (req.choice === 'account' || req.device === null))
         return { profile: rec.profile, day: this.today(now) };
       // 계정 기록이 더 높은 판이면 덮지 않는다
       if (rec.profile !== null) this.readable(rec.profile, now);
@@ -318,7 +331,13 @@ export class AccountService {
       this.counts.creditFails += 1;
       this.log(`계정 적립 실패: ${why} (누적 실패 ${this.counts.creditFails})`);
     }
-    this.push?.(id, { t: 'credit', matchId: rating.matchId, ok: result.ok, profile: result.profile });
+    this.push?.(id, {
+      t: 'credit',
+      tag: this.tagOf(id),
+      matchId: rating.matchId,
+      ok: result.ok,
+      profile: result.profile,
+    });
     return result;
   }
 

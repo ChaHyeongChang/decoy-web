@@ -5,6 +5,9 @@
 //   삭제 페이지는 '여기서 지울 수 없음 — 문의처'
 // - 비율 제한: IP마다 /auth/* 1분 20번, 계정마다 POST 1분 60번 → 429 rate (열쇠는 늦어도 2분 안에 메모리에서 지운다)
 // - 삭제 페이지는 referrer-policy same-origin (폼 POST의 Origin이 'null'이 되지 않게), 리디렉트는 no-referrer
+// - 삭제 페이지에서 시작한 로그인(next=delete)은 계정을 만들지 않고(없으면 '계정 없음'), 게임 세션(decoy_sid) 대신 삭제 페이지에만
+//   실리는 10분 쿠키(decoy_del)를 준다 — 삭제하려고 로그인한 브라우저가 게임에서 몰래 계정 모드 · 계정 적립이 되지 않게
+// - 기기 기록 올리기(import에 기기 글)는 구글 로그인 뒤 10분 안만 받는다(403 relogin) — 오래된 화면 흐름이 계정 기록을 덮지 않게
 // - 로그에는 실패 종류만 (토큰 · sub · 계정 ID를 찍지 않는다)
 // 시험 훅(--test-hooks)이 없으면 /test/*는 404 (index.ts의 다른 시험 경로와 같다)
 import { randomBytes } from 'node:crypto';
@@ -14,6 +17,8 @@ import {
   ACCOUNT_HEADER,
   AUTH_CALLBACK_PATH,
   AUTH_START_PATH,
+  DELETE_COOKIE,
+  DELETE_NONE_PARAM,
   LOGIN_RESULT_PARAM,
   OAUTH_COOKIE,
   SESSION_COOKIE,
@@ -34,7 +39,18 @@ import {
   parseImportRequest,
   type AccountService,
 } from './service';
-import { SESSION_MAX_AGE_SEC, accountTag, csrfFor, safeEqual, signSession, verifySession } from './session';
+import {
+  DELETE_SESSION_MAX_AGE_SEC,
+  IMPORT_WINDOW_SEC,
+  SESSION_MAX_AGE_SEC,
+  accountTag,
+  csrfFor,
+  safeEqual,
+  signDeleteSession,
+  signSession,
+  verifyDeleteSession,
+  verifySession,
+} from './session';
 import type { MemoryAccountStore } from './store';
 import { isTestTokenFlaw, testAuthorizePage, type TestIdp } from './testIdp';
 
@@ -267,8 +283,9 @@ export function createAccountRoutes(ctx: AccountRoutesContext): AccountHandler {
   const authRate = new RateLimiter(AUTH_RATE_PER_MIN, RATE_WINDOW_MS, ctx.now);
   const postRate = new RateLimiter(POST_RATE_PER_MIN, RATE_WINDOW_MS, ctx.now);
 
-  const sessionCookie = (accountId: string, o: Origin): string =>
-    setCookie(SESSION_COOKIE, signSession(accountId, secret, ctx.now()), {
+  /** 게임 세션 쿠키. loginMs = 구글 로그인을 마친 때 (새로 발급할 때 처음 로그인 때를 그대로 — 없으면 지금) */
+  const sessionCookie = (accountId: string, o: Origin, loginMs?: number): string =>
+    setCookie(SESSION_COOKIE, signSession(accountId, secret, ctx.now(), loginMs), {
       path: '/',
       maxAgeSec: SESSION_MAX_AGE_SEC,
       sameSite: 'Lax',
@@ -276,6 +293,16 @@ export function createAccountRoutes(ctx: AccountRoutesContext): AccountHandler {
     });
   const clearSession = (o: Origin): string =>
     clearCookie(SESSION_COOKIE, { path: '/', sameSite: 'Lax', secure: o.secure });
+  // 삭제 페이지 전용 (Path=/account/delete — /ws · /api에는 실리지 않는다)
+  const deleteCookie = (accountId: string, o: Origin): string =>
+    setCookie(DELETE_COOKIE, signDeleteSession(accountId, secret, ctx.now()), {
+      path: ACCOUNT_DELETE_PATH,
+      maxAgeSec: DELETE_SESSION_MAX_AGE_SEC,
+      sameSite: 'Lax',
+      secure: o.secure,
+    });
+  const clearDelete = (o: Origin): string =>
+    clearCookie(DELETE_COOKIE, { path: ACCOUNT_DELETE_PATH, sameSite: 'Lax', secure: o.secure });
   // 구글에서 돌아오는 다른 사이트발 POST에 실려야 해서 HTTPS면 SameSite=None (http 개발 · 시험은 같은 출처 가짜 구글이라 Lax)
   const oauthCookie = (value: string, o: Origin): string =>
     setCookie(OAUTH_COOKIE, value, {
@@ -293,7 +320,16 @@ export function createAccountRoutes(ctx: AccountRoutesContext): AccountHandler {
     if (!on) return null;
     const value = readCookie(req.headers.cookie, SESSION_COOKIE);
     const info = verifySession(value, secret, ctx.now());
-    return info && value ? { value, accountId: info.accountId, renew: info.renew } : null;
+    return info && value
+      ? { value, accountId: info.accountId, renew: info.renew, loginSec: info.loginSec }
+      : null;
+  };
+  /** 삭제 페이지 전용 쿠키의 계정 (10분 안) */
+  const deleteSessionOf = (req: IncomingMessage) => {
+    if (!on) return null;
+    const value = readCookie(req.headers.cookie, DELETE_COOKIE);
+    const info = verifyDeleteSession(value, secret, ctx.now());
+    return info && value ? { value, accountId: info.accountId } : null;
   };
 
   /** POST API 요청 위조 막기: 표시 헤더 + Origin(있으면 이 서버) */
@@ -335,7 +371,8 @@ export function createAccountRoutes(ctx: AccountRoutesContext): AccountHandler {
       day: st.day,
       timeZone: st.timeZone,
     };
-    sendJson(res, 200, body, s.renew ? [sessionCookie(s.accountId, o)] : []);
+    // 새로 발급해도 로그인 때는 그대로 (기기 기록 올리기 10분 창이 다시 열리지 않게)
+    sendJson(res, 200, body, s.renew ? [sessionCookie(s.accountId, o, s.loginSec * 1000)] : []);
   }
 
   async function apiPost(op: ApiOp, req: IncomingMessage, res: ServerResponse, o: Origin): Promise<void> {
@@ -376,6 +413,11 @@ export function createAccountRoutes(ctx: AccountRoutesContext): AccountHandler {
     const costumeReq = op === 'costume' ? parseCostumeRequest(parseJson(body.text)) : null;
     if ((op === 'import' && !importReq) || (op === 'costume' && !costumeReq)) {
       sendError(res, 400, 'bad-request');
+      return;
+    }
+    // 기기 글은 구글 로그인 뒤 10분 안만 믿는다 (첫 로그인 흐름이 아닌 오래된 화면 · 다시 시도가 계정 기록을 덮지 않게)
+    if (importReq && importReq.device !== null && ctx.now() / 1000 - s.loginSec > IMPORT_WINDOW_SEC) {
+      sendError(res, 403, 'relogin');
       return;
     }
     if (!(await service.ensureReady())) {
@@ -457,11 +499,17 @@ export function createAccountRoutes(ctx: AccountRoutesContext): AccountHandler {
   }
 
   async function authCallback(req: IncomingMessage, res: ServerResponse, o: Origin): Promise<void> {
-    const done = (result: LoginResult | 'delete', cookies: readonly string[] = []): void =>
-      redirect(res, 303, result === 'delete' ? ACCOUNT_DELETE_PATH : `/?${LOGIN_RESULT_PARAM}=${result}`, [
-        clearOauth(o),
-        ...cookies,
-      ]);
+    const done = (result: LoginResult | 'delete' | 'delete-none', cookies: readonly string[] = []): void =>
+      redirect(
+        res,
+        303,
+        result === 'delete'
+          ? ACCOUNT_DELETE_PATH
+          : result === 'delete-none'
+            ? `${ACCOUNT_DELETE_PATH}?${DELETE_NONE_PARAM}=1`
+            : `/?${LOGIN_RESULT_PARAM}=${result}`,
+        [clearOauth(o), ...cookies],
+      );
     const service = ctx.service;
     if (!on || !service || !cfg.enabled || !ctx.keys) {
       done('off');
@@ -508,20 +556,29 @@ export function createAccountRoutes(ctx: AccountRoutesContext): AccountHandler {
       done('db');
       return;
     }
-    let accountId: string;
+    const toDelete = saved.next === 'delete';
+    let accountId: string | null;
     try {
-      accountId = await service.login(check.sub);
+      // 삭제 페이지에서 시작했으면 찾기만 한다 (없는 계정을 만들지 않는다)
+      accountId = toDelete ? await service.find(check.sub) : await service.login(check.sub);
     } catch (err) {
       if (!(err instanceof AccountUnavailable)) throw err;
       done('db');
       return;
     }
-    done(saved.next === 'delete' ? 'delete' : 'ok', [sessionCookie(accountId, o)]);
+    if (!accountId) done('delete-none');
+    // 삭제 페이지: 게임 세션 대신 삭제 페이지 전용 쿠키 (게임 연결 · 계정 API에는 실리지 않는다)
+    else if (toDelete) done('delete', [deleteCookie(accountId, o)]);
+    else done('ok', [sessionCookie(accountId, o)]);
   }
 
   // ───────── 계정 삭제 페이지 ─────────
 
-  async function deletePage(req: IncomingMessage, res: ServerResponse, o: Origin): Promise<void> {
+  /**
+   * 삭제 페이지: 삭제 전용 쿠키(decoy_del)를 먼저, 없으면 게임 세션(decoy_sid)을 읽는다(CSRF 값도 그 쿠키 값으로). 삭제가 끝나거나
+   * 401이면 두 쿠키를 모두 지운다. ?none=1(삭제 페이지 로그인 — 그 구글 계정으로 만든 계정 없음)이면 게임 세션이 있어도 그 안내
+   */
+  async function deletePage(req: IncomingMessage, res: ServerResponse, o: Origin, url: URL): Promise<void> {
     const page = (
       status: number,
       state: DeletePageState,
@@ -533,10 +590,22 @@ export function createAccountRoutes(ctx: AccountRoutesContext): AccountHandler {
       page(req.method === 'POST' ? 404 : 200, { kind: 'off' });
       return;
     }
-    const s = sessionOf(req);
-    if (req.method === 'GET' || req.method === 'HEAD') {
+    const get = req.method === 'GET' || req.method === 'HEAD';
+    const del = deleteSessionOf(req);
+    const none = get && !del && url.searchParams.get(DELETE_NONE_PARAM) === '1';
+    const s = del ?? (none ? null : sessionOf(req));
+    /** 남은 (끝난 · 위조) 쿠키 지우기 */
+    const stale = (): string[] => [
+      ...(hasSessionCookie(req) ? [clearSession(o)] : []),
+      ...(readCookie(req.headers.cookie, DELETE_COOKIE) !== null ? [clearDelete(o)] : []),
+    ];
+    if (get) {
+      if (none) {
+        page(200, { kind: 'none' });
+        return;
+      }
       if (!s) {
-        page(200, { kind: 'signed-out' }, hasSessionCookie(req) ? [clearSession(o)] : []);
+        page(200, { kind: 'signed-out' }, stale());
         return;
       }
       if (!(await service.ensureReady())) {
@@ -545,7 +614,7 @@ export function createAccountRoutes(ctx: AccountRoutesContext): AccountHandler {
       }
       const st = await service.status(s.accountId);
       if (!st) {
-        page(200, { kind: 'signed-out' }, [clearSession(o)]);
+        page(200, { kind: 'signed-out' }, [clearSession(o), clearDelete(o)]);
         return;
       }
       const p = st.profile === null ? emptyProfile(0) : parseProfile(st.profile, ctx.now()).profile;
@@ -566,7 +635,7 @@ export function createAccountRoutes(ctx: AccountRoutesContext): AccountHandler {
       return;
     }
     if (!s) {
-      page(401, { kind: 'signed-out' }, [clearSession(o)]);
+      page(401, { kind: 'signed-out' }, [clearSession(o), clearDelete(o)]);
       return;
     }
     if (!postRate.take(s.accountId)) {
@@ -588,7 +657,7 @@ export function createAccountRoutes(ctx: AccountRoutesContext): AccountHandler {
       return;
     }
     const deleted = await service.delete(s.accountId);
-    page(200, { kind: 'deleted', deleted }, [clearSession(o)]);
+    page(200, { kind: 'deleted', deleted }, [clearSession(o), clearDelete(o)]);
   }
 
   // ───────── 시험 훅 ─────────
@@ -676,7 +745,7 @@ export function createAccountRoutes(ctx: AccountRoutesContext): AccountHandler {
       return;
     }
     if (path === ACCOUNT_DELETE_PATH) {
-      await deletePage(req, res, o);
+      await deletePage(req, res, o, url);
       return;
     }
     sendText(res, 404, 'not found');

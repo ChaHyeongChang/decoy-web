@@ -30,7 +30,7 @@ import {
   type SentDataInfo,
 } from '../../client/src/privacyData';
 import { STORAGE_KEYS } from '../../client/src/storageKeys';
-import { ACCOUNT_DELETE_PATH, OAUTH_COOKIE, SESSION_COOKIE } from '../../shared/src/account';
+import { ACCOUNT_DELETE_PATH, DELETE_COOKIE, OAUTH_COOKIE, SESSION_COOKIE } from '../../shared/src/account';
 import {
   PRIVACY_CONTACT_ENV,
   PRIVACY_PATHS,
@@ -144,10 +144,23 @@ function swCacheNames(): string[] {
   return [...new Set(names)];
 }
 
+/** 로그인한 화면만 보내는 게임 메시지 칸 (ACCOUNT_DATA의 출처 가운데 ClientMessage 칸 — 'join.account' 등) */
+function accountMessageFields(): string[] {
+  const { kinds } = clientMessageFields();
+  return (Object.values(ACCOUNT_DATA) as AccountDataInfo[])
+    .flatMap((d) => [...d.sources])
+    .filter((src) => kinds.includes(src.split('.')[0] ?? ''));
+}
+
 describe('보내는 항목 대응표 (privacyData.ts ↔ ClientMessage)', () => {
-  it('ClientMessage의 모든 필드가 대응표에 있고, 대응표에 없는 필드를 적지 않았다', () => {
+  it('ClientMessage의 모든 필드가 대응표(로그인한 화면만 보내는 칸은 ACCOUNT_DATA)에 있고, 대응표에 없는 필드를 적지 않았다', () => {
     const { fields } = clientMessageFields();
-    const mapped: string[] = Object.values(SENT_DATA).flatMap((d) => [...d.fields]);
+    const sent: string[] = Object.values(SENT_DATA).flatMap((d) => [...d.fields]);
+    // 계정 표시 tag(join · quick의 account)는 로그인한 경우에만 보내 '로그인한 경우에만' 표(ACCOUNT_DATA)에 적는다
+    const account = accountMessageFields();
+    expect(account.sort()).toEqual(['join.account', 'quick.account']);
+    expect(sent.filter((f) => account.includes(f))).toEqual([]);
+    const mapped = [...sent, ...account];
     expect(fields.length).toBeGreaterThan(10);
     expect(
       fields.filter((f) => !mapped.includes(f)),
@@ -275,9 +288,16 @@ describe('로그인한 경우에만 (선택형 구글 로그인 — privacyData.
       requestSources.filter((s) => !fields.includes(s)),
       'types.ts에 없는 계정 요청 필드',
     ).toEqual([]);
-    // 그 밖의 출처는 구글 ID 토큰의 sub와 세션 쿠키뿐 (decoy_oauth는 이용자를 알아보는 값이 아니라 쿠키 표에만)
+    // 그 밖의 출처는 구글 ID 토큰의 sub · 세션 쿠키 · 삭제 페이지 쿠키 · 게임에 들어갈 때 밝히는 계정 표시 tag뿐
+    // (decoy_oauth는 이용자를 알아보는 값이 아니라 쿠키 표에만)
     expect(sources.filter((s) => !s.startsWith('Account')).sort()).toEqual(
-      ['id_token.sub', `cookie.${SESSION_COOKIE}`].sort(),
+      [
+        'id_token.sub',
+        `cookie.${SESSION_COOKIE}`,
+        `cookie.${DELETE_COOKIE}`,
+        'join.account',
+        'quick.account',
+      ].sort(),
     );
     expect(new Set(sources).size).toBe(sources.length);
   });
@@ -340,7 +360,9 @@ describe('로그인한 경우에만 (선택형 구글 로그인 — privacyData.
   });
 
   it('4번 쿠키 표가 ACCOUNT_COOKIES · shared 쿠키 이름과 같고, 로그인하지 않으면 쿠키를 쓰지 않는다고 적었다', () => {
-    expect(ACCOUNT_COOKIES.map((c) => c.name).sort()).toEqual([OAUTH_COOKIE, SESSION_COOKIE].sort());
+    expect(ACCOUNT_COOKIES.map((c) => c.name).sort()).toEqual(
+      [OAUTH_COOKIE, SESSION_COOKIE, DELETE_COOKIE].sort(),
+    );
     const rows = tableCells(section('device'), 'cookies');
     expect(rows.length).toBe(ACCOUNT_COOKIES.length);
     for (const c of ACCOUNT_COOKIES) {
@@ -449,6 +471,11 @@ describe('기기 저장 키 · 캐시 이름 (storageKeys.ts · sw.js ↔ 문서
       const line = LISTING.split('\n').find((l) => l.startsWith(`| \`${k.key}\``));
       expect(line, `STORE_LISTING 표에 ${k.key}`).toContain(`| ${area[k.area]} |`);
     }
+    // 계정 표시는 얼마나 두는지(로그인 기능이 꺼진 동안도 남는다)를 STORE_LISTING에도 같은 글자로 적는다
+    expect(STORAGE_KEYS.account.keep).toContain('로그인 기능이 꺼진 동안은 남음');
+    expect(LISTING.split('\n').find((l) => l.startsWith('| `decoy:account`'))).toContain(
+      STORAGE_KEYS.account.keep,
+    );
     for (const c of swCacheNames()) {
       expect(
         rows.some((r) => r[0]?.startsWith(c) && r[1] === '오프라인 캐시'),

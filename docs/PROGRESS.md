@@ -585,6 +585,7 @@ PR #30 뒤 JS gzip이 424,151B로 상한(436,791B)까지 약 12KiB만 남아 줄
 - 로그인: 구글 OpenID Connect 리디렉트(페이지 이동, 팝업 · 구글 스크립트 없음), 범위 `openid`만 — 서버에 오는 것은 구글 고유 ID뿐. 서버가 ID 토큰 서명 · 클레임을 직접 검증(`node:crypto`), 세션은 서명한 HttpOnly 쿠키(`decoy_sid`)
 - 저장 · 적립: 계정 = 내부 계정 ID + 구글 고유 ID + 성장 기록 글. 온라인 판 보상은 서버가 판 평가로 직접 적립(그 계정 연결에만 `credit`), 봇과 연습은 적립하지 않음. 계정의 하루는 서버 시각 + `Asia/Seoul` 자정. 첫 로그인은 계정 · 이 기기 기록 중 고르기(더하지 않음 — DECISIONS 1절 D11)
 - 계정 삭제: 설정 › 계정 › 계정 삭제(두 번 확인) · 웹 페이지 `/account/delete`, 서버 행 바로 삭제. 로그아웃
+- 적립 재설계(검토 반영): 서버는 **화면이 들어갈 때 밝힌 계정 tag(`join` · `quick`의 `account`)와 그 소켓의 세션 쿠키가 같을 때만** 그 자리 판을 계정에 적립하고, 받아들였는지는 본인 `welcome.account`로만 알린다(다른 참가자 메시지는 그대로). 화면은 그 값으로 결과 적립을 정한다(없음 → 기기 · 지금 계정 → credit · 다른 계정 → 적립 안 함), `credit`에 tag. 삭제 페이지 로그인은 계정을 만들지 않고 삭제 전용 쿠키(`decoy_del`)만, 기기 기록 올리기는 로그인 뒤 10분(세션 `v2`에 로그인 시각), 다른 탭의 계정 바뀜은 세션 끝이 아니라 새 계정 모드로, 로그인 꺼짐 안내는 한 번. 계정 문구는 첫 묶음에서 조각 `accountText`로(첫 묶음 예산)
 - 문서: 처리방침(1 · 2 · 3 · 4 쿠키 표 · 5 · 6 · 7 구글 로그인 · 8 · 9 삭제 · 10 · 12 — 시행일 2026-10-28), `client/src/privacyData.ts` `ACCOUNT_DATA` · `ACCOUNT_COOKIES`, STORE_LISTING 4장 '로그인을 켤 때 바꾸는 값', PLAY_STORE_GUIDE 5 · 7 · 13단계 · 진행 기록, 새 `docs/LOGIN_GUIDE.md`, DEPLOY 0 · 3.4 · 5 · 6장, TECH_SPEC 2 · 3.3 · 3.5 · 3.6 · 7, DECISIONS 1절 D11 · 15절, GAME_DESIGN 12.3 · 12.4 · 12.6 · 변경 이력, META_PLAN 3절, HUMAN_CHECKS, CLAUDE.md 기준 문서 표
 - 시험 · 번들 · 병합: (채울 곳)
 

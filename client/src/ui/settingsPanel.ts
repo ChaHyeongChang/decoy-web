@@ -12,7 +12,8 @@
 import type { Role } from '@decoy/shared';
 import { teamOf } from '@decoy/shared';
 import { sfx } from '../audio';
-import { ACCOUNT_TEXT, APP_TEXT, CONTROLS, HELP_TEXT, SETTINGS_TEXT, UI_TEXT } from '../data/storyText';
+import { ACCOUNT_TEXT } from '../data/accountText';
+import { APP_TEXT, CONTROLS, HELP_TEXT, SETTINGS_TEXT, UI_TEXT } from '../data/storyText';
 import type { FrameLimit } from '../gfx/framePacing';
 import type { QualityChoice } from '../gfx/quality';
 import type { CharStyle } from '../gfx/charStyle';

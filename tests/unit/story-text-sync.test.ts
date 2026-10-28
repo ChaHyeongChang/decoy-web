@@ -1,4 +1,4 @@
-// 문구 동기화 (MOBILE_PLAN M12 12번): client/src/data/storyText.ts의 모든 문구가 docs/STORY_TEXT.md(표 셀 · 목록)에 나온다.
+// 문구 동기화 (MOBILE_PLAN M12 12번): client/src/data/storyText.ts · accountText.ts의 모든 문구가 docs/STORY_TEXT.md(표 셀 · 목록)에 나온다.
 // 규칙
 //  - 문서는 표의 칸(머리 줄 제외)과 목록 줄, 그 안의 따옴표 "…"만 본다 (설명 문단 · 제목은 보지 않는다)
 //  - 비교 전에 `코드 표시`를 벗기고 공백을 하나로, 문장 끝 마침표를 뺀다 (표에서는 마침표를 생략할 수 있다)
@@ -8,7 +8,11 @@
 //  - 색 값(#RRGGBB)은 문구가 아니다
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import * as TEXT from '../../client/src/data/storyText';
+import * as ACCOUNT from '../../client/src/data/accountText';
+import * as STORY from '../../client/src/data/storyText';
+
+/** 게임 문구: storyText.ts와 나눠 받는 조각용 계정 문구(accountText.ts — 첫 묶음을 작게) */
+const TEXT = { ...STORY, ...ACCOUNT };
 
 const md = readFileSync('docs/STORY_TEXT.md', 'utf8');
 

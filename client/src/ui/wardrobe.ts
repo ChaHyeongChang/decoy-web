@@ -17,7 +17,8 @@ import { MONSTER_REST, SURVIVOR_REST, type RoleCharId } from '../art/chars/types
 import { costumeArtReady } from '../art/chars/costume/registry';
 import { loadCostumeArt } from '../art/costumeBake';
 import { sfx } from '../audio';
-import { ACCOUNT_TEXT, META_TEXT, ROLE_CARDS } from '../data/storyText';
+import { ACCOUNT_TEXT } from '../data/accountText';
+import { META_TEXT, ROLE_CARDS } from '../data/storyText';
 import type { MetaState } from '../meta/meta';
 import { EMBER_SVG, fillText } from './levelChip';
 import { armAgainstDoubleTap } from './lobby';

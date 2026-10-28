@@ -79,7 +79,7 @@ const core = new ServerCore(
     },
     beforeStep: (room) => quickBots.beforeStep(room),
     canFillBots: (room) => botRoomsPlaying(room) < options.maxBotRooms,
-    // 판 보상 계정 적립 (로그인이 켜졌을 때만): 결과를 보낸 뒤 그 자리의 계정에 서버가 적립한다
+    // 판 보상 계정 적립 (로그인이 켜졌을 때만): 결과를 보낸 뒤 그 자리의 계정(화면이 밝힌 계정 = 쿠키 계정일 때만)에 서버가 적립한다
     rated: accounts.on ? (_room, seat, rating) => accounts.rated(seat.account, rating) : undefined,
   },
   () => performance.now(),
@@ -244,10 +244,16 @@ wss.on('connection', (socket: WebSocket, req: IncomingMessage) => {
   connCounter += 1;
   const half = options.lag / 2;
   const jitter = options.lag > 0 ? balance.network.lagJitterMs : 0;
-  // 로그인한 계정 (세션 쿠키 서명만 확인 — DB 조회 없음, 꺼짐 · 게스트는 null). 방은 자리에만 들고 어떤 메시지에도 싣지 않는다
-  const account = accounts.accountOf(req);
+  // 세션 쿠키의 계정 · 표시 tag (서명만 확인 — DB 조회 없음, 꺼짐 · 게스트는 null). 화면이 join · quick에서 같은 tag를 밝혔을 때만
+  // 자리의 계정이 된다(ServerCore.connect). 방은 자리에만 들고 다른 참가자에게 가는 메시지에는 싣지 않는다
+  const session = accounts.accountOf(req);
   // 송신: 받는 쪽이 못 따라오면 오래된 스냅샷은 건너뛰고(거점 메모가 든 것은 보냄), 그래도 크게 쌓이면 끊는다 (sendPolicy.ts)
-  const conn: Conn = { id: connCounter, account, ...createSender(socket, half, jitter, () => lagRng.next()) };
+  const conn: Conn = {
+    id: connCounter,
+    account: session?.id ?? null,
+    accountTag: session?.tag ?? null,
+    ...createSender(socket, half, jitter, () => lagRng.next()),
+  };
   accounts.conns.add(conn);
   alive.set(socket, true);
   socket.on('pong', () => alive.set(socket, true));

@@ -1,6 +1,7 @@
 // 계정 서비스 (docs/ACCOUNT_PLAN.md 4 · 5절): 서버 적립 = 공용 applyRating 결과 · 같은 판 한 번 · 지운 계정 다시 안 만듦 ·
 // 동시 적립 둘 다 반영 · DB 실패 다시 시도 · 'newer' 기록 덮지 않음 · 계정 날짜(서울 자정) · 기기 기록 올리기 · 접속 보상 하루 한 번 ·
-// 해금 불씨 · 입기 가진 것만 · 적립 결과는 그 계정 연결에만
+// 해금 불씨 · 입기 가진 것만 · 적립 결과는 그 계정 연결에만(그 계정 tag를 싣는다) · 삭제 페이지 찾기는 계정을 만들지 않음 ·
+// 기기 글 null은 있는 계정 기록을 덮지 않음
 import { describe, expect, it } from 'vitest';
 import type { MatchRating, ServerMessage } from '@decoy/shared';
 import {
@@ -87,6 +88,9 @@ interface Rig {
   clock: { now: number };
 }
 
+/** 시험용 계정 표시 tag (시스템은 세션 비밀로 만든다 — system.ts) */
+const tagOf = (id: string): string => `tag-${id.slice(0, 8)}`;
+
 function rig(over: Partial<AccountServiceOptions> = {}): Rig {
   const store = new TestStore();
   const pushed: Rig['pushed'] = [];
@@ -102,6 +106,7 @@ function rig(over: Partial<AccountServiceOptions> = {}): Rig {
       return Promise.resolve();
     },
     push: (id, msg) => pushed.push({ id, msg }),
+    tag: tagOf,
     log: (m) => logs.push(m),
     ...over,
   });
@@ -142,6 +147,21 @@ describe('로그인 · 상태', () => {
   });
 });
 
+describe('삭제 페이지 로그인: 찾기만 (find)', () => {
+  it('sub의 계정이 없으면 null이고 계정을 만들지 않는다, 있으면 그 계정 ID (로그인 횟수에 세지 않는다)', async () => {
+    const r = rig();
+    expect(await r.service.init()).toBe(true);
+    expect(await r.service.find('nobody')).toBeNull();
+    expect(r.store.size).toBe(0);
+    const id = await r.service.login('somebody');
+    expect(await r.service.find('somebody')).toBe(id);
+    expect(r.store.size).toBe(1);
+    expect(r.logs.join('\n')).toContain('계정 로그인 (누적 1)');
+    r.store.failing = true;
+    await expect(r.service.find('somebody')).rejects.toBeInstanceOf(AccountUnavailable);
+  });
+});
+
 describe('서버 적립', () => {
   it('결과는 공용 applyRating(빈 기록, 평가, 서버 시각, PROGRESSION, 계정 날짜)와 같다', async () => {
     const r = rig();
@@ -152,7 +172,10 @@ describe('서버 적립', () => {
     const text = serializeProfile(want!.profile, {});
     expect(res).toEqual({ ok: true, profile: text });
     expect(r.store.list()[0]!.profile).toBe(text);
-    expect(r.pushed).toEqual([{ id, msg: { t: 'credit', matchId: 'ROOM.1.a', ok: true, profile: text } }]);
+    // credit에는 그 계정의 표시 tag를 싣는다 (같은 사람의 다른 탭 · 다른 계정 모드 화면이 거른다)
+    expect(r.pushed).toEqual([
+      { id, msg: { t: 'credit', tag: tagOf(id), matchId: 'ROOM.1.a', ok: true, profile: text } },
+    ]);
     // 적립 성공도 로그에 횟수만 (계정 ID · 판 ID 없이 — 문서: '로그인 · 적립 횟수와 실패 종류만')
     expect(r.logs).toContain('계정 적립 (누적 1)');
     for (const v of [id, 'ROOM.1.a']) expect(r.logs.join('\n')).not.toContain(v);
@@ -232,7 +255,9 @@ describe('서버 적립', () => {
     expect(res).toEqual({ ok: false, profile: null });
     expect(r.sleeps).toEqual([...CREDIT_RETRY_MS]);
     expect(CREDIT_RETRY_MS).toEqual([500, 2000, 6000]);
-    expect(r.pushed).toEqual([{ id, msg: { t: 'credit', matchId: 'ROOM.1.a', ok: false, profile: null } }]);
+    expect(r.pushed).toEqual([
+      { id, msg: { t: 'credit', tag: tagOf(id), matchId: 'ROOM.1.a', ok: false, profile: null } },
+    ]);
     expect(r.logs.join('\n')).toContain('계정 적립 실패: error');
     // 두 번 실패하고 세 번째에 되면 ok
     r.store.failing = false;
@@ -287,12 +312,13 @@ describe('서버 적립', () => {
     await expect(
       r.service.costume(id, { action: 'wear', team: 'survivor', id: 'basic' }),
     ).rejects.toBeInstanceOf(AccountUnavailable);
-    await expect(r.service.importDevice(id, { choice: 'device', device: null })).rejects.toBeInstanceOf(
-      AccountUnavailable,
-    );
-    // 상태 읽기 · 계정 기록 그대로 쓰기(choice account)는 된다
+    await expect(
+      r.service.importDevice(id, { choice: 'device', device: JSON.stringify({ v: 1, xp: 3 }) }),
+    ).rejects.toBeInstanceOf(AccountUnavailable);
+    // 상태 읽기 · 계정 기록 그대로 쓰기(choice account · 기기 글 null)는 된다
     expect((await r.service.status(id))?.profile).toBe(newer);
     expect((await r.service.importDevice(id, { choice: 'account', device: null }))?.profile).toBe(newer);
+    expect((await r.service.importDevice(id, { choice: 'device', device: null }))?.profile).toBe(newer);
     expect(r.store.list()[0]!.profile).toBe(newer);
   });
 
@@ -366,6 +392,28 @@ describe('기기 기록 올리기 (첫 로그인)', () => {
     expect(profileOf(r, id).xp).toBe(9999);
     expect(profileOf(r, id).played.survivor).toBe(0);
     expect(replace?.profile).toBe(r.store.list()[0]!.profile);
+  });
+
+  it('기기 글 null은 비어 있지 않은 계정 기록을 절대 덮지 않는다 (choice와 상관없이), 빈 계정이면 빈 기록을 연다', async () => {
+    // 화면이 '빈 계정'이라고 본 사이 다른 기기가 기록을 올렸어도 (그 화면이 늦게 보낸 {choice, device:null})
+    for (const choice of ['device', 'account'] as const) {
+      const r = rig();
+      const id = await account(r);
+      await r.service.importDevice(id, { choice: 'device', device: device({ xp: 777, coins: 40 }) });
+      const before = r.store.list()[0]!.profile;
+      const saves = r.store.saves;
+      const out = await r.service.importDevice(id, { choice, device: null });
+      expect(out?.profile, choice).toBe(before);
+      expect(r.store.list()[0]!.profile, choice).toBe(before);
+      expect(r.store.saves, choice).toBe(saves);
+      expect(profileOf(r, id).xp).toBe(777);
+    }
+    // 빈 계정 + 빈 기기: {choice:'account', device:null}로 빈 기록 계정을 연다 (화면의 첫 로그인)
+    const r = rig();
+    const id = await account(r);
+    const out = await r.service.importDevice(id, { choice: 'account', device: null });
+    expect(out?.profile).toBe(serializeProfile(emptyProfile(T), {}));
+    expect((await r.service.status(id))?.fresh).toBe(false);
   });
 
   it('기기 기록이 서버보다 높은 판이면 받지 않는다 (400) · 계정이 없으면 null', async () => {
@@ -507,7 +555,7 @@ describe('적립 결과는 그 계정의 연결에만', () => {
     const b = new FakeConn('b'.repeat(32));
     const guest = new FakeConn(null);
     for (const c of [a1, a2, b, guest]) conns.add(c);
-    const msg: ServerMessage = { t: 'credit', matchId: 'M', ok: true, profile: '{}' };
+    const msg: ServerMessage = { t: 'credit', tag: 'tag-a', matchId: 'M', ok: true, profile: '{}' };
     expect(conns.send('a'.repeat(32), msg)).toBe(2);
     expect(a1.inbox).toEqual([msg]);
     expect(a2.inbox).toEqual([msg]);
