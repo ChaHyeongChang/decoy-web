@@ -252,8 +252,13 @@ export function createPostgresClient(conf: PgConfig): PgClient {
     pool.dropped = true;
     drops += 1;
     if (current === pool && !closed) current = make();
-    pool.sql.end({ timeout: 0 }).catch(noop);
-    for (const sock of pool.sockets) sock.destroy();
+    // 드라이버가 먼저 연결을 끝낸 뒤(시작 중 질의를 지운 뒤) 소켓을 부순다 — 먼저 부수면 드라이버가 시작 중 닫힘으로 보고 한 번 더 접속한다
+    void pool.sql
+      .end({ timeout: 0 })
+      .catch(noop)
+      .finally(() => {
+        for (const sock of pool.sockets) sock.destroy();
+      });
   };
 
   return {
@@ -580,7 +585,7 @@ export class PgAccountStore implements AccountStore {
    */
   private pause(info: PgErrorInfo, runStart: number): void {
     const now = this.now();
-    if (now < this.pausedUntil || this.lastOkAt >= runStart) {
+    if (now < this.pausedUntil || this.lastOkAt > runStart) {
       this.report(info, false);
       return;
     }

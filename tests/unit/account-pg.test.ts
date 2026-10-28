@@ -13,6 +13,7 @@ import { createServer, type Socket } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { PeerCertificate } from 'node:tls';
 import { describe, expect, it } from 'vitest';
 import type { MatchRating } from '@decoy/shared';
 import { ACCOUNT_TIMEOUT_MS } from '../../client/src/account/api';
@@ -27,6 +28,8 @@ import {
   PG_RETRY_MIN_LEFT_MS,
   PG_RETRY_WAIT_MS,
   PG_RUN_BUDGET_MS,
+  PG_STORM_SOCKETS,
+  PG_MAX_TRIES,
   PgAccountStore,
   classifyPgError,
   createPostgresClient,
@@ -40,7 +43,11 @@ import { emptyProfile, parseProfile, serializeProfile } from '@decoy/shared/meta
 import { AccountService, AccountUnavailable, DB_TIMEOUT_MS } from '../../server/src/account/service';
 import { signSession } from '../../server/src/account/session';
 import { AccountConflict, MemoryAccountStore, type AccountStore } from '../../server/src/account/store';
-import { DB_TLS_WARNINGS, createAccountSystem } from '../../server/src/account/system';
+import {
+  DB_TLS_WARNINGS,
+  createAccountSystem,
+  unhandledRejectionLine,
+} from '../../server/src/account/system';
 import {
   CookieJar,
   TEST_CLIENT_ID,
@@ -135,7 +142,6 @@ describe('드라이버 설정', () => {
       user: 'neondb_owner',
       pass: 'npg_S3cretPw',
       database: 'neondb',
-      ssl: 'verify-full',
       max: 2,
       idle_timeout: PG_IDLE_TIMEOUT_S,
       connect_timeout: PG_CONNECT_TIMEOUT_S,
@@ -151,8 +157,26 @@ describe('드라이버 설정', () => {
     expect(PG_IDLE_TIMEOUT_S).toBeLessThan(5 * 60);
     expect(postgresOptions({ ...conf, ssl: 'prefer' }).ssl).toBe('prefer');
     expect(postgresOptions({ ...conf, ssl: 'disable' }).ssl).toBe(false);
-    // sslrootcert 파일 내용 → 그 인증 기관으로 확인 (인증서 확인을 끄지 않는다)
-    expect(postgresOptions(conf, 'PEM').ssl).toEqual({ ca: 'PEM', rejectUnauthorized: true });
+    // 인증서 확인: 끄지 않는다 · sslrootcert 파일 내용이면 그 인증 기관
+    expect(o.ssl).toMatchObject({ rejectUnauthorized: true });
+    expect(o.ssl).not.toHaveProperty('ca');
+    expect(postgresOptions(conf, 'PEM').ssl).toMatchObject({ ca: 'PEM', rejectUnauthorized: true });
+  });
+
+  it('인증서 이름은 DATABASE_URL의 호스트로 비교한다 — DNS 이름 · IP 주소 모두 (드라이버는 IP면 이름을 비워 localhost와 비교하게 된다)', () => {
+    const identity = (host: string) => {
+      const ssl = postgresOptions({ ...parseDatabaseUrl(NEON)!, host }).ssl as {
+        checkServerIdentity: (name: string, cert: PeerCertificate) => Error | undefined;
+      };
+      return (san: string) =>
+        ssl.checkServerIdentity('localhost', { subject: {}, subjectaltname: san } as PeerCertificate);
+    };
+    const dns = identity('ep-x-pooler.ap-southeast-1.aws.neon.tech');
+    expect(dns('DNS:*.ap-southeast-1.aws.neon.tech')).toBeUndefined();
+    expect(dns('DNS:localhost')).toBeInstanceOf(Error);
+    const ip = identity('203.0.113.5');
+    expect(ip('IP Address:203.0.113.5')).toBeUndefined();
+    expect(ip('DNS:localhost')).toBeInstanceOf(Error);
   });
 
   it('sslrootcert 파일을 읽지 못하면 연결 묶음을 만들지 않는다 (예외 — 계정 기능 묶음이 로그인을 끈다)', () => {
@@ -493,6 +517,51 @@ describe('PgAccountStore (가짜 연결)', () => {
     expect(PG_PAUSE_MAX_MS).toBe(300_000);
   });
 
+  it('쉬기는 한 장애에 한 번: 동시에 실패한 여러 호출이 쉬는 시간을 거듭 늘리지 않고, 호출이 시작한 뒤 다른 질의가 됐으면(DB가 돌아왔다) 쉬지 않는다, 성공하면 바로 풀린다', async () => {
+    const clock = new Clock();
+    const timeout = (): Answer => ({ took: PG_ATTEMPT_TIMEOUT_MS, then: err('QUERY_TIMEOUT') });
+    // 네 호출이 동시에: 모두 두 시도가 시간을 넘긴다
+    const many = rig(Array.from({ length: 8 }, timeout), clock);
+    const runs = Array.from({ length: 4 }, () => many.store.get('i').catch((e: unknown) => e));
+    await Promise.all(runs);
+    const rests = many.logs.filter((l) => l.includes('DB를 쉰다'));
+    expect(rests).toHaveLength(1);
+    expect(rests[0]).toContain('15초 동안');
+    // 늦게 실패한 호출: 다른 호출이 그 사이 성공했으면 쉬지 않는다
+    const late = rig([timeout(), { rows: [row()], count: 1 }, timeout()], new Clock());
+    const slow = late.store.get('i').catch((e: unknown) => e);
+    const quick = late.store.get('i');
+    expect(await quick).not.toBeNull();
+    expect(await slow).toMatchObject({ code: 'QUERY_TIMEOUT' });
+    expect(late.logs.join('\n')).not.toContain('DB를 쉰다');
+    expect(await late.store.get('i')).toBeNull();
+  });
+
+  it('다른 요청이 연결 묶음을 버려 함께 끊긴 시도(POOL_DROPPED)는 한 번 더의 몫을 쓰지 않고 바로 다시 — 로그 없이, 예산 · 다섯 번 안에서', async () => {
+    const { client, store, waits, logs } = rig([
+      err('POOL_DROPPED'),
+      err('POOL_DROPPED'),
+      err('CONNECTION_CLOSED'),
+      { rows: [row()], count: 1 },
+    ]);
+    expect((await store.get('i'))?.id).toBe('a'.repeat(32));
+    expect(client.calls).toHaveLength(4);
+    expect(waits).toEqual([PG_RETRY_WAIT_MS]);
+    expect(logs).toEqual(['계정 DB 오류 CONNECTION_CLOSED — 연결 끊김 (한 번 더 시도)']);
+    expect(PG_MAX_TRIES).toBe(5);
+    const endless = rig(Array.from({ length: 8 }, () => err('POOL_DROPPED')));
+    await expect(endless.store.get('i')).rejects.toMatchObject({ code: 'POOL_DROPPED' });
+    expect(endless.client.calls).toHaveLength(PG_MAX_TRIES);
+    expect(endless.logs).toEqual([]);
+    // 예산이 1초도 남지 않으면 다시 하지 않는다
+    const late = rig([
+      { took: 8_200, then: err('POOL_DROPPED') },
+      { rows: [], count: 0 },
+    ]);
+    await expect(late.store.get('i')).rejects.toMatchObject({ code: 'POOL_DROPPED' });
+    expect(late.client.calls).toHaveLength(1);
+  });
+
   it('쉬는 시간은 5분을 넘지 않는다, 시간 넘김이 한 번뿐이면(두 번째는 다른 오류 · 성공) 쉬지 않는다', async () => {
     const clock = new Clock();
     const timeout = (): Answer => ({ took: PG_ATTEMPT_TIMEOUT_MS, then: err('QUERY_TIMEOUT') });
@@ -648,24 +717,32 @@ async function closedPort(): Promise<number> {
 
 /**
  * 가짜 DB 서버: 'close'는 받자마자 오류 없이 닫는다(드라이버가 시작 중 닫힘을 보고 끝없이 다시 접속하는 경우),
- * 'silent'는 받고 아무 답도 하지 않는다(소리 없이 멈춘 연결)
+ * 'silent'는 받고 아무 답도 하지 않는다(소리 없이 멈춘 연결), 'stuck'은 인증까지 끝낸 뒤 질의에 답하지 않는다(멈춘 백엔드)
  */
-async function fakePg(mode: 'close' | 'silent') {
+async function fakePg(mode: 'close' | 'silent' | 'stuck') {
   const open = new Set<Socket>();
   let accepted = 0;
-  const srv = createServer((sock) => {
+  let ended = 0;
+  // stuck: 접속 · 인증은 끝내고(AuthenticationOk + ReadyForQuery) 질의에는 답하지 않으며, 상대가 닫아도 이쪽은 닫지 않는다
+  const srv = createServer({ allowHalfOpen: mode === 'stuck' }, (sock) => {
     accepted += 1;
     open.add(sock);
     sock.on('close', () => open.delete(sock));
+    sock.on('end', () => (ended += 1));
     sock.on('error', () => undefined);
+    // 받은 것은 읽어 버린다 (진짜 서버처럼 — 상대가 닫으면 'end'를 본다)
+    sock.resume();
     if (mode === 'close') sock.end();
-    // 받은 것은 읽어 버린다 (진짜 서버처럼 — 상대가 닫으면 이쪽도 닫힌다)
-    else sock.resume();
+    if (mode === 'stuck')
+      sock.once('data', () =>
+        sock.write(Buffer.from([0x52, 0, 0, 0, 8, 0, 0, 0, 0, 0x5a, 0, 0, 0, 5, 0x49])),
+      );
   });
   await new Promise<void>((resolve) => srv.listen(0, '127.0.0.1', resolve));
   return {
     port: (srv.address() as AddressInfo).port,
     accepted: () => accepted,
+    ended: () => ended,
     open: () => open.size,
     close: () =>
       new Promise<void>((resolve) => {
@@ -766,32 +843,44 @@ describe('닿지 않는 DB (닫힌 포트 — 장애 · 한도 초과로 멈춘 
 });
 
 describe('멈춘 DB (실제 드라이버 · 가짜 서버)', () => {
-  it('오류 없이 접속을 닫는 서버: 드라이버의 끝없는 다시 접속을 시도 제한에서 끊고(묶음을 버림), 두 시도가 다 넘기면 DB를 쉬어 접속하지 않는다', async () => {
+  it('오류 없이 접속을 닫는 서버: 드라이버의 끝없는 다시 접속을 1초에 다섯 번 안에서 멈추고 바로 실패(RECONNECT_LOOP), 그 뒤 더 접속하지 않는다', async () => {
     const pg = await fakePg('close');
     const logs: string[] = [];
-    const store = new PgAccountStore(createPostgresClient(localConf(pg.port)), {
-      log: (m) => logs.push(m),
-      attemptTimeoutMs: 300,
-      budgetMs: 1_700,
-      pauseMs: 60_000,
-    });
+    const store = new PgAccountStore(createPostgresClient(localConf(pg.port)), { log: (m) => logs.push(m) });
     try {
       const t0 = Date.now();
-      await expect(store.get('a'.repeat(32))).rejects.toMatchObject({ code: 'QUERY_TIMEOUT' });
-      expect(Date.now() - t0).toBeLessThan(2_000);
-      // 끊기 전에는 드라이버가 쉬지 않고 다시 접속했다
-      expect(pg.accepted()).toBeGreaterThan(2);
-      // 버린 묶음은 더 접속하지 않는다
-      await pause(100);
+      const cpu0 = process.cpuUsage();
+      await expect(store.get('a'.repeat(32))).rejects.toMatchObject({ code: 'RECONNECT_LOOP' });
+      // 시도 제한(4.5초)까지 돌지 않는다
+      expect(Date.now() - t0).toBeLessThan(1_500);
+      const cpu = process.cpuUsage(cpu0);
+      expect((cpu.user + cpu.system) / 1000).toBeLessThan(500);
+      expect(pg.accepted()).toBeGreaterThan(1);
+      expect(pg.accepted()).toBeLessThanOrEqual(2 * (PG_STORM_SOCKETS + 1));
       const settled = pg.accepted();
       await pause(400);
-      expect(pg.accepted() - settled).toBeLessThanOrEqual(1);
-      expect(logs.at(-1)).toMatch(/^계정 DB 오류 QUERY_TIMEOUT — 응답이 없어 60초 동안 DB를 쉰다/);
-      // 쉬는 동안: 바로 실패, 접속 없음
-      const n = pg.accepted();
-      await expect(store.get('a'.repeat(32))).rejects.toMatchObject({ code: 'PAUSED' });
-      await pause(100);
-      expect(pg.accepted()).toBe(n);
+      expect(pg.accepted()).toBe(settled);
+      expect(logs.at(-1)).toMatch(/^계정 DB 오류 RECONNECT_LOOP — DB가 오류 없이 연결을 거듭 끊음/);
+      // 시간 넘김이 아니라 쉬지 않는다 (다음 요청도 같은 식으로 빨리 실패)
+      expect(logs.join('\n')).not.toContain('DB를 쉰다');
+    } finally {
+      await store.close().catch(() => undefined);
+      await pg.close();
+    }
+  });
+
+  it('붙은 뒤 질의에 답하지 않는 서버(멈춘 백엔드): 시도 제한에서 묶음을 버리고 그 소켓을 부순다 — 서버 쪽이 닫지 않아도 이쪽 소켓이 남지 않는다', async () => {
+    const pg = await fakePg('stuck');
+    const store = new PgAccountStore(createPostgresClient(localConf(pg.port)), {
+      attemptTimeoutMs: 200,
+      budgetMs: 1_600,
+    });
+    try {
+      await expect(store.get('a'.repeat(32))).rejects.toMatchObject({ code: 'QUERY_TIMEOUT' });
+      expect(pg.accepted()).toBe(2);
+      // 이쪽이 닫았다: 서버가 끝(FIN)을 모든 연결에서 받았다 (서버는 반만 닫힌 채로 버틴다)
+      for (let i = 0; i < 50 && pg.ended() < 2; i += 1) await pause(20);
+      expect(pg.ended()).toBe(2);
     } finally {
       await store.close().catch(() => undefined);
       await pg.close();
@@ -887,5 +976,19 @@ describe('계정 기능 묶음: DB 주소 확인', () => {
     });
     expect(sys.on).toBe(false);
     expect(sys.summary).toBe('계정 로그인: 꺼짐 (DATABASE_URL 틀림)');
+  });
+  it('드라이버 안쪽 비동기 오류 가드: 로그에는 오류 코드 · 이름만 (메시지 · 값 없이)', () => {
+    expect(
+      unhandledRejectionLine(
+        Object.assign(new TypeError('secret-host:5432 broke'), { code: 'ERR_INVALID_ARG_TYPE' }),
+      ),
+    ).toBe('서버: 처리되지 않은 비동기 오류 (ERR_INVALID_ARG_TYPE) — 판은 그대로 계속');
+    expect(unhandledRejectionLine(new TypeError('postgres://u:pw@h'))).toBe(
+      '서버: 처리되지 않은 비동기 오류 (TypeError) — 판은 그대로 계속',
+    );
+    expect(unhandledRejectionLine('pw=secret')).toBe(
+      '서버: 처리되지 않은 비동기 오류 (string) — 판은 그대로 계속',
+    );
+    expect(unhandledRejectionLine({ code: 'bad code with secret' })).toContain('(object)');
   });
 });

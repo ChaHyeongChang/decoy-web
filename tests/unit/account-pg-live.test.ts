@@ -6,6 +6,7 @@
 // - 서버가 연결을 끊은 뒤 다음 요청이 저절로 다시 붙는다
 // - 서비스: 로그인 → 기기 기록 올리기 → 서버 적립 → 삭제 (메모리 저장소와 같은 결과)
 // - 계정 기능 전체(HTTP): DATABASE_URL로 켜진 서버에서 가짜 구글 로그인 → 상태 → 올리기 → 삭제
+import { connect as netConnect, createServer, type AddressInfo, type Socket } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AccountStatus, MatchRating } from '@decoy/shared';
 import { emptyProfile, parseProfile, serializeProfile } from '@decoy/shared/meta';
@@ -171,6 +172,43 @@ describe.runIf(URL_TEXT !== '')('PgAccountStore (실제 PostgreSQL)', () => {
     expect(await store.saveProfile(rec.id, 'P', 2)).toBe(true);
     expect(logs.join('\n')).not.toContain(conf.password || '\u0000');
   });
+
+  it('잠든 DB가 5초 뒤 깨는 동안 동시에 넷이 와도 모두 된다 — 한 요청의 시간 넘김이 묶음을 버려도 함께 끊긴 요청은 새 묶음으로 다시 한다', async () => {
+    const rec = await store.create('live-wake', 1);
+    const wakeAt = Date.now() + 5_000;
+    const socks = new Set<Socket>();
+    // TCP 중계: 깨기 전에 온 연결은 깰 때까지 붙잡았다가(잠든 compute) 실제 PostgreSQL로 잇는다
+    const proxy = createServer((client) => {
+      socks.add(client);
+      client.on('error', () => undefined);
+      client.pause();
+      const link = (): void => {
+        if (client.destroyed) return;
+        const up = netConnect({ host: conf.host, port: conf.port });
+        socks.add(up);
+        up.on('error', () => client.destroy());
+        client.on('close', () => up.destroy());
+        up.on('close', () => client.destroy());
+        client.pipe(up).pipe(client);
+        client.resume();
+      };
+      setTimeout(link, Math.max(0, wakeAt - Date.now()));
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+    const port = (proxy.address() as AddressInfo).port;
+    const sleepy = new PgAccountStore(createPostgresClient({ ...conf, host: '127.0.0.1', port }), { table });
+    try {
+      const t0 = Date.now();
+      const got = await Promise.all(Array.from({ length: 4 }, () => sleepy.get(rec.id)));
+      expect(got.map((r) => r?.sub)).toEqual(['live-wake', 'live-wake', 'live-wake', 'live-wake']);
+      // 깬 뒤 곧바로 (예산 9초 안)
+      expect(Date.now() - t0).toBeLessThan(9_000);
+    } finally {
+      await sleepy.close();
+      for (const sock of socks) sock.destroy();
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+    }
+  }, 30_000);
 
   it('서비스: 로그인 → 기기 기록 올리기 → 서버 적립(같은 판은 한 번) → 삭제', async () => {
     const t = Date.UTC(2026, 9, 28, 3, 0, 0);
