@@ -649,15 +649,15 @@ test('로그아웃하면 이 기기 기록으로 · 첫 화면 소켓을 새로 
     await expectStore(c.page, 'device');
     expect(statusReqs).toEqual([]);
 
-    // 다시 로그인: 로그아웃이 표시를 지워 다시 첫 로그인이다. 이 기기에는 게스트 판 기록, 계정에는 첫 로그인 때 연 빈 기록이 있어
-    // 지금은 고르기 창이 뜬다(계정 기록이 빈 기록이어도 — fresh는 기록 글이 없을 때만) → '계정 기록'
+    // 다시 로그인: 로그아웃이 표시를 지워 다시 첫 로그인이다. 이 기기에는 게스트 판 기록, 계정에는 첫 로그인 때 연 빈 기록(아무것도
+    // 쌓지 않음)이 있어 묻지 않고 이 기기 기록을 올린다
+    const deviceNow = view(await readKey(c.page, PROGRESS_KEY));
+    expect(deviceNow?.xp ?? 0).toBeGreaterThan(0);
     await loginByUrl(c.page, srv.base, 'dave');
-    await expect(c.page.getByTestId('account-choose-account')).toContainText(
-      'Lv 1 · 불씨 0 · 의상 0벌 · 0판',
-    );
-    await press(c.page.getByTestId('account-choose-account'));
     await expectStore(c.page, 'server');
-    expect((await srv.account('dave'))?.profile).toBe(account);
+    await expectNotice(c.page, T.imported);
+    expect(await c.page.getByTestId('account-choose').count()).toBe(0);
+    expect(view((await srv.account('dave'))?.profile ?? null)?.xp).toBe(deviceNow?.xp);
     // 설정 › 계정 삭제: 첫 누름은 확인만, 취소하면 그대로, 두 번째 확인에서 지운다
     expect(await srv.account('dave')).not.toBeNull();
     await openAccountTab(c.page);
@@ -771,7 +771,7 @@ test('로그인 꺼짐(기본 서버): 첫 화면 · 봇과 연습에 계정 요
   }
 });
 
-test('로그인 꺼짐: 예전에 로그인했던 기기(표시가 남음)는 한 번 묻고 "지금은 로그인을 쓸 수 없어요" 뒤 표시를 지워 다음부터 묻지 않는다', async ({
+test('로그인 꺼짐: 예전에 로그인했던 기기(표시가 남음)는 부팅마다 상태를 읽어 "지금은 로그인을 쓸 수 없어요" 한 줄 · 게스트, 표시는 남긴다(다시 켜면 같은 계정으로)', async ({
   browser,
 }) => {
   const c = await newClient(browser, { serviceWorkers: 'block' });
@@ -790,12 +790,20 @@ test('로그인 꺼짐: 예전에 로그인했던 기기(표시가 남음)는 �
     await expectNotice(c.page, T.results.off);
     await expectStore(c.page, 'device');
     expect(statusReqs).toHaveLength(1);
-    expect(await readKey(c.page, MARK_KEY)).toBeNull();
+    // 표시는 남긴다: 지우면 다시 켰을 때 화면은 게스트인데 남은 쿠키로 서버가 계정에 적립한다(DECISIONS 15절)
+    expect(JSON.parse((await readKey(c.page, MARK_KEY)) ?? 'null')).toEqual({
+      v: 1,
+      tag: 'oldtag0123456789',
+    });
     await c.page.reload();
     await expect(c.page.getByTestId('practice')).toBeVisible();
-    await expect(c.page.getByTestId('settings-modal')).toBeAttached({ timeout: 15_000 });
-    expect(statusReqs).toHaveLength(1);
-    expect(await notices(c.page)).toEqual([]);
+    await expectNotice(c.page, T.results.off);
+    await expectStore(c.page, 'device');
+    expect(statusReqs).toHaveLength(2);
+    expect(JSON.parse((await readKey(c.page, MARK_KEY)) ?? 'null')).toEqual({
+      v: 1,
+      tag: 'oldtag0123456789',
+    });
     expect(issues(c).filter((p) => !SW_BLOCKED.test(p))).toEqual([]);
   } finally {
     await c.context.close();
