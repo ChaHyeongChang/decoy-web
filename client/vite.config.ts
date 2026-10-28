@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
-import { listShellFiles, swWithBuild } from './shellBuild';
+import { listShellFiles, precompressDist, swWithBuild } from './shellBuild';
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 const serverPort = Number(process.env.DECOY_SERVER_PORT ?? 8080);
@@ -61,7 +61,7 @@ const phaserFlags: Plugin = {
 };
 
 /**
- * 빌드 ID · 앱 셸 (M13d): 빌드마다 새 ID를 정해 화면 코드(`__DECOY_BUILD__`)와 `dist/build-id.json`(서버가 읽어
+ * 빌드 ID · 앱 셸 (M13d) · 미리 압축(번들 줄이기): 빌드마다 새 ID를 정해 화면 코드(`__DECOY_BUILD__`)와 `dist/build-id.json`(서버가 읽어
  * `x-decoy-build` 헤더 · welcome · pong에 싣는다)에 넣고, dist 전체 파일 목록(sw.js · wake.html · build-id.json 제외)을
  * 빌드 ID와 함께 `dist/sw.js`에 넣는다(앱 셸 사전 캐시). 새 파일(M14 manifest · 아이콘, M15 처리방침)은 저절로 들어간다.
  * DECOY_BUILD_ID 환경 변수로 ID를 정할 수 있다(시험). 개발 서버는 'dev'(서비스 워커를 등록하지 않는다)
@@ -87,6 +87,8 @@ function decoyBuild(command: 'build' | 'serve'): Plugin {
       writeFileSync(join(outDir, 'build-id.json'), `${JSON.stringify({ id })}\n`);
       const swPath = join(outDir, 'sw.js');
       writeFileSync(swPath, swWithBuild(readFileSync(swPath, 'utf8'), id, shell));
+      // 텍스트 자산마다 brotli · gzip 사본 (서버가 Accept-Encoding으로 고른다 — server/src/static.ts). 셸 목록 · sw.js를 쓴 뒤에
+      precompressDist(outDir);
     },
   };
 }

@@ -2,13 +2,24 @@
 //  서버 응답 / 오프라인 → 앱 셸 / 5초 초과 → wake.html / 표시 없는 응답 → wake.html / ?practice=1 캐시 먼저 /
 //  /privacy 네트워크 먼저 + 같은 빌드면 셸 사본 갱신, 실패 · 느림 · 표시 없음이면 셸 사본 /
 //  자산 캐시 우선 / 제외 경로 / JS 자리에 HTML이 오면 설치 실패 / 빌드 헤더가 다르면 설치 실패 / 사전 캐시는 'no-cache' 재검증 /
-//  새 빌드면 옛 decoy-shell-*만 정리 / dist의 새 파일이 셸 목록에 자동 포함(icons/ 제외)
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+//  새 빌드면 바로 앞 빌드 셸 하나만 남기고 더 옛 decoy-shell-*를 정리 · 옛 화면의 옛 조각(assets/)은 앞 빌드 셸에서 /
+//  dist의 새 파일이 셸 목록에 자동 포함(icons/ · 미리 압축한 .br · .gz 제외)
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import vm from 'node:vm';
+import { brotliDecompressSync, gunzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { SHELL_EXCLUDE, SHELL_EXCLUDE_PREFIX, listShellFiles, swWithBuild } from '../../client/shellBuild';
+import {
+  PRECOMPRESS_EXT,
+  PRECOMPRESS_MIN_BYTES,
+  SHELL_EXCLUDE,
+  SHELL_EXCLUDE_PREFIX,
+  listShellFiles,
+  precompressDist,
+  swWithBuild,
+} from '../../client/shellBuild';
+import { COMPRESSIBLE_EXT, GZIP_MIN_BYTES } from '../../server/src/static';
 
 const ORIGIN = 'https://decoy.test';
 const SW_SOURCE = readFileSync('client/public/sw.js', 'utf8');
@@ -386,7 +397,7 @@ describe('자산 · 업데이트', () => {
     expect(w.netCalls.at(-1)).toBe('/assets/index-zz.js');
   });
 
-  it('새 빌드 워커가 켜지면 옛 decoy-shell-*와 옛 깨우기 캐시만 지우고, 다른 캐시는 그대로', async () => {
+  it('새 빌드 워커가 켜지면 바로 앞 빌드 셸 하나만 남기고 더 옛 셸 · 옛 깨우기 캐시를 지운다, 다른 캐시는 그대로', async () => {
     const first = loadWorker('b1');
     await first.install();
     await first.activate();
@@ -395,12 +406,61 @@ describe('자산 · 업데이트', () => {
     const next = loadWorker('b2', ['index.html', 'assets/index-b2.js'], first.caches);
     await next.install();
     await next.activate();
-    expect((await next.caches.keys()).sort()).toEqual(['decoy-shell-b2', 'decoy-wake-v2', 'someone-else']);
+    expect((await next.caches.keys()).sort()).toEqual([
+      'decoy-shell-b1',
+      'decoy-shell-b2',
+      'decoy-wake-v2',
+      'someone-else',
+    ]);
     // 새 셸에는 새 빌드 자산만 (섞이지 않는다)
     expect([...(next.caches.caches.get('decoy-shell-b2')?.store.keys() ?? [])].sort()).toEqual([
       `${ORIGIN}/assets/index-b2.js`,
       `${ORIGIN}/index.html`,
     ]);
+    // 한 번 더 배포: 바로 앞(b2)만 남고 b1은 지운다
+    const third = loadWorker('b3', ['index.html', 'assets/index-b3.js'], first.caches);
+    await third.install();
+    await third.activate();
+    expect((await third.caches.keys()).sort()).toEqual([
+      'decoy-shell-b2',
+      'decoy-shell-b3',
+      'decoy-wake-v2',
+      'someone-else',
+    ]);
+  });
+
+  it('배포 직후 옛 화면이 찾는 옛 조각(assets/)은 앞 빌드 셸에서 준다 — 새 서버에는 없다(404)', async () => {
+    const first = loadWorker('b1', [...SHELL, 'assets/settingsPanel-a1.js']);
+    await first.install();
+    await first.activate();
+    const next = loadWorker(
+      'b2',
+      ['index.html', 'assets/index-b2.js', 'assets/settingsPanel-b2.js'],
+      first.caches,
+    );
+    await next.install();
+    await next.activate();
+    // 새 서버: 옛 빌드 파일은 404
+    next.setRoute((req) =>
+      new URL(req.url).pathname.includes('-a1.')
+        ? new Response('not found', { status: 404 })
+        : serverResponse(req.url, 'b2'),
+    );
+    const before = next.netCalls.length;
+    const old = await next.fetch('/assets/settingsPanel-a1.js', 'no-cors');
+    expect(old?.status).toBe(200);
+    expect(old?.headers.get('x-decoy-build')).toBe('b1');
+    expect(next.netCalls.length).toBe(before);
+    // 새 빌드 조각은 새 셸에서
+    expect((await next.fetch('/assets/settingsPanel-b2.js', 'no-cors'))?.headers.get('x-decoy-build')).toBe(
+      'b2',
+    );
+    // assets/ 밖(이름에 해시 없음)은 앞 빌드 셸에서 주지 않는다: 지금 셸에 없으면 네트워크
+    const logo = await next.fetch('/logo.svg', 'no-cors');
+    expect(next.netCalls.at(-1)).toBe('/logo.svg');
+    expect(logo?.headers.get('x-decoy-build')).toBe('b2');
+    // 앞 빌드 셸에도 없는 자산은 네트워크 (404 그대로 — 화면의 조각 실패 대처로 간다)
+    expect((await next.fetch('/assets/hub-a1.js', 'no-cors'))?.status).toBe(404);
   });
 });
 
@@ -417,6 +477,10 @@ describe('셸 목록 만들기 (Vite 플러그인)', () => {
       writeFileSync(join(dir, 'icons', 'maskable-512.png'), 'x');
       writeFileSync(join(dir, 'privacy.html'), 'x');
       writeFileSync(join(dir, 'manifest.webmanifest'), 'x');
+      // 미리 압축한 사본은 셸에 넣지 않는다 (워커는 원본 주소로 받고 브라우저가 풀어 둔다)
+      writeFileSync(join(dir, 'assets', 'index-a.js.br'), 'x');
+      writeFileSync(join(dir, 'assets', 'index-a.js.gz'), 'x');
+      writeFileSync(join(dir, 'index.html.br'), 'x');
       expect(listShellFiles(dir)).toEqual([
         'assets/index-a.js',
         'index.html',
@@ -427,6 +491,50 @@ describe('셸 목록 만들기 (Vite 플러그인)', () => {
       expect(SHELL_EXCLUDE).toEqual(['sw.js', 'wake.html', 'build-id.json']);
       // manifest 아이콘은 화면 · 오프라인 진입이 쓰지 않는다 (설치 때 브라우저 · OS가 받고, TWA는 APK 안의 것)
       expect(SHELL_EXCLUDE_PREFIX).toEqual(['icons/']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('미리 압축: 텍스트 자산(256B 이상)마다 .br · .gz 사본, 풀면 원본과 같다. png · woff2 · 작은 파일 · 사본은 건너뛴다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'decoy-dist-'));
+    try {
+      const js = `export const decoy = 1;\n${'const a = "생존자 셋과 괴물 하나";\n'.repeat(200)}`;
+      mkdirSync(join(dir, 'assets'));
+      writeFileSync(join(dir, 'assets', 'index-a.js'), js);
+      writeFileSync(join(dir, 'index.html'), `<!doctype html>${'<p>DECOY</p>'.repeat(100)}`);
+      writeFileSync(join(dir, 'sw.js'), `const SHELL = [];\n${'// 셸\n'.repeat(100)}`);
+      writeFileSync(join(dir, 'build-id.json'), '{"id":"abc"}');
+      writeFileSync(join(dir, 'logo.png'), Buffer.alloc(4000, 0));
+      writeFileSync(join(dir, 'ui.woff2'), Buffer.alloc(4000, 7));
+      const n = precompressDist(dir);
+      const files = readdirSync(dir, { recursive: true }).map(String).sort();
+      expect(files.filter((f) => /\.(br|gz)$/.test(f))).toEqual([
+        join('assets', 'index-a.js.br'),
+        join('assets', 'index-a.js.gz'),
+        'index.html.br',
+        'index.html.gz',
+        'sw.js.br',
+        'sw.js.gz',
+      ]);
+      expect(n).toBe(6);
+      const raw = readFileSync(join(dir, 'assets', 'index-a.js'));
+      expect(brotliDecompressSync(readFileSync(join(dir, 'assets', 'index-a.js.br'))).equals(raw)).toBe(true);
+      expect(gunzipSync(readFileSync(join(dir, 'assets', 'index-a.js.gz'))).equals(raw)).toBe(true);
+      // brotli가 gzip보다 작다 (같은 글)
+      expect(readFileSync(join(dir, 'assets', 'index-a.js.br')).length).toBeLessThan(
+        readFileSync(join(dir, 'assets', 'index-a.js.gz')).length,
+      );
+      // 두 번 불러도 사본의 사본을 만들지 않는다
+      precompressDist(dir);
+      expect(
+        readdirSync(dir, { recursive: true })
+          .map(String)
+          .filter((f) => /\.(br|gz)\.(br|gz)$/.test(f)),
+      ).toEqual([]);
+      // 서버가 압축해 보내는 확장자 · 최소 크기와 같다
+      expect([...PRECOMPRESS_EXT].sort()).toEqual([...COMPRESSIBLE_EXT].sort());
+      expect(PRECOMPRESS_MIN_BYTES).toBe(GZIP_MIN_BYTES);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -3,15 +3,21 @@
 // (수정 시각 · 크기가 바뀌면 다시), 압축은 스레드 풀에서 해 판 틱 루프를 멈추지 않는다. 이미 압축된 형식(png · woff2 등)은 그대로.
 // 텍스트 자산 응답에는 압축 여부와 상관없이 `Vary: Accept-Encoding`을 붙여 중간 캐시가 압축본을 못 받는 쪽에 주지 않게 한다.
 // M13d: 확장자가 있는 경로의 파일이 없으면 404(예전에는 index.html 200 — 배포 전환 순간 HTML이 JS 자리에 캐시될 수 있었다),
-// 확장자가 없는 경로만 index.html. 약한 ETag(크기-수정 시각) + If-None-Match 304, 폰트 · 문서 · manifest MIME
-import { createReadStream, existsSync, statSync } from 'node:fs';
+// 확장자가 없는 경로만 index.html. 약한 ETag(크기-수정 시각) + If-None-Match 304, 폰트 · 문서 · manifest MIME.
+// 번들 줄이기: 빌드가 텍스트 자산 옆에 미리 압축한 사본(`<파일>.br` brotli 11 · `<파일>.gz` gzip 9, client/shellBuild.ts)을 두면
+// 받는 쪽이 brotli를 받으면 .br, 아니면 gzip을 받으면 .gz를 그대로 보낸다(요청마다 압축하지 않는다). 사본은 처음 한 번 풀어
+// 원본과 같은지 확인한다(파일을 바꾸면 다시) — 원본만 바꾼 폴더(시험의 빌드 B 등)에 옛 사본을 보내지 않는다. 사본이 없거나
+// 다르면 예전처럼 gzip을 만들어 보낸다
+import { createReadStream, existsSync, statSync, type Stats } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import type { ServerResponse } from 'node:http';
 import { extname, join, normalize, sep } from 'node:path';
 import { promisify } from 'node:util';
-import { constants as zlibConstants, gzip } from 'node:zlib';
+import { brotliDecompress, constants as zlibConstants, gunzip, gzip } from 'node:zlib';
 
 const gzipAsync = promisify(gzip);
+const gunzipAsync = promisify(gunzip);
+const brotliDecompressAsync = promisify(brotliDecompress);
 
 export const MIME: Readonly<Record<string, string>> = {
   '.html': 'text/html; charset=utf-8',
@@ -67,9 +73,10 @@ interface GzEntry {
 /** 파일 경로 → 압축본 (파일마다 한 번). client/dist 안 파일만 들어오므로 크기는 빌드 크기로 묶인다 */
 const gzCache = new Map<string, GzEntry>();
 
-/** 압축본 캐시 비우기 (테스트용) */
+/** 압축본 캐시 · 미리 압축한 사본 확인 결과 비우기 (테스트용) */
 export function clearGzipCache(): void {
   gzCache.clear();
+  preCache.clear();
 }
 
 /** 지금 캐시에 든 파일 수 (테스트 · 진단용) */
@@ -99,6 +106,86 @@ export function acceptsGzip(header: string | string[] | undefined): boolean {
   }
   if (gzipQ !== null) return gzipQ > 0;
   return starQ !== null && starQ > 0;
+}
+
+/** 보낼 수 있는 압축 방식 */
+export type ContentCoding = 'br' | 'gzip';
+
+/**
+ * 받는 쪽이 받는 압축 방식을 고를 순서대로 (RFC 9110 12.5.3). q가 큰 것 먼저, 같으면 brotli 먼저(더 작다).
+ * 따로 적지 않은 방식은 `*`의 q를 따른다. q=0은 거절. 아무것도 받지 않으면 빈 목록(원본)
+ */
+export function acceptedCodings(header: string | string[] | undefined): ContentCoding[] {
+  const raw = Array.isArray(header) ? header.join(',') : (header ?? '');
+  const q = new Map<string, number>();
+  for (const part of raw.split(',')) {
+    const [name = '', ...params] = part.trim().toLowerCase().split(';');
+    let v = 1;
+    for (const p of params) {
+      const m = /^\s*q\s*=\s*([0-9.]+)\s*$/.exec(p);
+      if (m) v = Number(m[1]);
+    }
+    if (!Number.isFinite(v)) v = 0;
+    const token = name.trim() === 'x-gzip' ? 'gzip' : name.trim();
+    if (token !== '') q.set(token, Math.max(q.get(token) ?? 0, v));
+  }
+  const star = q.get('*') ?? 0;
+  const of = (c: ContentCoding): number => q.get(c) ?? star;
+  return (['br', 'gzip'] as const).filter((c) => of(c) > 0).sort((a, b) => of(b) - of(a));
+}
+
+/** 미리 압축한 사본의 확장자 */
+const PRE_EXT: Readonly<Record<ContentCoding, string>> = { br: '.br', gzip: '.gz' };
+
+interface PreEntry {
+  /** 원본 · 사본의 크기-수정 시각 (바뀌면 다시 확인) */
+  key: string;
+  /** 사본을 풀면 원본과 같은가 */
+  ok: Promise<boolean>;
+}
+
+/** 사본 경로 → 원본과 같은지 확인한 결과 (파일마다 한 번) */
+const preCache = new Map<string, PreEntry>();
+
+/** 사본을 풀어 원본과 같은지 (스레드 풀에서 — 판 틱 루프를 멈추지 않는다). 읽기 · 풀기에 실패하면 false */
+function precompressedMatches(
+  original: string,
+  orig: Stats,
+  sibling: string,
+  sib: Stats,
+  coding: ContentCoding,
+): Promise<boolean> {
+  const key = `${orig.size}-${orig.mtimeMs}-${sib.size}-${sib.mtimeMs}`;
+  const hit = preCache.get(sibling);
+  if (hit && hit.key === key) return hit.ok;
+  const ok = Promise.all([readFile(original), readFile(sibling)])
+    .then(async ([raw, packed]) => {
+      const unpacked = coding === 'br' ? await brotliDecompressAsync(packed) : await gunzipAsync(packed);
+      return unpacked.equals(raw);
+    })
+    .catch(() => false);
+  preCache.set(sibling, { key, ok });
+  return ok;
+}
+
+/** 받는 쪽이 받는 방식 가운데 쓸 수 있는 미리 압축한 사본 (고를 순서대로 처음 맞는 것). 없으면 null */
+async function pickPrecompressed(
+  target: string,
+  orig: Stats,
+  codings: readonly ContentCoding[],
+): Promise<{ coding: ContentCoding; path: string; size: number } | null> {
+  for (const coding of codings) {
+    const path = `${target}${PRE_EXT[coding]}`;
+    let sib: Stats;
+    try {
+      sib = statSync(path);
+    } catch {
+      continue;
+    }
+    if (!sib.isFile() || sib.size >= orig.size) continue;
+    if (await precompressedMatches(target, orig, path, sib, coding)) return { coding, path, size: sib.size };
+  }
+  return null;
 }
 
 /** 이 파일을 압축해 보낼 대상인가 (텍스트 자산 · 최소 크기 이상) */
@@ -187,10 +274,41 @@ export function serveStatic(
     streamRaw(target, res, headers);
     return;
   }
-  if (!acceptsGzip(acceptEncoding)) {
+  const codings = acceptedCodings(acceptEncoding);
+  if (codings.length === 0) {
     streamRaw(target, res, headers);
     return;
   }
+  pickPrecompressed(target, st, codings).then(
+    (pre) => {
+      if (res.destroyed) return;
+      if (pre) {
+        sendFile(pre.path, res, {
+          ...headers,
+          'content-encoding': pre.coding,
+          'content-length': String(pre.size),
+        });
+        return;
+      }
+      if (codings.includes('gzip')) sendGzipped(target, st, res, headers);
+      else streamRaw(target, res, headers);
+    },
+    () => {
+      if (!res.destroyed) streamRaw(target, res, headers);
+    },
+  );
+}
+
+/** 파일 그대로 흘려보낸다 (헤더를 정해 받는다 — 미리 압축한 사본) */
+function sendFile(path: string, res: ServerResponse, headers: Record<string, string>): void {
+  res.writeHead(200, headers);
+  const stream = createReadStream(path);
+  stream.on('error', () => res.destroy());
+  stream.pipe(res);
+}
+
+/** 그 자리에서 gzip으로 압축해 보낸다 (미리 압축한 사본이 없을 때, 파일마다 한 번 압축해 캐시) */
+function sendGzipped(target: string, st: Stats, res: ServerResponse, headers: Record<string, string>): void {
   gzipped(target, st.mtimeMs, st.size).then(
     (gz) => {
       if (res.destroyed) return;
