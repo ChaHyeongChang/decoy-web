@@ -38,6 +38,8 @@ import {
   privacyHandler,
   renderPrivacy,
 } from '../../server/src/privacy';
+import { RATE_WINDOW_MS } from '../../server/src/account/routes';
+import { renderDeletePage } from '../../server/src/account/deletePage';
 
 const PRIVACY = readFileSync('client/public/privacy.html', 'utf8');
 const LISTING = readFileSync('docs/STORE_LISTING.md', 'utf8');
@@ -383,6 +385,16 @@ describe('로그인한 경우에만 (선택형 구글 로그인 — privacyData.
     expect(del).toContain(`href="${ACCOUNT_DELETE_PATH}"`);
     expect(plain(del)).toMatch(/설정 › 계정 › 계정 삭제\(두 번 확인\)/);
     expect(plain(del)).toMatch(/바로/);
+    // 웹 페이지: 로그인만으로는 지우지 않는다 — 로그인한 뒤 삭제 페이지의 단추(같은 이름)를 눌러야 지운다
+    expect(plain(del)).toContain(
+      '로그인한 뒤 「계정과 기록 삭제」를 누르면 바로 지웁니다(로그인만으로는 지우지 않습니다)',
+    );
+    expect(plain(del)).not.toContain('로그인하면 바로 지웁니다');
+    expect(renderDeletePage({ kind: 'signed-in', level: 1, played: 0, csrf: 'x' }, null)).toContain(
+      '>계정과 기록 삭제</button>',
+    );
+    for (const doc of ['docs/TECH_SPEC.md', 'docs/DECISIONS.md'])
+      expect(readFileSync(doc, 'utf8'), doc).not.toContain('로그인해 바로 삭제');
     expect(byTestId('li', 'account-logout')).toContain('로그아웃');
     const basis = plain(/<p data-testid="legal-basis">([\s\S]*?)<\/p>/.exec(PRIVACY)?.[1] ?? '');
     for (const d of accountData)
@@ -391,6 +403,27 @@ describe('로그인한 경우에만 (선택형 구글 로그인 — privacyData.
     // 스토어 문서 · 안내서에도 같은 계정 삭제 URL
     expect(loginChapter).toContain(`\`https://<서비스 주소>${ACCOUNT_DELETE_PATH}\``);
     expect(GUIDE).toContain(`\`https://<서비스 주소>${ACCOUNT_DELETE_PATH}\``);
+  });
+
+  it('IP 주소: 디스크 · 로그에 남기지 않고, 로그인 기능을 켠 경우 너무 잦은 요청 막기에 최대 2분 메모리에만(계정 요청은 계정 ID) — 코드의 창과 같다', () => {
+    // 비율 제한 창 1분 → 열쇠는 늦어도 다음 창에 지운다 = 최대 2분 (server/src/account/rateLimit.ts)
+    expect(RATE_WINDOW_MS).toBe(60_000);
+    const items = plain(section('items'));
+    expect(items).not.toContain('IP 주소를 저장하거나 기록하지 않습니다');
+    expect(items).toMatch(/IP 주소를[^.]*최대 2분 동안 서버 메모리에만/);
+    expect(section('retention')).toContain('<li data-testid="rate-limit-retention">');
+    const rate = byTestId('li', 'rate-limit-retention');
+    for (const w of [
+      '로그인 기능을 켠 경우',
+      '/auth/*',
+      'IP 주소',
+      '계정 ID',
+      '최대 2분 동안 서버 메모리에만',
+      '디스크 · 데이터베이스 · 서버 기록(로그)에 남기지 않습니다',
+    ])
+      expect(rate, w).toContain(w);
+    // 서버 기록(로그): service.ts가 찍는 것은 로그인 · 적립 횟수와 실패 종류뿐
+    expect(plain(section('retention'))).toContain('(로그인 · 적립 횟수와 실패 종류만)');
   });
 
   it('DB 자리: 처리방침의 db 주석은 짝이 맞고, 공개 문서에 초안 표시(DB 결정 대기)가 없다', () => {

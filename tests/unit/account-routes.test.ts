@@ -2,11 +2,12 @@
 // 꺼짐 상태 · 로그인 전체 흐름(start → 가짜 구글 → callback → 쿠키 → /api/account) · state · 쿠키 · 나쁜 토큰 · 취소 · CSRF ·
 // 본문 크기 · 401 쿠키 지움 · DB 장애 503 · 삭제 즉시 · 삭제 뒤 적립이 계정을 다시 만들지 않음 · 삭제 페이지 · 비율 제한 ·
 // 기기에서 보낸 보상 값을 받는 길이 없음
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AccountStatus, MatchRating } from '@decoy/shared';
 import { PROGRESSION } from '@decoy/shared/meta';
 import { signJwt, testKeyPair } from '../../server/src/account/testIdp';
 import { StaticKeys } from '../../server/src/account/googleToken';
+import { RateLimiter } from '../../server/src/account/rateLimit';
 import { SESSION_RENEW_SEC, signSession } from '../../server/src/account/session';
 import {
   CookieJar,
@@ -96,10 +97,34 @@ describe('로그인 꺼짐 (기본)', () => {
     expect(cb.headers.get('location')).toBe('/?login=off');
     const page = await fetch(`${srv.base}/account/delete`);
     expect(page.status).toBe(200);
+    expect(page.headers.get('referrer-policy')).toBe('same-origin');
     const html = await page.text();
     expect(html).toContain('data-state="off"');
     expect(html).toContain('이 페이지에서 로그인해 지울 수 없습니다');
-    expect(html).toContain('문의처로 삭제를 요청');
+    // 서버는 이메일이 없어 요청한 계정을 찾을 수 없다 — 할 수 있는 일만 약속한다
+    expect(html).toContain('아래 문의처로 알려 주세요');
+    expect(html).toContain('서버는 이메일을 저장하지 않아 요청한 계정을 따로 찾을 수 없으므로');
+    expect(html).not.toContain('받는 대로');
+  });
+
+  it('/auth/*는 비율 제한(IP 담기)보다 먼저 off로 돌려보낸다 — 같은 IP로 한도를 넘겨도 429가 아니다', async () => {
+    const ip = randomIp();
+    for (let i = 0; i < 25; i += 1) {
+      const r = await fetch(`${srv.base}/auth/google/start`, {
+        redirect: 'manual',
+        headers: { 'x-forwarded-for': ip },
+      });
+      expect(r.status, `${i}번째`).toBe(302);
+      expect(r.headers.get('location')).toBe('/?login=off');
+    }
+    const cb = await fetch(`${srv.base}/auth/google/callback`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { 'x-forwarded-for': ip },
+      body: 'id_token=x',
+    });
+    expect(cb.status).toBe(303);
+    expect(cb.headers.get('location')).toBe('/?login=off');
   });
 
   it('시험 훅 없이 /test/* 계정 훅은 404, 계정 경로가 아니면 정적 파일로 넘긴다', async () => {
@@ -380,6 +405,7 @@ describe('로그인 켜짐 (가짜 구글 · 메모리 저장소)', () => {
       expect(setCookieLine(cb, 'decoy_sid')).toBeUndefined();
       const page = await fetch(`${srv.base}/account/delete`, { headers: { cookie: jar.header() } });
       expect(page.status).toBe(503);
+      expect(page.headers.get('referrer-policy')).toBe('same-origin');
       expect(await page.text()).toContain('data-state="db"');
       // 세션이 없는 상태 읽기는 저장소 없이 답한다 (게스트 화면이 늦지 않게)
       expect((await status(srv, new CookieJar())).body).toEqual({ on: true, signedIn: false });
@@ -429,6 +455,8 @@ describe('로그인 켜짐 (가짜 구글 · 메모리 저장소)', () => {
     expect(anon.status).toBe(200);
     expect(anon.headers.get('cache-control')).toBe('no-store');
     expect(anon.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
+    // 'no-referrer'면 브라우저가 같은 출처 폼 POST의 Origin을 'null'로 보내 늘 403이 된다 — 같은 출처에만 출처를 싣는다
+    expect(anon.headers.get('referrer-policy')).toBe('same-origin');
     const anonHtml = await anon.text();
     expect(anonHtml).toContain('data-state="signed-out"');
     expect(anonHtml).toContain('href="/auth/google/start?next=delete"');
@@ -438,6 +466,7 @@ describe('로그인 켜짐 (가짜 구글 · 메모리 저장소)', () => {
     const id = jar.get('decoy_sid')!.split('.')[1]!;
     await srv.system.service!.credit(id, RATING);
     const page = await fetch(`${srv.base}/account/delete`, { headers: { cookie: jar.header() } });
+    expect(page.headers.get('referrer-policy')).toBe('same-origin');
     const html = await page.text();
     expect(html).toContain('data-state="signed-in"');
     expect(html).toContain('레벨 ');
@@ -461,9 +490,14 @@ describe('로그인 켜짐 (가짜 구글 · 메모리 저장소)', () => {
       });
     const noToken = await post('');
     expect(noToken.status).toBe(403);
+    expect(noToken.headers.get('referrer-policy')).toBe('same-origin');
     expect(await noToken.text()).toContain('data-state="retry"');
     expect((await post(`csrf=${'A'.repeat(32)}`)).status).toBe(403);
     expect((await post(`csrf=${csrf}`, { origin: 'https://evil.example' })).status).toBe(403);
+    // 출처를 숨긴 폼 POST(Origin 'null' — 'no-referrer' 페이지 · 샌드박스 틀)는 받지 않는다
+    const hidden = await post(`csrf=${csrf}`, { origin: 'null' });
+    expect(hidden.status).toBe(403);
+    expect(hidden.headers.get('referrer-policy')).toBe('same-origin');
     expect((await accounts(srv)).some((a) => a.id === id)).toBe(true);
     // 다른 세션(같은 계정이라도)의 CSRF 값은 맞지 않는다
     const otherSession = signSession(id, TEST_SECRET, Date.now() - 10_000);
@@ -480,8 +514,10 @@ describe('로그인 켜짐 (가짜 구글 · 메모리 저장소)', () => {
     expect(cross.status).toBe(403);
     expect((await accounts(srv)).some((a) => a.id === id)).toBe(true);
 
+    // 같은 출처 폼 POST(브라우저가 'same-origin' 페이지에서 보내는 Origin = 이 서버)는 지운다
     const done = await post(`csrf=${csrf}`);
     expect(done.status).toBe(200);
+    expect(done.headers.get('referrer-policy')).toBe('same-origin');
     const doneHtml = await done.text();
     expect(doneHtml).toContain('data-state="deleted"');
     expect(doneHtml).toContain('계정과 서버의 성장 기록을 지웠습니다');
@@ -490,6 +526,7 @@ describe('로그인 켜짐 (가짜 구글 · 메모리 저장소)', () => {
     // 로그인 없이 POST → 로그인 안내
     const anonPost = await fetch(`${srv.base}/account/delete`, { method: 'POST', body: `csrf=${csrf}` });
     expect(anonPost.status).toBe(401);
+    expect(anonPost.headers.get('referrer-policy')).toBe('same-origin');
     expect(await anonPost.text()).toContain('data-state="signed-out"');
   });
 });
@@ -629,6 +666,58 @@ describe('비율 제한', () => {
       expect((await status(srv, jar)).res.status).toBe(200);
     } finally {
       await srv.close();
+    }
+  });
+});
+
+describe('비율 제한 열쇠(IP)를 오래 두지 않는다 (처리방침 3번: 최대 2분, 메모리에만)', () => {
+  const W = 60_000;
+
+  it('창(1분)이 끝난 열쇠는 늦어도 다음 창에 지운다 — 두 창 뒤 옛 키 없음', () => {
+    const clock = { now: 0 };
+    const rl = new RateLimiter(20, W, () => clock.now);
+    rl.take('10.0.0.1');
+    clock.now = 30_000;
+    rl.take('10.0.0.2');
+    expect(rl.size).toBe(2);
+    // 한 창 뒤: 창이 끝난 첫 열쇠는 지우고, 아직 창 안인 둘째는 둔다
+    clock.now = W;
+    rl.take('10.0.0.3');
+    expect(rl.size).toBe(2);
+    // 두 창 뒤: 옛 열쇠는 하나도 없다
+    clock.now = 2 * W;
+    rl.take('10.0.0.4');
+    expect(rl.size).toBe(1);
+  });
+
+  it('창마다 지워도 한도 세기는 그대로 (창 안에서는 막히고, 창이 끝나면 다시 된다)', () => {
+    const clock = { now: 0 };
+    const rl = new RateLimiter(3, W, () => clock.now);
+    for (let i = 0; i < 3; i += 1) expect(rl.take('a')).toBe(true);
+    expect(rl.take('a')).toBe(false);
+    clock.now = W - 1;
+    expect(rl.take('a')).toBe(false);
+    clock.now = W;
+    expect(rl.take('a')).toBe(true);
+  });
+
+  it('요청이 더 오지 않아도 (조용한 서버) 두 창 안에 지우고, 비면 타이머도 남기지 않는다', () => {
+    vi.useFakeTimers();
+    try {
+      const rl = new RateLimiter(20, W, () => Date.now());
+      rl.take('10.0.0.1');
+      vi.advanceTimersByTime(W / 2);
+      rl.take('10.0.0.2');
+      expect(rl.size).toBe(2);
+      // 첫 열쇠의 창이 끝난 때: 첫 열쇠만 지운다
+      vi.advanceTimersByTime(W / 2);
+      expect(rl.size).toBe(1);
+      // 둘째 열쇠도 두 창이 되기 전에 지운다
+      vi.advanceTimersByTime(W);
+      expect(rl.size).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

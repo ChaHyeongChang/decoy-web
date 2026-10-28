@@ -311,8 +311,10 @@ export class AccountService {
         await this.sleep(wait);
       }
     }
-    if (result.ok) this.counts.credits += 1;
-    else {
+    if (result.ok) {
+      this.counts.credits += 1;
+      this.log(`계정 적립 (누적 ${this.counts.credits})`);
+    } else {
       this.counts.creditFails += 1;
       this.log(`계정 적립 실패: ${why} (누적 실패 ${this.counts.creditFails})`);
     }
