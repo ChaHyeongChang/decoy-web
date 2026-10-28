@@ -37,6 +37,7 @@
 | 판 밖 성장 a: 판 평가 · 경험치 · 레벨 (판 기록 · 자기 평가만 · 기기 성장 기록 · 결과 화면 나눠 받기) | #28 | 2026-10-27 08:18 |
 | 판 밖 성장 b: 불씨 · 일일 도전 · 접속 보상 ('내 기록' 창 나눠 받기) | #29 | 2026-10-27 09:20 |
 | 판 밖 성장 c: 의상 · 옷장 (판 시작 명단 정보 숨김 · 그 판 의상만 같은 칸에 굽기 · 괴물 의상 유불리 없음 · 옷장 나눠 받기) | #30 | 2026-10-27 22:45 |
+| 번들 줄이기 (Phaser 맞춤 빌드 · 나눠 받는 조각 넷 더 · brotli 미리 압축 · 예산 두 줄) | #31 | 2026-10-28 02:04 |
 
 main에 병합하면 Render에 자동 배포된다(`render.yaml`, `plan: free` — **유료 전환은 사용자가 직접 한다. 파일의 플랜은 바꾸지 않는다**).
 
@@ -45,6 +46,7 @@ main에 병합하면 Render에 자동 배포된다(`render.yaml`, `plan: free` �
 2. Render 대시보드 환경 변수: `PRIVACY_CONTACT`(처리방침 문의처, 공개 이메일), 첫 업로드 뒤 `TWA_PACKAGE_NAME` · `TWA_SHA256_FINGERPRINTS`. 저장하면 재배포 = 열린 방이 사라진다
 3. 정식 출시 전 Render 유료 플랜(Starter) 전환 — 대시보드에서. **`render.yaml`의 `plan: free`는 그대로 둔다.** 전환하면 환경 변수 `DECOY_MAX_BOT_ROOMS=16`도 넣는다(코드 기본값 2는 무료 CPU 기준, PLAY_STORE_GUIDE 10단계)
 4. `docs/STORE_LISTING.md`에 남은 **⚠ 확인 필요** 답(지연 측정값 · 태그 — 데이터 보안 · 콘텐츠 등급 · 타깃 연령은 2026-10-13 사용자가 정해 반영, DECISIONS 6절)과 `docs/HUMAN_CHECKS.md`의 실기기 · 손맛 항목
+5. 선택형 구글 로그인을 켜려면(기본 꺼짐) `docs/LOGIN_GUIDE.md` 순서대로: 구글 클라우드 프로젝트 → Google Auth Platform(외부 · 로고 없음 · 범위 추가 없음 · 프로덕션 게시) → OAuth 클라이언트 ID(웹, 리디렉션 URI `https://<서비스 주소>/auth/google/callback`) → DB 가입(DB는 아직 고르지 않았다) → Render 환경 변수(`GOOGLE_CLIENT_ID` · DB 값, `DECOY_SESSION_SECRET` 자동 확인) → Play 데이터 보안 · 앱 액세스 · 자세한 설명 고치기(STORE_LISTING 4장, 계정 삭제 URL) → `DECOY_LOGIN=1` → 확인
 
 MOBILE_PLAN과 달라진 점
 - 정적 파일 gzip은 M13d가 아니라 **M12에서 이미 했다**(`server/src/static.ts`, DECISIONS 'M12: 정적 파일 gzip'). M13d 서버 갈래에는 다음이 남는다: 약한 ETag(크기-수정 시각) + `If-None-Match` 304, MIME에 `.woff2 → font/woff2` · `.txt` · (M14) `.webmanifest`. M12 성능 검토에서 나온 제안이고 패치는 저장소에 없다(다시 만든다)
@@ -187,6 +189,7 @@ MOBILE_PLAN과 달라진 점
 | 판 밖 성장 a (PR #28) | PR 빠른 검사 run 153(head 071b892, 다음 커밋으로 취소) · 154 통과(head 6eac1b2, 08:03 → 08:07 UTC), 수동 전체 검사 run 155 통과(head 6eac1b2, 08:03 → 08:18 UTC 벽시계 15분 — 4샤드 13 · 14 · 15 · 11분 · 빠른 검사 4분 · 지연 봇 2분 · 배포 검증 1분) | 1회 (병합 run 156 통과, 08:18 → 08:22 UTC) | — | 2026-10-27 08:18 UTC 병합(PR #28, 병합 커밋 6eb24ee) |
 | 판 밖 성장 b (PR #29) | PR 빠른 검사 run 157(head 0a85237, 다음 커밋으로 취소) · 158 실패(head 55239fd — `meta.spec` 불러오기, 아래 b 절) · 160 통과(head 5ba0c53) · 162 통과(head 3ddccd9), 수동 전체 검사 run 159 실패 · 취소(head 55239fd, 같은 원인) · 161 실패(head 5ba0c53 — 샤드 3 `camera.spec` 시험 경쟁 하나) · 163 통과(head 3ddccd9, 09:04 → 09:20 UTC 벽시계 16분 — 4샤드 15 · 11 · 14 · 15분 · 빠른 검사 13분 · 지연 봇 2분 · 배포 검증 1분) | 1회 (병합 run 164 통과, 09:20 → 09:33 UTC) | — | 2026-10-27 09:20 UTC 병합(PR #29, 병합 커밋 08ba9ce) |
 | 판 밖 성장 c (PR #30) | PR 빠른 검사 run 165 통과(head e0e02ec) · 168 통과(head b0f59c2, 22:25 → 22:29 UTC), 수동 전체 검사 run 166 취소(head e0e02ec — Codex 검토 반영 커밋 b0f59c2를 올려 다시 걸었다) · 167 통과(head b0f59c2, 22:25 → 22:42 UTC 벽시계 17분) | 1회 (병합 run 169 통과, 22:45 → 22:50 UTC) | — | 2026-10-27 22:45 UTC 병합(PR #30, 병합 커밋 d7192b2) |
+| 번들 줄이기 (PR #31) | PR 빠른 검사 run 170 실패(head 53f33bb — costume.spec 한 프레임 최대, 맨 아래 절) · 171 통과(head 1ac8a24) · 173 통과(head 1ce45f8) · 175 통과(head 931c40e, 01:46 → 01:51 UTC), 수동 전체 검사 run 172 실패(head 1ce45f8 — 샤드 4 m12-lifecycle, 맨 아래 절) · 174 통과(head 931c40e, 01:46 → 02:03 UTC 벽시계 17분) | 1회 (병합 run 176 통과, 02:04 → 02:09 UTC) | — | 2026-10-28 02:04 UTC 병합(PR #31, 병합 커밋 8d86045). 병합 뒤 '배포판 검증'(verify-live) run 1 통과(02:35 UTC) |
 
 2026년 10월 누적: 약 1,679분 (PR #20까지, 2026-10-13 19시 UTC, private 저장소 때) + 캐릭터 리디자인(PR #21) 약 140분 = 약 1,819분. 2026-10-18 저장소가 공개로 바뀌어 사용 시간 제한은 더 따지지 않는다(사용자) — 기록만 한다
 
@@ -563,7 +566,7 @@ PR #26 뒤 JS 번들(gzip)이 상한까지 130B만 남아, 다음 기능(결과 
 - 문서: GAME_DESIGN 12.5 · 변경 이력, TECH_SPEC 2 · 3.3 · 3.5, VISUAL_SPEC 4.6 · 9.8, STORY_TEXT 8절, DECISIONS 14절 c 행, PERF 9.4, HUMAN_CHECKS, META_PLAN, 처리방침 · STORE_LISTING(입은 의상 전송 — 데이터 보안 답은 그대로)
 - 병합: PR 빠른 검사 run 168 통과, 수동 전체 검사(4샤드 · 지연 봇 · 배포 검증) run 167 통과(head b0f59c2, 22:25 → 22:42 UTC) 뒤 2026-10-27 22:45 UTC main 병합(PR #30, 병합 커밋 d7192b2 · main 빠른 검사 run 169 통과)
 
-## 번들 줄이기: Phaser 맞춤 빌드 · 나눠 받기 · brotli · 예산 두 줄 (2026-10-28, PR #31)
+## 번들 줄이기: Phaser 맞춤 빌드 · 나눠 받기 · brotli · 예산 두 줄 (2026-10-28, PR #31 · 02:04 UTC 병합)
 PR #30 뒤 JS gzip이 424,151B로 상한(436,791B)까지 약 12KiB만 남아 줄였다(사용자 요청 — 다음에 구글 로그인 · 플레이테스트 반영이 들어온다). 규칙 · 판정 · 서버 게임 로직 · `config/balance.json` · `config/progression.json` · 화면은 그대로(DECISIONS 11절 '번들 줄이기' · '번들 예산 두 줄', PERF 10절)
 - 결과(gzip): **첫 로딩 JS 400,036 → 317,761B(−80.3KiB)**, **전체 JS 424,151 → 379,219B(−43.9KiB)**. brotli(실제 전송) 첫 로딩 262,316B · 전체 317,117B. 휴대폰 흉내(느린 4G · CPU 4배, 캐시 없는 첫 접속) 첫 화면까지 5.14 → 3.95초(컨테이너 측정, PERF 10.4)
 - Phaser 사용자 빌드 더 줄이기(`client/src/phaserCore.js` · `vite.config.ts PHASER_STUBS`, 게임 설정 `disablePreFX` · `disablePostFX`): 전체 −48.1KiB. 전후 촬영 비교(WebGL 높음 · 중간, Canvas 낮음 각 8장)에서 차이 없음(같은 빌드 두 번 찍은 차이 수준) · 그래픽 기능 표 같음 · 콘솔 0
@@ -575,4 +578,14 @@ PR #30 뒤 JS gzip이 424,151B로 상한(436,791B)까지 약 12KiB만 남아 줄
 - 검증 중 고친 것: Codex 검토(P2) — 연습 조각을 받는 사이 역할을 누르고 취소했다가 연습 고르기를 다시 열면 받기가 끝날 때 옛 선택으로 시작하던 것 → 시작 요청을 그 고르기 화면 번호에 묶었다(1ac8a24, E2E). 빠른 검사 run 170(53f33bb)은 `costume.spec`(@core) '의상 다시 굽기 한 프레임 최대 < 40ms'에서 러너 57.9ms로 실패했다 — 그 러너는 합계도 main run 169보다 1.4배 느렸고, 이 컨테이너에서 main 빌드와 이 PR 빌드를 3번씩 번갈아 돌리면 한 프레임 최대 6.1~13.4 · 6.5~12.8ms로 차이가 없다. 다음 커밋 run 171은 7.8ms로 통과(시험은 바꾸지 않았다). 첫 수동 전체 검사 run 172(1ce45f8)는 샤드 4의 `m12-lifecycle` '진동: 활성화 전 0번 …' 하나로 실패했다 — 시험이 문서가 준비될 때(DOMContentLoaded, 사용자 활성화 전) 생명주기 디버그 훅(`window.__DECOY_LIFE__`)으로 피격 진동을 불러 보는데, `?debug`이면 디버그 조각을 받은 뒤 `app.start()`를 하도록 바꾸면서 그 안에서 걸던 이 훅도 늦어졌다. 훅은 첫 묶음 코드라 앱을 만들 때(모듈 실행 안, 예전 시각) 걸게 고쳤다. 로컬에서 `lazy-chunks` '판 중 설정 처음 열기'가 한 번 실패했다(어느 단언인지 기록이 없었다 — 이후 반복 49번 통과): 판 시작 직후 굽기가 긴 작업 측정 창에 겹칠 수 있어 1.5초 뒤에 재고(settings-match와 같은 조건), 단언마다 이유와 판 중 받은 JS 목록을 남기게 했다
 - 병합 기록: PR #30(병합 커밋 d7192b2, 수동 전체 검사 run 167 · PR 빠른 검사 run 168 · main 빠른 검사 run 169)을 위 표 · Actions 표 · 의상 절에 채웠다
 - 문서: DECISIONS 11절, PERF 10절, TECH_SPEC 2 · 3.5 · 6 · 7 · 8, HUMAN_CHECKS '번들 줄이기', DEPLOY 5절, PROGRESS
+- 병합: PR 빠른 검사 run 175 통과, 수동 전체 검사(4샤드 · 지연 봇 · 배포 검증) run 174 통과(head 931c40e, 01:46 → 02:03 UTC) 뒤 2026-10-28 02:04 UTC main 병합(PR #31, 병합 커밋 8d86045 · main 빠른 검사 run 176 통과). 배포판 검증 run 1 통과
 
+## 선택형 구글 로그인 · 계정 저장 (2026-10-28, PR #32 예정)
+게스트 플레이는 그대로 두고, 로그인하면 메타 기록(레벨 · 경험치 · 불씨 · 도전 · 접속 보상 · 해금하고 입은 의상)을 계정에 저장해 PC · 휴대폰 · 스토어 앱에서 같이 쓴다(사용자 요청). 기능은 **기본 꺼짐**(환경 변수 `DECOY_LOGIN`) — 사용자가 Play 신고를 고친 뒤 켠다. 규칙 · 판정 · `config/balance.json` · `config/progression.json` · 판 안 게임 플레이 · 정보 차단은 그대로(설계 `docs/ACCOUNT_PLAN.md`, DECISIONS 15절, 규칙 GAME_DESIGN 12.6, TECH_SPEC 3.6)
+- 로그인: 구글 OpenID Connect 리디렉트(페이지 이동, 팝업 · 구글 스크립트 없음), 범위 `openid`만 — 서버에 오는 것은 구글 고유 ID뿐. 서버가 ID 토큰 서명 · 클레임을 직접 검증(`node:crypto`), 세션은 서명한 HttpOnly 쿠키(`decoy_sid`)
+- 저장 · 적립: 계정 = 내부 계정 ID + 구글 고유 ID + 성장 기록 글. 온라인 판 보상은 서버가 판 평가로 직접 적립(그 계정 연결에만 `credit`), 봇과 연습은 적립하지 않음. 계정의 하루는 서버 시각 + `Asia/Seoul` 자정. 첫 로그인은 계정 · 이 기기 기록 중 고르기(더하지 않음 — DECISIONS 1절 D11)
+- 계정 삭제: 설정 › 계정 › 계정 삭제(두 번 확인) · 웹 페이지 `/account/delete`, 서버 행 바로 삭제. 로그아웃
+- 문서: 처리방침(1 · 2 · 3 · 4 쿠키 표 · 5 · 6 · 7 구글 로그인 · 8 · 9 삭제 · 10 · 12 — 시행일 2026-10-28), `client/src/privacyData.ts` `ACCOUNT_DATA` · `ACCOUNT_COOKIES`, STORE_LISTING 4장 '로그인을 켤 때 바꾸는 값', PLAY_STORE_GUIDE 5 · 7 · 13단계 · 진행 기록, 새 `docs/LOGIN_GUIDE.md`, DEPLOY 0 · 3.4 · 5 · 6장, TECH_SPEC 2 · 3.3 · 3.5 · 3.6 · 7, DECISIONS 1절 D11 · 15절, GAME_DESIGN 12.3 · 12.4 · 12.6 · 변경 이력, META_PLAN 3절, HUMAN_CHECKS, CLAUDE.md 기준 문서 표
+- 시험 · 번들 · 병합: (채울 곳)
+
+> DB 결정 대기: 계정 기록 저장소(DB) 선택과 그에 따른 처리방침 · 신고 · 안내서 자리

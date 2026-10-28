@@ -8,6 +8,9 @@
 //  - 처리방침 문서 형식(lang · 필수 제목 · 스크립트 · 외부 주소 없음 · 문의처 자리), 사실 문구(보내는 시점 · 처리 근거 ·
 //    보관 기간 · 기기 저장 값의 전송), 서버 응답(/privacy · /privacy.html, 문의처 바꿔 넣기)
 //  - 외부 전송 없음(정적): 클라이언트 코드 · 공개 파일에 밖으로 가는 주소가 없다(XML 네임스페이스만 허용). 실제 요청은 E2E(m15-privacy)
+//  - 선택형 구글 로그인(docs/ACCOUNT_PLAN.md): 로그인한 경우에만 처리하는 항목(ACCOUNT_DATA)이 계정 API 요청 필드 · 쿠키 이름과
+//    맞고, 처리방침 1번 '로그인한 경우에만' 표 · 4번 쿠키 표 · STORE_LISTING 4장 · PLAY_STORE_GUIDE 7단계 '로그인을 켤 때' 표에 같은
+//    이름 · 유형 · 답으로 나온다. 보관 · 삭제 · 처리 근거 · 구글로 가는 것 문구
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer, request, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -17,13 +20,17 @@ import { gunzipSync } from 'node:zlib';
 import ts from 'typescript';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
+  ACCOUNT_COOKIES,
+  ACCOUNT_DATA,
   PROTOCOL_FIELDS,
   SENT_DATA,
   TARGET_AGE,
   formAnswer,
+  type AccountDataInfo,
   type SentDataInfo,
 } from '../../client/src/privacyData';
 import { STORAGE_KEYS } from '../../client/src/storageKeys';
+import { ACCOUNT_DELETE_PATH, OAUTH_COOKIE, SESSION_COOKIE } from '../../shared/src/account';
 import {
   PRIVACY_CONTACT_ENV,
   PRIVACY_PATHS,
@@ -227,6 +234,168 @@ describe('보내는 항목 대응표 (privacyData.ts ↔ ClientMessage)', () => 
     );
     expect(summary).toContain('기기 또는 기타 ID');
     expect(LISTING).not.toMatch(/신고하지 않는 것:[^\n]*기기 ID\(/);
+  });
+});
+
+/** types.ts '계정' 절의 계정 API 요청 타입(Account…Request) 필드 ('타입.필드') */
+function accountRequestFields(): string[] {
+  const sf = ts.createSourceFile(TYPES, readFileSync(TYPES, 'utf8'), ts.ScriptTarget.Latest, true);
+  const out: string[] = [];
+  sf.forEachChild((n) => {
+    if (!ts.isInterfaceDeclaration(n) || !/^Account\w*Request$/.test(n.name.text)) return;
+    for (const m of n.members)
+      if (ts.isPropertySignature(m) && ts.isIdentifier(m.name)) out.push(`${n.name.text}.${m.name.text}`);
+  });
+  return out;
+}
+
+/** data-testid가 붙은 요소의 글자 (태그 · 공백 정리) */
+function byTestId(tag: string, id: string): string {
+  return plain(new RegExp(`<${tag} data-testid="${id}">([\\s\\S]*?)</${tag}>`).exec(PRIVACY)?.[1] ?? '');
+}
+
+describe('로그인한 경우에만 (선택형 구글 로그인 — privacyData.ts ACCOUNT_DATA · ACCOUNT_COOKIES ↔ 문서)', () => {
+  const accountData = Object.values(ACCOUNT_DATA) as AccountDataInfo[];
+  /** STORE_LISTING 4장 (로그인을 켤 때 바꾸는 값) */
+  const loginChapter = LISTING.slice(LISTING.indexOf('## 4. 로그인을 켤 때'));
+
+  it('계정 API 요청 타입의 필드가 모두 ACCOUNT_DATA에 있고, 없는 필드 · 모르는 출처를 적지 않았다 (쿠키는 shared 이름 그대로)', () => {
+    const fields = accountRequestFields();
+    expect(fields).toContain('AccountImportRequest.device');
+    expect(fields).toContain('AccountCostumeRequest.id');
+    const sources: string[] = accountData.flatMap((d) => [...d.sources]);
+    expect(
+      fields.filter((f) => !sources.includes(f)),
+      'ACCOUNT_DATA에 없는 계정 요청 필드',
+    ).toEqual([]);
+    const requestSources = sources.filter((s) => s.startsWith('Account'));
+    expect(
+      requestSources.filter((s) => !fields.includes(s)),
+      'types.ts에 없는 계정 요청 필드',
+    ).toEqual([]);
+    // 그 밖의 출처는 구글 ID 토큰의 sub와 세션 쿠키뿐 (decoy_oauth는 이용자를 알아보는 값이 아니라 쿠키 표에만)
+    expect(sources.filter((s) => !s.startsWith('Account')).sort()).toEqual(
+      ['id_token.sub', `cookie.${SESSION_COOKIE}`].sort(),
+    );
+    expect(new Set(sources).size).toBe(sources.length);
+  });
+
+  it("이름 · 유형이 처리방침 1번 '로그인한 경우에만' 표와 STORE_LISTING 4.3 표에 모두 나오고, 4번째 칸의 답 · ⚠가 맞다", () => {
+    const rows = tableCells(section('items'), 'account-data');
+    expect(rows.length).toBe(accountData.length);
+    const sentLabels: string[] = Object.values(SENT_DATA).map((d) => d.label);
+    expect(accountData.some((d) => d.confirm)).toBe(true);
+    for (const d of accountData) {
+      expect(sentLabels, `${d.label}: 보내는 항목 표와 이름이 겹치지 않는다`).not.toContain(d.label);
+      const row = rows.find((r) => r[0] === d.label);
+      expect(row, `처리방침 표에 ${d.label}`).toBeDefined();
+      expect(row?.[2], `${d.label} 유형`).toBe(d.playType);
+      expect(d.playType, d.label).not.toMatch(/확인 필요|⚠|해당 없음/);
+      const line = listingRow(d.label);
+      expect(line, `STORE_LISTING 표에 ${d.label}`).toBeDefined();
+      expect(loginChapter, `${d.label}은 STORE_LISTING 4장에`).toContain(line);
+      const cells = listingCells(d.label);
+      expect(cells[2], `${d.label} STORE_LISTING 유형 칸`).toBe(d.playType);
+      expect(cells[3], `${d.label} 양식의 답`).toContain(formAnswer(d.form));
+      if (d.confirm) expect(cells[3], `${d.label} 4번째 칸`).toMatch(/⚠ 확인 필요/);
+      else expect(cells[3], `${d.label} 4번째 칸`).not.toMatch(/⚠|확인 필요/);
+    }
+    // 로그인은 선택 기능 · 계정을 지울 때까지 둔다 · 목적에 계정 관리
+    for (const d of accountData) {
+      expect(d.form.required, d.label).toBe(false);
+      expect(d.form.ephemeral, d.label).toBe(false);
+      expect(formAnswer(d.form)).toBe(
+        '수집 예 · 공유 아니요 · 선택 · 목적 앱 기능 · 계정 관리 · 일시적 처리 아니요',
+      );
+    }
+  });
+
+  it("PLAY_STORE_GUIDE 7단계 '로그인을 켤 때' 표의 데이터 유형 행이 ACCOUNT_DATA 유형 그대로 · 같은 답 (빠진 행 · 남는 행 없음)", () => {
+    const rows = GUIDE.split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith('| 로그인 › 데이터 유형 › '));
+    const types = rows.map((l) =>
+      (l.split('|')[1] ?? '')
+        .trim()
+        .slice('로그인 › 데이터 유형 › '.length)
+        .replace(/ \(.*\)$/, ''),
+    );
+    expect(new Set(types)).toEqual(new Set(accountData.map((d) => d.playType)));
+    expect(types.length).toBe(new Set(types).size);
+    for (const d of accountData) {
+      const row = rows[types.indexOf(d.playType)];
+      expect(row, `${d.label} 안내서 답`).toContain(`| ${formAnswer(d.form)} |`);
+    }
+    // 계정 만들기 · 계정 삭제 URL 행
+    const guideRow = (q: string): string =>
+      GUIDE.split('\n')
+        .map((l) => l.trim())
+        .find((l) => l.startsWith(`| ${q} |`)) ?? '';
+    expect(guideRow('로그인 › 데이터 보안 › 계정 만들기')).toContain('OAuth');
+    expect(guideRow('로그인 › 데이터 보안 › 계정 삭제 URL')).toContain(
+      `\`https://<서비스 주소>${ACCOUNT_DELETE_PATH}\``,
+    );
+  });
+
+  it('4번 쿠키 표가 ACCOUNT_COOKIES · shared 쿠키 이름과 같고, 로그인하지 않으면 쿠키를 쓰지 않는다고 적었다', () => {
+    expect(ACCOUNT_COOKIES.map((c) => c.name).sort()).toEqual([OAUTH_COOKIE, SESSION_COOKIE].sort());
+    const rows = tableCells(section('device'), 'cookies');
+    expect(rows.length).toBe(ACCOUNT_COOKIES.length);
+    for (const c of ACCOUNT_COOKIES) {
+      const row = rows.find((r) => r[0] === c.name);
+      expect(row, `쿠키 표에 ${c.name}`).toBeDefined();
+      expect(row?.slice(1)).toEqual([c.when, c.what, c.keep]);
+    }
+    // '쿠키를 쓰지 않습니다'는 이제 조건 없이 말하지 않는다
+    expect(PRIVACY).not.toContain('쿠키와 광고 ID를 쓰지 않습니다');
+    const first = plain(/<p>([\s\S]*?)<\/p>/.exec(section('device'))?.[1] ?? '');
+    expect(first).toMatch(/쿠키는[^.]*로그인[^.]*씁니다/);
+    const when = byTestId('p', 'cookies-when');
+    expect(when).toContain('로그인하지 않으면 쿠키를 쓰지 않습니다');
+    expect(when).toContain('HttpOnly');
+    // 기기에서 계정으로 올리는 성장 기록도 4번 '서버로 보내지 않습니다'의 예외에 적었다
+    expect(/서버로 보내지 않습니다\(([^)]*)\)/.exec(first)?.[1] ?? '').toMatch(
+      /로그인한 경우 성장 기록은[^)]*계정으로 올립니다/,
+    );
+  });
+
+  it('구글 로그인 사실: 범위 openid뿐 · 이메일 · 이름 · 사진을 받지 않음 · 구글로 가는 것은 앱 식별자 · 돌아올 주소 · state · nonce', () => {
+    const when = byTestId('p', 'account-when');
+    expect(when).toContain('openid');
+    expect(when).toContain('이메일 · 이름 · 프로필 사진은 받지 않습니다');
+    expect(when).toMatch(/로그인한 경우에만/);
+    const google = byTestId('p', 'google-login');
+    for (const word of ['Google LLC', '클라이언트', '돌아올', 'state', 'nonce', 'openid', '고유 ID'])
+      expect(google, word).toContain(word);
+    expect(google).toMatch(/개인정보를 구글로 이전하지 않습니다/);
+    expect(section('transfer')).toContain('data-testid="google-login"');
+    // 설계 문서의 인가 요청과 같은 사실 (범위 openid · 토큰은 서버로 POST)
+    const plan = readFileSync('docs/ACCOUNT_PLAN.md', 'utf8');
+    expect(plan).toContain('scope=openid&');
+    expect(plan).toContain('response_mode=form_post');
+  });
+
+  it('보관 · 삭제 · 처리 근거: 계정을 지울 때까지 · 지우면 바로 · 삭제 두 길(설정 · 웹 페이지) · 로그아웃, 근거 문단에 로그인 항목', () => {
+    const keep = byTestId('li', 'account-retention');
+    expect(keep).toContain('계정을 지울 때까지');
+    expect(keep).toContain('바로');
+    const del = /<li data-testid="account-delete">([\s\S]*?)<\/li>/.exec(section('rights'))?.[1] ?? '';
+    expect(del).toContain(`href="${ACCOUNT_DELETE_PATH}"`);
+    expect(plain(del)).toMatch(/설정 › 계정 › 계정 삭제\(두 번 확인\)/);
+    expect(plain(del)).toMatch(/바로/);
+    expect(byTestId('li', 'account-logout')).toContain('로그아웃');
+    const basis = plain(/<p data-testid="legal-basis">([\s\S]*?)<\/p>/.exec(PRIVACY)?.[1] ?? '');
+    for (const d of accountData)
+      for (const part of d.label.split(' · ')) expect(basis, d.label).toContain(part);
+    expect(basis).toContain('동의를 받아 처리하는 항목은 없습니다');
+    // 스토어 문서 · 안내서에도 같은 계정 삭제 URL
+    expect(loginChapter).toContain(`\`https://<서비스 주소>${ACCOUNT_DELETE_PATH}\``);
+    expect(GUIDE).toContain(`\`https://<서비스 주소>${ACCOUNT_DELETE_PATH}\``);
+  });
+
+  it('DB 자리: 처리방침의 db 주석은 짝이 맞고, 공개 문서에 초안 표시(DB 결정 대기)가 없다', () => {
+    expect(PRIVACY.match(/<!--db-->/g)?.length ?? 0).toBe(PRIVACY.match(/<!--\/db-->/g)?.length ?? 0);
+    expect(PRIVACY).not.toMatch(/DB 결정 대기|정해지면/);
   });
 });
 

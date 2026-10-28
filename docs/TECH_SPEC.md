@@ -23,7 +23,8 @@ decoy-web/
 ├─ docs/
 ├─ shared/src/
 │  ├─ balance.ts              ← balance.json 로드 + 타입
-│  ├─ types.ts                ← 엔티티, 메시지 타입
+│  ├─ types.ts                ← 엔티티, 메시지 타입 (계정 API 요청 · 응답 타입은 '계정' 절)
+│  ├─ account.ts              ← 선택형 구글 로그인: 계정 API 경로 · 로그인 시작 · 콜백 · 삭제 페이지 경로 · 쿠키 이름 · 로그인 결과 표시(서버 · 클라이언트 · 서비스 워커 · 시험이 같은 값)
 │  ├─ map.ts                  ← 48×32 타일 맵 데이터, 구역 · 스폰 · 거점 · 탈출구 좌표
 │  ├─ geometry.ts             ← 원-사각 충돌, 레이캐스트, 시야 다각형, 부채꼴 판정
 │  ├─ movement.ts             ← 입력 → 이동 (서버와 클라이언트 예측이 같은 함수를 쓴다)
@@ -41,14 +42,15 @@ decoy-web/
 │  └─ meta/                   ← 판 밖 성장 · 보상 (`@decoy/shared/meta`, 순수 계산 — 서버 · 기기가 같이 쓴다)
 │     ├─ progression.ts · progressionCheck.ts ← progression.json 타입 · 모양 검사(시험 · 서버 시작)
 │     ├─ rating.ts            ← 판 기록 → 평가(항목 넷 · 단계 0~4) → 경험치 · 레벨 곡선
-│     ├─ daily.ts             ← 날짜 글 · 일일 도전 고르기(날짜 해시) · 도전 진행 · 판 불씨 · 접속 보상 (메타 b)
+│     ├─ daily.ts             ← 날짜 글 · 일일 도전 고르기(날짜 해시) · 도전 진행 · 판 불씨 · 접속 보상 (메타 b) · 시간대 자정 날짜(`dayKeyInZone`, 계정 날짜)
 │     ├─ costume.ts           ← 의상 값 · 해금 · 입기 (메타 c). 받은 의상 거르기 · 역할 의상은 `shared/src/costume.ts`
-│     └─ profile.ts           ← 성장 기록 형식(판 번호 v) · 읽기 검사 · 판 적립(같은 판 한 번) · 계정으로 올릴 때 합치기
+│     └─ profile.ts           ← 성장 기록 형식(판 번호 v) · 읽기 검사 · 판 적립(같은 판 한 번) · 빈 기록 판별 · 합치기(`mergeProfiles` — 로그인에는 쓰지 않는다, DECISIONS 15절)
 ├─ server/src/                ← Node 전용 바깥 일만 (shared에는 `node:*` · `ws` · `fs` import 금지, eslint)
 │  ├─ index.ts                ← HTTP(정적 파일 · 테스트 훅) + ws 소켓 + setInterval → ServerCore
 │  ├─ config.ts · static.ts   ← 실행 옵션 · balance.json 읽기, 정적 파일(빌드가 미리 압축한 brotli · gzip 사본을 받는 쪽에 맞춰, 없으면 gzip)
 │  ├─ quickBots.ts            ← 빠른 매칭 같은 프로세스 실전 봇 드라이버(시작 때 실전 봇 지도 준비)
 │  ├─ sendPolicy.ts           ← 연결별 송신 큐 · 밀림 처리
+│  ├─ account/                ← 선택형 구글 로그인 · 계정 저장 (기본 꺼짐, 3.6): 설정(환경 변수) · 구글 ID 토큰 검증(googleToken) · 서명 쿠키 세션(session) · 저장소 모양(store — DB는 사용자가 고른다) · 적립 서비스(service) · 계정 API · 로그인 경로 · 삭제 페이지
 │  ├─ truthLog.ts             ← 정답 상태 파일 기록 (--truth-log)
 │  └─ bots.ts                 ← 개발 · 테스트용 WebSocket 봇
 ├─ client/src/
@@ -58,7 +60,8 @@ decoy-web/
 │  ├─ ui/                     ← HUD, 미니맵, 배너, 튜토리얼, 레벨 · 불씨 칩, 결과 화면 · '내 기록' 창 · 옷장 · 설정 화면 · 조작 배치 편집(나눠 받는 조각 `result` · `hub` · `wardrobe` · `settingsPanel` · `layoutEditor` — resultHost · hubHost · hub · settingsHost · layoutEditorLoader가 받는다)
 │  ├─ art/chars/costume/      ← 의상 그림 (나눠 받는 조각 `art`: 의상 여섯, 역할 그림의 의상 자리에 얹는다) · registry(첫 묶음, 등록부)
 │  ├─ art/costumeBake.ts      ← 굽기에 입힐 의상 (판 시작 명단 · 로비 내 역할 → 역할마다 의상, 조각이 오기 전엔 기본)
-│  ├─ meta/                   ← 성장 기록 저장소(profileStore: 바꿔 끼울 수 있는 ProfileStore, 지금은 기기) · 상태(meta) · 입은 의상(wearing, 판 밖 화면 그림용)
+│  ├─ meta/                   ← 성장 기록 저장소(profileStore: 바꿔 끼울 수 있는 ProfileStore — 기기 ↔ 계정) · 상태(meta) · 입은 의상(wearing, 판 밖 화면 그림용)
+│  ├─ account/                ← 선택형 구글 로그인 화면 쪽 (3.6): 첫 묶음 — 계정 상태 읽기 · 계정 API 호출 · ServerProfileStore · 표시(`decoy:account`), 나눠 받는 조각 `account` — 설정 '계정' 칸 · 첫 로그인 기록 고르기 창 · 로그인 결과 안내
 │  ├─ localServer.ts          ← 기기 안 연습 서버 (나눠 받는 조각 `localServer`: 공유 시뮬레이션 · 봇 두뇌까지, app.ts가 받는다). 수치는 practiceBalance.ts(첫 묶음)
 │  ├─ phaserCore.js           ← Phaser 사용자 빌드 (배포 빌드의 'phaser' — 쓰는 이름 공간만, vite.config.ts가 FX 등을 빈 모듈로)
 │  └─ debug.ts                ← window.__DECOY__ 디버그 훅 · ?debug=1 오버레이 (나눠 받는 조각 `debug`: 주소에 ?debug가 있을 때만 받고 받은 뒤 앱 시작)
@@ -92,6 +95,7 @@ decoy-web/
 | 공통 | 거점 게이지 · 상태, 탈출구 상태, 감옥 상태(누가 갇혔는지는 생존자만), 알림 이벤트, 남은 시간 | — |
 | 판 결과 (메타) | 받는 사람 **자기** 판 평가(`result.rating`, 판이 끝날 때 한 번) | 남의 평가 · 레벨(판이 끝난 뒤에도), 판 중의 평가 · 레벨 · 판 기록 |
 | 의상 (메타 c) | 판 시작 명단(`match.info.roster[].costume`, 기본이면 칸 없음): 생존자 명단에 생존자 넷의 그 역할 의상(동료 · 괴물), 괴물 명단은 자기 하나뿐. 빠른 매칭은 자기 의상만 | 괴물에게 생존자 의상(판 시작 명단에 생존자가 없다), 로비 · 결과 · 스냅샷의 의상 칸(누구에게도), 빠른 매칭의 남의 의상(봇 자리는 늘 기본이라 사람 단서) |
+| 계정 (선택형 구글 로그인, 3.6) | 그 계정의 연결에만 `credit`(적립 결과 · 계정 기록 글, 판 결과를 보낸 뒤). 계정 상태 · 기록은 게임 메시지가 아니라 HTTP 계정 API로 자기 세션에만 | 계정 ID · 로그인 여부 · 레벨 · 계정 기록(로비 · 판 시작 명단 · 스냅샷 · 결과 · 어떤 게임 메시지에도 없다 — `Seat.account`는 서버 안에만), 같은 방 다른 사람의 `credit`. 빠른 매칭에서 로그인한 사람이 있는 판과 없는 판의 다른 자리 메시지가 같다 |
 
 - 시야 판정은 `shared/visibility.ts` 하나를 서버(필터링)와 클라이언트(안개 그리기)가 같이 쓴다
 - **테스트로 보장한다**: 괴물 클라이언트가 받은 모든 스냅샷에 시야 밖 생존자의 좌표가 없어야 한다
@@ -105,13 +109,31 @@ decoy-web/
 
 - **판 기록**: 방(`room.ts`)이 판마다 `MatchRecorder`를 만들고 `game.step()` 뒤 틱마다 상태를 보인다. 기록기는 상태를 **읽기만** 하고 난수를 쓰지 않는다(규칙 골든 해시 · 봇 판 그대로 — 단위 시험이 켜고 끈 판의 상태를 견준다). 시야가 필요한 수치는 방이 스냅샷 틱에 이미 계산한 시야 사실(`VisibilityFacts`)로만 센다
 - **평가**: 판이 끝나는 틱에 `rateMatch`(공용)로 사람 자리마다 평가를 만들어 `resultFor`가 받는 사람 자기 것만 결과에 싣는다(`buildResult`는 그대로 — 골든 해시). 판 ID = 방 코드 · 판 번호 · 끝난 시각(새 난수 없음). 결과 단계에 다시 붙으면 같은 평가를 다시 보낸다
-- **보상**: 지금은 클라이언트가 `applyRating`(공용 순수 함수)으로 경험치를 적립하고 `ProfileStore`(지금은 `DeviceProfileStore` — `decoy:progress`)에 저장한다. 적립 직전에 저장소를 다시 읽어 다른 탭의 적립을 덮지 않는다(저장에 실패해 메모리에만 있는 적립이 있으면 다시 읽지 않는다 — 읽기만 되는 저장소에서 옛 기록으로 돌아가지 않게). 다음 단계 서버 저장은 같은 함수 · 같은 형식으로 서버가 적립하고 `ServerProfileStore`를 끼운다
+- **보상**: 게스트(로그인하지 않음 · 로그인 꺼짐 · 계정 읽기 실패)는 클라이언트가 `applyRating`(공용 순수 함수)으로 경험치를 적립하고 `ProfileStore`(`DeviceProfileStore` — `decoy:progress`)에 저장한다. 적립 직전에 저장소를 다시 읽어 다른 탭의 적립을 덮지 않는다(저장에 실패해 메모리에만 있는 적립이 있으면 다시 읽지 않는다 — 읽기만 되는 저장소에서 옛 기록으로 돌아가지 않게). 로그인한 경우는 서버가 같은 함수 · 같은 형식으로 계정에 적립하고 클라이언트는 `ServerProfileStore`를 끼운다(3.6)
 - **수치**: `config/progression.json`을 서버 · 클라이언트가 빌드에 넣는다(판정 수치가 아니라 `balance.json`과 따로). 모양 검사는 서버 시작 · 단위 시험
-- **불씨 · 일일 도전 · 접속 보상**(b): `applyRating`이 그날 날짜 글을 받아 도전 진행 · 불씨까지 적립하고, 접속 보상은 `claimLogin`(하루 한 번, 연속 날). 날짜 글은 클라이언트가 기기 시계로 만든다(`meta.ts localDay`, 자정 기준) — 자정 + 1초 타이머와 앱으로 돌아올 때 칩 · 창을 다시 그린다. 접속 보상은 자동으로 주지 않고 '내 기록' 창에서 받는다(부팅 때 저장소에 쓰지 않는다)
+- **불씨 · 일일 도전 · 접속 보상**(b): `applyRating`이 그날 날짜 글을 받아 도전 진행 · 불씨까지 적립하고, 접속 보상은 `claimLogin`(하루 한 번, 연속 날). 날짜 글은 게스트면 클라이언트가 기기 시계로 만든다(`meta.ts localDay`, 자정 기준), 계정이면 서버 시각 + 계정 시간대(3.6) — 자정 + 1초 타이머와 앱으로 돌아올 때 칩 · 창을 다시 그린다. 접속 보상은 자동으로 주지 않고 '내 기록' 창에서 받는다(부팅 때 저장소에 쓰지 않는다)
 - **의상**(c): 고른 의상(팀마다 하나)을 `join.costume` · `quick.costume` · 판 밖 `costume` 메시지로 보낸다. 서버(`room.ts`)는 id만 거르고(`sanitizeCostumeChoice`, 모르는 값 = 기본) 자리에 두며, 판 중에는 바꾸지 않는다(다시 들어와도 판 시작 의상). 봇 자리는 기본. 판 시작 명단에만 싣고(`matchInfo` — 위 3.3 표) 클라이언트는 그 명단으로 굽기 의상을 정한다(`costumeBake.ts`). 괴물 클라이언트는 생존자 의상을 받지 않으니 굽지도 않고, 괴물 화면 공통 생존자 그림은 의상 인자가 없다(`CommonArtOptions.costume?: never`)
 - **같은 칸 바꿔 굽기**(c): 의상은 그 역할 프레임을 같은 이름 · 같은 칸 · 같은 상자로 다시 그린다 — 텍스처 크기 그대로. 판 시작 명단 · 늦게 온 의상 그림으로 의상만 바뀌면 그 주인 칸만 지우고 다시 그려 같은 텍스처 키로 다시 올린다(`atlas.ts recostumeAtlas`, 리그를 다시 만들지 않는다). 기존 캐릭터 스타일에는 의상이 없다
 - **나눠 받기**: 결과 화면 코드(`ui/result.ts` · `ui/resultRating.ts`)와 '내 기록' 창(`ui/hub.ts`)은 동적 import 조각이다. 첫 화면을 그린 뒤 판 밖 쉬는 시간에 미리 받고(판 중에는 받지 않는다), 받지 못하면 승리 팀 · 버튼만 있는 작은 결과 + "새 버전이 있어요"(새 배포의 서버에는 옛 조각이 없다 — 서비스 워커가 바로 앞 빌드 셸을 남겨 옛 화면의 옛 조각을 거기서 주지만(번들 줄이기), 그 셸에도 없으면 이 대처로 간다). 적립은 첫 묶음 코드가 하므로 조각 실패와 무관하다. 의상 그림(조각 `art`)과 옷장(조각 `wardrobe`, 옷장 탭을 열 때)도 같다 — 의상 그림을 받지 못하면 기본 그림으로 굽고(장식뿐이라 판은 같다) 해금 · 입기는 된다. 첫 묶음은 한 조각이다(`vite.config.ts` codeSplitting `$initial` — 나눠 받는 조각이 첫 묶음 모듈을 함께 써도 첫 묶음을 공용 조각으로 쪼개지 않는다)
 - **나눠 받기 (번들 줄이기, DECISIONS 11절)**: 기기 안 연습 서버(`localServer` — 공유 시뮬레이션 · 봇 두뇌), 설정 화면(`settingsPanel`), 조작 배치 편집(`layoutEditor`), 디버그 훅 · 오버레이(`debug`)도 조각이다. 연습 · 설정은 판 밖 쉬는 시간에 미리 받고 설정은 화면(DOM)까지 만들어 둔다 — 판 중 메뉴로 처음 열 때 받거나 만들지 않는다(아직이면 판 시작 때 받기 시작). 배치 편집은 로비에서 설정을 열 때(터치), 디버그는 주소에 `?debug`가 있을 때만 받고 그때는 받은 뒤 앱을 시작한다(첫 화면이 그려질 때 훅이 있다). 받지 못하면 "새 버전이 있어요"(설정 · 연습 · 배치 편집은 그 화면을 열지 않고 첫 화면 · 설정 화면은 그대로). CSS는 첫 CSS에 둔다. 서비스 워커 셸에는 모든 조각이 들어가 오프라인 · 설치 앱에서도 같다. 배포 빌드의 Phaser는 사용자 빌드(`client/src/phaserCore.js` — 로더 · 트윈 · 시계 · 씬 입력 플러그인 · 스프라이트 · FX를 뺐다, 게임 설정 `disablePreFX` · `disablePostFX`)이고, 빠진 기능을 쓰면 `tests/unit/phaser-core.test.ts`가 잡는다
+
+### 3.6 선택형 구글 로그인 · 계정 저장 (설계 `docs/ACCOUNT_PLAN.md`, 결정 DECISIONS 15절)
+
+게스트 플레이는 그대로 두고, 로그인하면 메타 기록(레벨 · 경험치 · 불씨 · 도전 · 접속 보상 · 해금하고 입은 의상)을 계정에 두어 여러 기기에서 같이 쓴다. 규칙 · 판정 · `balance.json` · `progression.json` · 판 안 게임 플레이는 그대로다.
+
+- **꺼짐이 기본**: 환경 변수 `DECOY_LOGIN=1`과 `GOOGLE_CLIENT_ID` · `DECOY_SESSION_SECRET` · DB 접속 값이 모두 있어야 켜진다(선택 `DECOY_ACCOUNT_TIMEZONE`, 기본 `Asia/Seoul`). 하나라도 없거나 틀리면 꺼진 채로 뜨고 로그에 빠진 이름만 적는다. 꺼져 있으면 `GET /api/account` = `{on:false}`, 계정 화면 없음, 소켓 연결에 계정을 붙이지 않는다. 시험 전용(`--test-hooks`) 메모리 저장소 · 가짜 구글은 배포 서버가 받지 않는다
+- **로그인 흐름 — OpenID Connect 리디렉트**: `GET /auth/google/start` → 서버가 무작위 `state` · `nonce`를 짧은 쿠키(`decoy_oauth`, HttpOnly, 10분, HTTPS면 `SameSite=None; Secure` — 구글에서 돌아오는 다른 사이트발 POST에 실려야 한다)에 두고 구글 인가 주소로 302(`response_type=id_token`, `response_mode=form_post`, `scope=openid`, `prompt=select_account`) → 구글이 `id_token` · `state`를 `/auth/google/callback`으로 POST → state(시간 상수 비교) · 토큰 · nonce 확인 → 계정 찾기 · 만들기 → 세션 쿠키 → 303 `/?login=ok`(삭제 페이지에서 시작했으면 `/account/delete`), 실패는 `/?login=fail|cancel|off|db`. 팝업 · 구글 스크립트(GIS)가 없어 PC · 휴대폰 · 스토어 앱(TWA, Chrome Custom Tabs)이 같은 길이다
+- **토큰 검증**(`server/src/account/googleToken.ts`, `node:crypto`만): JWT 모양, `alg` RS256만(`none` · `HS256` 거절) · `kid` 필수, 구글 JWKS(`Cache-Control max-age`만큼 두고 모르는 `kid`면 1분에 한 번까지 다시 받기, 5초 제한), 서명 확인 → `iss`(accounts.google.com 두 형태) · `aud` = 클라이언트 ID · `exp`(60초 여유) · `iat`(300초 미래까지) · `nonce` · `sub` 모양. 실패 이유는 로그에 종류만
+- **세션**(`session.ts`): `decoy_sid` = `v1.<계정 ID>.<발급 초>.<HMAC-SHA256 서명>` HttpOnly · SameSite=Lax · 180일, 7일 지난 세션은 상태 읽기 때 새로 발급. DB 없이 서명만으로 확인한다(소켓 연결이 DB를 기다리지 않게). 계정 ID는 무작위 32자 16진수 — 구글 `sub`는 쿠키 · 화면 · 메시지에 가지 않는다. 화면이 계정을 알아보는 표시 `tag`(HMAC에서 만든 16자, `decoy:account`)
+- **저장**: 계정 하나 = 계정 ID + 구글 `sub` + 성장 기록 글(`serializeProfile`) + 만든 · 바꾼 시각(`server/src/account/store.ts` `AccountStore`). DB는 사용자가 고른다 — 실제 저장소는 이 모양을 따른다. 모든 DB 호출 3초 제한
+- **계정 API**(경로 `shared/src/account.ts`, 타입 `types.ts` '계정' 절): `GET /api/account`(상태) · `POST import`(첫 로그인 기기 기록 올리기 — 계정이 비었으면 올리고, 있으면 고른 쪽) · `claim-login`(본문 없음, 계정 날짜로) · `costume`(해금 · 입기) · `logout` · `delete`(행 바로 삭제). POST는 `x-decoy-account: 1` 헤더 + 같은 출처 `Origin`(CSRF), 본문 상한(import 32KB · 그 밖 2KB), 비율 제한(IP마다 `/auth/*` 1분 20번 · 계정마다 POST 1분 60번), `cache-control: no-store`. 401 `auth` · 403 `csrf` · 404 `off` · 413 · 429 `rate` · 503 `db`. 계정 삭제 웹 페이지 `/account/delete`(서버가 그리는 HTML, 스크립트 없음 — 로그인해 바로 삭제, Play '계정 삭제 URL')
+- **서버 적립**(`service.ts`): 소켓 연결 때 세션 쿠키를 서명으로 확인해 `Conn.account`에 두고, 방은 자리의 마지막 연결 계정을 `Seat.account`로 들고 있다가 판 결과를 보낸 **뒤** `RoomHooks.rated(room, seat, rating)`으로 넘긴다. 서비스는 계정마다 한 줄로 세워(인스턴스 1개) 읽기 → `parseProfile` → `applyRating(…, 계정 날짜)` → 저장, 같은 판 ID면 저장 없이 성공, 지워진 계정은 다시 만들지 않는다. 결과는 그 계정의 모든 연결에 `credit`. DB 실패는 0.5 · 2 · 6초 뒤 다시 시도, 그래도 안 되면 `ok:false`. 기기가 보낸 적립 값은 쓰지 않는다. **봇과 연습(기기 안 서버)은 적립하지 않는다** — 서버가 판정하지 않은 판이다
+- **계정 날짜**: `dayKeyInZone(서버 시각, DECOY_ACCOUNT_TIMEZONE)` — 기기 시계를 쓰지 않아 시계를 돌려 도전 · 접속 보상을 다시 받을 수 없다. 게스트(기기 기록)는 그대로 기기 자정
+- **화면**: 첫 묶음(`client/src/account/`)은 `decoy:account`가 있거나 주소에 `?login=`이 있을 때만 상태를 읽는다(게스트 · 꺼짐은 요청 없음). 계정 모드면 `MetaState`가 `ServerProfileStore`를 끼우고 받기 · 해금 · 입기는 계정 API, 온라인 판 결과는 `credit`을 기다린다(20초 안에 없으면 상태를 다시 읽어 판 ID로 확인). 첫 로그인: 기기 기록이 비었으면 묻지 않고, 계정이 비었으면 올리고, 둘 다 있으면 고르기 창(더하지 않는다). 기기 기록(`decoy:progress`)은 지우지 않는다 — 로그아웃하면 다시 게스트 기록. 로그인 · 로그아웃 · 삭제는 판 밖에서만. 나눠 받는 조각 `account`(설정 '계정' 칸 · 고르기 창 · 결과 안내), 못 받으면 "새 버전이 있어요"
+- **장애**: 상태 읽기가 401이면 표시를 지우고 게스트, 실패 · 503이면 이번 접속은 게스트(기기 기록)로 하고 한 줄 안내 — 판은 그대로. 서버 로그에 `sub` · 계정 ID · 토큰을 남기지 않는다(로그인 · 적립 수만)
+- **서비스 워커**: `/api/` · `/auth/` · `/account/`를 가로채지 않는다(`ACCOUNT_PASS_PREFIXES` ⊂ `sw.js` PASS — 앱 셸 · 깨우기 화면으로 바꿔 주면 로그인이 깨진다)
+- **정보 숨김**: 3.3 표 '계정' 행. 적립은 결과를 보낸 뒤 비동기라 다른 사람에게 가는 메시지의 시각 · 순서를 바꾸지 않는다
+- **번들**: 첫 로딩 +3KiB · 전체 +12KiB 안(구글 스크립트 없음)
 
 ## 4. 시야 렌더링
 
@@ -167,6 +189,7 @@ decoy-web/
 | 일의 양 예산 (렌더링 최적화) | 프레임당 일이 늘지 않는지 | 가상 시계 120Hz 10초 동안 센 2D 명령 · 그리기 호출 · 텍스처 올리기 · 캔버스 크기 바꾸기가 기준값 × 1.05 이하 (`tests/e2e/perf-budget*.spec.ts`, 같은 빌드면 같은 수). 시간 수치는 `npm run perf:frame` 기록용(`docs/PERF.md`) |
 | 판 밖 성장 (메타) | 판 기록 · 평가 · 저장 · 정보 숨김 | 기록기를 켜고 끈 봇 판의 상태가 같다 · 타격 · 수감 · 사망 · 구조 · 따돌림 · 포효 · 끊은 점령 · 탈출 세기(`tests/unit/meta-record.test.ts`), 평가 · 경험치 · 레벨 곡선 · progression.json 검증(`meta-rating`), 저장 형식 · 모르는 칸 보존 · 높은 판 읽기만 · 같은 판 한 번 · 합치기(`meta-profile`), 저장 · 불러오기 · 막힘 · 가득 참 · 지워짐 · 두 탭(`meta-client`), 결과에 자기 평가만 · 판 중 메시지에 평가 칸 없음(`meta-room`), 연습 판 평가 · 저장 · 레벨 칩 · 저장 실패 · 결과 조각 실패 · 괴물이 받은 원문 프레임(`tests/e2e/meta.spec.ts`) |
 | 의상 (메타 c) | 정보 숨김 · 굽기 · 유불리 없음 · 해금 | 판 시작 명단(생존자끼리 · 괴물은 자기만 · 빠른 매칭은 자기만) · 로비 · 결과 · 스냅샷에 의상 칸 없음 · 받은 의상 거르기 · 판 중 받은 의상은 판 뒤에(`tests/unit/costume-room.test.ts`), 값 · 해금 · 입기 · 기록 칸 · 다음 빌드 의상 보존(`meta-costume` · `meta-client`), 같은 칸 · 같은 상자 · 공통 생존자 칸은 의상과 무관 · 크기 기준 · 청록 없음(`char-frames-costume`), 괴물 의상 보이는 정도 = 기본 · 몸 가운데 원판 — Canvas처럼 칠하는 Node 래스터 · 게임 크기 10가지 × 21프레임 × 회전 · 위상 · Chromium 기준 값(`costume-parity*.test.ts`), 괴물이 받은 원문 프레임 · 의상이 다른 생존자 셋의 괴물 화면 조각이 같다 · 옷장 해금 · 두 번 누름 · 조각 막힘(`tests/e2e/costume.spec.ts`) |
+| 계정 (선택형 구글 로그인, 3.6 · ACCOUNT_PLAN 9절) | 토큰 검증 · 세션 · 설정 · 적립 · 계정 API · 정보 숨김 · 화면 · 실기기 없는 E2E | 단위: 토큰 검증(정상 · 가짜 서명 · 다른 키 · alg none/HS256 · 만료 · 미래 iat · aud · iss · nonce · 모양 깨짐 · 모르는 kid 다시 받기), 세션(위조 · 만료 · 다른 비밀), 쿠키 읽기, 설정(기본 꺼짐 · 빠진 값 · 배포에서 메모리 저장소 · 가짜 구글 거절), 서비스(첫 로그인 · 서버 적립 = 공용 함수 결과 · 같은 판 한 번 · 지운 계정 다시 안 만듦 · 동시 적립 순서 · DB 실패 다시 시도 · 계정 날짜), 라우트(꺼짐 · CSRF · 크기 · 401 · 503 · 삭제 즉시 · 삭제 페이지 · 기기 기록 올리기 두 갈래), 방(계정 ID가 메시지에 없음 · rated 훅 · 빠른 매칭 메시지 같음), 클라이언트(계정 모드 MetaState · 연습 판 적립 안 함 · credit · 실패 시 게스트), 서비스 워커 PASS, 계약(`account-contract`), 처리방침 · 스토어 문서 대조(`privacy` — `ACCOUNT_DATA` · 쿠키 표 · 계정 API 요청 필드). E2E(가짜 구글 · 메모리 저장소): 로그인 → 기기 기록 올리기 · 고르기 → 서버 판 적립 → 새 브라우저 컨텍스트에서 같은 기록 → 로그아웃 → 계정 삭제(설정 · 웹 페이지), 로그인 꺼짐(계정 요청 없음 · 칸 없음), DB 장애에서 게스트로 판 끝까지, 괴물이 받은 원문에 계정 단서 없음, 번들 두 줄 · 조각 따로, 오프라인 시작 |
 | 번들 · 나눠 받기 · 압축 (번들 줄이기) | 첫 로딩이 늘지 않는지 · 조각이 제때 오는지 · 오프라인 · 새 배포 직후 | 첫 로딩 JS(첫 묶음) · 전체 JS(모든 조각) gzip이 상한 · 마일스톤 예산 아래, 나눠 받는 조각 여덟이 따로 있다(`tests/e2e/bundle-size.spec.ts` @core), 첫 화면 HTML은 첫 묶음 하나 · 쉬는 시간에 결과 · 내 기록 · 설정(화면까지) · 연습 · 의상 그림을 받고 ?debug가 없으면 디버그 조각을 받지 않는다 · 연습 시작 · 판 중 설정 처음 열기에 JS를 더 받지 않고 긴 작업 없음 · 조각을 못 받으면 "새 버전이 있어요"(`lazy-chunks.spec.ts`), 셸에 모든 조각 · 오프라인으로 다시 열어 설정 · 배치 편집 · 연습 · 새 배포 뒤 옛 화면이 앞 빌드 셸에서 옛 조각을 연다(`m13-offline.spec.ts`), 서비스 워커 결정표 · 미리 압축(`sw-shell.test.ts`), brotli · gzip 사본 전송 · 옛 사본 안 씀(`static-gzip.test.ts`), Phaser 사용자 빌드에 없는 기능을 쓰지 않음(`phaser-core.test.ts`). 배포판은 `verify:deploy --url`(GitHub Actions '배포판 검증') |
 | 판정 불변 골든 (Vitest) | 그래픽 · 모바일 작업(M10~) 중 규칙 · 판정 · 정보 차단이 그대로인지 | 고정 시드 + 스크립트 입력(이동 · 조준 · 공격 · 돌진 · 포효 · 능력 · 구조 · 시야 전환) 960틱 → 60틱마다 게임 상태 해시 (`tests/unit/rules-golden.test.ts`). 바뀌면 GAME_DESIGN 변경 이력과 함께 갱신 |
 

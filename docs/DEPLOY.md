@@ -16,6 +16,7 @@ npm start              # 기본 포트 8080. PORT=3000 npm start 처럼 바꿀 �
 
 - 헬스 체크: `GET /healthz` → `ok` (모든 응답에 `x-decoy-server: 1` 헤더가 붙는다. 깨우기 화면이 호스팅 서비스의 대기 화면과 이 서버의 응답을 구별하는 표시)
 - 서버 옵션: `--port` (또는 `PORT`), `--host` (또는 `HOST`, 기본 `0.0.0.0`), `--balance <파일>` (또는 `DECOY_BALANCE`), `--dev` (또는 `DECOY_DEV_BOTS=1`, 개발용 봇 방 `?bots=1`을 받는다 — 배포 서버에서는 넣지 않는다)
+- 계정(선택형 구글 로그인 · 계정 저장, `docs/ACCOUNT_PLAN.md`): **기본 꺼짐.** 환경 변수 `DECOY_LOGIN=1`과 `GOOGLE_CLIENT_ID` · `DECOY_SESSION_SECRET` · DB 접속 값이 모두 있을 때만 `/auth/google/start` · `/auth/google/callback` · `/api/account…` · `/account/delete`를 연다. 하나라도 없거나 틀리면 꺼진 채로 뜨고 서버 로그에 빠진 값의 이름만 적는다(꺼져 있으면 `/api/account`가 `{"on":false}`). 켜는 순서는 `docs/LOGIN_GUIDE.md`(사람이 할 일)
 - 배포 전 확인: `npm run verify:deploy` — Docker가 있으면 이미지를 빌드해 컨테이너로 띄우고, 없으면 빌드 결과물을 `PORT`로 띄워서 첫 화면 HTTP 200 · 스크립트 · WebSocket 방 만들기까지 확인한다
 
 ## 1. 로컬 (한 컴퓨터)
@@ -122,6 +123,13 @@ docker run -d --name decoy --restart unless-stopped -p 80:8080 decoy-web
 | `PRIVACY_CONTACT` | 값 없음 (`sync: false`, 대시보드에서 넣는다) | 개인정보 처리방침(`/privacy`, M15)의 문의처. 비어 있으면 "스토어의 개발자 연락처로 문의" |
 | `DECOY_MAX_BOT_ROOMS` | 무료 플랜: 넣지 않음(기본 2) · **Starter로 바꾸면 `16`** | 빠른 매칭에서 동시에 봇을 채울 방 수(M13c, 출시 전 검토에서 6 → 2). CPU 할당량 흉내 실측(DECISIONS 5절)에서 무료(CPU 0.1개)는 봇 방 3개부터 끊겼고, Starter(CPU 0.5개)는 코어가 2배 느리다고 쳐도 16개까지 여유가 있었다. 넘은 방은 '사람만 기다리는 중'으로 다른 판이 끝나기를 기다린다 |
 | `DECOY_DEV_BOTS` | **넣지 않는다** | 개발용 봇 방(`?bots=1`)을 켠다. 이 방은 봇 방 상한 밖이라 배포 서버에서 켜면 연결 하나가 봇 판을 계속 만들 수 있다 |
+| `DECOY_LOGIN` | **넣지 않는다** (기본 꺼짐) — Play 데이터 보안 신고를 고친 뒤 `1` | 선택형 구글 로그인 · 계정 저장을 켠다(`docs/ACCOUNT_PLAN.md`). 켜는 순서 · 확인 · 끄기는 `docs/LOGIN_GUIDE.md` 5~9단계 |
+| `GOOGLE_CLIENT_ID` | 값 없음 (`sync: false`, 대시보드에서 넣는다) | 구글 클라우드 OAuth 클라이언트 ID(`…apps.googleusercontent.com`, LOGIN_GUIDE 3단계). 로그인을 켤 때만 필요 |
+| `DECOY_SESSION_SECRET` | 자동 (`generateValue: true` — Blueprint가 무작위 값을 만든다) | 세션 쿠키 서명 비밀(32자 이상). 대시보드에 보이는지만 확인하고 저장소 · 메신저에 옮겨 적지 않는다. 바꾸면 로그인한 모든 사람이 로그아웃된다(계정 기록은 그대로) |
+| `DECOY_ACCOUNT_TIMEZONE` | 넣지 않음 (기본 `Asia/Seoul`) | 계정의 하루(일일 도전 · 접속 보상)가 바뀌는 시간대(IANA 이름). 게스트(이 기기 기록)는 그대로 기기 자정 |
+| DB 접속 값 | DB 결정 대기 | 계정 기록 저장소. 로그인을 켤 때만 필요 |
+
+> DB 결정 대기: DB 접속 환경 변수 이름 · `render.yaml` 행 · 무료 플랜 조건(보관 기간 · 백업)
 
 환경 변수는 Render 대시보드 → 서비스 → **Environment**에서 넣는다. **저장하면 서버가 다시 배포되어 열려 있던 방이 사라진다** — 아무도 없을 때 넣는다.
 
@@ -164,7 +172,7 @@ docker run -d --name decoy --restart unless-stopped -p 80:8080 decoy-web
   - 이미 열려 있던 페이지(태블릿이 잠자기에서 깨어난 경우 등): 화면 가운데에 **"서버에 다시 연결하는 중…"** 안내가 뜨고, 연결되면 저절로 다시 들어간다
   - **잠들기 전의 방은 사라진다.** 깨어난 뒤 방 링크로 들어가면 "방을 찾을 수 없습니다. 서버가 잠들었다 깨어나거나 다시 시작하면 방이 사라져요…" 안내와 함께 첫 화면이 나온다. 방장이 새 방을 만들어 링크를 다시 보낸다 (서버가 잠들지 않은 짧은 끊김이면 같은 방으로 돌아간다)
 - **플레이테스트 1~2분 전에 개발자가 주소를 한 번 열어** 깨워 둔다
-- 잠들거나 다시 배포되면 **방과 진행 중인 판이 사라진다** (메모리에만 있다). 판이 끝나면 새로 방을 만든다
+- 잠들거나 다시 배포되면 **방과 진행 중인 판이 사라진다** (메모리에만 있다). 판이 끝나면 새로 방을 만든다. 로그인을 켰다면 계정 기록은 DB에 있어 사라지지 않고, 로그인 상태(서명한 쿠키)도 그대로다
 - 싱가포르라 한국에서 핑이 70~100ms 안팎 나올 수 있다(목표 30~60ms보다 높다). 게임은 예측 · 보간으로 지연을 가리고 lag 100 · 200 봇 전체 판 검사를 통과하지만, 손맛은 `&debug=1`로 핑을 보며 확인한다 (`docs/HUMAN_CHECKS.md`)
 - 무료 인스턴스 시간은 한 달 750시간(워크스페이스의 무료 서비스 합산)이다. 서비스 하나는 한 달 내내 깨어 있어도(최대 744시간) 넘지 않는다. 무료 인스턴스는 CPU 0.1개 · 메모리 512MB다. 작업 환경에서 WebSocket 봇 4명으로 판을 돌렸을 때 서버는 CPU 한 코어의 약 3% · 메모리 약 70MB를 썼으니 여유는 있다. 그래도 판 중에 끊기는 느낌이 들면 유료(Starter) 플랜으로 올린다(`render.yaml`의 `plan: starter` → 잠들지도 않는다)
 - 무료 플랜 조건(잠드는 시간, 무료 시간, 리전)은 Render 요금 · 문서 페이지에서 배포 시점에 다시 확인한다
@@ -189,6 +197,7 @@ Railway 같은 서비스도 Dockerfile로 배포된다. 다만 아시아 리전�
 3. 주소에 `&debug=1`을 붙이면 FPS · 프레임 시간 · 핑 · 서버 틱이 보인다(PC는 왼쪽 아래에 펼친 표, 휴대폰은 맵 왼쪽 위의 작은 칩 — 누르면 펼친다). 핑이 80ms를 넘으면 더 가까운 리전을 고른다
 4. 느린 노트북은 로비의 그래픽 품질을 낮음으로(또는 주소에 `&quality=low`)
 5. **압축 전송 · 나눠 받는 조각** (번들 줄이기): GitHub 저장소 → Actions → **배포판 검증** → Run workflow → 배포 주소(`https://<주소>`)를 넣고 실행한다. 잠든 서버는 깨어날 때까지(최대 3분) 기다린 뒤, 첫 화면 JS와 앱 셸의 모든 JS 조각 · CSS · HTML이 brotli를 받는 쪽에는 `content-encoding: br`, gzip만 받는 쪽에는 `gzip`, 압축을 받지 않는 쪽에는 원본으로 오는지(풀면 같은지), WebSocket 접속 · manifest를 본다. 받은 바이트를 로그에 적는다. 컴퓨터에서는 `node scripts/verify-deploy.mjs --url=https://<주소>`로 같은 검사를 한다. 빌드가 텍스트 자산마다 `.br` · `.gz` 사본을 미리 만들고 서버가 고른다(요청마다 압축하지 않는다)
+6. **선택형 구글 로그인**(켰을 때만): `https://<주소>/api/account` → 로그인하지 않은 브라우저에서 `{"on":true,"signedIn":false}`. 꺼져 있으면 `{"on":false}`(기본). 기기마다 로그인 · 같은 기록 · 로그아웃 · 계정 삭제 확인은 `docs/LOGIN_GUIDE.md` 8단계
 
 ## 6. 문제 해결
 
@@ -203,6 +212,8 @@ Railway 같은 서비스도 Dockerfile로 배포된다. 다만 아시아 리전�
 | 깨우기 기능을 아예 빼고 싶다 | `client/public/sw.js`를 지우기만 하면 이미 설치된 기기에 남는다. 대신 내용을 `self.addEventListener('install', () => self.skipWaiting()); self.addEventListener('activate', () => self.registration.unregister());`로 바꿔 배포하고, `client/src/main.ts`의 등록 코드를 뺀다 |
 | Render 배포가 "Waiting for checks"에서 멈춰 있다 | `main`의 GitHub Actions 검사가 실패했거나 아직 도는 중이다 (`autoDeployTrigger: checksPass`). 검사를 고치거나 **Manual Deploy** |
 | 화면이 끊긴다 | 로비의 그래픽 품질을 낮음으로(또는 주소에 `&quality=low`), 다른 탭 · 프로그램 닫기, `&debug=1`로 FPS 확인 |
+| 설정에 '계정' 칸이 없다 · `/api/account`가 `{"on":false}` | 로그인 기능이 꺼져 있다(기본). 켰는데도 그렇다면 `DECOY_LOGIN` · `GOOGLE_CLIENT_ID` · `DECOY_SESSION_SECRET` · DB 값 중 빠진 것 — 서버 로그에 빠진 이름이 적힌다(`docs/LOGIN_GUIDE.md` 7단계) |
+| 구글 로그인 오류 (`redirect_uri_mismatch` · `403 disallowed_useragent` · "액세스 차단됨" · 주소 끝 `?login=fail` · `off` · `db`) | `docs/LOGIN_GUIDE.md` 10단계 표. 로그인이 안 돼도 게임은 게스트(이 기기 기록)로 그대로 된다 |
 
 ## 7. 옛 화면과 맞지 않는 배포 (프로토콜 버전)
 
