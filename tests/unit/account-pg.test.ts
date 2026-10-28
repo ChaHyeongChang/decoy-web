@@ -744,6 +744,10 @@ async function fakePg(mode: 'close' | 'silent' | 'stuck') {
     accepted: () => accepted,
     ended: () => ended,
     open: () => open.size,
+    /** 열린 연결마다 한 바이트 쓴다 (상대가 부쉈으면 RST로 닫힌다) */
+    poke: () => {
+      for (const sock of open) sock.write(Buffer.from([0x4e]));
+    },
     close: () =>
       new Promise<void>((resolve) => {
         for (const s of open) s.destroy();
@@ -878,9 +882,16 @@ describe('멈춘 DB (실제 드라이버 · 가짜 서버)', () => {
     try {
       await expect(store.get('a'.repeat(32))).rejects.toMatchObject({ code: 'QUERY_TIMEOUT' });
       expect(pg.accepted()).toBe(2);
-      // 이쪽이 닫았다: 서버가 끝(FIN)을 모든 연결에서 받았다 (서버는 반만 닫힌 채로 버틴다)
+      // 이쪽이 소켓을 완전히 부쉈다: 서버가 끝(FIN)을 받고, 그 뒤 서버가 쓰면 이쪽 커널이 RST로 답해 서버 쪽도 닫힌다.
+      // (드라이버처럼 우아하게 닫기만 하면 이쪽 소켓이 반만 닫힌 채 남아 서버가 쓴 것을 받아 버린다 — 서버 쪽이 닫히지 않는다)
       for (let i = 0; i < 50 && pg.ended() < 2; i += 1) await pause(20);
       expect(pg.ended()).toBe(2);
+      // 첫 쓰기에 RST가 돌아오고, 다음 쓰기에서 서버가 그것을 알아챈다
+      for (let i = 0; i < 25 && pg.open() > 0; i += 1) {
+        pg.poke();
+        await pause(40);
+      }
+      expect(pg.open()).toBe(0);
     } finally {
       await store.close().catch(() => undefined);
       await pg.close();
