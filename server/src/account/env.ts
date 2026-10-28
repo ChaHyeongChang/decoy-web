@@ -15,30 +15,28 @@ export const ACCOUNT_ENV = {
   /** 로그인 제공자 ('google' · 'test' — 가짜 구글은 --test-hooks일 때만, 시험 훅 모드 기본값) */
   idp: 'DECOY_ACCOUNT_IDP',
   /**
-   * DB 접속 주소 (DB 구현이 끼울 자리: 사용자가 DB를 고르면 그 DB의 이름으로 바꾼다 — DECISIONS 15절).
-   * 지금은 값이 있어도 'DB 구현 대기'로 로그인을 켜지 않는다
+   * 계정 기록 DB(PostgreSQL) 접속 주소 — Neon 대시보드 Connect의 접속 문자열 그대로 (postgresql://…?sslmode=require…).
+   * 다른 Postgres로 옮길 때 이 값만 바꾼다 (docs/LOGIN_GUIDE.md)
    */
   dbUrl: 'DATABASE_URL',
 } as const;
 
 /**
  * 설정 문제 하나: 환경 변수 이름과 종류만 (값은 넣지 않는다).
- * missing 빠짐 · invalid 모양이 틀림 · not-allowed 이 모드에서 쓸 수 없음(배포 서버의 메모리 저장소 · 가짜 구글) ·
- * pending DB 구현 대기
+ * missing 빠짐 · invalid 모양이 틀림 · not-allowed 이 모드에서 쓸 수 없음(배포 서버의 메모리 저장소 · 가짜 구글)
  */
 export interface ConfigProblem {
   name: string;
-  kind: 'missing' | 'invalid' | 'not-allowed' | 'pending';
+  kind: 'missing' | 'invalid' | 'not-allowed';
 }
 
 const KIND_TEXT: Record<ConfigProblem['kind'], string> = {
   missing: '없음',
   invalid: '틀림',
   'not-allowed': '이 서버에서 못 씀',
-  pending: 'DB 구현 대기',
 };
 
-/** 로그용 글: "GOOGLE_CLIENT_ID 없음, DATABASE_URL DB 구현 대기" (이름 · 종류만) */
+/** 로그용 글: "GOOGLE_CLIENT_ID 없음, DATABASE_URL 틀림" (이름 · 종류만) */
 export function describeProblems(problems: readonly ConfigProblem[]): string {
   return problems.map((p) => `${p.name} ${KIND_TEXT[p.kind]}`).join(', ');
 }

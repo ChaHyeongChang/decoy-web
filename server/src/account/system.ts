@@ -100,7 +100,7 @@ export function createAccountSystem(opts: AccountSystemOptions): AccountSystem {
   let keys: KeyProvider | null = null;
   let testIdp: TestIdp | null = null;
   if (config.enabled) {
-    store = opts.store ?? createAccountStore(config.store, opts.env);
+    store = opts.store ?? createAccountStore(config.store, opts.env, log);
     service = new AccountService({
       store,
       timeZone: config.timeZone,

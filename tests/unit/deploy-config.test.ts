@@ -68,8 +68,8 @@ describe('render.yaml: 선택형 구글 로그인 (docs/ACCOUNT_PLAN.md 3절)', 
   const vars = (): RenderEnvVar[] => blueprint.services[0]!.envVars;
   const byKey = (k: string): RenderEnvVar | undefined => vars().find((v) => v.key === k);
 
-  it('DECOY_LOGIN · GOOGLE_CLIENT_ID는 대시보드에서 넣는다 (sync: false, 값 없음 — 값을 적으면 Blueprint 동기화가 덮는다)', () => {
-    for (const k of [ACCOUNT_ENV.login, ACCOUNT_ENV.clientId]) {
+  it('DECOY_LOGIN · GOOGLE_CLIENT_ID · DATABASE_URL은 대시보드에서 넣는다 (sync: false, 값 없음 — 값을 적으면 Blueprint 동기화가 덮는다)', () => {
+    for (const k of [ACCOUNT_ENV.login, ACCOUNT_ENV.clientId, ACCOUNT_ENV.dbUrl]) {
       expect(byKey(k), k).toEqual({ key: k, sync: false });
     }
   });
@@ -78,9 +78,9 @@ describe('render.yaml: 선택형 구글 로그인 (docs/ACCOUNT_PLAN.md 3절)', 
     expect(byKey(ACCOUNT_ENV.sessionSecret)).toEqual({ key: ACCOUNT_ENV.sessionSecret, generateValue: true });
   });
 
-  it('DB 접속 값 · 시험 전용 값은 아직 넣지 않고, Blueprint 값만으로는 로그인이 켜지지 않는다 (기본 꺼짐)', () => {
+  it('시험 전용 값은 넣지 않고, Blueprint 값만으로는 로그인이 켜지지 않는다 (기본 꺼짐)', () => {
     const keys = vars().map((v) => v.key);
-    for (const k of [ACCOUNT_ENV.dbUrl, ACCOUNT_ENV.store, ACCOUNT_ENV.idp]) expect(keys).not.toContain(k);
+    for (const k of [ACCOUNT_ENV.store, ACCOUNT_ENV.idp]) expect(keys).not.toContain(k);
     const env: Record<string, string> = {};
     for (const v of vars()) if (v.value !== undefined) env[v.key] = v.value;
     expect(readAccountConfig(env, { testHooks: false, dev: false }).enabled).toBe(false);

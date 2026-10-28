@@ -1,5 +1,5 @@
 // 계정 설정 (docs/ACCOUNT_PLAN.md 3절): 기본 꺼짐 · 빠진 값은 이름만 · 배포 서버에서 메모리 저장소 · 가짜 구글 거절 ·
-// DB 구현 대기 · 로그 문구에 값이 없다
+// DB(DATABASE_URL — PostgreSQL)가 맞으면 켜짐 · 틀리면 이름만 · 로그 문구에 값이 없다
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_ACCOUNT_TIMEZONE,
@@ -17,8 +17,9 @@ const HOOKS = { testHooks: true, dev: false };
 const DEV = { testHooks: false, dev: true };
 const CLIENT = '123456789012-abcdefghijklmnopqrstuvwxyz012345.apps.googleusercontent.com';
 const SECRET = 'S3cr3t-value-that-must-never-be-logged-0123456789';
-// 가짜 접속 주소 (자격 증명 모양 없이 — 로그에 새지 않는지만 본다)
-const DB = 'postgres://decoy-db.example.invalid:5432/decoy?marker=never-log-this';
+// 가짜 접속 주소 (닿지 않는 도메인 — 로그에 사용자 · 비밀번호 · 호스트가 새지 않는지만 본다)
+const DB =
+  'postgresql://never-log-user:never-log-this@decoy-db.example.invalid/decoy?sslmode=require&channel_binding=require';
 
 function problems(cfg: AccountConfig): string[] {
   return cfg.problems.map((p) => `${p.name}:${p.kind}`).sort();
@@ -64,14 +65,32 @@ describe('계정 설정', () => {
     ]);
   });
 
-  it('DB 구현 대기: DB 접속 값이 있어도 켜지 않는다 (로그에 이름만)', () => {
-    const cfg = readAccountConfig(
-      { DECOY_LOGIN: '1', GOOGLE_CLIENT_ID: CLIENT, DECOY_SESSION_SECRET: SECRET, DATABASE_URL: DB },
-      DEPLOY,
+  it('DB 접속 값(DATABASE_URL)이 맞으면 배포 서버에서 켜진다 (PostgreSQL) — 틀리거나 없으면 이름만', () => {
+    const base = { DECOY_LOGIN: '1', GOOGLE_CLIENT_ID: CLIENT, DECOY_SESSION_SECRET: SECRET };
+    const cfg = readAccountConfig({ ...base, DATABASE_URL: DB }, DEPLOY);
+    expect(cfg).toMatchObject({ enabled: true, store: { kind: 'postgres' }, testIdp: false });
+    expect(describeAccountConfig(cfg)).toBe('계정 로그인: 켜짐 (postgres)');
+    expect(chooseAccountStore({ DATABASE_URL: DB }, DEPLOY)).toEqual({
+      ok: true,
+      choice: { kind: 'postgres' },
+    });
+    // 만들기는 접속하지 않는다
+    const store = createAccountStore({ kind: 'postgres' }, { DATABASE_URL: DB });
+    expect(store.kind).toBe('postgres');
+    void store.close();
+    for (const bad of [
+      'mysql://u:p@h/db',
+      'postgres://h/db',
+      'postgres://u:p@h/db?sslmode=nope',
+      'not a url',
+    ])
+      expect(problems(readAccountConfig({ ...base, DATABASE_URL: bad }, DEPLOY))).toEqual([
+        'DATABASE_URL:invalid',
+      ]);
+    expect(problems(readAccountConfig(base, DEPLOY))).toEqual(['DATABASE_URL:missing']);
+    expect(describeAccountConfig(readAccountConfig(base, DEPLOY))).toBe(
+      '계정 로그인: 꺼짐 (DATABASE_URL 없음)',
     );
-    expect(cfg.enabled).toBe(false);
-    expect(problems(cfg)).toEqual(['DATABASE_URL:pending']);
-    expect(describeAccountConfig(cfg)).toBe('계정 로그인: 꺼짐 (DATABASE_URL DB 구현 대기)');
   });
 
   it('배포 서버(시험 훅 · 개발 아님)는 메모리 저장소 · 가짜 구글을 거절한다', () => {
@@ -140,6 +159,13 @@ describe('계정 설정', () => {
     const logs: string[] = [];
     const envs = [
       { DECOY_LOGIN: '1', GOOGLE_CLIENT_ID: CLIENT, DECOY_SESSION_SECRET: SECRET, DATABASE_URL: DB },
+      // 모양이 틀린 DB 주소: 이름만 ('DATABASE_URL 틀림')
+      {
+        DECOY_LOGIN: '1',
+        GOOGLE_CLIENT_ID: CLIENT,
+        DECOY_SESSION_SECRET: SECRET,
+        DATABASE_URL: DB.replace('sslmode=require', 'sslmode=never-log-mode'),
+      },
       {
         DECOY_LOGIN: '1',
         GOOGLE_CLIENT_ID: 'leaky-client',
@@ -168,6 +194,8 @@ describe('계정 설정', () => {
       'leaky-client',
       'decoy-db.example.invalid',
       'never-log-this',
+      'never-log-user',
+      'never-log-mode',
     ])
       expect(all).not.toContain(secretish);
     // 이름은 보인다

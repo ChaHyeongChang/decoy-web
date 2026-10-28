@@ -106,4 +106,25 @@ describe('UI 폰트 출처 · 라이선스', () => {
     const hashes = [...credits.matchAll(/결과 파일 sha256 `([0-9a-f]{64})`/g)].map((m) => m[1]);
     expect(hashes).toEqual([sha256(FONT_PATH)]);
   });
+
+  it("구글 로그인 단추의 공식 'G' 로고: 네 가지 색 그대로 · 정사각형 격자, 단추는 가이드라인 값(흰 바탕 · 테두리 · 글자색 · 여백), 6절에 출처 · 조건", () => {
+    const code = readFileSync('client/src/ui/account.ts', 'utf8');
+    const svg = /GOOGLE_G_SVG\s*=([\s\S]*?);\n/.exec(code)?.[1] ?? '';
+    const fills = [...svg.matchAll(/fill="(#[0-9A-Fa-f]{6})"/g)].map((m) => m[1]);
+    expect(fills).toEqual(['#EA4335', '#4285F4', '#FBBC05', '#34A853']);
+    expect(svg).toContain('viewBox="0 0 48 48"');
+    expect(svg).toContain('width="20" height="20"');
+    const css = readFileSync('client/src/ui/account.css', 'utf8');
+    const btn = /\.gsi-btn \{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(btn).toContain('background: #ffffff;');
+    expect(btn).toContain('border: 1px solid #747775;');
+    expect(btn).toContain('color: #1f1f1f;');
+    expect(btn).toContain('gap: 10px;');
+    expect(btn).toContain('padding: 0 12px;');
+    expect(btn).toContain('border-radius: 4px;');
+    const sec = credits.slice(credits.indexOf("## 6. 구글 로그인 단추의 'G' 로고"));
+    expect(sec).toContain('https://developers.google.com/identity/branding-guidelines');
+    expect(sec).toContain('Google LLC의 상표');
+    expect(sec).toContain('2026-10-28');
+  });
 });

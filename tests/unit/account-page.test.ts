@@ -80,9 +80,12 @@ describe('계정 삭제 페이지', () => {
     expect(odd).toContain('&lt;b&gt;x&lt;/b&gt;');
   });
 
-  it('백업 보관 기간은 DB가 정해질 때까지 문장을 넣지 않는다 (정해지면 상수 하나)', () => {
-    expect(ACCOUNT_BACKUP_RETENTION).toBeNull();
-    for (const st of STATES) expect(renderDeletePage(st, null)).not.toContain('백업');
+  it('지운 기록이 DB 업체의 복원용 기록(백업)에 남는 기간: Neon 무료 복원 기간 6시간을 모든 상태에 보여 준다 (처리방침과 같은 값)', () => {
+    expect(ACCOUNT_BACKUP_RETENTION).toBe('6시간');
+    for (const st of STATES)
+      expect(renderDeletePage(st, null)).toContain(
+        '복원용 기록(백업)에 최대 6시간 남았다가 자동으로 지워집니다',
+      );
   });
 
   it('휴대폰 폭: 고정 폭 없이 최대 폭 · 줄바꿈 · 좁은 화면에서 버튼 전체 폭, 터치 대상 48px 이상', () => {

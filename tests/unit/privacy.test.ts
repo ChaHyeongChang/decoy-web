@@ -39,7 +39,7 @@ import {
   renderPrivacy,
 } from '../../server/src/privacy';
 import { RATE_WINDOW_MS } from '../../server/src/account/routes';
-import { renderDeletePage } from '../../server/src/account/deletePage';
+import { ACCOUNT_BACKUP_RETENTION, renderDeletePage } from '../../server/src/account/deletePage';
 
 const PRIVACY = readFileSync('client/public/privacy.html', 'utf8');
 const LISTING = readFileSync('docs/STORE_LISTING.md', 'utf8');
@@ -449,9 +449,32 @@ describe('로그인한 경우에만 (선택형 구글 로그인 — privacyData.
     expect(plain(section('retention'))).toContain('(로그인 · 적립 횟수와 실패 종류만)');
   });
 
-  it('DB 자리: 처리방침의 db 주석은 짝이 맞고, 공개 문서에 초안 표시(DB 결정 대기)가 없다', () => {
+  it('DB 자리: 처리방침의 db 주석은 짝이 맞고 모두 채워졌으며, 공개 문서에 초안 표시(DB 결정 대기)가 없다', () => {
     expect(PRIVACY.match(/<!--db-->/g)?.length ?? 0).toBe(PRIVACY.match(/<!--\/db-->/g)?.length ?? 0);
+    expect(PRIVACY.match(/<!--db-->/g)?.length ?? 0).toBe(5);
+    expect(PRIVACY).not.toMatch(/<!--db-->\s*<!--\/db-->/);
     expect(PRIVACY).not.toMatch(/DB 결정 대기|정해지면/);
+  });
+
+  it('계정 기록 DB(Neon, 싱가포르): 6번 위탁 · 7번 국외 이전 · 3 · 8번 복원 기간 · 10번 암호화가 삭제 페이지와 같은 값', () => {
+    expect(ACCOUNT_BACKUP_RETENTION).toBe('6시간');
+    const outsourcing = plain(section('outsourcing'));
+    expect(outsourcing).toContain('Neon, LLC');
+    expect(outsourcing).toMatch(/계정 기록 저장소/);
+    const db = /<table data-testid="transfer-db">([\s\S]*?)<\/table>/.exec(section('transfer'))?.[1] ?? '';
+    expect(labeledCell(db, '받는 자')).toContain('Neon, LLC');
+    expect(labeledCell(db, '국가')).toMatch(/싱가포르[^,]*,\s*미국/);
+    expect(labeledCell(db, '항목')).toMatch(/구글 고유 ID · 계정 ID · 계정 성장 기록/);
+    expect(labeledCell(db, '시기 · 방법')).toContain('TLS');
+    expect(labeledCell(db, '목적 · 기간')).toContain(`최대 ${ACCOUNT_BACKUP_RETENTION}`);
+    expect(labeledCell(db, '거부')).toMatch(/로그인하지 않으면 이전되지 않습니다/);
+    for (const id of ['retention', 'destruction'])
+      expect(plain(section(id)), id).toContain(`최대 ${ACCOUNT_BACKUP_RETENTION}`);
+    expect(plain(section('security'))).toMatch(/TLS[^.]*인증서를 확인/);
+    // 삭제 페이지도 같은 기간을 보여 준다
+    expect(plain(renderDeletePage({ kind: 'signed-out' }, null))).toContain(
+      `최대 ${ACCOUNT_BACKUP_RETENTION}`,
+    );
   });
 });
 

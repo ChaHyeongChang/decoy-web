@@ -1,6 +1,6 @@
 # 저작권 · 출처 (CREDITS)
 
-DECOY의 그래픽은 **코드로 그린다**. 저장소에 들어 있는 이미지 · 폰트 파일은 아래 표가 전부이고, 게임에 실리는 외부 에셋은 UI 폰트(Noto Sans KR, SIL OFL 1.1) 하나다. 에셋 정책은 `docs/VISUAL_SPEC.md` 11장.
+DECOY의 그래픽은 **코드로 그린다**. 저장소에 들어 있는 이미지 · 폰트 파일은 아래 표가 전부이고, 게임에 실리는 외부 에셋은 UI 폰트(Noto Sans KR, SIL OFL 1.1)와 구글 로그인 단추의 공식 'G' 로고(Google 상표, 로그인 기능을 켰을 때만 보인다 — 6절)다. 에셋 정책은 `docs/VISUAL_SPEC.md` 11장.
 
 `tests/unit/credits.test.ts`가 `client/public` · `client/src` · `docs` 아래의 이미지 · 폰트 · 소리 파일(png · jpg · jpeg · webp · gif · avif · ico · svg · woff · woff2 · ttf · otf · mp3 · ogg · wav · m4a)이 모두 이 표에 경로 · 출처 · 라이선스와 함께 있는지, 이 문서에 적은 파일이 실제로 있는지 확인한다. 새 파일을 넣으면 이 표에 한 줄을 더한다. `artifacts/`(전후 비교 · 최종 보고 스크린샷, 게임 화면을 찍은 것)는 대상이 아니다.
 
@@ -64,3 +64,18 @@ DECOY의 그래픽은 **코드로 그린다**. 저장소에 들어 있는 이미
 1. CC0 또는 계획에서 승인한 라이선스인지 원문으로 확인한다. 라이선스가 불분명하면 넣지 않는다
 2. 1절 표에 `경로` · 무엇 · 출처(URL) · 라이선스를 적고, 전문 동봉이 필요하면 파일과 같이 배포한다
 3. `npm test`(credits · fonts · visual-spec 테스트)가 통과하는지 본다
+
+## 6. 구글 로그인 단추의 'G' 로고 (외부 상표)
+
+선택형 구글 로그인(기본 꺼짐, `docs/ACCOUNT_PLAN.md`)의 설정 › 계정 탭 로그인 단추에만 쓴다. 파일이 아니라 코드 안의 SVG 글(`client/src/ui/account.ts`의 `GOOGLE_G_SVG`)이고, 단추 모양은 `client/src/ui/account.css`의 `.gsi-btn`.
+
+- 무엇: Google 공식 'G' 로고(네 가지 색 — `#EA4335` · `#4285F4` · `#FBBC05` · `#34A853`, 48 × 48 격자의 경로). Google 로그인 브랜드 가이드라인이 단추 예시로 주는 SVG와 같은 경로 · 색
+- 권리: Google LLC의 상표. CC0가 아니며 라이선스로 받은 에셋이 아니다 — 'Google 로그인' 단추에 가이드라인대로 쓰는 것만 허락된다
+- 출처 · 조건: Google Identity 「Sign in with Google branding guidelines」 <https://developers.google.com/identity/branding-guidelines> (2026-10 기준)
+  - 로고의 색 · 비율 · 모양을 바꾸지 않는다(한 색 · 회색으로 바꾸기, 늘이기, 돌리기, 잘라 쓰기 금지)
+  - 로고는 문구와 함께 단추 안에만: 문구는 가이드라인이 정한 'Google 계정으로 로그인'(Sign in with Google의 한국어)
+  - 밝은 단추: 바탕 `#FFFFFF`, 테두리 `#747775` 1px, 글자 `#1F1F1F`, 높이 40px · 왼쪽 여백 12px · 로고 20px · 로고와 글자 사이 10px · 오른쪽 여백 12px, 모서리 4px. 손가락 화면에서는 다른 단추와 같이 높이만 48px(로고 · 여백 그대로)
+  - 글꼴: 가이드라인은 Roboto Medium을 권하지만 한글 문구라 게임 UI 폰트(Noto Sans KR, 굵기 500)를 쓴다
+  - 로그인 단추가 아닌 곳(광고 · 아이콘 · 다른 단추)에 쓰지 않는다. 계정 삭제 웹 페이지(`/account/delete`)의 로그인 링크는 로고 없이 글자만
+- 승인: CLAUDE.md의 외부 에셋 규칙(CC0 또는 계획에서 승인한 라이선스)의 예외로 사용자가 2026-10-28 승인했다(`docs/DECISIONS.md` 15절). 사람이 볼 것(단추 모양 · 색)은 `docs/HUMAN_CHECKS.md`
+- 확인: `tests/unit/credits.test.ts`가 코드의 로고 색이 위 네 가지뿐이고 정사각형 격자인지, 단추 CSS가 위 값인지 본다

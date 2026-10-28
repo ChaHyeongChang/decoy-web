@@ -3,7 +3,7 @@
 //   (기기 기록은 첫 로그인 올리기 importDevice로만 — 사용자가 고른 경우)
 // - 접속 보상 · 해금 · 입기도 공용 claimLogin · buyCostume · wearCostume. 날짜는 서버 시계 + 계정 시간대(dayKeyInZone)
 // - 계정마다 프로세스 안에서 한 줄로 세운다(읽기 → 고치기 → 쓰기가 섞이지 않게, 인스턴스 1개). 지운 계정은 다시 만들지 않는다
-// - 저장소 호출은 3초 제한. 계정 기록이 이 서버보다 높은 판('newer')이면 쓰지 않는다(옛 서버가 새 기록을 덮지 않게 — 공용 규칙)
+// - 저장소 호출은 3초 제한(DB 저장소는 저장소가 정한 값 — Neon이 깨는 시간을 담아 10초). 계정 기록이 이 서버보다 높은 판('newer')이면 쓰지 않는다(옛 서버가 새 기록을 덮지 않게 — 공용 규칙)
 // - 로그에는 수만 (sub · 계정 ID · 토큰을 찍지 않는다)
 import {
   PROGRESSION,
@@ -32,7 +32,7 @@ import type {
 } from '@decoy/shared';
 import type { AccountStore } from './store';
 
-/** 저장소 호출 제한 (ms) */
+/** 저장소 호출 제한 기본값 (ms). 저장소가 callTimeoutMs를 밝히면 그 값 */
 export const DB_TIMEOUT_MS = 3000;
 /** 적립 실패 뒤 다시 시도하는 간격 (ms) */
 export const CREDIT_RETRY_MS: readonly number[] = [500, 2000, 6000];
@@ -149,7 +149,7 @@ export class AccountService {
     this.timeZone = opts.timeZone;
     this.prog = opts.prog ?? PROGRESSION;
     this.now = opts.now ?? Date.now;
-    this.dbTimeoutMs = opts.dbTimeoutMs ?? DB_TIMEOUT_MS;
+    this.dbTimeoutMs = opts.dbTimeoutMs ?? opts.store.callTimeoutMs ?? DB_TIMEOUT_MS;
     this.settleMaxMs = opts.settleMaxMs ?? SETTLE_MAX_MS;
     this.retryDelaysMs = opts.retryDelaysMs ?? CREDIT_RETRY_MS;
     this.sleep = opts.sleep ?? delay;
@@ -376,7 +376,7 @@ export class AccountService {
     return run;
   }
 
-  /** 저장소 호출 하나 (3초 제한). 실패 · 시간 넘김은 AccountUnavailable */
+  /** 저장소 호출 하나 (제한 dbTimeoutMs). 실패 · 시간 넘김은 AccountUnavailable */
   private async db<T>(job: Job, fn: () => Promise<T>): Promise<T> {
     let raw: Promise<T>;
     try {

@@ -5,10 +5,10 @@
 import { ACCOUNT_DELETE_PATH, AUTH_START_PATH } from '@decoy/shared';
 
 /**
- * 지운 기록이 DB 백업에 남는 기간 (예: '7일'). DB가 정해지면 그 DB의 백업 보관 기간을 넣는다 — null이면 그 문장을 뺀다
- * (처리방침에도 같은 값을 적는다)
+ * 지운 기록이 DB 업체의 복원용 기록(백업)에 남는 기간: Neon 무료 플랜의 복원(PITR) 기간 6시간 (DECISIONS 15절). 요금제 · DB를
+ * 바꾸면 이 값과 처리방침(3 · 7 · 8번)을 같이 고친다(docs/LOGIN_GUIDE.md '유료 DB로 옮기기'). null이면 그 문장을 뺀다
  */
-export const ACCOUNT_BACKUP_RETENTION: string | null = null;
+export const ACCOUNT_BACKUP_RETENTION: string | null = '6시간';
 
 /** CSRF 값이 드는 숨은 칸 이름 */
 export const DELETE_CSRF_FIELD = 'csrf';
@@ -108,7 +108,7 @@ export function renderDeletePage(state: DeletePageState, contact: string | null)
   const backup =
     ACCOUNT_BACKUP_RETENTION === null
       ? ''
-      : `<li>지운 기록은 서버 백업에 최대 ${ACCOUNT_BACKUP_RETENTION} 남았다가 자동으로 지워집니다.</li>`;
+      : `<li>지운 기록은 계정 기록 저장소 업체의 복원용 기록(백업)에 최대 ${ACCOUNT_BACKUP_RETENTION} 남았다가 자동으로 지워집니다.</li>`;
   const ask = contact ?? '구글 플레이 스토어의 DECOY 개발자 연락처';
   return `<!doctype html>
 <html lang="ko">

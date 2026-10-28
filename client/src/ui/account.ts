@@ -1,6 +1,7 @@
 // 계정 화면 · 흐름 (선택형 구글 로그인, docs/ACCOUNT_PLAN.md 7 · 8절). 나눠 받는 조각 'account' — 로그인한 기기의 부팅 · 설정을 열 때만
 // 받는다(게스트 첫 화면에서는 받지 않는다). 흐름은 account/controller.ts(이 조각에 함께 든다), 부팅 판단은 첫 묶음의 account/boot.ts.
-//  - 설정 '계정' 탭: 로그인 안 함 = 설명 + 글자 버튼 "Google 계정으로 로그인"(페이지째 이동 — 팝업 없음, 구글 'G' 로고 없음),
+//  - 설정 '계정' 탭: 로그인 안 함 = 설명 + 구글 로그인 단추 "Google 계정으로 로그인"(Google 브랜드 가이드라인의 흰 단추 · 공식 'G'
+//    로고 — 2026-10-28 사용자 승인, docs/CREDITS.md 6절. 페이지째 이동 — 팝업 없음),
 //    로그인함 = 로그아웃 · 계정 삭제(두 번 확인) · 웹 삭제 페이지 · 처리방침 링크. 손가락 48px, 960×540 · 800×360에서 스크롤 없이
 //  - 첫 로그인 고르기 창: 계정 기록 · 이 기기 기록 (레벨 · 불씨 · 가진 의상 수 · 판 수)
 //  - 안내: 화면 아래 가운데 작은 줄, 몇 초 뒤 사라진다. 포인터를 받지 않아 누르기 · 시험을 가리지 않는다
@@ -10,10 +11,22 @@ import { ACCOUNT_TEXT } from '../data/accountText';
 import { UI_TEXT } from '../data/storyText';
 import { AccountController, type AccountDeps } from '../account/controller';
 import { fillText } from './levelChip';
-import { h, icon } from './uiArt';
+import { h, icon, svgSpan } from './uiArt';
 import './account.css';
 
 const T = ACCOUNT_TEXT;
+
+/**
+ * 구글 공식 'G' 로고 (Google 로그인 브랜드 가이드라인의 단추 예시와 같은 경로 · 네 가지 색). 색 · 비율을 바꾸지 않고 로그인 단추에만
+ * 쓴다 — Google LLC의 상표, 출처 · 조건은 docs/CREDITS.md 6절
+ */
+export const GOOGLE_G_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="20" height="20" focusable="false">' +
+  '<path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>' +
+  '<path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>' +
+  '<path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>' +
+  '<path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>' +
+  '</svg>';
 
 /** 계정 흐름을 만든다 (화면은 이 조각의 안내 · 고르기 창) */
 export function createAccount(deps: Omit<AccountDeps, 'screens'>): AccountController {
@@ -149,7 +162,14 @@ class AccountPage {
     const row = h('div', { class: 'set-row acct-row', 'data-testid': 'account-page', 'data-view': ctl.view });
     const actions = h('div', { class: 'acct-actions' });
     if (!signedIn) {
-      const login = this.btn('account-login', T.login, 'btn btn-primary');
+      // 구글 로그인 단추: 흰 바탕 · 회색 테두리 · 'G' 로고 + 문구 (게임 단추 모양 .btn을 쓰지 않는다 — 구글 단추 모양 그대로)
+      const login = h(
+        'button',
+        { class: 'gsi-btn', type: 'button', 'data-testid': 'account-login' },
+        svgSpan('gsi-logo', GOOGLE_G_SVG),
+        h('span', { class: 'gsi-text' }, T.login),
+      );
+      login.disabled = this.busy;
       login.addEventListener('click', () => window.location.assign(AUTH_START_PATH));
       actions.append(login);
       row.append(h('p', { class: 'set-hint acct-intro' }, T.intro), actions);

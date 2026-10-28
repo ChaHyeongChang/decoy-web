@@ -238,7 +238,7 @@ describe('계정 API 요청 (account/api.ts)', () => {
     expect(post?.init).toMatchObject({ credentials: 'same-origin', cache: 'no-store' });
   });
 
-  it('실패도 예외 없이: 5초 넘으면 timeout · 네트워크 net · 401 auth · 503 {error:db} db · 모양이 틀린 200 bad', async () => {
+  it('실패도 예외 없이: 12초(ACCOUNT_TIMEOUT_MS) 넘으면 timeout · 네트워크 net · 401 auth · 503 {error:db} db · 모양이 틀린 200 bad', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const slow = fakeServer(hang).api.request('/api/account', null, (b) => b);
     await vi.advanceTimersByTimeAsync(ACCOUNT_TIMEOUT_MS - 1);

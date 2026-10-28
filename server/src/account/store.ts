@@ -1,5 +1,5 @@
 // 계정 저장소 (선택형 구글 로그인, docs/ACCOUNT_PLAN.md): 저장 부분만 떼어 둔다. 계정 하나 = 구글 고유 ID(sub) + 성장 기록 글 하나.
-// 이메일 · 이름 · 사진은 받지도 저장하지도 않는다(로그인 범위 openid). 실제 DB 구현은 이 모양을 따른다(DB는 사용자가 고른다).
+// 이메일 · 이름 · 사진은 받지도 저장하지도 않는다(로그인 범위 openid). DB 구현(PostgreSQL — Neon, pgStore.ts)도 이 모양을 따른다.
 // 서버 인스턴스는 1개라(방이 메모리에 있다, DEPLOY) 같은 계정의 읽기-고치기-쓰기 순서는 AccountService가 프로세스 안에서 줄 세운다.
 // 저장소는 그 위에서 행 하나의 읽기 · 쓰기만 맡는다
 import { randomBytes } from 'node:crypto';
@@ -17,8 +17,13 @@ export interface AccountRecord {
 }
 
 export interface AccountStore {
-  /** 어떤 저장소인가 (서버 시작 로그 · 시험용, 예: 'memory') */
+  /** 어떤 저장소인가 (서버 시작 로그 · 시험용, 예: 'memory' · 'postgres') */
   readonly kind: string;
+  /**
+   * 저장소 호출 하나의 제한 (ms). 없으면 서비스 기본(DB_TIMEOUT_MS 3초). DB는 잠든 compute가 깨는 시간 · 한 번 더 하기를 담아
+   * 길게 둔다(pgStore.ts PG_CALL_TIMEOUT_MS)
+   */
+  readonly callTimeoutMs?: number;
   /** 시작할 때 한 번 (표 만들기 · 연결 확인). 실패하면 예외 — 서버는 그래도 뜨고 계정 요청만 503 */
   init(): Promise<void>;
   findBySub(sub: string): Promise<AccountRecord | null>;
