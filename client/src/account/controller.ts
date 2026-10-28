@@ -5,8 +5,10 @@
 //    계정이 비었으면 기기 기록을 올리고, 둘 다 있으면 고르기 창 — 고른 대로 올린다('계정 기록'이면 기기 기록 글을 보내지 않는다).
 //    고른 뒤 표시를 적는다. 서버는 기기 글을 구글 로그인 뒤 10분 안만 받는다 — 넘었으면(relogin) 표시를 지우고 게스트 + '다시 로그인'.
 //    기기 기록(decoy:progress)은 지우지 않는다 — 로그아웃하면 다시 게스트 기록
-//  - 로그인 안 함 · 401: 표시를 지우고 게스트. 꺼짐: 게스트로 하되 표시는 남기고 off를 적어 안내는 처음 한 번만(다시 켜져 같은 계정이면
-//    off를 지우고 묻지 않고 계정 모드). 실패 · 503 · 시간 초과: 이번 접속은 게스트 + 한 줄 안내 (판은 그대로)
+//  - 로그인 안 함 · 401: 표시를 지우고 게스트. 꺼짐: 게스트로 하되 표시는 남기고 off를 적어 안내('지금은 로그인을 쓸 수 없어요')는
+//    처음 알았을 때 한 번만 — 부팅 · 계정 모드 중 다시 읽기 · 설정을 열어 다시 읽기 어느 길이든(다시 켜져 같은 계정이면 off를 지우고
+//    묻지 않고 계정 모드). 실패 · 503 · 시간 초과: 이번 접속은 게스트 + 한 줄 안내 (판은 그대로)
+//  - 계정 삭제가 되면 그 tag를 앱에 알린다(removed): 방 안에서 지운 계정 자리의 판은 서버가 적립하지 않으니 앱이 기기 기록에
 //  - 다른 탭이 다른 계정으로 로그인했으면(다시 읽은 tag가 다름) 세션 끝이 아니라 바뀜: 표시를 지우지 않고 상태를 다시 읽어 새 계정 모드로
 //  - 설정을 열 때 상태를 모르면 그때 읽는다. 로그아웃 · 계정 삭제 · 세션 끝: 표시를 지우고 기기 기록으로 + 안내
 //  - 서버는 화면이 join · quick에서 밝힌 계정 tag가 그 소켓의 세션 쿠키 계정과 같을 때만 그 자리를 계정에 적립한다: 부팅이 아닌 때
@@ -49,6 +51,11 @@ export interface AccountDeps {
    * 부팅 때는 부르지 않는다 — 소켓이 이미 쿠키를 싣고 열렸다
    */
   entered?(): void;
+  /**
+   * 이 화면에서 계정을 지웠다 (그 계정 tag): 앱이 기억해 그 계정 자리였던 판(방 안에서 지움)은 기기 기록에 적립한다 — 서버는 지운
+   * 계정에 적립하지 않는다
+   */
+  removed?(tag: string): void;
   now(): number;
 }
 
@@ -111,11 +118,13 @@ export class AccountController {
 
   /** 계정 삭제 (서버 기록을 바로 지운다). 닿지 않으면 false */
   async remove(): Promise<boolean> {
+    const tag = this.store?.tag ?? null;
     const r = await post(this.d.api, ACCOUNT_API.delete);
     if (!r.ok) {
       if (r.error === 'auth') this.lost(this.store);
       return false;
     }
+    if (tag !== null) this.d.removed?.(tag);
     await this.leave(ACCOUNT_TEXT.removed);
     return true;
   }
@@ -140,16 +149,21 @@ export class AccountController {
     const st = r.ok ? r.body : null;
     if (!st?.on || !st.signedIn) {
       // 꺼짐은 표시를 남기고 알렸다고 적는다 (다시 켜지면 같은 계정으로 — 쿠키는 그대로다). 로그인 안 함 · 401은 지운다
+      const off = st?.on === false;
       const tag = this.d.mark.read();
-      if (st?.on !== false) this.d.mark.clear();
+      const told = this.d.mark.off();
+      if (!off) this.d.mark.clear();
       else if (tag !== null) this.d.mark.write(tag, true);
       this.store = null;
       if (this.d.meta.mode === 'server') {
-        notes.push(ACCOUNT_TEXT.expired);
+        notes.push(off ? ACCOUNT_TEXT.results.off : ACCOUNT_TEXT.expired);
         await this.d.meta.useStore(this.d.device);
         this.d.left?.();
+      } else if (off && !boot && tag !== null && !told) {
+        // 부팅 읽기가 실패한 뒤 설정을 열어 꺼짐을 처음 알았다: 표시에 off를 적었으니 다음 부팅은 알리지 않는다 — 여기서 한 번
+        notes.push(ACCOUNT_TEXT.results.off);
       }
-      return this.set(st?.on === false ? 'off' : 'out');
+      return this.set(off ? 'off' : 'out');
     }
     if (this.d.meta.mode !== 'server' || this.store?.tag !== st.tag) {
       const imported = await this.enter(st);
@@ -229,7 +243,9 @@ export class AccountController {
   private lost(store: ServerProfileStore | null, why: LostReason = 'out'): void {
     if (!store || this.store !== store) return;
     if (why === 'switched') void this.switched();
-    else void this.leave(ACCOUNT_TEXT.expired, why === 'off');
+    // 꺼짐은 '지금은 로그인을 쓸 수 없어요' (표시에 off를 적어 다음 부팅은 알리지 않으니 여기서 한 번)
+    else if (why === 'off') void this.leave(ACCOUNT_TEXT.results.off, true);
+    else void this.leave(ACCOUNT_TEXT.expired);
   }
 
   /** 게스트로 (기기 기록). 꺼짐(off)이면 표시를 남기고 알렸다고 적는다 */

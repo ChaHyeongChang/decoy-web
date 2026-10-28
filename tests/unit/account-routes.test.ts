@@ -215,13 +215,14 @@ describe('로그인 켜짐 (가짜 구글 · 메모리 저장소)', () => {
     expect(logs).not.toContain(listed.id);
   });
 
-  it('삭제 페이지 로그인(next=delete): 없는 구글 계정은 계정을 만들지 않고 "계정 없음" — 쿠키도 없다', async () => {
+  it('삭제 페이지 로그인(next=delete): 없는 구글 계정은 계정을 만들지 않고 "계정 없음" — 세션 쿠키 없이, 남은 삭제 전용 쿠키는 지운다', async () => {
     const before = await accounts(srv);
     const jar = new CookieJar();
     const cb = await loginFlow(srv, jar, { sub: 'never-played', next: 'delete' });
     expect(cb.status).toBe(303);
     expect(cb.headers.get('location')).toBe('/account/delete?none=1');
-    expect(cb.headers.getSetCookie().map((l) => l.split('=')[0])).toEqual(['decoy_oauth']);
+    expect(cb.headers.getSetCookie().map((l) => l.split('=')[0])).toEqual(['decoy_oauth', 'decoy_del']);
+    expect(setCookieLine(cb, 'decoy_del')).toMatch(/^decoy_del=; Path=\/account\/delete; Max-Age=0/);
     expect(jar.get('decoy_sid')).toBeUndefined();
     expect(jar.get('decoy_del')).toBeUndefined();
     expect(await accounts(srv)).toEqual(before);
@@ -237,6 +238,24 @@ describe('로그인 켜짐 (가짜 구글 · 메모리 저장소)', () => {
     const game = await signedIn(srv, 'game-user-elsewhere');
     const mixed = await fetch(`${srv.base}/account/delete?none=1`, { headers: { cookie: game.header() } });
     expect(await mixed.text()).toContain('data-state="none"');
+  });
+
+  it('삭제 페이지 로그인: 다른 계정의 삭제 전용 쿠키(10분 안)가 남은 브라우저로 계정 없는 구글 계정에 로그인하면 그 쿠키를 지워 "계정 없음" — 앞 계정의 삭제 폼을 그리지 않는다', async () => {
+    await signedIn(srv, 'first-delete-user');
+    const jar = new CookieJar();
+    const first = await loginFlow(srv, jar, { sub: 'first-delete-user', next: 'delete' });
+    expect(first.headers.get('location')).toBe('/account/delete');
+    expect(jar.get('decoy_del')).toBeDefined();
+    // 같은 브라우저에서 '다른 계정으로 로그인' → 그 구글 계정으로 만든 계정이 없다
+    const cb = await loginFlow(srv, jar, { sub: 'second-never-played', next: 'delete' });
+    expect(cb.headers.get('location')).toBe('/account/delete?none=1');
+    expect(jar.get('decoy_del')).toBeUndefined();
+    const page = await fetch(`${srv.base}/account/delete?none=1`, { headers: { cookie: jar.header() } });
+    const html = await page.text();
+    expect(html).toContain('data-state="none"');
+    expect(html).not.toContain('<form');
+    expect((await accounts(srv)).some((a) => a.sub === 'second-never-played')).toBe(false);
+    expect((await accounts(srv)).some((a) => a.sub === 'first-delete-user')).toBe(true);
   });
 
   it('삭제 페이지 로그인(next=delete): 있는 계정이면 게임 세션 대신 삭제 페이지 전용 쿠키(decoy_del, Path=/account/delete, 10분)만 — 그 쿠키로 계정 API · 게임 연결은 로그인 안 한 것과 같다', async () => {
@@ -564,6 +583,8 @@ describe('로그인 켜짐 (가짜 구글 · 메모리 저장소)', () => {
     expect(del.status).toBe(200);
     expect(await del.json()).toEqual({ deleted: true });
     expect(setCookieLine(del, 'decoy_sid')).toMatch(/Max-Age=0/);
+    // 삭제 페이지 전용 쿠키도 지운다 (처리방침: 계정을 지우면 지움 — 브라우저가 실어 보내지 않아도 조건 없이)
+    expect(setCookieLine(del, 'decoy_del')).toMatch(/^decoy_del=; Path=\/account\/delete; Max-Age=0/);
     expect((await accounts(srv)).some((a) => a.id === id)).toBe(false);
     // 판이 끝나 적립이 와도 (그 자리에 계정 ID가 남아 있었다) 다시 만들지 않는다
     const credit = await srv.system.service!.credit(id, RATING);
@@ -579,14 +600,19 @@ describe('로그인 켜짐 (가짜 구글 · 메모리 저장소)', () => {
     expect(await again.json()).toEqual({ deleted: false });
   });
 
-  it('로그아웃: 세션 쿠키를 지운다 (계정 기록은 그대로)', async () => {
+  it('로그아웃: 세션 쿠키 · 삭제 페이지 전용 쿠키를 지운다 (계정 기록은 그대로)', async () => {
     const jar = await signedIn(srv, 'logout-user');
+    // 같은 브라우저가 삭제 페이지에서도 로그인해 둔 채 (10분 안)
+    await loginFlow(srv, jar, { sub: 'logout-user', next: 'delete' });
+    expect(jar.get('decoy_del')).toBeDefined();
     const out = await apiPost(srv, jar, '/api/account/logout');
     expect(out.status).toBe(200);
     expect(await out.json()).toEqual({ ok: true });
     expect(jar.get('decoy_sid')).toBeDefined();
+    expect(setCookieLine(out, 'decoy_del')).toMatch(/^decoy_del=; Path=\/account\/delete; Max-Age=0/);
     jar.store(out);
     expect(jar.get('decoy_sid')).toBeUndefined();
+    expect(jar.get('decoy_del')).toBeUndefined();
     expect((await accounts(srv)).some((a) => a.sub === 'logout-user')).toBe(true);
   });
 

@@ -5,8 +5,9 @@
 //   삭제 페이지는 '여기서 지울 수 없음 — 문의처'
 // - 비율 제한: IP마다 /auth/* 1분 20번, 계정마다 POST 1분 60번 → 429 rate (열쇠는 늦어도 2분 안에 메모리에서 지운다)
 // - 삭제 페이지는 referrer-policy same-origin (폼 POST의 Origin이 'null'이 되지 않게), 리디렉트는 no-referrer
-// - 삭제 페이지에서 시작한 로그인(next=delete)은 계정을 만들지 않고(없으면 '계정 없음'), 게임 세션(decoy_sid) 대신 삭제 페이지에만
-//   실리는 10분 쿠키(decoy_del)를 준다 — 삭제하려고 로그인한 브라우저가 게임에서 몰래 계정 모드 · 계정 적립이 되지 않게
+// - 삭제 페이지에서 시작한 로그인(next=delete)은 계정을 만들지 않고(없으면 '계정 없음' — 남은 decoy_del은 지운다), 게임 세션(decoy_sid)
+//   대신 삭제 페이지에만 실리는 10분 쿠키(decoy_del)를 준다 — 삭제하려고 로그인한 브라우저가 게임에서 몰래 계정 모드 · 계정 적립이
+//   되지 않게. 로그아웃 · 계정 삭제(API) 응답은 decoy_del도 지운다(그 요청에 실리지 않으니 조건 없이)
 // - 기기 기록 올리기(import에 기기 글)는 구글 로그인 뒤 10분 안만 받는다(403 relogin) — 오래된 화면 흐름이 계정 기록을 덮지 않게
 // - 로그에는 실패 종류만 (토큰 · sub · 계정 ID를 찍지 않는다)
 // 시험 훅(--test-hooks)이 없으면 /test/*는 404 (index.ts의 다른 시험 경로와 같다)
@@ -391,7 +392,8 @@ export function createAccountRoutes(ctx: AccountRoutesContext): AccountHandler {
         sendError(res, body.status, 'bad-request', [], body.close);
         return;
       }
-      sendJson(res, 200, { ok: true }, [clearSession(o)]);
+      // 삭제 페이지 전용 쿠키도 지운다 (처리방침: 로그아웃하면 사라짐 — Path가 달라 이 요청에 실리지 않으니 조건 없이)
+      sendJson(res, 200, { ok: true }, [clearSession(o), clearDelete(o)]);
       return;
     }
     const s = sessionOf(req);
@@ -434,7 +436,8 @@ export function createAccountRoutes(ctx: AccountRoutesContext): AccountHandler {
             ? await service.claimLogin(id)
             : { deleted: await service.delete(id) };
     if (op === 'delete') {
-      sendJson(res, 200, out, [clearSession(o)]);
+      // 삭제 페이지 전용 쿠키도 (처리방침: 계정을 지우면 지움 — 이 요청에 실리지 않으니 조건 없이)
+      sendJson(res, 200, out, [clearSession(o), clearDelete(o)]);
       return;
     }
     if (out === null) {
@@ -566,7 +569,9 @@ export function createAccountRoutes(ctx: AccountRoutesContext): AccountHandler {
       done('db');
       return;
     }
-    if (!accountId) done('delete-none');
+    // 그 구글 계정으로 만든 계정이 없다: 세션 쿠키 없이, 남은 삭제 전용 쿠키(다른 계정으로 10분 안에 로그인해 둔 것)는 지운다 —
+    // 안 지우면 '계정 없음' 페이지가 앞 계정의 삭제 폼을 그린다
+    if (!accountId) done('delete-none', [clearDelete(o)]);
     // 삭제 페이지: 게임 세션 대신 삭제 페이지 전용 쿠키 (게임 연결 · 계정 API에는 실리지 않는다)
     else if (toDelete) done('delete', [deleteCookie(accountId, o)]);
     else done('ok', [sessionCookie(accountId, o)]);

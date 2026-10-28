@@ -93,7 +93,10 @@ export interface Seat {
    * 적립한다. 로비 · 판 시작 명단 · 스냅샷 · 결과 어디에도 싣지 않는다 (정보 숨김 — 로그인 여부가 사람 단서가 되지 않게)
    */
   account: string | null;
-  /** 그 계정의 표시 tag (없으면 null). 그 자리 본인 연결의 welcome에만 싣는다 — 화면이 이 판의 적립 갈래를 정한다 */
+  /**
+   * 그 계정의 표시 tag (없으면 null). 그 자리 본인 연결의 welcome에만 싣고, 판이 끝난 순간의 값은 본인 result에 싣는다(ratedTags —
+   * 화면이 그 판의 적립 갈래를 정한다)
+   */
   accountTag: string | null;
 }
 
@@ -157,6 +160,11 @@ export class Room {
   private recorder: MatchRecorder | null = null;
   /** 판이 끝난 순간의 사람 자리별 평가 (결과와 함께 자기 것만 보낸다, 재접속하면 다시) */
   private ratings = new Map<string, MatchRating>();
+  /**
+   * 판이 끝난 순간 서버가 적립한 자리별 계정 tag (평가와 함께 고정 — 게스트 자리는 null). 결과 단계에 다시 붙어(새로고침 · 다른 탭
+   * 넘겨받기 · 재연결) 자리 계정이 바뀌어도 다시 보내는 결과에는 이 값을 싣는다 — 화면이 그 판의 적립 갈래를 정한다. 본인 결과에만
+   */
+  private ratedTags = new Map<string, string | null>();
   /** 이번 판에 괴물이 끊겨 있던 시간의 합 (초). 재접속해도 줄지 않는다 */
   private monsterAway = 0;
   /** 이번 판에 '나가기'로 빠진 사람 자리 (끊김과 달리 돌아오지 않는다고 본다) */
@@ -310,7 +318,8 @@ export class Room {
       balance: this.config.balance,
       balanceHash: this.balanceHash,
       build: this.config.buildId ?? null,
-      // 이 자리에 받아들인 계정 tag: 본인 연결에만 (화면이 결과 적립 갈래를 정한다 — 다른 참가자 메시지에는 없다)
+      // 이 자리에 받아들인 계정 tag: 본인 연결에만 (화면이 다음 판의 결과 적립 갈래를 정한다 — 이미 끝난 판은 result.account로.
+      // 다른 참가자 메시지에는 없다)
       account: seat.accountTag,
     });
     this.sendLobby(seat);
@@ -424,8 +433,13 @@ export class Room {
         return { ...p, name, bot: other?.bot ?? false };
       }),
     };
-    // 판 평가는 받는 사람 자기 것만 (남의 평가 · 레벨은 판이 끝난 뒤에도 보내지 않는다)
-    return { t: 'result', result, rating: this.ratings.get(seat.id) ?? null };
+    // 판 평가 · 그 판을 적립한 계정 tag는 받는 사람 자기 것만 (남의 평가 · 레벨 · 계정은 판이 끝난 뒤에도 보내지 않는다)
+    return {
+      t: 'result',
+      result,
+      rating: this.ratings.get(seat.id) ?? null,
+      account: this.ratedTags.get(seat.id) ?? null,
+    };
   }
 
   /** 시작 가능 여부. 봇 방이면 빈 역할은 봇이 채운다 */
@@ -576,6 +590,7 @@ export class Room {
     this.aliases = new AliasBook();
     this.recorder = new MatchRecorder(this.game);
     this.ratings.clear();
+    this.ratedTags.clear();
     this.monsterAway = 0;
     this.leftInMatch.clear();
     this.phase = 'playing';
@@ -622,6 +637,7 @@ export class Room {
    */
   private rateFinished(game: Game, nowMs: number): void {
     this.ratings.clear();
+    this.ratedTags.clear();
     const recorder = this.recorder;
     this.recorder = null;
     if (!recorder) return;
@@ -637,6 +653,8 @@ export class Room {
           PROGRESSION,
         ),
       );
+      // 이 판을 적립할 계정 (바로 뒤 finishMatch가 rated 훅으로 넘기는 seat.account와 같은 순간의 값)
+      this.ratedTags.set(seat.id, seat.accountTag);
     }
   }
 
@@ -646,6 +664,7 @@ export class Room {
     this.game = null;
     this.recorder = null;
     this.ratings.clear();
+    this.ratedTags.clear();
     this.lastResult = null;
     this.resultSeats.clear();
     // 봇 자리는 비우고, 사람은 역할을 유지한 채 준비만 푼다

@@ -434,7 +434,11 @@ export type ClientMessage =
   | { t: 'start' }
   | { t: 'input'; frames: InputFrame[] }
   | { t: 'ping'; c: number }
-  | { t: 'rematch' }
+  /**
+   * 다시 하기. account: 화면이 지금 계정 모드면 그 계정 tag (join · quick의 account와 같다 — 게스트면 보내지 않는다). 빠른 매칭
+   * 재대기열은 이 값으로 새 자리의 계정을 정한다(들어올 때 밝힌 옛 값이 아니라 — 결과에서 로그아웃 · 계정 삭제했으면 게스트 자리)
+   */
+  | { t: 'rematch'; account?: string }
   /** 판 밖(로비 · 대기 · 결과)에서 옷장으로 바꾼 의상 (메타 c). 판 중에는 무시 — 판 시작 명단과 구운 그림이 판 끝까지 같게 */
   | { t: 'costume'; costume: CostumeChoice }
   /** 빠른 매칭 대기열에 들어간다 (M13c). 대기 중이거나 판이 없는 빠른 매칭 방에 넣거나 새로 만든다 */
@@ -477,8 +481,12 @@ export type ServerMessage =
   | { t: 'snap'; s: Snapshot }
   /** build: 서버 빌드 ID (M13d, join 전에도 비교) */
   | { t: 'pong'; c: number; s: number; build?: string | null }
-  /** rating: 받는 사람 자기 판 평가 (봇 자리 · 평가할 수 없는 판이면 없음, GAME_DESIGN 12장) */
-  | { t: 'result'; result: MatchResult; rating?: MatchRating | null }
+  /**
+   * rating: 받는 사람 자기 판 평가 (봇 자리 · 평가할 수 없는 판이면 없음, GAME_DESIGN 12장).
+   * account: 이 판을 서버가 적립한 계정 tag, 받는 사람 본인 것만 (선택형 구글 로그인 — 판이 끝난 순간 그 자리 계정, 게스트 자리면 null).
+   * 결과 단계에 다시 붙어 welcome.account가 바뀌어도 그대로다 — 화면은 이 값으로 결과 적립 갈래를 정한다(welcome.account는 다음 판용)
+   */
+  | { t: 'result'; result: MatchResult; rating?: MatchRating | null; account?: string | null }
   | { t: 'error'; code: ErrorCode; message: string }
   /**
    * 로그인한 사람의 판 보상을 서버가 계정에 적립한 결과 (선택형 구글 로그인, docs/ACCOUNT_PLAN.md). 그 계정의 연결에만 보낸다 —

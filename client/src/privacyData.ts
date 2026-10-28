@@ -5,7 +5,7 @@
 //
 // '봇과 연습'은 기기 안에서 판정하므로 아래 어느 것도 서버로 가지 않는다 (M13b).
 // 선택형 구글 로그인으로 로그인한 경우에만 처리하는 항목은 아래 ACCOUNT_DATA · ACCOUNT_COOKIES (HTTP · 쿠키, 그리고 로그인한 화면만
-// 보내는 게임 메시지 칸 join.account · quick.account — 그 칸은 SENT_DATA가 아니라 ACCOUNT_DATA에 적는다)
+// 보내는 게임 메시지 칸 join.account · quick.account · rematch.account — 그 칸은 SENT_DATA가 아니라 ACCOUNT_DATA에 적는다)
 import { DELETE_COOKIE, OAUTH_COOKIE, SESSION_COOKIE } from '@decoy/shared';
 
 export interface SentDataInfo {
@@ -116,7 +116,9 @@ export function formAnswer(form: {
 }
 
 // ───────────────────────── 선택형 구글 로그인 (docs/ACCOUNT_PLAN.md) ─────────────────────────
-// 로그인한 경우에만 처리하는 항목. 게임 메시지(ClientMessage)가 아니라 구글 ID 토큰 · 세션 쿠키 · 계정 API(HTTP)로 오간다.
+// 로그인한 경우에만 처리하는 항목. 주로 구글 ID 토큰 · 세션 쿠키 · 계정 API(HTTP)로 오가고, 게임 메시지에는 계정 tag가 본인이 보내는
+// join · quick · rematch의 account와 본인 welcome · result의 account에만, 계정 기록 글은 그 계정 연결의 credit에만 실린다 — 다른
+// 참가자에게 가는 게임 메시지(로비 · 판 시작 명단 · 스냅샷 · 결과 · 남의 welcome)에는 계정 · 로그인 여부 · 레벨을 싣지 않는다.
 // 처리방침 1번 '로그인한 경우에만' 표(data-testid="account-data") · 4번 쿠키 표(data-testid="cookies"), STORE_LISTING 4장
 // '로그인을 켤 때 바꾸는 값', PLAY_STORE_GUIDE 7단계 '로그인을 켤 때' 표에 그대로 옮겨 적는다(tests/unit/privacy.test.ts).
 // 로그인 기능은 기본 꺼짐(환경 변수 DECOY_LOGIN) — 켜기 전에 Play Console 신고를 이 표대로 고친다(docs/LOGIN_GUIDE.md)
@@ -154,12 +156,19 @@ export const ACCOUNT_DATA = {
   },
   accountSession: {
     label: '계정 ID · 세션 쿠키',
-    // 계정 표시 tag(join.account · quick.account)는 계정 ID에서 만든 불투명한 값으로, 같은 계정을 가리키는 값이라 여기에 넣었다
-    sources: [`cookie.${SESSION_COOKIE}`, `cookie.${DELETE_COOKIE}`, 'join.account', 'quick.account'],
+    // 계정 표시 tag(join.account · quick.account · rematch.account)는 계정 ID에서 만든 불투명한 값으로, 같은 계정을 가리키는 값이라
+    // 여기에 넣었다
+    sources: [
+      `cookie.${SESSION_COOKIE}`,
+      `cookie.${DELETE_COOKIE}`,
+      'join.account',
+      'quick.account',
+      'rematch.account',
+    ],
     // 세션 쿠키는 계정 ID를 담은 인증 수단이라 따로 유형을 신고하지 않고 '사용자 ID'에 넣었다 (사람 확인)
     playType: '개인 정보 › 사용자 ID',
     purpose:
-      '로그인 상태 유지. 서버가 무작위로 만든 계정 ID(구글 ID가 아니다)를 발급 · 로그인 시각과 함께 서명해 HttpOnly 쿠키에 둔다(계정 삭제 페이지에서 로그인하면 그 페이지에만 쓰는 10분 쿠키). 로그인한 화면은 온라인 판에 들어갈 때 계정 표시(계정 ID에서 만든 불투명한 값)를 함께 보내고, 서버는 그 표시가 쿠키의 계정과 같을 때만 그 판 보상을 그 계정에 적립한다',
+      '로그인 상태 유지. 서버가 무작위로 만든 계정 ID(구글 ID가 아니다)를 발급 · 로그인 시각과 함께 서명해 HttpOnly 쿠키에 둔다(계정 삭제 페이지에서 로그인하면 그 페이지에만 쓰는 10분 쿠키). 로그인한 화면은 온라인 판에 들어갈 때(다시 하기 포함) 계정 표시(계정 ID에서 만든 불투명한 값)를 함께 보내고, 서버는 그 표시가 쿠키의 계정과 같을 때만 그 판 보상을 그 계정에 적립한다',
     confirm: true,
     form: ACCOUNT_FORM,
   },
