@@ -376,6 +376,21 @@ export function applyRating(
   };
 }
 
+/**
+ * 아직 아무것도 쌓지 않은 기록인가 (선택형 구글 로그인: 첫 로그인 때 이 기기 기록을 올릴지 물을 필요가 없다).
+ * 판 · 경험치 · 불씨 · 가진 의상 · 받은 접속 보상이 모두 없다
+ */
+export function isBlankProfile(p: Profile): boolean {
+  return (
+    p.xp === 0 &&
+    p.coins === 0 &&
+    p.played.survivor + p.played.monster === 0 &&
+    p.owned.length === 0 &&
+    p.login === null &&
+    p.recent.length === 0
+  );
+}
+
 /** 오늘 접속 보상을 아직 받지 않았는가 */
 export function loginAvailable(p: Profile, day: DayKey): boolean {
   return p.login?.last !== day;

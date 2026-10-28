@@ -469,4 +469,95 @@ export type ServerMessage =
   | { t: 'pong'; c: number; s: number; build?: string | null }
   /** rating: 받는 사람 자기 판 평가 (봇 자리 · 평가할 수 없는 판이면 없음, GAME_DESIGN 12장) */
   | { t: 'result'; result: MatchResult; rating?: MatchRating | null }
-  | { t: 'error'; code: ErrorCode; message: string };
+  | { t: 'error'; code: ErrorCode; message: string }
+  /**
+   * 로그인한 사람의 판 보상을 서버가 계정에 적립한 결과 (선택형 구글 로그인, docs/ACCOUNT_PLAN.md). 그 계정의 연결에만 보낸다 —
+   * 같은 방 다른 사람에게는 로그인 여부 · 레벨 · 기록이 가지 않는다. profile: 적립 뒤 계정 기록 글(serializeProfile, ok일 때만)
+   */
+  | { t: 'credit'; matchId: string; ok: boolean; profile: string | null };
+
+// ───────────────────────── 계정 (선택형 구글 로그인, HTTP) ─────────────────────────
+// 게임 메시지(WebSocket)와 따로 HTTP로 오간다(docs/ACCOUNT_PLAN.md). 경로 · 쿠키 이름은 shared/src/account.ts
+
+/** 계정 기록이 오가는 형식: 기록 글(serializeProfile) + 계정의 오늘(계정 시간대 자정 기준) */
+export interface AccountProfileBody {
+  /** 계정 기록 글 (parseProfile로 읽는다) */
+  profile: string;
+  /** 계정의 오늘 날짜 글 'YYYY-MM-DD' (서버 시계 + 계정 시간대) */
+  day: string;
+}
+
+/** GET /api/account 응답 */
+export type AccountStatus =
+  /** 로그인 기능이 꺼져 있다 (환경 변수 DECOY_LOGIN, 기본 꺼짐) — 계정 화면을 보이지 않는다 */
+  | { on: false }
+  /** 켜져 있고 로그인하지 않았다 (또는 세션이 끝났다 · 계정이 지워졌다) */
+  | { on: true; signedIn: false }
+  | {
+      on: true;
+      signedIn: true;
+      /** 이 계정을 이 기기에서 알아보는 표시 (계정 ID에서 만든 불투명한 값 — 구글 ID · 이메일이 아니다) */
+      tag: string;
+      /** 계정 기록이 아직 없다 (첫 로그인 — 기기 기록을 올리기 전) */
+      fresh: boolean;
+      /** 계정 기록 글 (fresh면 null) */
+      profile: string | null;
+      day: string;
+      /** 계정의 하루가 바뀌는 시간대 (IANA, 예: Asia/Seoul) — 자정 타이머 · 날짜 표시 */
+      timeZone: string;
+    };
+
+/** 계정 API 오류 응답 (HTTP 4xx · 5xx 본문) */
+export interface AccountErrorBody {
+  error: AccountErrorCode;
+}
+
+export type AccountErrorCode =
+  /** 로그인 기능이 꺼져 있다 */
+  | 'off'
+  /** 로그인하지 않았다 · 세션이 끝났다 · 계정이 지워졌다 (401) */
+  | 'auth'
+  /** 요청 출처 · 표시 헤더가 맞지 않는다 (403) */
+  | 'csrf'
+  /** 본문이 틀렸다 · 너무 크다 (400 · 413) */
+  | 'bad-request'
+  /** 너무 자주 (429) */
+  | 'rate'
+  /** 계정 저장소(DB)에 닿지 않는다 (503) — 게스트로 계속한다 */
+  | 'db';
+
+/** POST /api/account/import: 첫 로그인 때 기기 기록 올리기 (응답 AccountProfileBody) */
+export interface AccountImportRequest {
+  /**
+   * 계정 기록이 이미 있을 때 어느 쪽을 쓸지 (사용자가 고른다). 계정이 비었으면(fresh) 무엇이든 기기 기록을 올린다.
+   * 'account'면 계정 기록을 그대로 둔다
+   */
+  choice: 'device' | 'account';
+  /** 이 기기 기록 글 (decoy:progress 그대로, 없으면 null) */
+  device: string | null;
+}
+
+/** POST /api/account/claim-login: 오늘 접속 보상 받기 (계정 날짜로 서버가 계산) */
+export interface AccountClaimResponse extends AccountProfileBody {
+  /** 받은 보상 (이미 받았으면 null) */
+  claimed: { reward: number; streak: number } | null;
+}
+
+/** POST /api/account/costume: 의상 해금 · 입기 (서버가 불씨 · 가진 의상으로 판단) */
+export interface AccountCostumeRequest {
+  action: 'buy' | 'wear';
+  team: Team;
+  id: string;
+}
+
+export interface AccountCostumeResponse extends AccountProfileBody {
+  /** ok · 모르는 의상 · 이미 가짐 · 불씨 모자람 · 가지지 않아 못 입음 */
+  result: 'ok' | 'unknown' | 'owned' | 'coins' | 'not-owned';
+  /** 해금한 값 (buy · ok일 때) */
+  price?: number;
+}
+
+/** POST /api/account/delete 응답: 서버 기록을 바로 지웠는가 */
+export interface AccountDeleteResponse {
+  deleted: boolean;
+}

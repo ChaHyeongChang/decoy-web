@@ -116,3 +116,74 @@ export function loginReward(streak: number, prog: Progression): number {
   const s = Math.max(1, Math.min(prog.login.maxStreak, Math.floor(streak)));
   return prog.login.base + prog.login.step * (s - 1);
 }
+
+// ───────────────────────── 계정 날짜 (선택형 구글 로그인) ─────────────────────────
+// 계정 기록의 하루는 기기 시계가 아니라 서버 시계 + 계정 시간대(서버 설정, 기본 Asia/Seoul) 자정으로 바뀐다(docs/ACCOUNT_PLAN.md):
+// 서버가 판 보상 · 접속 보상을 적립할 때와 클라이언트가 계정 기록을 보일 때가 같은 함수를 쓴다. Intl만 쓴다(Node · 브라우저 공용)
+
+const zoneFormats = new Map<string, Intl.DateTimeFormat>();
+
+function zoneFormat(timeZone: string): Intl.DateTimeFormat {
+  let f = zoneFormats.get(timeZone);
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    zoneFormats.set(timeZone, f);
+  }
+  return f;
+}
+
+/** IANA 시간대 이름인가 (이 실행 환경이 아는 것) */
+export function isTimeZone(v: unknown): v is string {
+  if (typeof v !== 'string' || v === '' || v.length > 64) return false;
+  try {
+    zoneFormat(v);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+interface ZoneParts {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+}
+
+function zoneParts(nowMs: number, timeZone: string): ZoneParts {
+  const out: Record<string, number> = {};
+  for (const p of zoneFormat(timeZone).formatToParts(new Date(nowMs)))
+    if (p.type !== 'literal') out[p.type] = Number(p.value);
+  return {
+    year: out.year ?? 1970,
+    month: out.month ?? 1,
+    day: out.day ?? 1,
+    hour: (out.hour ?? 0) % 24,
+    minute: out.minute ?? 0,
+    second: out.second ?? 0,
+  };
+}
+
+/** 그 시간대의 날짜 글 (자정 기준) */
+export function dayKeyInZone(nowMs: number, timeZone: string): DayKey {
+  const p = zoneParts(nowMs, timeZone);
+  return dayKeyOf(p.year, p.month, p.day);
+}
+
+/** 그 시간대의 다음 자정까지 ms (1 이상). 일광 절약 시간 전환일은 한 시간 어긋날 수 있다 — 타이머는 넘긴 뒤 다시 잰다 */
+export function msToMidnightInZone(nowMs: number, timeZone: string): number {
+  const p = zoneParts(nowMs, timeZone);
+  const into = ((p.hour * 60 + p.minute) * 60 + p.second) * 1000 + (((nowMs % 1000) + 1000) % 1000);
+  return Math.max(1, 86_400_000 - into);
+}

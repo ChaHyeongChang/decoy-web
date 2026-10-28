@@ -38,6 +38,11 @@ import { applyDropExpired, buildResult, finish } from './systems/match';
 
 export interface Conn {
   readonly id: number;
+  /**
+   * 로그인한 계정 키 (선택형 구글 로그인, docs/ACCOUNT_PLAN.md): 서버가 WebSocket을 열 때 세션 쿠키로 알아낸 불투명한 값.
+   * 게스트 · 기기 안 연습 · 봇은 없음. 어떤 메시지에도 싣지 않는다 — 방은 판이 끝날 때 RoomHooks.rated로 바깥에 넘기기만 한다
+   */
+  readonly account?: string | null;
   send(msg: ServerMessage): void;
   close(): void;
 }
@@ -70,6 +75,11 @@ export interface Seat {
   costume: CostumeChoice;
   /** 판 중에 받은 의상 (판 시작 명단 · 구운 그림은 그 판 끝까지 같게 두고, 판이 끝나면 costume으로 옮긴다) */
   nextCostume?: CostumeChoice;
+  /**
+   * 이 자리에 마지막으로 붙은 연결의 계정 키 (Conn.account, 게스트 · 봇은 null). 판이 끝날 때 RoomHooks.rated로 넘겨 서버가
+   * 그 계정에 보상을 적립한다. 로비 · 판 시작 명단 · 스냅샷 · 결과 어디에도 싣지 않는다 (정보 숨김 — 로그인 여부가 사람 단서가 되지 않게)
+   */
+  account: string | null;
 }
 
 export interface RoomHooks {
@@ -87,6 +97,11 @@ export interface RoomHooks {
   canFillBots?: (room: Room) => boolean;
   /** 틱마다 정답 상태 기록 (테스트 전용) */
   recordTruth?: (room: Room) => void;
+  /**
+   * 판이 끝나 사람 자리마다 평가를 만들고 결과를 보낸 뒤 (선택형 구글 로그인): 서버가 seat.account가 있으면 그 계정에 이 평가로
+   * 보상을 적립한다(docs/ACCOUNT_PLAN.md). 기기 안 연습 서버는 넘기지 않는다. 방 상태를 바꾸지 않는다
+   */
+  rated?: (room: Room, seat: Seat, rating: MatchRating) => void;
   log?: (msg: string) => void;
 }
 
@@ -203,6 +218,7 @@ export class Room {
       matchesPlayed: 0,
       lastLobby: null,
       costume: bot ? { ...BASIC_COSTUMES } : sanitizeCostumeChoice(costume),
+      account: bot ? null : (conn?.account ?? null),
     };
     this.seats.push(seat);
     if (!bot && this.hostId === null) this.hostId = seat.id;
@@ -221,6 +237,8 @@ export class Room {
       seat.conn.close();
     }
     seat.conn = conn;
+    // 마지막으로 붙은 연결의 계정 (로그아웃한 탭이 다시 붙으면 null — 그 판은 적립하지 않는다)
+    seat.account = seat.bot ? null : (conn.account ?? null);
     seat.droppedAt = null;
     seat.lastLobby = null;
     this.leftInMatch.delete(seat.id);
@@ -557,6 +575,13 @@ export class Room {
     for (const s of this.seats) {
       const last = this.lastResult;
       s.conn?.send(this.resultFor(s, last));
+    }
+    // 계정 적립 (서버만, 결과를 보낸 뒤): 평가가 있는 사람 자리마다 바깥에 넘긴다 — 계정이 있는지는 바깥이 seat.account로 본다
+    if (this.hooks.rated) {
+      for (const s of this.seats) {
+        const rating = this.ratings.get(s.id);
+        if (rating && !s.bot) this.hooks.rated(this, s, rating);
+      }
     }
     this.sendLobby();
     this.hooks.log?.(
