@@ -34,9 +34,12 @@ export const PG_IDLE_TIMEOUT_S = 60;
 export const PG_MAX_CONNECTIONS = 2;
 /** 연결 하나를 쓰는 최대 시간 (초) */
 export const PG_MAX_LIFETIME_S = 30 * 60;
-/** 1초 안에 연결 묶음 하나가 이만큼 새 연결을 열려 하면 '오류 없이 닫는 서버'로 보고 그 시도를 바로 끝낸다(RECONNECT_LOOP) */
+/**
+ * 연결 묶음 하나가 어떤 질의도 끝나지 않은 채(성공 · 실패 모두 없이) 이만큼 넘게 새 연결을 열면 '시작 중 오류 없이 닫는 서버'에
+ * 드라이버가 끝없이 다시 접속하는 것으로 보고 그 시도를 바로 끝낸다(RECONNECT_LOOP). 질의가 하나라도 끝나면 다시 센다 — 장애 뒤
+ * 요청이 이어져도 DB가 돌아오면 바로 붙고, 비밀번호 틀림 · 한도 초과처럼 질의마다 실패가 오는 경우는 세지 않는다
+ */
 export const PG_STORM_SOCKETS = 5;
-const PG_STORM_WINDOW_MS = 1_000;
 /** 호출 하나의 시도 수 상한 (다른 요청이 연결 묶음을 버려 함께 끊긴 시도 포함) */
 export const PG_MAX_TRIES = 5;
 /** 같은 오류 코드 로그는 이 간격에 한 번 (ms) */
@@ -189,8 +192,10 @@ function codeError(code: string, message: string): Error {
 /** 연결 묶음 하나: 드라이버 · 이 묶음이 연 소켓 · 최근에 연 시각 */
 interface Pool {
   sql: postgres.Sql;
+  /** 이 묶음이 연 소켓 (TLS면 드라이버가 우리 리스너를 지우므로 닫힌 것은 열 때마다 걸러 낸다) */
   sockets: Set<Socket>;
-  opened: number[];
+  /** 마지막으로 질의가 끝난 뒤 연 연결 수 */
+  opens: number;
   dropped: boolean;
 }
 
@@ -198,12 +203,15 @@ interface Pool {
  * postgres.js 연결 묶음. 접속은 첫 질의 때 한다. 소켓은 이 함수가 직접 연다(드라이버 socket 설정):
  * - 질의가 timeoutMs 안에 끝나지 않으면 그 묶음을 버린다 — 드라이버를 끝내고(end timeout 0) 그 묶음의 소켓을 바로 부순다(드라이버는
  *   우아하게 닫기만 해서, 멈춘 서버 쪽 연결이 끝없이 남는다). 다음 질의부터 새 묶음
- * - 서버가 오류 없이 접속을 닫으면 드라이버가 쉬지 않고 다시 접속한다(접속 제한도 매번 새로 잰다): 1초에 5번 넘게 열면 그 시도를
- *   바로 끝낸다(RECONNECT_LOOP)
+ * - 서버가 시작 중 오류 없이 접속을 닫으면 드라이버가 쉬지 않고 다시 접속한다(접속 제한도 매번 새로 잰다): 어떤 질의도 끝나지
+ *   않은 채 다섯 번 넘게 열면 그 시도를 바로 끝낸다(RECONNECT_LOOP — 질의가 하나라도 끝나면 다시 센다)
  * - 다른 질의가 묶음을 버려 함께 끊긴 질의는 POOL_DROPPED로 알린다(저장소가 한 번 더의 몫을 쓰지 않고 새 묶음으로 다시 한다)
  * 버린 질의의 늦은 실패는 삼킨다. sslrootcert 파일을 읽지 못하면 예외 (만드는 쪽이 로그인을 끈다)
  */
-export function createPostgresClient(conf: PgConfig): PgClient {
+/** 연결 묶음 + 진단: 지금 묶음이 들고 있는 소켓 수 (시험 — 다시 접속이 쌓여 새지 않는지, 마지막으로 연 뒤 닫힌 것도 센다) */
+export type PostgresClient = PgClient & { openSockets(): number };
+
+export function createPostgresClient(conf: PgConfig): PostgresClient {
   const ca = conf.caFile !== null ? readFileSync(conf.caFile, 'utf8') : null;
   let closed = false;
   let drops = 0;
@@ -221,15 +229,14 @@ export function createPostgresClient(conf: PgConfig): PgClient {
     });
     // 오류는 드라이버가 받는다 — 그 사이 · 그 뒤에도 처리되지 않은 'error'로 서버가 죽지 않게
     sock.on('error', noop);
+    for (const old of pool.sockets) if (old.destroyed) pool.sockets.delete(old);
     pool.sockets.add(sock);
     sock.once('close', () => pool.sockets.delete(sock));
-    const t = Date.now();
-    pool.opened = pool.opened.filter((x) => t - x < PG_STORM_WINDOW_MS);
-    pool.opened.push(t);
+    pool.opens += 1;
     const why =
       pool.dropped || closed
         ? codeError('CONNECTION_DESTROYED', '계정 DB: 버린 연결 묶음')
-        : pool.opened.length > PG_STORM_SOCKETS
+        : pool.opens > PG_STORM_SOCKETS
           ? codeError('RECONNECT_LOOP', '계정 DB: 서버가 오류 없이 연결을 거듭 닫음')
           : null;
     if (why) setImmediate(() => sock.destroy(why));
@@ -241,7 +248,7 @@ export function createPostgresClient(conf: PgConfig): PgClient {
     const options: postgres.Options<Record<string, postgres.PostgresType>> & {
       socket: () => Promise<Socket>;
     } = { ...postgresOptions(conf, ca), socket: () => Promise.resolve(openSocket(pool)) };
-    const pool: Pool = { sql: postgres(options), sockets: new Set(), opened: [], dropped: false };
+    const pool: Pool = { sql: postgres(options), sockets: new Set(), opens: 0, dropped: false };
     return pool;
   };
 
@@ -267,8 +274,13 @@ export function createPostgresClient(conf: PgConfig): PgClient {
       const pool = current;
       const startDrops = drops;
       const run = pool.sql.unsafe(text, [...params]).then(
-        (res) => ({ rows: [...res] as Record<string, unknown>[], count: res.count }),
+        (res) => {
+          pool.opens = 0;
+          return { rows: [...res] as Record<string, unknown>[], count: res.count };
+        },
         (e: unknown) => {
+          // 질의가 끝났다 (실패도) — 다시 접속 폭주 세기를 처음부터
+          pool.opens = 0;
           // 다른 질의가 묶음을 버려 함께 끊겼다 (이 질의 탓이 아니다)
           throw drops !== startDrops
             ? codeError('POOL_DROPPED', '계정 DB: 다른 요청이 연결 묶음을 새로 만듦')
@@ -290,6 +302,8 @@ export function createPostgresClient(conf: PgConfig): PgClient {
         clearTimeout(timer);
       }
     },
+    // 걸러 내지 않은 그대로 (마지막으로 연 뒤 닫힌 것까지 — 열 때마다 걸러 내는지 보는 시험용)
+    openSockets: () => current.sockets.size,
     async end() {
       closed = true;
       await current.sql.end({ timeout: 2 }).catch(noop);

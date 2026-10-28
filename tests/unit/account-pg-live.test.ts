@@ -210,6 +210,99 @@ describe.runIf(URL_TEXT !== '')('PgAccountStore (실제 PostgreSQL)', () => {
     }
   }, 30_000);
 
+  it('DB가 오류 없이 접속을 닫다가 돌아오면, 요청이 쉬지 않고 이어져도 바로 붙는다 (다시 접속 폭주 막기가 돌아온 DB를 막지 않는다)', async () => {
+    const rec = await store.create('live-recover', 1);
+    let mode: 'close' | 'pass' = 'close';
+    const socks = new Set<Socket>();
+    const proxy = createServer((client) => {
+      socks.add(client);
+      client.on('error', () => undefined);
+      if (mode === 'close') {
+        client.resume();
+        client.end();
+        return;
+      }
+      const up = netConnect({ host: conf.host, port: conf.port });
+      socks.add(up);
+      up.on('error', () => client.destroy());
+      client.on('close', () => up.destroy());
+      up.on('close', () => client.destroy());
+      client.pipe(up).pipe(client);
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+    const port = (proxy.address() as AddressInfo).port;
+    const flaky = new PgAccountStore(createPostgresClient({ ...conf, host: '127.0.0.1', port }), { table });
+    const okAt: number[] = [];
+    let switchedAt = Number.POSITIVE_INFINITY;
+    let stop = false;
+    // 둘이 쉬지 않고 요청한다 (장애 동안 실패해도 곧바로 다음 요청)
+    const worker = async (): Promise<void> => {
+      while (!stop) {
+        try {
+          if ((await flaky.get(rec.id))?.sub === 'live-recover') okAt.push(Date.now());
+        } catch {
+          // 장애 동안은 실패 (게스트)
+        }
+      }
+    };
+    try {
+      const workers = [worker(), worker()];
+      await new Promise((r) => setTimeout(r, 1_500));
+      mode = 'pass';
+      switchedAt = Date.now();
+      await new Promise((r) => setTimeout(r, 2_000));
+      stop = true;
+      await Promise.all(workers);
+      const after = okAt.filter((t) => t >= switchedAt);
+      expect(after.length).toBeGreaterThan(5);
+      // 돌아온 뒤 1초 안에 붙었다
+      expect(after[0]! - switchedAt).toBeLessThan(1_000);
+    } finally {
+      stop = true;
+      await flaky.close();
+      for (const sock of socks) sock.destroy();
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+    }
+  }, 30_000);
+
+  it('비밀번호가 틀린 요청이 한꺼번에 와도 모두 28P01 (다시 접속 폭주로 잘못 보지 않는다)', async () => {
+    const logs: string[] = [];
+    const bad = new PgAccountStore(createPostgresClient({ ...conf, password: `${conf.password}-wrong` }), {
+      table,
+      log: (m) => logs.push(m),
+    });
+    try {
+      const got = await Promise.all(
+        Array.from({ length: 8 }, () => bad.get('0'.repeat(32)).catch((e: { code?: string }) => e.code)),
+      );
+      expect(got).toEqual(Array.from({ length: 8 }, () => '28P01'));
+      expect(logs.join('\n')).not.toContain('RECONNECT_LOOP');
+    } finally {
+      await bad.close();
+    }
+  });
+
+  it('TLS 연결(이 컴퓨터 PostgreSQL은 TLS를 켜 두었다 — prefer)이 서버 쪽에서 거듭 끊겨 다시 붙어도 묶음이 든 소켓이 쌓이지 않는다', async () => {
+    const client = createPostgresClient(conf);
+    const tls = new PgAccountStore(client, { table });
+    try {
+      for (let i = 0; i < 6; i += 1) {
+        expect(await tls.get('0'.repeat(32))).toBeNull();
+        await admin
+          .query(
+            `SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+           WHERE application_name = 'decoy' AND pid <> pg_backend_pid() AND datname = current_database()`,
+          )
+          .catch(() => undefined);
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(await tls.get('0'.repeat(32))).toBeNull();
+      expect(client.openSockets()).toBeLessThanOrEqual(2);
+    } finally {
+      await tls.close();
+    }
+  });
+
   it('서비스: 로그인 → 기기 기록 올리기 → 서버 적립(같은 판은 한 번) → 삭제', async () => {
     const t = Date.UTC(2026, 9, 28, 3, 0, 0);
     const svc = new AccountService({ store, timeZone: 'Asia/Seoul', now: () => t });
