@@ -198,10 +198,9 @@ interface Pool {
  * postgres.js 연결 묶음. 접속은 첫 질의 때 한다. 소켓은 이 함수가 직접 연다(드라이버 socket 설정):
  * - 질의가 timeoutMs 안에 끝나지 않으면 그 묶음을 버린다 — 드라이버를 끝내고(end timeout 0) 그 묶음의 소켓을 바로 부순다(드라이버는
  *   우아하게 닫기만 해서, 멈춘 서버 쪽 연결이 끝없이 남는다). 다음 질의부터 새 묶음
- * - 서버가 오류 없이 접속을 닫으면 드라이버가 쉬지 않고 다시 접속한다(접속 제한도 매번 새로 잰다): 1초에 5번 넘게 열려 하면 그 시도를
+ * - 서버가 오류 없이 접속을 닫으면 드라이버가 쉬지 않고 다시 접속한다(접속 제한도 매번 새로 잰다): 1초에 5번 넘게 열면 그 시도를
  *   바로 끝낸다(RECONNECT_LOOP)
  * - 다른 질의가 묶음을 버려 함께 끊긴 질의는 POOL_DROPPED로 알린다(저장소가 한 번 더의 몫을 쓰지 않고 새 묶음으로 다시 한다)
- * - TCP 접속도 4초 제한 (드라이버의 접속 제한은 소켓을 받은 뒤부터 잰다)
  * 버린 질의의 늦은 실패는 삼킨다. sslrootcert 파일을 읽지 못하면 예외 (만드는 쪽이 로그인을 끈다)
  */
 export function createPostgresClient(conf: PgConfig): PgClient {
@@ -209,44 +208,39 @@ export function createPostgresClient(conf: PgConfig): PgClient {
   let closed = false;
   let drops = 0;
 
-  const openSocket = (pool: Pool): Promise<Socket> => {
-    if (pool.dropped || closed)
-      return Promise.reject(codeError('CONNECTION_DESTROYED', '계정 DB: 버린 연결 묶음'));
+  /**
+   * 드라이버가 접속마다 부른다. 언제나 접속 중인 실제 소켓을 돌려준다 — 드라이버는 받은 소켓의 'error' · 'close'로 그 연결 자리를
+   * 정리하므로(여기서 예외를 던지면 그 자리가 '접속 중'에 영영 묶여 묶음이 멈춘다). 버린 묶음이거나 다시 접속 폭주면 드라이버가
+   * 소켓을 받은 다음 차례에 그 소켓을 우리 오류 코드로 부순다
+   */
+  const openSocket = (pool: Pool): Socket => {
+    const sock = Object.assign(netConnect({ host: conf.host, port: conf.port }), {
+      // 드라이버가 TLS SNI · 오류 문구에 쓴다
+      host: conf.host,
+      port: conf.port,
+    });
+    // 오류는 드라이버가 받는다 — 그 사이 · 그 뒤에도 처리되지 않은 'error'로 서버가 죽지 않게
+    sock.on('error', noop);
+    pool.sockets.add(sock);
+    sock.once('close', () => pool.sockets.delete(sock));
     const t = Date.now();
     pool.opened = pool.opened.filter((x) => t - x < PG_STORM_WINDOW_MS);
-    if (pool.opened.length >= PG_STORM_SOCKETS)
-      return Promise.reject(codeError('RECONNECT_LOOP', '계정 DB: 서버가 오류 없이 연결을 거듭 닫음'));
     pool.opened.push(t);
-    return new Promise<Socket>((resolve, reject) => {
-      const sock = netConnect({ host: conf.host, port: conf.port });
-      pool.sockets.add(sock);
-      // 오류는 드라이버가 받는다 — 그 사이 · 그 뒤에도 처리되지 않은 'error'로 서버가 죽지 않게
-      sock.on('error', noop);
-      sock.once('close', () => pool.sockets.delete(sock));
-      const timer = setTimeout(() => {
-        sock.destroy();
-        reject(codeError('CONNECT_TIMEOUT', '계정 DB: 접속 시간 넘김'));
-      }, PG_CONNECT_TIMEOUT_S * 1000);
-      const fail = (e: Error): void => {
-        clearTimeout(timer);
-        sock.destroy();
-        reject(e);
-      };
-      sock.once('error', fail);
-      sock.once('connect', () => {
-        clearTimeout(timer);
-        sock.removeListener('error', fail);
-        // 드라이버가 TLS SNI · 오류 문구에 쓴다
-        resolve(Object.assign(sock, { host: conf.host, port: conf.port }));
-      });
-    });
+    const why =
+      pool.dropped || closed
+        ? codeError('CONNECTION_DESTROYED', '계정 DB: 버린 연결 묶음')
+        : pool.opened.length > PG_STORM_SOCKETS
+          ? codeError('RECONNECT_LOOP', '계정 DB: 서버가 오류 없이 연결을 거듭 닫음')
+          : null;
+    if (why) setImmediate(() => sock.destroy(why));
+    return sock;
   };
 
   const make = (): Pool => {
     // socket: 드라이버 설정이지만 타입 정의에 없다 (Options와 교차 타입으로 넘긴다). 드라이버는 첫 질의 때 부른다
     const options: postgres.Options<Record<string, postgres.PostgresType>> & {
       socket: () => Promise<Socket>;
-    } = { ...postgresOptions(conf, ca), socket: () => openSocket(pool) };
+    } = { ...postgresOptions(conf, ca), socket: () => Promise.resolve(openSocket(pool)) };
     const pool: Pool = { sql: postgres(options), sockets: new Set(), opened: [], dropped: false };
     return pool;
   };
