@@ -16,12 +16,13 @@ import {
   readBuildId,
 } from './config';
 import { createSender } from './sendPolicy';
-import { PRIVACY_PATHS, privacyHandler } from './privacy';
+import { PRIVACY_CONTACT_ENV, PRIVACY_PATHS, contactHtml, privacyHandler } from './privacy';
 import { serveStatic } from './static';
 import { TruthLog } from './truthLog';
 import { ASSETLINKS_PATH, assetLinksFromEnv } from './wellKnown';
 import { spawnLocalBot } from './bots';
 import { createQuickBots } from './quickBots';
+import { createAccountSystem } from './account/system';
 
 const options = parseOptions(process.argv.slice(2), process.env);
 const balance = loadBalance(options.balancePath);
@@ -35,6 +36,19 @@ if (assetLinks.problem) console.warn(assetLinks.problem);
 /** 개인정보 처리방침 (M15): 문의처는 환경 변수 PRIVACY_CONTACT */
 const servePrivacy = privacyHandler(options.staticDir, process.env);
 const truthLog = options.truthLogPath ? new TruthLog(options.truthLogPath) : null;
+/**
+ * 선택형 구글 로그인 · 계정 저장 (docs/ACCOUNT_PLAN.md): 환경 변수 DECOY_LOGIN=1 등으로 켠다(기본 꺼짐 — 꺼지면 판은 지금과 같다).
+ * 켜졌는데 저장소가 시작하지 못해도 서버는 뜨고 계정 요청만 503 (판은 게스트로 그대로)
+ */
+const accounts = createAccountSystem({
+  env: process.env,
+  testHooks: options.testHooks,
+  dev: options.dev,
+  contact: contactHtml(process.env[PRIVACY_CONTACT_ENV]),
+});
+if (accounts.config.requested && !accounts.on) console.warn(accounts.summary);
+else console.log(accounts.summary);
+void accounts.start();
 const lagRng = new Rng(options.seed ^ 0x5bd1e995);
 
 // 빠른 매칭 빈자리 봇 (M13c): 같은 프로세스 실전 봇 (quickBots.ts). 실전 봇 지도를 여기서(listen 전) 미리 계산한다 —
@@ -65,6 +79,8 @@ const core = new ServerCore(
     },
     beforeStep: (room) => quickBots.beforeStep(room),
     canFillBots: (room) => botRoomsPlaying(room) < options.maxBotRooms,
+    // 판 보상 계정 적립 (로그인이 켜졌을 때만): 결과를 보낸 뒤 그 자리의 계정에 서버가 적립한다
+    rated: accounts.on ? (_room, seat, rating) => accounts.rated(seat.account, rating) : undefined,
   },
   () => performance.now(),
 );
@@ -179,6 +195,8 @@ function handleHttp(req: IncomingMessage, res: ServerResponse): void {
     res.end(JSON.stringify(room ? truthOf(room) : null));
     return;
   }
+  // 계정 경로 (/api/account · /auth/* · /account/* · 계정 시험 훅): 정적 파일보다 먼저. 꺼져 있으면 '꺼짐'으로만 답한다
+  if (accounts.handle(req, res, url)) return;
   if (PRIVACY_PATHS.includes(url.pathname)) {
     // 개인정보 처리방침: 문의처를 환경 변수로 바꿔 넣는다. 파일이 없으면 404 (게임 HTML을 주지 않는다)
     servePrivacy(res, req.headers['accept-encoding']);
@@ -222,12 +240,15 @@ setInterval(() => {
   }
 }, 10_000);
 
-wss.on('connection', (socket: WebSocket) => {
+wss.on('connection', (socket: WebSocket, req: IncomingMessage) => {
   connCounter += 1;
   const half = options.lag / 2;
   const jitter = options.lag > 0 ? balance.network.lagJitterMs : 0;
+  // 로그인한 계정 (세션 쿠키 서명만 확인 — DB 조회 없음, 꺼짐 · 게스트는 null). 방은 자리에만 들고 어떤 메시지에도 싣지 않는다
+  const account = accounts.accountOf(req);
   // 송신: 받는 쪽이 못 따라오면 오래된 스냅샷은 건너뛰고(거점 메모가 든 것은 보냄), 그래도 크게 쌓이면 끊는다 (sendPolicy.ts)
-  const conn: Conn = { id: connCounter, ...createSender(socket, half, jitter, () => lagRng.next()) };
+  const conn: Conn = { id: connCounter, account, ...createSender(socket, half, jitter, () => lagRng.next()) };
+  accounts.conns.add(conn);
   alive.set(socket, true);
   socket.on('pong', () => alive.set(socket, true));
   const link = core.connect(conn, (err) => {
@@ -243,7 +264,10 @@ wss.on('connection', (socket: WebSocket) => {
   );
 
   socket.on('message', (data) => inbound.push(data.toString()));
-  socket.on('close', () => link.close());
+  socket.on('close', () => {
+    accounts.conns.remove(conn);
+    link.close();
+  });
   socket.on('error', () => socket.close());
 });
 
@@ -266,6 +290,9 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     console.log(`DECOY 서버 종료 (${signal})`);
     for (const client of wss.clients) client.terminate();
     httpServer.close();
-    process.exit(0);
+    // 계정 저장소 연결 정리 (꺼져 있으면 바로). 오래 걸려도 2초 뒤에는 끝낸다
+    const exit = (): never => process.exit(0);
+    setTimeout(exit, 2000).unref();
+    void accounts.close().finally(exit);
   });
 }

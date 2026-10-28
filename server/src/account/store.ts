@@ -117,6 +117,11 @@ export class MemoryAccountStore implements AccountStore {
     return this.byId.size;
   }
 
+  /** 모든 계정 사본 (시험 훅 /test/accounts · 단위 시험 확인용) */
+  list(): AccountRecord[] {
+    return [...this.byId.values()].map((r) => ({ ...r }));
+  }
+
   private copy(rec: AccountRecord | undefined): AccountRecord | null {
     return rec ? { ...rec } : null;
   }

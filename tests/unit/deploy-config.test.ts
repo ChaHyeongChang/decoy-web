@@ -8,10 +8,14 @@ import {
   SERVER_MARK_HEADER,
   parseOptions,
 } from '../../server/src/config';
+import { readAccountConfig } from '../../server/src/account/config';
+import { ACCOUNT_ENV } from '../../server/src/account/env';
 
 interface RenderEnvVar {
   key: string;
   value?: string;
+  sync?: boolean;
+  generateValue?: boolean;
 }
 
 interface RenderService {
@@ -57,6 +61,32 @@ describe('render.yaml (Render Blueprint)', () => {
     const port = svc.envVars.find((v) => v.key === 'PORT');
     expect(port?.value).toMatch(/^\d+$/);
     expect(parseOptions([], { PORT: port?.value }).port).toBe(Number(port?.value));
+  });
+});
+
+describe('render.yaml: 선택형 구글 로그인 (docs/ACCOUNT_PLAN.md 3절)', () => {
+  const vars = (): RenderEnvVar[] => blueprint.services[0]!.envVars;
+  const byKey = (k: string): RenderEnvVar | undefined => vars().find((v) => v.key === k);
+
+  it('DECOY_LOGIN · GOOGLE_CLIENT_ID는 대시보드에서 넣는다 (sync: false, 값 없음 — 값을 적으면 Blueprint 동기화가 덮는다)', () => {
+    for (const k of [ACCOUNT_ENV.login, ACCOUNT_ENV.clientId]) {
+      expect(byKey(k), k).toEqual({ key: k, sync: false });
+    }
+  });
+
+  it('DECOY_SESSION_SECRET은 Render가 무작위로 만든다 (generateValue, 값은 저장소에 없다)', () => {
+    expect(byKey(ACCOUNT_ENV.sessionSecret)).toEqual({ key: ACCOUNT_ENV.sessionSecret, generateValue: true });
+  });
+
+  it('DB 접속 값 · 시험 전용 값은 아직 넣지 않고, Blueprint 값만으로는 로그인이 켜지지 않는다 (기본 꺼짐)', () => {
+    const keys = vars().map((v) => v.key);
+    for (const k of [ACCOUNT_ENV.dbUrl, ACCOUNT_ENV.store, ACCOUNT_ENV.idp]) expect(keys).not.toContain(k);
+    const env: Record<string, string> = {};
+    for (const v of vars()) if (v.value !== undefined) env[v.key] = v.value;
+    expect(readAccountConfig(env, { testHooks: false, dev: false }).enabled).toBe(false);
+    // 비밀 · 토큰 · 키를 값으로 적은 줄이 없다 (공개 저장소)
+    for (const v of vars())
+      if (/SECRET|TOKEN|KEY|PASSWORD|DATABASE/i.test(v.key)) expect(v.value, v.key).toBeUndefined();
   });
 });
 
