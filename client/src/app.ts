@@ -39,6 +39,7 @@ import {
   listenLifecycle,
   practiceEntry,
   rejoinRetryDelay,
+  reopenForAccount,
   returnTarget,
   staleAfterLeave,
   type LastRoom,
@@ -270,6 +271,13 @@ export class App {
    * 서버가 leave를 처리하기 전에 보낸 떠난 방 것이라 버린다(staleAfterLeave). 새 소켓이 열리면 푼다
    */
   private awaitingWelcome = false;
+  /**
+   * 이 소켓을 연 뒤 계정 모드가 바뀌었다 (부팅이 아닌 때 — 로그아웃 · 계정 삭제 · 세션 끝 · 꺼짐 · 다른 탭 로그인). 서버는 소켓을 열
+   * 때의 세션 쿠키로 계정을 정하므로(Conn.account) 이 소켓의 계정은 지금 모드와 다르다: 첫 화면이면 바로, 방 · 판 중이면 첫 화면에
+   * 돌아올 때 다시 연다. 그때까지 계정 모드의 온라인 판은 기기 기록에 적립하고(서버가 이 계정에 적립하지 않는다) credit은 받지 않는다
+   * (다른 계정 것일 수 있다). 게스트 모드는 그대로 기기 기록 — DECISIONS 15절
+   */
+  private staleSocket = false;
 
   constructor(
     readonly params: AppParams,
@@ -285,6 +293,8 @@ export class App {
     this.keeper = new LinkKeeper(
       {
         connect: () => {
+          // 새 소켓은 지금 쿠키를 싣는다 (부팅 때는 계정 상태를 읽는 중이어도 같은 쿠키 — 계정 모드를 따른다)
+          this.staleSocket = false;
           this.wake.connecting(performance.now());
           this.net.connect();
         },
@@ -424,7 +434,7 @@ export class App {
     // 연습 중에는 서버 메시지를 쓰지 않는다 (연결도 쉰다). 계정 적립 알림(credit)은 연습 중에 와도 받는다 (앞 온라인 판의 것)
     this.net.on((msg) => {
       if (msg.t === 'credit') {
-        this.meta.credit(msg.matchId, msg.ok, msg.profile);
+        if (!this.staleSocket) this.meta.credit(msg.matchId, msg.ok, msg.profile);
         return;
       }
       if (this.local) return;
@@ -496,7 +506,8 @@ export class App {
           mark: accountMark(),
           device: this.deviceStore,
           deviceText: () => readKey('progress'),
-          left: () => this.accountLeft(),
+          left: () => this.accountChanged(),
+          entered: () => this.accountChanged(),
           now: () => Date.now(),
         }),
       }),
@@ -515,11 +526,18 @@ export class App {
   }
 
   /**
-   * 로그아웃 · 계정 삭제 · 세션 끝으로 게스트가 됐다: 첫 화면이면 연결을 새로 연다 — 서버는 연결을 열 때의 세션 쿠키로 계정을
-   * 정하므로(Conn.account), 옛 연결로 하는 판이 그 계정에 적립되지 않게. 방 · 판 중이면 그대로 둔다(그 판은 계정에 적립될 수 있다)
+   * 부팅이 아닌 때 계정 모드가 바뀌었다 (로그아웃 · 계정 삭제 · 세션 끝 · 꺼짐 · 다른 탭 로그인): 이 소켓은 옛 계정 상태로 열렸다.
+   * 첫 화면이면 바로, 방 · 판 중이면 첫 화면에 돌아올 때(forgetRoom) 다시 연다 — 옛 계정 소켓으로 하는 판이 계속 그 계정에
+   * 적립되거나(공용 기기면 다음 사람 판이 앞사람 계정에), 게스트 소켓의 판이 어디에도 적립되지 않는 일이 없게
    */
-  private accountLeft(): void {
-    if (this.local || this.lobby || this.match || !this.net.connected) return;
+  private accountChanged(): void {
+    this.staleSocket = true;
+    this.reopenAtHome();
+  }
+
+  /** 계정 모드가 바뀐 소켓이고 첫 화면이면 다시 연다 (판 중 나가기 leaveRoom · 연습 끝은 원래 새로 연다) */
+  private reopenAtHome(): void {
+    if (!reopenForAccount(this.staleSocket, this.lobby !== null || this.match !== null)) return;
     this.quietClose = true;
     this.keeper.restart();
   }
@@ -744,7 +762,10 @@ export class App {
     this.forgetRoom(queueDropped, prefill);
   }
 
-  /** 방을 잊고 첫 화면으로 (나가기 뒤 · 대기열에서 빠짐): 주소 room · 마지막 방을 지운다. 연결은 그대로 쓴다 */
+  /**
+   * 방을 잊고 첫 화면으로 (나가기 뒤 · 대기열에서 빠짐 · 결과 '홈으로'): 주소 room · 마지막 방을 지운다. 연결은 그대로 쓴다 — 방 · 판
+   * 중에 계정 모드가 바뀌었으면 여기서 다시 연다('leave'는 먼저 보냈다)
+   */
   private forgetRoom(queueDropped: boolean, prefill = ''): void {
     clearLastRoom();
     this.clearRejoin();
@@ -755,6 +776,7 @@ export class App {
     const url = new URL(window.location.href);
     url.searchParams.delete('room');
     window.history.replaceState(window.history.state, '', url.toString());
+    this.reopenAtHome();
   }
 
   subscribe(listener: (e: AppEvent) => void): () => void {
@@ -1120,8 +1142,11 @@ export class App {
         this.result = msg.result;
         this.setPlaying(false);
         // 내 평가 적립 (같은 판이면 다시 주지 않는다 — 재접속해 결과를 다시 받아도). 저장이 안 돼도 화면은 그대로
-        // 로그인했으면 온라인 판은 서버가 계정에 적립하고(credit을 기다린다), 연습 판은 적립하지 않는다 (meta.ts)
-        const rated = msg.rating ? this.meta.applyRating(msg.rating, this.local !== null) : null;
+        // 로그인했으면 온라인 판은 서버가 계정에 적립하고(credit을 기다린다), 연습 판은 적립하지 않는다 (meta.ts). 연 뒤 계정
+        // 모드가 바뀐 소켓의 판은 서버가 이 계정에 적립하지 않으니 기기 기록에 (staleSocket)
+        const rated = msg.rating
+          ? this.meta.applyRating(msg.rating, this.local !== null, this.staleSocket)
+          : null;
         this.resultUi.show(msg.result, this.match?.role ?? null, rated);
         this.emit({ kind: 'result', result: msg.result });
         return;

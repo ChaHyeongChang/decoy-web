@@ -1,6 +1,7 @@
 // 이 기기 계정 표시 `decoy:account` (선택형 구글 로그인, docs/ACCOUNT_PLAN.md 7절): JSON {v:1, tag}. tag는 서버가 계정 ID에서
 // 만든 불투명한 값이다(구글 ID · 이메일이 아니다). 있으면 부팅 때 계정 기록을 먼저 읽고, 계정 tag와 같으면 이 기기 기록 올리기를
-// 다시 묻지 않는다. 저장소 접근은 storageKeys.ts만 (막혀 있으면 표시 없음 = 게스트)
+// 다시 묻지 않는다. tag ''는 '로그인 시도 중'(로그인하고 돌아와 첫 로그인을 아직 마치지 못함 — account/boot.ts): 부팅 때 읽고, 어느
+// 계정 tag와도 달라 첫 로그인으로 본다. 저장소 접근은 storageKeys.ts만 (막혀 있으면 표시 없음 = 게스트)
 import { readKey, removeKey, writeKey, type StorageLike } from '../storageKeys';
 import { TAG_RE } from './api';
 
@@ -17,7 +18,7 @@ export function accountMark(storage?: StorageLike | null): AccountMark {
       try {
         const o: unknown = JSON.parse(readKey('account', '', storage) ?? 'null');
         const { v, tag } = (o ?? {}) as { v?: unknown; tag?: unknown };
-        return v === 1 && typeof tag === 'string' && TAG_RE.test(tag) ? tag : null;
+        return v === 1 && typeof tag === 'string' && (tag === '' || TAG_RE.test(tag)) ? tag : null;
       } catch {
         return null;
       }

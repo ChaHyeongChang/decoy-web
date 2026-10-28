@@ -289,6 +289,15 @@ export function staleAfterLeave(awaitingWelcome: boolean, type: string): boolean
 }
 
 /**
+ * 계정 모드가 바뀐 소켓을 지금 다시 여는가 (선택형 구글 로그인): 서버는 소켓을 열 때의 세션 쿠키로 계정을 정한다(Conn.account).
+ * 소켓을 연 뒤 계정 모드가 바뀌었으면(stale — 로그아웃 · 계정 삭제 · 세션 끝 · 다른 탭 로그인) 방 · 판 밖(첫 화면)에서 다시 연다.
+ * 방 · 판 중(결과 화면 포함)이면 자리 · 재접속 흐름을 흔들지 않게 첫 화면에 돌아올 때까지 미룬다. 연습 중에는 소켓이 쉬고 끝날 때 새로 연다
+ */
+export function reopenForAccount(stale: boolean, inRoom: boolean): boolean {
+  return stale && !inRoom;
+}
+
+/**
  * 마지막 방 복귀 중 거절(옛 소켓이 아직 붙어 있어 in-progress · room-full)을 받았다: 다시 시도할 때까지 ms,
  * 다음 시도가 저장 시각 + LAST_ROOM_MS를 넘으면 null(그만둔다)
  */

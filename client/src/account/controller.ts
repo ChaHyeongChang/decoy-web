@@ -1,10 +1,14 @@
 // 계정 흐름 (선택형 구글 로그인, docs/ACCOUNT_PLAN.md 7절). 나눠 받는 조각 'account'에 든다(ui/account.ts가 내보낸다) — 첫 묶음은
 // 부팅 판단(account/boot.ts) · 상태 읽기 · 계정 저장소만 가진다.
-//  - 로그인함: 계정 모드(MetaState.useStore). 이 기기 표시 tag가 계정 tag와 다르면 첫 로그인: 기기 기록이 비었으면 묻지 않고
-//    (계정도 비었으면 빈 기록으로 계정을 연다), 계정이 비었으면 기기 기록을 올리고, 둘 다 있으면 고르기 창. 고른 뒤 표시를 적는다.
+//  - 로그인함: 계정 모드(MetaState.useStore). 이 기기 표시 tag가 계정 tag와 다르면(로그인 시도 중 ''도) 첫 로그인: 기기 기록이
+//    비었으면 묻지 않고(계정도 비었으면 빈 기록으로 계정을 연다), 계정이 비었으면 기기 기록을 올리고, 둘 다 있으면 고르기 창 —
+//    고른 대로 올린다('계정 기록'이면 기기 기록 글을 보내지 않는다). 고른 뒤 표시를 적는다.
 //    기기 기록(decoy:progress)은 지우지 않는다 — 로그아웃하면 다시 게스트 기록
-//  - 로그인 안 함 · 꺼짐 · 401: 표시를 지우고 게스트. 실패 · 503 · 시간 초과: 이번 접속은 게스트 + 한 줄 안내 (판은 그대로)
+//  - 로그인 안 함 · 401: 표시를 지우고 게스트. 꺼짐: 게스트로 하되 표시는 남긴다(쿠키가 남아 다시 켜지면 서버는 그 계정에 적립한다 —
+//    다음 부팅이 읽어 같은 계정으로). 실패 · 503 · 시간 초과: 이번 접속은 게스트 + 한 줄 안내 (판은 그대로)
 //  - 설정을 열 때 상태를 모르면 그때 읽는다. 로그아웃 · 계정 삭제 · 세션 끝: 표시를 지우고 기기 기록으로 + 안내
+//  - 서버는 소켓을 열 때의 세션 쿠키로 계정을 정한다(Conn.account): 부팅이 아닌 때 계정 모드가 바뀌면(들어감 entered · 나감 left)
+//    앱이 소켓을 다시 연다 (방 · 판 중이면 첫 화면에 돌아올 때 — app.ts)
 import { ACCOUNT_API, isLoginResult, type AccountImportRequest, type AccountStatus } from '@decoy/shared';
 import { isBlankProfile, parseProfile, type Profile } from '@decoy/shared/meta';
 import { ACCOUNT_TEXT } from '../data/storyText';
@@ -35,8 +39,13 @@ export interface AccountDeps {
   /** 이 기기 기록 글 그대로 (올리기) */
   deviceText(): string | null;
   screens: AccountScreens;
-  /** 로그아웃 · 삭제 · 세션 끝으로 게스트가 됐다 */
+  /** 로그아웃 · 삭제 · 세션 끝 · 꺼짐으로 게스트가 됐다 */
   left?(): void;
+  /**
+   * 부팅이 아닌 때(설정을 열어 읽음 — 다른 탭이 로그인) 계정 모드로 들어갔다: 지금 소켓은 그 전에 열려 계정이 없다(게스트).
+   * 부팅 때는 부르지 않는다 — 소켓이 이미 쿠키를 싣고 열렸다
+   */
+  entered?(): void;
   now(): number;
 }
 
@@ -104,18 +113,20 @@ export class AccountController {
     return true;
   }
 
+  /** 상태를 읽어 맞춘다. status를 주면 부팅 (부팅이 먼저 보낸 요청) */
   private read(notes: string[], status?: Promise<AccountCall<AccountStatus>>): Promise<AccountView> {
     this.reading ??= (status ?? getStatus(this.d.api))
-      .then((r) => this.apply(r, notes))
+      .then((r) => this.apply(r, notes, status !== undefined))
       .finally(() => (this.reading = null));
     return this.reading;
   }
 
-  private async apply(r: AccountCall<AccountStatus>, notes: string[]): Promise<AccountView> {
+  private async apply(r: AccountCall<AccountStatus>, notes: string[], boot: boolean): Promise<AccountView> {
     if (!r.ok && r.error !== 'auth') return this.set('unknown');
     const st = r.ok ? r.body : null;
     if (!st?.on || !st.signedIn) {
-      this.d.mark.clear();
+      // 꺼짐은 표시를 남긴다 (다시 켜지면 같은 계정으로 — 쿠키는 그대로다)
+      if (st?.on !== false) this.d.mark.clear();
       this.store = null;
       if (this.d.meta.mode === 'server') {
         notes.push(ACCOUNT_TEXT.expired);
@@ -131,6 +142,7 @@ export class AccountController {
         return this.set('unknown');
       }
       if (imported) notes.push(ACCOUNT_TEXT.imported);
+      if (!boot) this.d.entered?.();
     }
     return this.set('in');
   }
@@ -149,7 +161,8 @@ export class AccountController {
       else if (st.fresh) req = { choice: 'device', device: raw };
       else {
         const choice = await this.d.screens.choose(parseProfile(text, this.d.now()).profile, dev.profile);
-        req = { choice, device: raw };
+        // 고른 대로 올린다: '계정 기록'이면 이 기기 기록 글을 보내지 않는다
+        req = { choice, device: choice === 'device' ? raw : null };
       }
       if (req) {
         const r = await importDevice(api, req);
@@ -164,23 +177,25 @@ export class AccountController {
       text,
       st.timeZone,
       st.tag,
-      () => this.lost(store),
+      (off) => this.lost(store, off),
       () => this.d.now(),
+      this.d.device,
     );
     this.store = store;
     await this.d.meta.useStore(store);
     return imported;
   }
 
-  /** 세션이 끝났다 (계정 API 401 · 다른 기기에서 지움): 지금 쓰는 계정이면 게스트로 */
-  private lost(store: ServerProfileStore | null): void {
-    if (store && this.store === store) void this.leave(ACCOUNT_TEXT.expired);
+  /** 세션이 끝났다 (계정 API 401 · 다른 기기에서 지움) · 꺼졌다(off): 지금 쓰는 계정이면 게스트로 */
+  private lost(store: ServerProfileStore | null, off = false): void {
+    if (store && this.store === store) void this.leave(ACCOUNT_TEXT.expired, off);
   }
 
-  private async leave(text: string): Promise<void> {
-    this.d.mark.clear();
+  /** 게스트로 (기기 기록). 꺼짐(off)이면 표시를 남긴다 */
+  private async leave(text: string, off = false): Promise<void> {
+    if (!off) this.d.mark.clear();
     this.store = null;
-    this.set('out');
+    this.set(off ? 'off' : 'out');
     await this.d.meta.useStore(this.d.device);
     this.d.screens.notice(text);
     this.d.left?.();
