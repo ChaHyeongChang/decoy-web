@@ -177,6 +177,8 @@ export const ACCOUNT_DATA = {
     sources: [
       'AccountImportRequest.choice',
       'AccountImportRequest.device',
+      // 화면이 계정이 비었다고 보고 올리는 표시 (그새 채워졌으면 서버가 덮지 않는다) — 기록 자체는 아니지만 올리기 요청의 칸
+      'AccountImportRequest.ifBlank',
       'AccountCostumeRequest.action',
       'AccountCostumeRequest.team',
       'AccountCostumeRequest.id',

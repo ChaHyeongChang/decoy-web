@@ -6,7 +6,8 @@
 //  못 함 · 모름(20초 뒤 다시 읽기) · 다른 계정 → 적립 안 함, 이 화면에서 지운 계정 → 기기) / credit은 지금 계정 tag 것만 / 판에 밝히는 계정 tag(join · quick) / 연습 판은 계정 · 기기 모두 적립
 //  안 함 / 계정 날짜 · 자정 / 로그아웃 · 삭제 · 세션 끝 → 기기 모드 / 다른 탭이 다른 계정으로 바꿈(switched) / 꺼짐 안내는 한 번
 //  (부팅 · 계정 모드 중 다시 읽기 · 설정을 열어 다시 읽기 — '지금은 로그인을 쓸 수 없어요') ·
-//  다시 켜짐 / 첫 로그인 빈 기기 + 빈 계정 · 로그인 뒤 10분이 지나 올리기 거절(relogin)
+//  다시 켜짐 / 첫 로그인 빈 기기 + 빈 계정 · 로그인 뒤 10분이 지나 올리기 거절(relogin) / 묻지 않고 올린 기록(ifBlank)이 409
+//  conflict면 상태를 한 번 다시 읽어 고르기 창 (실패 · 다른 계정이면 실패 길)
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MatchRating } from '@decoy/shared';
 import {
@@ -474,7 +475,8 @@ describe('첫 로그인 (이 기기 표시 tag ≠ 계정 tag)', () => {
     const r = await rig({ device: text, route: importRoute(statusIn('T1', null), { ...dev, updated: 9 }) });
     await r.boot('ok');
     const imp = r.calls.find((c) => c.path === '/api/account/import');
-    expect(imp?.body).toEqual({ choice: 'device', device: text });
+    // 묻지 않고 올리는 길: 서버에서 그새 채워졌으면 덮지 말라고 ifBlank를 싣는다
+    expect(imp?.body).toEqual({ choice: 'device', device: text, ifBlank: true });
     expect(r.chosen).toEqual([]);
     expect(r.meta.mode).toBe('server');
     expect(r.meta.current.xp).toBe(130);
@@ -492,7 +494,7 @@ describe('첫 로그인 (이 기기 표시 tag ≠ 계정 tag)', () => {
     await r.boot('ok');
     expect(r.chosen).toEqual([]);
     const imp = r.calls.find((c) => c.path === '/api/account/import');
-    expect(imp?.body).toEqual({ choice: 'device', device: text });
+    expect(imp?.body).toEqual({ choice: 'device', device: text, ifBlank: true });
     expect(r.meta.current.xp).toBe(130);
     expect(r.notes).toEqual([T.results.ok, T.imported]);
     expect(markOf(r)).toEqual({ v: 1, tag: 'T5' });
@@ -546,10 +548,130 @@ describe('첫 로그인 (이 기기 표시 tag ≠ 계정 tag)', () => {
     const next = await rig({ storage: r.storage, route });
     await next.boot(null);
     expect(next.calls.map((c) => c.path)).toEqual(['/api/account', '/api/account/import']);
-    expect(next.calls[1]?.body).toEqual({ choice: 'device', device: serializeProfile(dev) });
+    expect(next.calls[1]?.body).toEqual({ choice: 'device', device: serializeProfile(dev), ifBlank: true });
     expect(next.meta.mode).toBe('server');
     expect(markOf(next)).toEqual({ v: 1, tag: 'T1' });
     expect(next.notes).toEqual([T.imported]);
+  });
+});
+
+describe('첫 로그인 올리기 충돌 (409 conflict — 비었던 계정을 그새 다른 기기가 채움)', () => {
+  /** 상태 읽기 · 올리기 답을 차례로 (다 쓰면 마지막 답을 되풀이) */
+  function seqRoute(statuses: (() => Response)[], imports: (() => Response)[]): Route {
+    let s = 0;
+    let i = 0;
+    const pick = (list: (() => Response)[], n: number): Response => list[Math.min(n, list.length - 1)]!();
+    return (c) => (c.path === '/api/account' ? pick(statuses, s++) : pick(imports, i++));
+  }
+  const paths = (r: Rig): string[] => r.calls.map((c) => c.path);
+  const imports = (r: Rig): unknown[] =>
+    r.calls.filter((c) => c.path === '/api/account/import').map((c) => c.body);
+
+  it('계정 API는 409 {error:conflict}를 conflict로 읽는다', async () => {
+    const { api } = fakeServer(() => json(409, { error: 'conflict' }));
+    expect(await api.request('/api/account/import', { choice: 'device', device: null }, (b) => b)).toEqual({
+      ok: false,
+      status: 409,
+      error: 'conflict',
+    });
+  });
+
+  it('비었다고 보고 묻지 않고 올렸는데 409: 상태를 한 번 다시 읽어 채워졌으면 고르기 창 → 고른 쪽으로 ifBlank 없이 다시 올린다', async () => {
+    const dev = profileWith({ xp: 130, coins: 40 });
+    const text = serializeProfile(dev);
+    const other = profileWith({ xp: 900, coins: 5, owned: ['pack'] });
+    // 처음 읽은 계정: 기록 없음(fresh) · 아무것도 쌓지 않은 빈 기록 — 둘 다 묻지 않는 길
+    for (const first of [null, profileWith({})]) {
+      for (const choice of ['account', 'device'] as const) {
+        const label = `${first === null ? 'fresh' : 'blank'} → ${choice}`;
+        const after = choice === 'account' ? other : dev;
+        const r = await rig({
+          device: text,
+          choose: choice,
+          route: seqRoute(
+            [() => json(200, statusIn('T1', first)), () => json(200, statusIn('T1', other))],
+            [() => json(409, { error: 'conflict' }), () => json(200, body(after))],
+          ),
+        });
+        await r.boot('ok');
+        expect(paths(r), label).toEqual([
+          '/api/account',
+          '/api/account/import',
+          '/api/account',
+          '/api/account/import',
+        ]);
+        const [auto, picked] = imports(r);
+        expect(auto, label).toStrictEqual({ choice: 'device', device: text, ifBlank: true });
+        // 고르기 창에서 고른 경우에는 ifBlank를 싣지 않는다 ('계정 기록'이면 기기 글도 보내지 않는다)
+        expect(picked, label).toStrictEqual({ choice, device: choice === 'device' ? text : null });
+        // 고르기 창은 한 번: 다시 읽은(다른 기기가 채운) 계정 기록과 이 기기 기록
+        expect(r.chosen, label).toHaveLength(1);
+        expect(r.chosen[0]?.account.xp, label).toBe(900);
+        expect(r.chosen[0]?.account.owned, label).toEqual(['pack']);
+        expect(r.chosen[0]?.device.xp, label).toBe(130);
+        // 끝은 고른 기록으로 로그인 (보통 고르기와 같은 안내)
+        expect(r.meta.mode, label).toBe('server');
+        expect(r.meta.tag, label).toBe('T1');
+        expect(r.meta.current.xp, label).toBe(after.xp);
+        expect(r.ctl.view, label).toBe('in');
+        expect(markOf(r), label).toEqual({ v: 1, tag: 'T1' });
+        expect(r.notes, label).toEqual(choice === 'device' ? [T.results.ok, T.imported] : [T.results.ok]);
+        // 기기 기록은 지우지 않는다
+        expect(r.storage.data.get(PROGRESS), label).toBe(text);
+      }
+    }
+  });
+
+  it('409 뒤 다시 읽기가 실패 · 다른 계정 · 로그인 안 함이면 실패 길 (게스트 + 안내, 시도 중 표시 남김) — 다시 읽기는 한 번만', async () => {
+    const dev = profileWith({ xp: 130, coins: 40 });
+    const text = serializeProfile(dev);
+    const cases: [string, () => Response][] = [
+      ['503', () => json(503, { error: 'db' })],
+      ['다른 tag', () => json(200, statusIn('T9', profileWith({ xp: 900 })))],
+      ['로그인 안 함', () => json(200, { on: true, signedIn: false })],
+      ['꺼짐', () => json(200, { on: false })],
+    ];
+    for (const [label, reread] of cases) {
+      const r = await rig({
+        device: text,
+        choose: 'device',
+        route: seqRoute(
+          [() => json(200, statusIn('T1', null)), reread],
+          [() => json(409, { error: 'conflict' })],
+        ),
+      });
+      await r.boot('ok');
+      expect(paths(r), label).toEqual(['/api/account', '/api/account/import', '/api/account']);
+      expect(r.chosen, label).toEqual([]);
+      expect(r.meta.mode, label).toBe('device');
+      expect(r.meta.current.xp, label).toBe(130);
+      expect(r.ctl.view, label).toBe('unknown');
+      expect(r.notes, label).toEqual([T.offline]);
+      // 첫 로그인을 마치지 못했다: 시도 중 표시 그대로 (다음 부팅이 다시)
+      expect(markOf(r), label).toEqual({ v: 1, tag: '' });
+      expect(r.storage.data.get(PROGRESS), label).toBe(text);
+    }
+  });
+
+  it('다시 읽어도 여전히 비어 보여 또 409면 거기서 멈춘다 (다시 읽기 한 번 · 올리기 두 번, 고르기 창 없음)', async () => {
+    const dev = profileWith({ xp: 130, coins: 40 });
+    const text = serializeProfile(dev);
+    const r = await rig({
+      device: text,
+      choose: 'device',
+      route: seqRoute([() => json(200, statusIn('T1', null))], [() => json(409, { error: 'conflict' })]),
+    });
+    await r.boot('ok');
+    expect(paths(r)).toEqual(['/api/account', '/api/account/import', '/api/account', '/api/account/import']);
+    expect(imports(r)).toStrictEqual([
+      { choice: 'device', device: text, ifBlank: true },
+      { choice: 'device', device: text, ifBlank: true },
+    ]);
+    expect(r.chosen).toEqual([]);
+    expect(r.meta.mode).toBe('device');
+    expect(r.ctl.view).toBe('unknown');
+    expect(r.notes).toEqual([T.offline]);
+    expect(markOf(r)).toEqual({ v: 1, tag: '' });
   });
 });
 

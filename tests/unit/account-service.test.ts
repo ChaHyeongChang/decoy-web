@@ -1,9 +1,10 @@
 // 계정 서비스 (docs/ACCOUNT_PLAN.md 4 · 5절): 서버 적립 = 공용 applyRating 결과 · 같은 판 한 번 · 지운 계정 다시 안 만듦 ·
 // 동시 적립 둘 다 반영 · DB 실패 다시 시도 · 'newer' 기록 덮지 않음 · 계정 날짜(서울 자정) · 기기 기록 올리기 · 접속 보상 하루 한 번 ·
 // 해금 불씨 · 입기 가진 것만 · 적립 결과는 그 계정 연결에만(그 계정 tag를 싣는다) · 삭제 페이지 찾기는 계정을 만들지 않음 ·
-// 기기 글 null은 있는 계정 기록을 덮지 않음
+// 기기 글 null은 있는 계정 기록을 덮지 않음 · 비었다고 보고 올린 기록(ifBlank)은 그새 채워졌으면 덮지 않음(409) ·
+// 조건부 쓰기(읽은 rev): 시간을 넘겨 버린 옛 쓰기 · 그새 바뀐 기록을 덮지 않음, 적립은 다시 읽고 다시 시도
 import { describe, expect, it } from 'vitest';
-import type { MatchRating, ServerMessage } from '@decoy/shared';
+import type { AccountImportRequest, MatchRating, ServerMessage } from '@decoy/shared';
 import {
   PROGRESSION,
   applyRating,
@@ -15,6 +16,7 @@ import {
 } from '@decoy/shared/meta';
 import {
   AccountBadRequest,
+  AccountImportConflict,
   AccountService,
   AccountUnavailable,
   CREDIT_RETRY_MS,
@@ -24,7 +26,7 @@ import {
   type AccountServiceOptions,
   type CreditMessage,
 } from '../../server/src/account/service';
-import { MemoryAccountStore, type AccountRecord } from '../../server/src/account/store';
+import { AccountConflict, MemoryAccountStore, type AccountRecord } from '../../server/src/account/store';
 import { AccountConnections } from '../../server/src/account/system';
 import { FakeConn } from '../helpers/fakeConn';
 
@@ -84,6 +86,52 @@ class TestStore extends MemoryAccountStore {
   }
 }
 
+/** 다음 기록 쓰기 하나를 붙잡아 두었다가 놓는 저장소 (시간을 넘겨 버린 옛 쓰기가 늦게 도착하는 흉내) */
+class HeldStore extends TestStore {
+  private holdNext = false;
+  private release: (() => void) | null = null;
+  private held: Promise<boolean> | null = null;
+
+  hold(): void {
+    this.holdNext = true;
+  }
+
+  /** 붙잡은 쓰기를 놓고 끝나기를 기다린다 (썼으면 fulfilled, 그새 바뀌어 거절했으면 rejected) */
+  async letGo(): Promise<PromiseSettledResult<boolean>> {
+    const held = this.held;
+    if (!held || !this.release) throw new Error('붙잡은 쓰기가 없다');
+    this.release();
+    const [settled] = await Promise.allSettled([held]);
+    return settled;
+  }
+
+  override saveProfile(id: string, profile: string, nowMs: number, expectRev?: number): Promise<boolean> {
+    if (!this.holdNext) return super.saveProfile(id, profile, nowMs, expectRev);
+    this.holdNext = false;
+    const gate = new Promise<void>((resolve) => (this.release = resolve));
+    this.held = gate.then(() => super.saveProfile(id, profile, nowMs, expectRev));
+    return this.held;
+  }
+}
+
+/** 다음 읽기 바로 뒤(서비스가 쓰기 전)에 한 번: 조건 없이(rev 없이) 불씨 +7을 쓴다 — 다른 길의 쓰기가 끼어든 흉내 */
+class SneakyStore extends TestStore {
+  sneakNext = false;
+  /** 끼어들어 쓴 글 */
+  sneaked: string | null = null;
+
+  override async get(id: string): Promise<AccountRecord | null> {
+    const rec = await super.get(id);
+    if (this.sneakNext && rec?.profile) {
+      this.sneakNext = false;
+      const p = parseProfile(rec.profile, T);
+      this.sneaked = serializeProfile({ ...p.profile, coins: p.profile.coins + 7 }, p.extra);
+      await super.saveProfile(id, this.sneaked, T);
+    }
+    return rec;
+  }
+}
+
 interface Rig {
   store: TestStore;
   service: AccountService;
@@ -96,8 +144,8 @@ interface Rig {
 /** 시험용 계정 표시 tag (시스템은 세션 비밀로 만든다 — system.ts) */
 const tagOf = (id: string): string => `tag-${id.slice(0, 8)}`;
 
-function rig(over: Partial<AccountServiceOptions> = {}): Rig {
-  const store = new TestStore();
+/** store를 주면 그 저장소로 (붙잡기 · 끼어들기 시험) */
+function rig(over: Partial<AccountServiceOptions> = {}, store: TestStore = new TestStore()): Rig {
   const pushed: Rig['pushed'] = [];
   const sleeps: number[] = [];
   const logs: string[] = [];
@@ -320,6 +368,14 @@ describe('서버 적립', () => {
     await expect(
       r.service.importDevice(id, { choice: 'device', device: JSON.stringify({ v: 1, xp: 3 }) }),
     ).rejects.toBeInstanceOf(AccountUnavailable);
+    // 비었다고 보고 올린 기록(ifBlank)도: 읽지 못하는 높은 판 기록을 '빈 기록'으로 보고 덮지 않는다
+    await expect(
+      r.service.importDevice(id, {
+        choice: 'device',
+        device: JSON.stringify({ v: 1, xp: 3 }),
+        ifBlank: true,
+      }),
+    ).rejects.toBeInstanceOf(AccountUnavailable);
     // 상태 읽기 · 계정 기록 그대로 쓰기(choice account · 기기 글 null)는 된다
     expect((await r.service.status(id))?.profile).toBe(newer);
     expect((await r.service.importDevice(id, { choice: 'account', device: null }))?.profile).toBe(newer);
@@ -430,6 +486,79 @@ describe('기기 기록 올리기 (첫 로그인)', () => {
     expect(await r.service.importDevice('f'.repeat(32), { choice: 'device', device: null })).toBeNull();
   });
 
+  it('ifBlank(화면이 비었다고 보고 묻지 않고 올림): 계정 기록이 없거나(fresh) 아무것도 쌓지 않은 빈 기록이면 올린다', async () => {
+    const text = device({ xp: 300, coins: 20 });
+    const parsed = parseProfile(text, T);
+    const want = serializeProfile(parsed.profile, parsed.extra);
+    // 기록 없음 (첫 로그인)
+    const r = rig();
+    const id = await account(r);
+    const out = await r.service.importDevice(id, { choice: 'device', device: text, ifBlank: true });
+    expect(out).toEqual({ profile: want, day: '2026-10-28' });
+    expect(r.store.list()[0]).toMatchObject({ profile: want, rev: 1 });
+    // 빈 기록 (빈 기기로 처음 로그인해 연 계정 — null이 아니다)
+    const b = rig();
+    const bid = await account(b);
+    await b.service.importDevice(bid, { choice: 'account', device: null });
+    const blank = b.store.list()[0]!;
+    expect(blank.profile).toBe(serializeProfile(emptyProfile(T), {}));
+    const up = await b.service.importDevice(bid, { choice: 'device', device: text, ifBlank: true });
+    expect(up?.profile).toBe(want);
+    expect(b.store.list()[0]).toMatchObject({ profile: want, rev: blank.rev + 1 });
+    expect(profileOf(b, bid).xp).toBe(300);
+  });
+
+  it('ifBlank: 그새 다른 기기가 채운 계정 기록은 덮지 않고 AccountImportConflict (기록 · rev 그대로, 쓰기 없음)', async () => {
+    const r = rig();
+    const id = await account(r);
+    // 다른 기기가 먼저 첫 로그인해 올렸다
+    await r.service.importDevice(id, { choice: 'device', device: device({ xp: 777, coins: 40 }) });
+    const before = r.store.list()[0]!;
+    const saves = r.store.saves;
+    await expect(
+      r.service.importDevice(id, { choice: 'device', device: device({ xp: 5, coins: 1 }), ifBlank: true }),
+    ).rejects.toBeInstanceOf(AccountImportConflict);
+    expect(r.store.list()[0]).toEqual(before);
+    expect(r.store.saves).toBe(saves);
+    expect(profileOf(r, id).xp).toBe(777);
+    // 접속 보상만 받은 계정도 비어 있지 않다 (불씨 · 접속 기록)
+    const c = rig();
+    const cid = await account(c);
+    await c.service.claimLogin(cid);
+    const claimed = c.store.list()[0]!;
+    await expect(
+      c.service.importDevice(cid, { choice: 'device', device: device({ xp: 5 }), ifBlank: true }),
+    ).rejects.toBeInstanceOf(AccountImportConflict);
+    expect(c.store.list()[0]).toEqual(claimed);
+    // 고르기 창에서 고른 뒤(ifBlank 없이)에는 고른 대로 바꾼다
+    const replace = await r.service.importDevice(id, {
+      choice: 'device',
+      device: device({ xp: 5, coins: 1 }),
+    });
+    expect(profileOf(r, id).xp).toBe(5);
+    expect(replace?.profile).toBe(r.store.list()[0]!.profile);
+  });
+
+  it("ifBlank여도 choice 'account' · 기기 글 null은 있는 계정 기록을 덮지 않는다 (충돌이 아니라 그 기록을 돌려준다)", async () => {
+    const reqs: AccountImportRequest[] = [
+      { choice: 'account', device: device({ xp: 5 }), ifBlank: true },
+      { choice: 'device', device: null, ifBlank: true },
+      { choice: 'account', device: null, ifBlank: true },
+    ];
+    for (const req of reqs) {
+      const label = JSON.stringify({ ...req, device: req.device === null ? null : 'text' });
+      const r = rig();
+      const id = await account(r);
+      await r.service.importDevice(id, { choice: 'device', device: device({ xp: 777 }) });
+      const before = r.store.list()[0]!;
+      const saves = r.store.saves;
+      const out = await r.service.importDevice(id, req);
+      expect(out?.profile, label).toBe(before.profile);
+      expect(r.store.list()[0], label).toEqual(before);
+      expect(r.store.saves, label).toBe(saves);
+    }
+  });
+
   it('요청 모양 검사 (기기 글 32KB 상한)', () => {
     expect(parseImportRequest({ choice: 'device', device: '{}' })).toEqual({
       choice: 'device',
@@ -449,6 +578,21 @@ describe('기기 기록 올리기 (첫 로그인)', () => {
     ])
       expect(parseImportRequest(bad)).toBeNull();
     expect(parseImportRequest({ choice: 'device', device: 'x'.repeat(32 * 1024 + 1) })).toBeNull();
+    // ifBlank는 true만 받는다 (싣지 않으면 요청에도 없다)
+    expect(parseImportRequest({ choice: 'device', device: '{}', ifBlank: true })).toStrictEqual({
+      choice: 'device',
+      device: '{}',
+      ifBlank: true,
+    });
+    expect(parseImportRequest({ choice: 'device', device: '{}' })).toStrictEqual({
+      choice: 'device',
+      device: '{}',
+    });
+    for (const ifBlank of [false, 1, 'yes', 'true', null, {}])
+      expect(
+        parseImportRequest({ choice: 'device', device: '{}', ifBlank }),
+        JSON.stringify(ifBlank),
+      ).toBeNull();
   });
 });
 
@@ -524,6 +668,141 @@ describe('접속 보상 · 의상 (서버가 판단)', () => {
       { action: 'buy', team: 'monster' },
     ])
       expect(parseCostumeRequest(bad)).toBeNull();
+  });
+});
+
+describe('조건부 쓰기 (읽은 rev): 옛 쓰기 · 그새 바뀐 기록을 덮지 않는다', () => {
+  /** 시작 기록: 불씨 500 · 가방(pack)을 가졌다 (해금 · 입기 · 접속 보상이 모두 쓰기를 만든다) */
+  const start = (): string => serializeProfile({ ...emptyProfile(T), coins: 500, owned: ['pack'] }, {});
+
+  async function seeded(over: Partial<AccountServiceOptions>, store: TestStore): Promise<[Rig, string]> {
+    const r = rig(over, store);
+    const id = await account(r);
+    await r.service.importDevice(id, { choice: 'device', device: start() });
+    return [r, id];
+  }
+
+  function rejectedWith(s: PromiseSettledResult<boolean>): unknown {
+    expect(s.status).toBe('rejected');
+    return s.status === 'rejected' ? (s.reason as unknown) : null;
+  }
+
+  const staleJobs: [string, (s: AccountService, id: string) => Promise<unknown>][] = [
+    [
+      '기기 기록 올리기',
+      (s, id) =>
+        s.importDevice(id, {
+          choice: 'device',
+          device: serializeProfile({ ...emptyProfile(T), xp: 9999 }, {}),
+        }),
+    ],
+    ['의상 해금', (s, id) => s.costume(id, { action: 'buy', team: 'survivor', id: 'scarf' })],
+    ['의상 입기', (s, id) => s.costume(id, { action: 'wear', team: 'survivor', id: 'pack' })],
+  ];
+
+  it.each(staleJobs)(
+    '%s: 쓰기가 시간을 넘겨(503) 뒤 일(접속 보상)이 쓴 다음에 늦게 도착해도 거절된다 — 기록 · rev는 뒤 일의 것',
+    async (_, jobA) => {
+      const held = new HeldStore();
+      const [r, id] = await seeded({ dbTimeoutMs: 30, settleMaxMs: 30 }, held);
+      // 일 A: 쓰기가 붙잡혀 시간을 넘긴다
+      held.hold();
+      await expect(jobA(r.service, id)).rejects.toMatchObject({ why: 'timeout' });
+      // 일 B: 접속 보상 (줄은 A의 쓰기를 settleMaxMs만 기다리고 넘어간다)
+      const b = await r.service.claimLogin(id);
+      expect(b?.claimed).not.toBeNull();
+      const afterB = r.store.list()[0]!;
+      expect(afterB.profile).toBe(b?.profile);
+      // A의 옛 쓰기가 이제 도착: 읽은 rev가 지나 쓰지 않는다
+      expect(rejectedWith(await held.letGo())).toBeInstanceOf(AccountConflict);
+      expect(r.store.list()[0]).toEqual(afterB);
+      // A의 변화(기기 기록 · 해금 · 입기)는 없고 B의 불씨는 있다
+      const p = profileOf(r, id);
+      expect(p.xp).toBe(0);
+      expect(p.owned).toEqual(['pack']);
+      expect(p.wear.survivor).toBe('basic');
+      expect(p.coins).toBe(500 + PROGRESSION.login.base);
+    },
+  );
+
+  it('적립: 첫 쓰기가 시간을 넘기면 다시 읽고 다시 시도해 한 번 적립 — 늦게 도착한 첫 쓰기는 거절되어 그 뒤 일도 덮지 않는다', async () => {
+    const held = new HeldStore();
+    const clock = { now: T };
+    const sleeps: number[] = [];
+    const [r, id] = await seeded(
+      {
+        dbTimeoutMs: 30,
+        settleMaxMs: 30,
+        retryDelaysMs: [1, 1, 1],
+        now: () => clock.now,
+        // 다시 시도는 조금 뒤 (다시 쓴 글의 시각이 첫 시도와 다르다)
+        sleep: (ms) => {
+          sleeps.push(ms);
+          clock.now += 1000;
+          return Promise.resolve();
+        },
+      },
+      held,
+    );
+    held.hold();
+    const res = await r.service.credit(id, rating('ROOM.9.a'));
+    expect(res.ok).toBe(true);
+    expect(sleeps).toEqual([1]);
+    const afterCredit = r.store.list()[0]!;
+    expect(afterCredit.profile).toBe(res.profile);
+    expect(r.pushed.map((x) => x.msg.ok)).toEqual([true]);
+    // 그 뒤 일: 접속 보상
+    const b = await r.service.claimLogin(id);
+    const afterB = r.store.list()[0]!;
+    expect(afterB.profile).toBe(b?.profile);
+    expect(afterB.rev).toBe(afterCredit.rev + 1);
+    // 첫 시도의 옛 쓰기가 이제 도착: 거절 (적립을 두 번 하지도, 접속 보상을 지우지도 않는다)
+    expect(rejectedWith(await held.letGo())).toBeInstanceOf(AccountConflict);
+    expect(r.store.list()[0]).toEqual(afterB);
+    const p = profileOf(r, id);
+    expect(p.played.survivor).toBe(1);
+    expect(p.recent.filter((m) => m === 'ROOM.9.a')).toHaveLength(1);
+    expect(p.coins).toBe(parseProfile(afterCredit.profile, T).profile.coins + PROGRESSION.login.base);
+  });
+
+  it('적립: 읽은 뒤 기록이 그새 바뀌면(조건 없는 쓰기가 끼어듦) AccountConflict → 다시 읽고 다시 시도해 한 번만 적립, 끼어든 변화도 남는다', async () => {
+    const store = new SneakyStore();
+    const [r, id] = await seeded({}, store);
+    store.sneakNext = true;
+    const res = await r.service.credit(id, rating('ROOM.7.a'));
+    expect(res.ok).toBe(true);
+    // 한 번 실패(그새 바뀜)하고 다시 읽어 성공
+    expect(r.sleeps).toEqual([CREDIT_RETRY_MS[0]]);
+    expect(store.sneaked).not.toBeNull();
+    const base = parseProfile(store.sneaked, T);
+    expect(base.profile.coins).toBe(507);
+    // 끼어든 기록 위에 공용 applyRating 그대로
+    const want = applyRating(base.profile, rating('ROOM.7.a'), T, PROGRESSION, '2026-10-28');
+    expect(want).not.toBeNull();
+    expect(res.profile).toBe(serializeProfile(want!.profile, base.extra));
+    expect(r.store.list()[0]!.profile).toBe(res.profile);
+    const p = profileOf(r, id);
+    expect(p.played.survivor).toBe(1);
+    expect(p.recent).toEqual(['ROOM.7.a']);
+    expect(r.pushed).toEqual([
+      { id, msg: { t: 'credit', tag: tagOf(id), matchId: 'ROOM.7.a', ok: true, profile: res.profile } },
+    ]);
+  });
+
+  it('적립이 아닌 일(의상 해금)은 그새 바뀐 기록을 덮지 않고 503 (AccountUnavailable error) — 끼어든 변화 그대로', async () => {
+    const store = new SneakyStore();
+    const [r, id] = await seeded({}, store);
+    store.sneakNext = true;
+    const err = await r.service.costume(id, { action: 'buy', team: 'survivor', id: 'scarf' }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(AccountUnavailable);
+    expect((err as AccountUnavailable).why).toBe('error');
+    expect(r.store.list()[0]!.profile).toBe(store.sneaked);
+    expect(profileOf(r, id).owned).toEqual(['pack']);
+    expect(profileOf(r, id).coins).toBe(507);
+    expect(r.sleeps).toEqual([]);
   });
 });
 

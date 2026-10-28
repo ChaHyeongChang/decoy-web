@@ -2,7 +2,8 @@
 // 꺼짐 상태 · 로그인 전체 흐름(start → 가짜 구글 → callback → 쿠키 → /api/account) · state · 쿠키 · 나쁜 토큰 · 취소 · CSRF ·
 // 본문 크기 · 401 쿠키 지움 · DB 장애 503 · 삭제 즉시 · 삭제 뒤 적립이 계정을 다시 만들지 않음 · 삭제 페이지 · 비율 제한 ·
 // 기기에서 보낸 보상 값을 받는 길이 없음 · 삭제 페이지 로그인은 계정을 만들지 않고 게임 세션 대신 삭제 전용 쿠키(decoy_del) ·
-// 기기 기록 올리기는 구글 로그인 뒤 10분 안만(새로 발급한 세션도 로그인 때 그대로)
+// 기기 기록 올리기는 구글 로그인 뒤 10분 안만(새로 발급한 세션도 로그인 때 그대로) · 비었다고 보고 올린 기록(ifBlank)이
+// 그새 채워졌으면 409 conflict로 덮지 않음
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AccountStatus, MatchRating } from '@decoy/shared';
 import { PROGRESSION } from '@decoy/shared/meta';
@@ -487,6 +488,69 @@ describe('로그인 켜짐 (가짜 구글 · 메모리 저장소)', () => {
     expect((await json<{ profile: string }>(late)).profile).toBe(up.profile);
     const st = await status(srv, jar);
     expect(st.body).toMatchObject({ signedIn: true, profile: up.profile });
+  });
+
+  it('비었다고 보고 올린 기록(ifBlank)은 그새 다른 기기가 채웠으면 409 conflict로 덮지 않는다 · 빈 기록 계정은 받는다 · ifBlank는 true만', async () => {
+    const progressA = JSON.stringify({ v: 1, xp: 210, coins: 30 });
+    const progressB = JSON.stringify({ v: 1, xp: 5, coins: 1 });
+    // 기기 A의 첫 로그인: 계정이 비어 있으니 묻지 않고 올린다
+    const a = await signedIn(srv, 'if-blank-user');
+    const first = await apiPost(srv, a, '/api/account/import', {
+      choice: 'device',
+      device: progressA,
+      ifBlank: true,
+    });
+    expect(first.status).toBe(200);
+    const up = await json<{ profile: string }>(first);
+    expect(JSON.parse(up.profile)).toMatchObject({ xp: 210, coins: 30 });
+    // 기기 B(같은 계정, 다른 세션)도 비었다고 보고 늦게 올렸다: 409, 덮지 않는다 (세션은 그대로)
+    const b = await signedIn(srv, 'if-blank-user');
+    const second = await apiPost(srv, b, '/api/account/import', {
+      choice: 'device',
+      device: progressB,
+      ifBlank: true,
+    });
+    expect(second.status).toBe(409);
+    expect(await second.json()).toEqual({ error: 'conflict' });
+    expect(second.headers.get('cache-control')).toBe('no-store');
+    expect(second.headers.getSetCookie()).toEqual([]);
+    for (const jar of [a, b])
+      expect((await status(srv, jar)).body).toMatchObject({
+        signedIn: true,
+        fresh: false,
+        profile: up.profile,
+      });
+    // 고르기 창에서 고른 뒤(ifBlank 없이)에는 고른 대로 바꾼다
+    const chosen = await apiPost(srv, b, '/api/account/import', { choice: 'device', device: progressB });
+    expect(chosen.status).toBe(200);
+    expect(JSON.parse((await json<{ profile: string }>(chosen)).profile)).toMatchObject({ xp: 5, coins: 1 });
+
+    // 빈 기록 계정(빈 기기로 처음 로그인해 연 계정 — 기록이 null이 아니다)은 ifBlank 올리기를 받는다
+    const c = await signedIn(srv, 'if-blank-empty');
+    expect((await apiPost(srv, c, '/api/account/import', { choice: 'account', device: null })).status).toBe(
+      200,
+    );
+    expect((await status(srv, c)).body).toMatchObject({ signedIn: true, fresh: false });
+    const fill = await apiPost(srv, c, '/api/account/import', {
+      choice: 'device',
+      device: progressA,
+      ifBlank: true,
+    });
+    expect(fill.status).toBe(200);
+    expect(JSON.parse((await json<{ profile: string }>(fill)).profile)).toMatchObject({ xp: 210, coins: 30 });
+
+    // 본문 검사: ifBlank는 true만 (그 밖은 400, 기록 그대로)
+    for (const ifBlank of [false, 1, 'yes', null]) {
+      const bad = await apiPost(srv, c, '/api/account/import', {
+        choice: 'device',
+        device: progressB,
+        ifBlank,
+      });
+      expect(bad.status, JSON.stringify(ifBlank)).toBe(400);
+      expect(await bad.json()).toEqual({ error: 'bad-request' });
+    }
+    const listed = (await accounts(srv)).find((x) => x.sub === 'if-blank-empty')!;
+    expect(JSON.parse(listed.profile!)).toMatchObject({ xp: 210, coins: 30 });
   });
 
   it('기기 기록 올리기는 기기 글 · 비어 있지 않은 글이 있으면 구글 로그인 뒤 10분 안만 — 넘으면 403 relogin (null은 언제나 된다)', async () => {
