@@ -133,6 +133,11 @@ export default defineConfig(({ command }) => ({
     fs: { allow: [repoRoot] },
     proxy: {
       '/ws': { target: `ws://localhost:${serverPort}`, ws: true },
+      // 선택형 구글 로그인 (docs/ACCOUNT_PLAN.md): 계정 API · 로그인 · 삭제 페이지도 서버로. Host를 바꾸지 않는다(서버가 출처 ·
+      // 돌아올 주소를 Host로 만든다)
+      '/api': { target: `http://localhost:${serverPort}` },
+      '/auth': { target: `http://localhost:${serverPort}` },
+      '/account': { target: `http://localhost:${serverPort}` },
     },
   },
 }));

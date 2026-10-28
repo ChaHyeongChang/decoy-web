@@ -63,14 +63,14 @@
 | `POST /api/account/delete` | **계정 행을 바로 지운다** + 쿠키 지우기 | `AccountDeleteResponse` |
 
 - POST는 `x-decoy-account: 1` 헤더 + `Origin`(있으면 같은 출처) 필수, 아니면 403 `csrf`. JSON 본문 상한: import 32KB, 그 밖 2KB(넘으면 413). CORS 허용 없음
-- 로그인 안 함 · 세션 끝 · 지워진 계정 → 401 `auth`(쿠키도 지운다). 꺼짐 → 404 `off`
+- 로그인 안 함 · 세션 끝 · 지워진 계정 → POST는 401 `auth`(쿠키도 지운다), `GET /api/account`는 200 `{on:true, signedIn:false}`(쿠키를 지운다). 꺼짐 → `GET /api/account`는 200 `{on:false}`, 그 밖은 404 `off`
 - 너무 잦은 요청: IP마다 `/auth/*` 1분 20번, 계정마다 POST 1분 60번 → 429 `rate`
 - 모든 DB 호출은 3초 제한. 넘거나 실패하면 503 `db`
 - 응답은 `cache-control: no-store`
 
 ## 5. 서버 적립 (`server/src/account/service.ts`)
 
-- WebSocket 연결 때 `decoy_sid` 쿠키를 서명으로 확인해 `Conn.account`에 계정 ID를 둔다(로그인이 꺼졌으면 두지 않는다). 방은 자리에 붙은 마지막 연결의 계정을 `Seat.account`로 들고 있다가 판이 끝나 결과를 보낸 뒤 `RoomHooks.rated(room, seat, rating)`으로 넘긴다
+- WebSocket 연결 때 `decoy_sid` 쿠키를 서명으로 확인해 `Conn.account`에 계정 ID를 둔다(로그인이 꺼졌거나 `Origin` 호스트가 이 서버와 다르면 두지 않는다 — 다른 사이트에서 연 소켓은 게스트). 방은 자리에 붙은 마지막 연결의 계정을 `Seat.account`로 들고 있다가 판이 끝나 결과를 보낸 뒤 `RoomHooks.rated(room, seat, rating)`으로 넘긴다
 - 서비스: 계정마다 한 줄로 세워(같은 프로세스 — 인스턴스 1개) 읽기 → `parseProfile`(없으면 `emptyProfile`) → `applyRating(profile, rating, 서버 시각, PROGRESSION, 계정 날짜)` → 저장. 같은 판 ID면 저장 없이 성공(재접속). 지워진 계정은 **다시 만들지 않는다**
 - 결과는 그 계정의 **모든 연결**(같은 사람의 다른 탭)에 `{t:'credit', matchId, ok, profile}`. DB 실패는 0.5 · 2 · 6초 뒤 다시 시도하고 그래도 안 되면 `ok:false`
 - 계정 날짜 = `dayKeyInZone(서버 시각, DECOY_ACCOUNT_TIMEZONE)`(공용 `shared/src/meta/daily.ts`). 기기 시계를 쓰지 않는다 — 시계를 돌려 도전 · 접속 보상을 다시 받을 수 없다. 기기 기록(게스트)은 지금처럼 기기 자정
@@ -91,18 +91,19 @@
 
 ## 7. 화면 (클라이언트)
 
-- **첫 묶음(작게, +3KiB 안쪽)**: `client/src/account/` — 상태 읽기 · 계정 API 호출(`fetch`, 5초 제한) · `ServerProfileStore` · 표시 `decoy:account`. 부팅 때 **`decoy:account`가 있거나 주소에 `?login=`이 있을 때만** `GET /api/account`를 부른다(게스트 · 기능 꺼짐은 요청 없음). 표시가 있으면 레벨 칩은 계정을 읽을 때까지 '…'(최대 3초, 넘으면 기기 기록)
+- **첫 묶음(작게, +3KiB 안쪽)**: `client/src/account/api.ts` · `mark.ts` · `boot.ts` — 상태 읽기 · 계정 API 호출(`fetch`, 5초 제한) · 표시 `decoy:account`. 계정 흐름(`controller.ts`) · `ServerProfileStore`(`serverStore.ts`) · 호출(`calls.ts`)은 예산 때문에 조각 `account`로 옮겼다 — 로그인한 기기는 부팅 때 그 조각을 받은 뒤 계정 모드로 들어간다(셸 캐시에 있다, 못 받으면 이번 접속은 게스트 + '새 버전이 있어요'). 부팅 때 **`decoy:account`가 있거나 주소에 `?login=`이 있을 때만** `GET /api/account`를 부른다(게스트 · 기능 꺼짐은 요청 없음). 표시가 있으면 레벨 칩은 계정을 읽을 때까지 '…'(최대 3초, 넘으면 기기 기록)
 - **나눠 받는 조각 `account`**: 설정 화면의 '계정' 칸(로그인 · 로그아웃 · 계정 삭제 두 번 확인 · 삭제 페이지 · 처리방침 링크), 첫 로그인 기록 고르기 창, 로그인 결과 안내. 설정을 열 때 · 고르기 창이 필요할 때 받는다. 못 받으면 "새 버전이 있어요"
 - `MetaState`는 저장소를 바꿔 끼운다(`device` ↔ `server`). 계정 모드에서는 받기 · 해금 · 입기를 서버 API로, 온라인 판 결과는 `credit`을 기다린다(미리보기 숫자는 같은 공용 함수로 그리고 "계정에 저장하는 중…" → "저장했어요" / "저장하지 못했어요"). 20초 안에 `credit`이 없으면 상태를 다시 읽어 판 ID가 있으면 저장된 것으로 본다. 날짜 · 자정 타이머는 계정 시간대
 - 첫 로그인(이 기기 `decoy:account` tag ≠ 계정 tag): 기기 기록이 비었으면 묻지 않는다. 계정이 비었으면 기기 기록을 올리고 "이 기기 기록을 계정에 올렸어요". 둘 다 있으면 고르기 창(계정 기록 · 이 기기 기록 — 레벨 · 불씨 · 의상 수 · 판 수). 고른 뒤 tag를 적는다. 기기 기록(`decoy:progress`)은 지우지 않는다 — 로그아웃하면 다시 게스트 기록
 - 로그인 · 로그아웃 · 삭제는 판 밖에서만(로그인은 페이지를 떠난다). 판 중 설정에서는 '계정' 칸을 숨긴다
-- `GET /api/account`가 401이면 표시를 지우고 게스트로, 실패 · 503이면 이번 접속은 게스트(기기 기록)로 하고 한 줄 안내 — 판은 그대로
+- 로그아웃 · 삭제 뒤 첫 화면이면 소켓을 새로 연다(서버는 소켓을 열 때의 쿠키로 계정을 정한다). 친구 방 로비 · 결과에 있는 동안 로그아웃하면 그 방의 다음 판은 옛 계정에 적립될 수 있다(그 판의 보상이 그 사람 계정에 들어갈 뿐이라 막지 않았다 — DECISIONS 15절)
+- `GET /api/account`가 `signedIn:false` · `on:false`면 표시를 지우고 게스트로, 실패 · 503이면 이번 접속은 게스트(기기 기록)로 하고 한 줄 안내 — 판은 그대로
 - 서비스 워커는 `/api/` · `/auth/` · `/account/`를 가로채지 않는다(캐시 없음)
 
 ## 8. 계정 삭제
 
 - 설정 › 계정 › 계정 삭제(두 번 확인) → `POST /api/account/delete` → 서버 행 바로 삭제 → 게스트로
-- 웹 페이지 `/account/delete`(서버가 그리는 HTML, 스크립트 없음): 로그인 안 했으면 설명 + "Google 계정으로 로그인해 삭제하기"(`/auth/google/start?next=delete`), 했으면 "계정과 기록 삭제" 폼(POST, 세션에서 만든 CSRF 값 + Origin) → 바로 삭제 → "지웠어요". 로그인 기능이 꺼져 있으면 "서버에 계정 기록이 없다"는 안내. Play 데이터 보안 '계정 삭제 URL'에 이 주소를 적는다
+- 웹 페이지 `/account/delete`(서버가 그리는 HTML, 스크립트 없음): 로그인 안 했으면 설명 + "Google 계정으로 로그인해 삭제하기"(`/auth/google/start?next=delete`), 했으면 "계정과 기록 삭제" 폼(POST, 세션에서 만든 CSRF 값 + Origin) → 바로 삭제 → "지웠어요". 로그인 기능이 꺼져 있으면 "여기서는 지울 수 없다 — 예전에 로그인했다면 문의처로 요청(받는 대로 지움)" 안내(켰다 끈 뒤에는 DB에 기록이 남아 있을 수 있다). Play 데이터 보안 '계정 삭제 URL'에 이 주소를 적는다
 - 백업에 남는 기간은 고른 DB의 백업 보관 기간을 처리방침 · 삭제 페이지에 적는다
 
 ## 9. 시험

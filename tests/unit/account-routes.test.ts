@@ -82,7 +82,7 @@ describe('로그인 꺼짐 (기본)', () => {
     expect(srv.system.summary).toBe('계정 로그인: 꺼짐 (DECOY_LOGIN)');
   });
 
-  it('/auth/*는 /?login=off로 돌려보내고, 삭제 페이지는 "서버에 계정 기록이 없다"', async () => {
+  it('/auth/*는 /?login=off로 돌려보내고, 삭제 페이지는 "여기서 지울 수 없음 — 문의처로"', async () => {
     const start = await fetch(`${srv.base}/auth/google/start`, { redirect: 'manual' });
     expect(start.status).toBe(302);
     expect(start.headers.get('location')).toBe('/?login=off');
@@ -98,7 +98,8 @@ describe('로그인 꺼짐 (기본)', () => {
     expect(page.status).toBe(200);
     const html = await page.text();
     expect(html).toContain('data-state="off"');
-    expect(html).toContain('서버에 계정 기록이 없습니다');
+    expect(html).toContain('이 페이지에서 로그인해 지울 수 없습니다');
+    expect(html).toContain('문의처로 삭제를 요청');
   });
 
   it('시험 훅 없이 /test/* 계정 훅은 404, 계정 경로가 아니면 정적 파일로 넘긴다', async () => {

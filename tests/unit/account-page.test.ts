@@ -41,7 +41,7 @@ describe('계정 삭제 페이지', () => {
   });
 
   it('상태별 글: 꺼짐 · 로그인 링크 · 레벨과 판 수 + 폼 · 지움 · 장애 · 다시 열기', () => {
-    expect(renderDeletePage({ kind: 'off' }, null)).toContain('서버에 계정 기록이 없습니다');
+    expect(renderDeletePage({ kind: 'off' }, null)).toContain('문의처로 삭제를 요청');
     const out = renderDeletePage({ kind: 'signed-out' }, null);
     expect(out).toContain(
       '<a class="button" data-testid="delete-login" href="/auth/google/start?next=delete">Google 계정으로 로그인해 삭제하기</a>',
