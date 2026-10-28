@@ -18,6 +18,7 @@ import {
   newPlayerPage,
   press,
   recordInputs,
+  waitPrefetched,
   type DeviceOptions,
 } from './helpers';
 import { waitForTouchTarget } from './touch';
@@ -95,6 +96,29 @@ async function startPractice(page: Page, role: 'runner' | 'monster'): Promise<vo
       timeout: 30_000,
     },
   );
+}
+
+/**
+ * 터치 로비는 첫 쉬는 시간에 판 배치를 미리 적용해 캔버스 크기 · 자리가 바뀌고(main.ts schedulePrebake → applyMatchLayout),
+ * 칩은 다음 4Hz 갱신에서 그 캔버스 모서리로 옮겨 간다. 느린 러너에서는 칩이 보인 뒤 1~2초 지나 옮겨 가므로 그 사이 누르면
+ * 빗나간다(main도 같다 — 6배 느리게 재면 보인 뒤 약 1.5초에 옮긴다). 미리 받기(배치 적용과 같은 걸음에서 시작한다)가 끝나고 칩
+ * 자리가 갱신 간격(250ms)보다 길게 그대로일 때까지 기다린 뒤 누른다
+ */
+async function settleTouchLobby(page: Page): Promise<void> {
+  await waitPrefetched(page);
+  let prev = '';
+  await expect
+    .poll(
+      async () => {
+        const b = await page.getByTestId('debug-overlay-toggle').boundingBox();
+        const key = b ? `${Math.round(b.x)},${Math.round(b.y)},${Math.round(b.width)}` : 'none';
+        const same = key !== 'none' && key === prev;
+        prev = key;
+        return same;
+      },
+      { intervals: [350], timeout: 10_000, message: '터치 로비 칩 자리가 멈출 때까지' },
+    )
+    .toBe(true);
 }
 
 /** 칩을 눌러 펼치거나(true) 접고(false) 그렇게 됐는지 본다 */
@@ -248,6 +272,7 @@ for (const c of TOUCH_CASES) {
     expect(lobby.panelHidden).toBe(true);
     // 칩은 로비에서 눌러 펼치고 접는다 (판 입력 · 설정 단추로 가지 않는다)
     const settings = page.getByTestId('settings-panel');
+    await settleTouchLobby(page);
     await tapChip(page, true);
     await tapChip(page, false);
     await expect(settings).toBeHidden();
