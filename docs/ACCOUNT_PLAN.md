@@ -7,7 +7,7 @@
 | 무엇 | 누가 | 어디에 |
 |---|---|---|
 | 로그인 | 브라우저가 구글 로그인 화면으로 **페이지째 이동**(팝업 없음) → 구글이 ID 토큰을 서버로 POST → **서버가 토큰을 직접 검증** | 서버 |
-| 계정 | 구글 고유 ID(`sub`) + 성장 기록 글 하나. 이메일 · 이름 · 사진은 **받지도 않는다**(요청 범위 `openid`만) | DB (사용자가 고른다 — 저장 부분은 `server/src/account/store.ts` 모양) |
+| 계정 | 구글 고유 ID(`sub`) + 성장 기록 글 하나. 이메일 · 이름 · 사진은 **받지도 않는다**(요청 범위 `openid`만) | DB — **Neon** PostgreSQL(무료, 싱가포르 `aws-ap-southeast-1`, 사용자 결정 2026-10-28). `server/src/account/pgStore.ts` `PgAccountStore`(`store.ts` `AccountStore` 모양) — 3.1절 |
 | 세션 | 서버가 서명한 HttpOnly 쿠키(`decoy_sid`). 화면 스크립트는 읽지 못한다 | 브라우저 쿠키 |
 | 온라인 판 보상 | **서버가** 판 평가(`rateMatch`)로 공용 `applyRating`을 그대로 불러 계정에 적립 — **화면이 들어갈 때 밝힌 계정 tag와 그 소켓의 세션 쿠키 계정이 같을 때만**. 기기가 보낸 값은 쓰지 않는다 | 서버 → DB, 받아들였는지는 그 자리 본인 `welcome.account`로, 판 끝에 적립한 계정은 본인 `result.account`로, 결과는 그 계정 연결에만 `credit` 메시지 |
 | 접속 보상 · 해금 · 입기 | 서버가 공용 `claimLogin` · `buyCostume` · `wearCostume`으로 (기기는 요청만) | 계정 API |
@@ -23,7 +23,7 @@
 - 구글 스크립트(GIS)를 쓰지 않는다: 페이지 이동만이라 팝업 차단 · 스토어 앱(TWA, Chrome Custom Tabs) · PC · 휴대폰 브라우저에서 같은 길이고, 범위가 `openid`라 **이메일 · 이름 · 사진이 우리 서버에 오지 않는다** — Play 데이터 보안에 '사용자 ID'만 더하면 된다. 구글 '로그인 버튼(GIS)'은 범위가 고정(이메일 · 이름 · 사진 포함)이라 쓰지 않았다(DECISIONS 15절)
 - 출처(`<출처>`)는 요청의 `x-forwarded-proto`(Render) + `Host`로 만든다. 구글 클라우드에 등록한 리디렉션 주소와 다르면 구글이 거절한다(무해)
 - `decoy_oauth`는 구글에서 돌아오는 **다른 사이트발 POST**에 실려야 하므로 HTTPS에서 `SameSite=None; Secure`, http(개발 · 시험)에서는 `SameSite=Lax`
-- 버튼: 글자 버튼 "Google 계정으로 로그인". 구글 'G' 로고는 구글 상표라(CC0 아님, 브랜드 가이드라인이 로그인 버튼에만 허용) CLAUDE.md 외부 에셋 규칙상 사용자 승인 뒤에 넣는다(HUMAN_CHECKS)
+- 버튼: 흰 배경 단추에 구글 공식 'G' 로고 + "Google 계정으로 로그인". 'G' 로고는 구글 상표라(CC0 아님, 브랜드 가이드라인이 로그인 버튼에만 허용) 사용자 승인(2026-10-28)을 받아 가이드라인대로 색 · 비율을 바꾸지 않고 쓴다 — 출처 · 조건 `docs/CREDITS.md` 6절, 결정 DECISIONS 15절
 
 ### 2.1 ID 토큰 검증 (`server/src/account/googleToken.ts`, 의존성 없음 — `node:crypto`)
 
@@ -47,11 +47,25 @@
 | `DECOY_LOGIN` | `1`이면 켠다 | 꺼짐 (계정 화면 없음, 계정 요청 `{on:false}`) |
 | `GOOGLE_CLIENT_ID` | 구글 클라우드 OAuth 클라이언트 ID(`…apps.googleusercontent.com`) | 켜지 않는다(로그에 이유) |
 | `DECOY_SESSION_SECRET` | 32자 이상 무작위(render.yaml `generateValue: true`가 만든다) | 켜지 않는다 |
-| DB 접속 값 | 사용자가 고른 DB(DECISIONS 15절) | 켜지 않는다 |
+| `DATABASE_URL` | 계정 기록 저장소 PostgreSQL 접속 문자열 — Neon 대시보드 Connect에서 복사한 그대로(`postgresql://…-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require`). Render 대시보드에만(`render.yaml`은 `sync: false` 키만) | 켜지 않는다(`DATABASE_URL 없음`, 모양이 틀리면 `DATABASE_URL 틀림`) |
 | `DECOY_ACCOUNT_TIMEZONE` | 계정 하루가 바뀌는 시간대, 기본 `Asia/Seoul` | 기본값 |
 
-- 켜졌는데 하나라도 없거나 틀리면 **꺼진 채로** 뜨고 서버 로그에 빠진 **이름만** 적는다(값은 찍지 않는다)
+- 켜졌는데 하나라도 없거나 틀리면 **꺼진 채로** 뜨고 서버 로그에 빠진 **이름만** 적는다(값은 찍지 않는다 — 예: `계정 로그인: 꺼짐 (DATABASE_URL 없음)`). 켜지면 `계정 로그인: 켜짐 (postgres)`
 - 시험 전용(`--test-hooks`): `DECOY_ACCOUNT_STORE=memory`(메모리 저장소) · 가짜 구글(`/test/google/authorize` — 시험 키로 서명한 ID 토큰을 같은 콜백으로 POST). 배포 서버(훅 없음)는 둘 다 받지 않는다(단위 시험)
+
+### 3.1 계정 기록 저장소 (Neon PostgreSQL, `server/src/account/pgStore.ts`)
+
+사용자 결정(2026-10-28): **Neon 무료 플랜, 지역 AWS Asia Pacific 1 (Singapore) `aws-ap-southeast-1`**(Render 서버와 같은 싱가포르). 표준 PostgreSQL 접속만 쓰므로 유료 · 다른 Postgres로 옮길 때 `DATABASE_URL`만 바꾼다(코드 그대로 — `docs/LOGIN_GUIDE.md` 11절). 이유와 대안은 DECISIONS 15절.
+
+- 드라이버: npm `postgres` 3.4.9(의존 패키지 0개, Unlicense). esbuild가 서버 한 파일에 묶는다. 준비된 문장(prepare)을 끄고 써 Neon 풀러(`-pooler`) 주소 · 직접 주소 둘 다 된다
+- 표: 서버가 시작할 때 `CREATE TABLE IF NOT EXISTS decoy_accounts (id text PRIMARY KEY, sub text NOT NULL UNIQUE, profile text, created bigint NOT NULL, updated bigint NOT NULL)` — 사람이 표를 만들지 않는다. 이메일 · 이름 칸은 없다
+- TLS: `sslmode` `require` · `verify-ca` · `verify-full`이면 TLS + **인증서 확인**(libpq `require`보다 엄격 — Neon은 공인 인증서). 없거나 `prefer` · `allow`면 TLS를 먼저 시도하고 거절되면 암호화 없이(인증서 확인 없음, libpq 기본 — Render 내부 주소용), `disable`이면 암호화 없이. `channel_binding`은 드라이버가 지원하지 않아 무시한다(대신 인증서 확인)
+- 시간: 접속 제한 6초, 저장소 호출 하나 최대 10초(메모리 저장소 3초), 연결 오류(접속 끊김 · 접속 시간 넘김 등)면 0.3초 뒤 한 번 더(드라이버의 접속 미루기 backoff는 끈다 — 장애 중 요청이 매달리지 않게). 쉬는 연결은 60초 뒤 닫고(연결을 붙잡아 compute를 깨워 두지 않게) 연결은 최대 2개. Neon 무료는 5분 쉬면 compute가 잠들고 다음 첫 요청에서 깨느라 보통 1초 안팎, 드물게 몇 초 늦다
+- 서버 시작 때 DB에 못 닿으면 `계정 저장소 시작 실패 (계정 요청은 503, 판은 그대로)` 로그 뒤, 요청이 올 때 30초에 한 번 다시 시도한다
+- 무료 한도(compute 월 100 CU-시간 · 저장 0.5GB)를 넘어 그달 compute가 멈추면: 다시 시도하지 않고 로그 `계정 DB 오류 … — DB 무료 한도 초과 (그달 compute 정지)` → 계정 요청 503 `db` → 화면은 게스트(이 기기 기록), 판은 그대로(판 중 로그인한 사람의 그 판 보상은 적립 실패로 보일 수 있다)
+- 로그: 오류 코드(SQLSTATE 5자리 또는 연결 오류 이름 — `CONNECT_TIMEOUT` · `28P01` 등)와 짧은 힌트만, 같은 코드는 1분에 한 번. DB 주소 · 비밀번호 · 호스트는 찍지 않는다. 힌트의 뜻 · 할 일은 LOGIN_GUIDE 10단계 표
+- `/healthz`는 DB에 닿지 않는다(잠든 compute를 깨우지 않는다)
+- 복원(PITR) 기간 6시간: 지운 계정 기록은 Neon의 복원용 기록에 최대 6시간 남았다가 자동으로 지워진다 — 처리방침 3 · 8번 · 삭제 페이지(8절)
 
 ## 4. 계정 API (`shared/src/account.ts` 경로, 타입은 `shared/src/types.ts` '계정' 절)
 
@@ -68,7 +82,7 @@
 - 로그인 안 함 · 세션 끝 · 지워진 계정 → POST는 401 `auth`(쿠키도 지운다), `GET /api/account`는 200 `{on:true, signedIn:false}`(쿠키를 지운다). 꺼짐 → `GET /api/account`는 200 `{on:false}`, 그 밖은 404 `off`. 삭제 전용 쿠키(`decoy_del`)만 있으면 로그인 안 함과 같다
   - 예외: `logout`은 세션과 상관없이 200 `{ok:true}`(쿠키를 지운다). `delete`는 서명이 유효한 세션이면 계정이 이미 없어도 200 `{deleted:false}`(삭제 페이지도 같다 — '이미 지워진 계정')
 - 너무 잦은 요청: IP마다 `/auth/*` 1분 20번, 계정마다 POST 1분 60번 → 429 `rate`. 열쇠(IP · 계정 ID)는 서버 메모리에만 두고 창이 끝나면 늦어도 다음 창에 지운다(최대 2분 — 처리방침 3번). 로그인이 꺼져 있으면 `/auth/*`는 IP를 담지 않고 바로 `/?login=off`
-- 모든 DB 호출은 3초 제한. 넘거나 실패하면 503 `db`
+- 저장소 호출 하나 제한: PostgreSQL 10초(접속 6초 + 연결 오류면 0.3초 뒤 한 번 더 — 3.1절), 메모리 저장소 3초. 넘거나 실패하면 503 `db`
 - 응답은 `cache-control: no-store`
 
 ## 5. 서버 적립 (`server/src/account/service.ts`, `shared/src/sim/core.ts`)
@@ -100,7 +114,7 @@
 
 ## 7. 화면 (클라이언트)
 
-- **첫 묶음(작게, +3KiB 안쪽)**: `client/src/account/api.ts` · `mark.ts` · `boot.ts` — 상태 읽기 · 계정 API 호출(`fetch`, 5초 제한) · 표시 `decoy:account`. 계정 문구(`ACCOUNT_TEXT`)는 나눠 받는 조각에서만 쓰여 조각 `accountText`(`client/src/data/accountText.ts`)에 따로 둔다. 계정 흐름(`controller.ts`) · `ServerProfileStore`(`serverStore.ts`) · 호출(`calls.ts`)은 예산 때문에 조각 `account`로 옮겼다 — 로그인한 기기는 부팅 때 그 조각을 받은 뒤 계정 모드로 들어간다(셸 캐시에 있다, 못 받으면 이번 접속은 게스트 + '새 버전이 있어요'). 부팅 때 **`decoy:account`가 있거나 주소에 `?login=`이 있을 때만** `GET /api/account`를 부른다(표시 없는 기기는 요청 없음 — 꺼짐을 알린 표시 기기는 부팅마다 상태 요청 하나). 표시가 있으면 레벨 칩은 계정을 읽을 때까지 '…'(최대 3초, 넘으면 기기 기록 — 꺼짐을 알린 표시면 기다리지 않는다). 방 주소(`?room=` · 마지막 방 복귀)로 연 부팅은 이 읽기가 끝난 뒤(최대 3초 — 꺼짐을 알린 표시 기기도) 방에 들어간다 — 들어갈 때의 모드를 밝혀야 새로고침한 판도 계정에 적립된다
+- **첫 묶음(작게, +3KiB 안쪽)**: `client/src/account/api.ts` · `mark.ts` · `boot.ts` — 상태 읽기 · 계정 API 호출(`fetch`, 12초 제한 — 서버가 잠든 DB를 깨우며 기다리는 동안 먼저 포기하지 않게) · 표시 `decoy:account`. 계정 문구(`ACCOUNT_TEXT`)는 나눠 받는 조각에서만 쓰여 조각 `accountText`(`client/src/data/accountText.ts`)에 따로 둔다. 계정 흐름(`controller.ts`) · `ServerProfileStore`(`serverStore.ts`) · 호출(`calls.ts`)은 예산 때문에 조각 `account`로 옮겼다 — 로그인한 기기는 부팅 때 그 조각을 받은 뒤 계정 모드로 들어간다(셸 캐시에 있다, 못 받으면 이번 접속은 게스트 + '새 버전이 있어요'). 부팅 때 **`decoy:account`가 있거나 주소에 `?login=`이 있을 때만** `GET /api/account`를 부른다(표시 없는 기기는 요청 없음 — 꺼짐을 알린 표시 기기는 부팅마다 상태 요청 하나). 표시가 있으면 레벨 칩은 계정을 읽을 때까지 '…'(최대 3초, 넘으면 기기 기록 — 꺼짐을 알린 표시면 기다리지 않는다). 방 주소(`?room=` · 마지막 방 복귀)로 연 부팅은 이 읽기가 끝난 뒤(최대 3초 — 꺼짐을 알린 표시 기기도) 방에 들어간다 — 들어갈 때의 모드를 밝혀야 새로고침한 판도 계정에 적립된다
 - **나눠 받는 조각 `account`**: 설정 화면의 '계정' 칸(로그인 · 로그아웃 · 계정 삭제 두 번 확인 · 삭제 페이지 · 처리방침 링크), 첫 로그인 기록 고르기 창, 로그인 결과 안내. 설정을 열 때 · 고르기 창이 필요할 때 받는다. 못 받으면 "새 버전이 있어요"
 - `MetaState`는 저장소를 바꿔 끼운다(`device` ↔ `server`). 계정 모드에서는 받기 · 해금 · 입기를 서버 API로 한다. 계정 모드면 `join` · `quick`(재접속 포함) · `rematch`에 `account: tag`(`MetaState.tag`)를 싣고, `welcome`을 받을 때마다 `seatAccount = welcome.account ?? null`(다음 판용)
 - **온라인 판 결과 적립은 그 판의 계정 `ratedSeat(result.account, seatAccount)`로 정한다** — 결과에 실린 판 끝 값이 먼저, 칸이 없는 옛 서버면 `seatAccount`. 이 화면에서 지운 계정 tag(설정 › 계정 삭제가 된 것 — 앱의 `goneTags`)면 없음과 같이 기기 기록에(서버는 지운 계정에 적립하지 않는다 — 두 번 쌓이지 않는다, 결과에 '이 판은 이 기기 기록에 적립했어요'). 서버가 적립하는 곳과 화면이 적립하는 곳이 늘 하나:
@@ -124,14 +138,12 @@
   - 지운 뒤 같은 구글 계정으로 다시 로그인하면 새 계정으로 시작한다. 그 기기에 로그인하지 않고 쌓은 기록이 남아 있으면 첫 로그인 규칙(7절)대로 새 계정에 올린다
   - 응답은 `Referrer-Policy: same-origin`이다. `no-referrer`면 브라우저가 같은 출처 폼 POST의 `Origin`을 `null`로 보내 출처 확인이 늘 403으로 거절한다(`same-origin`은 다른 사이트로는 주소 · 출처를 보내지 않는다)
 - 로그인 기능이 꺼져 있으면 페이지는 "여기서는 지울 수 없다 — 예전에 로그인했다면 문의처로 알려 달라"고 안내한다(켰다 끈 뒤에는 DB에 기록이 남아 있을 수 있다). 서버는 이메일을 저장하지 않아 요청한 계정을 따로 찾을 수 없으므로 "받는 대로 지운다"고 약속하지 않고, 할 수 있는 일만 적는다
-- **꺼진 동안 삭제 요청이 오면** (운영자, `docs/LOGIN_GUIDE.md` 9단계): (가) 로그인 기능을 잠깐 다시 켜고(Play 신고는 로그인을 켤 때 값 그대로일 때만) 요청자가 `/account/delete`에서 직접 로그인해 지우게 한 뒤 다시 끄거나, (나) DB의 계정 기록 전체를 지운다. 처리한 뒤 요청자에게 답장한다
-- 백업에 남는 기간은 고른 DB의 백업 보관 기간을 처리방침 · 삭제 페이지에 적는다
-
-> DB 결정 대기: (나) DB의 계정 기록 전체를 지우는 방법(대시보드 · 명령)
+- **꺼진 동안 삭제 요청이 오면** (운영자, `docs/LOGIN_GUIDE.md` 9단계): (가) 로그인 기능을 잠깐 다시 켜고(Play 신고는 로그인을 켤 때 값 그대로일 때만) 요청자가 `/account/delete`에서 직접 로그인해 지우게 한 뒤 다시 끄거나, (나) DB의 계정 기록 전체를 지운다(Neon 콘솔 SQL Editor에서 `DELETE FROM decoy_accounts;` — 표는 남긴다. DB에 이메일이 없어 특정 사람의 행만 골라 지울 수는 없다). 처리한 뒤 요청자에게 답장한다
+- 지운 계정 기록은 DB 업체(Neon)의 복원용 기록(PITR)에 **최대 6시간** 남았다가 자동으로 지워진다 — 처리방침 3 · 8번과 삭제 페이지(`server/src/account/deletePage.ts` `ACCOUNT_BACKUP_RETENTION`)에 같은 값을 적는다. 유료로 올리거나 다른 DB로 옮겨 기간이 바뀌면 둘을 함께 고친다(LOGIN_GUIDE 11절)
 
 ## 9. 시험
 
-- 단위: 토큰 검증(정상 · 가짜 서명 · 다른 키 · alg none/HS256 · 만료 · 미래 iat · aud · iss · nonce · 모양 깨짐 · 모르는 kid 다시 받기), 세션(위조 · 만료 · 다른 비밀 · 로그인 초 그대로 · 삭제 전용 값과 서로 바꿔 쓸 수 없음), 쿠키 읽기, 설정(기본 꺼짐 · 빠진 값 · 배포에서 메모리 저장소 · 가짜 구글 거절), 서비스(첫 로그인 · 서버 적립 = 공용 함수 결과 · 같은 판 한 번 · 지운 계정 다시 안 만듦 · 동시 적립 순서 · DB 실패 다시 시도 · 계정 날짜 · credit에 tag · 찾기는 만들지 않음 · 기기 글 null은 덮지 않음), 라우트(꺼짐 · CSRF · 크기 · 401 · 503 · 삭제 즉시 · 삭제 페이지 · 기기 기록 올리기 두 갈래 · 10분 창 · 삭제 페이지 로그인은 계정을 만들지 않고 `decoy_del`만 — 계정 없으면 남은 `decoy_del`을 지움 · 로그아웃 · 삭제는 `decoy_del`도 지움), 방 · 연결 처리(자리 계정 = 밝힌 tag와 쿠키 tag가 같을 때만 — 같음 · 다름 · 안 밝힘 · 쿠키 없음 · 재접속 · 다시 하기(rematch가 밝힌 값), 결과 단계 재접속에도 result.account는 판 끝 값, 본인 welcome · result만 다르고 다른 자리 메시지 같음 · rated 훅은 효과 계정만), 실제 서버(밝힘 · 안 밝힘 · 다른 tag · 다른 출처 · `decoy_del` 소켓), 클라이언트(계정 모드 MetaState · join/quick tag · 결과 세 갈래(result.account 먼저) · 지운 계정 자리는 기기 · credit tag 거르기 · 연습 판 적립 안 함 · switched · 꺼짐 안내 한 번(부팅 · 다시 읽기 · 설정) · relogin · 실패 시 게스트), 서비스 워커 PASS
+- 단위: 토큰 검증(정상 · 가짜 서명 · 다른 키 · alg none/HS256 · 만료 · 미래 iat · aud · iss · nonce · 모양 깨짐 · 모르는 kid 다시 받기), 세션(위조 · 만료 · 다른 비밀 · 로그인 초 그대로 · 삭제 전용 값과 서로 바꿔 쓸 수 없음), 쿠키 읽기, 설정(기본 꺼짐 · 빠진 값 · 배포에서 메모리 저장소 · 가짜 구글 거절), 서비스(첫 로그인 · 서버 적립 = 공용 함수 결과 · 같은 판 한 번 · 지운 계정 다시 안 만듦 · 동시 적립 순서 · DB 실패 다시 시도 · 계정 날짜 · credit에 tag · 찾기는 만들지 않음 · 기기 글 null은 덮지 않음), 라우트(꺼짐 · CSRF · 크기 · 401 · 503 · 삭제 즉시 · 삭제 페이지 · 기기 기록 올리기 두 갈래 · 10분 창 · 삭제 페이지 로그인은 계정을 만들지 않고 `decoy_del`만 — 계정 없으면 남은 `decoy_del`을 지움 · 로그아웃 · 삭제는 `decoy_del`도 지움), 방 · 연결 처리(자리 계정 = 밝힌 tag와 쿠키 tag가 같을 때만 — 같음 · 다름 · 안 밝힘 · 쿠키 없음 · 재접속 · 다시 하기(rematch가 밝힌 값), 결과 단계 재접속에도 result.account는 판 끝 값, 본인 welcome · result만 다르고 다른 자리 메시지 같음 · rated 훅은 효과 계정만), 실제 서버(밝힘 · 안 밝힘 · 다른 tag · 다른 출처 · `decoy_del` 소켓), 클라이언트(계정 모드 MetaState · join/quick tag · 결과 세 갈래(result.account 먼저) · 지운 계정 자리는 기기 · credit tag 거르기 · 연습 판 적립 안 함 · switched · 꺼짐 안내 한 번(부팅 · 다시 읽기 · 설정) · relogin · 실패 시 게스트), 서비스 워커 PASS, PostgreSQL 저장소(가짜 연결 · 닫힌 포트로 `DATABASE_URL` 해석 · 연결 오류 한 번 더 · 오류 분류(연결 · 한도 초과 · 힌트) · 같은 로그 1분에 한 번 · 로그에 주소 없음 · 닿지 않는 DB에서도 서버는 뜨고 계정 요청만 503) + 실제 PostgreSQL(환경 변수 `DECOY_TEST_DATABASE_URL`이 있을 때만 — CI 빠른 검사는 러너의 PostgreSQL을 켜고 실행마다 만든 무작위 비밀번호로). Neon 자체(잠들기 · 한도)는 시험할 수 없어 HUMAN_CHECKS
 - E2E(가짜 구글 · 메모리 저장소): 로그인 → 기기 기록 올리기 · 고르기 → 서버 판 적립(join에 tag · 본인 welcome에 tag) → 다른 브라우저(새 컨텍스트)에서 같은 기록 → 로그아웃 → 계정 삭제(설정 · 웹 페이지 — 없던 구글 계정은 만들지 않음), 삭제 페이지로 로그인만 한 브라우저의 게임 판은 계정에 적립되지 않음, 탭 A가 계정 모드로 들어간 판 중에 탭 B가 로그아웃해도 그 판은 계정에만(기기에 두 번 쌓이지 않음), 계정 자리 판의 결과 화면에서 계정 읽기가 늦은 새로고침(게스트로 다시 붙음)에도 그 판은 기기에 쌓이지 않고 계정 적립은 한 번(`result.account`), 로그인 꺼짐(계정 요청 없음 · 칸 없음 · 예전 로그인 기기의 꺼짐 안내는 한 번), DB 장애에서 게스트로 판 끝까지(서버도 적립하지 않음), 괴물이 받은 원문에 계정 단서 없음, 번들 두 줄 · 조각 따로, 오프라인 시작
 
 ## 10. 번들

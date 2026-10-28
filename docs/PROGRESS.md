@@ -46,7 +46,7 @@ main에 병합하면 Render에 자동 배포된다(`render.yaml`, `plan: free` �
 2. Render 대시보드 환경 변수: `PRIVACY_CONTACT`(처리방침 문의처, 공개 이메일), 첫 업로드 뒤 `TWA_PACKAGE_NAME` · `TWA_SHA256_FINGERPRINTS`. 저장하면 재배포 = 열린 방이 사라진다
 3. 정식 출시 전 Render 유료 플랜(Starter) 전환 — 대시보드에서. **`render.yaml`의 `plan: free`는 그대로 둔다.** 전환하면 환경 변수 `DECOY_MAX_BOT_ROOMS=16`도 넣는다(코드 기본값 2는 무료 CPU 기준, PLAY_STORE_GUIDE 10단계)
 4. `docs/STORE_LISTING.md`에 남은 **⚠ 확인 필요** 답(지연 측정값 · 태그 — 데이터 보안 · 콘텐츠 등급 · 타깃 연령은 2026-10-13 사용자가 정해 반영, DECISIONS 6절)과 `docs/HUMAN_CHECKS.md`의 실기기 · 손맛 항목
-5. 선택형 구글 로그인을 켜려면(기본 꺼짐) `docs/LOGIN_GUIDE.md` 순서대로: 구글 클라우드 프로젝트 → Google Auth Platform(외부 · 로고 없음 · 범위 추가 없음 · 프로덕션 게시) → OAuth 클라이언트 ID(웹, 리디렉션 URI `https://<서비스 주소>/auth/google/callback`) → DB 가입(DB는 아직 고르지 않았다) → Render 환경 변수(`GOOGLE_CLIENT_ID` · DB 값, `DECOY_SESSION_SECRET` 자동 확인) → Play 데이터 보안 · 앱 액세스 · 자세한 설명 고치기(STORE_LISTING 4장, 계정 삭제 URL) → `DECOY_LOGIN=1` → 확인
+5. 선택형 구글 로그인을 켜려면(기본 꺼짐) `docs/LOGIN_GUIDE.md` 순서대로: 구글 클라우드 프로젝트 → Google Auth Platform(외부 · 로고 없음 · 범위 추가 없음 · 프로덕션 게시) → OAuth 클라이언트 ID(웹, 리디렉션 URI `https://<서비스 주소>/auth/google/callback`) → DB 가입(Neon 무료, 지역 AWS Asia Pacific 1 (Singapore) — 2026-10-28 사용자 결정) → Render 환경 변수(`GOOGLE_CLIENT_ID` · `DATABASE_URL`, `DECOY_SESSION_SECRET` 자동 확인) → Play 데이터 보안 · 앱 액세스 · 자세한 설명 고치기(STORE_LISTING 4장, 계정 삭제 URL) → `DECOY_LOGIN=1` → 확인
 
 MOBILE_PLAN과 달라진 점
 - 정적 파일 gzip은 M13d가 아니라 **M12에서 이미 했다**(`server/src/static.ts`, DECISIONS 'M12: 정적 파일 gzip'). M13d 서버 갈래에는 다음이 남는다: 약한 ETag(크기-수정 시각) + `If-None-Match` 304, MIME에 `.woff2 → font/woff2` · `.txt` · (M14) `.webmanifest`. M12 성능 검토에서 나온 제안이고 패치는 저장소에 없다(다시 만든다)
@@ -96,7 +96,7 @@ MOBILE_PLAN과 달라진 점
 
 ### 4. 알려진 문제와 보류 항목
 - `> 보류:` 표시 항목은 없다
-- (선택형 구글 로그인) DB를 아직 고르지 않아 로그인을 켤 수 없다(메모리 저장소는 시험 · 개발 전용). 처리방침 · 안내서의 DB 자리(`<!--db-->` · '> DB 결정 대기')가 비어 있다
+- (선택형 구글 로그인) 로그인은 기본 꺼짐 — 켜는 법은 `docs/LOGIN_GUIDE.md`(구글 클라우드 · Neon · Render · Play 신고는 사람이 한다). Neon 무료는 5분 쉬면 잠들어 그 뒤 첫 계정 요청이 몇 초 늦을 수 있고, 월 compute 한도(100 CU-시간)를 넘으면 그달은 로그인한 사람도 게스트로만 된다(판은 그대로, DECISIONS 15절 · HUMAN_CHECKS). 잠들기 · 한도는 자동 시험으로 볼 수 없다
 - (선택형 구글 로그인) 로그인하고 돌아오는 주소는 `/?login=…`로 고정이라 원래 주소의 값(`debug` · `quality` 등)은 없어진다. 계정 E2E는 같은 출처 가짜 구글을 거쳐 돌아온 문서에서 크롬 글꼴 미리 받기 경고('preloaded but not used')가 이 컨테이너에서 나 그 spec에서만 허용했다(앱 코드가 낸 것이 아니다, 진짜 구글에서도 나는지는 실기기 확인)
 - (선택형 구글 로그인) 받아들인 한계(DECISIONS 15절): 방 안에서 로그아웃하면 그 방의 다음 판은 들어올 때의 계정에 적립된다(결과에 한 줄), 다른 탭 · 웹 페이지에서 지운 계정은 화면이 로그아웃과 구별하지 못해 방 안에서 이어진 판이 어디에도 쌓이지 않을 수 있다, 부팅 중('…') 누른 빠른 매칭 · 방은 게스트 자리(기기 기록에 적립), 비율 제한 IP는 `x-forwarded-for` 첫 값(기본 막기)
 - (번들 줄이기) `m10-resolution.webgl` '창 크기 · DPR 변경 뒤' 시험의 DPR만 바꾸는 단계는 이 컨테이너(헤드리스 셸 1243)에서 main 빌드(d7192b2)도 똑같이 실패한다 — CDP로 창 DPR을 1로 바꿔도 앱의 matchMedia 변경 알림이 오지 않아 백버퍼가 그대로다. CI(크롬 141)에서는 통과해 온 시험이고 이 PR이 바꾼 코드가 아니다(로컬 확인은 CI 전체 검사로 대신)
@@ -594,6 +594,5 @@ PR #30 뒤 JS gzip이 424,151B로 상한(436,791B)까지 약 12KiB만 남아 줄
 - 시험: 단위 2,116개(계정 9파일 — 토큰 검증 정상 · 가짜 서명 · 다른 키 · alg none/HS256 · 만료 · 미래 iat · aud · iss · nonce · 모르는 kid, 세션 위조 · 만료, 설정 기본 꺼짐 · 배포 모드에서 메모리 저장소 · 가짜 구글 거절, 서버 적립 = 공용 함수 결과 · 같은 판 한 번 · 지운 계정 다시 안 만듦 · 동시 적립 · DB 실패 다시 시도, 기기 기록 올리기 두 갈래 · 10분, 계정 날짜, 라우트 CSRF · 크기 · 401 · 503 · 삭제 즉시 · 삭제 페이지, 방: 계정 ID가 어느 메시지에도 없음 · 로그인 여부만 다른 두 판의 다른 자리 메시지가 같음(친구 방 · 빠른 매칭), 클라이언트 계정 모드 · 연습 판 적립 안 함 · credit · 결과 적립 세 갈래 · 꺼짐 · switched), E2E `account.spec` 14개(가짜 구글 · 메모리 저장소 서버를 따로 띄움: 로그인 · 첫 로그인 올리기 · 고르기 · 서버 적립 · 다른 기기 · 연습 판 · 로그아웃 · 설정 삭제 · 웹 삭제 페이지 · 삭제 페이지 로그인은 적립 안 함 · 꺼짐 · DB 장애에서 게스트로 판 끝까지 · 나쁜 토큰 · 정보 숨김(괴물 원문) · 다른 탭 로그아웃 · 결과 단계 새로고침 · 서비스 워커 · 오프라인)
 - 번들(gzip, zlib 기본): 첫 로딩 JS 317,761 → 약 320,510B(+2.7KiB, 예산 +3KiB · 상한 346,679B), 전체 JS 379,219 → 약 387,580B(+8.2KiB, 예산 +12KiB · 상한 436,791B). 나눠 받는 조각 `account`(계정 흐름 · 설정 계정 칸 · 고르기 창) · `accountText`(계정 문구) 더함. 구글 스크립트 없음
 - 로컬 전체 E2E(재설계 전 head 000c1b4): 303개 중 300개 통과 — 실패 셋은 이번 변경과 무관(`smoke` 설치 Chromium 경로: 이 컨테이너에서 링크한 브라우저 폴더로 돌림, `m10-resolution.webgl` DPR: 아래 알려진 문제 — main도 실패, `fog-follow.webgl` medium: 같은 시각 다른 작업이 CPU를 써서 — 혼자 다시 돌려 4개 통과)
-- 병합: (DB를 고른 뒤 — 채울 곳)
-
-> DB 결정 대기: 계정 기록 저장소(DB) 선택과 그에 따른 처리방침 · 신고 · 안내서 자리
+- Neon 저장소 구현 (2026-10-28, 사용자 결정 — Neon 무료 · AWS Asia Pacific 1 (Singapore) `aws-ap-southeast-1`): `PgAccountStore`(`server/src/account/pgStore.ts`, 드라이버 npm `postgres` 3.4.9 — Unlicense · 의존 패키지 0개, 서버 한 파일에 묶임). 환경 변수 `DATABASE_URL`(Neon 접속 문자열, Render 대시보드에만 — `render.yaml`은 `sync: false` 키만). 서버가 시작할 때 `decoy_accounts` 표를 만든다. TLS는 `sslmode=require`에서도 인증서 확인 · `channel_binding` 무시, 접속 6초 · 저장소 호출 하나 10초 · 연결 오류면 0.3초 뒤 한 번 더 · 쉬는 연결 60초(연결 최대 2개), 화면 계정 요청 제한 5 → 12초. 한도 초과는 다시 시도하지 않고 503 → 게스트, 로그는 오류 코드 · 힌트만(주소 · 비밀번호 없음), `/healthz`는 DB에 닿지 않음. 처리방침 3 · 6 · 7 · 8 · 10번(Neon, LLC 위탁 · 싱가포르 저장 · 복원용 기록 최대 6시간 · DB 연결 TLS)과 계정 삭제 페이지(최대 6시간). 단위 시험(가짜 연결 · 닫힌 포트) + 실제 PostgreSQL 시험(`DECOY_TEST_DATABASE_URL`이 있을 때만 — CI 빠른 검사가 러너의 PostgreSQL을 무작위 비밀번호로 켠다). 사용자 결정: 구글 'G' 로고 단추 허용, 연습 판은 계정에 쌓지 않음 · 계정 하루 = 서울 자정 · 방 안 로그아웃 한계 그대로(DECISIONS 15절). 문서: LOGIN_GUIDE 4~10단계(Neon 가입 · `DATABASE_URL` · 처리방침 확인 · 켜짐 로그 · 표 확인 · 전체 지우기 · DB 문제 해결) · 새 11절 '유료 DB로 옮기기', DEPLOY 0 · 3.4 · 4 · 5 · 6장, STORE_LISTING 4장(데이터 보안 답은 그대로), PLAY_STORE_GUIDE 13단계, DECISIONS 15절, ACCOUNT_PLAN 1 · 2 · 3.1 · 4 · 7 · 8 · 9절, TECH_SPEC 1 · 2 · 3.6 · 7, HUMAN_CHECKS
+- 병합: (main 병합 뒤 채움)
