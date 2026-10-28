@@ -66,7 +66,7 @@ import type { Transport } from './transport';
 import { LeaveDialog, ReplacedNotice } from './ui/lifecycleUi';
 import { loadLayoutEditor } from './ui/layoutEditorLoader';
 import { costumeSetFromRoster, lobbyCostumeSet, setBakeCostumes } from './art/costumeBake';
-import { MetaState } from './meta/meta';
+import { MetaState, ratedSeat } from './meta/meta';
 import { setWearing } from './meta/wearing';
 import { DeviceProfileStore } from './meta/profileStore';
 import type * as AccountUiNs from './ui/account';
@@ -278,10 +278,16 @@ export class App {
    */
   private staleSocket = false;
   /**
-   * 지금 방 자리에 서버가 받아들인 계정 tag (welcome.account, 게스트 자리 · 연습은 null). 결과 적립 갈래를 정한다: null → 기기 기록,
-   * 지금 계정 → credit을 기다림, 다른 계정(그사이 로그아웃 · 계정 바뀜) → 어디에도 적립하지 않음(서버가 그 계정에)
+   * 지금 방 자리에 서버가 받아들인 계정 tag (welcome.account, 게스트 자리 · 연습은 null). 결과 적립 갈래는 결과에 실린 그 판의 계정
+   * (result.account — 결과 단계에 다시 붙어 이 값이 바뀌어도 그대로)으로 정하고, 이 값은 그 칸이 없는 옛 서버의 결과에만 쓴다(ratedSeat).
+   * null → 기기 기록, 지금 계정 → credit을 기다림, 다른 계정(그사이 로그아웃 · 계정 바뀜) → 어디에도 적립하지 않음(서버가 그 계정에)
    */
   private seatAccount: string | null = null;
+  /**
+   * 이 화면에서 지운 계정 tag (설정 › 계정 삭제가 된 것만 — 다른 탭 · 웹 페이지에서 지운 것은 로그아웃과 구별하지 못한다). 그 계정
+   * 자리의 판은 서버가 적립하지 않으므로(지운 계정을 다시 만들지 않는다) 기기 기록에 적립한다 — 두 번 쌓이지 않는다
+   */
+  private readonly goneTags = new Set<string>();
   /** 부팅 때 계정 상태를 읽는 중 (끝나면 null): 방 주소로 연 부팅은 이것이 끝난 뒤(최대 3초) 방에 들어간다 */
   private accountBoot: Promise<void> | null = null;
   /** 소켓이 열린 횟수 (부팅 입장을 기다리는 사이 소켓이 바뀌었는지) */
@@ -417,7 +423,8 @@ export class App {
     });
     this.resultUi = new ResultHost(
       uiRoot,
-      () => this.link.send({ t: 'rematch' }),
+      // 다시 하기도 지금 모드를 밝힌다 (빠른 매칭 재대기열은 이 값으로 새 자리 계정을 정한다 — 결과에서 로그아웃 · 삭제했으면 게스트)
+      () => this.link.send({ t: 'rematch', account: this.meta.tag }),
       () => this.leaveToHome(),
       () => this.showUpdate(),
     );
@@ -528,6 +535,7 @@ export class App {
           deviceText: () => readKey('progress'),
           left: () => this.accountChanged(),
           entered: () => this.accountChanged(),
+          removed: (tag) => this.goneTags.add(tag),
           now: () => Date.now(),
         }),
       }),
@@ -548,7 +556,7 @@ export class App {
   /**
    * 부팅이 아닌 때 계정 모드가 바뀌었다 (로그아웃 · 계정 삭제 · 세션 끝 · 꺼짐 · 다른 탭 로그인): 이 소켓은 옛 쿠키로 열렸다.
    * 첫 화면이면 바로, 방 · 판 중이면 첫 화면에 돌아올 때(forgetRoom) 다시 연다 — 새 쿠키를 실은 소켓이어야 다음 판에 밝힌 계정이
-   * 쿠키 계정과 같아 서버가 받아들인다(다른 탭에서 로그인한 뒤 들어간 계정 모드). 그 전 판은 welcome.account로 갈래가 정해진다
+   * 쿠키 계정과 같아 서버가 받아들인다(다른 탭에서 로그인한 뒤 들어간 계정 모드). 그 전 판은 result.account로 갈래가 정해진다
    */
   private accountChanged(): void {
     this.staleSocket = true;
@@ -1092,7 +1100,7 @@ export class App {
         this.balance = validateBalance(msg.balance);
         this.balanceHash = msg.balanceHash;
         this.you = msg.you;
-        // 이 자리에 서버가 받아들인 계정 (재접속마다 다시 받는다)
+        // 이 자리에 서버가 받아들인 계정 (재접속마다 다시 받는다 — 다음 판용, 이미 끝난 판은 result.account)
         this.seatAccount = msg.account ?? null;
         this.lobbyUi.setYou(msg.you);
         // 연습 방: 주소 · 자리 토큰 · 마지막 방을 저장하지 않는다 (연습 중 새로고침 → 첫 화면)
@@ -1169,10 +1177,16 @@ export class App {
         this.result = msg.result;
         this.setPlaying(false);
         // 내 평가 적립 (같은 판이면 다시 주지 않는다 — 재접속해 결과를 다시 받아도). 저장이 안 돼도 화면은 그대로
-        // 로그인했으면 온라인 판은 그 자리에 서버가 받아들인 계정(welcome.account)으로 갈래를 정한다: 지금 계정이면 서버가 적립하고
-        // credit을 기다린다, 게스트 자리면 기기 기록, 다른 계정이면 적립하지 않는다. 연습 판은 계정 모드면 적립하지 않는다 (meta.ts)
+        // 온라인 판은 그 판을 서버가 적립한 계정(result.account — 결과 단계에 다시 붙어 welcome.account가 바뀌어도 그대로, 옛 서버면
+        // welcome.account)으로 갈래를 정한다: 지금 계정이면 서버가 적립하고 credit을 기다린다, 게스트 자리 · 이 화면에서 지운 계정이면
+        // 기기 기록, 다른 계정이면 적립하지 않는다. 연습 판은 계정 모드면 적립하지 않는다 (meta.ts)
         const rated = msg.rating
-          ? this.meta.applyRating(msg.rating, this.local !== null, this.seatAccount)
+          ? this.meta.applyRating(
+              msg.rating,
+              this.local !== null,
+              ratedSeat(msg.account, this.seatAccount),
+              this.goneTags,
+            )
           : null;
         this.resultUi.show(msg.result, this.match?.role ?? null, rated);
         this.emit({ kind: 'result', result: msg.result });

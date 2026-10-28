@@ -2,9 +2,10 @@
 //  계정 API 요청 모양 · 5초 제한 · 실패 갈래 / 이 기기 표시 decoy:account / 부팅: 게스트는 요청 없음 · 표시 있음 → 계정 모드 ·
 //  3초 칩 기다림 / 401 · 로그인 안 함 · 꺼짐 → 게스트 · 표시 지움, 503 · 시간 초과 → 이번 접속 게스트 + 안내 / ?login= 안내 /
 //  첫 로그인 세 갈래(빈 기기 · 빈 계정 · 둘 다 → 고르기) / 계정 모드 받기 · 해금 · 입기는 API로, 실패하면 기록 그대로 /
-//  온라인 판 결과 세 갈래(자리 계정 welcome.account: 없음 → 기기 · 지금 계정 → credit 기다림 → 저장함 · 못 함 · 모름(20초 뒤 다시
-//  읽기) · 다른 계정 → 적립 안 함) / credit은 지금 계정 tag 것만 / 판에 밝히는 계정 tag(join · quick) / 연습 판은 계정 · 기기 모두 적립
-//  안 함 / 계정 날짜 · 자정 / 로그아웃 · 삭제 · 세션 끝 → 기기 모드 / 다른 탭이 다른 계정으로 바꿈(switched) / 꺼짐 안내는 한 번 ·
+//  온라인 판 결과 세 갈래(그 판의 계정 result.account — 옛 서버면 welcome.account: 없음 → 기기 · 지금 계정 → credit 기다림 → 저장함 ·
+//  못 함 · 모름(20초 뒤 다시 읽기) · 다른 계정 → 적립 안 함, 이 화면에서 지운 계정 → 기기) / credit은 지금 계정 tag 것만 / 판에 밝히는 계정 tag(join · quick) / 연습 판은 계정 · 기기 모두 적립
+//  안 함 / 계정 날짜 · 자정 / 로그아웃 · 삭제 · 세션 끝 → 기기 모드 / 다른 탭이 다른 계정으로 바꿈(switched) / 꺼짐 안내는 한 번
+//  (부팅 · 계정 모드 중 다시 읽기 · 설정을 열어 다시 읽기 — '지금은 로그인을 쓸 수 없어요') ·
 //  다시 켜짐 / 첫 로그인 빈 기기 + 빈 계정 · 로그인 뒤 10분이 지나 올리기 거절(relogin)
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MatchRating } from '@decoy/shared';
@@ -25,7 +26,7 @@ import { accountMark } from '../../client/src/account/mark';
 import { reopenForAccount } from '../../client/src/lifecycle';
 import { CREDIT_WAIT_MS, ServerProfileStore } from '../../client/src/account/serverStore';
 import { ACCOUNT_TEXT } from '../../client/src/data/accountText';
-import { MetaState } from '../../client/src/meta/meta';
+import { MetaState, ratedSeat } from '../../client/src/meta/meta';
 import { DeviceProfileStore } from '../../client/src/meta/profileStore';
 import type { StorageLike } from '../../client/src/storageKeys';
 
@@ -141,6 +142,8 @@ interface Rig {
   left: () => number;
   /** 부팅이 아닌 때 계정 모드로 들어간 횟수 (앱이 소켓을 다시 연다) */
   entered: () => number;
+  /** 이 화면에서 지운 계정 tag (앱의 goneTags) */
+  gone: string[];
   boot(login: string | null): Promise<void> | null;
 }
 
@@ -172,6 +175,7 @@ async function rig(o: {
   const mark = accountMark(storage);
   let left = 0;
   let entered = 0;
+  const gone: string[] = [];
   const ctl = new AccountController({
     api,
     meta,
@@ -181,6 +185,7 @@ async function rig(o: {
     screens,
     left: () => (left += 1),
     entered: () => (entered += 1),
+    removed: (tag) => gone.push(tag),
     now,
   });
   let loads = 0;
@@ -194,6 +199,7 @@ async function rig(o: {
     chosen,
     left: () => left,
     entered: () => entered,
+    gone,
     boot: (login) =>
       bootAccount(
         {
@@ -792,6 +798,76 @@ describe('계정 모드 판 결과: 서버 적립 (credit)', () => {
     expect(parseProfile(guestStorage.data.get(PROGRESS) ?? null, clock).profile.xp).toBe(XP);
   });
 
+  it('결과 적립 갈래는 result.account(그 판을 서버가 적립한 계정 — 결과 단계에 다시 붙어도 그대로)로 정한다, welcome.account는 다음 판용', async () => {
+    // 고르는 값: 결과에 실린 계정이 먼저, 옛 서버(칸 없음)면 welcome.account
+    expect(ratedSeat('T1', null)).toBe('T1');
+    expect(ratedSeat(null, 'T1')).toBeNull();
+    expect(ratedSeat(undefined, 'T1')).toBe('T1');
+    expect(ratedSeat(undefined, null)).toBeNull();
+    // 계정 자리 판 끝 → 결과 단계에 tag 없이 다시 붙음(welcome.account null · result.account T1), 지금 모드가 T1: 기기에 쓰지 않고 credit
+    const { meta, storage, calls } = await accountMeta(profileWith({ xp: 40 }), () => json(503, {}));
+    const mine = await meta.applyRating(rating('R.1'), false, ratedSeat('T1', null));
+    expect(mine.account?.state).toBe('pending');
+    expect(mine.device).toBeUndefined();
+    expect(storage.writes).toEqual([]);
+    // 같은 결과 · 지금 모드가 게스트(계정 읽기가 늦은 새로고침): '들어올 때의 계정' 줄, 기기에 쓰지 않는다
+    const guestStorage = mem();
+    const guest = new MetaState(new DeviceProfileStore(guestStorage), now);
+    await guest.ready;
+    expect(await guest.applyRating(rating('R.1'), false, ratedSeat('T1', null))).toMatchObject({
+      gain: null,
+      elsewhere: true,
+    });
+    expect(guestStorage.writes).toEqual([]);
+    // 게스트 자리 판 끝 → tag를 밝혀 다시 붙음(welcome.account T1 · result.account null): 기기 기록에 (이미 적립했으면 같은 판 ID로 걸러짐)
+    const dev = await meta.applyRating(rating('R.2'), false, ratedSeat(null, 'T1'));
+    expect(dev.device).toBe(true);
+    expect(dev.gain?.xp.total).toBe(XP);
+    expect(dev.account).toBeUndefined();
+    expect((await meta.applyRating(rating('R.2'), false, ratedSeat(null, 'T1'))).gain).toBeNull();
+    expect(parseProfile(storage.data.get(PROGRESS) ?? null, clock).profile.xp).toBe(11 + XP);
+    expect(calls).toEqual([]);
+  });
+
+  it('이 화면에서 지운 계정의 판(결과의 계정이 지운 tag): 서버는 지운 계정에 적립하지 않으니 기기 기록에 + "이 기기 기록에 적립했어요" — "들어올 때의 계정" 줄이 아니다', async () => {
+    let deleteRes: Response = json(503, { error: 'db' });
+    const r = await rig({
+      mark: 'T1',
+      device: profileWith({ xp: 9 }),
+      route: (c) =>
+        c.path === '/api/account' ? json(200, statusIn('T1', profileWith({ xp: 500 }))) : deleteRes,
+    });
+    await r.boot(null);
+    // 닿지 못한 삭제는 기억하지 않는다
+    expect(await r.ctl.remove()).toBe(false);
+    expect(r.gone).toEqual([]);
+    deleteRes = json(200, { deleted: true });
+    expect(await r.ctl.remove()).toBe(true);
+    expect(r.gone).toEqual(['T1']);
+    expect(r.meta.mode).toBe('device');
+    const gone = new Set(r.gone);
+    // 방 안에서 지운 계정 자리의 판 (게스트 모드)
+    const out = await r.meta.applyRating(rating('G.1'), false, 'T1', gone);
+    expect(out.elsewhere).toBeUndefined();
+    expect(out.device).toBe(true);
+    expect(out.gain?.xp.total).toBe(XP);
+    expect(parseProfile(r.storage.data.get(PROGRESS) ?? null, clock).profile.xp).toBe(9 + XP);
+    // 같은 판 결과를 다시 받아도 두 번 쌓이지 않는다
+    expect((await r.meta.applyRating(rating('G.1'), false, 'T1', gone)).gain).toBeNull();
+    // 지우지 않은(로그아웃만 한) 계정 자리는 그대로 '들어올 때의 계정' (서버가 그 계정에 적립한다)
+    expect(await r.meta.applyRating(rating('G.2'), false, 'T0', gone)).toMatchObject({
+      elsewhere: true,
+      gain: null,
+    });
+    // 그사이 다른 계정 모드가 됐어도 지운 계정 자리의 판은 기기 기록에
+    const { meta, storage } = await accountMeta(profileWith({ xp: 40 }), () => json(503, {}));
+    const other = await meta.applyRating(rating('G.3'), false, 'T0', new Set(['T0']));
+    expect(other).toMatchObject({ device: true });
+    expect(other.elsewhere).toBeUndefined();
+    expect(parseProfile(storage.data.get(PROGRESS) ?? null, clock).profile.xp).toBe(11 + XP);
+    expect(meta.current.xp).toBe(40);
+  });
+
   it('credit은 지금 계정 tag 것만 받는다 (다른 계정 tag는 무시 — 다른 계정 기록으로 화면을 바꾸지 않는다)', async () => {
     const { meta } = await accountMeta(profileWith({ xp: 40 }), () => json(503, {}));
     const applied = await meta.applyRating(rating('M.5'), false, 'T1');
@@ -965,7 +1041,39 @@ describe('로그인 꺼짐(on:false)은 표시를 지우지 않는다 — 안내
       expect(r.storage.data.has(MARK), view).toBe(kept);
       if (kept) expect(markOf(r)).toEqual({ v: 1, tag: 'T1', off: true });
       expect(r.left()).toBe(1);
+      // 꺼짐은 '로그인이 끝나…'가 아니라 '지금은 로그인을 쓸 수 없어요' (표시에 off를 적었으니 다음 부팅은 알리지 않는다 — 여기서 한 번)
+      await vi.waitFor(() => expect(r.notes.length).toBe(1));
+      expect(r.notes, view).toEqual([kept ? T.results.off : T.expired]);
+      if (kept) {
+        const next = await rig({ storage: r.storage, route: () => json(200, { on: false }) });
+        await next.boot(null);
+        expect(next.notes).toEqual([]);
+      }
     }
+  });
+
+  it('부팅 읽기가 실패한 뒤 설정을 열어(다시 읽기) 꺼짐을 알게 되면 그때 한 번 알린다 — 이미 알린 표시면 알리지 않는다', async () => {
+    let status: Response = json(503, { error: 'db' });
+    const r = await rig({ mark: 'T1', device: profileWith({ xp: 9 }), route: () => status });
+    await r.boot(null);
+    expect(r.ctl.view).toBe('unknown');
+    expect(r.notes).toEqual([T.offline]);
+    status = json(200, { on: false });
+    expect(await r.ctl.ensure()).toBe('off');
+    expect(r.notes).toEqual([T.offline, T.results.off]);
+    expect(markOf(r)).toEqual({ v: 1, tag: 'T1', off: true });
+    expect(r.meta.mode).toBe('device');
+    // 다음 부팅(아직 꺼짐)은 알리지 않는다
+    const next = await rig({ storage: r.storage, route: () => json(200, { on: false }) });
+    await next.boot(null);
+    expect(next.notes).toEqual([]);
+    // 이미 알린 표시로 부팅 읽기가 실패한 뒤 설정에서 꺼짐을 다시 알게 돼도 알리지 않는다
+    let again: Response = json(503, { error: 'db' });
+    const told = await rig({ storage: r.storage, route: () => again });
+    await told.boot(null);
+    again = json(200, { on: false });
+    expect(await told.ctl.ensure()).toBe('off');
+    expect(told.notes).toEqual([T.offline]);
   });
 });
 

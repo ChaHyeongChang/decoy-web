@@ -8,13 +8,15 @@
 //     페이지(로그인해 삭제 — 리퍼러 정책 때문에 Origin: null로 거절되던 것을 고쳤다. 없던 구글 계정은 만들지 않는다) · 삭제 페이지로
 //     로그인하고 지우지 않은 채 게임을 해도 계정에 적립되지 않음 · 로그인 꺼진 서버의 삭제 페이지
 //  4b. 탭 A가 계정 모드로 방에 들어간 뒤 같은 브라우저 탭 B에서 로그아웃: A의 그 판은 들어올 때의 계정에 적립되고 기기에는 안 함
+//  4c. 계정 자리 판이 끝난 결과 화면에서 계정 상태 읽기가 늦은 새로고침(게스트로 다시 붙음 — welcome.account null): 다시 받은 결과의
+//     account는 적립한 tag라 화면은 기기 기록에 적립하지 않고, 계정 적립은 판 끝 한 번뿐
 //  5. 로그인 꺼짐(기본 서버): 첫 화면 · 연습 판에 계정 요청 · 계정 조각 없음, 설정을 열면 상태 요청 한 번 뒤 계정 탭 없음.
 //     예전에 로그인했던 기기는 꺼짐 안내를 처음 한 번만
 //  6. DB 장애: 새로고침하면 게스트 안내 · 기기 기록으로 연습 · 온라인 판 끝까지(화면이 계정을 밝히지 않아 서버도 적립하지 않음),
 //     되돌리면 계정, 로그인 중 장애는 ?login=db
 //  7. 나쁜 토큰(만료 · 가짜 서명 · 다른 aud · nonce) · 취소: 안내만, 쿠키 · 계정 없음
 //  8. 정보 숨김: 로그인한 생존자 셋 + 로그인 안 한 괴물의 친구 방 — 괴물이 받은 원문에 계정 단서 없음, credit은 그 생존자 연결에만,
-//     계정 tag는 본인 welcome · credit에만 (방 주소로 연 부팅은 계정 상태를 읽은 뒤 계정을 밝혀 들어간다)
+//     계정 tag는 본인 welcome · result · credit에만 (방 주소로 연 부팅은 계정 상태를 읽은 뒤 계정을 밝혀 들어간다)
 //  9. 서비스 워커: 계정 · 로그인 요청은 워커 캐시를 거치지 않고, 서버를 끄고 오프라인으로 다시 열어도 첫 화면 · 봇과 연습(게스트 안내)
 // 콘솔 오류 · 경고는 0이다. 브라우저가 스스로 찍는 것만 허용한다: 서버를 끈 시험(9)의 연결 실패(m13-offline과 같은 기준),
 // DB 장애 시험(6)의 503 응답 실패 로그, 크롬의 글꼴 미리 받기 경고(issues)
@@ -891,6 +893,69 @@ test('탭 A가 계정 모드로 방에 들어간 뒤 같은 브라우저 탭 B�
   }
 });
 
+test('결과 화면에서 새로고침(계정 상태 읽기가 늦어 게스트로 다시 붙음): 다시 받은 결과의 account는 판 끝에 적립한 tag — 이 기기 기록에 그 판이 없고 계정 적립은 한 번', async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const srv = await startLoginServer();
+  const c = await newClient(browser);
+  try {
+    await home(c.page, srv.base);
+    await loginByUrl(c.page, srv.base, 'refresher');
+    await expectStore(c.page, 'server');
+    const tag = await markTag(c.page);
+    expect(tag).toMatch(/^[\w-]{16}$/);
+    const tap = await tapSocket(c.page, false);
+    // 계정 자리로 서버 판을 끝낸다 → 서버가 적립하고 credit
+    await playOnline(c.page, srv.base, 'server');
+    const matchId = ratedMatchId(tap.frames);
+    expect(lastWelcomeAccount(tap.frames)).toBe(tag);
+    await expect.poll(() => credits(tap.frames).length, { timeout: 15_000 }).toBe(1);
+    await expect(c.page.getByTestId('rate-account')).toHaveAttribute('data-state', 'saved');
+    const deviceBefore = await readKey(c.page, PROGRESS_KEY);
+    expect(view(deviceBefore)?.recent ?? []).not.toContain(matchId);
+
+    // 결과 화면에서 새로고침 — 계정 상태 읽기를 붙잡아 둔다: 방 주소 부팅은 3초를 기다린 뒤 게스트 모드로(계정을 밝히지 않고) 다시 붙는다
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    await c.page.route(/\/api\/account$/, async (route) => {
+      await gate;
+      await route.continue();
+    });
+    const resultsBefore = messages(tap.frames).filter((m) => m.t === 'result').length;
+    await c.page.reload();
+    await expect
+      .poll(() => messages(tap.frames).filter((m) => m.t === 'result').length, { timeout: 20_000 })
+      .toBe(resultsBefore + 1);
+    expect(lastEntry(tap.sent)).toMatchObject({ t: 'join' });
+    expect(lastEntry(tap.sent).account).toBeUndefined();
+    // 다음 판용 welcome.account는 null이지만, 다시 받은 결과의 account는 적립한 계정 그대로
+    expect(lastWelcomeAccount(tap.frames)).toBeNull();
+    const again = messages(tap.frames).filter(
+      (m): m is Extract<ServerMessage, { t: 'result' }> => m.t === 'result',
+    );
+    expect(again.at(-1)).toMatchObject({ account: tag, rating: { matchId } });
+    // 화면: 지금은 게스트(계정 읽기 전) → '들어올 때의 계정에 적립돼요', 기기 기록에는 적립하지 않는다
+    await expect(c.page.getByTestId('rate-elsewhere')).toBeVisible({ timeout: 15_000 });
+    expect(await c.page.locator('[data-testid="rate-device"]').count()).toBe(0);
+    // 계정 상태 읽기를 놓아 계정 모드로 (결과 화면에는 레벨 칩이 없다 — 응답을 기다린다)
+    const read = c.page.waitForResponse((r) => new URL(r.url()).pathname === '/api/account');
+    release();
+    expect((await read).status()).toBe(200);
+    await new Promise((r) => setTimeout(r, 500));
+    expect(await readKey(c.page, PROGRESS_KEY)).toBe(deviceBefore);
+    // 계정 적립은 판 끝 한 번 (새로고침해도 credit이 더 오지 않고, 계정 기록에 그 판 하나)
+    expect(credits(tap.frames)).toHaveLength(1);
+    expect(
+      view((await srv.account('refresher'))?.profile)?.recent.filter((id) => id === matchId),
+    ).toHaveLength(1);
+    expect(issues(c)).toEqual([]);
+  } finally {
+    await c.context.close();
+    await srv.stop();
+  }
+});
+
 // ───────────────────────── 5. 로그인 꺼짐 ─────────────────────────
 
 test('로그인 꺼짐(기본 서버): 첫 화면 · 봇과 연습에 계정 요청 · 계정 조각이 없고, 설정을 열면 상태 요청 한 번 뒤 계정 탭이 보이지 않는다', async ({
@@ -1108,7 +1173,10 @@ test('나쁜 토큰(만료 · 가짜 서명 · 다른 aud · nonce)은 "로그�
 
 // ───────────────────────── 8. 정보 숨김 ─────────────────────────
 
-test('정보 숨김: 로그인한 생존자 셋 + 로그인 안 한 괴물의 친구 방 — 괴물이 받은 모든 원문에 계정 ID · tag · credit이 없고("account"는 자기 welcome의 null뿐), credit은 그 생존자 연결에만 하나씩 · 계정 tag는 본인 welcome · credit에만', async ({
+/** "account" 칸이 있는 원문: 받는 사람 본인 welcome · result뿐 (받는 사람별로 만든다) */
+const OWN_ACCOUNT = /^\{"t":"(welcome|result)"/;
+
+test('정보 숨김: 로그인한 생존자 셋 + 로그인 안 한 괴물의 친구 방 — 괴물이 받은 모든 원문에 계정 ID · tag · credit이 없고("account"는 자기 welcome · result의 null뿐), credit은 그 생존자 연결에만 하나씩 · 계정 tag는 본인 welcome · result · credit에만', async ({
   browser,
 }) => {
   test.setTimeout(240_000);
@@ -1168,11 +1236,11 @@ test('정보 숨김: 로그인한 생존자 셋 + 로그인 안 한 괴물의 �
     expect(mRaw.length).toBeGreaterThan(20);
     for (const t of mRaw) {
       for (const s of secrets) expect(t.includes(s), `괴물 원문에 계정 단서 ${s}`).toBe(false);
-      // 계정 낱말은 자기 welcome의 "account":null(게스트 자리)뿐
-      if (t.startsWith('{"t":"welcome"')) expect(t).toContain('"account":null');
+      // 계정 낱말은 자기 welcome · 자기 result의 "account":null(게스트 자리)뿐
+      if (OWN_ACCOUNT.test(t)) expect(t).toContain('"account":null');
       else expect(t, '괴물 원문').not.toMatch(/credit|account/i);
     }
-    expect(mRaw.filter((t) => /account/i.test(t)).every((t) => t.startsWith('{"t":"welcome"'))).toBe(true);
+    expect(mRaw.filter((t) => /account/i.test(t)).every((t) => OWN_ACCOUNT.test(t))).toBe(true);
     // 생존자: credit은 자기 판 · 자기 계정 기록 · 자기 tag, 계정 ID와 다른 사람의 tag는 어떤 원문에도 없다
     const rows = await srv.accounts();
     for (const [i, c] of clients.slice(1).entries()) {
@@ -1186,10 +1254,11 @@ test('정보 숨김: 로그인한 생존자 셋 + 로그인 안 한 괴물의 �
       const others = secrets.filter((x) => x !== tags[i]);
       for (const t of c.frames.raw)
         for (const s of others) expect(t.includes(s), `${c.role} 원문 ${s}`).toBe(false);
-      // 자기 tag는 본인 welcome · credit에만, 그 밖에는 계정 낱말이 없다
-      for (const t of c.frames.raw.filter(
-        (x) => !x.startsWith('{"t":"credit"') && !x.startsWith('{"t":"welcome"'),
-      )) {
+      // 자기 tag는 본인 welcome · result(그 판을 적립한 계정) · credit에만, 그 밖에는 계정 낱말이 없다
+      const results = c.frames.raw.filter((x) => x.startsWith('{"t":"result"'));
+      expect(results.length).toBeGreaterThan(0);
+      for (const t of results) expect(t, `${c.role} 결과`).toContain(`"account":"${tags[i]!}"`);
+      for (const t of c.frames.raw.filter((x) => !x.startsWith('{"t":"credit"') && !OWN_ACCOUNT.test(x))) {
         expect(t, `${c.role} 원문`).not.toMatch(/credit|account/i);
         expect(t.includes(tags[i]!), `${c.role} 원문 자기 tag`).toBe(false);
       }

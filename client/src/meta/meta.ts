@@ -5,8 +5,9 @@
 // 계정 모드에서는 기록을 서버만 쓴다 — 받기 · 해금 · 입기는 계정 API로(실패하면 기록을 바꾸지 않고 실패를 돌려준다. 기기 쪽으로
 // 몰래 쓰지 않는다), 온라인 판 보상은 서버가 적립해 credit 메시지로 알린다(결과 화면은 같은 공용 함수의 미리보기 숫자 + 저장 상태).
 // 봇과 연습은 서버가 판정하지 않아 계정에 적립하지 않는다(기기 기록에도 쓰지 않는다). 날짜 · 자정은 계정 시간대.
-// 온라인 판은 그 자리에 서버가 받아들인 계정(welcome.account — 들어갈 때 화면이 밝힌 계정 = 쿠키 계정일 때만)으로 갈래를 정한다:
-// 없음 → 기기 기록(계정 모드여도), 지금 계정 → credit을 기다림, 다른 계정(그사이 로그아웃 · 계정 바뀜) → 어디에도 적립하지 않음.
+// 온라인 판은 그 판을 서버가 적립한 계정(result.account — 들어갈 때 화면이 밝힌 계정 = 쿠키 계정이었던 자리의 판 끝 값, ratedSeat)으로
+// 갈래를 정한다: 없음 · 이 화면에서 지운 계정 → 기기 기록(계정 모드여도), 지금 계정 → credit을 기다림, 다른 계정(그사이 로그아웃 ·
+// 계정 바뀜) → 어디에도 적립하지 않음.
 // 계정 모드의 일은 계정 저장소(AccountStore — account/serverStore.ts, 나눠 받는 조각 'account')가 맡고, 여기는 넘기기만 한다(첫 묶음을 작게)
 import type { CostumeChoice, MatchRating, Team } from '@decoy/shared';
 import {
@@ -50,10 +51,20 @@ export interface RatingApplied {
   account?: AccountCredit;
   /** 계정 모드 봇과 연습: 계정에 적립하지 않았다 */
   practice?: boolean;
-  /** 계정 모드인데 게스트 자리였던 온라인 판: 이 기기 기록에 적립했다 */
+  /** 계정 모드인데 게스트 자리였던 온라인 판 · 이 화면에서 지운 계정 자리의 판: 이 기기 기록에 적립했다 */
   device?: boolean;
   /** 들어올 때의 계정 자리(지금 모드와 다름): 서버가 그 계정에 적립한다 — 화면은 어디에도 적립하지 않았다 */
   elsewhere?: boolean;
+}
+
+const NO_TAGS: ReadonlySet<string> = new Set();
+
+/**
+ * 온라인 판 결과의 적립 갈래를 정하는 그 판의 계정 tag (선택형 구글 로그인): 결과에 실린 것(result.account — 서버가 판 끝에 그 자리로
+ * 적립한 계정, 결과 단계에 다시 붙어 welcome.account가 바뀌어도 그대로)이 먼저, 칸이 없는 옛 서버면 welcome.account
+ */
+export function ratedSeat(result: string | null | undefined, welcome: string | null): string | null {
+  return result !== undefined ? result : welcome;
 }
 
 /** 기기 시계 → 이 기기의 날짜 글 (자정 기준, 일일 도전 · 접속 보상) */
@@ -104,7 +115,7 @@ export interface AccountStore extends ProfileStore {
   /** 이 계정 표시 (GET /api/account의 tag — join · quick에 밝힌다) */
   readonly tag: string;
   /**
-   * 판 결과: 연습 판은 적립하지 않음. 온라인 판은 seat(그 자리에 서버가 받아들인 계정 tag, welcome.account)로 — 없음이면 기기 기록,
+   * 판 결과: 연습 판은 적립하지 않음. 온라인 판은 seat(그 판을 서버가 적립한 계정 tag, result.account)로 — 없음이면 기기 기록,
    * 이 계정이면 미리보기 + credit 기다리기, 다른 계정이면 적립하지 않음
    */
   rate(
@@ -360,24 +371,28 @@ export class MetaState {
    * 거기서 걸러진다). 다시 읽지 못하면 메모리의 기록에 더한다.
    * 계정: 온라인 판은 같은 공용 함수로 미리보기만 하고 기록은 서버의 credit을 기다린다(계정 저장소가 곧바로 기다림을 건다 —
    * credit이 이 함수가 끝나기 전에 와도 놓치지 않게). 연습 판은 적립하지 않는다(기기 기록에도 쓰지 않는다).
-   * seat = 그 자리에 서버가 받아들인 계정 tag (welcome.account, 게스트 자리 · 연습이면 null). 서버는 그 계정에만 적립하므로:
-   * 계정 모드여도 null이면 기기 기록에, 게스트 모드인데 계정 자리(들어온 뒤 로그아웃 · 다른 탭에서 바뀜)면 어디에도 적립하지 않는다
+   * seat = 그 판을 서버가 적립한 계정 tag (ratedSeat — result.account, 게스트 자리 · 연습이면 null). 서버는 그 계정에만 적립하므로:
+   * 계정 모드여도 null이면 기기 기록에, 게스트 모드인데 계정 자리(들어온 뒤 로그아웃 · 다른 탭에서 바뀜)면 어디에도 적립하지 않는다.
+   * gone = 이 화면에서 지운 계정 tag: 서버는 지운 계정에 적립하지 않으니(다시 만들지 않는다) 그 자리의 판은 기기 기록에(한 줄)
    */
   async applyRating(
     rating: MatchRating,
     practice = false,
     seat: string | null = null,
+    gone: ReadonlySet<string> = NO_TAGS,
   ): Promise<RatingApplied> {
+    const dropped = seat !== null && gone.has(seat);
     const s = this.store;
-    if (s.kind === 'server') return s.rate(this, rating, practice, seat);
-    if (seat !== null) return { rating, gain: null, saved: true, elsewhere: true };
+    if (s.kind === 'server') return s.rate(this, rating, practice, dropped ? null : seat);
+    if (seat !== null && !dropped) return { rating, gain: null, saved: true, elsewhere: true };
     await this.ready;
     await this.reread();
     const applied = applyRating(this.profile, rating, this.now(), this.prog, this.today());
-    if (!applied) return { rating, gain: null, saved: true };
+    const device = dropped ? { device: true } : {};
+    if (!applied) return { rating, gain: null, saved: true, ...device };
     this.profile = applied.profile;
     this.emit();
     const saved = await this.persist();
-    return { rating, gain: applied.gain, saved };
+    return { rating, gain: applied.gain, saved, ...device };
   }
 }

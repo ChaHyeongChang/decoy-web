@@ -156,9 +156,9 @@ describe('보내는 항목 대응표 (privacyData.ts ↔ ClientMessage)', () => 
   it('ClientMessage의 모든 필드가 대응표(로그인한 화면만 보내는 칸은 ACCOUNT_DATA)에 있고, 대응표에 없는 필드를 적지 않았다', () => {
     const { fields } = clientMessageFields();
     const sent: string[] = Object.values(SENT_DATA).flatMap((d) => [...d.fields]);
-    // 계정 표시 tag(join · quick의 account)는 로그인한 경우에만 보내 '로그인한 경우에만' 표(ACCOUNT_DATA)에 적는다
+    // 계정 표시 tag(join · quick · rematch의 account)는 로그인한 경우에만 보내 '로그인한 경우에만' 표(ACCOUNT_DATA)에 적는다
     const account = accountMessageFields();
-    expect(account.sort()).toEqual(['join.account', 'quick.account']);
+    expect(account.sort()).toEqual(['join.account', 'quick.account', 'rematch.account']);
     expect(sent.filter((f) => account.includes(f))).toEqual([]);
     const mapped = [...sent, ...account];
     expect(fields.length).toBeGreaterThan(10);
@@ -297,6 +297,7 @@ describe('로그인한 경우에만 (선택형 구글 로그인 — privacyData.
         `cookie.${DELETE_COOKIE}`,
         'join.account',
         'quick.account',
+        'rematch.account',
       ].sort(),
     );
     expect(new Set(sources).size).toBe(sources.length);

@@ -174,6 +174,8 @@ describe('실제 서버: 로그인 켜짐 (시험 훅 · 메모리 저장소 · 
       expect(credit.tag).toBe(tag);
       const result = a.inbox.find((m) => m.t === 'result');
       expect(result && result.t === 'result' ? result.rating?.matchId : null).toBe(credit.matchId);
+      // 본인 결과에는 그 판을 적립한 계정 tag (결과 단계에 다시 붙어도 그대로 — 화면이 적립 갈래를 정한다)
+      expect(result && result.t === 'result' ? result.account : null).toBe(tag);
       // 결과를 먼저 받고 credit은 그 뒤
       expect(a.inbox.findIndex((m) => m.t === 'result')).toBeLessThan(
         a.inbox.findIndex((m) => m.t === 'credit'),
@@ -186,7 +188,7 @@ describe('실제 서버: 로그인 켜짐 (시험 훅 · 메모리 저장소 · 
       // 계정에 저장됐다 (새 브라우저에서 읽어도 같은 기록)
       const st = await accountStatus(jar);
       expect(st).toMatchObject({ signedIn: true, fresh: false, profile: credit.profile });
-      // 다른 자리(괴물 포함)는 credit도, 계정 ID · tag도 받지 않는다 ("account" 칸은 자기 welcome의 null뿐)
+      // 다른 자리(괴물 포함)는 credit도, 계정 ID · tag도 받지 않는다 ("account" 칸은 자기 welcome · 자기 result의 null뿐)
       await new Promise((r) => setTimeout(r, 300));
       for (const g of guests) {
         expect(g.inbox.some((m) => m.t === 'credit')).toBe(false);
@@ -195,6 +197,7 @@ describe('실제 서버: 로그인 켜짐 (시험 훅 · 메모리 저장소 · 
         expect(all).not.toContain(tag);
         expect(g.raw.filter((r) => /"account"\s*:/.test(r))).toEqual([
           expect.stringMatching(/^\{"t":"welcome".*"account":null\}$/),
+          expect.stringMatching(/^\{"t":"result".*"account":null\}$/),
         ]);
       }
       // 로그인한 사람 자신이 받은 판 메시지에도 계정 ID는 없다 (credit 말고는 계정 기록도 없다)

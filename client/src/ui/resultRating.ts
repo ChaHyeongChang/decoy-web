@@ -191,7 +191,7 @@ export function ratingPanel(applied: RatingApplied): HTMLElement {
   } else {
     panel.append(h('div', { class: 'rate-note', 'data-testid': 'rate-already' }, META_TEXT.alreadyGot));
   }
-  // 계정 모드인데 게스트 자리였던 판 (계정 모드가 되기 전에 들어왔다): 이 기기 기록에 적립했다
+  // 계정 모드인데 게스트 자리였던 판 (계정 모드가 되기 전에 들어왔다) · 이 화면에서 지운 계정 자리의 판: 이 기기 기록에 적립했다
   if (applied.device)
     panel.append(h('div', { class: 'rate-note', 'data-testid': 'rate-device' }, ACCOUNT_TEXT.deviceMatch));
   if (applied.account) panel.append(accountLine(applied.account));
