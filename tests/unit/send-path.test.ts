@@ -58,7 +58,8 @@ const hasNote = (events: GameEvent[]): boolean =>
  * 방이 그 자리에 만든 메시지는 built에 모은다(무엇을 만들었고 무엇이 나갔는지 비교)
  */
 function playingRoom(): { room: Room; runner: Seat; socket: FakeSocket; built: ServerMessage[] } {
-  const mgr = new RoomManager({ balance, seed: 5, testHooks: false }, {});
+  // 판 시작 카운트다운은 끈다 (시작 직후 거점 점령을 끝내는 시험)
+  const mgr = new RoomManager({ balance, seed: 5, testHooks: false, startCountdown: 0 }, {});
   const socket = new FakeSocket();
   const sender = createSender(socket, 0, 0, Math.random);
   const built: ServerMessage[] = [];

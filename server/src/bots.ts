@@ -102,8 +102,8 @@ export class BotClient {
     if (!this.info || !this.balance || !this.lastSnap) return;
     this.seq += 1;
     const snap = this.lastSnap;
-    // 괴물 재접속 대기(판 정지) 중에는 서버가 입력을 처리하지 않으므로 보내지 않는다
-    if (snap.world.paused !== null) return;
+    // 괴물 재접속 대기(판 정지) · 판 시작 카운트다운 중에는 서버가 입력을 처리하지 않으므로 보내지 않는다
+    if (snap.world.paused !== null || snap.world.countdown > 0) return;
     this.pending = this.pending.filter((f) => f.seq > snap.ack);
     const view = predictSelf(snap, this.pending, this.balance);
     const input = this.brain.decide(view, this.info, this.balance, this.seq);

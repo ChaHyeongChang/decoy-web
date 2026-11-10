@@ -33,6 +33,9 @@ export const SPECTATE_KEYS: Readonly<Record<string, number>> = {
   Numpad3: 2,
 };
 
+/** 터치의 눌림 · 발사 대기를 버릴 때 넘기는 상황: 지금은 공격 · 돌진을 할 수 없다 (InputSampler.dropPressed) */
+const NO_FIRE: TouchFrameCtx = { nowMs: 0, face: 0, canAttack: false, canDash: false };
+
 /** 창 단위 이벤트를 받는 곳 (브라우저에서는 window · document · screen.orientation. 단위 테스트는 가짜 EventTarget) */
 export interface InputEnv {
   /** keydown · keyup · pointerup · blur · orientationchange (터치 모드: pointerdown · pointermove 캡처) */
@@ -325,6 +328,16 @@ export class InputSampler {
   clearPressed(): void {
     this.pressed = 0;
     this.touch?.reset();
+  }
+
+  /**
+   * 판 시작 카운트다운 동안 (플레이테스트 a-8): 그사이 눌린 버튼만 버린다 — 능력 · 공격이 "시작!"에 저절로 나가지 않게.
+   * clearPressed와 달리 터치 손가락은 그대로 둔다(터치 화면이 켜져 있다): 누르고 있던 이동 키 · 스틱은 시작 순간 그대로 이어져
+   * 다시 누르지 않아도 걷는다. 터치의 탭 · 발사 대기는 '지금은 할 수 없음'으로 한 번 꺼내 버린다(takePressed가 비운다)
+   */
+  dropPressed(): void {
+    this.pressed = 0;
+    this.touch?.takePressed(NO_FIRE);
   }
 
   /**

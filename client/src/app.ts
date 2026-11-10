@@ -115,6 +115,11 @@ export interface AppParams {
    * 저장하지 않음, 그림 정보 · 판정과 무관해 배포 주소에서도 받는다). 없거나 그 밖의 값이면 true(맞춘다)
    */
   camSnap: boolean;
+  /**
+   * ?countdown=1: 시험(?debug) 연습 판에서도 판 시작 카운트다운을 켠다 (플레이테스트 a-8). ?debug 없는 연습 판은 늘 켜져 있고,
+   * 서버 방은 서버가 정한다(시험 훅 서버는 시험 명령 `startCountdown`)
+   */
+  countdown: boolean;
 }
 
 /** ?cam 값 해석: 1~6 사이 수만 (소수 허용), 그 밖에는 null */
@@ -151,6 +156,7 @@ export function readParams(search: string): AppParams {
     chars: parseCharStyle(p.get('chars')),
     cam: parseCamZoom(p.get('cam')),
     camSnap: p.get('camSnap') !== '0',
+    countdown: p.get('countdown') === '1',
   };
 }
 
@@ -738,7 +744,12 @@ export class App {
     this.clearRejoin();
     this.returning = null;
     this.roomCode = null;
-    const local = new mod.LocalTransport({ testHooks: this.params.debug !== 'off' || import.meta.env.DEV });
+    const debug = this.params.debug !== 'off';
+    const local = new mod.LocalTransport({
+      testHooks: debug || import.meta.env.DEV,
+      // 판 시작 카운트다운: 사람이 하는 연습 판은 늘(개발 빌드 포함), 시험(?debug) 판은 ?countdown=1일 때만
+      countdown: !debug || this.params.countdown,
+    });
     this.local = local;
     this.localUnsub = local.subscribe((msg) => this.onMessage(msg));
     this.renderWake();

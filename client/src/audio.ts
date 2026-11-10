@@ -6,6 +6,8 @@
 // 기억했다가 만들 때 건다. 음소거 = 모두 0 (그동안은 소리 노드도 만들지 않는다)
 
 export type SfxName = 'windup' | 'hit' | 'captureStart' | 'captureDone' | 'doorOpen' | 'roar';
+/** 판 시작 카운트다운 소리 (플레이테스트 a-8): 숫자 3 · 2 · 1마다 'count', "시작!"에 'go' (Sfx.count) */
+export type CountSfxName = 'count' | 'go';
 /** UI 소리 (설정 화면 통합): 단추 누름 · 켜고 끔 · 화면 열기 · 닫기 */
 export type UiSfxName = 'tap' | 'toggle' | 'open' | 'close';
 /** 소리 세기 (0~1, prefs.audioLevelsOf): 전체 · 효과음 묶음 · UI 묶음 */
@@ -64,7 +66,7 @@ export class Sfx {
   /** 지금 소리 세기 (setLevels, 0~1). 기본값은 예전과 같은 소리(모두 1) */
   private levels: SfxLevels = { master: 1, sfx: 1, ui: 1 };
   /** 디버그 · 테스트: 재생 요청 기록 (최근 50개) */
-  readonly log: { name: SfxName; at: number }[] = [];
+  readonly log: { name: SfxName | CountSfxName; at: number }[] = [];
   /** 디버그 · 테스트: UI 소리 요청 기록 (최근 20개, 판 효과음 기록 log와 따로) */
   readonly uiLog: { name: UiSfxName; at: number }[] = [];
   /** 전체 음량 0 (음소거 포함) */
@@ -258,6 +260,29 @@ export class Sfx {
         break;
     }
     window.setTimeout(() => out.disconnect(), 1500);
+  }
+
+  /**
+   * 판 시작 카운트다운 소리: 숫자마다 짧은 한 음('count'), "시작!"에 올라가는 두 음('go'). 효과음 묶음으로 가고 판 효과음 기록(log)에
+   * 남는다. 숫자는 1초에 하나라 간격 제한은 두지 않는다. 오디오가 아직 열리지 않았거나 음소거 · 효과음 0이면 기록만 남는다
+   */
+  count(name: CountSfxName): void {
+    this.log.push({ name, at: performance.now() });
+    if (this.log.length > 50) this.log.shift();
+    if (this.muted || this.levels.sfx <= 0) return;
+    const ctx = this.ctx;
+    const bus = this.sfxBus;
+    if (!ctx || !bus || ctx.state !== 'running') return;
+    const out = ctx.createGain();
+    out.gain.value = 1;
+    out.connect(bus);
+    const t = ctx.currentTime + 0.005;
+    if (name === 'count') this.tone(out, 'triangle', t, 0.09, 660, 660, 0.3, 2600);
+    else {
+      this.tone(out, 'triangle', t, 0.1, 660, 660, 0.3, 3000);
+      this.tone(out, 'triangle', t + 0.09, 0.28, 990, 990, 0.34, 3200);
+    }
+    window.setTimeout(() => out.disconnect(), 800);
   }
 
   /** 주파수가 f0 → f1로 미끄러지는 음 하나 (선택: 저역 통과 · 떨림) */

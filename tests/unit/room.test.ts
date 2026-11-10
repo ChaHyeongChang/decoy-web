@@ -23,7 +23,8 @@ function joinMsg(
 }
 
 function setupRoom(): { mgr: RoomManager; room: Room; seats: Seat[]; conns: FakeConn[] } {
-  const mgr = new RoomManager({ balance, seed: 3, testHooks: false }, {});
+  // 판 시작 카운트다운은 끈다: 이 파일은 판 시작 직후부터 판이 흐른다고 본다 (카운트다운은 countdown.test.ts)
+  const mgr = new RoomManager({ balance, seed: 3, testHooks: false, startCountdown: 0 }, {});
   const conns = [new FakeConn(), new FakeConn(), new FakeConn(), new FakeConn()];
   const first = mgr.join(conns[0]!, joinMsg(null));
   if ('error' in first) throw new Error('create failed');

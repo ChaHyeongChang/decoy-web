@@ -433,7 +433,8 @@ export class Hud {
             : HUD_TEXT.spectating,
         icon: FR.icon('eye', UI.textDim, 20),
       };
-    if (this.isMonster && snap.world.monsterWait > 0)
+    // 판 시작 카운트다운 동안에는 띄우지 않는다: 괴물 대기 5초는 "시작!" 뒤부터 센다 (멈춘 5초 숫자가 고장처럼 보이지 않게)
+    if (this.isMonster && snap.world.monsterWait > 0 && !(snap.world.countdown > 0))
       return {
         text: `${UI_TEXT.monsterWait} ${Math.ceil(snap.world.monsterWait)}초`,
         icon: FR.icon('timer', WARN, 20),
