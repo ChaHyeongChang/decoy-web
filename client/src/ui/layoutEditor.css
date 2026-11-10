@@ -170,6 +170,7 @@
   max-width: min(560px, calc(100vw - 32px));
   max-height: calc(100vh - 16px);
   overflow-y: auto;
+  touch-action: pan-y;
   padding: 8px 10px;
   transition: opacity 0.15s;
 }

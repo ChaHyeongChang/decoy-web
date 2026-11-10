@@ -108,6 +108,7 @@
   width: min(720px, calc(100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
   max-height: calc(100dvh - 128px - env(safe-area-inset-top, 0px));
   overflow-y: auto;
+  touch-action: pan-y;
   padding: 16px 20px 16px 16px;
   text-align: left;
   translate: -50% 0;
@@ -353,6 +354,45 @@
   .seg {
     min-height: 48px;
   }
+}
+
+/* ───── 확대 안내 (플레이테스트 a-1, zoomNotice.ts): 화면이 확대된 동안 보이는 화면을 덮는 막 + 가운데 패널 ─────
+   자리 · 크기 · 배율은 JS가 정한다(zoomGuard.noticeBox — 보이는 화면에 맞춰 1/배율로 줄여 놓아 확대 전과 같은 크기로 보인다).
+   세로 안내(80) 위: 세로 안내는 touch-action: none이라 그 위에서는 오므릴 수 없다 */
+.zoom-notice {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 85;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(12px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px))
+    max(12px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+  background: rgba(5, 8, 12, 0.72);
+  transform-origin: 0 0;
+  /* 끌기 · 오므리기는 브라우저에 맡긴다(되돌리는 길). 두 번 탭 확대만 없다 */
+  touch-action: manipulation;
+}
+.zoom-card {
+  --ring: var(--neon-dim);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: min(440px, 100%);
+  padding: 18px 20px 16px;
+  background-color: var(--panel);
+  text-align: center;
+}
+.zoom-text {
+  margin: 0;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.5;
 }
 
 /* ───── 낮은 가로 화면 (휴대폰): 촘촘하게 ───── */

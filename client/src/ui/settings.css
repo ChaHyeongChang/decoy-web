@@ -120,6 +120,8 @@
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* 스크롤 컨테이너마다 세로 끌기만 적는다 (화면 확대 막기 — 문서 뿌리가 touch-action: none, style.css) */
+  touch-action: pan-y;
   padding: 4px 18px 8px;
 }
 .set-page[hidden] {
@@ -401,6 +403,7 @@
     border-bottom: 0;
     border-right: 1px solid var(--edge);
     overflow-y: auto;
+    touch-action: pan-y;
   }
   .set-tab {
     flex: none;
@@ -455,6 +458,247 @@
   .set-card.has-account .set-tab {
     padding: 0 4px;
     text-align: center;
+  }
+}
+
+/* ───── 낮은 휴대폰 가로 (플레이테스트 a-6, 높이 420 이하 — 아이폰 14 가로 390 · 주소창이 있으면 300~340, Pixel 7 412 · 360,
+   Pixel 5 293): 설명 글씨 · 여백 · 머리 줄을 줄이고, '닫기' · '모두 기본값으로' · '기본값'은 보이는 면만 줄인다.
+   누르는 자리(요소 상자)는 48px 그대로다 (터치 대상 하한 — VISUAL_SPEC 9.4 · 9.5, layout.MIN_TARGET). 위 520 · 330 블록 뒤에 둔다 ───── */
+@media (max-height: 420px) {
+  /* 탭 칸 148 → 112px (탭 글자 2~3자): 본문이 36px 넓어진다 */
+  .set-card {
+    grid-template-columns: 112px minmax(0, 1fr) auto auto;
+  }
+  .set-title {
+    padding: 4px 0 4px 14px;
+    font-size: 15px;
+  }
+  /* 머리 줄 60 → 52px: 누르는 자리 48 + 위아래 2 */
+  .set-close {
+    margin: 2px 8px 2px 0;
+    padding: 0 10px;
+    font-size: 13px;
+  }
+  .set-foot {
+    padding: 2px 8px 2px 0;
+  }
+  .set-reset-all {
+    padding: 0 10px;
+    font-size: 13px;
+  }
+  /* '닫기' · '모두 기본값으로': 보이는 면 34px, 누르는 자리 48px. 버튼 자신의 깎기(clip-path는 누르는 자리까지 깎는다) · 바탕을 떼고
+     ::before(면) · ::after(테두리 고리, style.css .btn::after)를 가운데 34px로 놓는다 */
+  .set-close,
+  .set-reset-all {
+    clip-path: none;
+    background: none;
+    isolation: isolate;
+  }
+  .set-close::before,
+  .set-reset-all::before {
+    content: '';
+    position: absolute;
+    top: calc(50% - 17px);
+    right: 0;
+    left: 0;
+    height: 34px;
+    z-index: -1;
+    background-color: var(--panel-2);
+    clip-path: polygon(
+      var(--cut) 0,
+      calc(100% - var(--cut)) 0,
+      100% var(--cut),
+      100% calc(100% - var(--cut)),
+      calc(100% - var(--cut)) 100%,
+      var(--cut) 100%,
+      0 calc(100% - var(--cut)),
+      0 var(--cut)
+    );
+  }
+  .set-close::after,
+  .set-reset-all::after {
+    top: calc(50% - 17px);
+    bottom: auto;
+    height: 34px;
+  }
+  .set-close:hover:not([disabled]),
+  .set-reset-all:hover:not([disabled]),
+  .set-close:focus-visible,
+  .set-reset-all:focus-visible {
+    box-shadow: none;
+  }
+  .set-close:hover::before,
+  .set-reset-all:hover::before,
+  .set-close:focus-visible::before,
+  .set-reset-all:focus-visible::before {
+    box-shadow: inset 0 0 14px rgba(34, 211, 238, 0.28);
+  }
+  .set-close .ico svg,
+  .set-reset-all .ico svg {
+    width: 15px;
+    height: 15px;
+  }
+  .set-inmatch {
+    margin: 0 12px 2px;
+    padding: 3px 8px;
+    font-size: 12px;
+    line-height: 1.3;
+  }
+  .set-tabs {
+    padding: 0 0 4px 8px;
+  }
+  .set-card .set-tab {
+    padding: 0 8px;
+  }
+  .set-body {
+    padding: 0 12px 4px;
+  }
+  .set-row {
+    padding: 4px 0;
+    row-gap: 1px;
+    column-gap: 10px;
+    grid-template-columns: minmax(84px, 8.75em) minmax(0, 1fr) auto;
+  }
+  .set-row .seg {
+    min-width: 60px;
+    padding: 0 10px;
+  }
+  .set-hint,
+  .set-lock {
+    font-size: 12px;
+    line-height: 1.3;
+  }
+  .set-value {
+    min-width: 46px;
+  }
+  /* '기본값': 보이는 면 30px, 누르는 자리 48px (면 = ::before. 꺼졌을 때의 사선 해치 · 포커스 테두리도 면에) */
+  .set-reset {
+    position: relative;
+    isolation: isolate;
+    padding: 0 8px;
+    border-color: transparent;
+    background: none;
+    font-size: 12px;
+  }
+  .set-reset::before {
+    content: '';
+    position: absolute;
+    top: calc(50% - 15px);
+    right: 0;
+    left: 0;
+    height: 30px;
+    z-index: -1;
+    border: 1px solid var(--edge-2);
+    border-radius: 4px;
+    background: var(--panel-2);
+  }
+  .set-reset:disabled {
+    border-color: transparent;
+    background: none;
+  }
+  .set-reset:disabled::before {
+    border-color: var(--edge);
+    background:
+      repeating-linear-gradient(135deg, transparent 0 5px, rgba(148, 163, 184, 0.08) 5px 7px), var(--panel);
+  }
+  .set-reset:focus-visible {
+    outline: none;
+  }
+  .set-reset:focus-visible::before {
+    outline: 2px solid var(--neon);
+    outline-offset: 1px;
+  }
+  .set-foot .quality-note,
+  .set-done {
+    left: 124px;
+    font-size: 12px;
+  }
+}
+/* 계정 탭까지 다섯 · 높이 330 이하(탭 두 줄): 탭 칸은 148px 그대로 (112px에는 두 칸이 들지 않는다) */
+@media (max-height: 330px) {
+  .set-card.has-account {
+    grid-template-columns: 148px minmax(0, 1fr) auto auto;
+  }
+  .set-card.has-account .set-tab {
+    padding: 0 4px;
+  }
+  .set-card.has-account .set-foot .quality-note,
+  .set-card.has-account .set-done {
+    left: 160px;
+  }
+}
+/* 좁고 낮은 화면 (폭 739 이하 — 아이폰 SE 667, Galaxy S9+ 658): 이름 칸을 줄여 고르는 칸 넷이 한 줄에 든다 */
+@media (max-height: 420px) and (max-width: 739px) {
+  .set-row {
+    grid-template-columns: minmax(72px, 6.5em) minmax(0, 1fr) auto;
+  }
+  .set-row-head .field-label {
+    white-space: normal;
+  }
+  .set-row .seg {
+    min-width: 54px;
+    padding: 0 7px;
+  }
+}
+/* 넓고 낮은 화면 (폭 740 이상): 설명을 이름 아래(왼쪽 칸)에 둔다 — 고르는 칸 · 기본값이 두 줄 높이를 함께 써서 설명이 줄 높이를 더하지 않는다 */
+@media (max-height: 420px) and (min-width: 740px) {
+  .set-row {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    /* 1줄 = 이름(남는 높이), 2줄 = 설명(없으면 0): 설명이 없는 줄은 이름이 세로 가운데에 온다 */
+    grid-template-rows: 1fr auto;
+    row-gap: 0;
+  }
+  .set-row.set-slider {
+    grid-template-columns: minmax(84px, 8.75em) minmax(0, 1fr) auto;
+  }
+  .set-row-head .field-label {
+    grid-row: 1;
+    align-self: center;
+  }
+  .set-row > .set-hint {
+    grid-column: 1;
+    grid-row: 2;
+    align-self: start;
+  }
+  .set-row > .segs,
+  .set-row > .set-slide,
+  .set-row-head .set-reset {
+    grid-row: 1 / span 2;
+  }
+  .set-row > .set-lock {
+    grid-row: 3;
+  }
+  /* 단추 줄(조작 배치 편집 · 안내 다시 보기): 단추 왼쪽, 설명 · 완료 안내 오른쪽 */
+  .set-row.set-action {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .set-action .set-row-head > .btn {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .set-row.set-action > .set-hint,
+  .set-row.set-action > .life-done {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: center;
+  }
+  /* 안내 줄(화면 밖 화살표 · PC 조작)은 그대로 전체 폭 */
+  .set-row.set-help > .set-hint {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+  .set-row.set-help .set-row-head .field-label {
+    grid-row: auto;
+    align-self: center;
+  }
+  /* 판 중 '판은 멈추지 않아요'는 머리 줄(제목 · 모두 기본값으로 사이)로 올린다: 본문이 그만큼 높아진다 */
+  .set-card.in-match {
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas: 'title note foot close' 'tabs body body body';
+  }
+  .set-card.in-match .set-inmatch {
+    align-self: center;
+    margin: 0 8px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

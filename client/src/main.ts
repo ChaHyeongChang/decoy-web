@@ -54,6 +54,7 @@ import { drawProbeText, relayoutAll, retextAll } from './ui/text';
 import { matchMenu } from './matchMenu';
 import { audioLevelsOf, onPrefsChange, uiScaleOf } from './prefs';
 import { initSettingsUrl } from './settingsModel';
+import { startZoomGuard } from './ui/zoomNotice';
 
 /** 창 크기 · DPR이 바뀐 뒤 백버퍼를 다시 만들 때까지 기다리는 시간 (끌어서 바꾸는 동안 매번 만들지 않게) */
 const RESIZE_DEBOUNCE_MS = 150;
@@ -68,6 +69,8 @@ setCamZoom(
 gfxState.camZoom = CAM_ZOOM;
 // 터치 모드 · 세로 · 브라우저 안 (M11). 로비가 전체 화면 버튼을 그리기 전에 정한다
 initDevice(params.touch);
+// 화면 확대 막기 · 감지 (플레이테스트 a-1): 터치 모드에서만. PC는 브라우저 확대를 그대로 둔다
+if (device.touch) startZoomGuard();
 const uiRoot = document.getElementById('ui-root') ?? document.body;
 const gameRoot = document.getElementById('game-root') ?? document.body;
 const app = new App(params, uiRoot);

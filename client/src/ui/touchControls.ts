@@ -1133,15 +1133,16 @@ export class TouchControls {
 
   /** 꺼진 터치 화면에서 '설정' 버튼 누르기 (손가락은 따로 세지 않는다 — 다른 조작이 없다) */
   private menuTap(e: PointerEvent): boolean {
-    if (!this.menuOn || device.portrait) return false;
+    if (!this.menuOn || device.portrait || device.zoomed) return false;
     e.preventDefault();
     return true;
   }
 
-  /** 켜짐 = 바깥에서 켬 + 세로 화면이 아님 */
+  /** 켜짐 = 바깥에서 켬 + 세로 화면이 아님 + 화면이 확대되지 않음 (플레이테스트 a-1: 확대 안내가 덮은 동안) */
   private apply(): void {
-    this.layer.classList.toggle('menu-on', this.menuOn && !device.portrait);
-    const live = this.active && !device.portrait;
+    const held = device.portrait || device.zoomed;
+    this.layer.classList.toggle('menu-on', this.menuOn && !held);
+    const live = this.active && !held;
     if (live === this.live) return;
     this.live = live;
     if (!live) {
