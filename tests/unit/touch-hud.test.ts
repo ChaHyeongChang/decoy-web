@@ -2,6 +2,7 @@
 // 터치 글자 크기(CSS 12px 이상, 주요 14 이상 — 높이 293 · 320 · 360), 터치 HUD 부품이 맵 · 서로 · 엄지 영역(터치 화면 대상 ·
 // 이동 스틱 그림)과 겹치지 않음, 배너 자리 · 맨 아래 안내 줄이 터치 대상과 겹치지 않음. PC는 언제나 1920×1080 그대로.
 // 판 중 창이 낮아지면(M12 검토) 엄지 버튼이 덮는 HUD 부품을 찾는다(hudCovered → 미니맵을 숨긴다)
+// 거점 줄 게이지(플레이테스트 a-7): 줄들이 예전 링 게이지 한 쌍과 같은 사각형을 채우고, 줄 수를 인자로 받는다
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { computeRenderSize } from '../../client/src/render/resolution';
@@ -230,7 +231,7 @@ describe('터치 HUD 자리 touchHudPlan', () => {
     expect(plan(802, 293, false).minimap).not.toBeNull();
     // 좁은 칸 · 낮은 화면: 게이지가 오른쪽 칸(화면 오른쪽 절반)
     const s9 = plan(658, 320, true);
-    expect(s9.gaugeA.x / L.HUD.touch!.L).toBeGreaterThan(658 / 2);
+    expect(s9.gauges[0]!.x / L.HUD.touch!.L).toBeGreaterThan(658 / 2);
     // 태블릿 4:3: 위 띠에 모두 (좌우 칸 없음), 미니맵 없음
     L.applyLayout(L.layoutFor(1024, 768, true));
     expect(L.HUD.touch!.mode).toBe('band');
@@ -288,6 +289,167 @@ describe('터치 HUD 자리 touchHudPlan', () => {
       }
     }
     expect(insets).toBeGreaterThan(8);
+  });
+
+  // ── 거점 줄 게이지 (플레이테스트 a-7) ──
+
+  /**
+   * 예전 링 게이지 한 쌍(gaugeA ∪ gaugeB)의 사각형 [x, y, w, h] (CSS px). 기준 커밋 57363eb의 layout.ts로 뽑은 값이다
+   * (판과 같은 조정 — 시스템 버튼 세 칸 · 내 팀). 줄 게이지가 같은 자리 · 같은 크기를 쓰는지 대조한다
+   */
+  const OLD_RING_PAIR: Readonly<Record<string, readonly [number, number, number, number]>> = {
+    '863×360 monster': [43.34, 35.12, 74.8, 35.36],
+    '863×360 survivor': [43.34, 35.12, 74.8, 35.36],
+    '740×360 monster': [12.61, 35.12, 74.8, 35.36],
+    '740×360 survivor': [12.61, 35.12, 74.8, 35.36],
+    '750×369 monster': [11.73, 35.12, 74.8, 35.36],
+    '750×369 survivor': [11.73, 35.12, 74.8, 35.36],
+    '750×300 monster': [37.6, 35.12, 74.8, 35.36],
+    '750×300 survivor': [637.6, 64, 74.8, 35.36],
+    '658×320 monster': [576.21, 64, 74.8, 35.36],
+    '658×320 survivor': [576.21, 64, 74.8, 35.36],
+    '640×360 monster': [7.09, 6, 74.8, 35.36],
+    '640×360 survivor': [7.09, 6, 74.8, 35.36],
+    '667×375 monster': [8.23, 6, 74.8, 35.36],
+    '667×375 survivor': [8.23, 6, 74.8, 35.36],
+    '844×390 monster': [27.33, 35.12, 74.8, 35.36],
+    '844×390 survivor': [27.33, 35.12, 74.8, 35.36],
+    '802×293 monster': [94.24, 6, 74.8, 35.36],
+    '802×293 survivor': [94.24, 6, 74.8, 35.36],
+    '1024×768 monster': [375.34, 4.32, 74.8, 35.36],
+    '1024×768 survivor': [375.34, 4.32, 74.8, 35.36],
+    '1280×800 monster': [6.67, 6, 74.8, 35.36],
+    '1280×800 survivor': [6.67, 6, 74.8, 35.36],
+  };
+  /** 줄 게이지를 보는 화면 격자: 아이폰 14 Chrome(750×369 · 주소창 750×300) · 안드로이드 360 높이 · 16:9 · 태블릿 */
+  const GAUGE_GRID: [number, number][] = [
+    [863, 360],
+    [740, 360],
+    [750, 369],
+    [750, 300],
+    [658, 320],
+    [640, 360],
+    [667, 375],
+    [844, 390],
+    [802, 293],
+    [1024, 768],
+    [1280, 800],
+  ];
+  /** 판과 같은 배치 (main.ts applyMatchLayout: 시스템 버튼 세 칸 · 내 팀) */
+  const matchPlan = (w: number, h: number, team: 'monster' | 'survivor', rows?: number) => {
+    const l = L.layoutFor(w, h, true, { sysSlots: L.SYS_SLOTS_MENU, team });
+    const t = L.touchHudPlan(l, rows)!;
+    return { l, t, plan: t[team], k: 1 / t.L };
+  };
+
+  it('거점 줄 게이지: 거점 수만큼의 줄이 예전 링 게이지 한 쌍과 같은 사각형을 빈틈없이 채운다 (화면 격자 × 두 역할)', () => {
+    expect(L.GAUGE_IDS).toEqual(['A', 'B']);
+    expect(L.TOUCH_PART.gaugeRow).toEqual({ w: 110, h: 26 });
+    let checked = 0;
+    for (const [w, h] of GAUGE_GRID)
+      for (const team of ['monster', 'survivor'] as const) {
+        const label = `${w}×${h} ${team}`;
+        const { plan, k } = matchPlan(w, h, team);
+        const old = OLD_RING_PAIR[label];
+        expect(old, label).toBeDefined();
+        if (!old) continue;
+        const rows = plan.gauges.map((r) => ({ x: r.x * k, y: r.y * k, w: r.w * k, h: r.h * k }));
+        expect(rows.length, label).toBe(L.GAUGE_IDS.length);
+        const rowH = old[3] / rows.length;
+        rows.forEach((r, i) => {
+          // 줄마다: 예전 한 쌍의 폭 그대로, 높이는 줄 수로 나눈 값, 위에서부터 맞닿게
+          expect(r.x, `${label} 줄 ${i} x`).toBeCloseTo(old[0], 1);
+          expect(r.w, `${label} 줄 ${i} 폭`).toBeCloseTo(old[2], 1);
+          expect(r.h, `${label} 줄 ${i} 높이`).toBeCloseTo(rowH, 2);
+          expect(r.y, `${label} 줄 ${i} y`).toBeCloseTo(old[1] + i * rowH, 1);
+        });
+        // 늘 떠 있는 부품 목록의 gaugeA · gaugeB가 같은 줄 사각형이다 (이동 영역 · 조작 배치 편집이 피하는 자리)
+        L.GAUGE_IDS.forEach((id, i) => {
+          const rect = plan.rects.find((r) => r.id === `gauge${id}`)?.rect;
+          expect(rect, `${label} gauge${id}`).toEqual(plan.gauges[i]);
+        });
+        checked += 1;
+      }
+    expect(checked).toBe(GAUGE_GRID.length * 2);
+  });
+
+  it('거점 줄 게이지는 다른 HUD 부품 · 맵 · 터치 버튼 · 스틱과 겹치지 않는다 (화면 격자 × 두 역할, 판과 같은 조정)', () => {
+    let pairs = 0;
+    for (const [w, h] of GAUGE_GRID)
+      for (const team of ['monster', 'survivor'] as const) {
+        const label = `${w}×${h} ${team}`;
+        const { l, plan, k } = matchPlan(w, h, team);
+        const toCss = (r: Box): Box => ({ x: r.x * k, y: r.y * k, w: r.w * k, h: r.h * k });
+        const rows = plan.gauges.map(toCss);
+        const others = plan.rects
+          .filter((r) => !/^gauge/.test(r.id))
+          .map((r) => ({ id: r.id, css: toCss(r.rect) }));
+        expect(others.length, label).toBeGreaterThanOrEqual(4);
+        const map = toCss({ x: l.mapX, y: l.mapY, w: L.MAP_DRAW_W, h: L.MAP_DRAW_H });
+        const T = touchLayout(
+          w,
+          h,
+          { l: 0, r: 0, t: 0, b: 0 },
+          team === 'monster',
+          true,
+          plan.rects.map((r) => toCss(r.rect)),
+          { menu: true, sysRows: plan.sysRows, viewRatio: l.viewW / l.viewH },
+        );
+        const targets: [string, Box][] = [['move-zone', T.zone]];
+        if (T.aim) targets.push(['aim-stick', T.aim]);
+        for (const [id, b] of Object.entries(T.buttons)) if (b) targets.push([id, b]);
+        targets.push([
+          'move-ghost',
+          { x: T.moveHome.x - T.moveR, y: T.moveHome.y - T.moveR, w: T.moveR * 2, h: T.moveR * 2 },
+        ]);
+        rows.forEach((r, i) => {
+          expect(r.x, `${label} 줄 ${i} 화면 안`).toBeGreaterThanOrEqual(-1e-6);
+          expect(r.y, `${label} 줄 ${i} 화면 안`).toBeGreaterThanOrEqual(-1e-6);
+          expect(r.x + r.w, `${label} 줄 ${i} 화면 안`).toBeLessThanOrEqual(w + 1e-6);
+          expect(r.y + r.h, `${label} 줄 ${i} 화면 안`).toBeLessThanOrEqual(h + 1e-6);
+          expect(overlaps(r, map), `${label} 줄 ${i} ↔ 맵`).toBe(false);
+          for (const o of others) {
+            expect(overlaps(r, o.css), `${label} 줄 ${i} ↔ ${o.id}`).toBe(false);
+            pairs += 1;
+          }
+          for (const [id, b] of targets) expect(overlaps(r, b), `${label} 줄 ${i} ↔ ${id}`).toBe(false);
+          // 줄끼리도 겹치지 않는다 (맞닿기만 한다)
+          rows
+            .slice(i + 1)
+            .forEach((q, j) => expect(overlaps(r, q), `${label} 줄 ${i} ↔ 줄 ${i + 1 + j}`).toBe(false));
+        });
+      }
+    expect(pairs).toBeGreaterThan(150);
+  });
+
+  it('줄 수를 인자로 받는다: 한 줄 · 세 줄이면 같은 폭 · 같은 줄 높이로 위에서부터 쌓이고, 기본값은 거점 수', () => {
+    for (const [w, h] of [
+      [844, 390],
+      [802, 293],
+      [640, 360],
+      [1024, 768],
+    ] as const) {
+      const l = L.layoutFor(w, h, true);
+      const base = L.touchHudPlan(l)!;
+      expect(L.touchHudPlan(l, L.GAUGE_IDS.length)).toEqual(base);
+      for (const n of [1, 3]) {
+        const t = L.touchHudPlan(l, n)!;
+        for (const team of ['monster', 'survivor'] as const) {
+          const rows = t[team].gauges;
+          const first = rows[0]!;
+          expect(rows.length, `${w}×${h} ${n}줄`).toBe(n);
+          expect(first.w).toBeCloseTo(base[team].gauges[0]!.w, 6);
+          expect(first.h).toBeCloseTo(base[team].gauges[0]!.h, 6);
+          rows.forEach((r, i) => {
+            expect([r.x, r.w, r.h]).toEqual([first.x, first.w, first.h]);
+            expect(r.y).toBeCloseTo(first.y + i * first.h, 6);
+          });
+          // 부품 목록에도 줄 수만큼 (이름은 거점 목록에서, 목록보다 많으면 차례 번호)
+          const ids = t[team].rects.filter((r) => /^gauge/.test(r.id)).map((r) => r.id);
+          expect(ids).toEqual(['gaugeA', 'gaugeB', 'gauge2'].slice(0, n));
+        }
+      }
+    }
   });
 
   it('HUD를 넘기지 않으면 터치 화면 배치는 M11 그대로 (이동 영역 = 왼쪽 40% 전체 높이)', () => {

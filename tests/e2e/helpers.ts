@@ -534,3 +534,87 @@ export async function waitCamera(page: Page, timeout = 15_000): Promise<void> {
     )
     .toBe(true);
 }
+
+// ───────────── 거점 진행 숫자 (플레이테스트 a-7) ─────────────
+
+/** 거점 하나의 화면 숫자와 그 화면 자기 스냅샷에서 계산한 기대값 (같은 순간에 읽는다) */
+export interface PointPct {
+  /** HUD가 보이는 숫자 (getHud pointXPct — 숫자를 보이지 않는 화면이면 '') */
+  shown: number | string;
+  /** 기대값: 자기 스냅샷 진행의 내림 정수 %, 완료만 100, 완료 전 99까지 (VISUAL_SPEC 8.3) */
+  want: number;
+  /** 스냅샷 거점 상태 · HUD 게이지 상태 · 숫자 일의 자리 프레임 */
+  state: string;
+  gauge: string;
+  frame: string;
+}
+
+export async function pointPct(page: Page, id: 'A' | 'B'): Promise<PointPct> {
+  return page.evaluate((id) => {
+    const h = window.__DECOY__?.getHud() ?? {};
+    const p = window.__DECOY__?.getLastSnapshot()?.world.points.find((q) => q.id === id);
+    const want = !p
+      ? -1
+      : p.state === 'done'
+        ? 100
+        : Math.min(99, Math.floor(Math.max(0, Math.min(1, p.progress)) * 100 + 1e-6));
+    return {
+      shown:
+        typeof h[`point${id}Pct`] === 'number'
+          ? Number(h[`point${id}Pct`])
+          : String(h[`point${id}Pct`] ?? ''),
+      want,
+      state: p?.state ?? '',
+      gauge: String(h[`point${id}`] ?? ''),
+      frame: String(h[`point${id}PctFrame`] ?? ''),
+    };
+  }, id);
+}
+
+/** 화면 숫자가 자기 스냅샷 진행과 맞을 때까지 기다려 그 값을 돌려준다 (새 스냅샷이 온 프레임과 HUD가 다시 계산한 프레임 사이는 건너뛴다) */
+export async function waitPointPct(
+  page: Page,
+  id: 'A' | 'B',
+  ok: (p: PointPct) => boolean,
+  label: string,
+  timeout = 20_000,
+): Promise<PointPct> {
+  let last: PointPct | null = null;
+  await expect
+    .poll(
+      async () => {
+        const p = await pointPct(page, id);
+        last = p;
+        // 실패하면 마지막으로 읽은 값이 메시지에 남는다
+        return p.shown === p.want && ok(p) ? 'ok' : JSON.stringify(p);
+      },
+      { message: label, intervals: [50, 100], timeout },
+    )
+    .toBe('ok');
+  if (!last) throw new Error(label);
+  return last;
+}
+
+/** 조건이 맞으면 그 값, 시간 안에 맞지 않으면 null (다시 시도하는 장면용) */
+export async function tryPointPct(
+  page: Page,
+  id: 'A' | 'B',
+  ok: (p: PointPct) => boolean,
+  timeout: number,
+): Promise<PointPct | null> {
+  return waitPointPct(page, id, ok, '', timeout).then(
+    (p) => p,
+    () => null,
+  );
+}
+
+/** HUD 글자 객체 중 '%'가 든 것 (진행 숫자는 아틀라스 그림이라 없어야 한다) */
+export async function hudPctTexts(page: Page): Promise<string[]> {
+  return page.evaluate(
+    () =>
+      window.__DECOY__
+        ?.getHudLayout()
+        ?.items.filter((i) => i.kind === 'text' && (i.text ?? '').includes('%'))
+        .map((i) => `${i.id}:${i.text}`) ?? ['getHudLayout 없음'],
+  );
+}

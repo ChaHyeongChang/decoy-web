@@ -617,7 +617,7 @@ function schedulePrebake(): void {
     // 로비 대기가 없다. 온라인 서버 수치가 다르면 로비에서 다시 굽는다
     const b = app.balance ?? PRACTICE_BALANCE;
     prebakeAtlas(game.scene.getScene('idle'), b.survivor.radius, b.monster.radius);
-    // HUD 아틀라스도 (배율 2 Canvas에서 약 28ms, 같은 배율이면 아무것도 하지 않는다)
+    // HUD 아틀라스도 (배율 2 Canvas에서 약 28ms, 같은 배율이면 아무것도 하지 않는다). 글꼴이 정해진 뒤에만 굽는다 — 아래에서 다시 부른다
     prebakeHud(game.textures);
     // 의상 그림 조각도 (판이 시작될 때 동료 · 괴물 의상을 바로 굽게 — 판 시작 명단은 판이 시작돼야 온다)
     void loadCostumeArt();
@@ -654,9 +654,12 @@ const relayoutScenes = (): void => {
 };
 void loadUiFonts().then((ok) => {
   if (ok) relayoutScenes();
+  // HUD 아틀라스에 글꼴로 그린 그림(거점 진행 숫자)이 있어 글꼴이 정해진 지금 미리 굽는다 (그 전의 미리 굽기는 HUD를 건너뛴다)
+  schedulePrebake();
 });
 // 시간 제한(3초)을 넘겨 늦게 받았으면 그때 다시 그린다 (그 사이 판이 대체 글꼴로 시작했을 수 있다)
 onUiFontsLate(relayoutScenes);
+onUiFontsLate(schedulePrebake);
 
 /** 판 시작 전 크기 대기를 멈춘다 (로비 복귀 · 결과 · 새 판: 그 판 장면은 시작하지 않는다) */
 let stopSettle = (): void => undefined;

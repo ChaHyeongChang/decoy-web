@@ -1,21 +1,32 @@
 // M10c HUD (Canvas · 소프트웨어 합성): 늘 떠 있는 HUD는 맵 사각형과 겹치지 않음, Tab 점수판이 열리면 첫 판 조작 안내가 닫힘,
 // 괴물 화면 카드 · 점수판에 이름 · 역할 없음(익명 규칙 그대로), 거점 정지 · 완료 상태 칩(디버그 값 + 픽셀),
-// 가만히 있으면 HUD 텍스처를 다시 굽지 않음(배율이 바뀔 때만), HUD에 Graphics 없음, 콘솔 0
+// 가만히 있으면 HUD 텍스처를 다시 굽지 않음(배율이 바뀔 때만), HUD에 Graphics 없음, 콘솔 0,
+// 거점 진행 숫자(플레이테스트 a-7): 괴물 · 생존자 화면이 자기 스냅샷 진행의 내림 %로 같은 값, 숫자가 바뀌어도 굽기 · 글자 그리기 없음
+import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { HUD, MAP_RECT } from '../../client/src/ui/layout';
 import {
   BASE_QUERY,
   closeAll,
+  hudPctTexts,
   pickRoleAndReady,
+  pointPct,
   sendTest,
   startFourPlayerMatch,
+  tryPointPct,
   waitForSnapshots,
+  waitPointPct,
   watchConsole,
+  type PointPct,
 } from './helpers';
 
 type HudInfo = Record<string, number | boolean | string>;
 
 const LONG_NAME = '가나다라마바사아자차카타';
+/** 판 시간 (초, config/balance.json) */
+const TIME_LIMIT = (
+  JSON.parse(readFileSync('config/balance.json', 'utf8')) as { match: { timeLimit: number } }
+).match.timeLimit;
 
 async function hud(page: Page): Promise<HudInfo> {
   return page.evaluate(() => window.__DECOY__?.getHud() ?? {});
@@ -196,6 +207,145 @@ test('괴물 HUD는 익명 · 거점 정지 · 완료 상태 칩 (디버그 값 
   expect(last.bakes).toBe(bakes);
   expect(last.missingFrames).toBe('');
   expect((await hud(host)).missingFrames).toBe('');
+  for (const p of players) expect(p.problems).toEqual([]);
+  await closeAll(players);
+});
+
+async function redraws(page: Page): Promise<number> {
+  return page.evaluate(() => window.__DECOY__?.textAudit().redraws ?? -1);
+}
+
+test('거점 진행 숫자: 괴물 · 생존자 화면이 같은 값(자기 스냅샷 진행의 내림 %) · 정지 주황 · 완료 100 · 숫자가 바뀌어도 다시 굽지 않고 글자를 그리지 않는다', async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const { players } = await startFourPlayerMatch(browser);
+  const monster = players.find((p) => p.role === 'monster')!;
+  const runner = players.find((p) => p.role === 'runner')!;
+  const guard = players.find((p) => p.role === 'guard')!;
+  const scout = players.find((p) => p.role === 'scout')!;
+  const host = monster.page;
+  const screens = [
+    { name: '괴물', page: monster.page },
+    { name: '러너', page: runner.page },
+  ];
+  // 괴물은 붙잡아 두고, 생존자는 모두 거점 밖으로 (러너 = A 옆 바닥)
+  await sendTest(host, { kind: 'freeze', target: monster.id, frozen: true });
+  await sendTest(host, { kind: 'teleport', target: guard.id, x: 24, y: 22 });
+  await sendTest(host, { kind: 'teleport', target: scout.id, x: 30, y: 24 });
+  await sendTest(host, { kind: 'teleport', target: runner.id, x: 14, y: 16.5 });
+  for (const s of screens) await s.page.setViewportSize({ width: 1920, height: 1080 });
+  // 굽기 기준값: 창을 키운 뒤의 다시 굽기(배율 0.5 → 1)가 끝난 다음에 읽는다
+  for (const s of screens) {
+    await s.page.waitForFunction(() => window.__DECOY__?.gfx.zoom === 1, null, { polling: 100 });
+    await s.page.evaluate(
+      () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null)))),
+    );
+  }
+  const bakes0 = await Promise.all(screens.map(async (s) => Number((await hud(s.page)).bakes)));
+
+  // ① 멈춘 진행: B 0.4(아무도 없음 → 대기, 진행은 남는다) · A 0 → 두 화면 모두 B 40 · A 흐린 0
+  await sendTest(host, { kind: 'setPoint', point: 'A', progress: 0 });
+  await sendTest(host, { kind: 'setPoint', point: 'B', progress: 0.4 });
+  for (const s of screens) {
+    const b = await waitPointPct(s.page, 'B', (p) => p.want === 40 && p.state === 'idle', `${s.name} B 40`);
+    expect(b.frame, s.name).toBe('pct:text:o0');
+    const a = await waitPointPct(s.page, 'A', (p) => p.want === 0, `${s.name} A 0`);
+    expect(a.frame, s.name).toBe('pct:dim:o0');
+  }
+
+  // ② 점령 중: 러너가 A에 들어가 1명 속도(1%당 0.4초)로 오르는 동안 두 화면 모두 자기 스냅샷의 내림 %다.
+  //    같은 길이의 가만히 있는 구간과 견줘 숫자가 바뀌는 동안 글자를 더 그리지 않는다(글자 객체였다면 숫자가 바뀔 때마다 한 번)
+  // 타이머는 처음 나오는 (자리, 글자)마다 글자를 한 번 그린다(hudKit Digits): 끝자리 0~9가 다 나온 뒤(판 시작 11초 뒤)에 잰다
+  await runner.page.waitForFunction(
+    (limit) => (window.__DECOY__?.getLastSnapshot()?.world.timeLeft ?? limit) <= limit - 11,
+    TIME_LIMIT,
+    { polling: 200, timeout: 30_000 },
+  );
+  const idle0 = await redraws(runner.page);
+  await runner.page.waitForTimeout(3000);
+  const idleRedraws = (await redraws(runner.page)) - idle0;
+  const cap0 = await redraws(runner.page);
+  await sendTest(host, { kind: 'teleport', target: runner.id, x: 8, y: 16.5 });
+  const start = await waitPointPct(runner.page, 'A', (p) => p.state === 'capturing', '러너 A 점령 시작');
+  const startN = Number(start.shown);
+  const seen = new Set<number>([startN]);
+  for (let k = 1; k <= 3; k += 1) {
+    const p = await waitPointPct(
+      runner.page,
+      'A',
+      (q) => q.state === 'capturing' && Number(q.shown) >= startN + k * 2,
+      `러너 A 점령 중 +${k * 2}`,
+    );
+    expect(p.gauge).toBe('capturing');
+    expect(p.frame).toMatch(/^pct:text:o\d$/);
+    seen.add(Number(p.shown));
+  }
+  const capRedraws = (await redraws(runner.page)) - cap0;
+  const changes = Math.max(...seen) - startN;
+  console.log(
+    `[m10-hud] 진행 숫자 ${startN} → ${Math.max(...seen)} (${changes}번 바뀜, 본 값 ${[...seen].join(' ')}), 글자 다시 그리기: 가만히 3초 ${idleRedraws} · 점령 중 ${capRedraws}`,
+  );
+  expect(changes).toBeGreaterThanOrEqual(6);
+  expect(capRedraws).toBeLessThanOrEqual(idleRedraws + 2);
+  // 괴물 화면도 점령 중 자기 스냅샷의 내림 % (깜빡이지만 값은 같다)
+  const now = (await pointPct(monster.page, 'A')).want;
+  for (let k = 1; k <= 2; k += 1) {
+    const p = await waitPointPct(
+      monster.page,
+      'A',
+      (q) => q.state === 'capturing' && Number(q.shown) >= now + k,
+      `괴물 A 점령 중 +${k}`,
+    );
+    expect([p.gauge, p.frame.startsWith('pct:text:o')]).toEqual(['capturing', true]);
+  }
+  for (const s of screens) expect(await hudPctTexts(s.page), s.name).toEqual([]);
+
+  // ③ 멈춘 뒤 두 화면이 같은 숫자: 러너가 나가면 진행이 그 자리에 멈춘다
+  await sendTest(host, { kind: 'teleport', target: runner.id, x: 14, y: 16.5 });
+  const stopped: PointPct[] = [];
+  for (const s of screens)
+    stopped.push(
+      await waitPointPct(s.page, 'A', (p) => p.state === 'idle' && p.gauge === 'idle', `${s.name} A 멈춤`),
+    );
+  expect(stopped[0]!.shown).toBe(stopped[1]!.shown);
+  expect(Number(stopped[0]!.shown)).toBeGreaterThanOrEqual(startN + 6);
+
+  // ④ 정지: 러너가 A에 있고 괴물이 들어가면(유예 5초 안) 진행이 멈추고 숫자가 주황 — 두 화면 같은 값.
+  //    유예가 지나 점령이 다시 오르면(느린 러너) 괴물을 내보냈다가 다시 들여보낸다
+  await sendTest(host, { kind: 'teleport', target: runner.id, x: 8, y: 16.5 });
+  let paused: PointPct[] = [];
+  for (let attempt = 1; attempt <= 3 && paused.length < 2; attempt += 1) {
+    await waitPointPct(runner.page, 'A', (p) => p.state === 'capturing', `러너 A 다시 점령 (${attempt})`);
+    await sendTest(host, { kind: 'teleport', target: monster.id, x: 9.5, y: 17, face: 0 });
+    paused = [];
+    for (const s of screens) {
+      const p = await tryPointPct(s.page, 'A', (q) => q.state === 'blocked' && q.gauge === 'paused', 4000);
+      if (p) paused.push(p);
+    }
+    if (paused.length < 2) await sendTest(host, { kind: 'teleport', target: monster.id, x: 44.5, y: 12.5 });
+  }
+  expect(paused.length, 'A 정지가 두 화면에 보였다').toBe(2);
+  expect(paused[0]!.shown).toBe(paused[1]!.shown);
+  for (const p of paused) expect(p.frame).toMatch(/^pct:warn:o\d$/);
+
+  // ⑤ 완료: 괴물이 나가고 진행을 1로 → ✓ 와 함께 100 (완료 전에는 99까지)
+  await sendTest(host, { kind: 'teleport', target: monster.id, x: 44.5, y: 12.5, face: 0 });
+  await sendTest(host, { kind: 'setPoint', point: 'A', progress: 1 });
+  for (const s of screens) {
+    const done = await waitPointPct(s.page, 'A', (p) => p.state === 'done', `${s.name} A 완료`);
+    expect([done.shown, done.gauge, done.frame], s.name).toEqual([100, 'done', 'pct:text:100']);
+    // B는 그대로 40
+    expect((await pointPct(s.page, 'B')).shown, s.name).toBe(40);
+  }
+
+  // 숫자가 몇 번 바뀌어도 · 상태가 바뀌어도 아틀라스를 다시 굽지 않고, 아틀라스에 없는 프레임도 없다
+  for (const [i, s] of screens.entries()) {
+    const info = await hud(s.page);
+    expect(Number(info.bakes), s.name).toBe(bakes0[i]);
+    expect(info.missingFrames, s.name).toBe('');
+    expect(await hudPctTexts(s.page), s.name).toEqual([]);
+  }
   for (const p of players) expect(p.problems).toEqual([]);
   await closeAll(players);
 });

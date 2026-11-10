@@ -7,6 +7,7 @@ import {
   RESCUE_POINT,
   type Balance,
   type PointState,
+  type PointView,
   type Role,
   type RoleId,
   type RosterEntry,
@@ -44,7 +45,8 @@ import {
   blendOver,
   type ContrastPair,
 } from '../art/palette';
-import { HUD, type HudLayoutSpec } from './layout';
+import { UI_FONT } from './fonts';
+import { GAUGE_IDS, GAUGE_ROW, HUD, type HudLayoutSpec } from './layout';
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -73,9 +75,9 @@ export const HC = {
 
 export const NOTE_ALPHA = 0.85;
 
-/** 강조색 (타일 테두리 · 눈금 링). line = 그래픽, text = 글자 · 아이콘. warn은 터치 거점 링 게이지의 정지 눈금만 */
-export type Accent = 'runner' | 'guard' | 'scout' | 'monster' | 'neon' | 'cone' | 'warn';
-/** 행동 타일 · 눈금 링을 굽는 강조색 (warn은 터치 배치에서만 링을 굽는다) */
+/** 강조색 (타일 테두리 · 눈금 링). line = 그래픽, text = 글자 · 아이콘 */
+export type Accent = 'runner' | 'guard' | 'scout' | 'monster' | 'neon' | 'cone';
+/** 행동 타일 · 눈금 링을 굽는 강조색 (모두 — 옛 터치 링 게이지의 정지 눈금 warn은 줄 게이지로 바뀌며 없앴다) */
 export const ACCENTS: readonly Accent[] = ['runner', 'guard', 'scout', 'monster', 'neon', 'cone'];
 export const ACCENT: Readonly<Record<Accent, { line: number; text: number }>> = {
   runner: { line: ROLE.runner, text: ROLE_TEXT.runner },
@@ -84,8 +86,13 @@ export const ACCENT: Readonly<Record<Accent, { line: number; text: number }>> = 
   monster: { line: ROLE.monster, text: ROLE_TEXT.monster },
   neon: { line: NEON, text: NEON },
   cone: { line: CONE.idle, text: CONE.idle },
-  warn: { line: WARN, text: WARN },
 };
+
+/** 터치 줄 게이지의 진행 채움 (판 색에 상태색을 섞은 어두운 면 — 그 위 글자 · 숫자 대비는 HUD_TEXT_PAIRS) */
+export const ROW_FILL = {
+  neon: blendOver(NEON, UI.panel, 0.26),
+  warn: blendOver(WARN, UI.panel, 0.16),
+} as const;
 
 /** HUD에서 새로 쓰는 글자 / 바탕 쌍 (palette.TEXT_PAIRS에 없는 것). tests/unit/hud.test.ts가 고정한다 */
 export const HUD_TEXT_PAIRS: readonly ContrastPair[] = [
@@ -109,6 +116,10 @@ export const HUD_TEXT_PAIRS: readonly ContrastPair[] = [
     min: 4.5,
   },
   { name: '정지 칩 아이콘 / 패널', fg: WARN, bg: UI.panel, min: 3 },
+  // 거점 진행 숫자 (플레이테스트 a-7): PC는 위 띠 바탕 위, 터치 줄 게이지는 판 · 진행만큼 칠한 어두운 채움 위
+  { name: '진행 숫자 정지 / 띠 바탕', fg: WARN, bg: UI.background, min: 4.5 },
+  { name: '진행 숫자 · 거점 글자 / 줄 게이지 채움', fg: UI.text, bg: ROW_FILL.neon, min: 4.5 },
+  { name: '진행 숫자 정지 / 줄 게이지 정지 채움', fg: WARN, bg: ROW_FILL.warn, min: 4.5 },
   // 화면 밖 화살표: 배지(패널) 위 문양 · 아이콘 · 테두리 (그래픽 3:1)
   { name: '화살표 러너 / 배지', fg: ROLE.runner, bg: UI.panel, min: 3 },
   { name: '화살표 가드 / 배지', fg: ROLE.guard, bg: UI.panel, min: 3 },
@@ -162,6 +173,68 @@ export const GAUGE_ICON: Readonly<Record<GaugeState, IconId | null>> = {
 
 export function gaugeColor(s: GaugeState): number {
   return s === 'paused' ? WARN : s === 'idle' ? UI.textDim : NEON;
+}
+
+// ── 거점 진행 숫자 (플레이테스트 a-7) ──
+
+/**
+ * 거점 진행 숫자 (정수 %): 내림. 완료만 100이고 완료 전에는 99까지다(✓ 칩과 100%가 늘 같이 나온다).
+ * 스냅샷 world.points 한 칸의 진행 · 상태만 받는다 — 역할 · 시야 · 다른 칸을 받지 않으므로 괴물 화면도 생존자 화면도
+ * 서버가 보낸 같은 값에서 같은 숫자가 나온다 (정보 차단: 새 정보 없음, tests/unit/hud.test.ts)
+ */
+export function pointPercent(p: Pick<PointView, 'progress' | 'state'>): number {
+  if (p.state === 'done') return 100;
+  // 1e-6: 서버가 소수 4자리로 반올림해 보낸다(0.01% 단위) — 그보다 작고 부동소수 오차(0.29 × 100 = 28.999…)보다 크다
+  return Math.min(99, Math.floor(clamp01(p.progress) * 100 + 1e-6));
+}
+
+/**
+ * 괴물 화면에도 진행 숫자를 보이는가. 서버는 거점 진행을 받는 사람과 무관하게 같은 값으로 보내고(interest.ts worldView) 괴물 HUD도
+ * 그 값으로 게이지를 그려 왔으므로 같은 숫자를 보인다. 사람 확인 뒤 괴물에게만 빼려면 이 값 하나를 false로 (HUMAN_CHECKS)
+ */
+export const PCT_FOR_MONSTER = true;
+
+/** 이 화면에 진행 숫자를 보이는가 (생존자는 늘, 괴물은 PCT_FOR_MONSTER) */
+export function pctShown(isMonster: boolean): boolean {
+  return !isMonster || PCT_FOR_MONSTER;
+}
+
+/** 진행 숫자 색: 정지 = 주황, 0% = 흐린 글자, 그 밖 = 본문. 색은 장식이고 상태는 칩 아이콘이 가른다 */
+export type PctTone = 'text' | 'warn' | 'dim';
+export const PCT_TONE: Readonly<Record<PctTone, number>> = { text: UI.text, warn: WARN, dim: UI.textDim };
+
+export function pctTone(s: GaugeState, n: number): PctTone {
+  return s === 'paused' ? 'warn' : n === 0 ? 'dim' : 'text';
+}
+
+/**
+ * 진행 숫자 글자 칸 폭 (글자 크기 배수): 숫자 한 자 · '%'. UI 글꼴 굵게 실측 0.59 · 0.963에 여유를 둔 고정 칸이고 글자는 칸
+ * 가운데에 그린다 — 글자 폭을 재지 않으므로 대체 글꼴이어도 칸 밖으로 나가지 않고 숫자가 바뀌어도 '%' 자리가 그대로다
+ */
+export const PCT_CELL = { digit: 0.6, pct: 0.98 } as const;
+/** 글자 밑줄(baseline)을 가운데에서 내리는 양 (글자 크기 배수): 숫자 · 대문자 높이 0.73의 절반 */
+const TEXT_DROP = 0.365;
+
+/** 가장 넓은 숫자 '100%'의 폭 (font = 글자 크기) */
+export function pctWidth(font: number): number {
+  return (PCT_CELL.digit * 3 + PCT_CELL.pct) * font;
+}
+
+/** 숫자 n의 프레임 이름: [십의 자리, 일의 자리 + %]. 한 자리 수 · 100은 한 장('')이다 */
+const PCT_NAMES: Readonly<Record<PctTone, readonly (readonly [string, string])[]>> = (() => {
+  const of = (t: PctTone): (readonly [string, string])[] =>
+    Array.from({ length: 101 }, (_, n) =>
+      n === 100
+        ? (['', `pct:${t}:100`] as const)
+        : ([n >= 10 ? `pct:${t}:t${Math.floor(n / 10)}` : '', `pct:${t}:o${n % 10}`] as const),
+    );
+  return { text: of('text'), warn: of('warn'), dim: of('dim') };
+})();
+const PCT_NONE: readonly [string, string] = ['', ''];
+
+/** 진행 숫자의 아틀라스 프레임 두 장 (미리 만든 이름 — 스냅샷마다 문자열을 만들지 않는다). 범위 밖이면 빈 이름 */
+export function pctFrames(n: number, tone: PctTone): readonly [string, string] {
+  return PCT_NAMES[tone][n] ?? PCT_NONE;
 }
 
 export type StatusKey = keyof typeof HUD_TEXT.status;
@@ -694,6 +767,24 @@ function circle(c: Ctx, r: number): void {
   c.arc(0, 0, r, 0, Math.PI * 2);
 }
 
+/**
+ * 글자를 고정 자리에 그린다 (아틀라스에 굽는 글꼴 그림: 거점 진행 숫자 · 터치 줄 게이지의 거점 글자). 글자마다 가운데 x,
+ * y = 글자 세로 가운데. 글자 폭을 재지 않는다 — 굽는 서명에 글꼴 세대가 들어 있어 늦게 받은 글꼴이면 다시 굽는다 (hudKit specSig)
+ */
+function paintGlyphs(
+  c: Ctx,
+  font: number,
+  color: number,
+  y: number,
+  glyphs: readonly (readonly [string, number])[],
+): void {
+  c.font = `bold ${font}px ${UI_FONT}`;
+  c.textAlign = 'center';
+  c.textBaseline = 'alphabetic';
+  c.fillStyle = rgba(color);
+  for (const [ch, x] of glyphs) c.fillText(ch, x, y + font * TEXT_DROP);
+}
+
 // ───────────────────────── 아틀라스 목록 ─────────────────────────
 
 /** 고정 크기 그림: 기준점(0, 0) 둘레의 범위(논리 px)와 그리기 (기준점 좌표계) */
@@ -727,13 +818,10 @@ export type AtlasSpec = FrameSpec | KitSpec;
 // 프레임 이름은 HUD가 매 갱신마다 수십 번 묻는다 (눈금 링 24칸 · 아이콘 · 미니맵 그림). 같은 문자열을 다시 만들지 않게
 // 눈금 · 링은 미리 만든 표에서, 아이콘 · 미니맵 · 실루엣은 처음 만든 문자열을 기억해 돌려준다 (렌더링 최적화 2). 결과 문자열은
 // 예전 템플릿과 같다 (tests/unit/hud-gate.test.ts가 옛 함수와 견준다)
-const ALL_ACCENTS: readonly Accent[] = [...ACCENTS, 'warn'];
 const TICK_NAMES = new Map<Accent, readonly string[]>(
-  ALL_ACCENTS.map((a) => [a, Array.from({ length: TICKS }, (_, i) => `t:${a}:${i}`)]),
+  ACCENTS.map((a) => [a, Array.from({ length: TICKS }, (_, i) => `t:${a}:${i}`)]),
 );
-const RING_NAMES = new Map<Accent | 'off', string>(
-  [...ALL_ACCENTS, 'off' as const].map((a) => [a, `r:${a}`]),
-);
+const RING_NAMES = new Map<Accent | 'off', string>([...ACCENTS, 'off' as const].map((a) => [a, `r:${a}`]));
 /** 아이콘 이름: 아이콘별 (색 × 1024 + 크기) → 이름. 크기 · 색이 정수가 아니거나 범위 밖이면 기억하지 않고 만든다 */
 const ICON_NAMES = new Map<IconId, Map<number, string>>();
 const MM_NAMES = new Map<string, string>();
@@ -886,7 +974,7 @@ export function slotIconFrame(s: ActionSlot): string {
 
 export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
   const out: AtlasSpec[] = [];
-  /** 터치 배치 (M12): 링 게이지 · 큰 상태 아이콘을 더 굽고, 쓰지 않는 막대 게이지는 굽지 않는다 */
+  /** 터치 배치 (M12): 거점 줄 게이지 · 큰 상태 아이콘을 더 굽고, 쓰지 않는 막대 게이지 · 배지 · 칩은 굽지 않는다 */
   const touch = h.touch !== null;
   const seen = new Set<string>();
   const add = (s: AtlasSpec): void => {
@@ -1068,7 +1156,7 @@ export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
         }
       },
     });
-  for (const s of GAUGE_STATES) {
+  for (const s of touch ? [] : GAUGE_STATES) {
     const col = gaugeColor(s);
     add(
       square(`dia:${s}`, G.dia / 2 + 3, (c, z) => {
@@ -1104,6 +1192,138 @@ export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
         }),
       );
   }
+  // ── 거점 진행 숫자 (플레이테스트 a-7): 십의 자리 한 자 · 일의 자리 + '%' · '100%'를 색마다 굽는다. 판 중에는 프레임만 바꾼다 ──
+  // 기준점: PC = 숫자 칸 오른쪽 끝 · 세로 가운데, 터치 = 줄 왼쪽 위 (줄 안 그림이 모두 같은 기준점이라 같은 기기 픽셀에 놓인다)
+  const R = GAUGE_ROW;
+  const pf = G.pctFont;
+  const pr = touch ? R.pctRight : 0;
+  const pm = touch ? R.midY : 0;
+  const rowTop = R.inset;
+  const rowBot = G.rowH - R.inset;
+  const [py0, py1] = touch ? [rowTop, rowBot] : [-pf * 0.62, pf * 0.62];
+  const dw = PCT_CELL.digit * pf;
+  const sw = PCT_CELL.pct * pf;
+  const glyphFrame = (
+    name: string,
+    x0: number,
+    x1: number,
+    font: number,
+    color: number,
+    glyphs: readonly (readonly [string, number])[],
+  ): void =>
+    add({
+      kind: 'frame',
+      name,
+      x0,
+      y0: py0,
+      x1,
+      y1: py1,
+      paint: (c) => paintGlyphs(c, font, color, pm, glyphs),
+    });
+  for (const tone of ['text', 'warn', 'dim'] as const) {
+    const col = PCT_TONE[tone];
+    for (let d = 0; d <= 9; d += 1) {
+      // 흐린 색은 0%뿐, 100%는 완료(본문색)뿐 — pctTone이 내는 조합만 굽는다
+      if (tone === 'dim' && d > 0) break;
+      glyphFrame(`pct:${tone}:o${d}`, pr - sw - dw, pr, pf, col, [
+        [String(d), pr - sw - dw / 2],
+        ['%', pr - sw / 2],
+      ]);
+      if (d > 0 && tone !== 'dim')
+        glyphFrame(`pct:${tone}:t${d}`, pr - sw - dw * 2, pr - sw - dw, pf, col, [
+          [String(d), pr - sw - dw * 1.5],
+        ]);
+    }
+    if (tone === 'text')
+      glyphFrame(`pct:${tone}:100`, pr - sw - dw * 3, pr, pf, col, [
+        ['1', pr - sw - dw * 2.5],
+        ['0', pr - sw - dw * 1.5],
+        ['0', pr - sw - dw / 2],
+        ['%', pr - sw / 2],
+      ]);
+  }
+  // ── 터치 거점 줄 게이지 (a-7, 기준점 = 줄 왼쪽 위): 판(상태색 테두리) · 진행 채움(어두운 면 + 아래 밝은 띠, 가로로 자른다) ·
+  //    상태 아이콘 · 거점 글자. 그림은 줄 위 · 아래 inset 안에만 있어 맞닿은 줄끼리 겹치지 않는다 ──
+  if (touch) {
+    const cut = [3, 0, 3, 0] as const;
+    /** 판 사각형을 기기 픽셀 격자에 맞춘다 (테두리 한 줄이 두 줄에 번지지 않게): [위, 폭, 높이] */
+    const plateAt = (z: number): [number, number, number] => {
+      const top = Math.round(rowTop * z) / z;
+      return [top, Math.round(G.w * z) / z, Math.round(rowBot * z) / z - top];
+    };
+    for (const s of GAUGE_STATES) {
+      const col = s === 'idle' ? 0x2c4a5e : gaugeColor(s);
+      add({
+        kind: 'frame',
+        name: `grow:${s}`,
+        x0: 0,
+        y0: rowTop,
+        x1: G.w,
+        y1: rowBot,
+        paint: (c, z) => {
+          const hl = hair(z);
+          const [top, rw, rh] = plateAt(z);
+          c.beginPath();
+          chamfer(c, 0, top, rw, rh, cut);
+          c.fillStyle = rgba(UI.panel, 0.96);
+          c.fill();
+          c.beginPath();
+          chamfer(c, hl / 2, top + hl / 2, rw - hl, rh - hl, cut);
+          c.lineWidth = hl;
+          c.strokeStyle = rgba(col);
+          c.stroke();
+        },
+      });
+      const ic = GAUGE_ICON[s];
+      if (ic)
+        add({
+          kind: 'frame',
+          name: `gicon:${s}`,
+          x0: R.iconX - R.icon / 2 - 1,
+          y0: rowTop,
+          x1: R.iconX + R.icon / 2 + 1,
+          y1: rowBot,
+          paint: (c) =>
+            drawIcon(c, ic, R.iconX - R.icon / 2, R.midY - R.icon / 2, R.icon, rgba(gaugeColor(s)), 1.1),
+        });
+    }
+    for (const [n, col] of [
+      ['neon', NEON],
+      ['warn', WARN],
+    ] as const)
+      add({
+        kind: 'frame',
+        name: `growfill:${n}`,
+        x0: 0,
+        y0: rowTop,
+        x1: G.w,
+        y1: rowBot,
+        paint: (c, z) => {
+          const hl = hair(z);
+          const [top, rw, rh] = plateAt(z);
+          // 어두운 면은 테두리 안쪽, 밝은 띠는 아래 테두리 자리까지 (진행만큼 아래 테두리가 굵고 밝아진다)
+          c.save();
+          c.beginPath();
+          chamfer(c, hl, top + hl, rw - hl * 2, rh - hl * 2, cut);
+          c.clip();
+          c.fillStyle = rgba(ROW_FILL[n]);
+          c.fillRect(0, top, rw, rh);
+          c.restore();
+          c.save();
+          c.beginPath();
+          chamfer(c, 0, top, rw, rh, cut);
+          c.clip();
+          const strip = hair(z, R.strip);
+          c.fillStyle = rgba(col);
+          c.fillRect(0, top + rh - strip, rw, strip);
+          c.restore();
+        },
+      });
+    for (const id of GAUGE_IDS)
+      glyphFrame(`gltr:${id}`, R.letterX - R.letterW / 2, R.letterX + R.letterW / 2, G.letterFont, UI.text, [
+        [id, R.letterX],
+      ]);
+  }
   for (const m of ['normal', 'low', 'grace'] as const) {
     const col = m === 'normal' ? 0x2c4a5e : TIMER_LOOK[m].color;
     add(
@@ -1130,7 +1350,7 @@ export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
       }
     };
   add(square(FR.ring('off'), RING.r1 + 0.6, ringPaint(HC.tickOff, 0, TICKS)));
-  for (const a of touch ? [...ACCENTS, 'warn' as const] : ACCENTS) {
+  for (const a of ACCENTS) {
     add(square(FR.ring(a), RING.r1 + 0.6, ringPaint(ACCENT[a].line, 0, TICKS)));
     for (let i = 0; i < TICKS; i += 1) {
       const t = tickAngle(i);
