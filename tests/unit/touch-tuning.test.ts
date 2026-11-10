@@ -296,7 +296,7 @@ describe('조이스틱 크기 (stickScale) · 시스템 버튼 칸 (sysSlots)', 
 });
 
 describe('좌우 반전 (mirror)', () => {
-  it('HUD 부품이 화면 가운데로 뒤집힌다 (게이지 A가 왼쪽 그대로, 팀 카드 순서도 왼쪽부터)', () => {
+  it('HUD 부품이 화면 가운데로 뒤집힌다 (거점 줄 게이지는 A가 윗줄 그대로, 팀 카드 순서도 왼쪽부터)', () => {
     for (const [name, w, h] of SCREENS) {
       const a = L.touchHudPlan(L.layoutFor(w, h, true, { sysSlots: 3 }))!;
       const lb = L.layoutFor(w, h, true, { sysSlots: 3, mirror: true });
@@ -307,17 +307,22 @@ describe('좌우 반전 (mirror)', () => {
         const q = b[role];
         expect(q.timer.x, name).toBeCloseTo(W - p.timer.x, 6);
         expect(q.timer.y, name).toBeCloseTo(p.timer.y, 6);
-        expect(q.gaugeA.x, name).toBeCloseTo(W - p.gaugeB.x, 6);
-        expect(q.gaugeB.x, name).toBeCloseTo(W - p.gaugeA.x, 6);
-        expect(q.gaugeA.x).toBeLessThan(q.gaugeB.x);
+        // 거점 줄 게이지 (플레이테스트 a-7): 줄마다 제자리에서 좌우로만 뒤집힌다 — A가 늘 윗줄이라 줄을 맞바꾸지 않는다
+        expect(q.gauges.length).toBe(p.gauges.length);
+        expect(q.gauges.length).toBeGreaterThanOrEqual(2);
+        q.gauges.forEach((g, i) => {
+          const o = p.gauges[i]!;
+          expect(g.x, `${name} 줄 ${i}`).toBeCloseTo(W - o.x - o.w, 6);
+          expect([g.y, g.w, g.h]).toEqual([o.y, o.w, o.h]);
+          if (i > 0) expect(g.y).toBeGreaterThan(q.gauges[i - 1]!.y);
+        });
         const gridW = p.cards.cols * p.cards.w + (p.cards.cols - 1) * p.cards.gap;
         expect(q.cards.x, name).toBeCloseTo(W - p.cards.x - gridW, 6);
         if (p.minimap) expect(q.minimap!.x).toBeCloseTo(W - p.minimap.x - p.minimap.w, 6);
         if (p.minimapInset) expect(q.minimapInset!.x).toBeCloseTo(W - p.minimapInset.x - p.minimapInset.w, 6);
-        // 사각형 목록: 같은 id가 뒤집힌 자리 (게이지는 맞바꾼 자리)
+        // 사각형 목록: 같은 id가 뒤집힌 자리
         for (const r of p.rects) {
-          const id = r.id === 'gaugeA' ? 'gaugeB' : r.id === 'gaugeB' ? 'gaugeA' : r.id;
-          const m = q.rects.find((x) => x.id === id)!;
+          const m = q.rects.find((x) => x.id === r.id)!;
           if (r.id.startsWith('card')) continue;
           expect(m.rect.x, `${name} ${r.id}`).toBeCloseTo(W - r.rect.x - r.rect.w, 6);
           expect(m.rect.w).toBeCloseTo(r.rect.w, 6);

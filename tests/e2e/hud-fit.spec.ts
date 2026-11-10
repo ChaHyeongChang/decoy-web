@@ -3,8 +3,16 @@
 // PC 판 중 메뉴 버튼, FPS · 핑 칩, 터치 버튼(설정 · 점수판 · 엄지 버튼 · 스틱)이 서로 겹치지 않고 화면 안이다.
 // 예전에는 PC 메뉴 버튼(44 CSS px)이 위 띠(960×540에서 32px)보다 커 팀 카드 위 테두리에 약 5px(800×600은 11px, 맵 왼쪽 끝 ·
 // FPS 칩까지) 걸쳤다. 터치 HUD와 터치 대상의 겹침 · 글자 크기는 m12-screen이 더 많은 기기에서 본다
+// 거점 게이지의 진행 숫자(플레이테스트 a-7)도 게이지 자리 안이다 — 숫자는 자기 스냅샷 진행의 내림 %
 import { expect, test, type Browser, type BrowserContextOptions } from '@playwright/test';
-import { PHONE_LANDSCAPE, newPlayerPage, press, waitForSnapshots } from './helpers';
+import {
+  PHONE_LANDSCAPE,
+  hudPctTexts,
+  newPlayerPage,
+  press,
+  waitForSnapshots,
+  waitPointPct,
+} from './helpers';
 import { touchTargets, waitForTouchTarget } from './touch';
 
 interface Box {
@@ -76,6 +84,10 @@ async function hudBoxes(
     await expect
       .poll(async () => (await page.evaluate(() => window.__DECOY__!.getMatchPrefs()))?.menuButton?.visible)
       .toBe(true);
+  // 거점 진행 숫자 (플레이테스트 a-7): 게이지마다 자기 스냅샷 진행의 내림 %이고, 글자 객체가 아니라 아틀라스 그림이다
+  for (const id of ['A', 'B'] as const)
+    await waitPointPct(page, id, () => true, `${c.name} ${role} 거점 ${id}`);
+  expect(await hudPctTexts(page)).toEqual([]);
   // 칩 글자 · 자리가 한 번 더 갱신될 때까지 (초당 2번)
   await page.waitForTimeout(700);
   const l = (await page.evaluate(() => window.__DECOY__!.getHudLayout()))!;

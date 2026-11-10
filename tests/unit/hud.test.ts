@@ -1,16 +1,20 @@
 // HUD (M10c, VISUAL_SPEC 8장): 행동 칸 값(M11 터치 버튼과 공유) · 거점 게이지 · 타이머 · 팀 카드 · 상태 표시(색만으로 구분하지 않기) ·
-// 글자 대비 · 9조각 배치 · 아틀라스 목록 · 조작 안내 줄 나누기
+// 글자 대비 · 9조각 배치 · 아틀라스 목록 · 조작 안내 줄 나누기 · 거점 진행 숫자(플레이테스트 a-7: 값 · 프레임 · 숫자 칸)
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { validateBalance } from '../../shared/src/balance';
 import { createMoveState } from '../../shared/src/movement';
 import { RESCUE_POINT } from '../../shared/src/map';
-import type { Snapshot, SurvivorView } from '../../shared/src/types';
+import type { PointView, Snapshot, SurvivorView } from '../../shared/src/types';
 import { CONTROLS } from '../../client/src/data/storyText';
 import { TEXT_PAIRS, UI, WARN, WARN_TEXT, contrastRatio } from '../../client/src/art/palette';
 import {
   GAUGE_ICON,
+  GAUGE_STATES,
   HUD_TEXT_PAIRS,
+  PCT_CELL,
+  PCT_FOR_MONSTER,
+  PCT_TONE,
   STATUS_LOOK,
   TICKS,
   TIMER_LOOK,
@@ -22,6 +26,12 @@ import {
   litTicks,
   packShelves,
   parseControl,
+  pctFrames,
+  pctShown,
+  pctTone,
+  pctWidth,
+  pointOf,
+  pointPercent,
   sliceSpans,
   statusKey,
   teamCards,
@@ -30,7 +40,19 @@ import {
   timerView,
   type ActionSlot,
 } from '../../client/src/ui/hudArt';
-import { HUD, MAP_RECT, VIEW_W } from '../../client/src/ui/layout';
+import {
+  GAUGE_IDS,
+  GAUGE_ROW,
+  HUD,
+  MAP_RECT,
+  TOUCH_UI,
+  VIEW_W,
+  applyLayout,
+  layoutFor,
+  pcLayout,
+} from '../../client/src/ui/layout';
+
+afterEach(() => applyLayout(pcLayout()));
 
 const balance = validateBalance(JSON.parse(readFileSync('config/balance.json', 'utf8')));
 
@@ -321,9 +343,248 @@ describe('거점 게이지 · 타이머 · 상태 표시', () => {
   });
 });
 
+describe('거점 진행 숫자 (플레이테스트 a-7)', () => {
+  const point = (progress: number, state: PointView['state'] = 'capturing'): PointView => ({
+    id: 'A',
+    progress,
+    state,
+  });
+
+  it('거점 진행 숫자: 내림 · 완료 전 99까지 · 완료만 100 · 0 미만 · 1 초과는 자른다', () => {
+    const cases: [number, PointView['state'], number][] = [
+      [0, 'idle', 0],
+      [0, 'capturing', 0],
+      [0.0099, 'capturing', 0],
+      [0.01, 'capturing', 1],
+      [0.29, 'capturing', 29], // 0.29 × 100 = 28.999…(부동소수)여도 29
+      [0.57, 'capturing', 57],
+      [0.6299, 'capturing', 62],
+      [0.63, 'blocked', 63],
+      [0.999, 'capturing', 99],
+      [0.9996, 'capturing', 99], // 완료 직전 최댓값 (1 − 1/2400, 소수 4자리)
+      [1, 'capturing', 99], // 진행이 1이어도 서버가 완료라고 하기 전에는 99
+      [1, 'idle', 99],
+      [1, 'done', 100],
+      [0.4, 'done', 100], // 완료는 진행 값과 무관하게 100
+      [-0.2, 'capturing', 0],
+      [1.7, 'blocked', 99],
+    ];
+    for (const [progress, state, want] of cases)
+      expect([progress, state, pointPercent(point(progress, state))]).toEqual([progress, state, want]);
+    // 서버가 보내는 값(소수 4자리) 전부: 내림과 같고 단조 증가
+    let last = 0;
+    for (let i = 0; i <= 10000; i += 1) {
+      const n = pointPercent(point(i / 10000));
+      expect(n, `${i}`).toBe(Math.min(99, Math.floor(i / 100)));
+      expect(n).toBeGreaterThanOrEqual(last);
+      last = n;
+    }
+  });
+
+  it('거점 진행 숫자 함수는 스냅샷 거점 한 칸의 진행 · 상태만 받는다 — 역할 · 시야 · 다른 칸 자리가 없다 (타입 검사)', () => {
+    // 실행하지 않는 함수: tsc -p tests가 @ts-expect-error 줄에 타입 에러가 있는지(= 인자 자리가 없는지) 확인한다
+    const typeOnly = (f: typeof pointPercent, p: PointView, snap: Snapshot): void => {
+      f(p);
+      f({ progress: 0.5, state: 'capturing' });
+      // @ts-expect-error 역할(받는 사람)을 넘길 자리가 없다
+      f(p, 'monster');
+      // @ts-expect-error 스냅샷 전체(나 · 다른 사람 · 시야)를 받지 않는다
+      f(snap);
+      // @ts-expect-error 진행 없이 상태만으로는 부를 수 없다
+      f({ state: 'capturing' });
+    };
+    expect(typeOnly.length).toBe(3);
+    expect(pointPercent.length).toBe(1);
+    // 같은 거점 값이면 누가 보든 같은 숫자다: 다른 칸(id)이 달라도 값은 진행 · 상태에서만 나온다
+    for (const [progress, state] of [
+      [0.4321, 'capturing'],
+      [0.4321, 'blocked'],
+      [0.4321, 'idle'],
+      [1, 'done'],
+    ] as const)
+      expect(pointPercent({ id: 'B', progress, state } as PointView)).toBe(pointPercent({ progress, state }));
+  });
+
+  it('게이지는 거점 값을 순서 번호가 아니라 id로 찾는다 — 스냅샷 순서가 게이지 순서(GAUGE_IDS)와 달라도 줄마다 제 거점 값', () => {
+    const a: PointView = { id: 'A', progress: 0.12, state: 'capturing' };
+    const b: PointView = { id: 'B', progress: 0.87, state: 'blocked' };
+    // 마일스톤 b의 셋째 거점(지금 PointId에 없다)이 앞에 끼어도
+    const c = { id: 'C', progress: 0.5, state: 'idle' } as unknown as PointView;
+    for (const points of [
+      [a, b],
+      [b, a],
+      [c, b, a],
+      [b, c, a],
+    ]) {
+      const shown = GAUGE_IDS.map((id) => {
+        const p = pointOf(points, id);
+        return p ? `${p.id}:${pointPercent(p)}` : '';
+      });
+      expect(shown, points.map((p) => p.id).join('')).toEqual(['A:12', 'B:87']);
+    }
+    // 스냅샷에 없는 거점은 그리지 않는다 (순서 번호로 짝지으면 다른 거점 값이 나온다)
+    expect(pointOf([b], 'A')).toBeUndefined();
+    expect(pointOf([], 'B')).toBeUndefined();
+  });
+
+  it('괴물 화면에도 같은 숫자를 보인다 — 빼는 스위치는 상수 하나 (PCT_FOR_MONSTER)', () => {
+    expect(PCT_FOR_MONSTER).toBe(true);
+    expect(pctShown(false)).toBe(true);
+    expect(pctShown(true)).toBe(PCT_FOR_MONSTER);
+  });
+
+  it('숫자 색: 정지 = 주황, 0% = 흐린 글자, 그 밖 = 본문 (상태는 칩 아이콘이 가른다)', () => {
+    expect(pctTone('paused', 0)).toBe('warn');
+    expect(pctTone('paused', 40)).toBe('warn');
+    expect(pctTone('idle', 0)).toBe('dim');
+    expect(pctTone('capturing', 0)).toBe('dim');
+    expect(pctTone('idle', 40)).toBe('text');
+    expect(pctTone('capturing', 99)).toBe('text');
+    expect(pctTone('done', 100)).toBe('text');
+    expect(PCT_TONE).toEqual({ text: UI.text, warn: WARN, dim: UI.textDim });
+  });
+
+  /** 나올 수 있는 (상태, 숫자) 전부의 프레임 이름 */
+  const reachable = (): { label: string; frames: readonly [string, string] }[] => {
+    const out: { label: string; frames: readonly [string, string] }[] = [];
+    for (const s of GAUGE_STATES)
+      for (let n = 0; n <= 100; n += 1) {
+        // 완료는 100뿐이고 100은 완료뿐이다 (pointPercent)
+        if ((s === 'done') !== (n === 100)) continue;
+        out.push({ label: `${s} ${n}`, frames: pctFrames(n, pctTone(s, n)) });
+      }
+    return out;
+  };
+
+  it('0~100 모든 숫자의 프레임이 PC · 터치 아틀라스 목록에 있다 (한 자리 · 100은 한 장, 두 자리는 두 장)', () => {
+    expect(pctFrames(7, 'text')).toEqual(['', 'pct:text:o7']);
+    expect(pctFrames(63, 'warn')).toEqual(['pct:warn:t6', 'pct:warn:o3']);
+    expect(pctFrames(100, 'text')).toEqual(['', 'pct:text:100']);
+    expect(pctFrames(0, 'dim')).toEqual(['', 'pct:dim:o0']);
+    // 같은 숫자면 같은 배열 (스냅샷마다 문자열 · 배열을 만들지 않는다)
+    expect(pctFrames(63, 'text')).toBe(pctFrames(63, 'text'));
+    expect(pctFrames(101, 'text')).toEqual(['', '']);
+    expect(pctFrames(-1, 'text')).toEqual(['', '']);
+    const all = reachable();
+    expect(all.length).toBe(100 * 3 + 1);
+    for (const touch of [false, true]) {
+      if (touch) applyLayout(layoutFor(844, 390, true));
+      expect(HUD.touch !== null).toBe(touch);
+      const names = new Set(hudSpecs().map((x) => x.name));
+      const missing: string[] = [];
+      for (const { label, frames } of all) {
+        expect(frames[1], label).not.toBe('');
+        for (const f of frames) if (f !== '' && !names.has(f)) missing.push(`${touch} ${label} → ${f}`);
+      }
+      expect(missing).toEqual([]);
+      // 굽는 숫자 프레임은 쓰는 것뿐이다: 본문 20(십의 자리 9 + 일의 자리 10 + 100%) · 주황 19 · 흐림 1
+      const used = new Set(all.flatMap((a) => a.frames).filter((f) => f !== ''));
+      const baked = [...names].filter((n) => n.startsWith('pct:'));
+      expect(baked.sort()).toEqual([...used].sort());
+      expect(baked.length).toBe(40);
+    }
+  });
+
+  it('숫자 글자 크기: PC 15 논리 px · 터치 12 CSS px 이상, 터치 줄 게이지 거점 글자는 14 CSS px 이상', () => {
+    expect(HUD.touch).toBeNull();
+    expect(HUD.gauge.pctFont).toBeGreaterThanOrEqual(15);
+    for (const [w, h] of [
+      [844, 390],
+      [802, 293],
+      [640, 360],
+      [1024, 768],
+    ] as const) {
+      applyLayout(layoutFor(w, h, true));
+      expect(HUD.gauge.pctFont * TOUCH_UI.art, `${w}×${h}`).toBeGreaterThanOrEqual(TOUCH_UI.font.small);
+      expect(HUD.gauge.letterFont * TOUCH_UI.art, `${w}×${h}`).toBeGreaterThanOrEqual(TOUCH_UI.font.main);
+    }
+  });
+
+  it("숫자 칸 (PC): 게이지 전체 폭 288 그대로, 배지 · 칩 · 숫자 칸 · 막대가 겹치지 않고 '100%'가 칸에 들어간다", () => {
+    const G = HUD.gauge;
+    expect(G.w).toBe(288);
+    expect([HUD.gaugeA.x, HUD.gaugeB.x]).toEqual([580, 1340]);
+    // 배지 쪽 끝에서 안쪽으로: 배지 · 칩 · 숫자 칸 · 막대
+    const chip0 = G.dia + G.gap;
+    const pct0 = chip0 + G.chip + G.pctGap;
+    const bar0 = pct0 + G.pctW + G.pctGap;
+    expect([chip0, chip0 + G.chip, pct0, pct0 + G.pctW, bar0, bar0 + G.barW]).toEqual([
+      44, 68, 74, 122, 128, 288,
+    ]);
+    expect(bar0 + G.barW).toBe(G.w);
+    // 가장 넓은 숫자 '100%'가 칸 안
+    expect(pctWidth(G.pctFont)).toBeLessThanOrEqual(G.pctW);
+    expect(pctWidth(G.pctFont)).toBeCloseTo((PCT_CELL.digit * 3 + PCT_CELL.pct) * G.pctFont, 9);
+    // 숫자 프레임은 칸 오른쪽 끝(기준점) 왼쪽에만 있고 칸 폭을 넘지 않는다
+    const pctSpecs = hudSpecs().filter((x) => x.name.startsWith('pct:'));
+    expect(pctSpecs.length).toBe(40);
+    for (const sp of pctSpecs) {
+      if (sp.kind !== 'frame') throw new Error(`${sp.name}: 고정 크기 그림이 아니다`);
+      expect(sp.x1, sp.name).toBeLessThanOrEqual(1e-9);
+      expect(sp.x0, sp.name).toBeGreaterThanOrEqual(-G.pctW);
+      // 위 띠(64) 안: 세로로 배지(38)보다 크지 않다
+      expect(sp.y1 - sp.y0, sp.name).toBeLessThanOrEqual(G.dia);
+    }
+    // 십의 자리 칸과 일의 자리 칸은 맞닿고 겹치지 않는다
+    const tens = pctSpecs.find((x) => x.name === 'pct:text:t6');
+    const ones = pctSpecs.find((x) => x.name === 'pct:text:o3');
+    if (tens?.kind !== 'frame' || ones?.kind !== 'frame') throw new Error('숫자 프레임 없음');
+    expect(tens.x1).toBeCloseTo(ones.x0, 9);
+  });
+
+  it("터치 줄 게이지 한 줄: 글자 · 상태 아이콘 · '100%'가 한 줄(110 × 26)에 겹치지 않게 들어가고, 그림은 줄 위 · 아래 여백 안에만 있다", () => {
+    applyLayout(layoutFor(844, 390, true));
+    const G = HUD.gauge;
+    const R = GAUGE_ROW;
+    expect([G.w, G.rowH]).toEqual([110, 26]);
+    // 왼쪽부터: 거점 글자 칸 · 상태 아이콘 · 숫자(오른쪽 맞춤)
+    const letter = [R.letterX - R.letterW / 2, R.letterX + R.letterW / 2] as const;
+    const icon = [R.iconX - R.icon / 2, R.iconX + R.icon / 2] as const;
+    const num = [R.pctRight - pctWidth(G.pctFont), R.pctRight] as const;
+    expect(letter[0]).toBeGreaterThanOrEqual(0);
+    expect(icon[0]).toBeGreaterThanOrEqual(letter[1]);
+    expect(num[0]).toBeGreaterThanOrEqual(icon[1]);
+    expect(num[1]).toBeLessThanOrEqual(G.w);
+    const specs = hudSpecs();
+    const row = specs.filter((x) => /^(grow|growfill|gicon|gltr|pct):/.test(x.name));
+    // 판 4(상태) + 채움 2 + 상태 아이콘 3 + 거점 글자(거점 수) + 숫자 40
+    expect(row.length).toBe(4 + 2 + 3 + GAUGE_IDS.length + 40);
+    for (const id of GAUGE_IDS) expect(row.some((x) => x.name === `gltr:${id}`)).toBe(true);
+    for (const sp of row) {
+      if (sp.kind !== 'frame') throw new Error(`${sp.name}: 고정 크기 그림이 아니다`);
+      expect(sp.y0, sp.name).toBeGreaterThanOrEqual(R.inset);
+      expect(sp.y1, sp.name).toBeLessThanOrEqual(G.rowH - R.inset);
+      expect(sp.x0, sp.name).toBeGreaterThanOrEqual(0);
+      expect(sp.x1, sp.name).toBeLessThanOrEqual(G.w);
+    }
+    // 쓰지 않는 PC 그림(막대 · 배지 · 칩)과 옛 링 게이지의 주황 눈금은 굽지 않는다
+    const names = specs.map((x) => x.name);
+    for (const gone of ['gbar:idle', 'gfill:neon', 'gstripe', 'dia:idle', 'chip:done', 'r:warn', 't:warn:0'])
+      expect(names, gone).not.toContain(gone);
+    // 맞닿은 줄끼리 그린 상자가 겹치지 않는다: hudKit이 프레임 둘레에 두는 1텍셀까지 줄 간격(기기 픽셀 정수) 안이다.
+    // 기기 배율 1 · 1.5 · 2 · 2.625 · 3 × UI 크기 1~1.5 (굽는 배율 z = 그림 1단위의 기기 px)
+    for (const dpr of [1, 1.5, 2, 2.625, 3])
+      for (let ui = 1; ui <= 1.5001; ui += 0.05) {
+        const z = TOUCH_UI.art * ui * dpr;
+        const top = Math.floor(R.inset * z) - 1;
+        const bottom = Math.ceil((G.rowH - R.inset) * z) + 1;
+        expect(top, `위 dpr ${dpr} ui ${ui.toFixed(2)}`).toBeGreaterThanOrEqual(0);
+        expect(bottom, `아래 dpr ${dpr} ui ${ui.toFixed(2)}`).toBeLessThanOrEqual(Math.round(G.rowH * z));
+      }
+  });
+});
+
 describe('글자 대비 (HUD에서 새로 쓰는 쌍)', () => {
   it('HUD 글자 쌍은 모두 기준 이상 (글자 4.5:1, 아이콘 3:1)', () => {
     for (const p of HUD_TEXT_PAIRS) expect(contrastRatio(p.fg, p.bg), p.name).toBeGreaterThanOrEqual(p.min);
+    // 거점 진행 숫자의 바탕 쌍이 들어 있다 (PC 위 띠 · 터치 줄 게이지 채움)
+    const names = HUD_TEXT_PAIRS.map((p) => p.name);
+    for (const n of [
+      '진행 숫자 정지 / 띠 바탕',
+      '진행 숫자 · 거점 글자 / 줄 게이지 채움',
+      '진행 숫자 정지 / 줄 게이지 정지 채움',
+    ])
+      expect(names).toContain(n);
   });
 
   it('배너 톤 글자: 경고 배너는 #0B1622 (8.49:1), 발각 · 정보는 흰 글자 (palette.TEXT_PAIRS)', () => {

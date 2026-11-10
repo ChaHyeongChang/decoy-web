@@ -11,7 +11,7 @@
 import Phaser from 'phaser';
 import { gfxState } from '../gfx/state';
 import { createCanvasTexture, makeCanvas, nextFogKey, removeCanvasTexture } from '../render/fogPaint';
-import { fontGeneration } from './fonts';
+import { fontGeneration, uiFontsSettled } from './fonts';
 import { hudSpecs, packShelves, sliceSpans, type AtlasSpec } from './hudArt';
 import { HUD } from './layout';
 import { UI_FONT, makeText, type CrispText } from './text';
@@ -53,8 +53,11 @@ interface Atlas {
 let shared: Atlas | null = null;
 let specCache: { sig: string; specs: AtlasSpec[] } | null = null;
 
-/** 굽는 그림이 달라지는 배치 값 (터치 · 크기) */
-function specSig(): string {
+/**
+ * 굽는 그림이 달라지는 값: 배치(터치 · 크기)와 글꼴 세대. 아틀라스에 글꼴로 그린 그림(거점 진행 숫자 · 터치 줄 게이지의 거점 글자,
+ * 플레이테스트 a-7)이 있어, 늦게 받은 글꼴이면 한 번 다시 굽는다 (그 전에 구운 것은 대체 글꼴 그림)
+ */
+export function specSig(): string {
   return [
     HUD.touch ? 't' : 'p',
     HUD.gauge.dia,
@@ -63,6 +66,7 @@ function specSig(): string {
     HUD.hint.h,
     HUD.banner.h,
     HUD.banner.rowH,
+    fontGeneration(),
   ].join(',');
 }
 /** 누적 굽기 횟수 (디버그 hud.bakes) */
@@ -165,8 +169,13 @@ function atlasNow(textures: Phaser.Textures.TextureManager): Atlas {
   return shared;
 }
 
-/** 로비 대기 중 미리 굽기 (main.ts schedulePrebake에서 부르면 판 시작 때 굽는 시간이 없다. 같은 배율이면 아무것도 안 한다) */
+/**
+ * 로비 대기 중 미리 굽기 (main.ts schedulePrebake에서 부르면 판 시작 때 굽는 시간이 없다. 같은 배율이면 아무것도 안 한다).
+ * 글꼴이 정해지기(받음 · 시간 초과) 전에는 굽지 않는다: 아틀라스에 글꼴 그림이 있어 대체 글꼴로 구우면 글꼴이 온 뒤 한 번 더
+ * 굽게 된다 — main.ts가 글꼴이 정해지면 다시 부른다 (로비에서 굽는 횟수 1번 그대로)
+ */
 export function prebakeHud(textures: Phaser.Textures.TextureManager): void {
+  if (!uiFontsSettled()) return;
   atlasNow(textures);
 }
 

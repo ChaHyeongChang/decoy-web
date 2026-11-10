@@ -39,7 +39,7 @@ function rng(seed: number): () => number {
 
 describe('프레임 이름 표 · 기억 = 옛 템플릿', () => {
   const ids = Object.keys(ICONS) as IconId[];
-  const accents: Accent[] = [...ACCENTS, 'warn'];
+  const accents: readonly Accent[] = ACCENTS;
 
   it('아이콘: 모든 아이콘 × 색 × 크기 (정수 · 소수 · 큰 크기 · 두 번째 호출)', () => {
     const r = rng(1);

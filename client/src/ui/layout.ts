@@ -4,7 +4,7 @@
 // 맵 배율(MAP_SCALE)은 모든 배치에서 같다(맵 · 캐릭터 그림 · 안개가 배율에 묶여 있다). 화면에 맞추는 것은 카메라 zoom이다.
 // 아래 `export let` 값은 ES 모듈 라이브 바인딩이라 다른 모듈은 읽는 순간의 값을 본다. 판 중에는 바뀌지 않는다
 // (판 중 창 크기가 바뀌면 논리 크기는 그대로 두고 zoom만 다시 맞춘다).
-import { MAP_H, MAP_W, TILE_PX } from '@decoy/shared';
+import { CAPTURE_POINTS, MAP_H, MAP_W, TILE_PX } from '@decoy/shared';
 
 /** PC 논리 해상도 (PC는 언제나 이 크기) */
 export const PC_VIEW_W = 1920;
@@ -227,9 +227,11 @@ export function minimapInsetFrame(i: { x: number; y: number; w: number }, s: num
 export const TOUCH_PART = {
   /** 팀 카드 한 장 (실루엣 · 상태 아이콘 · 체력 칸 · 수감 눈금) */
   card: { w: 110, h: 44 },
-  /** 거점 링 게이지 한 칸 (정사각) · 두 칸 사이 */
-  gauge: 52,
-  gaugeGap: 6,
+  /**
+   * 거점 줄 게이지 한 줄 (글자 + 상태 아이콘 + 진행 숫자, 아래 채움 띠 — 플레이테스트 a-7). 줄 수 = 거점 수(GAUGE_IDS).
+   * 두 줄이 예전 링 한 쌍(110 × 52)과 같은 사각형이라 배치 후보 · 넘침 계산이 그대로다
+   */
+  gaugeRow: { w: 110, h: 26 },
   /** 타이머 틀 높이 · 안쪽 여백 · 아이콘 크기 · 아이콘과 숫자 사이 */
   timer: { h: 34, pad: 9, icon: 20, gap: 4 },
   /** 미니맵 틀 여백 · 제목 줄 */
@@ -238,6 +240,24 @@ export const TOUCH_PART = {
   ribbon: { h: 36, rowH: 32, gap: 6 },
   /** 맨 아래 안내 줄 (TOUCH_UI.hintH CSS px) 아이콘 */
   hintIcon: 20,
+} as const;
+
+/** 거점 게이지를 그리는 순서 = 스냅샷 world.points 순서 (거점 목록에서 읽는다 — 거점이 늘면 터치 줄 게이지도 한 줄 는다) */
+export const GAUGE_IDS: readonly string[] = Object.keys(CAPTURE_POINTS);
+
+/**
+ * 터치 거점 줄 게이지 한 줄 안 (그림 단위, 줄 왼쪽 위 기준): 판 위 · 아래 여백(줄 사이 틈은 2배), 거점 글자 칸 가운데 x · 칸 폭,
+ * 상태 아이콘 가운데 x · 크기, 진행 숫자 오른쪽 끝 x, 아래 채움 띠 두께, 글자 · 아이콘 · 숫자 가운데 y
+ */
+export const GAUGE_ROW = {
+  inset: 2,
+  letterX: 15,
+  letterW: 22,
+  iconX: 39,
+  icon: 16,
+  pctRight: 105,
+  strip: 3,
+  midY: 12.2,
 } as const;
 
 /** 타이머 틀 폭 (CSS px): 숫자 5칸(12:00) 기준, '최후' 글자까지 */
@@ -539,9 +559,8 @@ export interface Rect {
 export interface TouchHudPlan {
   /** 타이머 틀 가운데 · 폭 · 높이, '최후' 글자를 쓸 자리가 있는가 */
   timer: { x: number; y: number; w: number; h: number; label: boolean };
-  /** 거점 링 게이지 가운데 */
-  gaugeA: { x: number; y: number };
-  gaugeB: { x: number; y: number };
+  /** 거점 줄 게이지: 줄마다 사각형 (위에서부터 world.points 순서 — A · B …, 서로 맞닿는다) */
+  gauges: Rect[];
   /** 팀 카드 격자: 첫 카드 왼쪽 위, 한 장 크기, 열 수, 간격 */
   cards: { x: number; y: number; w: number; h: number; cols: number; gap: number };
   /** 미니맵 그림 왼쪽 위 · 폭 (틀 · 제목은 바깥). 자리가 없으면 null */
@@ -599,10 +618,11 @@ function planCss(
   monster: boolean,
   map: Box,
   T: Readonly<LayoutTuning> = DEFAULT_TUNING,
+  /** 거점 줄 게이지 줄 수 (거점 수) */
+  gaugeRows: number = GAUGE_IDS.length,
 ): {
   timer: Box & { label: boolean };
-  gaugeA: Box;
-  gaugeB: Box;
+  gauges: Box[];
   cards: Box & { cols: number; cw: number; ch: number };
   minimap: Box | null;
   inset: Box | null;
@@ -615,20 +635,20 @@ function planCss(
   const r = thumbReserve(W, H, monster, T, map.x + map.w);
   const cardW = P.card.w * a;
   const cardH = P.card.h * a;
-  const g = P.gauge * a;
-  const pairW = g * 2 + P.gaugeGap * a;
+  // 거점 줄 게이지 덩어리: 폭 = 한 줄 폭, 높이 = 줄 높이 × 줄 수 (두 줄 = 예전 링 한 쌍 110 × 52)
+  const rowH = P.gaugeRow.h * a;
+  const g = rowH * gaugeRows;
+  const pairW = P.gaugeRow.w * a;
   const timerH = P.timer.h * a;
   const grid = (cols: number): { w: number; h: number } => {
     const rows = Math.ceil(3 / cols);
     return { w: cols * cardW + (cols - 1) * U.gap, h: rows * cardH + (rows - 1) * U.gap };
   };
-  const pairAt = (x: number, y: number): [Box, Box] => [
-    { x, y, w: g, h: g },
-    { x: x + g + P.gaugeGap * a, y, w: g, h: g },
-  ];
+  const pairAt = (x: number, y: number, n: number = gaugeRows): Box[] =>
+    Array.from({ length: n }, (_, i) => ({ x, y: y + i * rowH, w: pairW, h: rowH }));
 
   if (mode === 'band') {
-    // 위 띠에 모두: 가운데 타이머, 그 왼쪽 링 게이지 둘, 맨 왼쪽 팀 카드 한 줄. 미니맵은 자리가 없어 숨긴다
+    // 위 띠에 모두: 가운데 타이머, 그 왼쪽 거점 줄 게이지, 맨 왼쪽 팀 카드 한 줄. 미니맵은 자리가 없어 숨긴다
     const cy = band / 2;
     const timerW = timerCss.label;
     const timer = { x: W / 2 - timerW / 2, y: cy - timerH / 2, w: timerW, h: timerH, label: true };
@@ -637,8 +657,8 @@ function planCss(
     // 카드 줄과 닿으면 게이지를 타이머 오른쪽으로
     const leftX = timer.x - U.gap * 2 - pairW;
     const gx = leftX >= cards.x + cards.w + U.gap * 2 ? leftX : timer.x + timer.w + U.gap * 2;
-    const [ga, gb] = pairAt(gx, cy - g / 2);
-    return { timer, gaugeA: ga, gaugeB: gb, cards, minimap: null, inset: insetCss(map, r, a) };
+    const gauges = pairAt(gx, cy - g / 2);
+    return { timer, gauges, cards, minimap: null, inset: insetCss(map, r, a) };
   }
 
   const cw = mapLeft;
@@ -707,7 +727,7 @@ function planCss(
     (c.pair.x < W / 2 ? 0 : Math.max(0, c.pair.y + g - rightLimit) * 100);
   const pick = cands.find((c) => over(c) === 0) ?? [...cands].sort((p, q) => over(p) - over(q))[0]!;
   const timerBox = pick.timer;
-  const [ga, gb] = pairAt(pick.pair.x, pick.pair.y);
+  const gauges = pairAt(pick.pair.x, pick.pair.y);
   const cards = { x: center(gr.w), y: pick.cardsY, w: gr.w, h: gr.h, cols, cw: cardW, ch: cardH };
   // 미니맵: 오른쪽 칸 남는 자리 (3:2 + 제목 · 틀). 최소 폭보다 좁으면 숨긴다
   const mm = P.minimap;
@@ -724,8 +744,7 @@ function planCss(
       : null;
   return {
     timer: timerBox,
-    gaugeA: ga,
-    gaugeB: gb,
+    gauges,
     cards,
     minimap,
     inset: minimap ? null : insetCss(map, r, a),
@@ -801,12 +820,11 @@ function overlapsCss(a: Box, b: Box, eps = 0.01): boolean {
   return a.x < b.x + b.w - eps && b.x < a.x + a.w - eps && a.y < b.y + b.h - eps && b.y < a.y + a.h - eps;
 }
 
-/** 늘 떠 있는 부품 사각형 (CSS px, 좌우 반전 전): 타이머 · 게이지 둘 · 팀 카드 셋 · 옆 칸 미니맵 틀 */
+/** 늘 떠 있는 부품 사각형 (CSS px, 좌우 반전 전): 타이머 · 게이지 줄(거점마다) · 팀 카드 셋 · 옆 칸 미니맵 틀 */
 function planBoxes(p: ReturnType<typeof planCss>, a: number): { id: string; box: Box }[] {
   const out: { id: string; box: Box }[] = [
     { id: 'timer', box: p.timer },
-    { id: 'gaugeA', box: p.gaugeA },
-    { id: 'gaugeB', box: p.gaugeB },
+    ...p.gauges.map((box, i) => ({ id: `gauge${GAUGE_IDS[i] ?? i}`, box })),
   ];
   const c = p.cards;
   for (let i = 0; i < 3; i += 1)
@@ -890,9 +908,10 @@ function touchHudFits(l: LayoutInfo): boolean {
 /**
  * 터치 HUD 배치 (순수). 화면(CSS) 기준으로 정하고 논리 px로 돌려준다. 늘 떠 있는 부품은 맵 사각형 · 엄지 영역
  * (오른쪽 아래 버튼 무리 · 오른쪽 위 시스템 버튼 · 이동 스틱 그림)과 겹치지 않는다(tests/unit/touch-hud.test.ts).
- * 좌우 반전(tuning.mirror)이면 다 정한 뒤 좌우로 뒤집는다 (게이지는 A가 왼쪽 그대로 — 둘의 자리를 맞바꾼다)
+ * 좌우 반전(tuning.mirror)이면 다 정한 뒤 좌우로 뒤집는다 (거점 줄 게이지는 A가 늘 윗줄이라 줄 순서는 그대로)
+ * gaugeRows = 거점 줄 게이지 줄 수 (기본 = 거점 수)
  */
-export function touchHudPlan(l: LayoutInfo): TouchHud | null {
+export function touchHudPlan(l: LayoutInfo, gaugeRows: number = GAUGE_IDS.length): TouchHud | null {
   if (l.kind === 'pc') return null;
   const U = TOUCH_UI;
   const { T, a, L, W, H, band, mapLeft, mapCss, mode } = touchGeom(l);
@@ -901,16 +920,15 @@ export function touchHudPlan(l: LayoutInfo): TouchHud | null {
   // 좌우 반전: CSS 사각형을 화면 가운데 기준으로 뒤집는다
   const flip = (b: Box): Box => (T.mirror ? { ...b, x: W - b.x - b.w } : b);
   const plan = (monster: boolean): TouchHudPlan => {
-    const p = planCss(W, H, mode, band, mapLeft, monster, mapCss, T);
-    const ga = flip(T.mirror ? p.gaugeB : p.gaugeA);
-    const gb = flip(T.mirror ? p.gaugeA : p.gaugeB);
+    const p = planCss(W, H, mode, band, mapLeft, monster, mapCss, T, gaugeRows);
+    const gauges = p.gauges.map(flip);
     const c = p.cards;
     const gridW = c.cols * c.cw + (c.cols - 1) * U.gap;
     const cards = { ...c, x: flip({ x: c.x, y: c.y, w: gridW, h: c.h }).x };
     const timer = { ...flip(p.timer), label: p.timer.label };
     const minimap = p.minimap ? flip(p.minimap) : null;
     const inset = p.inset ? flip(p.inset) : null;
-    const rects = planBoxes({ ...p, timer, gaugeA: ga, gaugeB: gb, cards, minimap }, a).map((b) => ({
+    const rects = planBoxes({ ...p, timer, gauges, cards, minimap }, a).map((b) => ({
       id: b.id,
       rect: toL(b.box),
     }));
@@ -921,8 +939,7 @@ export function touchHudPlan(l: LayoutInfo): TouchHud | null {
         y: (timer.y + timer.h / 2) * L,
         label: timer.label,
       },
-      gaugeA: { x: (ga.x + ga.w / 2) * L, y: (ga.y + ga.h / 2) * L },
-      gaugeB: { x: (gb.x + gb.w / 2) * L, y: (gb.y + gb.h / 2) * L },
+      gauges: gauges.map(toL),
       cards: {
         x: cards.x * L,
         y: cards.y * L,
@@ -1027,8 +1044,11 @@ function hudFonts(l: LayoutInfo) {
  * 터치 배치(touchWide · touchNarrow)는 touch(touchHudPlan)에 부품 자리를 두고, 아틀라스로 굽는 크기(gauge · timer.h ·
  * hint.h · banner)는 그림 단위(× s = 논리 px)다. PC는 s = 1이라 두 단위가 같다
  */
-const GAUGE = { dia: 38, chip: 24, barW: 212, barH: 22, gap: 6 } as const;
-const GAUGE_W = GAUGE.dia + GAUGE.gap + GAUGE.chip + 8 + GAUGE.barW;
+// 진행 숫자 칸(pctW, 플레이테스트 a-7)은 칩과 막대 사이: 막대를 212 → 160으로 줄여 전체 폭(288) · 배지 · 칩 자리는 그대로다
+const GAUGE = { dia: 38, chip: 24, pctW: 48, pctGap: 6, barW: 160, barH: 22, gap: 6 } as const;
+const GAUGE_W = GAUGE.dia + GAUGE.gap + GAUGE.chip + GAUGE.pctGap + GAUGE.pctW + GAUGE.pctGap + GAUGE.barW;
+/** 진행 숫자 글자 크기 (그림 단위): PC 17 논리 px, 터치 보조 글자(CSS 12px — UI 크기를 키우면 같이 커진다) */
+const PCT_FONT = { pc: 17, touch: TOUCH_UI.font.small / TOUCH_UI.art } as const;
 const TIMER_W = 156;
 
 function hudFor(l: LayoutInfo) {
@@ -1049,8 +1069,19 @@ function hudFor(l: LayoutInfo) {
     timer: touch
       ? { x: touch.survivor.timer.x, y: touch.survivor.timer.y, w: touch.survivor.timer.w, h: P.timer.h }
       : { x: l.viewW / 2, y: band / 2, w: TIMER_W, h: 44 },
-    /** 거점 게이지: 배지 ◇ · 상태 칩 · 막대. A는 타이머 왼쪽, B는 오른쪽에 좌우 대칭(배지가 바깥). 터치는 링 게이지(배지 · 칩) */
-    gauge: touch ? { ...GAUGE, dia: 34, chip: 20, w: P.gauge } : { ...GAUGE, w: GAUGE_W },
+    /**
+     * 거점 게이지: 배지 ◇ · 상태 칩 · 진행 숫자 칸 · 막대. A는 타이머 왼쪽, B는 오른쪽에 좌우 대칭(배지가 바깥).
+     * 터치는 줄 게이지(TOUCH_PART.gaugeRow · GAUGE_ROW): w = 한 줄 폭, rowH = 줄 높이, letterFont = 거점 글자(주요 글자 CSS 14px)
+     */
+    gauge: touch
+      ? {
+          ...GAUGE,
+          w: P.gaugeRow.w,
+          rowH: P.gaugeRow.h,
+          pctFont: PCT_FONT.touch,
+          letterFont: TOUCH_UI.font.main / TOUCH_UI.art,
+        }
+      : { ...GAUGE, w: GAUGE_W, rowH: 0, pctFont: PCT_FONT.pc, letterFont: 0 },
     /** 배지 쪽 바깥 끝 x (A = 왼쪽 끝, B = 오른쪽 끝) */
     gaugeA: { x: l.viewW / 2 - TIMER_W / 2 - 14 - GAUGE_W, y: band / 2 },
     gaugeB: { x: l.viewW / 2 + TIMER_W / 2 + 14 + GAUGE_W, y: band / 2 },
