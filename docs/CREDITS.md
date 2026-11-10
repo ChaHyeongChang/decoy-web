@@ -21,6 +21,7 @@ DECOY의 그래픽은 **코드로 그린다**. 저장소에 들어 있는 이미
 | `docs/images/concept_04_decoy_play.png` | 컨셉 이미지: 플레이 장면 | 위와 같음 | 문서 참고용. 게임 · 스토어에 쓰지 않음 | 아니오 |
 | `docs/images/concept_05_shared_vision.png` | 컨셉 이미지: 공유 시야 | 위와 같음 | 문서 참고용. 게임 · 스토어에 쓰지 않음 | 아니오 |
 | `docs/images/concept_06_hud_sheet.png` | 컨셉 이미지: HUD 시트 | 위와 같음 | 문서 참고용. 게임 · 스토어에 쓰지 않음 | 아니오 |
+| `docs/images/capture_c_candidates.svg` | 거점 C 후보 세 곳을 표시한 맵 그림 (`docs/PLAYTEST_PLAN.md` b절) | 이 프로젝트에서 `shared/src/map.ts` 타일로 스크립트가 그림 (플레이테스트 반영) | 프로젝트 소유 | 아니오 (문서 그림) |
 
 컨셉 이미지는 분위기 참고만 한다. 거점별 색 · 부채꼴 3단계 · 괴물 여러 마리 · 아이템 상자는 v1 초기 안이라 따르지 않는다(`docs/VISUAL_SPEC.md` 11장).
 
