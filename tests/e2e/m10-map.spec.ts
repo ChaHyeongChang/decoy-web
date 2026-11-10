@@ -4,7 +4,7 @@
 //  - 배지는 캐릭터 아래: 실제 배지 자리(거점 A 글자 · 마름모 · 상태 칩 · 감옥 자물쇠)에 선 몸 원판(0.9r)이 배지 없는 바닥에
 //    선 같은 몸과 같다 (평균 ΔE ≤ 2)
 //  - 거점 정지: 정보 레이어 'blocked' + 주황, 상태 칩에 주황 일시정지 아이콘 픽셀
-//  - 멈춘 시계에서 열린 탈출구는 다 열린 그림 (R6)
+//  - 멈춘 시계에서 열린 탈출구는 다 열린 그림 (R6), 그 문 왼쪽 자물쇠 판(a-9)의 열린 숫자가 그려지고 바뀔 때만 굽는다
 //  - 맵 쪽 레이어 · 배지에 프레임마다 다시 그리는 Graphics 없음
 //  - 굽는 시간 · 텍스처 바이트 기록(낮음 예산 8MiB), 콘솔 에러 · 경고 0
 import { readFileSync } from 'node:fs';
@@ -16,6 +16,7 @@ import {
   blockedPoint,
   darkAndLit,
   exitOpensWhileFrozen,
+  expectKeypadDrawn,
   expectBodiesOverBadges,
   expectDarkAndLit,
   expectNoMapGraphics,
@@ -83,6 +84,8 @@ test('배지는 캐릭터를 덮지 않고, 거점 정지는 주황 + 일시정�
   // 열린 틈(어두운 초록 + 초록 빛)이 문짝(청회색)을 덮었다: 초록 채널이 닫힌 문보다 1.5배 · 10 이상 밝다
   expect(door.after[1]).toBeGreaterThanOrEqual(door.before[1] + 10);
   expect(door.after[1]).toBeGreaterThanOrEqual(door.before[1] * 1.5);
+  // 같은 장면의 문 왼쪽 자물쇠 판 (플레이테스트 a-9): 열린 판 숫자가 실제로 그려졌고, 바뀔 때만 굽는다
+  expectKeypadDrawn(door.keypad);
   expect(s.problems).toEqual([]);
   await s.context.close();
 });

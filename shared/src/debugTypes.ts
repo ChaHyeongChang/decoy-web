@@ -46,8 +46,9 @@ export interface InfoItem {
    * badge = 거점 · 탈출구 · 감옥 배지, progress = 진행 게이지(거점 점령 · 탈출구 개방 · 구조),
    * cone = 괴물 부채꼴, range = 범위 표시(공격 준비 · 밀치기 · 포효 · 캠핑 · 근접 원), marker = 안개 위 마커(탐지 · 포효),
    * reveal = 괴물 화면 능력 노출(역할색 테두리 + 문양)
+   * keypad = 탈출구 자물쇠 판(플레이테스트 a-9): value '모드:네 칸'(예 'typing:07__' — 숫자 · '•' 모름 · '_' 빈칸), 괴물 화면은 숫자 없음
    */
-  kind: 'badge' | 'progress' | 'cone' | 'range' | 'marker' | 'reveal';
+  kind: 'badge' | 'progress' | 'cone' | 'range' | 'marker' | 'reveal' | 'keypad';
   /** 세부 이름 (예: 'point-A', 'exit-N', 'prison', 'attack', 'shove', 'roar', 'camp', 'near', 'track', 'roarSelf', 'roarPing', 'rescue', 'runner') */
   tag: string;
   x: number;

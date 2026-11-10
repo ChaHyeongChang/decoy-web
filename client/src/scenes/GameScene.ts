@@ -25,6 +25,7 @@ import {
 } from '@decoy/shared';
 import type { App } from '../app';
 import { LinearRamp, isWalking, selfPieces, type SelfStep, type TravelPiece } from '../art/anim';
+import { takeCode, type KeypadCodes } from '../art/keypad';
 import { sfx } from '../audio';
 import { HELP_TEXT, STORY_TEXT, UI_TEXT, formatText } from '../data/storyText';
 import { device } from '../device';
@@ -338,6 +339,8 @@ export class GameScene extends Phaser.Scene {
   };
   /** 이번 프레임 포효 핑 펄스 고리 값 (그릇 — 프레임마다 다시 쓴다): 창 밖 화살표 · 작은 지도 · 크게 본 지도가 같은 값을 그린다 */
   private readonly pingPulseNow: PingPulse = { t: 0, alpha: 0 };
+  /** 받은 비밀번호 조각 (탈출구 자물쇠 판, 메모 이벤트 id로 자리). 괴물은 메모를 받지 않아 늘 [null, null] */
+  private keypadCodes: KeypadCodes = [null, null];
   /** 마지막으로 그린 내 위치 (예측) */
   localPos = { x: 0, y: 0, face: 0 };
   /** 피격 플래시 · 수감 페이드 · 기절 채도 감소 */
@@ -656,6 +659,7 @@ export class GameScene extends Phaser.Scene {
     this.setupMatchPrefs();
     this.roarPings = [];
     this.drawnSurvivors = null;
+    this.keypadCodes = [null, null];
     // 'match' 뒤 이 장면이 생기기 전(판 시작 대기 · 세로 안내 · 다시 들어온 판의 장면 재시작)에 온 거점 메모를 다시 보인다.
     // 장면이 생긴 뒤의 메모는 아래 구독이 받는다 (M12 검토: 재접속 때 서버가 남겨 보낸 메모가 터치에서 사라지던 것)
     for (const ev of app.matchNotes) this.onEvent(ev);
@@ -1266,6 +1270,7 @@ export class GameScene extends Phaser.Scene {
         if (ev.you) this.screenFx.imprison(now);
         return;
       case 'text': {
+        takeCode(this.keypadCodes, ev);
         if (ev.id === 'ALERT_CAPTURE_START') sfx.play('captureStart');
         else if (ev.id === 'ALERT_CAPTURE_DONE') sfx.play('captureDone');
         else if (ev.id === 'ALERT_EXIT_OPEN') sfx.play('doorOpen');
@@ -1821,6 +1826,7 @@ export class GameScene extends Phaser.Scene {
         localDashAt: this.localDashAt,
         motion: this.motion,
         view,
+        keypadCodes: this.keypadCodes,
       },
       delta,
     );
