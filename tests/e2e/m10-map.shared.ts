@@ -10,7 +10,9 @@ import {
   type TestCommand,
   type Vec2,
 } from '@decoy/shared';
-import { BADGE, PRISON_LOCK } from '../../client/src/art/mapArtBadges';
+import { KEYPAD, digitAt, keypadAt } from '../../client/src/art/keypad';
+import { BADGE, PRISON_LOCK, dimmed } from '../../client/src/art/mapArtBadges';
+import { OBJ_COLOR } from '../../client/src/art/mapArtGeom';
 import { watchConsole } from './helpers';
 
 export type Rgb = [number, number, number];
@@ -470,13 +472,56 @@ export function expectBodiesOverBadges(r: Record<string, BodyOverBadge>): void {
   }
 }
 
+/** 북쪽 탈출구 자물쇠 판 (플레이테스트 a-9, render/keypad.ts) — exitOpensWhileFrozen이 함께 잰다 */
+export interface DoorKeypad {
+  /** 정보 레이어 'keypad-N' 값 (예 'open:0740') */
+  value: string | null;
+  /** 숫자 칸 네 개 안에서 켜진 획 색(열림 = 탈출구 초록, 보이는 곳 1 · 안 보이는 곳 0.45 알파로 미리 섞은 색)에 가까운 픽셀 수 */
+  lit: number[];
+  /** 판 굽기 누계(gfx.features.keypadBakes) 증가: 두 사람이 서서 열릴 때까지 · 그 사이 그린 프레임 · 열린 뒤 멈춘 장면 */
+  bakesOpening: number;
+  framesOpening: number;
+  bakesSteady: number;
+  framesSteady: number;
+}
+
+/** 판 굽기 누계 · 그린 프레임 수 */
+async function keypadCounters(page: Page): Promise<{ bakes: number; frames: number }> {
+  return page.evaluate(() => ({
+    bakes: Number(window.__DECOY__?.gfx.features.keypadBakes ?? 0),
+    frames: window.__DECOY__?.getAnimState()?.frames ?? 0,
+  }));
+}
+
+/** 북쪽 자물쇠 판 숫자 칸마다 켜진 획 픽셀 수 (스크린샷 한 장) */
+async function keypadLit(page: Page): Promise<number[]> {
+  const r = keypadAt('N');
+  const rects: Record<string, Rect> = {};
+  for (let i = 0; i < KEYPAD.digits; i += 1) {
+    const p = digitAt(i);
+    const x = r.x0 + p.x;
+    const y = r.y0 + p.y;
+    rects[`d${i}`] = await tileRect(page, x, y, x + KEYPAD.glyphW, y + KEYPAD.glyphH);
+  }
+  const lit = [dimmed(OBJ_COLOR.go, 1), dimmed(OBJ_COLOR.go, 0.45)].map(hexRgb);
+  const px = await grab(page, rects);
+  return Object.keys(rects).map(
+    (k) =>
+      (px[k] ?? []).filter(([pr, pg, pb]) =>
+        lit.some(([lr, lg, lb]) => Math.hypot(pr - lr, pg - lg, pb - lb) < 24),
+      ).length,
+  );
+}
+
 /**
  * R6: 장식 시계가 멈춘 채(freezeClock) 탈출구가 열려도 미닫이가 다 열린 그림이 된다 (닫힌 = 활성처럼 남지 않음).
- * 두 거점 완료 → 탈출구 활성 → 가드(봇)가 북문 판정 원 안에서 개방 → 열림. 문 칸 가운데 픽셀이 열린 틈(초록) 색인지 본다
+ * 두 거점 완료 → 탈출구 활성 → 가드(봇)가 북문 판정 원 안에서 개방 → 열림. 문 칸 가운데 픽셀이 열린 틈(초록) 색인지 본다.
+ * 같은 장면에서 문 왼쪽 자물쇠 판(a-9)이 실제 렌더러로 그려졌는지(정보 값 · 숫자 칸 픽셀)와 바뀔 때만 굽는지(굽기 누계)도 잰다:
+ * WebGL에서는 캔버스 텍스처 올리기 · 칸 나누기 경로를 거친다(Canvas 렌더러는 캔버스를 바로 그린다)
  */
 export async function exitOpensWhileFrozen(
   s: Session,
-): Promise<{ before: Rgb; after: Rgb; state: string | number | null }> {
+): Promise<{ before: Rgb; after: Rgb; state: string | number | null; keypad: DoorKeypad }> {
   const { page, send, id } = s;
   await page.evaluate(() => window.__DECOY__?.freezeClock(4321));
   await send({ kind: 'teleport', target: id('monster'), x: 44.5, y: 12.5, face: 0 });
@@ -505,6 +550,7 @@ export async function exitOpensWhileFrozen(
   const noBanner = (): Promise<number> => page.evaluate(() => window.__DECOY__?.getBanners().length ?? 0);
   await expect.poll(noBanner, { timeout: 15_000 }).toBe(0);
   const before = await mean();
+  const c0 = await keypadCounters(page);
   // 개방은 두 사람이 판정 원 안에 있을 때 (가드 · 스카우트 봇)
   await send({ kind: 'teleport', target: id('guard'), x: 23.5, y: 1.7, face: 0 });
   await send({ kind: 'teleport', target: id('scout'), x: 24.5, y: 1.7, face: 0 });
@@ -513,7 +559,41 @@ export async function exitOpensWhileFrozen(
   await page.waitForTimeout(1200);
   await expect.poll(noBanner, { timeout: 15_000 }).toBe(0);
   const after = await mean();
-  return { before, after, state: await badge('exit-N') };
+  // 자물쇠 판: 열린 뒤 멈춘 장면에서 30프레임 넘게 그리는 동안 굽기 누계가 그대로인지
+  const c1 = await keypadCounters(page);
+  await page.waitForFunction((f) => (window.__DECOY__?.getAnimState()?.frames ?? 0) >= f + 30, c1.frames, {
+    timeout: 30_000,
+  });
+  const c2 = await keypadCounters(page);
+  const keypad: DoorKeypad = {
+    value: await page.evaluate(() => {
+      const v = window.__DECOY__
+        ?.getInfoLayer()
+        .find((i) => i.kind === 'keypad' && i.tag === 'keypad-N')?.value;
+      return v === undefined || v === null ? null : String(v);
+    }),
+    lit: await keypadLit(page),
+    bakesOpening: c1.bakes - c0.bakes,
+    framesOpening: c1.frames - c0.frames,
+    bakesSteady: c2.bakes - c1.bakes,
+    framesSteady: c2.frames - c1.frames,
+  };
+  return { before, after, state: await badge('exit-N'), keypad };
+}
+
+/**
+ * exitOpensWhileFrozen의 자물쇠 판 판정: 열린 판(정보 값 'open:' + 숫자 네 자리)이 화면에 실제로 그려졌고(숫자 칸 네 개 모두
+ * 켜진 획 픽셀), 판이 바뀔 때만 굽는다 — 여는 동안 굽기는 입력 넷 + 열림 하나에 가드 · 스카우트 순간이동으로 북 · 남 판 알파가
+ * 바뀐 몫(판마다 한 번)까지(프레임마다 굽는다면 그린 프레임 수만큼 는다), 열린 뒤 멈춘 장면에서는 0
+ */
+export function expectKeypadDrawn(k: DoorKeypad): void {
+  expect(k.value).toMatch(/^open:\d{4}$/);
+  for (const v of k.lit) expect(v, `숫자 칸 켜진 획 픽셀 ${k.lit}`).toBeGreaterThan(4);
+  expect(k.bakesOpening).toBeGreaterThanOrEqual(1);
+  expect(k.bakesOpening).toBeLessThanOrEqual(5 + 2);
+  expect(k.framesOpening).toBeGreaterThan(k.bakesOpening);
+  expect(k.framesSteady).toBeGreaterThanOrEqual(30);
+  expect(k.bakesSteady).toBe(0);
 }
 
 export interface MapScene {

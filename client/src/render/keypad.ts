@@ -1,7 +1,8 @@
 // 탈출구 자물쇠 판 그리기 (플레이테스트 a-9): 문 왼쪽 벽 칸에 자물쇠 + 7세그먼트 네 칸. 무엇을 그릴지 · 자리는 art/keypad.ts.
 // 배지(objects.ts)와 같은 층(맵 컨테이너, 캐릭터 아래 — R15) · 같은 알파(안 보이는 곳 0.45, 어두운 바닥에 미리 섞은 불투명 색) ·
-// 같은 굽기(기기 픽셀 1:1 캔버스, 판 서명 · 알파 · 배율이 바뀔 때만 — 한 번 여는 동안 6번). 판 둘(북 · 남)은 캔버스 텍스처
-// 하나의 두 칸이다(휴대폰 MobilePipeline에서도 그리기 한 번). 텍스처 · 이미지는 탈출구가 처음 켜질 때 만든다(판 시작에는 아무것도
+// 같은 굽기(기기 픽셀 1:1 캔버스, 판 서명 · 알파 · 배율이 바뀔 때만 — 한 번 여는 동안 6번, 누계 gfx.features.keypadBakes).
+// 판 둘(북 · 남)은 캔버스 텍스처 하나의 두 칸이다(휴대폰 MobilePipeline에서도 그리기 한 번. 구운 draw마다 텍스처를 통째로 한 번
+// 올린다 — 칸이 둘뿐이라 바뀐 칸만 올려도 절반). 텍스처 · 이미지는 탈출구가 처음 켜질 때 만든다(판 시작에는 아무것도
 // 그리지 않는다 — 일의 양 예산 그대로). 글자(글꼴)를 쓰지 않고 사각형 · 선만으로 그린다. 색은 표지판과 같은 판 색 · OBJ_COLOR뿐이다.
 // 맵 원점 · 월드 배율(MAP_X · WORLD_SCALE)은 판 장면을 만들기 전에 정해지고 판 중에 바뀌지 않는다(layout.configureLayout).
 import type Phaser from 'phaser';
@@ -217,6 +218,7 @@ export class ExitKeypads {
     s.baked = s.code;
     s.alpha = a;
     s.zoom = zoom;
+    gfxState.features.keypadBakes = Number(gfxState.features.keypadBakes ?? 0) + 1;
     const { ctx: c, tex } = this.atlas;
     const sx = id === 'N' ? GAP : GAP * 2 + this.slotW;
     const r = keypadRect(id, zoom);

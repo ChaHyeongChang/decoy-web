@@ -523,6 +523,9 @@ describe('굽기 (render/keypad.ts ExitKeypads)', () => {
     const kp = new ExitKeypads(f.scene as never, { add: vi.fn() } as never);
     const codes: KeypadCodes = ['07', '40'];
     const bakesOf = (id: string): number => f.frameSets.filter((n) => n === id).length;
+    /** 실제 앱에서 E2E · 성능 기록이 읽는 굽기 누계 (gfx.features.keypadBakes) */
+    const counter = (): number => Number(gfxState.features.keypadBakes ?? 0);
+    const counter0 = counter();
     const values: string[] = [];
     /** 그리고 정보 값을 모은다. 구운 draw는 텍스처를 한 번 올리고, 굽지 않은 draw는 올리지 않는다 */
     const draw = (list: ExitView[]): void => {
@@ -567,6 +570,9 @@ describe('굽기 (render/keypad.ts ExitKeypads)', () => {
     for (let t = 1; t < openTicks; t += 1) draw(exits('open', 1, 'active', serverProgress(t)));
     for (let k = 0; k < 5; k += 1) draw(exits('open', 1, 'open', 1));
     expect(bakesOf('S')).toBe(6);
+    // 굽기 누계(gfx.features.keypadBakes)가 실제 굽기 수와 같다 (북 9 + 남 6)
+    expect(counter() - counter0).toBe(f.frameSets.length);
+    expect(counter() - counter0).toBe(15);
   });
 
   it('괴물 화면(진행 null): 문이 열리는 동안 판은 빈 판 그대로라 굽기는 켜짐 · 열림 두 번뿐이고 정보 값에 숫자가 없다', async () => {
