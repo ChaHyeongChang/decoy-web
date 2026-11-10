@@ -497,6 +497,7 @@ export class GameScene extends Phaser.Scene {
       scoreboard: this.scoreboard.visible,
       scoreText: this.scoreboard.text,
       help: this.tutorial?.visible ?? false,
+      helpClose: this.tutorial?.closeHintShown ?? false,
       countdown: this.banners.countdownText,
       spotted: this.spottedEdge.shown,
       hudGraphics,
@@ -1913,7 +1914,7 @@ export class GameScene extends Phaser.Scene {
     // Tab 점수판(터치: 점수판 버튼)이 열리면 조작 안내를 닫는다 (두 패널이 겹치지 않게)
     const tab = this.sampler.tabHeld || (this.touchControls?.scoreboard ?? false);
     // 판 시작 카운트다운 동안에는 조작 안내를 키로 닫지 않고 표시 시간도 세지 않는다 (읽을 틈 — "시작!"부터 다시 센다)
-    if (counting) this.tutorial?.update(0, tab);
+    if (counting) this.tutorial?.update(0, tab, true);
     else this.tutorial?.update(now, anyKey || tab);
     this.scoreboard.update(tab, snap);
     // 이번 프레임 월드 그림이 다 놓인 뒤: 창 밖 그림은 그리지 않는다

@@ -68,6 +68,8 @@ interface CountSample {
   banners: string[];
   /** PC 첫 판 조작 안내가 떠 있다 */
   help: boolean;
+  /** 조작 안내의 닫기 안내 줄('아무 키나 누르면 닫힘')이 보인다 */
+  helpClose: boolean;
   /** 기기 안 연습: 모든 자리의 정답 위치 */
   truth: string;
 }
@@ -98,6 +100,7 @@ function countRecorder(): void {
       inputs: d.getInputLog().length,
       banners: d.getBanners(),
       help: hud.help === true,
+      helpClose: hud.helpClose === true,
       truth: truth ? truth.players.map((p) => `${p.id}:${p.x.toFixed(3)},${p.y.toFixed(3)}`).join(' ') : '',
     });
   }, 25);
@@ -342,6 +345,15 @@ test('서버 방 4명: 숫자 → 시작! 동안 키를 눌러도 모두 정지 
     expect(
       digitSamples.filter((s) => !s.help).length,
       `${label}: 카운트다운 중 조작 안내가 닫힌 표본 (키를 누른 뒤)`,
+    ).toBe(0);
+    // 닫기 안내 줄('아무 키나 누르면 닫힘')은 키로 닫히지 않는 카운트다운 동안 숨고, "시작!"부터 안내가 닫힐 때까지 보인다
+    expect(
+      digitSamples.filter((s) => s.helpClose).length,
+      `${label}: 카운트다운 중 닫기 안내 줄이 보인 표본`,
+    ).toBe(0);
+    expect(
+      all.filter((s) => s.t >= firstGo && s.help && !s.helpClose).length,
+      `${label}: "시작!" 뒤 안내가 떠 있는데 닫기 줄이 숨은 표본`,
     ).toBe(0);
     const closedAt = all.find((s) => s.t > firstGo && !s.help)!.t;
     if (p === guard) {

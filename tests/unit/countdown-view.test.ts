@@ -318,6 +318,39 @@ describe('카운트다운 동안의 입력 (InputSampler.dropPressed)', () => {
     expect(r.sampler.sample(3, 0, { ...CAN, nowMs: 1200 }).pressed).toBe(BTN.ATTACK);
   });
 
+  // 플레이테스트 a-2와 함께 (통합 검토): '누르면 바로'(fire)와 탭 공격 조준 보정의 발사 대기도 카운트다운 동안 버린다
+  const ASSIST20: TouchFrameCtx = { ...CAN, assist: (b) => b + (20 * Math.PI) / 180 };
+
+  it('터치 괴물 · 누르면 바로: 카운트다운 중 누른 공격 버튼(fire)은 "시작!" 순간에도, 보정 발사 대기를 거쳐서도 나가지 않는다', () => {
+    const touch = new TouchInput();
+    const r = rig(touch, true);
+    touch.fire(BTN.ATTACK);
+    r.sampler.dropPressed();
+    const f1 = r.sampler.sample(1, 0, { ...ASSIST20, nowMs: 100 });
+    // 보정 각도에 face가 와 있어도 (발사 대기가 남아 있었다면 여기서 나간다)
+    const f2 = r.sampler.sample(2, 0, { ...ASSIST20, face: (20 * Math.PI) / 180, nowMs: 133 });
+    expect([f1.pressed, f2.pressed]).toEqual([0, 0]);
+  });
+
+  it('터치 괴물 · 누르면 바로 대조: 버리지 않으면 fire는 보정 발사 대기를 거쳐 다음 프레임에 나간다 (위 시험이 빈 통과가 아님)', () => {
+    const touch = new TouchInput();
+    const r = rig(touch, true);
+    touch.fire(BTN.ATTACK);
+    const f1 = r.sampler.sample(1, 0, { ...ASSIST20, nowMs: 100 });
+    const f2 = r.sampler.sample(2, 0, { ...ASSIST20, face: (20 * Math.PI) / 180, nowMs: 133 });
+    expect([f1.pressed, f2.pressed]).toEqual([0, BTN.ATTACK]);
+  });
+
+  it('터치 괴물 · 끌어서 조준: 카운트다운 동안 문턱 밖으로 끈 채 누르고 있다가 시작 뒤에 떼면 그 방향으로 나간다 (누르고 있던 입력은 이어받는다)', () => {
+    const touch = new TouchInput();
+    const r = rig(touch, true);
+    touch.stickStart(1, 'aim', 0);
+    touch.stickMove(1, 0, 1);
+    for (let i = 0; i < 10; i += 1) r.sampler.dropPressed();
+    touch.stickEnd(1, 3000);
+    expect(r.sampler.sample(1, 0, { ...CAN, face: Math.PI / 2, nowMs: 3010 }).pressed).toBe(BTN.ATTACK);
+  });
+
   it('터치: 누르고 있는 구조 버튼은 held로 남되 누른 신호(pressed)는 나가지 않는다 (키를 누르고 있는 것과 같다)', () => {
     const touch = new TouchInput();
     const r = rig(touch, false);
