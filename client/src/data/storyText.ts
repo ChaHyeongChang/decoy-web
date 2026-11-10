@@ -1,6 +1,7 @@
 // 게임 내 문구는 이 파일 한 곳에 모은다 (docs/STORY_TEXT.md). 계정 문구(ACCOUNT_TEXT)만 나눠 받는 조각에서 쓰므로 accountText.ts에 따로
 // 둔다(첫 묶음을 작게 — DECISIONS 15절).
 import type { Role, TextId } from '@decoy/shared';
+import type { AttackButton } from '../prefs';
 
 export interface TextEntry {
   text: string;
@@ -223,21 +224,37 @@ export const CONTROLS_TOUCH: Record<'monster' | 'survivor', string[]> = {
   ],
   monster: [
     '왼쪽 스틱  이동 · 오른쪽 스틱  조준',
-    '오른쪽 스틱을 놓으면  공격 (가운데로 되돌리면 취소)',
+    '오른쪽 스틱을 놓으면  공격 (짧게 누르면 보는 방향 · 되돌리면 취소)',
     '돌진 버튼 (끌어서 방향)  돌진 · 포효 · 시야 버튼',
     '점수판 버튼  점수판 · 상태',
     '생존자를 두 번 때리면 감옥으로. 두 명을 죽이거나 셋 모두 가두면 승리',
   ],
 };
 
+/**
+ * 공격 버튼(터치 괴물, 설정 조작 탭 prefs.AttackButton)이 '누르면 바로'일 때 조작 안내의 첫 두 줄 — CONTROLS_TOUCH.monster의
+ * 조준 · 공격 줄 대신. 조준 스틱이 없다(닿는 순간 보는 방향으로 공격)
+ */
+export const CONTROLS_TOUCH_INSTANT: readonly string[] = [
+  '왼쪽 스틱  이동 (바라보는 방향 = 이동 방향)',
+  '공격 버튼  누르면 바로 보는 방향으로 공격',
+];
+
 /** 입력 방식에 맞는 역할 능력 줄 (로비 역할 카드) */
 export function roleAbility(role: Role, mode: InputMode): string {
   return mode === 'touch' ? ROLE_CARDS[role].abilityTouch : ROLE_CARDS[role].ability;
 }
 
-/** 입력 방식에 맞는 조작 안내 */
-export function controlsText(team: 'monster' | 'survivor', mode: InputMode): string[] {
-  return mode === 'touch' ? CONTROLS_TOUCH[team] : CONTROLS[team];
+/** 입력 방식(과 터치 괴물의 공격 버튼 방식)에 맞는 조작 안내 */
+export function controlsText(
+  team: 'monster' | 'survivor',
+  mode: InputMode,
+  attack: AttackButton = 'drag',
+): string[] {
+  if (mode !== 'touch') return CONTROLS[team];
+  const lines = CONTROLS_TOUCH[team];
+  if (team !== 'monster' || attack !== 'instant') return lines;
+  return [...CONTROLS_TOUCH_INSTANT, ...lines.slice(CONTROLS_TOUCH_INSTANT.length)];
 }
 
 export const HUD_TEXT = {
@@ -297,7 +314,7 @@ export const TOUCH_TEXT = {
   ],
   tutorialMonster: [
     '왼쪽 아래를 누르고 끌면 이동 — 누른 자리가 스틱 가운데',
-    '오른쪽 조준 스틱을 끌어 조준하고, 놓으면 공격 · 가운데로 되돌리면 취소',
+    '오른쪽 조준 스틱은 짧게 누르면 보는 방향으로 공격, 끌어 놓으면 그쪽으로 · 되돌리면 취소',
     '돌진 버튼은 끌어서 방향을 정하고, 짧게 탭하면 지금 방향으로',
     '포효 · 시야 버튼은 탭 · 오른쪽 위 점수판 버튼',
   ],
@@ -309,16 +326,36 @@ export const TOUCH_TEXT = {
   ],
   tutorialMonsterCustom: [
     '이동 영역을 누르고 끌면 이동 — 누른 자리가 스틱 가운데',
-    '조준 스틱을 끌어 조준하고, 놓으면 공격 · 가운데로 되돌리면 취소',
+    '조준 스틱은 짧게 누르면 보는 방향으로 공격, 끌어 놓으면 그쪽으로 · 되돌리면 취소',
     '돌진 버튼은 끌어서 방향을 정하고, 짧게 탭하면 지금 방향으로',
     '포효 · 시야 버튼은 탭 · 점수판 버튼',
   ],
+  /** 공격 버튼이 '누르면 바로'일 때 괴물 본문의 둘째 줄 (조준 스틱 줄 대신 — 기본 배치 / 조작 배치를 바꿨을 때) */
+  tutorialAttackInstant: '오른쪽 공격 버튼을 누르면 바로 보는 방향으로 공격',
+  tutorialAttackInstantCustom: '공격 버튼을 누르면 바로 보는 방향으로 공격',
   /** 조작 배치를 바꿨을 때 그림 밑 한 줄 */
   tutorialCustomNote: '그림은 내가 바꾼 조작 배치예요',
   tutorialOk: '알겠어요',
   /** 판 중 위치 표시의 이동 영역 이름 */
   hintMove: '여기를 누르고 끌어 이동',
 } as const;
+
+/**
+ * 판 직전 터치 안내 본문 (번호 = 그림의 번호). custom = 조작 배치를 바꿨다(자리 말이 없는 쪽), attack = 괴물 공격 버튼 방식
+ * ('누르면 바로'면 둘째 줄이 조준 스틱 대신 공격 버튼 줄)
+ */
+export function tutorialLines(
+  team: 'monster' | 'survivor',
+  custom: boolean,
+  attack: AttackButton = 'drag',
+): readonly string[] {
+  if (team === 'survivor') return custom ? TOUCH_TEXT.tutorialSurvivorCustom : TOUCH_TEXT.tutorialSurvivor;
+  const lines = custom ? TOUCH_TEXT.tutorialMonsterCustom : TOUCH_TEXT.tutorialMonster;
+  if (attack !== 'instant') return lines;
+  const out: string[] = [...lines];
+  out[1] = custom ? TOUCH_TEXT.tutorialAttackInstantCustom : TOUCH_TEXT.tutorialAttackInstant;
+  return out;
+}
 
 /** 앱 생명주기 · 설정 문구 (M12): 로비 설정 · 다른 탭 안내 · 뒤로 가기 확인 */
 export const APP_TEXT = {
@@ -393,6 +430,12 @@ export const SETTINGS_TEXT = {
   stickSize: '조이스틱 크기',
   stickClear: '조이스틱 투명도',
   stickHint: '다음 판부터 적용돼요',
+  /** 괴물 공격 버튼 방식 (플레이테스트 반영 a-2) */
+  attackButton: '공격 버튼',
+  attackButtonDrag: '끌어서 조준',
+  attackButtonInstant: '누르면 바로',
+  attackButtonHint:
+    '괴물 공격 버튼 — 끌어서 조준은 짧게 누르면 보는 방향, 끌면 그쪽으로 공격해요. 누르면 바로는 닿자마자 공격해요. 다음 판부터 적용돼요',
   layoutEdit: '조작 배치 편집',
   layoutEditHint: '버튼 자리와 크기를 바꿔요 (생존자 · 괴물 따로, 로비에서만)',
   controlsPc: '키보드 · 마우스 조작',

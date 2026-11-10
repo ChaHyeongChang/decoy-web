@@ -19,6 +19,12 @@ export const STICK_SIZE = { min: 80, max: 130, step: 5, def: 100 } as const;
 export const STICK_CLEAR = { min: 0, max: 60, step: 10, def: 0 } as const;
 /** 음량 (%) */
 export const VOLUME = { min: 0, max: 100, step: 5 } as const;
+/**
+ * 공격 버튼 방식 (터치 괴물): 끌어서 조준(짧게 누르면 보는 방향, 끌면 그쪽) / 누르면 바로(닿는 순간 보는 방향으로, 끌기 없음).
+ * 터치 화면이 판 시작 때 읽는다 — 입력을 읽는 방식만 바꾸고 서버로 가는 형식 · 판정은 같다
+ */
+export type AttackButton = 'drag' | 'instant';
+export const ATTACK_BUTTONS: readonly AttackButton[] = ['drag', 'instant'];
 
 export interface Prefs {
   /** 화면: UI 크기 */
@@ -39,6 +45,8 @@ export interface Prefs {
   stickSize: number;
   /** 조작(터치): 조이스틱 투명도 (%) */
   stickClear: number;
+  /** 조작(터치): 공격 버튼 방식 */
+  attackButton: AttackButton;
 }
 
 export type PrefKey = keyof Prefs;
@@ -54,11 +62,15 @@ export const PREF_DEFAULTS: Readonly<Prefs> = Object.freeze({
   muted: false,
   stickSize: STICK_SIZE.def,
   stickClear: STICK_CLEAR.def,
+  attackButton: 'drag',
 });
 
 export const PREF_KEYS = Object.keys(PREF_DEFAULTS) as PrefKey[];
 
-/** 저장 형식 판 (모양이 바뀌면 올린다. 다른 판은 읽지 않는다 → 기본값) */
+/**
+ * 저장 형식 판 (모양이 바뀌면 올린다. 다른 판은 읽지 않는다 → 기본값). 칸을 더하는 것은 올리지 않는다 — 없는 칸은 기본값으로
+ * 읽고, 올리면 모두의 저장 설정이 지워진다
+ */
 export const PREFS_VERSION = 1;
 
 /** 범위 안 정수로 (step 칸에 맞춘다). 수가 아니면 null */
@@ -93,6 +105,8 @@ export function cleanPref<K extends PrefKey>(key: K, v: unknown): Prefs[K] | nul
       const n = stepped(v, STICK_CLEAR.min, STICK_CLEAR.max, STICK_CLEAR.step);
       return n === null ? null : out(n);
     }
+    case 'attackButton':
+      return typeof v === 'string' && (ATTACK_BUTTONS as readonly string[]).includes(v) ? out(v) : null;
     default:
       return null;
   }
@@ -237,6 +251,11 @@ export function stickScaleOf(p: Readonly<Prefs> = load()): number {
 /** 조이스틱 불투명도 배율 (1 = 지금 그대로) */
 export function stickAlphaOf(p: Readonly<Prefs> = load()): number {
   return 1 - p.stickClear / 100;
+}
+
+/** 공격 버튼 방식 (터치 화면 · 판 직전 안내가 읽는다) */
+export function attackButtonOf(p: Readonly<Prefs> = load()): AttackButton {
+  return p.attackButton;
 }
 
 // ───────────── 시험용 ─────────────

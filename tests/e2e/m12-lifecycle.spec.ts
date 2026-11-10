@@ -826,7 +826,7 @@ test('진동: 활성화 전 0번, 피격 1번 · 오래된 피격 0번, 발각 �
     h.hapticSpotted(true, 0);
   });
   expect((await vib()).map((v) => v.pattern)).toEqual([[70], [35, 80, 35]]);
-  // 설정에서 끄기 → 0번, 다시 켜기 → 울림 (설정 화면 조작 탭: 조이스틱 · 진동 · 배치 편집 · 안내 다시 보기 순서)
+  // 설정에서 끄기 → 0번, 다시 켜기 → 울림 (설정 화면 조작 탭: 조이스틱 · 공격 버튼 · 진동 · 배치 편집 · 안내 다시 보기 순서)
   await openSettings(page, 'controls');
   const controlsOrder = await page
     .getByTestId('settings-page-controls')
@@ -835,6 +835,7 @@ test('진동: 활성화 전 0번, 피격 1번 · 오래된 피격 0번, 발각 �
   expect(controlsOrder).toEqual([
     'row-stick-size',
     'row-stick-clear',
+    'row-attack-button',
     'row-haptics',
     'row-layout',
     'row-tutorial',

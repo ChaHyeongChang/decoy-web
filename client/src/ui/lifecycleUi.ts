@@ -4,11 +4,11 @@
 // (열고 닫을 때만 DOM을 바꾼다)
 import { teamOf, type Role, type Team } from '@decoy/shared';
 import { isDefaultLayout, loadControlLayout, matchTuning } from '../controlLayout';
-import { APP_TEXT, HELP_TEXT, TOUCH_TEXT } from '../data/storyText';
+import { APP_TEXT, HELP_TEXT, TOUCH_TEXT, tutorialLines } from '../data/storyText';
 import { canOfferFullscreen } from '../device';
 import { currentCharStyle, type CharStyle } from '../gfx/charStyle';
 import type { LeaveKind } from '../lifecycle';
-import { pref } from '../prefs';
+import { attackButtonOf, onPrefsChange, pref, type AttackButton } from '../prefs';
 import { effectiveTouchLayout, hudPreview } from './touchControls';
 import { frontFigureSvg, h, icon, roleVars, svgSpan } from './uiArt';
 import { wearingFor } from '../meta/wearing';
@@ -326,6 +326,8 @@ export class TouchTutorialCard {
   private style: CharStyle | null = null;
   /** 그린 조작 배치 (저장값 문자열, 바뀌면 다시 그린다) */
   private layoutKey = '';
+  /** 그린 본문의 공격 버튼 방식 (괴물 둘째 줄이 다르다 — 바뀌면 다시 그린다) */
+  private attack: AttackButton | null = null;
   /** 새 캐릭터 스타일의 내 역할 정면 그림 (기존 스타일이면 null) */
   private figure: HTMLSpanElement | null = null;
 
@@ -335,6 +337,10 @@ export class TouchTutorialCard {
   constructor(private readonly onOk: () => void) {
     this.el = h('section', { class: 'panel life-tutorial', 'data-testid': 'touch-tutorial' });
     this.el.addEventListener('animationend', () => this.el.classList.remove('life-enter'));
+    // 떠 있는 동안 설정에서 공격 버튼 방식을 바꾸면 괴물 본문 둘째 줄을 바로 맞춘다 (카드는 앱에 하나, 끝까지 산다)
+    onPrefsChange((key) => {
+      if (key === 'attackButton') this.refresh();
+    });
   }
 
   get visible(): boolean {
@@ -372,13 +378,17 @@ export class TouchTutorialCard {
     const layoutKey = isDefaultLayout(saved)
       ? ''
       : JSON.stringify([saved, pref('stickSize'), pref('uiSize'), window.innerWidth, window.innerHeight]);
-    if (this.role === role && this.style === style && this.layoutKey === layoutKey) return this.el;
+    const attack = attackButtonOf();
+    if (this.role === role && this.style === style && this.layoutKey === layoutKey && this.attack === attack)
+      return this.el;
     const sameBody =
       this.team === team &&
       this.style === style &&
       this.layoutKey === layoutKey &&
+      this.attack === attack &&
       this.el.firstChild !== null;
     this.layoutKey = layoutKey;
+    this.attack = attack;
     this.role = role;
     this.style = style;
     this.el.setAttribute('style', roleVars(role));
@@ -393,15 +403,9 @@ export class TouchTutorialCard {
     this.team = team;
     this.figure = style === 'new' ? ttFigure(role) : null;
     const title = nextId('tt-title');
-    // 조작 배치를 바꿨으면 그림은 바꾼 배치, 본문은 자리 말이 없는 쪽
+    // 조작 배치를 바꿨으면 그림은 바꾼 배치, 본문은 자리 말이 없는 쪽. 괴물 둘째 줄은 공격 버튼 방식을 따른다
     const custom = customDiagram(team);
-    const lines = custom
-      ? team === 'monster'
-        ? TOUCH_TEXT.tutorialMonsterCustom
-        : TOUCH_TEXT.tutorialSurvivorCustom
-      : team === 'monster'
-        ? TOUCH_TEXT.tutorialMonster
-        : TOUCH_TEXT.tutorialSurvivor;
+    const lines = tutorialLines(team, custom !== null, attack);
     const ok = h(
       'button',
       { class: 'btn btn-primary', type: 'button', 'data-testid': 'touch-tutorial-ok' },

@@ -27,6 +27,7 @@ import {
   pref,
   resetPref,
   setPref,
+  type AttackButton,
   type PrefKey,
   type UiSize,
 } from '../prefs';
@@ -566,6 +567,21 @@ export class SettingsPanel {
         },
         {
           ...this.prefSlider('stickClear', 'stick-clear', 'controls', T.stickClear, STICK_CLEAR, T.stickHint),
+          when: touchOnly,
+        },
+        // 공격 버튼 방식 (플레이테스트 반영 a-2): 터치 화면이 판 시작 때 읽는다 — 조작 탭은 로비에서만 뜨므로 다음 판부터
+        {
+          ...this.prefSeg<AttackButton>(
+            'attackButton',
+            'attack-button',
+            'controls',
+            T.attackButton,
+            [
+              { value: 'drag', label: T.attackButtonDrag },
+              { value: 'instant', label: T.attackButtonInstant },
+            ],
+            T.attackButtonHint,
+          ),
           when: touchOnly,
         },
       );
