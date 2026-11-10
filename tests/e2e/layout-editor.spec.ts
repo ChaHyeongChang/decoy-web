@@ -3,9 +3,11 @@
 // 저장한 비율 자리(800×360 시작 → 판 중 915×412 → 1024×768), 두 역할의 고친 배치는 저장 · 취소까지 남고 취소는 버린다, 작게 ·
 // 크게(48px 하한), 좌우 반전이면 판에서 이동 영역이 오른쪽 · HUD도 뒤집혀 안 겹침. 편집 화면 휴대폰 화면 사진은
 // artifacts/screens/(커밋하지 않음)에 남긴다. 기능 시험은 기기 배율 1
+// 플레이테스트 a-5: 맵 창 안 미니맵('지도')도 끌어 옮긴다 — 자리만, 맵 창 안에서만, 다른 조작 · 이동 영역 위에는 못 놓고, 저장 →
+// 새로고침 뒤 그대로 → 연습 판의 미니맵이 그 자리(누르면 크게 보기). 옆 칸 미니맵 화면에서는 끌 수 없고 저장한 자리도 쓰지 않는다
 import { mkdirSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
-import type { ControlLayoutInfo, HudLayout, TouchTarget } from '@decoy/shared';
+import type { ControlLayoutInfo, HudLayout, MatchPrefsDebug, TouchTarget } from '@decoy/shared';
 import { CAP_BELOW, boxAt, ratioOf } from '../../client/src/controlLayout';
 import { EDITOR_TEXT } from '../../client/src/data/storyText';
 import { PHONE_BROWSER, dpr1, newPlayerPage, press, type DeviceOptions } from './helpers';
@@ -47,6 +49,8 @@ function ctl(L: ControlLayoutInfo, id: string): Rect {
 }
 
 const mid = (b: Rect): { x: number; y: number } => ({ x: b.x + b.w / 2, y: b.y + b.h / 2 });
+/** 사각형을 정수 px로 (x, y, w, h) */
+const ints = (b: Rect): number[] => [b.x, b.y, b.w, b.h].map((v) => Math.round(v));
 const SYS = new Set(['scoreboard', 'menu', 'fullscreen']);
 /** 이름표까지 차지하는 사각형 */
 const occ = (id: string, b: Rect): Rect => (SYS.has(id) ? b : { ...b, h: b.h + CAP_BELOW });
@@ -374,6 +378,234 @@ test('좌우 반전 (괴물): 편집 화면 · 연습 판 모두 이동 영역 �
   expect(ht.x + ht.w / 2).toBeGreaterThan(400);
   expect(hudOverlaps(hud, targets)).toEqual([]);
   expect(touchLayoutProblems(await measureTouchLayout(page))).toEqual([]);
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
+// ───────────── 지도 (맵 창 안 미니맵) 옮기기 — 플레이테스트 a-5 ─────────────
+
+/** 편집 화면 · 판 중 배치의 맵 창 안 미니맵 틀 (HUD 목록의 minimapInset) */
+function mini(L: ControlLayoutInfo): Rect {
+  const b = L.hud.find((x) => x.id === 'minimapInset');
+  if (!b) throw new Error(`맵 창 안 미니맵 없음: ${L.hud.map((x) => x.id).join(',')}`);
+  return { x: b.x, y: b.y, w: b.w, h: b.h };
+}
+
+async function matchPrefs(page: Page): Promise<MatchPrefsDebug> {
+  const p = await page.evaluate(() => window.__DECOY__?.getMatchPrefs() ?? null);
+  if (!p) throw new Error('판 장면 없음');
+  return p;
+}
+
+/** 지도를 놓을 수 있는 범위 (touchControls.minimapRange와 같은 식): 맵 창 안쪽 6px, 아래는 가장자리 띠 위까지 */
+function mapRange(map: Rect, safe: Rect): Rect {
+  const y = map.y + 6;
+  return { x: map.x + 6, y, w: map.w - 12, h: Math.min(map.y + map.h - 6, safe.y + safe.h) - y };
+}
+
+const overlapsRect = (a: Rect, b: Rect): boolean =>
+  Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) > 0.5 &&
+  Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y) > 0.5;
+
+test('지도 옮기기 (괴물 750×340 — 맵 창 안 미니맵): 끌어 옮기되 맵 창 밖 · 조준 스틱 · 이동 영역 위에는 못 놓고 크기는 못 바꾼다, 저장 → 새로고침 뒤 그대로 → 연습 판의 미니맵이 그 자리 · 누르면 크게 보기, 판 중 창이 낮아져도 맵 창 안 같은 비율 자리', async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const { context, page, problems } = await newPlayerPage(browser, phone(750, 340));
+  await context.addInitScript(stubFullscreen);
+  await page.goto(QUERY);
+  await expect(page.getByTestId('practice')).toBeVisible();
+  const L0 = await openEditor(page, 'monster');
+  expect(editorProblems(L0)).toEqual([]);
+  // 지도는 조작 목록이 아니라 HUD 목록에 지금 자리로 나온다. 처음 자리 = 판 HUD 배치의 맵 왼쪽 위 구석
+  expect(L0.controls.map((c) => c.id)).not.toContain('minimap');
+  const m0 = mini(L0);
+  expect(ints(m0)).toEqual([126, 6, 100, 82]);
+  const el = page.locator('[data-ctl="minimap"]');
+  await expect(el).toContainText(EDITOR_TEXT.minimap);
+  const elBox = (await el.boundingBox())!;
+  expect(Math.abs(elBox.x - m0.x) + Math.abs(elBox.y - m0.y)).toBeLessThanOrEqual(1);
+  // 이동 영역은 틀 아래에서 시작한다
+  expect(L0.zone.y).toBeGreaterThanOrEqual(m0.y + m0.h);
+
+  // 1) 맵 가운데 빈 곳으로 끈다: 고른 조작 = 지도, 크기 버튼은 꺼진다 (자리만)
+  await dragTo(page, mid(m0), { x: 400, y: 160 });
+  const L1 = await controlLayout(page);
+  const m1 = mini(L1);
+  expect(Math.abs(mid(m1).x - 400)).toBeLessThanOrEqual(1);
+  expect(Math.abs(mid(m1).y - 160)).toBeLessThanOrEqual(1);
+  expect([m1.w, m1.h]).toEqual([Math.round(m0.w), Math.round(m0.h)]);
+  expect(L1.selected).toBe('minimap');
+  await expect(page.getByTestId('le-selected')).toContainText(EDITOR_TEXT.minimap);
+  await expect(page.getByTestId('le-smaller')).toBeDisabled();
+  await expect(page.getByTestId('le-bigger')).toBeDisabled();
+  expect(editorProblems(L1)).toEqual([]);
+  await expect(page.getByTestId('le-msg')).toBeHidden();
+  await page.screenshot({ path: `${SHOTS}/layout-editor-750x340-minimap.png` });
+
+  // 2) 맵 창 위 밖으로: 맵 위 끝 + 6px에서 멈추고 맵 윤곽이 경고 모양 + 지도용 안내
+  await dragTo(page, mid(m1), { x: 400, y: -40 }, async () => {
+    await expect(page.locator('.le-map.blocked')).toBeVisible();
+    await expect(page.getByTestId('le-msg')).toContainText(EDITOR_TEXT.blockedMap);
+  });
+  const m2 = mini(await controlLayout(page));
+  expect(m2.y).toBe(6);
+  expect(Math.abs(mid(m2).x - 400)).toBeLessThanOrEqual(1);
+
+  // 3) 조준 스틱 위로: 놓을 수 없다 — 조준 스틱에 경고 표시, 끝나도 8px 떨어져 있다
+  const L2 = await controlLayout(page);
+  await dragTo(page, mid(m2), mid(ctl(L2, 'attack')), async () => {
+    await expect(page.locator('[data-ctl="attack"]')).toHaveClass(/blocked/);
+  });
+  const L3 = await controlLayout(page);
+  expect(gapOf(mini(L3), occ('attack', ctl(L3, 'attack')))).toBeGreaterThanOrEqual(7.5);
+  expect(editorProblems(L3)).toEqual([]);
+
+  // 4) 이동 스틱 고리 옆(이동 영역 띠 안)으로: 놓을 수 없다 — 이동 스틱에 경고 표시. 끝난 자리는 이동 영역과 겹치지 않는다
+  const ring = ctl(L3, 'move');
+  await dragTo(page, mid(mini(L3)), { x: ring.x + ring.w + 70, y: ring.y + 30 }, async () => {
+    await expect(page.locator('[data-ctl="move"]')).toHaveClass(/blocked/);
+    await expect(page.getByTestId('le-msg')).toContainText(EDITOR_TEXT.blockedMap);
+  });
+  const L4 = await controlLayout(page);
+  expect(overlapsRect(mini(L4), L4.zone)).toBe(false);
+  expect(ctl(L4, 'move').y).toBeGreaterThanOrEqual(L4.zone.y - 0.5);
+  expect(editorProblems(L4)).toEqual([]);
+
+  // 5) 맵 가운데 빈 곳에 두고 저장: 기존 items에 minimap 한 칸 (형식 판 1, 크기 배율 1)
+  await dragTo(page, mid(mini(L4)), { x: 400, y: 160 });
+  const L5 = await controlLayout(page);
+  const m5 = mini(L5);
+  expect(Math.abs(mid(m5).x - 400) + Math.abs(mid(m5).y - 160)).toBeLessThanOrEqual(2);
+  await press(page.getByTestId('le-save'));
+  await expect(page.getByTestId('le-msg')).toContainText(EDITOR_TEXT.saved);
+  await expect(page.getByTestId('layout-editor')).toHaveCount(0);
+  const saved = (await savedLayout(page)) as {
+    v: number;
+    survivor?: unknown;
+    monster: { mirror: boolean; items: Record<string, { u: number; v: number; s: number }> };
+  };
+  expect(saved.v).toBe(1);
+  expect(saved.survivor).toBeUndefined();
+  expect(Object.keys(saved.monster.items)).toEqual(['minimap']);
+  const place = saved.monster.items.minimap!;
+  expect(place.s).toBe(1);
+  // 비율은 맵 창 범위 기준: 맵 (120, 0, 510, 340) 안쪽 6px, 아래는 가장자리 띠 위까지
+  const want0 = ratioOf(m5, mapRange({ x: 120, y: 0, w: 510, h: 340 }, L5.safe));
+  expect(Math.abs(place.u - want0.u) + Math.abs(place.v - want0.v)).toBeLessThan(0.002);
+
+  // 새로고침해도 그대로
+  await page.reload();
+  await expect(page.getByTestId('practice')).toBeVisible();
+  const R = await openEditor(page, 'monster');
+  expect(mini(R)).toEqual(m5);
+  await press(page.getByTestId('le-cancel'));
+  await expect(page.getByTestId('layout-editor')).toHaveCount(0);
+
+  // 연습 판: 미니맵이 저장한 자리 (틀 = 누르는 자리), 터치 대상 · 다른 HUD와 겹치지 않는다
+  const M = await practice(page, 'monster');
+  expect(M.fallback).toBe(false);
+  await expect.poll(async () => (await matchPrefs(page)).minimapTap !== null, POLL).toBe(true);
+  const tap = (await matchPrefs(page)).minimapTap!;
+  expect(Math.abs(tap.x - m5.x), '판 미니맵 x').toBeLessThanOrEqual(1.5);
+  expect(Math.abs(tap.y - m5.y), '판 미니맵 y').toBeLessThanOrEqual(1.5);
+  expect(Math.abs(mini(M).x - m5.x) + Math.abs(mini(M).y - m5.y)).toBeLessThanOrEqual(1);
+  const hud = await hudLayout(page);
+  expect(hud.minimapInset).toBe(true);
+  // 표시 목록에서 잰 미니맵 그림도 그 자리다 (틀 그림의 번짐 3px 안)
+  const drawn = hud.items.filter((x) => x.id === 'minimap');
+  expect(drawn.length).toBeGreaterThan(2);
+  for (const i of drawn) {
+    expect(i.x).toBeGreaterThanOrEqual(tap.x - 3);
+    expect(i.y).toBeGreaterThanOrEqual(tap.y - 3);
+    expect(i.x + i.w).toBeLessThanOrEqual(tap.x + tap.w + 3);
+    expect(i.y + i.h).toBeLessThanOrEqual(tap.y + tap.h + 3);
+  }
+  const targets = await touchTargets(page);
+  for (const t of targets) expect(overlapsRect(tap, t), `판 미니맵 ↔ ${t.id}`).toBe(false);
+  expect(hudOverlaps(hud, targets)).toEqual([]);
+  expect(touchLayoutProblems(await measureTouchLayout(page))).toEqual([]);
+  // 옮긴 지도를 누르면 크게 보기가 열리고 이동 스틱은 생기지 않는다, 다시 누르면 닫힌다
+  const touch = await MultiTouch.attach(page);
+  await touch.down(1, tap.x + tap.w / 2, tap.y + tap.h / 2);
+  await expect.poll(async () => (await matchPrefs(page)).minimapBig.open, POLL).toBe(true);
+  expect(await page.evaluate(() => document.querySelector('.tc-move.live') !== null)).toBe(false);
+  await touch.up(1);
+  await touch.tap(1, 400, 300);
+  await expect.poll(async () => (await matchPrefs(page)).minimapBig.open, POLL).toBe(false);
+  await touch.detach();
+
+  // 판 중 창이 낮아지면(주소창): 맵 창이 줄어든 만큼 같은 비율 자리 — 맵 창 안, 터치 대상과 안 겹침
+  const low = await resizeTo(page, 750, 300);
+  await expect
+    .poll(
+      async () => Math.round((await page.evaluate(() => window.__DECOY__?.getHudLayout()?.map.h)) ?? 0),
+      POLL,
+    )
+    .toBe(300);
+  const mapLow = (await hudLayout(page)).map;
+  await expect
+    .poll(async () => {
+      const f = (await matchPrefs(page)).minimapTap;
+      return f !== null && Math.abs(f.x - mini(low).x) < 1.5 && Math.abs(f.y - mini(low).y) < 1.5;
+    }, POLL)
+    .toBe(true);
+  const tapLow = (await matchPrefs(page)).minimapTap!;
+  expect(tapLow.x).toBeGreaterThanOrEqual(mapLow.x + 6 - 1);
+  expect(tapLow.y).toBeGreaterThanOrEqual(mapLow.y + 6 - 1);
+  expect(tapLow.x + tapLow.w).toBeLessThanOrEqual(mapLow.x + mapLow.w - 6 + 1);
+  expect(tapLow.y + tapLow.h).toBeLessThanOrEqual(mapLow.y + mapLow.h - 6 + 1);
+  const ratioLow = ratioOf(mini(low), mapRange(mapLow, low.safe));
+  expect(Math.abs(ratioLow.u - place.u), '낮아진 창의 가로 비율').toBeLessThan(0.02);
+  expect(Math.abs(ratioLow.v - place.v), '낮아진 창의 세로 비율').toBeLessThan(0.02);
+  for (const t of await touchTargets(page))
+    expect(overlapsRect(tapLow, t), `낮아진 창 ↔ ${t.id}`).toBe(false);
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
+test('옆 칸 미니맵 화면(괴물 915×412): 지도는 끌 수 없는 HUD 자리 그대로이고, 낮은 화면에서 저장해 둔 지도 자리는 쓰지 않되 다른 조작을 고쳐 저장해도 남는다', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const { context, page, problems } = await newPlayerPage(browser, phone(915, 412));
+  await context.addInitScript(stubFullscreen);
+  // 낮은 화면(750×340)에서 저장해 둔 지도 자리
+  const before = { v: 1, monster: { mirror: false, items: { minimap: { u: 0.5628, v: 0.4956, s: 1 } } } };
+  await context.addInitScript((raw) => {
+    if (localStorage.getItem('decoy:controlLayout') === null)
+      localStorage.setItem('decoy:controlLayout', raw);
+  }, JSON.stringify(before));
+  await page.goto(QUERY);
+  await expect(page.getByTestId('practice')).toBeVisible();
+  const L0 = await openEditor(page, 'monster');
+  // 옆 칸 미니맵: 끌 수 있는 지도는 없고, 놓을 수 없는 HUD 자리(사선 무늬 + 이름표)로만 보인다
+  await expect(page.locator('[data-ctl="minimap"]')).toHaveCount(0);
+  await expect(page.locator('[data-hud="minimap"]')).toContainText(EDITOR_TEXT.minimap);
+  expect(L0.hud.some((b) => b.id === 'minimap')).toBe(true);
+  expect(L0.hud.some((b) => b.id === 'minimapInset')).toBe(false);
+  expect(L0.fallback).toBe(false);
+  expect(editorProblems(L0)).toEqual([]);
+  // 포효 버튼을 옮겨 저장해도 저장해 둔 지도 자리는 그대로 남는다
+  const roar = ctl(L0, 'roar');
+  await dragTo(page, mid(roar), { x: mid(roar).x - 100, y: mid(roar).y + 20 });
+  expect(ctl(await controlLayout(page), 'roar').x).toBeLessThan(roar.x - 50);
+  await press(page.getByTestId('le-save'));
+  await expect(page.getByTestId('layout-editor')).toHaveCount(0);
+  const saved = (await savedLayout(page)) as { v: number; monster: { items: Record<string, unknown> } };
+  expect(saved.v).toBe(1);
+  expect(Object.keys(saved.monster.items)).toEqual(['roar', 'minimap']);
+  expect(saved.monster.items.minimap).toEqual(before.monster.items.minimap);
+
+  // 연습 판: 미니맵은 오른쪽 옆 칸(맵 밖) 그대로 — 저장한 지도 자리로 맵 창 안에 들어오지 않는다
+  const M = await practice(page, 'monster');
+  expect(M.fallback).toBe(false);
+  await expect.poll(async () => (await matchPrefs(page)).minimapTap !== null, POLL).toBe(true);
+  const tap = (await matchPrefs(page)).minimapTap!;
+  const hud = await hudLayout(page);
+  expect(hud.minimapInset).toBe(false);
+  expect(tap.x).toBeGreaterThanOrEqual(hud.map.x + hud.map.w - 0.5);
+  expect(hudOverlaps(hud, await touchTargets(page))).toEqual([]);
   expect(problems).toEqual([]);
   await context.close();
 });

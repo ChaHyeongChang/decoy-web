@@ -216,6 +216,8 @@ test('글자 · 겹침: 휴대폰 높이 293 · 320 · 360 · 16:9 두 가지에
 }) => {
   test.setTimeout(300_000);
   const report: string[] = [];
+  /** 맵 창 안 미니맵을 받은 괴물 화면: 미니맵 틀(부품을 모두 덮는 사각형)이 맵 가운데보다 왼쪽인가 (플레이테스트 a-5) */
+  const insetMonsters: Record<string, 'left' | 'right'> = {};
   const run = async (c: Case, role: Role): Promise<void> => {
     const label = `${c.name} ${role}`;
     const s = await soloMatch(browser, c.device, role);
@@ -235,6 +237,22 @@ test('글자 · 겹침: 휴대폰 높이 293 · 320 · 360 · 16:9 두 가지에
     report.push(
       `${label}: 논리 ${g.viewW}×${Math.round(g.viewH)} · 가장 작은 글자 ${Math.min(...fonts)}px · 미니맵 ${ids.has('minimap') ? '있음' : '없음'}`,
     );
+    // 플레이테스트 a-5: 괴물의 맵 안 미니맵은 맵 위 가운데 칸(가로 가운데 1/3 × 위 1/3)을 가리지 않는다 — 괴물이 위로 조준하면
+    // 시야 부채꼴 끝이 오는 자리다 (예전에는 658×320 · 640×360 괴물의 틀이 이 칸의 60%를 덮었다)
+    if (role === 'monster' && layout.minimapInset) {
+      const mm = layout.items.filter((i) => i.id === 'minimap');
+      const m = layout.map;
+      const x0 = Math.min(...mm.map((i) => i.x));
+      const x1 = Math.max(...mm.map((i) => i.x + i.w));
+      const y0 = Math.min(...mm.map((i) => i.y));
+      const inTopThird = y0 < m.y + m.h / 3 - 0.5;
+      const ox = Math.min(x1, m.x + (m.w * 2) / 3) - Math.max(x0, m.x + m.w / 3);
+      expect(
+        inTopThird && ox > 0.5 ? ox : 0,
+        `${label} 미니맵 ↔ 맵 위 가운데 칸 (가로 ${ox.toFixed(1)}px)`,
+      ).toBe(0);
+      insetMonsters[c.name] = (x0 + x1) / 2 < m.x + m.w / 2 ? 'left' : 'right';
+    }
 
     if (role === 'runner') {
       // 수감: 아래 안내 줄(터치 문구)이 가장자리 띠 안에서 버튼과 겹치지 않는다. 따라가는 카메라에서는 수감 중 관전을 알리는
@@ -269,6 +287,13 @@ test('글자 · 겹침: 휴대폰 높이 293 · 320 · 360 · 16:9 두 가지에
   const all = CASES.flatMap((c) => (['monster', 'runner'] as const).map((r) => [c, r] as const));
   for (let i = 0; i < all.length; i += 2) await Promise.all(all.slice(i, i + 2).map(([c, r]) => run(c, r)));
   console.log(`[m12-screen] ${report.join(' / ')}`);
+  // 오른쪽이 엄지 버튼 무리에 막히는 괴물 화면(658×320 · 640×360)은 맵 왼쪽 위 구석, 오른쪽에 자리가 있는 802×293은 그대로
+  // (863×360 · 960×540 괴물은 옆 칸 미니맵이라 여기 없다)
+  expect(insetMonsters).toEqual({
+    'Galaxy S9+ 658×320': 'left',
+    '16:9 640×360': 'left',
+    'Pixel 5 802×293': 'right',
+  });
 });
 
 // ───────────── 회전 ─────────────

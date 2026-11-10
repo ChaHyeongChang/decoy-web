@@ -446,19 +446,36 @@ describe('판 중 창이 낮아지면 엄지 버튼이 덮는 HUD 부품 hudCove
     expect(block('.tc-sys > .tc-cap')).toMatch(/top: auto;[\s\S]*bottom: \d+px;/);
   });
 
-  it('minimapFallback: 맵 창 안 오른쪽 위, 시스템 버튼이 걸치면 그 아래 · 그 왼쪽, 모두 막히거나 맵보다 크면 null', () => {
+  it('minimapFallback: 맵 창 안 오른쪽 위, 시스템 버튼이 걸치면 그 아래 · 맵 왼쪽 위 구석 · 막은 것의 왼쪽, 모두 막히거나 맵보다 크면 null', () => {
     const map = { x: 100, y: 50, w: 900, h: 600 };
     const frame = { w: 200, h: 150 };
     expect(L.minimapFallback(map, frame, [], 10, 8)).toEqual({ x: 790, y: 60 });
     // 오른쪽 위 구석에 걸친 시스템 버튼 → 그 아래 (오른쪽 끝 그대로)
     const tr = { x: 760, y: 40, w: 100, h: 100 };
     expect(L.minimapFallback(map, frame, [tr], 10, 8)).toEqual({ x: 790, y: 148 });
-    // 아래가 엄지 버튼으로 막히면 → 그 왼쪽 (맵 위 끝)
+    // 아래가 엄지 버튼으로 막히면 → 맵 왼쪽 위 구석 (플레이테스트 a-5: 예전에는 막은 것의 왼쪽 { x: 552 } — 맵 위 가운데 쪽이었다)
     const thumb = { x: 760, y: 200, w: 200, h: 400 };
-    expect(L.minimapFallback(map, frame, [tr, thumb], 10, 8)).toEqual({ x: 552, y: 60 });
-    // 왼쪽도 막히면(또는 맵 왼쪽 절반까지 가야 하면) null
-    expect(L.minimapFallback(map, frame, [tr, thumb, { x: 500, y: 40, w: 60, h: 60 }], 10, 8)).toBeNull();
-    expect(L.minimapFallback(map, frame, [{ x: 600, y: 40, w: 400, h: 60 }, thumb], 10, 8)).toBeNull();
+    expect(L.minimapFallback(map, frame, [tr, thumb], 10, 8)).toEqual({ x: 110, y: 60 });
+    // 막은 것의 왼쪽이 막혀도(또는 맵 왼쪽 절반까지 가야 해도) 왼쪽 위 구석이 비어 있으면 거기
+    expect(L.minimapFallback(map, frame, [tr, thumb, { x: 500, y: 40, w: 60, h: 60 }], 10, 8)).toEqual({
+      x: 110,
+      y: 60,
+    });
+    expect(L.minimapFallback(map, frame, [{ x: 600, y: 40, w: 400, h: 60 }, thumb], 10, 8)).toEqual({
+      x: 110,
+      y: 60,
+    });
+    // 왼쪽 위 구석이 이동 영역에 걸치면 → 막은 것의 왼쪽 (맵 위 끝, 맵 오른쪽 절반 안)
+    const zone = { x: 0, y: 150, w: 400, h: 500 };
+    expect(L.minimapFallback(map, frame, [tr, thumb], 10, 8, zone)).toEqual({ x: 552, y: 60 });
+    // 그 왼쪽도 막히면(또는 맵 왼쪽 절반까지 가야 하면) null
+    expect(
+      L.minimapFallback(map, frame, [tr, thumb, { x: 500, y: 40, w: 60, h: 60 }], 10, 8, zone),
+    ).toBeNull();
+    expect(L.minimapFallback(map, frame, [{ x: 600, y: 40, w: 400, h: 60 }, thumb], 10, 8, zone)).toBeNull();
+    // 왼쪽 위 구석에 버튼이 있어도 (좌우 반전의 시스템 버튼) 마찬가지
+    const tl = { x: 90, y: 40, w: 100, h: 60 };
+    expect(L.minimapFallback(map, frame, [tr, thumb, tl, { x: 500, y: 40, w: 60, h: 60 }], 10, 8)).toBeNull();
     // 간격(gap) 밖이면 상관없다
     expect(L.minimapFallback(map, frame, [{ x: 600, y: 300, w: 100, h: 100 }], 10, 8)).toEqual({
       x: 790,

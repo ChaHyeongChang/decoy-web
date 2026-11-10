@@ -13,14 +13,32 @@
 // 안으로 자른다. 다른 조작 · 늘 떠 있는 판 HUD(타이머 · 게이지 · 팀 카드 · 미니맵)와 겹치면(이름표까지, 간격 MIN_GAP) 가장 가까운
 // 빈자리로 민다(4px 격자를 가까운 순 · 정해진 순서로 — 늘 같은 결과). 밀 자리가 없으면 통째로 기본 배치(반전이면 뒤집은 것)로
 // 돌아간다. 이동 스틱(쉬는 고리)은 이동 영역 안에만 놓는다: 고리가 있는 쪽(왼쪽 · 오른쪽) 화면 40% 띠의 HUD 아래
+//
+// 지도(minimap, 플레이테스트 a-5): 맵 창 안 미니맵(옆 칸에 자리가 없는 화면)의 자리만 옮긴다 — 크기 배율은 늘 1, 범위는 맵 창 안
+// (rules.mapRange — 늘 떠 있는 HUD는 맵 밖이라는 규칙의 예외가 맵 창 안 미니맵 하나다), 비율도 그 범위 기준이다. 다른 조작 · HUD와
+// 겹치지 않고 이동 영역은 지도 아래에서 시작한다(지도를 누르면 크게 보기). 옆 칸 미니맵 화면에서는 저장한 자리를 쓰지 않는다.
+// 저장 형식은 그대로(items에 한 칸): 지도 칸이 없는 옛 저장값은 판 HUD 배치의 자리, 옛 묶음은 모르는 칸이라 버린다
 import type { Team } from '@decoy/shared';
 import { stickScaleOf, uiScaleOf } from './prefs';
 import { readKey, removeKey, writeKey, type StorageLike } from './storageKeys';
 import { MIN_GAP, MIN_TARGET, SYS_SLOTS_MENU, type LayoutTuning } from './ui/layout';
 
-/** 배치를 바꿀 수 있는 조작: 이동 스틱(쉬는 고리) · 조준 스틱(괴물 공격) · 버튼 · 시스템 버튼(점수판 · 설정 · 전체 화면) */
+/**
+ * 배치를 바꿀 수 있는 조작: 이동 스틱(쉬는 고리) · 조준 스틱(괴물 공격) · 버튼 · 시스템 버튼(점수판 · 설정 · 전체 화면) ·
+ * 지도(맵 창 안 미니맵 — 자리만)
+ */
 export type ControlId =
-  'move' | 'attack' | 'dash' | 'roar' | 'mode' | 'ability' | 'rescue' | 'scoreboard' | 'menu' | 'fullscreen';
+  | 'move'
+  | 'attack'
+  | 'dash'
+  | 'roar'
+  | 'mode'
+  | 'ability'
+  | 'rescue'
+  | 'scoreboard'
+  | 'menu'
+  | 'fullscreen'
+  | 'minimap';
 
 /** 정해진 순서 (자리 정하기 · 저장 순서) */
 export const CONTROL_IDS: readonly ControlId[] = [
@@ -34,14 +52,15 @@ export const CONTROL_IDS: readonly ControlId[] = [
   'scoreboard',
   'menu',
   'fullscreen',
+  'minimap',
 ];
 
 export const TEAMS: readonly Team[] = ['survivor', 'monster'];
 
 /** 역할마다 있는 조작 */
 export const TEAM_CONTROLS: Readonly<Record<Team, readonly ControlId[]>> = {
-  survivor: ['move', 'ability', 'rescue', 'scoreboard', 'menu', 'fullscreen'],
-  monster: ['move', 'attack', 'dash', 'roar', 'mode', 'scoreboard', 'menu', 'fullscreen'],
+  survivor: ['move', 'ability', 'rescue', 'scoreboard', 'menu', 'fullscreen', 'minimap'],
+  monster: ['move', 'attack', 'dash', 'roar', 'mode', 'scoreboard', 'menu', 'fullscreen', 'minimap'],
 };
 
 const SYS: ReadonlySet<ControlId> = new Set<ControlId>(['scoreboard', 'menu', 'fullscreen']);
@@ -125,7 +144,8 @@ export function cleanTeamLayout(team: Team, v: unknown): TeamLayout | null {
     for (const id of TEAM_CONTROLS[team]) {
       if (!Object.prototype.hasOwnProperty.call(rec, id)) continue;
       const p = cleanPlace(rec[id]);
-      if (p) items[id] = p;
+      // 지도는 자리만 (크기 배율은 늘 1 — 나중에 크기를 넣어도 형식이 그대로다)
+      if (p) items[id] = id === 'minimap' ? { ...p, s: 1 } : p;
     }
   }
   const t: TeamLayout = { mirror: o.mirror === true, items };
@@ -278,9 +298,9 @@ export function sizedBox(base: Box, s: number, cx: number, cy: number): Box {
   return { x: Math.round(cx - w / 2), y: Math.round(cy - h / 2), w, h };
 }
 
-/** 조작이 차지하는 사각형: 버튼 · 스틱은 아래로 나오는 이름표까지, 시스템 버튼은 그대로 */
+/** 조작이 차지하는 사각형: 버튼 · 스틱은 아래로 나오는 이름표까지, 시스템 버튼 · 지도는 그대로 */
 export function occupied(id: ControlId, b: Box): Box {
-  return isSysControl(id) ? b : { x: b.x, y: b.y, w: b.w, h: b.h + CAP_BELOW };
+  return isSysControl(id) || id === 'minimap' ? b : { x: b.x, y: b.y, w: b.w, h: b.h + CAP_BELOW };
 }
 
 /** 두 사각형이 gap 이상 떨어져 있는가 (한 축이라도) */
@@ -295,12 +315,21 @@ export function separated(a: Box, b: Box, gap: number): boolean {
 
 export type Side = 'left' | 'right';
 
-/** 놓기 규칙: 움직일 수 있는 범위 · 피할 판 HUD 사각형 · 이동 영역(쪽, 고리 반지름) · 화면 가운데 x */
+/**
+ * 놓기 규칙: 움직일 수 있는 범위 · 피할 판 HUD 사각형 · 이동 영역(쪽, 고리 반지름, 더 피할 사각형 — 지도) · 화면 가운데 x ·
+ * 지도를 놓을 수 있는 범위(맵 창 안, 없으면 range)
+ */
 export interface PlaceRules {
   range: Box;
   hud: readonly Box[];
-  zone: (side: Side, r: number) => Box;
+  zone: (side: Side, r: number, extra?: readonly Box[]) => Box;
   midX: number;
+  mapRange?: Box;
+}
+
+/** 조작을 놓을 수 있는 범위 (지도는 맵 창 안) */
+export function rangeOf(id: ControlId, rules: PlaceRules): Box {
+  return (id === 'minimap' && rules.mapRange) || rules.range;
 }
 
 /** 이동 고리가 있는 쪽 (가운데가 화면 가운데보다 왼쪽이면 왼쪽) */
@@ -315,16 +344,27 @@ export interface Blockers {
   outside: boolean;
 }
 
-/** id를 box에 놓을 때 막는 것 (others = 다른 조작의 지금 자리, id 자신은 무시) */
+/**
+ * id를 box에 놓을 때 막는 것 (others = 다른 조작의 지금 자리, id 자신은 무시). 이동 고리 · 지도는 이동 영역도 본다: 영역(고리 쪽
+ * 40% 띠, HUD · 지도 아래)이 고리를 품고 지도와 겹치지 않아야 한다 — 고리를 놓을 때는 범위 밖, 지도를 놓을 때는 이동 고리가 막은 것
+ */
 export function blockersOf(id: ControlId, box: Box, others: ControlBoxes, rules: PlaceRules): Blockers {
-  let outside = !insideBox(box, rules.range);
-  if (id === 'move' && !outside) outside = !insideBox(box, rules.zone(sideOf(box, rules.midX), box.w / 2));
+  let outside = !insideBox(box, rangeOf(id, rules));
   const occ = occupied(id, box);
   const controls: ControlId[] = [];
   for (const o of CONTROL_IDS) {
     const b = others[o];
     if (o === id || !b) continue;
     if (!separated(occ, occupied(o, b), MIN_GAP)) controls.push(o);
+  }
+  const ring = id === 'move' ? box : others.move;
+  const map = id === 'minimap' ? box : others.minimap;
+  if (ring && (id === 'move' || id === 'minimap')) {
+    const z = rules.zone(sideOf(ring, rules.midX), ring.w / 2, map ? [map] : []);
+    if (!insideBox(ring, z) || (map && !separated(map, z, 0))) {
+      if (id === 'move') outside = true;
+      else if (!controls.includes('move')) controls.push('move');
+    }
   }
   const hud: number[] = [];
   rules.hud.forEach((b, i) => {
@@ -360,7 +400,7 @@ function offsets(): readonly (readonly [number, number])[] {
 export function nearestFree(id: ControlId, box: Box, others: ControlBoxes, rules: PlaceRules): Box | null {
   if (placeOk(id, box, others, rules)) return box;
   for (const [dx, dy] of offsets()) {
-    const c = clampBox({ ...box, x: box.x + dx, y: box.y + dy }, rules.range);
+    const c = clampBox({ ...box, x: box.x + dx, y: box.y + dy }, rangeOf(id, rules));
     if (placeOk(id, c, others, rules)) return c;
   }
   return null;
@@ -392,16 +432,18 @@ export interface Resolved {
 
 /**
  * 실제 자리 (CSS px). base = 이 화면의 기본 배치(반전 전, 있는 조작만), safe = 안전 사각형, rules = 놓기 규칙.
- * 바꾸지 않은 조작은 기본 자리에 그대로 두고(피할 것), 바꾼 조작을 CONTROL_IDS 순서로 놓는다(앞에서 놓은 것도 피한다)
+ * 바꾸지 않은 조작은 기본 자리에 그대로 두고(피할 것), 바꾼 조작을 CONTROL_IDS 순서로 놓는다(앞에서 놓은 것도 피한다).
+ * fixed = 이미 제자리인 기본 사각형(뒤집지 않는다): 지도 — 판 HUD 배치가 좌우 반전까지 해 둔 자리
  */
 export function resolveLayout(
   base: ControlBoxes,
   layout: TeamLayout | null,
   safe: Box,
   rules: PlaceRules,
+  fixed: ControlBoxes = {},
 ): Resolved {
   const mirror = layout?.mirror === true;
-  const def = baseBoxes(base, mirror, safe);
+  const def = { ...baseBoxes(base, mirror, safe), ...fixed };
   const items = layout?.items ?? {};
   const ids = CONTROL_IDS.filter((id) => def[id] && items[id]);
   if (ids.length === 0) return { boxes: def, mirror, fallback: false };
@@ -411,7 +453,7 @@ export function resolveLayout(
     const b0 = def[id];
     const p = items[id];
     if (!b0 || !p) continue;
-    const box = nearestFree(id, placeBox(b0, p, rules.range), placed, rules);
+    const box = nearestFree(id, placeBox(b0, p, rangeOf(id, rules)), placed, rules);
     if (!box) return { boxes: def, mirror, fallback: true };
     placed[id] = box;
   }

@@ -435,6 +435,8 @@ export const EDITOR_TEXT = {
   cancel: '취소',
   saved: '저장했어요',
   blocked: '다른 버튼 · HUD와 겹치거나 화면 가장자리 밖이라 놓을 수 없어요',
+  /** 지도(맵 창 안 미니맵)를 놓을 수 없는 자리 */
+  blockedMap: '지도는 맵 안에서 버튼 · 이동 영역과 겹치지 않는 곳에만 놓을 수 있어요',
   hudPreview: '판 HUD 미리보기 (겹치지 않게 피해요)',
   timer: '남은 시간',
   gaugeA: '거점 A',

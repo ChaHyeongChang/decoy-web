@@ -146,17 +146,27 @@ export const TOUCH_UI = {
 
 /**
  * 맵 창 안 미니맵 (따라가는 카메라, CSS px): 맵 가로의 frac · maxCss 이하, 맵 끝에서 margin. 엄지 버튼 무리는 화면 오른쪽
- * 절반 안에 있다고 보고(가장 왼쪽 포효 버튼도 그 안) 그 위 끝 위에서 멈춘다
+ * 절반 안에 있다고 보고(가장 왼쪽 포효 버튼도 그 안) 그 위 끝 위에서 멈춘다.
+ * 낮은 화면(게임 영역 높이 lowH 이하 — 휴대폰 브라우저 주소창이 보일 때)은 맵 가로의 fracLow로 줄인다: 옆 칸 미니맵 최소 폭
+ * (TOUCH_UI.minimapMin) 아래로는 줄이지 않고 원래 크기보다 커지지 않는다 (플레이테스트 a-5 — 맵 창을 덜 가리게)
  */
-export const MINIMAP_INSET = { frac: 0.22, maxCss: 200, margin: 6, min: 60 } as const;
+export const MINIMAP_INSET = {
+  frac: 0.22,
+  maxCss: 200,
+  margin: 6,
+  min: 60,
+  lowH: 350,
+  fracLow: 0.18,
+} as const;
 
 /**
  * 판 중 창이 낮아져 엄지 버튼이 옆 칸 미니맵을 덮었을 때 미니맵 틀을 옮길 자리 (논리 px, 틀 왼쪽 위). 확대 화면에서는 맵
  * 전체가 보이지 않아 미니맵이 필수라 숨기지 않고 맵 창 안 오른쪽 위 구석으로 옮긴다(검토 반영): 틀이 맵 안이고 피할 사각형
  * (엄지 버튼 · 시스템 버튼, 간격 gap)과 겹치지 않으면 그 자리. 오른쪽 위 구석에 시스템 버튼이 걸치면(판 중 설정 버튼까지 세 칸이라
- * 전체 화면 버튼이 맵에 걸친다 — 설정 화면 통합) 그 아래, 그다음 그 왼쪽(맵 위 끝)을 본다(판 시작 배치의 맵 안 미니맵과 같은 순서,
- * VISUAL_SPEC 12.6). 모두 막히면 null (그때는 예전처럼 숨긴다). 왼쪽 절반은 이동 영역(화면 왼쪽 40%)이 그 아래까지 올라와 있어
- * 쓰지 않는다
+ * 전체 화면 버튼이 맵에 걸친다 — 설정 화면 통합) 그 아래, 그다음 맵 왼쪽 위 구석(이동 영역 zone과 겹치지 않을 때만 — 겹치면 누르기가
+ * 이동 스틱으로 간다), 마지막으로 막은 것의 왼쪽(맵 위 끝, 맵 오른쪽 절반 안)을 본다(판 시작 배치의 맵 안 미니맵과 같은 순서,
+ * VISUAL_SPEC 12.6). 모두 막히면 null (그때는 예전처럼 숨긴다). 막은 것의 왼쪽은 맵 위 가운데에 걸쳐 괴물의 시야 부채꼴 끝을 가리는
+ * 자리라(플레이테스트 a-5) 왼쪽 위 구석 다음에만 쓴다
  */
 export function minimapFallback(
   map: { x: number; y: number; w: number; h: number },
@@ -164,6 +174,7 @@ export function minimapFallback(
   avoid: readonly { x: number; y: number; w: number; h: number }[],
   margin: number,
   gap: number,
+  zone: { x: number; y: number; w: number; h: number } | null = null,
 ): { x: number; y: number } | null {
   if (frame.w + margin * 2 > map.w || frame.h + margin * 2 > map.h) return null;
   const free = (x: number, y: number): boolean =>
@@ -192,7 +203,11 @@ export function minimapFallback(
   // 그 아래 (오른쪽 끝 그대로)
   const below = Math.max(...blockers.map((b) => b.y + b.h)) + gap;
   if (free(right, below)) return { x: right, y: below };
-  // 그 왼쪽 (맵 위 끝 그대로)
+  // 맵 왼쪽 위 구석 (이동 영역과 겹치면 쓰지 않는다)
+  const corner = map.x + margin;
+  if (free(corner, top) && !(zone && overlapsCss({ x: corner, y: top, w: frame.w, h: frame.h }, zone)))
+    return { x: corner, y: top };
+  // 막은 것의 왼쪽 (맵 위 끝 그대로)
   const left = Math.min(...blockers.map((b) => b.x)) - gap - frame.w;
   if (left >= map.x + map.w / 2 && free(left, top)) return { x: left, y: top };
   return null;
@@ -532,9 +547,10 @@ export interface TouchHudPlan {
   /** 미니맵 그림 왼쪽 위 · 폭 (틀 · 제목은 바깥). 자리가 없으면 null */
   minimap: { x: number; y: number; w: number } | null;
   /**
-   * 옆 칸에 자리가 없을 때 맵 창 안 오른쪽 위에 둘 미니맵 (그림 왼쪽 위 · 폭, 틀 · 제목은 바깥 — 틀까지 맵 창 안).
-   * 따라가는 카메라(확대 화면)에서만 쓴다(minimap.ts): 확대 1이면 맵 전체가 보여 필요 없다. 엄지 버튼 · 시스템 버튼과
-   * 겹치지 않는다. rects에는 넣지 않는다(맵 밖 부품 목록 — 이동 영역 시작 · 덮임 판단에 쓰지 않는다)
+   * 옆 칸에 자리가 없을 때 맵 창 안 오른쪽 위(또는 왼쪽 위 구석 — insetCss)에 둘 미니맵 (그림 왼쪽 위 · 폭, 틀 · 제목은 바깥 —
+   * 틀까지 맵 창 안). 따라가는 카메라(확대 화면)에서만 쓴다(minimap.ts): 확대 1이면 맵 전체가 보여 필요 없다. 엄지 버튼 · 시스템
+   * 버튼과 겹치지 않는다. rects에는 넣지 않는다(맵 밖 부품 목록 — 덮임 판단에 쓰지 않는다. 이동 영역은 터치 화면이 이 틀을 따로
+   * 넘겨받아 피한다 — touchControls obstacles)
    */
   minimapInset: { x: number; y: number; w: number } | null;
   /** 늘 떠 있는 부품 사각형 (맵 · 엄지 영역과 겹치지 않는다, 터치 화면이 이동 영역을 이 아래에서 시작한다) */
@@ -717,22 +733,28 @@ function planCss(
 }
 
 /**
- * 맵 창 안 미니맵 자리 (CSS px, 그림 사각형 — 틀 · 제목은 바깥). 후보 둘: ① 맵 오른쪽 위 구석(시스템 버튼이 맵에 걸치면 그
- * 아래) ② 시스템 버튼 왼쪽의 맵 위 끝. 틀이 엄지 버튼(실제 버튼 사각형 + 최소 간격)과 겹치지 않는 가장 큰 폭으로 줄이고, 더 큰
- * 쪽을 고른다(같으면 ①). 최소 폭(MINIMAP_INSET.min — 확대 화면에서는 미니맵이 필수라 옆 칸 미니맵보다 작게 허용)보다 작으면 null.
+ * 맵 창 안 미니맵 자리 (CSS px, 그림 사각형 — 틀 · 제목은 바깥). 후보: ① 맵 오른쪽 위 구석(시스템 버튼이 맵에 걸치면 그 아래)
+ * ③ 맵 왼쪽 위 구석 — 틀 아래 끝이 이동 스틱 그림 위 이동 영역(moveTop − zoneTop)을 넘지 않는 폭까지. 틀이 엄지 버튼(실제 버튼
+ * 사각형 + 최소 간격)과 겹치지 않는 가장 큰 폭으로 줄이고, 더 큰 쪽을 고른다(같으면 ①). 둘 다 없을 때만 ② 시스템 버튼 왼쪽의 맵 위 끝
+ * (맵 위 가운데에 걸쳐 괴물이 위로 조준한 시야 부채꼴 끝을 가린다 — 플레이테스트 a-5: 예전에는 ②가 둘째 후보라 버튼 무리가 높은
+ * 괴물만 늘 위 가운데였다). 최소 폭(MINIMAP_INSET.min — 확대 화면에서는 미니맵이 필수라 옆 칸 미니맵보다 작게 허용)보다 작으면 null.
  * 버튼과 가로로 겹치지 않으면 그 버튼 높이와 상관없다 (검토 반영: 예전에는 오른쪽 절반이면 무리 맨 위 끝에서 멈춰, 낮은 16:9
- * 화면의 괴물이 옆 칸 · 안쪽 미니맵을 둘 다 못 받았다)
+ * 화면의 괴물이 옆 칸 · 안쪽 미니맵을 둘 다 못 받았다). 게임 영역 높이(r.zoneBottom + 아래 가장자리 띠)가 lowH 이하면 조금 작게
+ * (MINIMAP_INSET)
  */
 function insetCss(
   map: Box,
-  r: { sysLeft: number; sysBottom: number; cluster: readonly Box[] },
+  r: { sysLeft: number; sysBottom: number; moveTop: number; zoneBottom: number; cluster: readonly Box[] },
   a: number = TOUCH_UI.art,
 ): Box | null {
   const mm = TOUCH_PART.minimap;
   const pad = mm.pad * a;
   const title = mm.title * a;
-  const M = MINIMAP_INSET.margin;
-  const full = Math.min(map.w * MINIMAP_INSET.frac, MINIMAP_INSET.maxCss);
+  const I = MINIMAP_INSET;
+  const M = I.margin;
+  const base = Math.min(map.w * I.frac, I.maxCss);
+  const low = r.zoneBottom + EDGE_BAND.bottom <= I.lowH + 1e-6;
+  const full = low ? Math.min(base, Math.max(TOUCH_UI.minimapMin, map.w * I.fracLow)) : base;
   const ratio = MAP_H / MAP_W;
   const clear = (f: Box): boolean =>
     r.cluster.every(
@@ -742,24 +764,27 @@ function insetCss(
         f.y >= b.y + b.h + MIN_GAP ||
         b.y >= f.y + f.h + MIN_GAP,
     );
-  const fit = (right: number, top: number): Box | null => {
-    // 맵 아래 끝 안
-    let w = Math.min(full, (map.y + map.h - M - top - title - pad) / ratio);
+  // edge = 틀 오른쪽 끝 (fromLeft면 왼쪽 끝), top = 틀 위 끝, bottom = 틀 아래 끝 상한
+  const fit = (edge: number, top: number, bottom: number, fromLeft = false): Box | null => {
+    let w = Math.min(full, (bottom - top - title - pad) / ratio);
     // 엄지 버튼과 겹치지 않을 때까지 1 CSS px씩 줄인다 (배치를 정할 때 한 번, 200번 안)
-    while (w >= MINIMAP_INSET.min) {
-      const frame = { x: right - w - pad * 2, y: top, w: w + pad * 2, h: title + w * ratio + pad };
-      if (clear(frame)) break;
+    while (w >= I.min) {
+      const x = fromLeft ? edge : edge - w - pad * 2;
+      if (clear({ x, y: top, w: w + pad * 2, h: title + w * ratio + pad })) break;
       w -= 1;
     }
-    if (w < MINIMAP_INSET.min) return null;
-    return { x: right - pad - w, y: top + title, w, h: w * ratio };
+    if (w < I.min) return null;
+    return { x: fromLeft ? edge + pad : edge - pad - w, y: top + title, w, h: w * ratio };
   };
   const mapRight = map.x + map.w;
+  const mapBottom = map.y + map.h - M;
   const intrude = r.sysLeft < mapRight;
-  const a1 = fit(mapRight - M, intrude ? Math.max(map.y + M, r.sysBottom + MIN_GAP) : map.y + M);
-  const a2 = intrude ? fit(Math.min(mapRight - M, r.sysLeft - MIN_GAP), map.y + M) : null;
-  if (a1 && a2) return a2.w > a1.w + 0.5 ? a2 : a1;
-  return a1 ?? a2;
+  const a1 = fit(mapRight - M, intrude ? Math.max(map.y + M, r.sysBottom + MIN_GAP) : map.y + M, mapBottom);
+  const a3 = fit(map.x + M, map.y + M, Math.min(mapBottom, r.moveTop - TOUCH_UI.zoneTop), true);
+  if (a1 && a3) return a3.w > a1.w + 0.5 ? a3 : a1;
+  return (
+    a1 ?? a3 ?? (intrude ? fit(Math.min(mapRight - M, r.sysLeft - MIN_GAP), map.y + M, mapBottom) : null)
+  );
 }
 
 /**

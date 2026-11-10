@@ -186,6 +186,10 @@ export class GameScene extends Phaser.Scene {
 
   /** 판 중 창이 낮아져 엄지 버튼이 옆 칸 미니맵을 덮었다 (TouchControls onCovered) */
   private minimapCovered = false;
+  /** 이동 영역 (논리 px, TouchControls onThumbs): 판 중 옮기는 미니맵이 그 위에 놓이지 않게 */
+  private moveZoneBox: { x: number; y: number; w: number; h: number } | null = null;
+  /** 조작 배치에서 옮긴 맵 창 안 미니맵 틀 (논리 px, 없으면 null — 판 HUD 배치의 자리) */
+  private minimapSpot: { x: number; y: number } | null = null;
 
   // ── 판 중 설정 효과 (설정 화면 통합) ──
   /** OS '동작 줄이기' (판 장면을 만들 때 읽는다): 흔들림 0 */
@@ -229,13 +233,14 @@ export class GameScene extends Phaser.Scene {
   private bigSharp = true;
 
   /**
-   * 미니맵 자리: 엄지 버튼이 덮지 않으면 처음 자리. 덮으면 확대 화면에서는 맵 창 안 빈 구석으로 옮기고(미니맵이 필수, 검토 반영),
-   * 옮길 자리가 없거나 확대 1이면 예전처럼 숨긴다(M12 — 판 화면 전체가 보여 같은 정보)
+   * 미니맵 자리: 엄지 버튼이 덮지 않으면 처음 자리(조작 배치에서 맵 창 안 미니맵을 옮겼으면 그 자리 — 플레이테스트 a-5). 덮으면 확대
+   * 화면에서는 맵 창 안 빈 구석으로 옮기고(미니맵이 필수, 검토 반영), 옮길 자리가 없거나 확대 1이면 예전처럼 숨긴다(M12 — 판 화면
+   * 전체가 보여 같은 정보)
    */
   private placeMinimap(): void {
     const mm = this.minimap;
     if (!this.minimapCovered) {
-      mm.relocate(null);
+      mm.relocate(this.minimapSpot);
       mm.setHidden(false);
       return;
     }
@@ -243,7 +248,14 @@ export class GameScene extends Phaser.Scene {
     const L = HUD.touch?.L ?? 1;
     const spot =
       CAM_ZOOM > 1 && size
-        ? minimapFallback(MAP_RECT, size, this.thumbBoxes, MINIMAP_INSET.margin * L, MIN_GAP * L)
+        ? minimapFallback(
+            MAP_RECT,
+            size,
+            this.thumbBoxes,
+            MINIMAP_INSET.margin * L,
+            MIN_GAP * L,
+            this.moveZoneBox,
+          )
         : null;
     mm.relocate(spot);
     mm.setHidden(spot === null);
@@ -538,6 +550,8 @@ export class GameScene extends Phaser.Scene {
     this.minimap = new Minimap(this, this.kit, info.role === 'monster');
     this.edges = CAM_ZOOM > 1 ? new EdgeMarkers(this.kit) : null;
     this.thumbBoxes = [];
+    this.moveZoneBox = null;
+    this.minimapSpot = null;
     this.banners = new Banners(this.kit);
     // 첫 판 조작 안내는 키보드 · 마우스용이라 터치 모드에서는 만들지 않는다 (터치는 판 직전 안내 + 판 중 위치 표시, M12)
     this.tutorial = info.firstMatch && !device.touch ? new TutorialOverlay(this.kit, info) : null;
@@ -595,8 +609,10 @@ export class GameScene extends Phaser.Scene {
             this.minimapCovered = ids.has('minimap');
             this.placeMinimap();
           },
-          onThumbs: (boxes) => {
+          onThumbs: (boxes, zone, spot) => {
             this.thumbBoxes = boxes;
+            this.moveZoneBox = zone;
+            this.minimapSpot = spot;
             this.placeMinimap();
           },
         },

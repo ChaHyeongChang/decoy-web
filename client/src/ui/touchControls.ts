@@ -39,6 +39,8 @@ import {
   CAM_ZOOM,
   EDGE_BAND,
   HUD,
+  MAP_RECT,
+  MINIMAP_INSET,
   MIN_GAP,
   MIN_TARGET,
   MOVE_ZONE_RATIO,
@@ -79,9 +81,10 @@ export interface TouchControlsOptions {
     onCovered?: (ids: ReadonlySet<string>) => void;
     /**
      * 다시 배치할 때마다 엄지 대상 사각형 (논리 px, thumbAvoidBoxes — 버튼 이름표 · 이동 스틱 고리까지): 화면 밖 화살표 · 옮긴
-     * 미니맵이 엄지 버튼 아래로 숨지 않게 피한다
+     * 미니맵이 엄지 버튼 아래로 숨지 않게 피한다. zone = 이동 영역(판 중 옮기는 미니맵이 그 위에 놓이지 않게), minimap = 조작 배치에서
+     * 옮긴 맵 창 안 미니맵 틀 (옮기지 않았으면 null — 플레이테스트 a-5)
      */
-    onThumbs?: (boxes: readonly Box[]) => void;
+    onThumbs?: (boxes: readonly Box[], zone: Box, minimap: Box | null) => void;
   };
 }
 
@@ -152,6 +155,8 @@ export interface TouchLayout {
   buttons: Partial<Record<TouchButtonId, Box>>;
   /** 저장한 조작 배치를 놓을 자리가 없어 기본 배치(반전이면 뒤집은 것)로 돌아갔다 (그때만 true) */
   fallback?: true;
+  /** 조작 배치에서 옮긴 맵 창 안 미니맵 틀 (옮겼을 때만 — 없으면 판 HUD 배치가 정한 자리) */
+  minimap?: Box;
 }
 
 /** touchLayout 추가 선택 (설정 화면 통합). 모두 빠지면 예전 배치 그대로 */
@@ -162,8 +167,14 @@ export interface TouchLayoutOptions {
   menu?: boolean;
   /** 저장한 조작 배치 (좌우 반전 · 옮긴 조작). 없거나 기본이면 기본 배치 */
   custom?: TeamLayout | null;
-  /** 옮긴 조작 · 반대쪽 이동 영역이 더 피할 사각형 (창 CSS px — 맵 창 안 미니맵처럼 avoid에 없는 HUD) */
+  /** 이동 영역 · 옮긴 조작이 더 피할 사각형 (창 CSS px — avoid에 없는 HUD) */
   obstacles?: readonly Box[];
+  /**
+   * 맵 창 안 미니맵 (창 CSS px, 옆 칸 미니맵 화면은 넘기지 않는다): frame = 판 HUD 배치가 정한 틀(좌우 반전까지 한 자리), map = 맵
+   * 사각형. 이동 영역 · 옮긴 조작이 틀을 피한다(탭해서 크게 보기가 이동 영역에 먹히지 않게 — 플레이테스트 a-5). 저장한 조작 배치에
+   * 지도 자리(items.minimap)가 있으면 그 자리로 옮긴다(결과 minimap, 맵 창 안에서만 — minimapRange)
+   */
+  minimap?: { frame: Box; map: Box } | null;
   /** 판 화면 논리 폭 / 높이 (전체 화면 버튼 세로 줄 판단). 없으면 지금 배치(VIEW_W / VIEW_H) */
   viewRatio?: number;
   /**
@@ -182,7 +193,8 @@ export interface TouchLayoutOptions {
  * avoid(M12) = 판 HUD 부품 사각형(창 CSS px): 이동 영역은 그와 가로로 겹치는 부품 아래에서 시작한다(이동 스틱 그림이 들어갈
  * 높이는 남긴다). 버튼 무리 · 시스템 버튼 자리는 판 HUD 배치(layout.touchHudPlan)가 같은 식으로 비워 두었다.
  * opts(설정 화면 통합): 조이스틱 크기 · 판 중 설정 버튼 · 저장한 조작 배치. 배치를 바꿨으면 기본 배치 위에 덮어(controlLayout
- * resolveLayout — 범위 안, 다른 조작 · HUD(avoid + obstacles)와 안 겹침) 이동 영역은 이동 스틱 고리가 있는 쪽 40% 띠가 된다
+ * resolveLayout — 범위 안, 다른 조작 · HUD(avoid + obstacles + 맵 창 안 미니맵)와 안 겹침) 이동 영역은 이동 스틱 고리가 있는 쪽
+ * 40% 띠가 된다. 맵 창 안 미니맵 틀(opts.minimap)은 기본 배치의 이동 영역도 피한다 (플레이테스트 a-5)
  */
 export function touchLayout(
   w: number,
@@ -243,8 +255,14 @@ export function touchLayout(
         : { x: rowLeft - gap - sysW, y: sysY, w: sysW, h: sysH };
   }
   const moveR = t.moveR;
+  const custom = opts.custom ?? null;
+  const mini = opts.minimap ?? null;
+  // 조작 배치에서 옮기는 지도 (맵 창 안 미니맵일 때만 — 옆 칸 미니맵 화면에서는 저장한 자리를 쓰지 않는다)
+  const moving = mini && custom?.items.minimap ? mini : null;
+  // 피할 것 = 판 HUD + 맵 창 안 미니맵 (옮기는 지도는 놓은 자리로 다시 피한다)
+  const hud = [...avoid, ...(opts.obstacles ?? []), ...(mini && !moving ? [mini.frame] : [])];
   const zoneAt = (side: Side, r: number, list: readonly Box[]): Box => moveZone(w, safe, side, r, list);
-  const zone = zoneAt('left', moveR, avoid);
+  const zone = zoneAt('left', moveR, hud);
   const def: TouchLayout = {
     safe,
     zone,
@@ -254,18 +272,19 @@ export function touchLayout(
     dashR: Math.round(btn * 0.9),
     buttons,
   };
-  const custom = opts.custom ?? null;
   if (isDefaultLayout(custom)) return def;
-  // 조작 배치: 기본 배치 위에 덮는다. 피할 것 = 판 HUD + 맵 창 안 미니맵
-  const hud = [...avoid, ...(opts.obstacles ?? [])];
+  // 조작 배치: 기본 배치 위에 덮는다
   const rules: PlaceRules = {
     range: moveRange(safe, pad),
     hud,
-    zone: (side, r) => zoneAt(side, r, hud),
+    zone: (side, r, extra = []) => zoneAt(side, r, [...hud, ...extra]),
     midX: safe.x + safe.w / 2,
+    ...(moving ? { mapRange: minimapRange(moving.map, safe) } : {}),
   };
-  const res = resolveLayout(controlBoxes(def), custom, safe, rules);
+  const res = resolveLayout(controlBoxes(def), custom, safe, rules, moving ? { minimap: moving.frame } : {});
   const b = res.boxes;
+  // 옮긴 지도 (기본 배치로 돌아갔으면 판 HUD 배치의 틀): 이동 영역이 그 아래에서 시작한다
+  const mm = b.minimap;
   const ring = b.move ?? ringOf(def);
   const R = ring.w / 2;
   const out: Partial<Record<TouchButtonId, Box>> = {};
@@ -275,14 +294,25 @@ export function touchLayout(
   }
   return {
     safe,
-    zone: rules.zone(sideOf(ring, rules.midX), R),
+    zone: rules.zone(sideOf(ring, rules.midX), R, mm ? [mm] : []),
     moveR: R,
     moveHome: { x: ring.x + R, y: ring.y + R },
     aim: b.attack ?? null,
     dashR: def.dashR,
     buttons: out,
     ...(res.fallback ? { fallback: true as const } : {}),
+    ...(mm && !res.fallback ? { minimap: mm } : {}),
   };
+}
+
+/**
+ * 조작 배치에서 지도(맵 창 안 미니맵)를 놓을 수 있는 범위 (창 CSS px): 맵 사각형 안쪽 MINIMAP_INSET.margin, 아래는 가장자리 띠
+ * (맨 아래 안내 줄 자리) 위까지. 늘 떠 있는 HUD는 맵 밖이라는 규칙(R15)의 예외가 '맵 창 안 미니맵' 하나라 맵 창 밖으로는 못 옮긴다
+ */
+export function minimapRange(map: Box, safe: Box): Box {
+  const M = MINIMAP_INSET.margin;
+  const y = map.y + M;
+  return { x: map.x + M, y, w: map.w - M * 2, h: Math.min(map.y + map.h - M, safe.y + safe.h) - y };
 }
 
 /**
@@ -398,7 +428,7 @@ export function effectiveTouchLayout(
       stickScale: tuning.stickScale,
       menu,
       custom: { mirror: tuning.mirror, items: saved?.items ?? {} },
-      obstacles: hud.inset ? [hud.inset] : [],
+      minimap: hud.inset ? { frame: hud.inset, map: hud.map } : null,
       viewRatio: hud.layout.viewW / hud.layout.viewH,
       sysRows: hud.sysRows,
     },
@@ -683,14 +713,22 @@ export class TouchControls {
     this.apply();
   }
 
-  /** 맵 창 안 미니맵 틀 (창 CSS px): 옮긴 조작이 피한다 (판 HUD rects에는 없다). 따라가는 카메라에서 옆 칸에 자리가 없을 때만 */
-  private insetBoxes(): Box[] {
+  /**
+   * 맵 창 안 미니맵 틀 · 맵 사각형 (창 CSS px): 이동 영역 · 옮긴 조작이 틀을 피한다 (판 HUD rects에는 없다). 따라가는 카메라에서
+   * 옆 칸에 자리가 없을 때만
+   */
+  private insetBox(): { frame: Box; map: Box } | null {
     const plan = HUD.touch ? (this.team === 'monster' ? HUD.touch.monster : HUD.touch.survivor) : null;
     const c = this.opts.hud?.canvas();
     const i = plan?.minimapInset;
-    if (!i || !c || CAM_ZOOM <= 1) return [];
-    const f = minimapInsetFrame(i, HUD.s);
-    return [{ x: c.left + f.x * c.k, y: c.top + f.y * c.k, w: f.w * c.k, h: f.h * c.k }];
+    if (!i || !c || CAM_ZOOM <= 1) return null;
+    const css = (r: Box): Box => ({
+      x: c.left + r.x * c.k,
+      y: c.top + r.y * c.k,
+      w: r.w * c.k,
+      h: r.h * c.k,
+    });
+    return { frame: css(minimapInsetFrame(i, HUD.s)), map: css(MAP_RECT) };
   }
 
   /** 디버그 · 시험: 지금 배치 (getControlLayout) */
@@ -704,7 +742,8 @@ export class TouchControls {
     const L = this.layout;
     if (!L) return null;
     const hud = this.hudBoxes();
-    for (const b of this.insetBoxes()) hud.push({ id: 'minimapInset', b });
+    const mini = L.minimap ?? this.insetBox()?.frame;
+    if (mini) hud.push({ id: 'minimapInset', b: mini });
     return { team: this.team, mirror: this.custom.mirror, fallback: L.fallback === true, layout: L, hud };
   }
 
@@ -936,7 +975,7 @@ export class TouchControls {
         stickScale: this.stickScale,
         menu: this.parts.has('menu'),
         custom: this.custom,
-        obstacles: isDefaultLayout(this.custom) ? [] : this.insetBoxes(),
+        minimap: this.insetBox(),
         sysRows: HUD.touch ? HUD.touch[this.team].sysRows : 1,
       },
     );
@@ -945,13 +984,13 @@ export class TouchControls {
     const hud = this.opts.hud;
     const c = hud?.canvas();
     if (hud?.onThumbs && c && c.k > 0) {
-      const thumbs = thumbAvoidBoxes(L).map((b) => ({
+      const toL = (b: Box): Box => ({
         x: (b.x - c.left) / c.k,
         y: (b.y - c.top) / c.k,
         w: b.w / c.k,
         h: b.h / c.k,
-      }));
-      hud.onThumbs(thumbs);
+      });
+      hud.onThumbs(thumbAvoidBoxes(L).map(toL), toL(L.zone), L.minimap ? toL(L.minimap) : null);
     }
     const place = (el: HTMLElement | undefined, b: Box | null | undefined): void => {
       if (el && b)
