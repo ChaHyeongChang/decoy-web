@@ -44,7 +44,14 @@ import { InputLog, InputSampler } from '../input';
 import { matchMenu, toggleMatchMenu } from '../matchMenu';
 import { onPrefsChange, pref, shakeScaleOf, type PrefKey } from '../prefs';
 import { AimHold, aimAnchor } from '../aimHold';
-import { applyDashStart, applyWindupLock, cooldownAheadSec, predictMonsterPress } from '../localActions';
+import {
+  InputLagBase,
+  applyDashStart,
+  applyWindupLock,
+  cooldownAheadSec,
+  predictMonsterPress,
+  type MonsterPressInput,
+} from '../localActions';
 import { WindupShow } from '../windupShow';
 import { COLOR } from '../render/colors';
 import { cullable } from '../render/camera';
@@ -313,6 +320,8 @@ export class GameScene extends Phaser.Scene {
   private screenFx!: ScreenEffects;
   /** 괴물: 내 화면의 공격 준비 표시 판단 (예측 → 서버 확인 → 끝에서 대기, windupShow.ts) */
   private windupShow!: WindupShow;
+  /** 괴물: 서버가 내 입력을 평소 몇 틱 늦게 처리하는가 (쿨타임 어림의 끊김 보정, localActions.ts) */
+  private inputLag!: InputLagBase;
   /** 방금 받은 스냅샷의 attackStart가 예측하지 못한 준비인가 (준비 소리를 이벤트에서 낸다) */
   private windupUnheard = false;
   /** 판 중 FPS 감시를 하는가 (세션 상태는 sessionAutoDowngrade: 느리면 한 단계 내리고 효과를 확인한다) */
@@ -550,6 +559,7 @@ export class GameScene extends Phaser.Scene {
     this.applyFlash();
     this.chipWanted = pref('perfChip');
     this.windupShow = new WindupShow(balance.monster.attack.windup * 1000, app.dt * 1000);
+    this.inputLag = new InputLagBase();
     this.spottedEdge = this.kit.slice(38);
     this.spottedEdge.hollow = true;
     this.spottedEdge.set('spot', 0, 0, VIEW_W, VIEW_H).show(false);
@@ -630,6 +640,8 @@ export class GameScene extends Phaser.Scene {
       this.eventAgeMs = age;
       // 괴물 공격 준비 표시: 오래된 스냅샷도 상태는 따라간다 (서버 확인 · 거절 · 타격 결과 · 기절 — windupShow.ts)
       const mine = e.snap.you.mon;
+      // 쿨타임 어림의 끊김 보정: 서버 틱 − ack의 최근 기준선 (오래된 스냅샷도 센다)
+      if (mine !== null) this.inputLag.note(e.snap.tick, e.snap.ack);
       this.windupUnheard =
         mine !== null &&
         this.windupShow.snapshot(e.snap.ack, mine.windup, e.snap.events, app.lastSnapAt, app.link.rtt);
@@ -1299,27 +1311,43 @@ export class GameScene extends Phaser.Scene {
    */
   private touchCtx(): TouchFrameCtx | undefined {
     if (!this.touch) return undefined;
-    const app = this.app;
     const nowMs = performance.now();
-    const st = app.predictor?.state;
+    // 이 프레임의 seq는 이미 올렸다 (stepInput). 어림은 마우스 · 키 경로(predictMonster)와 같은 monsterPressBase를 거친다
+    const base = this.monsterPressBase(this.seq, nowMs);
+    if (!base) return { nowMs, face: this.app.predictor?.state?.face ?? 0, canAttack: false, canDash: false };
+    return {
+      nowMs,
+      face: base.move.face,
+      canAttack: predictMonsterPress({ ...base, pressed: BTN.ATTACK }).attack,
+      canDash: predictMonsterPress({ ...base, pressed: BTN.DASH }).dash,
+    };
+  }
+
+  /**
+   * 괴물 행동 어림의 입력 (터치 touchCtx · 마우스 · 키 predictMonster가 함께 쓴다 — 한쪽만 다른 식이 되지 않게): 입력 seq를 서버가
+   * 처리할 때의 상황. 쿨타임은 입력 줄로 세고(마지막 스냅샷이 본 틱 뒤 이 입력을 서버가 처리할 때까지 흐를 틱 수), 올라가는 길이
+   * 끊겨 서버가 평소보다 뒤처진 틱 수는 뺀다 (cooldownAheadSec · InputLagBase). 예측 상태 · 스냅샷이 없으면 null
+   */
+  private monsterPressBase(seq: number, nowMs: number): Omit<MonsterPressInput, 'pressed'> | null {
+    const app = this.app;
     const snap = app.lastSnap;
     const mon = snap?.you.mon;
+    const st = app.predictor?.state;
     const balance = app.balance;
-    if (!st || !snap || !mon || !balance)
-      return { nowMs, face: st?.face ?? 0, canAttack: false, canDash: false };
-    const base = {
+    if (!snap || !mon || !st || !balance) return null;
+    return {
       move: st,
       mon,
       balance,
-      // 이 프레임의 seq는 이미 올렸다 (stepInput): 쿨타임은 입력 줄로 센다 (cooldownAheadSec)
-      ageSec: cooldownAheadSec(this.seq, snap.ack, app.dt, nowMs - app.lastSnapAt, app.link.rtt),
+      ageSec: cooldownAheadSec(
+        seq,
+        snap.ack,
+        app.dt,
+        nowMs - app.lastSnapAt,
+        app.link.rtt,
+        this.inputLag.excess(snap.tick, snap.ack),
+      ),
       localWindupActive: this.windupShow.active,
-    };
-    return {
-      nowMs,
-      face: st.face,
-      canAttack: predictMonsterPress({ ...base, pressed: BTN.ATTACK }).attack,
-      canDash: predictMonsterPress({ ...base, pressed: BTN.DASH }).dash,
     };
   }
 
@@ -1387,24 +1415,15 @@ export class GameScene extends Phaser.Scene {
 
   /**
    * 괴물: 공격 준비 · 돌진을 서버 확인 전에 먼저 보여 준다 (판정은 서버, 어긋나면 보정). at = 이 입력 틱의 명목 시각.
-   * 쿨타임은 입력 줄로 센다(cooldownAheadSec): 마지막 스냅샷이 본 틱 뒤 이 입력을 서버가 처리할 때까지 흐를 틱 수
+   * 어림은 터치 경로와 같은 monsterPressBase를 거친다 (쿨타임은 입력 줄로 센다)
    */
   private predictMonster(frame: InputFrame, at: number): void {
     const app = this.app;
-    const snap = app.lastSnap;
-    const mon = snap?.you.mon;
-    const st = app.predictor?.state;
-    const balance = app.balance;
-    if (!snap || !mon || !st || !balance || !app.predictor) return;
     const now = performance.now();
-    const res = predictMonsterPress({
-      pressed: frame.pressed,
-      move: st,
-      mon,
-      balance,
-      ageSec: cooldownAheadSec(frame.seq, snap.ack, app.dt, now - app.lastSnapAt, app.link.rtt),
-      localWindupActive: this.windupShow.active,
-    });
+    const base = this.monsterPressBase(frame.seq, now);
+    if (!base || !app.predictor) return;
+    const { move: st, balance } = base;
+    const res = predictMonsterPress({ ...base, pressed: frame.pressed });
     if (res.attack) {
       app.predictor.predictAction(frame.seq, applyWindupLock(balance));
       this.windupShow.press(frame.seq, at, st.face, app.link.rtt);

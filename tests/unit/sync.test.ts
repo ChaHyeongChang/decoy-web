@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { BTN, type MoveEnv } from '@decoy/shared';
 import {
+  INPUT_LAG,
+  InputLagBase,
   applyDashStart,
   applyWindupLock,
   cooldownAheadSec,
@@ -179,6 +181,49 @@ describe('괴물 행동 즉시 피드백 어림 (M8)', () => {
     // 잘못된 값(음수)은 0으로 본다
     expect(cooldownAheadSec(107, 100, dt, -500, -100)).toBeCloseTo(6 * dt, 12);
     expect(cooldownAheadSec(101, 100, dt, -500, -100)).toBe(0);
+  });
+
+  it('올라가는 길 끊김 보정 (검토): 입력 줄에서 서버가 평소보다 뒤처진 틱 수(excessTicks)를 뺀다 — 시계 어림 아래로는 내려가지 않는다', () => {
+    const dt = 1 / balance.network.serverTickHz;
+    // 끊긴 동안 서버가 4틱 굶어 ack가 멈췄다: 대기 입력 10개 중 4개는 한꺼번에 처리된다 → 실제로 흐를 틱은 6
+    expect(cooldownAheadSec(111, 100, dt, 25, 200, 4)).toBeCloseTo(6 * dt, 12);
+    expect(cooldownAheadSec(111, 100, dt, 25, 200)).toBeCloseTo(10 * dt, 12);
+    // 다 빼도 시계 어림(0.025 + 0.1초)보다 작게 보지 않는다
+    expect(cooldownAheadSec(111, 100, dt, 25, 200, 20)).toBeCloseTo(0.125, 12);
+    // 음수는 0으로 본다
+    expect(cooldownAheadSec(111, 100, dt, 0, 0, -3)).toBeCloseTo(10 * dt, 12);
+  });
+
+  it('InputLagBase: 기준선 = 최근 40개 스냅샷의 서버 틱 − ack 최솟값, excess = 지금 값이 기준선보다 한 틱 넘게 뒤처진 만큼', () => {
+    const lag = new InputLagBase();
+    // 스냅샷이 없으면 0
+    expect(lag.excess(100, 90)).toBe(0);
+    // 판 초반 ack 0(내 입력을 아직 처리하지 않음)은 서버 틱만 작아 기준선을 낮추므로 세지 않는다
+    lag.note(3, 0);
+    expect(lag.excess(100, 90)).toBe(0);
+    // 평소: 서버 틱 − ack가 6 ~ 7 (지터로 한 틱 흔들림)
+    for (let i = 0; i < 20; i += 1) lag.note(200 + i, 200 + i - 6 - (i % 2));
+    expect(lag.excess(300, 294)).toBe(0);
+    expect(lag.excess(300, 293)).toBe(0);
+    // 끊김: 서버 틱 − ack가 11 → 기준선 6 + 여유(한 틱)를 넘긴 4틱
+    expect(INPUT_LAG.slackTicks).toBe(1);
+    expect(lag.excess(300, 289)).toBe(4);
+    // 그 스냅샷을 세어도 기준선은 그대로 (최솟값)
+    lag.note(300, 289);
+    expect(lag.excess(300, 289)).toBe(4);
+    // ack 0인 스냅샷에서는 보정하지 않는다
+    expect(lag.excess(300, 0)).toBe(0);
+
+    // 지연이 늘어 그대로 머물면: 옛 값이 창(40개) 안에 하나라도 있는 동안은 옛 기준선, 모두 밀려나면 새 기준선
+    const moved = new InputLagBase();
+    for (let i = 0; i < INPUT_LAG.window; i += 1) moved.note(100 + i, 100 + i - 6);
+    for (let i = 0; i < INPUT_LAG.window - 1; i += 1) moved.note(200 + i, 200 + i - 11);
+    expect(moved.excess(300, 289)).toBe(4);
+    moved.note(300, 289);
+    expect(moved.excess(301, 290)).toBe(0);
+    // 지연이 줄면 바로 새 기준선 (보정은 0 그대로)
+    moved.note(302, 297);
+    expect([moved.excess(303, 298), moved.excess(303, 291)]).toEqual([0, 6]);
   });
 });
 

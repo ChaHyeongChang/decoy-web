@@ -100,13 +100,52 @@ describe('공격 준비 표시 (WindupShow)', () => {
 
   it('바로 앞의 예측하지 못한 누름이 받아들여졌으면(ack < seq인데 서버가 준비 중) 그 준비를 내 예측으로 잇는다 — 소리는 누를 때 한 번', () => {
     const s = predicted();
+    for (let q = 100; q <= 103; q += 1) s.noteStep(q, q, 0);
+    const before = s.view(1150)?.fill ?? Number.NaN;
     expect(s.snapshot(98, 0.3667, [START], 1150, RTT)).toBe(false);
-    expect([s.phase, s.view(1150)?.startAt]).toEqual(['confirmed', 1000]);
+    expect(s.phase).toBe('confirmed');
     // 방향은 서버가 그 앞 누름에서 고정한 내 방향을 따른다 (내가 예측한 누름의 방향이 아니다)
     expect(s.view(1150)?.dir).toBeNull();
+    // 채움은 줄지 않는다 (앞 누름 기준으로 당겨져 한 번 앞으로 뛴다 — 아래 시험)
+    expect(s.view(1150)?.fill).toBeGreaterThanOrEqual(before);
     // 내 입력(100)은 준비 중이라 서버가 버린다: 표시는 그대로 타격 결과까지
     s.snapshot(100, 0.3, [], 1220, RTT);
     expect(s.phase).toBe('confirmed');
+    s.snapshot(109, 0, [HIT], 1600, RTT);
+    expect(s.phase).toBe('idle');
+  });
+
+  it('앞 누름 P0이 받아들여졌으면 채움 시작 · 세울 자리를 P0 기준으로 다시 잡는다 — P0 = ack + 남은 준비 틱 − 11, 서버는 P0 + 11번째 입력에서 타격한다 (검토)', () => {
+    // 스냅샷이 P0을 처리한 바로 그 틱 (남은 준비 11틱): P0 = 98. 내 누름(100)보다 두 틱 앞
+    const s = predicted();
+    for (let q = 100; q <= 103; q += 1) s.noteStep(q, q, 0);
+    s.snapshot(98, 0.3667, [START], 1150, RTT);
+    const startAt = 1000 - 2 * DT;
+    expect(s.view(1150)?.startAt).toBeCloseTo(startAt, 9);
+    expect(s.view(1150)?.fill).toBeCloseTo((1150 - startAt) / W, 9);
+    for (let q = 104; q <= 115; q += 1) s.noteStep(q, q, 0);
+    // 다 차는 순간도 P0 기준 (내 누름 기준이면 두 틱 늦게 찼다)
+    expect(s.view(startAt + W - 0.01)?.hold).toBe(false);
+    const v = s.view(startAt + W + 1);
+    // 대기 자리 = P0 + 11 = 109번째 입력의 자리 (내 누름 기준이면 111 — 베기 호보다 두 틱 앞에 섰다)
+    expect([v?.hold, v?.fill, v?.anchor]).toEqual([true, 1, { x: 98 + STRIKE_STEPS, y: 0 }]);
+
+    // 스냅샷이 P0을 처리하고 4틱 뒤 (남은 준비 7틱): P0 = 98 + 7 − 11 = 94. 타격 입력 105는 내 화면이 이미 지났다(106까지 적용) →
+    // 그 자리를 모르니 세우지 않는다 (대기 중에도 나를 따라간다 — 뒤 입력의 자리를 잘못 세우지 않는다)
+    const late = predicted();
+    for (let q = 100; q <= 106; q += 1) late.noteStep(q, q, 0);
+    late.snapshot(98, 0.2333, [], 1250, RTT);
+    expect(late.phase).toBe('confirmed');
+    expect(late.view(1250)?.startAt).toBeCloseTo(1000 - 6 * DT, 9);
+    for (let q = 107; q <= 115; q += 1) late.noteStep(q, q, 0);
+    expect([late.view(1400)?.hold, late.view(1400)?.anchor]).toEqual([true, null]);
+
+    // 남은 준비를 모르면(준비 시작 이벤트만, 준비 값 0): 시작은 그대로, 자리는 세우지 않는다
+    const unknown = predicted();
+    unknown.snapshot(98, 0, [START], 1150, RTT);
+    expect([unknown.phase, unknown.view(1150)?.startAt]).toEqual(['confirmed', 1000]);
+    for (let q = 100; q <= 115; q += 1) unknown.noteStep(q, q, 0);
+    expect([unknown.view(1400)?.hold, unknown.view(1400)?.anchor]).toEqual([true, null]);
   });
 
   it('거절: 서버가 그 입력을 처리했는데(ack ≥ seq) 준비 중이 아니면 끈다 — 새 누름은 다시 예측할 수 있다', () => {

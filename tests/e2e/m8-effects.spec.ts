@@ -419,6 +419,32 @@ function expectPredictedAndHeld(t: Trial, label: string): void {
   expect(t.sounds, `${label}: 준비 소리`).toBe(1);
 }
 
+/**
+ * 서버가 받지 않은 누름: 예측으로 범위가 켜졌다면(헛 준비) 서버 확인 전에 켜졌고, 서버 확인 스냅샷 뒤 두 프레임 안에 꺼져 다시
+ * 켜지지 않으며 다 차지 않는다(준비 시간을 다 채우거나 끝에서 기다리지 않는다). 켜졌는가(헛 준비였는가)를 돌려준다
+ */
+function expectOffWhenRejected(t: Trial, label: string): boolean {
+  const o = outcome(t);
+  expect(o.accepted, `${label}: 서버가 받지 않음`).toBe(false);
+  if (o.ackAt === null) throw new Error(`${label}: 서버 확인 스냅샷이 오지 않았다`);
+  const ackAt = o.ackAt;
+  const on = t.frames.filter((f) => f.range);
+  if (on.length === 0) return false;
+  expect(on[0]!.t, `${label}: 범위가 서버 확인 뒤에 켜졌다`).toBeLessThan(ackAt);
+  const after = t.frames.filter((f) => f.t > ackAt);
+  expect(after.length, `${label}: 서버 확인 뒤 프레임`).toBeGreaterThanOrEqual(4);
+  expect(
+    after.slice(2).some((f) => f.range),
+    `${label}: 서버 확인 뒤에도 범위가 남았다`,
+  ).toBe(false);
+  expect(
+    on.every((f) => f.fill < 1),
+    `${label}: 다 차지 않는다`,
+  ).toBe(true);
+  expect(t.sounds, `${label}: 준비 소리`).toBeLessThanOrEqual(1);
+  return true;
+}
+
 test(`왕복 ${LAG}ms: 쿨타임이 끝나는 무렵의 공격도 누른 입력 틱에 준비가 보이고, 타격 결과까지 이어지며, 서버가 거절한 누름은 꺼진다`, async ({
   browser,
 }) => {
@@ -457,6 +483,9 @@ test(`왕복 ${LAG}ms: 쿨타임이 끝나는 무렵의 공격도 누른 입력 
   // 2) 쿨타임이 끝나는 무렵: 옛 어림으로는 아직 쿨타임인 순간(서버는 받아들인다)에 누른다
   const edges: Trial[] = [];
   const skipped: string[] = [];
+  /** 끝 무렵 누름 가운데 서버가 받지 않은 것 · 그중 예측으로 범위가 켜졌던 것(헛 준비) */
+  let edgeRejected = 0;
+  let edgeFalse = 0;
   for (let cycle = 0; cycle < 14 && edges.length < 2; cycle += 1) {
     const t = await page.evaluate(
       (dtS) => (window as unknown as { __WPROBE__: WindupProbe }).__WPROBE__.edge(dtS),
@@ -471,8 +500,17 @@ test(`왕복 ${LAG}ms: 쿨타임이 끝나는 무렵의 공격도 누른 입력 
         edges.push(t);
         continue;
       }
-      skipped.push(o.accepted ? '누른 뒤 입력 틱 전에 새 스냅샷' : '서버가 받지 않음');
-      if (o.accepted) continue;
+      if (o.accepted) {
+        skipped.push('누른 뒤 입력 틱 전에 새 스냅샷');
+        continue;
+      }
+      // 서버가 받지 않은 끝 무렵 누름: 헛 준비였다면 서버 확인에서 바로 꺼져야 한다 (건너뛰기만 하지 않는다 — 검토)
+      edgeRejected += 1;
+      const falsePredicted = expectOffWhenRejected(t, `쿨타임 끝 무렵 (서버가 받지 않음 ${edgeRejected})`);
+      if (falsePredicted) edgeFalse += 1;
+      skipped.push(
+        falsePredicted ? '서버가 받지 않음(헛 준비 — 서버 확인에서 꺼짐)' : '서버가 받지 않음(예측 안 함)',
+      );
     } else skipped.push('조건에 맞는 스냅샷 없음');
     // 공격이 나가지 않았다: 쿨타임이 끝난 뒤 한 번 눌러 다음 쿨타임을 시작한다
     await ready();
@@ -494,6 +532,7 @@ test(`왕복 ${LAG}ms: 쿨타임이 끝나는 무렵의 공격도 누른 입력 
           return `${t.kind} 누름 → 범위 ${((on?.t ?? NaN) - t.press).toFixed(0)}ms · 서버 확인 ${((o.ackAt ?? NaN) - t.press).toFixed(0)}ms · 타격 결과 ${((o.hitAt ?? NaN) - t.press).toFixed(0)}ms`;
         })
         .join(' / ') +
+      ` · 끝 무렵 누름 중 서버가 받지 않음 ${edgeRejected} (그중 헛 준비 ${edgeFalse})` +
       (skipped.length > 0 ? ` (건너뜀: ${skipped.join(' · ')})` : ''),
   );
 
@@ -501,25 +540,12 @@ test(`왕복 ${LAG}ms: 쿨타임이 끝나는 무렵의 공격도 누른 입력 
   await ready();
   const rejectFrom = truthLogSize();
   const rejected = await probePress('frozen');
-  const ro = outcome(rejected);
-  expect(ro.accepted, '거절: 서버가 받지 않음').toBe(false);
-  if (ro.ackAt === null) throw new Error('거절: 서버 확인 스냅샷이 오지 않았다');
-  const ackAt = ro.ackAt;
+  // 서버 확인 전에 떴다가 서버 확인이 온 뒤 두 프레임 안에 꺼지고 다시 켜지지 않는다 (준비 시간을 다 채우거나 끝에서 기다리지 않는다)
+  expect(expectOffWhenRejected(rejected, '거절'), '거절: 예측한 준비가 떴다').toBe(true);
   const on = rejected.frames.filter((f) => f.range);
   expect(on.length, '거절: 예측한 준비가 떴다').toBeGreaterThanOrEqual(2);
-  expect(on[0]!.t, '거절: 서버 확인 전에 떴다').toBeLessThan(ackAt);
-  // 서버 확인이 온 뒤 두 프레임 안에 꺼지고 다시 켜지지 않는다 (준비 시간을 다 채우거나 끝에서 기다리지 않는다)
-  const after = rejected.frames.filter((f) => f.t > ackAt);
-  expect(after.length, '거절: 서버 확인 뒤 프레임').toBeGreaterThanOrEqual(4);
-  expect(
-    after.slice(2).some((f) => f.range),
-    '거절: 서버 확인 뒤에도 범위가 남았다',
-  ).toBe(false);
   expect(on[on.length - 1]!.t - rejected.inputAt, '거절: 준비 시간보다 먼저 꺼진다').toBeLessThan(WINDUP_MS);
-  expect(
-    on.every((f) => f.fill < 1),
-    '거절: 다 차지 않는다',
-  ).toBe(true);
+  expect(rejected.sounds, '거절: 준비 소리 (누를 때 한 번)').toBe(1);
   // 서버 정답 기록: 그 누름 뒤 준비가 시작된 틱이 없다
   expect(truthSince(rejectFrom, code).filter((f) => (f.monster?.windup ?? 0) > 0)).toEqual([]);
   await sendTest(page, { kind: 'freeze', target: you, frozen: false });

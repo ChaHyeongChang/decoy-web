@@ -32,10 +32,51 @@ export function inputAheadSec(seq: number, ack: number, dt: number): number {
   return Math.max(0, seq - ack - 1) * dt;
 }
 
+/** 입력 줄 어림의 끊김 보정 (판정 수치가 아니라 내 화면 예측의 어림 값이라 balance.json이 아니라 여기 둔다 — WINDUP_SHOW와 같다) */
+export const INPUT_LAG = {
+  /** 기준선(스냅샷의 서버 틱 − ack 가운데 가장 작은 값)을 볼 최근 스냅샷 수 (20Hz면 2초) */
+  window: 40,
+  /** 기준선보다 이만큼(틱)까지 뒤처진 것은 지터로 보고 입력 줄을 그대로 센다 */
+  slackTicks: 1,
+} as const;
+
 /**
- * 쿨타임 어림에 쓰는 '흐를 시간' (초): 입력 줄로 센 값(inputAheadSec). 다만 예전 시계 어림(스냅샷을 받은 뒤 흐른 시간 sinceSnapMs
- * + 왕복 rttMs / 2 — 스냅샷이 오는 편도 시간이 빠져 늘 실제보다 짧다)보다 작게 보지는 않는다: 탭이 잠깐 멈췄다 깨어 입력 틱을
- * 건너뛰면(한 번에 따라잡는 틱 수에 상한이 있다) 그 왕복 동안 입력 줄이 실제 시간보다 짧아져 예전 식보다도 모자란다
+ * 서버가 내 입력을 평소 몇 틱 늦게 처리하는가: 스냅샷의 '서버 틱 − ack'의 최근 최솟값 (플레이테스트 반영 a-4 검토).
+ * 입력 줄(inputAheadSec)은 '서버가 틱마다 내 입력을 하나씩 처리한다'를 전제로 한다. 올라가는 길이 잠깐 끊기면(와이파이 ·
+ * 이동통신의 재전송) 서버는 내 입력 없이 틱을 넘기고(ack가 멈춘다) 밀린 입력이 한꺼번에 오면 한 틱에 여럿을 처리한다(크레딧 ·
+ * 빚 · 큐 상한 — shared/src/sim/game.ts). 그 사이 스냅샷으로 센 입력 줄은 굶은 틱만큼 길어, 쿨타임 끝 무렵 누름을 서버가
+ * 버리는데 예측했다(헛 준비 범위 + 소리). 기준선보다 slackTicks 넘게 뒤처진 틱 수(excess)만큼은 입력 줄에서 뺀다.
+ * ack가 0인 스냅샷(내 입력을 아직 하나도 처리하지 않은 판 초반)은 서버 틱만 커 기준선을 낮추므로 세지 않는다
+ */
+export class InputLagBase {
+  private readonly ring: number[] = [];
+  private next = 0;
+  private min = Number.POSITIVE_INFINITY;
+
+  /** 스냅샷마다 (오래된 스냅샷도): tick = 서버 틱, ack = 서버가 처리한 내 마지막 입력 */
+  note(tick: number, ack: number): void {
+    if (ack <= 0) return;
+    const lag = tick - ack;
+    if (this.ring.length < INPUT_LAG.window) this.ring.push(lag);
+    else this.ring[this.next] = lag;
+    this.next = (this.next + 1) % INPUT_LAG.window;
+    let m = Number.POSITIVE_INFINITY;
+    for (const v of this.ring) if (v < m) m = v;
+    this.min = m;
+  }
+
+  /** 이 스냅샷(tick, ack)의 입력 줄이 평소보다 길게 센 틱 수 (0 이상) */
+  excess(tick: number, ack: number): number {
+    if (ack <= 0 || !Number.isFinite(this.min)) return 0;
+    return Math.max(0, tick - ack - this.min - INPUT_LAG.slackTicks);
+  }
+}
+
+/**
+ * 쿨타임 어림에 쓰는 '흐를 시간' (초): 입력 줄로 센 값(inputAheadSec)에서, 올라가는 길이 끊겨 서버가 평소보다 뒤처진 틱 수
+ * excessTicks(InputLagBase.excess)를 뺀다. 다만 예전 시계 어림(스냅샷을 받은 뒤 흐른 시간 sinceSnapMs + 왕복 rttMs / 2 — 스냅샷이
+ * 오는 편도 시간이 빠져 늘 실제보다 짧다)보다 작게 보지는 않는다: 탭이 잠깐 멈췄다 깨어 입력 틱을 건너뛰면(한 번에 따라잡는 틱
+ * 수에 상한이 있다) 그 왕복 동안 입력 줄이 실제 시간보다 짧아져 예전 식보다도 모자란다
  */
 export function cooldownAheadSec(
   seq: number,
@@ -43,8 +84,10 @@ export function cooldownAheadSec(
   dt: number,
   sinceSnapMs: number,
   rttMs: number,
+  excessTicks = 0,
 ): number {
-  return Math.max(inputAheadSec(seq, ack, dt), (Math.max(0, sinceSnapMs) + Math.max(0, rttMs) / 2) / 1000);
+  const line = inputAheadSec(seq, ack + Math.max(0, excessTicks), dt);
+  return Math.max(line, (Math.max(0, sinceSnapMs) + Math.max(0, rttMs) / 2) / 1000);
 }
 
 /** 서버 규칙(공격 · 돌진 가능 조건)을 그대로 따라 어림한다: 대기 · 기절 · 돌진 · 준비 중이면 불가, 쿨타임이 남으면 불가 */

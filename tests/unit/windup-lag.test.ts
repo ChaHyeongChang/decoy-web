@@ -4,9 +4,12 @@
 //     — 옛 식(스냅샷을 받은 뒤 흐른 시간 + 왕복 / 2)은 편도 지연만큼 모자라 약 왕복 / 2 폭의 창에서 서버를 기다렸다
 //  ② 예측 → 서버 확인 → 끝에서 대기 → 타격 결과까지 표시가 끊기지 않고(시작 시각 유지 · 소리 한 번), 거절 · 기절이면 꺼진다
 //  ③ 판정은 그대로다: 준비 시작 틱 + 11틱에 타격, 예측을 끈 클라이언트와 서버 쪽 결과가 같다
+//  ④ 올라가는 길이 잠깐 끊긴 뒤(서버가 굶었다가 밀린 입력을 한 틱에 여럿 처리 — ack가 한꺼번에 뛴다)에도 헛 예측이 작다
+//     (InputLagBase: 서버 틱 − ack의 기준선보다 뒤처진 만큼은 입력 줄에서 뺀다, 검토)
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Rng } from '@decoy/shared';
 import { stunMonster } from '@decoy/shared/sim';
+import { cooldownAheadSec } from '../../client/src/localActions';
 import { loadTestBalance } from '../helpers/fixtures';
 import {
   LAG_SIM_TIMERS,
@@ -26,6 +29,9 @@ const STRIKE_AFTER_MS = (Math.round(WINDUP_MS / DT) - 1) * DT;
 
 /** 옛 쿨타임 어림 (고치기 전 GameScene.predictMonster): 스냅샷을 받은 뒤 흐른 시간 + 왕복 / 2 */
 const oldAgeSec: NonNullable<LagSimOptions['ageSec']> = (c) => (c.nowMs - c.lastSnapAt + c.lag / 2) / 1000;
+/** 끊김 보정 없는 입력 줄 어림 (검토 전 제품 식): excess를 넘기지 않는다 */
+const lineOnlyAgeSec: NonNullable<LagSimOptions['ageSec']> = (c) =>
+  cooldownAheadSec(c.seq, c.ack, DT / 1000, c.nowMs - c.lastSnapAt, c.lag);
 
 beforeEach(() => {
   vi.useFakeTimers(LAG_SIM_TIMERS);
@@ -49,16 +55,22 @@ const STEP_MS = 5;
 /** 칸 수 → 창 폭 (ms, 위상 평균) */
 const widthMs = (cells: number): number => (cells * STEP_MS) / PHASES;
 
+interface ScanOptions {
+  ageSec?: LagSimOptions['ageSec'];
+  /** 터치 조준 스틱 짧은 탭으로 누른다 */
+  touch?: boolean;
+  /** 올라가는 길 끊김: 쿨타임 끝 기준 endOff(ms, 음수 = 그 전)에 풀리는 dur ms 끊김 */
+  stall?: { dur: number; endOff: number };
+  /** 훑기 시작 (쿨타임 끝 기준 ms, 기본 −200) */
+  from?: number;
+}
+
 /**
  * 쿨타임 끝 무렵을 훑는다: 첫 공격 뒤, '서버 쿨타임이 0이 된 틱' 기준 −200 ~ +50ms에 5ms 간격으로 한 번 누른다(위상 6가지).
  * 조사 때의 시뮬레이션과 같은 위상 · 시드다(범위만 창이 생기는 구간으로 줄였다)
  */
-function scanCooldownEnd(
-  lag: number,
-  jitter: number,
-  ageSec?: LagSimOptions['ageSec'],
-  touch = false,
-): Windows {
+function scanCooldownEnd(lag: number, jitter: number, opts: ScanOptions = {}): Windows {
+  const { ageSec, touch = false, stall, from = -200 } = opts;
   const out: Windows = { late: 0, falsePos: 0, accepted: 0, n: 0 };
   for (let k = 0; k < PHASES; k += 1) {
     const rng = new Rng(900 + k);
@@ -73,9 +85,11 @@ function scanCooldownEnd(
     const probe = simulateLag({ ...base, presses: [{ at: 1000 }], until: 3400 });
     const cdEnd = probe.cdEnds[0];
     if (cdEnd === undefined) throw new Error('쿨타임 끝 없음');
-    for (let rel = -200; rel <= 50; rel += STEP_MS) {
+    const upStall = stall ? { from: cdEnd + stall.endOff - stall.dur, to: cdEnd + stall.endOff } : undefined;
+    for (let rel = from; rel <= 50; rel += STEP_MS) {
       const r = simulateLag({
         ...base,
+        upStall,
         presses: [{ at: 1000 }, { at: cdEnd + rel, touch }],
         until: cdEnd + rel + 700,
       });
@@ -132,8 +146,8 @@ describe('쿨타임 어림: 입력 줄로 센다 (cooldownAheadSec)', () => {
 
   it('옛 식(스냅샷을 받은 뒤 흐른 시간 + 왕복 / 2)은 편도 지연만큼 모자랐다: 서버를 기다리는 창이 lag 100에서 40ms, lag 200에서 90ms 넘게', () => {
     // 이 시험 틀이 그 차이를 가려내는지: 같은 훑기에서 옛 식은 약 왕복 / 2 폭 (조사: 50 · 110ms)
-    const w100 = scanCooldownEnd(100, JITTER, oldAgeSec);
-    const w200 = scanCooldownEnd(200, JITTER, oldAgeSec);
+    const w100 = scanCooldownEnd(100, JITTER, { ageSec: oldAgeSec });
+    const w200 = scanCooldownEnd(200, JITTER, { ageSec: oldAgeSec });
     expect(widthMs(w100.late)).toBeGreaterThan(40);
     expect(widthMs(w200.late)).toBeGreaterThan(90);
     expect([w100.falsePos, w200.falsePos]).toEqual([0, 0]);
@@ -142,8 +156,8 @@ describe('쿨타임 어림: 입력 줄로 센다 (cooldownAheadSec)', () => {
   it('터치 짧은 탭: 쿨타임 끝 무렵 서버가 받았을 탭이 버려지지 않는다 (옛 식은 lag 200에서 약 100ms 폭의 탭을 보내지 않았다)', () => {
     // 터치는 '할 수 없다'고 어림하면 탭을 보내지 않는다 → 서버가 받는 탭 수로 견준다 (같은 시각의 마우스 클릭이 기준)
     const mouse = scanCooldownEnd(200, JITTER);
-    const tap = scanCooldownEnd(200, JITTER, undefined, true);
-    const tapOld = scanCooldownEnd(200, JITTER, oldAgeSec, true);
+    const tap = scanCooldownEnd(200, JITTER, { touch: true });
+    const tapOld = scanCooldownEnd(200, JITTER, { ageSec: oldAgeSec, touch: true });
     const lost = mouse.accepted - tap.accepted;
     const lostOld = mouse.accepted - tapOld.accepted;
     console.log(
@@ -153,6 +167,46 @@ describe('쿨타임 어림: 입력 줄로 센다 (cooldownAheadSec)', () => {
     expect(widthMs(lostOld)).toBeGreaterThan(90);
     // 서버가 받지 않을 탭을 보내 헛 예측하지도 않는다
     expect(tap.falsePos).toBe(0);
+  });
+
+  it('올라가는 길이 잠깐 끊긴 뒤(150 ~ 500ms, 쿨타임 끝 150 ~ 250ms 전에 풀림): 헛 예측 창 15ms 아래 · 늦은 예측 창 35ms 아래 (lag 100 · 200, 마우스 · 터치)', () => {
+    // 끊긴 동안 서버는 내 입력 없이 틱을 넘기고(ack가 멈춘다) 밀린 입력이 오면 한 틱에 여럿을 처리한다(크레딧 · 빚 · 큐 상한).
+    // 그 사이 스냅샷으로 센 입력 줄은 굶은 틱만큼 길다 — 서버 틱 − ack의 기준선보다 뒤처진 만큼을 빼고 센다 (InputLagBase)
+    const stalls = [
+      { dur: 150, endOff: -250 },
+      { dur: 250, endOff: -250 },
+      { dur: 250, endOff: -150 },
+      { dur: 500, endOff: -200 },
+    ];
+    const lines: string[] = [];
+    for (const lag of [100, 200])
+      for (const stall of stalls) {
+        const label = `lag ${lag} · 끊김 ${stall.dur}ms (쿨타임 끝 ${-stall.endOff}ms 전에 풀림)`;
+        const w = scanCooldownEnd(lag, JITTER, { stall, from: -250 });
+        expect(w.accepted, `${label} 받아들인 누름`).toBeGreaterThan(50);
+        expect(widthMs(w.falsePos), `${label} 헛 예측 창 (ms)`).toBeLessThan(15);
+        // 끊긴 뒤 기준선 보정이 조금 비관적이라 늦은 창이 끊김 없을 때(12 · 16ms)보다 조금 넓다
+        expect(widthMs(w.late), `${label} 늦은 예측 창 (ms)`).toBeLessThan(35);
+        lines.push(
+          `${label}: 헛 예측 ${widthMs(w.falsePos).toFixed(1)}ms · 늦은 예측 ${widthMs(w.late).toFixed(1)}ms`,
+        );
+      }
+    // 터치 탭도 같은 어림을 거친다: 서버가 버릴 탭을 보내지 않는다
+    const tap = scanCooldownEnd(200, JITTER, { stall: { dur: 250, endOff: -250 }, from: -250, touch: true });
+    expect(widthMs(tap.falsePos), '터치 lag 200 · 끊김 250ms 헛 예측 창 (ms)').toBeLessThan(15);
+    lines.push(`터치 lag 200 · 끊김 250ms: 헛 예측 ${widthMs(tap.falsePos).toFixed(1)}ms`);
+    console.log(`[windup-lag] 올라가는 길 끊김 뒤 쿨타임 끝 무렵\n  ${lines.join('\n  ')}`);
+  });
+
+  it('끊김 보정 없이 입력 줄만 세면(검토 전 식) 끊김 뒤 헛 예측 창이 40ms 넘게 생겼다 (lag 100 · 200, 옛 시계 식은 0)', () => {
+    // 이 시험 틀이 그 차이를 가려내는지: 검토에서 잰 값 lag 100 약 96ms · lag 200 약 68ms (끊김 250ms, 쿨타임 끝 250ms 전에 풀림)
+    const stall = { dur: 250, endOff: -250 };
+    for (const lag of [100, 200]) {
+      const line = scanCooldownEnd(lag, JITTER, { stall, from: -250, ageSec: lineOnlyAgeSec });
+      const old = scanCooldownEnd(lag, JITTER, { stall, from: -250, ageSec: oldAgeSec });
+      expect(widthMs(line.falsePos), `lag ${lag} 입력 줄만`).toBeGreaterThan(40);
+      expect(old.falsePos, `lag ${lag} 옛 시계 식`).toBe(0);
+    }
   });
 });
 

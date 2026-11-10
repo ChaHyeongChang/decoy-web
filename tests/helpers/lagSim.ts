@@ -2,7 +2,9 @@
 // 그 상태를 담은 스냅샷 도착"을 1ms 단위로 돌린다. 화면(Phaser)은 없다.
 //  - 서버 = 실제 판정 코드(Game), 스냅샷은 20Hz · 값은 interest.ts와 같은 반올림(0.001초), 이벤트는 스냅샷에 실려 온다
 //  - 지연 = 실제 LagQueue 둘(보낼 때 · 받을 때 왕복의 절반씩, 방향마다 ± 지터, 순서 보존)
-//  - 클라이언트 = 실제 Predictor · predictMonsterPress · cooldownAheadSec · WindupShow · TouchInput, 순서는 GameScene.stepInput과 같다
+//  - 클라이언트 = 실제 Predictor · predictMonsterPress · cooldownAheadSec · InputLagBase · WindupShow · TouchInput, 순서는
+//    GameScene.stepInput과 같다
+//  - 올라가는 길 끊김(upStall, 선택): 그 구간에 보낸 입력은 끝날 때까지 묶였다가 한꺼번에 간다 (와이파이 · 이동통신의 재전송)
 // 부르는 시험은 vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance', 'Date'] })를 켜 둔다
 import { vi } from 'vitest';
 import {
@@ -17,7 +19,12 @@ import {
   type MoveState,
 } from '@decoy/shared';
 import { Game } from '@decoy/shared/sim';
-import { applyWindupLock, cooldownAheadSec, predictMonsterPress } from '../../client/src/localActions';
+import {
+  InputLagBase,
+  applyWindupLock,
+  cooldownAheadSec,
+  predictMonsterPress,
+} from '../../client/src/localActions';
 import { Predictor } from '../../client/src/sync';
 import { TouchInput } from '../../client/src/touchInput';
 import { WindupShow } from '../../client/src/windupShow';
@@ -30,6 +37,7 @@ const DT_S = 1 / balance.network.serverTickHz;
 const round3 = (v: number): number => Math.round(v * 1000) / 1000;
 
 interface SimSnap {
+  tick: number;
   ack: number;
   move: MoveState;
   attackCd: number;
@@ -85,8 +93,20 @@ export interface LagSimOptions {
   clientPhase: number;
   presses: SimPress[];
   until: number;
-  /** 쿨타임 어림 바꿔 끼우기 (초). 없으면 제품 식 cooldownAheadSec(새 입력 seq, 스냅샷 ack, 틱, 스냅샷 뒤 흐른 시간, 왕복) */
-  ageSec?: (c: { nowMs: number; lastSnapAt: number; lag: number; seq: number; ack: number }) => number;
+  /**
+   * 쿨타임 어림 바꿔 끼우기 (초). 없으면 제품 식 cooldownAheadSec(새 입력 seq, 스냅샷 ack, 틱, 스냅샷 뒤 흐른 시간, 왕복,
+   * InputLagBase.excess(스냅샷 서버 틱, ack)). excess = 그 제품 보정 값 (틱)
+   */
+  ageSec?: (c: {
+    nowMs: number;
+    lastSnapAt: number;
+    lag: number;
+    seq: number;
+    ack: number;
+    excess: number;
+  }) => number;
+  /** 올라가는 길 끊김: 시각 from ~ to(ms)에 보낸 입력은 to 뒤 첫 입력 틱에 그 입력과 함께 간다 (서버는 그동안 굶는다) */
+  upStall?: { from: number; to: number };
   /** 서버 틱마다 game.step() 바로 앞에서 (판 상태를 직접 바꿔 거절 · 기절을 만든다) */
   beforeServerTick?: (game: Game, nowMs: number) => void;
   /** 1ms마다 표시 상태를 적는다 */
@@ -149,6 +169,7 @@ export function simulateLag(o: LagSimOptions): LagSimResult {
   const predictor = new Predictor(balance, DT_S, now);
   const show = new WindupShow(balance.monster.attack.windup * 1000, SIM_DT_MS);
   const touch = new TouchInput();
+  const inputLag = new InputLagBase();
   let lastSnap: SimSnap | null = null;
   let lastSnapAt = 0;
   const traces: AttackTrace[] = [];
@@ -160,6 +181,7 @@ export function simulateLag(o: LagSimOptions): LagSimResult {
     (snap) => {
       lastSnap = snap;
       lastSnapAt = now();
+      inputLag.note(snap.tick, snap.ack);
       predictor.reconcile(snap.move, snap.ack, env);
       const before = show.phase;
       if (show.snapshot(snap.ack, snap.windup, snap.events, lastSnapAt, o.lag)) sounds.push(lastSnapAt);
@@ -225,6 +247,7 @@ export function simulateLag(o: LagSimOptions): LagSimResult {
       Math.floor(((game.tick - 1) * n.snapshotHz) / n.serverTickHz);
     if (isSnap)
       toClient.push({
+        tick: game.tick,
         ack: mon.ack,
         move: cloneMoveState(mon.move),
         attackCd: round3(mon.attackCd),
@@ -250,14 +273,15 @@ export function simulateLag(o: LagSimOptions): LagSimResult {
       camp: 0,
       blockWarn: null,
     };
-    // GameScene.predictMonster · touchCtx와 같은 어림
+    // GameScene.monsterPressBase(predictMonster · touchCtx)와 같은 어림
+    const excess = inputLag.excess(snap.tick, snap.ack);
     const base = {
       move: st,
       mon: monSelf,
       balance,
       ageSec: o.ageSec
-        ? o.ageSec({ nowMs: t, lastSnapAt, lag: o.lag, seq, ack: snap.ack })
-        : cooldownAheadSec(seq, snap.ack, DT_S, t - lastSnapAt, o.lag),
+        ? o.ageSec({ nowMs: t, lastSnapAt, lag: o.lag, seq, ack: snap.ack, excess })
+        : cooldownAheadSec(seq, snap.ack, DT_S, t - lastSnapAt, o.lag, excess),
       localWindupActive: show.active,
     };
     let pressed = 0;
@@ -304,8 +328,14 @@ export function simulateLag(o: LagSimOptions): LagSimResult {
     }
     predictor.applyLocal(frame, env, at);
     show.noteStep(seq, st.x, st.y);
-    toServer.push(frame);
+    if (o.upStall && t >= o.upStall.from && t < o.upStall.to) stalled.push(frame);
+    else {
+      for (const f of stalled) toServer.push(f);
+      stalled.length = 0;
+      toServer.push(frame);
+    }
   };
+  const stalled: InputFrame[] = [];
 
   // 가상 시간을 정수 ms로 흘린다: 서버 틱 · 입력 틱 · 누름은 그 시각을 지난 첫 정수 ms에 처리한다. 표본을 적을 때는 1ms씩,
   // 아니면 다음 일이 있는 ms로 건너뛴다 (지연 큐의 타이머는 그 사이 제 시각에 돈다 — 결과는 1ms씩 흘린 것과 같다)

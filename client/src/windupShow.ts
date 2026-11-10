@@ -2,7 +2,8 @@
 // 판정은 서버가 한다. 여기서 정하는 것은 "내 화면에 준비 범위 · 든 자세를 언제부터 언제까지 어디에 그리는가"뿐이고, 판 장면이
 // 입력 틱(press · noteStep) · 스냅샷(snapshot) · 프레임(view)에서 부른다. 그리기는 view()가 준 값만 쓴다(render/worldRenderer).
 //  - 예측(predicted): 누른 입력 틱부터 채운다 (서버 확인 전)
-//  - 확인(confirmed): 서버가 준비 중이라고 알려 왔다 → 시작 시각을 그대로 두고 이어 그린다 (다시 시작하지 않고 소리도 다시 내지 않는다)
+//  - 확인(confirmed): 서버가 준비 중이라고 알려 왔다 → 시작 시각을 그대로 두고 이어 그린다 (다시 시작하지 않고 소리도 다시 내지 않는다).
+//    받아들여진 것이 예측하지 못한 바로 앞 누름이면 시작 시각 · 세울 자리를 그 누름 기준으로 당겨 잡는다 (adoptEarlier)
 //  - 거절: 서버가 그 입력을 처리했는데(ack ≥ seq) 준비 중이 아니다 → 끈다. 기절(stunned)을 받아도 끈다.
 //    다만 그 뒤에 누른 공격이 아직 서버로 가는 중이면(연타) 끄지 않고 그 누름으로 옮겨 잇는다 — 서버는 대개 그 누름을 받아들인다
 //  - 서버(server): 예측하지 못한 준비 → 스냅샷의 남은 시간에서 거꾸로 센 시각부터 그린다 (소리는 attackStart 이벤트에서)
@@ -58,7 +59,11 @@ export class WindupShow {
   private startAt = 0;
   private dir: number | null = null;
   private capMs = 0;
+  /** 대기 중 범위를 세울 자리를 적을 입력 (준비를 시작한 입력 + strikeSteps). 이미 지나 적을 수 없으면 NaN — 내 자리를 따라간다 */
+  private anchorSeq = Number.NaN;
   private anchored = false;
+  /** noteStep이 마지막으로 본 입력 */
+  private lastStep = 0;
   private readonly anchor = { x: 0, y: 0 };
   private readonly out: WindupShown = { dir: null, startAt: 0, fill: 0, hold: false, anchor: null };
   /** 서버가 타격을 판정하는 입력: 누른 입력 + 이만큼 (준비 12틱이면 11번째 입력을 처리한 틱에 타격) */
@@ -89,7 +94,14 @@ export class WindupShow {
     this.startAt = atMs;
     this.dir = dir;
     this.capMs = holdCapMs(rttMs, this.dtMs);
+    this.aimAnchor();
+  }
+
+  /** 세울 자리를 이 준비를 시작한 입력(this.seq) 기준으로 다시 잡는다. 그 타격 입력을 이미 지났으면 세우지 않는다 */
+  private aimAnchor(): void {
+    const target = this.seq + this.strikeSteps;
     this.anchored = false;
+    this.anchorSeq = target > this.lastStep ? target : Number.NaN;
   }
 
   /** 예측한 준비를 서버가 아직 확인하지 않았는데 공격을 또 눌렀다 (입력 seq — 새로 예측하지는 않는다) */
@@ -102,8 +114,10 @@ export class WindupShow {
    * 자리다(그린 자리는 그 틱 길이 뒤 = 채움이 다 차는 순간에 거기 닿는다) — 대기 중 범위를 그 자리에 세워 둔다
    */
   noteStep(seq: number, x: number, y: number): void {
+    if (seq > this.lastStep) this.lastStep = seq;
     if (this.anchored || (this.state !== 'predicted' && this.state !== 'confirmed')) return;
-    if (seq < this.seq + this.strikeSteps) return;
+    // NaN(세우지 않음)이면 늘 거짓
+    if (!(seq >= this.anchorSeq)) return;
     this.anchor.x = x;
     this.anchor.y = y;
     this.anchored = true;
@@ -133,14 +147,16 @@ export class WindupShow {
           this.startAt = nowMs - (this.windupMs - windup * 1000);
           this.dir = null;
           this.capMs = holdCapMs(rttMs, this.dtMs);
+          // 누른 입력을 몰라 세울 자리도 모른다: 대기 중에도 나를 따라간다
           this.anchored = false;
+          this.anchorSeq = Number.NaN;
         }
         break;
       case 'predicted':
         if (winding || (start && !hit)) {
           // 서버가 준비 중이면 내 누름(이 입력이든, 예측하지 못한 바로 앞 누름이든)이 받아들여진 것이다: 시작 시각 그대로 잇는다.
-          // 예측한 입력을 처리하기 전이면 앞 누름의 준비다 — 방향은 서버가 고정한 내 방향을 따른다
-          if (ack < this.seq) this.dir = null;
+          // 예측한 입력을 처리하기 전이면 앞 누름의 준비다 — 그 누름 기준으로 다시 잡는다(adoptEarlier)
+          if (ack < this.seq) this.adoptEarlier(ack, windup);
           this.state = 'confirmed';
         } else if (ack >= this.seq) {
           // 이 입력을 처리했는데 준비 중이 아니다: 거절 (쿨타임 · 대기 · 기절 — 어림이 틀렸다)
@@ -150,7 +166,7 @@ export class WindupShow {
             this.seq = this.later;
             this.later = 0;
             this.dir = null;
-            this.anchored = false;
+            this.aimAnchor();
           } else this.state = 'idle';
         }
         break;
@@ -166,6 +182,29 @@ export class WindupShow {
     // 기절: 서버가 준비를 취소했다 (입력을 아직 처리하지 않았어도 그 입력은 기절 중이라 거절된다)
     if (stunned) this.state = 'idle';
     return sound;
+  }
+
+  /**
+   * 예측한 내 누름(this.seq)보다 앞의, 예측하지 못한 누름 P0이 받아들여졌다 (내 누름은 준비 중이라 서버가 버린다). 서버는 P0 +
+   * strikeSteps번째 입력을 처리한 틱에 타격한다 — 내 누름 기준이면 범위가 베기 호보다 (내 누름 − P0)틱만큼 앞에 서고 채움도 그만큼
+   * 늦게 찬다(검토). P0 = ack + 남은 준비 틱 − strikeSteps (서버가 틱마다 입력 하나를 처리하면 정확하다 — 스냅샷이 P0을 처리한 틱
+   * 뒤 k틱이면 ack = P0 + k, 남은 준비 = strikeSteps − k틱). 채움 시작은 입력 틱 격자에서 그만큼 앞(P0의 명목 시각)으로 당기고(채움이
+   * 앞으로 한 번 뛴다 — 줄지는 않는다) 세울 자리는 P0 + strikeSteps번째 입력의 자리로 다시 잡는다. 남은 준비를 모르면(준비 시작
+   * 이벤트만 왔다) 시작은 그대로 두고 자리를 세우지 않는다. 방향은 서버가 고정한 내 방향을 따른다
+   */
+  private adoptEarlier(ack: number, windup: number): void {
+    this.dir = null;
+    this.later = 0;
+    if (windup <= 0) {
+      this.anchored = false;
+      this.anchorSeq = Number.NaN;
+      return;
+    }
+    const left = Math.round((windup * 1000) / this.dtMs);
+    const p0 = Math.min(ack, ack + left - this.strikeSteps);
+    this.startAt -= (this.seq - p0) * this.dtMs;
+    this.seq = p0;
+    this.aimAnchor();
   }
 
   /** 이번 프레임(시각 nowMs)에 그릴 준비. 없으면 null. 돌려준 객체는 다음 호출 때 다시 쓴다 */
