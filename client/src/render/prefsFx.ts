@@ -3,6 +3,7 @@
 //  - 번쩍임 줄이기: 피격 붉은 가장자리를 옅게 · 서서히(맞은 순간 확 켜지지 않게), 발각 빛 테두리는 맥동 없이 고정 알파
 //    (발각 정보는 그대로 보인다). 잘라 옮김 어두워짐은 cameraDirector.noDip이 끈다(카메라 값은 camera.ts CAMERA)
 //  - 지도 크게 보기: 맵 창 가운데에 같은 미니맵 내용을 크게 (틀 높이 = 맵 창 높이 비율). 정보는 작은 미니맵과 같다(minimap.ts)
+//  - 포효 핑 펄스: 창 밖 화살표 · 미니맵의 흰 펄스 고리 박자(월드 핑과 같다). 번쩍임 줄이기면 퍼지지 않는 고정 고리
 // 화면 흔들림 줄이기는 camera.ts ScreenShake.scale(prefs.shakeScaleOf) 한 곳이다
 
 /**
@@ -33,6 +34,43 @@ export const SPOTTED_EDGE = { pulseHz: 1.2, mid: 0.8, swing: 0.2, steady: 0.9 } 
 export function spottedEdgeAlpha(tMs: number, reduced: boolean): number {
   if (reduced) return SPOTTED_EDGE.steady;
   return SPOTTED_EDGE.mid + SPOTTED_EDGE.swing * Math.cos((tMs / 1000) * Math.PI * 2 * SPOTTED_EDGE.pulseHz);
+}
+
+/**
+ * 포효 핑 펄스 (괴물 화면): 표시 시간(revealDuration) 동안 beats번 퍼지며 사라진다. 월드 핑 고리(characters.drawRoarPing)와 창 밖
+ * 화살표 · 미니맵의 펄스 고리가 같은 식을 쓴다 — 1.5초에 3번 = 2Hz(초당 3번 미만). alpha = 퍼지기 시작할 때 고리 알파,
+ * 번쩍임 줄이기면 퍼지지 않고 steadyT 자리 · steadyAlpha로 고정(드러난 자리 표시는 그대로 보인다)
+ */
+export const PING_PULSE = { beats: 3, alpha: 0.9, steadyT: 0.4, steadyAlpha: 0.6 } as const;
+
+/** 포효 핑 위상 0~1 (k = 핑이 지난 비율 0~1): 표시 시간 동안 beats번 0 → 1 */
+export function pingPhase(k: number): number {
+  return (k * PING_PULSE.beats) % 1;
+}
+
+/** 펄스 고리 하나의 값: t = 퍼진 정도 0(처음 크기)~1(끝 크기), alpha = 알파 (0이면 그리지 않는다) */
+export interface PingPulse {
+  t: number;
+  alpha: number;
+}
+
+/**
+ * 창 밖 화살표 · 미니맵 포효 핑의 펄스 고리 (그릇 out에 쓴다 — 프레임마다 객체를 만들지 않는다). k = 핑이 지난 비율
+ * (살아 있는 핑이 없으면 0~1 밖 → 알파 0). 받은 시각으로 재므로 주사율과 무관하고, 핑이 몇 개든 값이 하나라 모두 같은 그림이다
+ */
+export function pingPulse(k: number, reduced: boolean, out: PingPulse): PingPulse {
+  if (!(k >= 0 && k <= 1)) {
+    out.t = 0;
+    out.alpha = 0;
+  } else if (reduced) {
+    out.t = PING_PULSE.steadyT;
+    out.alpha = PING_PULSE.steadyAlpha;
+  } else {
+    const phase = pingPhase(k);
+    out.t = phase;
+    out.alpha = PING_PULSE.alpha * (1 - phase);
+  }
+  return out;
 }
 
 /**

@@ -139,6 +139,9 @@ export const UI_TEXT = {
   rematch: '다시 하기',
   spotted: '발각',
   outOfRange: '범위 밖',
+  /** 괴물 화면 포효 결과 알림 (포효 핑이 보이는 동안): 드러난 수 = 그린 핑 수 ({n}), 0명이면 roarNone */
+  roarFound: '{n}명을 포착했다.',
+  roarNone: '근처에 아무도 없다.',
   monsterWait: '괴물이 깨어나기까지',
   monsterReconnect: '괴물 재접속 대기',
   disconnected: '연결이 끊겼습니다. 다시 연결하는 중…',

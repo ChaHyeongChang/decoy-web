@@ -48,6 +48,7 @@ import {
   type Disc,
   type PathPen,
 } from '../art/shapes';
+import { pingPhase } from './prefsFx';
 
 const T = TILE_PX;
 
@@ -620,11 +621,14 @@ export function drawRoarMark(g: Phaser.GameObjects.Graphics, x: number, y: numbe
   g.fillRect(px - 1.5, py + 3.5, 3, 2.5);
 }
 
-/** 포효 핑: 흰 원 펄스 + 가운데 점 (괴물 화면 1.5초). k = 지난 비율 */
+/**
+ * 포효 핑: 흰 원 펄스 + 가운데 점 (괴물 화면 1.5초). k = 지난 비율. 박자는 창 밖 화살표 · 미니맵 펄스 고리와 같은
+ * 식(prefsFx.pingPhase — 표시 시간에 3번)
+ */
 export function drawRoarPing(g: Phaser.GameObjects.Graphics, x: number, y: number, k: number): void {
   const px = x * T;
   const py = y * T;
-  const phase = (k * 3) % 1;
+  const phase = pingPhase(k);
   g.lineStyle(5, OUTLINE, 0.55 * (1 - phase));
   strokeCirclePen(g, px, py, 6 + phase * 22);
   g.lineStyle(2.5, 0xffffff, 0.95 * (1 - phase));

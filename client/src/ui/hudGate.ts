@@ -6,6 +6,7 @@
 //    미니맵 합성 · 축소 · 업로드가 한 프레임에 겹쳐 120Hz 예산을 넘던 것(PERF 4.1 안개 갱신 프레임). 바로 앞 프레임도 안개가
 //    바뀐 프레임이면(프레임이 안개 주기보다 느림 — 빈 프레임이 없다) 미루지 않고 그 프레임에 그린다(예전과 같은 갱신 빈도)
 //  - dropEnded · dropStale: 배너 알림 목록을 제자리에서 거른다 (filter와 같은 결과, 새 배열 없음)
+//  - shownUntil: 대기열에서 꺼낸 알림이 사라질 시각 (함께 사라져야 하는 알림은 늘리지 않고, 너무 늦었으면 버린다)
 
 /** 다시 계산할 프레임인가: 입력 중 하나라도 지난번과 다르면 true (처음에는 늘 true) */
 export class HudGate {
@@ -92,4 +93,20 @@ export function dropStale<T extends { created: number }>(list: T[], nowMs: numbe
     j += 1;
   }
   if (j !== list.length) list.length = j;
+}
+
+/** 알림 한 줄이 떠 있는 최소 시간 (ms): 대기열에서 밀려 늦게 떠도 이만큼은 보인다 */
+export const BANNER_MIN_MS = 800;
+/** 함께 사라져야 하는 알림(tied)이 밀려서 남은 시간이 이보다 짧으면 띄우지 않는다 (ms — 깜빡하고 사라지지 않게) */
+export const BANNER_TIED_MIN_MS = 400;
+
+/**
+ * 대기열에서 꺼낸 알림이 사라질 시각 (null = 띄우지 않고 버린다). 보통 알림은 기다린 만큼 늦게 시작하므로 남은 시간(최소
+ * BANNER_MIN_MS)으로 다시 잡는다. 다른 표시와 함께 사라져야 하는 알림(tied — 포효 결과는 핑이 보이는 동안만)은 끝나는 시각을
+ * 늘리지 않고, 남은 시간이 BANNER_TIED_MIN_MS보다 짧으면 버린다 — 표시가 사라진 뒤에 글만 남지 않게
+ */
+export function shownUntil(until: number, tied: boolean, nowMs: number): number | null {
+  const left = until - nowMs;
+  if (tied) return left >= BANNER_TIED_MIN_MS ? until : null;
+  return nowMs + Math.max(BANNER_MIN_MS, left);
 }

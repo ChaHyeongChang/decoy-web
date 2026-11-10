@@ -6,6 +6,8 @@
 // 기억했다가 만들 때 건다. 음소거 = 모두 0 (그동안은 소리 노드도 만들지 않는다)
 
 export type SfxName = 'windup' | 'hit' | 'captureStart' | 'captureDone' | 'doorOpen' | 'roar';
+/** 포효 결과 소리의 기록 이름 (roarResult만 남긴다 — play로는 낼 수 없다): 드러난 자리마다 'roarFound' 한 줄, 0명이면 'roarEmpty' 한 줄 */
+export type RoarResultName = 'roarFound' | 'roarEmpty';
 /** UI 소리 (설정 화면 통합): 단추 누름 · 켜고 끔 · 화면 열기 · 닫기 */
 export type UiSfxName = 'tap' | 'toggle' | 'open' | 'close';
 /** 소리 세기 (0~1, prefs.audioLevelsOf): 전체 · 효과음 묶음 · UI 묶음 */
@@ -20,6 +22,19 @@ const MASTER_GAIN = 0.32;
 const MIN_GAP_MS = 60;
 /** 음량을 바꿀 때 이득이 따라가는 시간 상수 (초): 딸깍 소리 없이 바로 (약 50ms면 다 바뀐다) */
 export const LEVEL_TAU_S = 0.015;
+/**
+ * 포효 결과 소리 (괴물 화면): 포효 소리가 잦아든 뒤(delayS) 드러난 수만큼 '핑'을 gapS 간격으로 낸다. 핑은 모두 같은 음(pingHz) ·
+ * 같은 길이(pingS) · 같은 세기(pingPeak)다 — 순서 · 자리에 따라 바꾸지 않는다(누가 누구인지 단서가 되지 않게).
+ * max = 한 번에 내는 핑 상한(소리 노드 수). 0명이면 핑 대신 낮게 떨어지는 빈 메아리(roarResult)
+ */
+export const ROAR_RESULT = {
+  delayS: 0.25,
+  gapS: 0.13,
+  pingHz: 1568,
+  pingS: 0.11,
+  pingPeak: 0.3,
+  max: 6,
+} as const;
 
 /** 0~1로 (수가 아니면 1 — 음량 값이 깨져도 소리가 사라지지 않게. 음소거는 0이 온다) */
 function clampLevel(v: number): number {
@@ -64,7 +79,7 @@ export class Sfx {
   /** 지금 소리 세기 (setLevels, 0~1). 기본값은 예전과 같은 소리(모두 1) */
   private levels: SfxLevels = { master: 1, sfx: 1, ui: 1 };
   /** 디버그 · 테스트: 재생 요청 기록 (최근 50개) */
-  readonly log: { name: SfxName; at: number }[] = [];
+  readonly log: { name: SfxName | RoarResultName; at: number }[] = [];
   /** 디버그 · 테스트: UI 소리 요청 기록 (최근 20개, 판 효과음 기록 log와 따로) */
   readonly uiLog: { name: UiSfxName; at: number }[] = [];
   /** 전체 음량 0 (음소거 포함) */
@@ -256,6 +271,37 @@ export class Sfx {
         break;
       default:
         break;
+    }
+    window.setTimeout(() => out.disconnect(), 1500);
+  }
+
+  /**
+   * 포효 결과 (괴물 화면, 포효 소리 play('roar')와 따로 부른다): 드러난 수(count)만큼 같은 음의 핑, 0명이면 빈 메아리.
+   * 한 번의 호출 안에서 시각을 미뤄 예약한다 — play를 여러 번 부르면 같은 소리 간격(MIN_GAP_MS)에 걸려 한 번만 난다.
+   * 기록(log)에는 핑마다 한 줄을 남긴다(getSounds로 센다). 음소거 · 오디오가 아직 열리지 않았으면 기록만 남는다
+   */
+  roarResult(count: number): void {
+    const R = ROAR_RESULT;
+    const now = performance.now();
+    const n = Math.max(0, Math.min(R.max, Math.floor(count)));
+    const name: RoarResultName = n > 0 ? 'roarFound' : 'roarEmpty';
+    for (let i = 0; i < Math.max(1, n); i += 1) this.log.push({ name, at: now });
+    while (this.log.length > 50) this.log.shift();
+    if (this.muted || this.levels.sfx <= 0) return;
+    const ctx = this.ctx;
+    const bus = this.sfxBus;
+    if (!ctx || !bus || ctx.state !== 'running') return;
+    const out = ctx.createGain();
+    out.gain.value = 1;
+    out.connect(bus);
+    const t = ctx.currentTime + R.delayS;
+    if (n > 0) {
+      for (let i = 0; i < n; i += 1)
+        this.tone(out, 'triangle', t + i * R.gapS, R.pingS, R.pingHz, R.pingHz, R.pingPeak, 4200);
+    } else {
+      // 빈 메아리: 낮게 떨어지는 음(220 → 165Hz) 한 번 + 0.24초 뒤 작게 한 번 더
+      this.tone(out, 'triangle', t, 0.28, 220, 165, 0.24, 1200);
+      this.tone(out, 'triangle', t + 0.24, 0.28, 220, 165, 0.09, 1200);
     }
     window.setTimeout(() => out.disconnect(), 1500);
   }

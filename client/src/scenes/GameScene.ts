@@ -50,8 +50,16 @@ import { cullable } from '../render/camera';
 import { CameraDirector, devPerTile } from '../render/cameraDirector';
 import { UI } from '../art/palette';
 import { ScreenEffects, collectFxTargets } from '../render/effects';
-import { MINIMAP_BIG_TEXELS, bigMinimapPlace, bigMinimapTexels, spottedEdgeAlpha } from '../render/prefsFx';
+import {
+  MINIMAP_BIG_TEXELS,
+  bigMinimapPlace,
+  bigMinimapTexels,
+  pingPulse,
+  spottedEdgeAlpha,
+  type PingPulse,
+} from '../render/prefsFx';
 import { WorldRenderer, type MotionSource } from '../render/worldRenderer';
+import { roarResultText } from '../roarFeedback';
 import { TouchInput, type TouchFrameCtx } from '../touchInput';
 import { TOUCH_HINT_MS, takeTouchHints } from '../touchTutorial';
 import type { IconId } from '../art/icons';
@@ -306,6 +314,8 @@ export class GameScene extends Phaser.Scene {
   private unsubscribe: (() => void) | null = null;
   /** 포효 핑 (괴물 화면) */
   private roarPings: { x: number; y: number; until: number; start: number }[] = [];
+  /** 이번 프레임 포효 핑 펄스 고리 값 (그릇 — 프레임마다 다시 쓴다): 창 밖 화살표 · 작은 지도 · 크게 본 지도가 같은 값을 그린다 */
+  private readonly pingPulseNow: PingPulse = { t: 0, alpha: 0 };
   /** 마지막으로 그린 내 위치 (예측) */
   localPos = { x: 0, y: 0, face: 0 };
   /** 피격 플래시 · 수감 페이드 · 기절 채도 감소 */
@@ -1029,7 +1039,7 @@ export class GameScene extends Phaser.Scene {
     if (baseNew || refit || baked)
       big.refreshBase(this.world.bigBaseCanvas ?? this.world.baseCanvas, baseNew);
     big.setWorld(snap.world.points, snap.world.exits, view, this.director?.spectating ?? null, blinkOff);
-    big.update(this.drawn, snap.you.role, this.roleOf);
+    big.update(this.drawn, snap.you.role, this.roleOf, this.pingPulseNow);
   }
 
   /** 캔버스 자리 (창 CSS px의 왼쪽 위 · 논리 1px의 CSS px). 보이지 않으면 null */
@@ -1181,6 +1191,10 @@ export class GameScene extends Phaser.Scene {
       shakes: d.shake.active,
       shakeScale: d.shake.scale,
       markers: this.edges?.debug() ?? [],
+      pingRings: {
+        small: this.minimap?.pingRings ?? [],
+        big: this.bigOpen ? (this.minimapBig?.pingRings ?? []) : [],
+      },
     };
   }
 
@@ -1242,6 +1256,10 @@ export class GameScene extends Phaser.Scene {
         this.director?.shake.add('roar', now);
         const dur = (this.app.balance?.monster.roar.revealDuration ?? 1.5) * 1000;
         for (const p of ev.pts) this.roarPings.push({ x: p.x, y: p.y, start: now, until: now + dur });
+        // 결과 피드백: 드러난 수(= 그리는 핑 수)만큼 같은 음의 핑 · 한 줄 알림. 0명이면 빈 메아리 · '아무도 없다'.
+        // 알림은 핑과 같은 시각에 사라진다(다른 알림에 밀려 못 띄웠으면 버린다)
+        sfx.roarResult(ev.pts.length);
+        this.banners.push(roarResultText(ev.pts.length), dur / 1000, 'info', 'roar', now, true);
         return;
       }
       case 'shoveMiss':
@@ -1662,7 +1680,16 @@ export class GameScene extends Phaser.Scene {
       bodies,
       this.edgePlaced,
     );
-    edges.update(this.edgePlaced, role === 'monster', now);
+    edges.update(this.edgePlaced, role === 'monster', now, this.pingPulseNow);
+  }
+
+  /**
+   * 포효 핑이 지난 비율 0~1 (살아 있는 핑이 없으면 −1). 포효 쿨타임이 표시 시간보다 길어 살아 있는 핑은 늘 한 번의 포효에서 온
+   * 것이라 시작 시각이 하나다. 받은 시각으로 재므로 주사율과 무관하다
+   */
+  private pingK(now: number): number {
+    for (const p of this.roarPings) if (now <= p.until) return (now - p.start) / (p.until - p.start);
+    return -1;
   }
 
   /** 그리는 내 자리 그릇 (프레임마다 다시 쓴다: world.draw는 이번 프레임 안에서만 읽는다) */
@@ -1762,7 +1789,10 @@ export class GameScene extends Phaser.Scene {
       d?.spectating ?? null,
       blinkOff,
     );
-    this.minimap.update(this.drawn, snap.you.role, this.roleOf);
+    // 포효 핑 펄스: 월드 핑(world.draw의 nowMs)과 같은 시각 · 같은 식 — 작은 지도 · 크게 본 지도 · 창 밖 화살표가 같은 값을 쓴다.
+    // 번쩍임 줄이기면 퍼지지 않는 고정 고리
+    const pulse = pingPulse(this.pingK(now), this.flashReduced, this.pingPulseNow);
+    this.minimap.update(this.drawn, snap.you.role, this.roleOf, pulse);
     // 지도 크게 보기: 작은 지도와 같은 값 · 같은 프레임
     this.updateBigMap(snap, view, blinkOff, baseNew);
     this.updateEdges(snap, view, now);
