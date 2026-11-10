@@ -303,12 +303,20 @@ test('포효 (괴물): 화살표 + 창 안 핑 = 미니맵 = 소리 = 알림의 
     });
     haloScales.push(halo.scale);
   }
-  // 퍼진다: 고리 크기가 프레임마다 달라지고, 처음 크기로 두 번 넘게 돌아온다(1.5초에 3번 — 2번 되돌아감)
-  let wraps = 0;
-  for (let i = 1; i < haloScales.length; i += 1) if (haloScales[i]! < haloScales[i - 1]! - 0.05) wraps += 1;
+  // 퍼진다: 고리 크기가 프레임마다 달라지고 끝 크기 가까이까지 간다
   expect(new Set(haloScales.map((v) => v.toFixed(3))).size).toBeGreaterThan(6);
-  expect(wraps).toBe(2);
   expect(Math.max(...haloScales)).toBeGreaterThan(1 + (HALO_MAX - 1) * 0.6);
+  // 박자: 위상이 표시 시간(1.5초) 동안 3번 도는 빠르기로 나아간다 (월드 핑과 같은 박자). 프레임 수에 기대지 않게 기록한 프레임
+  // 시각으로 견준다 — 기록 시각과 그린 시각이 한 프레임쯤 어긋날 수 있어 0.2바퀴까지 봐준다(2번 · 4번 도는 박자는 1.5초 동안
+  // 한 바퀴가 어긋나 걸린다)
+  const phases = haloScales.map((v) => (v - 1) / (HALO_MAX - 1));
+  live.forEach((f, i) => {
+    const off = phases[i]! - phases[0]! - (PING_PULSE.beats * (f.t - live[0]!.t)) / REVEAL_MS;
+    expect(
+      Math.abs(off - Math.round(off)),
+      `t=${Math.round(f.t)} 위상 ${phases[i]!.toFixed(2)}`,
+    ).toBeLessThan(0.2);
+  });
 
   // ── 수명: 1.5초(revealDuration) 그대로, 끝난 뒤 10프레임 동안 아무것도 없다 (잔상 없음) ──
   const span = live[live.length - 1]!.t - live[0]!.t;
