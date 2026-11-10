@@ -60,6 +60,9 @@ const CAP = BEFORE_M10 + 88 * 1024;
 // 옮기고 a · b · c를 상한 안에서 나눈다 — 첫 로딩 +10 · +4 · +6KiB(합 20KiB, 상한까지 약 5.5KiB 남김), 전체 +14 · +6 · +14KiB
 // (합 34KiB, 약 13.5KiB 남김). 나눠 받는 조각이 느는 몫도 전체 줄에 든다
 // a(버그 · 조작 · 화면): 확대 막기 · 조준 보정 · 포효 표시 · 준비 동작 표시 · 미니맵 자리 · 게이지 숫자 · 카운트다운 · 자물쇠 판
+// — PR #33 병합 첫 로딩 329,156B(+8.4KiB) · 전체 397,465B(+9.1KiB)
+// b(거점 세 곳 중 두 곳): 거점 셋(HUD · 미니맵 · 화살표 · 꺼진 거점 그림) · 봇의 거점 선택(연습 조각) — PR #33 병합에서 첫 로딩 +4KiB ·
+// 전체 +6KiB
 /** 첫 로딩 JS 상한: M10 전 전체 번들 크기 (첫 화면에 받는 JS가 비주얼 리마스터 전 전체보다 크지 않게) */
 const INITIAL_CAP = BEFORE_M10;
 /** 첫 묶음(첫 화면) 조각 파일 이름 앞부분 */
@@ -78,10 +81,10 @@ const LAZY_CHUNKS = [
   'accountText',
 ];
 const MILESTONE = {
-  name: '플레이테스트 반영 a',
-  baseName: 'PR #32 병합',
-  base: { total: 388_149, initial: 320_524 },
-  budget: { total: 14 * 1024, initial: 10 * 1024 },
+  name: '플레이테스트 반영 b',
+  baseName: 'PR #33 병합',
+  base: { total: 397_465, initial: 329_156 },
+  budget: { total: 6 * 1024, initial: 4 * 1024 },
 };
 
 test(
