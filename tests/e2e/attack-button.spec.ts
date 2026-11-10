@@ -5,16 +5,25 @@
 //  3. 설정 조작 탭 '공격 버튼' 줄: 기본 끌어서 조준, 고르면 그 칸만 저장 · 새로고침 뒤에도 그대로 · 기본값으로 되돌리기
 //  4. '누르면 바로'로 바꾼 판: 판 직전 안내가 바뀌고, 닿는 순간 공격 · 끌기 무시 · 뗄 때 아무것도 없음 · 보이는 생존자 쪽 보정
 //  5. PC 클릭에는 보정이 없다
+//  6. 점수판 조작 안내: 끌어서 조준 줄이 점수판 폭을 늘리지 않는다(작은 휴대폰 + UI 크기를 키워도 화면 안), '누르면 바로' 판은 그 방식 줄
 // 판정은 서버 정답(틱마다 쓰는 truth.jsonl의 공격 준비 방향)으로 본다. 시간 창은 입력 프레임 수 · 서버 상태로 잰다.
 // 봇을 옮겨 세워 둘 때는 placeFrozen을 쓴다 — 시험 명령 teleport는 freeze를 풀어, 옮기기만 하면 봇이 다시 걸어 나간다
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { BTN, DEG, angleDiff, type InputLogEntry, type Role } from '@decoy/shared';
 import { ASSIST } from '../../client/src/aimAssist';
-import { SETTINGS_TEXT, tutorialLines } from '../../client/src/data/storyText';
+import {
+  CONTROLS_TOUCH,
+  CONTROLS_TOUCH_INSTANT,
+  HUD_TEXT,
+  SETTINGS_TEXT,
+  tutorialLines,
+} from '../../client/src/data/storyText';
 import { TOUCH, aimStartOf } from '../../client/src/touchInput';
+import { TOUCH_BOARD_W, TOUCH_UI } from '../../client/src/ui/layout';
 import {
   BASE_QUERY,
   PHONE_LANDSCAPE,
+  PHONE_NARROW,
   aimMonsterAt,
   chooseSetting,
   closeSettings,
@@ -258,6 +267,60 @@ async function waitAttackReady(page: Page): Promise<void> {
     null,
     { polling: 100, timeout: 20_000 },
   );
+}
+
+interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** 작은 휴대폰 가로 전체 화면 w×h (기기 배율 1) */
+const smallPhone = (w: number, h: number): DeviceOptions =>
+  dpr1({ ...PHONE_NARROW, viewport: { width: w, height: h }, screen: { width: w, height: h } });
+
+/**
+ * 점수판 버튼을 탭해 점수판을 열고, 점수판 부품(HUD 이름 'score' — 판 · 제목 · 행 · 조작 안내 · 닫기 안내)을 모두 감싼 상자(CSS px),
+ * 보이는 글자, 적용된 UI 크기 배율(제목 글자 = 주요 글자 + 1 CSS px × 배율)을 돌려준다
+ */
+async function openScoreboard(
+  page: Page,
+  t: MultiTouch,
+): Promise<{ box: Box; texts: string[]; ui: number; ctrlShown: boolean }> {
+  const c = centerOf(await waitForTouchTarget(page, 'scoreboard'));
+  await t.tap(5, c.x, c.y, 60);
+  await page.waitForFunction(() => window.__DECOY__?.getHud().scoreboard === true, null, {
+    polling: 100,
+    timeout: 20_000,
+  });
+  // 행(스냅샷의 익명 상태 목록)까지 놓였을 때
+  await expect
+    .poll(
+      async () =>
+        (await page.evaluate(() => window.__DECOY__!.getHudLayout()))?.items.some(
+          (i) => i.id === 'score' && i.text?.startsWith('생존자 '),
+        ) ?? false,
+      POLL,
+    )
+    .toBe(true);
+  const items = (await page.evaluate(() => window.__DECOY__!.getHudLayout()))!.items.filter(
+    (i) => i.id === 'score',
+  );
+  const x0 = Math.min(...items.map((i) => i.x));
+  const y0 = Math.min(...items.map((i) => i.y));
+  const x1 = Math.max(...items.map((i) => i.x + i.w));
+  const y1 = Math.max(...items.map((i) => i.y + i.h));
+  const title = items.find((i) => i.text === HUD_TEXT.scoreboard);
+  expect(title?.fontPx, '점수판 제목').toBeDefined();
+  const texts = items.flatMap((i) => (i.text === undefined ? [] : [i.text]));
+  return {
+    box: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 },
+    texts,
+    ui: title!.fontPx! / (TOUCH_UI.font.main + 1),
+    // 낮은 화면은 조작 안내 줄을 뺀다 (목표 문장 = 마지막 줄)
+    ctrlShown: texts.includes(CONTROLS_TOUCH.monster.at(-1)!),
+  };
 }
 
 /** 괴물 화면: 스냅샷에 온 생존자 수 = want이고, 그린 생존자 수도 같다 (보간 지연 뒤 화면까지 반영됨) */
@@ -586,6 +649,13 @@ test("'누르면 바로'로 바꾼 뒤의 판: 판 직전 안내가 바뀌고, �
     1 * DEG,
   );
   await t.up(2);
+
+  // ⑤ 점수판 조작 안내도 판 시작 때 읽은 방식('누르면 바로')의 줄이다: 공격 버튼 줄이 있고, 끌어서 조준 줄(놓으면 · 취소)은 없다
+  const board = await openScoreboard(page, t);
+  expect(board.ctrlShown, '915×412는 조작 안내 줄을 보인다').toBe(true);
+  expect(board.texts).toContain('공격 버튼');
+  expect(board.texts).toContain(CONTROLS_TOUCH_INSTANT[1]!.split('  ')[1]);
+  expect(board.texts.filter((x) => /놓으면|취소|짧게 탭/.test(x))).toEqual([]);
   await t.detach();
   expect((await pointerCounts(page))['pointercancel:touch'] ?? 0).toBe(0);
   expect(s.problems).toEqual([]);
@@ -623,4 +693,34 @@ test('PC 클릭에는 보정이 없다: 보이는 생존자가 20° 옆에 있�
   expect(frames.filter((f) => angleGap(f.aim, 0) > 1 * DEG).map((f) => f.aim)).toEqual([]);
   expect(s.problems).toEqual([]);
   await s.context.close();
+});
+
+test('점수판 조작 안내(터치 괴물, 끌어서 조준): 작은 휴대폰 가로에서 UI 크기를 키워도 점수판이 화면 안이고 폭이 TOUCH_BOARD_W × 배율 이하', async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  // 조작 안내 블록은 열 단위로 폭을 잰다(첫 열 최대 폭 + 둘째 열) — 둘째 줄 첫 칸이 길어지면 첫 줄 둘째 칸이 밀려 패널 전체가
+  // 넓어진다. layout.touchHudFits는 점수판 최대 폭을 TOUCH_BOARD_W로 보고 UI 크기를 고르므로 그보다 넓으면 화면 밖으로 나간다
+  // (667×375 = 아이폰 8 · SE 2/3 가로, 568×320 = 가장 좁은 가로)
+  for (const c of [
+    { w: 667, h: 375, ui: 'xlarge' },
+    { w: 568, h: 320, ui: 'large' },
+  ] as const) {
+    const name = `${c.w}×${c.h} UI ${c.ui}`;
+    const s = await soloMatch(browser, smallPhone(c.w, c.h), 'monster', async (lobby) => {
+      await chooseSetting(lobby, 'screen', `ui-size-${c.ui}`);
+      await closeSettings(lobby);
+    });
+    const t = await MultiTouch.attach(s.page);
+    const b = await openScoreboard(s.page, t);
+    expect(b.ui, `${name}: UI 크기를 키운 배치가 적용됐다`).toBeGreaterThan(1.05);
+    expect(b.box.x, `${name}: 점수판 왼쪽 끝`).toBeGreaterThanOrEqual(0);
+    expect(b.box.x + b.box.w, `${name}: 점수판 오른쪽 끝`).toBeLessThanOrEqual(c.w);
+    // 그림 단위 × (CSS px / 그림 단위). 글자 크기 반올림(0.1 논리 px) 여유 1%
+    expect(b.box.w, `${name}: 점수판 폭`).toBeLessThanOrEqual(TOUCH_BOARD_W * TOUCH_UI.art * b.ui * 1.01);
+    if (b.ctrlShown) expect(b.texts, `${name}: 끌어서 조준 줄`).toContain('오른쪽 스틱을 놓으면');
+    await t.detach();
+    expect(s.problems, name).toEqual([]);
+    await s.context.close();
+  }
 });

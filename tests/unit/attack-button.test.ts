@@ -22,13 +22,21 @@ describe('조작 안내 (점수판): 공격 버튼 방식에 맞는 줄', () => 
     }
   });
 
-  it("터치 괴물 '끌어서 조준'(기본): 놓으면 공격 줄에 '짧게 누르면 보는 방향'이 있다", () => {
+  it("터치 괴물 '끌어서 조준'(기본): 놓으면 공격 줄에 '짧게 탭 = 보는 방향'이 둘째 칸으로 있다", () => {
     expect(controlsText('monster', 'touch')).toBe(CONTROLS_TOUCH.monster);
     expect(controlsText('monster', 'touch', 'drag')).toBe(CONTROLS_TOUCH.monster);
     const line = CONTROLS_TOUCH.monster[1]!;
     expect(line).toContain('놓으면');
-    expect(line).toContain('짧게 누르면 보는 방향');
     expect(line).toContain('되돌리면 취소');
+    // 짧은 탭은 첫 칸 설명에 붙이지 않고 둘째 칸(첫 줄 '오른쪽 스틱  조준' 아래)으로 둔다 — 조작 안내 블록은 열 단위로 폭을 재서
+    // 첫 칸이 길어지면 점수판 패널 전체가 넓어진다(작은 휴대폰 + UI 크기 큼에서 화면 밖, attack-button.spec 점수판 시험)
+    expect(parseControl(line)).toEqual({
+      kind: 'keys',
+      pairs: [
+        { key: '오른쪽 스틱을 놓으면', note: '', desc: '공격 (되돌리면 취소)' },
+        { key: '짧게 탭', note: '', desc: '보는 방향' },
+      ],
+    });
   });
 
   it("터치 괴물 '누르면 바로': 조준 스틱 · 놓기 · 취소 말이 없고 누르면 바로 공격, 나머지 줄(돌진 · 점수판 · 목표)은 같다", () => {
