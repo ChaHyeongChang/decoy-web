@@ -4,7 +4,8 @@
 // 미니맵보다 많은 정보가 나올 수 없다. 출처가 drawn에서 사라진 프레임에 화살표도 바로 사라진다(여운 없음).
 //  - 생존자 화면: 팀원(자유), 수감된 팀원이 있으면 감옥 구조 자리, 공유 시야로 보이는 괴물, 스카우트 탐지, 포효한 괴물 자리,
 //    끝나지 않은 거점(상태별), 활성 · 열린 탈출구. 관전 중이면 내 자리도(수감 중일 때)
-//  - 괴물 화면: 점령 중인 거점(깜빡임)과 포효로 드러난 자리(흰색 · 역할 없음)만. 생존자 엔티티 화살표는 없다
+//  - 괴물 화면: 점령 중인 거점(깜빡임)과 포효로 드러난 자리(흰색 · 역할 없음)만. 생존자 엔티티 화살표는 없다.
+//    포효 핑 화살표만 크게(EDGE_ART.pingScale배) 그린다 — 대상 · 자리 · 수명은 그대로이고 핑마다 같은 배율이다
 import {
   CAPTURE_POINTS,
   EXITS,
@@ -15,6 +16,7 @@ import {
   type Role,
   type SurvivorStatus,
 } from '@decoy/shared';
+import { EDGE_ART } from '../ui/hudArt';
 
 export type EdgeKind =
   'monster' | 'track' | 'roar' | 'roarPing' | 'prison' | 'teammate' | 'self' | 'exit' | 'point';
@@ -31,6 +33,8 @@ export interface EdgeTarget {
   role: Role | null;
   /** 거점 · 탈출구 상태 (그림을 고른다) */
   state: string | null;
+  /** 배지 배율 (포효 핑만 EDGE_ART.pingScale, 나머지 1): 간격 · 피하기 · 몸 겹침을 이 크기로 잰다 */
+  scale: number;
 }
 
 /** 놓인 화살표 (논리 px) */
@@ -92,7 +96,16 @@ export function edgeTargets(i: EdgeInput, out: EdgeTarget[]): EdgeTarget[] {
     role: Role | null,
     state: string | null,
   ): void => {
-    out.push({ kind, id, tx, ty, prio: EDGE_PRIO[kind], role, state });
+    out.push({
+      kind,
+      id,
+      tx,
+      ty,
+      prio: EDGE_PRIO[kind],
+      role,
+      state,
+      scale: kind === 'roarPing' ? EDGE_ART.pingScale : 1,
+    });
   };
   if (i.role === 'monster') {
     // 괴물: 포효로 드러난 자리 (흰색, 역할 없음 · 번호는 그린 순서) + 점령 중 거점
@@ -226,7 +239,7 @@ export function rayToTrack(t: Track, tx: number, ty: number): { x: number; y: nu
 export interface EdgeLayout {
   /** 창 가장자리에서 배지 가운데까지 (논리 px) */
   inset: number;
-  /** 배지 반지름 (논리 px): 서로 이만큼의 두 배 + 틈보다 가깝지 않게 민다 */
+  /** 배지 반지름 (논리 px, 대상의 scale배): 서로 두 반지름의 합 + 틈보다 가깝지 않게 민다 */
   r: number;
   /** 배지 사이 틈 (논리 px) */
   gap: number;
@@ -234,6 +247,11 @@ export interface EdgeLayout {
   avoid: readonly { x: number; y: number; w: number; h: number }[];
   /** 캐릭터 몸 반지름 (논리 px): 배지가 몸과 겹치면 흐리게 */
   bodyR: number;
+}
+
+/** 배지 반지름 (논리 px): 큰 화살표(포효 핑)는 scale배 */
+function radiusOf(L: EdgeLayout, g: EdgeTarget): number {
+  return L.r * g.scale;
 }
 
 function hitsBox(
@@ -282,11 +300,13 @@ export function placeEdges(
     s.push(toPerim(t, q.x, q.y));
     order.push(k);
   }
-  // 겹침 풀기: 둘레 순으로 늘어놓고 이웃 사이가 최소 간격보다 좁으면 반씩 민다 (몇 번 반복)
-  const minGap = L.r * 2 + L.gap;
+  // 겹침 풀기: 둘레 순으로 늘어놓고 이웃 사이가 최소 간격(두 배지 반지름 + 틈)보다 좁으면 반씩 민다 (몇 번 반복).
+  // 큰 화살표(포효 핑)는 반지름이 scale배라 그만큼 더 벌린다
   order.sort((a, b) => s[a]! - s[b]!);
   const n = order.length;
-  if (n > 1 && minGap * n < P) {
+  let need = 0;
+  for (let k = 0; k < n; k += 1) need += radiusOf(L, picked[k]!) * 2 + L.gap;
+  if (n > 1 && need < P) {
     for (let pass = 0; pass < 16; pass += 1) {
       let moved = false;
       for (let k = 0; k < n; k += 1) {
@@ -294,6 +314,7 @@ export function placeEdges(
         const b = order[(k + 1) % n]!;
         let d = s[b]! - s[a]!;
         if (k === n - 1) d += P;
+        const minGap = radiusOf(L, picked[a]!) + radiusOf(L, picked[b]!) + L.gap;
         if (d >= minGap) continue;
         const push = (minGap - d) / 2;
         s[a] = s[a]! - push;
@@ -307,37 +328,39 @@ export function placeEdges(
   // 이미 자리 잡은 다른 화살표(걸리지 않은 것 · 먼저 옮긴 것)와도 최소 간격을 지킨다 — 같은 버튼에 막힌 둘이 같은 빈자리에
   // 겹쳐 쌓이지 않게 (검토 반영). 빈자리가 없으면 제자리
   if (L.avoid.length > 0 && picked.length > 0) {
-    const inBox = (q: number): boolean => {
+    const inBox = (q: number, r: number): boolean => {
       const p = fromPerim(t, q);
-      return L.avoid.some((b) => hitsBox(p.x, p.y, L.r, b));
+      return L.avoid.some((b) => hitsBox(p.x, p.y, r, b));
     };
     const moving: number[] = [];
+    // 자리 잡은 화살표 (picked 번호 — 자리 s와 반지름을 같이 읽는다)
     const fixed: number[] = [];
     for (let k = 0; k < picked.length; k += 1) {
-      if (inBox(s[k]!)) moving.push(k);
-      else fixed.push(s[k]!);
+      if (inBox(s[k]!, radiusOf(L, picked[k]!))) moving.push(k);
+      else fixed.push(k);
     }
-    const near = (q: number): boolean => {
+    const near = (q: number, r: number): boolean => {
       for (const f of fixed) {
-        const d = Math.abs(q - f) % P;
-        if (Math.min(d, P - d) < minGap - 1e-6) return true;
+        const d = Math.abs(q - s[f]!) % P;
+        if (Math.min(d, P - d) < r + radiusOf(L, picked[f]!) + L.gap - 1e-6) return true;
       }
       return false;
     };
     const step = 4;
     for (const k of moving) {
       const at = s[k]!;
+      const r = radiusOf(L, picked[k]!);
       for (let d = step; d < P / 2; d += step) {
-        if (!inBox(at + d) && !near(at + d)) {
+        if (!inBox(at + d, r) && !near(at + d, r)) {
           s[k] = at + d;
           break;
         }
-        if (!inBox(at - d) && !near(at - d)) {
+        if (!inBox(at - d, r) && !near(at - d, r)) {
           s[k] = at - d;
           break;
         }
       }
-      fixed.push(s[k]!);
+      fixed.push(k);
     }
   }
   for (let k = 0; k < picked.length; k += 1) {
@@ -346,7 +369,7 @@ export function placeEdges(
     const tp = toScreen(v, g.tx, g.ty);
     let faded = false;
     for (const b of bodies)
-      if (Math.hypot(b.x - p.x, b.y - p.y) < L.r + L.bodyR) {
+      if (Math.hypot(b.x - p.x, b.y - p.y) < radiusOf(L, g) + L.bodyR) {
         faded = true;
         break;
       }

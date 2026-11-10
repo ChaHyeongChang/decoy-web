@@ -1,19 +1,21 @@
 // 화면 밖 화살표 그리기 (따라가는 카메라). 무엇을 어디에 놓을지는 순수 모듈(render/offscreen.ts)이 정하고, 여기서는 HUD
 // 아틀라스 그림(배지 · 셰브론 · 문양 · 아이콘)을 재사용 풀로 놓기만 한다(매 프레임 Graphics · 텍스처 없음).
 // 깊이 38.5~38.7: 창 밖 가리개(37) · 발각 테두리(38) 위, HUD 패널(39~) 아래 — 맵 사각형 안 표시라 HUD 패널 목록에 들지 않는다.
-// 색만으로 구분하지 않기: 역할 = 문양 모양 + 색, 괴물 = 괴물 문양, 탐지 · 포효 · 감옥 · 탈출구 · 거점 = 아이콘 모양 + 색.
-// 괴물 화면의 포효 핑은 흰 공통 문양(역할 없음)이다
-import type { OffscreenMarkerDebug, Role } from '@decoy/shared';
-import { EXIT_GO, HIDDEN_SURVIVOR, NEON, PRISON_RED, ROLE, UI, WARN } from '../art/palette';
-import type { IconId } from '../art/icons';
-import { EDGE_ART, EDGE_GLYPH, EDGE_ICON, FR } from './hudArt';
+// 그림 고르기(색만으로 구분하지 않기)는 순수 모듈 edgeLook.ts에 있다.
+// 괴물 화면의 포효 핑은 흰 공통 문양(역할 없음)이고, 이 화살표만 크게(EDGE_ART.pingScale배) + 흰 펄스 고리(월드 핑과 같은
+// 박자, prefsFx.pingPulse)를 그린다 — 대상 · 자리 · 수명은 그대로이고 핑마다 같은 그림이다
+import type { OffscreenMarkerDebug } from '@decoy/shared';
+import { UI } from '../art/palette';
+import { EDGE_ART, FR } from './hudArt';
+import { EDGE_HALO, chevBack, edgeLook, haloScale } from './edgeLook';
 import { setText, type HudKit, type Spr } from './hudKit';
 import type { CrispText } from './text';
 import { HUD } from './layout';
 import type { EdgeMarker } from '../render/offscreen';
+import type { PingPulse } from '../render/prefsFx';
 
-/** 깊이 (창 밖 가리개 37 · 발각 테두리 38 위, HUD 39 아래) */
-const DEPTH = { badge: 38.5, icon: 38.6, text: 38.7 } as const;
+/** 깊이 (창 밖 가리개 37 · 발각 테두리 38 위, HUD 39 아래). 펄스 고리는 배지 바로 아래 */
+const DEPTH = { halo: 38.45, badge: 38.5, icon: 38.6, text: 38.7 } as const;
 /** 몸과 겹친 화살표 · 깜빡임 꺼진 위상의 알파 */
 const FADED_ALPHA = 0.35;
 const BLINK_MS = 500;
@@ -22,71 +24,8 @@ interface Item {
   badge: Spr;
   chev: Spr;
   icon: Spr;
-}
-
-/** 화살표 하나의 그림 (강조색 · 배지 안 그림 · 글자) */
-export interface EdgeLook {
-  color: number;
-  /** 배지 안 그림 프레임 */
-  inner: string;
-  /** 배지 안 글자 (거점 A/B) */
-  label: string;
-  labelColor: number;
-  /** 깜빡임 (괴물 화면 점령 알림) */
-  blink: boolean;
-  /** 낮은 강조 (대기 거점 · 활성(닫힌) 탈출구) */
-  dim: boolean;
-}
-
-const icon = (id: IconId, color: number, size = EDGE_ICON): string => FR.icon(id, color, size);
-
-/** 화살표 그림을 고른다 (순수: hud.test가 프레임이 아틀라스에 있는지 본다) */
-export function edgeLook(m: EdgeMarker, monsterScreen: boolean): EdgeLook {
-  const base = { label: '', labelColor: UI.text, blink: false, dim: false };
-  const roleColor = (r: Role | null): number => (r ? ROLE[r] : HIDDEN_SURVIVOR);
-  switch (m.kind) {
-    case 'monster':
-      return { ...base, color: ROLE.monster, inner: FR.glyph('monster', EDGE_GLYPH) };
-    case 'track':
-      return { ...base, color: ROLE.scout, inner: icon('track', ROLE.scout) };
-    case 'roar':
-      return { ...base, color: WARN, inner: icon('roar', WARN) };
-    case 'roarPing':
-      return { ...base, color: HIDDEN_SURVIVOR, inner: FR.glyph('hidden', EDGE_GLYPH) };
-    case 'prison':
-      return { ...base, color: PRISON_RED, inner: icon('prison', PRISON_RED) };
-    case 'teammate': {
-      const r = m.role && m.role !== 'monster' ? m.role : null;
-      return {
-        ...base,
-        color: roleColor(r),
-        inner: r ? FR.glyph(r, EDGE_GLYPH) : FR.glyph('hidden', EDGE_GLYPH),
-      };
-    }
-    case 'self': {
-      const r = m.role && m.role !== 'monster' ? m.role : null;
-      return {
-        ...base,
-        color: HIDDEN_SURVIVOR,
-        inner: r ? FR.glyph(r, EDGE_GLYPH) : FR.glyph('hidden', EDGE_GLYPH),
-      };
-    }
-    case 'exit':
-      return { ...base, color: EXIT_GO, inner: icon('exit', EXIT_GO), dim: m.state !== 'open' };
-    case 'point': {
-      // 괴물 화면: 점령 중 경고(주황 깜빡임). 생존자 화면: 점령 중 청록 · 정지 주황 · 대기 흐림
-      const col = monsterScreen || m.state === 'blocked' ? WARN : m.state === 'capturing' ? NEON : UI.textDim;
-      return {
-        ...base,
-        color: col,
-        inner: icon('point', col, EDGE_ICON + 4),
-        label: m.id,
-        labelColor: col,
-        blink: monsterScreen,
-        dim: !monsterScreen && m.state === 'idle',
-      };
-    }
-  }
+  /** 포효 핑 펄스 고리 (다른 화살표에서는 숨긴다) */
+  halo: Spr;
 }
 
 export class EdgeMarkers {
@@ -119,17 +58,27 @@ export class EdgeMarkers {
         badge: k.spr(DEPTH.badge),
         chev: k.spr(DEPTH.badge, false),
         icon: k.spr(DEPTH.icon),
+        halo: k.spr(DEPTH.halo, false),
       }));
       this.items[i] = it;
     }
     return it;
   }
 
-  /** 프레임마다: 놓인 화살표를 그린다 (나머지는 숨긴다) */
-  update(markers: readonly EdgeMarker[], monsterScreen: boolean, nowMs: number): void {
+  /**
+   * 프레임마다: 놓인 화살표를 그린다 (나머지는 숨긴다). pulse = 이번 프레임 포효 핑 펄스 고리 값(prefsFx.pingPulse — 판 장면이
+   * 미니맵과 같은 값을 넘긴다. 살아 있는 핑이 없으면 알파 0)
+   */
+  update(
+    markers: readonly EdgeMarker[],
+    monsterScreen: boolean,
+    nowMs: number,
+    pulse: Readonly<PingPulse>,
+  ): void {
     this.used = 0;
     this.shown.length = 0;
     const blinkOff = Math.floor(nowMs / BLINK_MS) % 2 === 1;
+    const z = this.kit.dev;
     let showA = false;
     let showB = false;
     for (const m of markers) {
@@ -137,14 +86,26 @@ export class EdgeMarkers {
       this.used += 1;
       const look = edgeLook(m, monsterScreen);
       const alpha = m.faded || (look.blink && blinkOff) ? FADED_ALPHA : look.dim ? 0.85 : 1;
+      // 큰 화살표(포효 핑): 배지 · 문양 · 셰브론을 scale배로. 셰브론은 끝이 창 가장자리를 넘지 않게 배지 쪽으로 당긴다
+      const k = m.scale;
+      const back = k === 1 ? 0 : chevBack(k) * HUD.s;
       it.badge.set(FR.edge('badge', look.color), m.x, m.y).show(true);
-      it.chev.set(FR.edge('chev', look.color), m.x, m.y).show(true);
+      it.chev
+        .set(FR.edge('chev', look.color), m.x - Math.cos(m.dir) * back, m.y - Math.sin(m.dir) * back)
+        .show(true);
       it.chev.img.setRotation(m.dir);
       // 거점은 다이아 아이콘 안에 글자
       it.icon.set(look.inner, m.x, m.y).show(true);
-      it.badge.img.setAlpha(alpha);
-      it.chev.img.setAlpha(alpha);
-      it.icon.img.setAlpha(alpha);
+      // 풀로 다시 쓰는 그림이라 배율 · 알파를 매 프레임 다시 건다: set은 같은 값이면 아무것도 하지 않고, apply는 배율만 되돌린다 —
+      // 포효 핑에 썼던 칸이 다음 프레임에 거점 화살표가 되어도 커진 채 남지 않게
+      it.badge.img.setScale(k / z).setAlpha(alpha);
+      it.chev.img.setScale(k / z).setAlpha(alpha);
+      it.icon.img.setScale(k / z).setAlpha(alpha);
+      if (look.pulse && pulse.alpha > 0) {
+        // 몸과 겹쳐 흐려진 화살표는 고리도 같이 흐리게 (R15)
+        it.halo.set(EDGE_HALO, m.x, m.y).show(true);
+        it.halo.img.setScale(haloScale(pulse.t) / z).setAlpha(pulse.alpha * (m.faded ? FADED_ALPHA : 1));
+      } else it.halo.show(false);
       if (look.label === 'A' || look.label === 'B') {
         const t = this.labels[look.label];
         setText(t, look.label, look.labelColor);
@@ -166,6 +127,7 @@ export class EdgeMarkers {
     it.badge.show(false);
     it.chev.show(false);
     it.icon.show(false);
+    it.halo.show(false);
   }
 
   hide(): void {
@@ -181,6 +143,9 @@ export class EdgeMarkers {
     const out: OffscreenMarkerDebug[] = [];
     for (const { m, item } of this.shown) {
       if (!item.badge.img.visible) continue;
+      // 배율 · 고리는 그림에 실제로 걸린 값을 읽는다 (HUD.s배로 구운 그림: 1텍셀 = 기기 1px)
+      const z = this.kit.dev;
+      const halo = item.halo.img;
       out.push({
         kind: m.kind,
         id: m.id,
@@ -189,6 +154,9 @@ export class EdgeMarkers {
         x: item.badge.img.x,
         y: item.badge.img.y,
         dir: item.chev.img.rotation,
+        scale: item.badge.img.scaleX * z,
+        halo: halo.visible ? { scale: halo.scaleX * z, alpha: halo.alpha } : null,
+        chev: { x: item.chev.img.x, y: item.chev.img.y },
       });
     }
     return out;

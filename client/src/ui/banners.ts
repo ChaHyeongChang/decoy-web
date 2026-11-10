@@ -19,6 +19,7 @@ import { NEON_DIM, UI } from '../art/palette';
 import { fontGeneration } from './fonts';
 import { FR, TONE, type Tone } from './hudArt';
 import { dropEnded, dropStale } from './hudGate';
+import { shownUntil } from './hudGate';
 import { hexColor, setText, type HudKit, type Slice, type Spr } from './hudKit';
 import { HUD, MAP_SCALE, MAP_Y, VIEW_W } from './layout';
 import { UI_FONT, makeText, type CrispText } from './text';
@@ -32,6 +33,8 @@ export interface BannerLine {
 interface Item extends BannerLine {
   until: number;
   created: number;
+  /** 다른 표시와 함께 사라져야 하는 알림 (포효 결과 = 핑이 보이는 동안만): 끝나는 시각을 늘리지 않는다 */
+  tied: boolean;
 }
 
 /** 대기열에서 이보다 오래 기다린 알림은 버린다 (지난 일) */
@@ -182,8 +185,19 @@ export class Banners {
     this.note.text.setVisible(false);
   }
 
-  push(text: string, seconds: number, tone: Tone, icon: IconId, nowMs: number = performance.now()): void {
-    this.queue.push({ text, tone, icon, until: nowMs + seconds * 1000, created: nowMs });
+  /**
+   * tied = 다른 표시와 함께 사라져야 하는 알림 (포효 결과): 다른 알림에 밀려 늦게 떠도 끝나는 시각(nowMs + seconds)은 그대로이고,
+   * 남은 시간이 너무 짧으면 버린다 — 표시가 사라진 뒤에 글만 남지 않게
+   */
+  push(
+    text: string,
+    seconds: number,
+    tone: Tone,
+    icon: IconId,
+    nowMs: number = performance.now(),
+    tied = false,
+  ): void {
+    this.queue.push({ text, tone, icon, until: nowMs + seconds * 1000, created: nowMs, tied });
   }
 
   pushNote(text: string, seconds: number): void {
@@ -249,9 +263,9 @@ export class Banners {
     while (this.shown.length < this.rows.length && this.queue.length > 0) {
       const next = this.queue.shift();
       if (!next) break;
-      // 큐에서 기다린 만큼 늦게 시작하므로 표시 시간을 다시 잡는다
-      const dur = next.until - nowMs;
-      this.shown.push({ ...next, until: nowMs + Math.max(800, dur) });
+      // 큐에서 기다린 만큼 늦게 시작하므로 표시 시간을 다시 잡는다 (함께 사라져야 하는 알림은 그대로 두거나 버린다)
+      const until = shownUntil(next.until, next.tied, nowMs);
+      if (until !== null) this.shown.push({ ...next, until });
     }
     const B = HUD.banner;
     this.rows.forEach((row, i) => {

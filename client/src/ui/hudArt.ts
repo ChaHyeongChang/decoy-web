@@ -774,8 +774,8 @@ export const FR = {
   },
   /** 정면 문양 (점수판 · 조작 안내) */
   glyph: (g: RoleId | 'monster' | 'hidden', size: number): string => `g:${g}:${size}`,
-  /** 화면 밖 화살표: 배지(테두리 색) · 셰브론(색) */
-  edge: (part: 'badge' | 'chev', color: number): string => {
+  /** 화면 밖 화살표: 배지(테두리 색) · 셰브론(색) · 펄스 고리(포효 핑) */
+  edge: (part: 'badge' | 'chev' | 'halo', color: number): string => {
     let byColor = EDGE_NAMES.get(part);
     if (!byColor) {
       byColor = new Map();
@@ -836,6 +836,11 @@ const PANEL: PlateLook = {
 export const DIAL = { well: 17, body: 10.5, rot: -Math.PI / 3 } as const;
 /** 미니맵 그림 몸 반지름 (지도 1타일 ≈ 4.6px, 실제보다 크게) */
 export const MM_BODY = 4.6;
+/**
+ * 미니맵 포효 핑 (괴물 화면, 그림 단위): 흰 마름모 반높이 h(몸 그림과 같은 크기) + 그 둘레에서 퍼지는 흰 펄스 고리 —
+ * 처음 반지름 ring, 끝은 그 ringTo배(박자 · 알파는 prefsFx.pingPulse, 번쩍임 줄이기면 고정). 핑마다 같은 그림이다
+ */
+export const MM_PING = { h: 4.6, ring: 6.5, ringTo: 2.2 } as const;
 
 /**
  * 화면 밖 화살표 (따라가는 카메라, 그림 단위 — × HUD.s = 논리 px): 배지(어두운 원판 + 강조색 테두리) 안에 문양 · 아이콘,
@@ -849,6 +854,9 @@ export const EDGE_ART = {
   chevHalf: 8,
   inset: 30,
   gap: 5,
+  /** 포효 핑 화살표만: 배지 · 문양 · 셰브론 배율, 펄스 고리가 퍼지는 끝 반지름(보통 배지 반지름 r의 배수 — 처음은 커진 배지 둘레) */
+  pingScale: 1.3,
+  haloTo: 1.9,
 } as const;
 /** 화살표 강조색 (셰브론 · 배지 테두리를 굽는 색) */
 export const EDGE_COLORS: readonly number[] = [
@@ -1320,7 +1328,21 @@ export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
       }),
     );
   diamond('track', 4, ROLE.scout, OUTLINE);
-  diamond('roarPing', 3.4, 0xffffff, OUTLINE);
+  diamond('roarPing', MM_PING.h, 0xffffff, OUTLINE);
+  // 포효 핑 펄스 고리: 어두운 외곽선 위 흰 고리 (밝은 바닥 · 어두운 안개 어디서나 보이게). 미니맵이 배율 · 알파만 바꾼다
+  const ringFrame = (name: string, r: number, w: number): void =>
+    add(
+      square(name, r + w / 2 + 2, (c) => {
+        circle(c, r);
+        c.lineWidth = w + 1.6;
+        c.strokeStyle = rgba(OUTLINE, 0.7);
+        c.stroke();
+        c.lineWidth = w;
+        c.strokeStyle = rgba(HIDDEN_SURVIVOR);
+        c.stroke();
+      }),
+    );
+  ringFrame(FR.mm('roarPingRing'), MM_PING.ring, 1.6);
   diamond('point', 4.5, null, NEON);
   // 거점 상태 (따라가는 카메라: 미니맵이 상단 게이지와 같은 상태를 보인다 — 채움 · 색 · 모양)
   diamond('point:capturing', 4.5, NEON, OUTLINE);
@@ -1417,6 +1439,8 @@ export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
     });
   }
   for (const [id, col] of EDGE_ICONS) icon(id, col, id === 'point' ? EDGE_ICON + 4 : EDGE_ICON);
+  // 포효 핑 화살표의 펄스 고리 (흰색 하나): 커진 배지 둘레 크기로 굽고, 화살표가 배율 · 알파만 바꾼다
+  ringFrame(FR.edge('halo', HIDDEN_SURVIVOR), E.r * E.pingScale, E.ring);
 
   // ── 배너 리본 (3조각): 지속 배너 높이 · 알림 줄 높이 ──
   const B = h.banner;
@@ -1460,6 +1484,7 @@ export const BANNER_ICONS: readonly (readonly [IconId, number])[] = [
   ['prison', WARN_TEXT],
   ['point', WARN_TEXT],
   ['roar', WARN_TEXT],
+  ['roar', UI.white],
 ];
 
 // ───────────────────────── 조작 안내 줄 (조작 안내 · 점수판) ─────────────────────────
