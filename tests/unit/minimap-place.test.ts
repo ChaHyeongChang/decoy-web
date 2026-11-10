@@ -707,6 +707,40 @@ describe('판 중 창이 낮아질 때 옮길 자리 (layout.minimapFallback —
       y: 60,
     });
   });
+
+  it('좌우 반전(이동 영역이 오른쪽): 어느 후보도 이동 영역에 걸치지 않는다 — 오른쪽 위 · 그 아래 · 막은 것의 왼쪽도 (PR #33 검토)', () => {
+    const map = { x: 100, y: 50, w: 900, h: 600 };
+    const frame = { w: 200, h: 150 };
+    const zoneRight = { x: 560, y: 0, w: 500, h: 700 };
+    // 막는 것이 없으면 예전에는 오른쪽 위(이동 영역 위)를 돌려줬다 → 이제 맵 왼쪽 위 구석
+    expect(L.minimapFallback(map, frame, [], 10, 8, zoneRight)).toEqual({ x: 110, y: 60 });
+    // 오른쪽 위를 시스템 버튼이 막으면 '그 아래'(이동 영역 위)가 아니라 맵 왼쪽 위 구석
+    const sys = { x: 860, y: 40, w: 140, h: 60 };
+    expect(L.minimapFallback(map, frame, [sys], 10, 8, zoneRight)).toEqual({ x: 110, y: 60 });
+    // 왼쪽 위 구석도 막히면 '막은 것의 왼쪽'이 이동 영역에 걸치므로 놓을 자리가 없다(null — 옮기지 않고 숨긴다)
+    const leftBtn = { x: 90, y: 40, w: 230, h: 200 };
+    expect(L.minimapFallback(map, frame, [sys, leftBtn], 10, 8, zoneRight)).toBeNull();
+    // 무작위 배치: 돌려준 자리는 늘 이동 영역과 겹치지 않는다
+    let seed = 7;
+    const rnd = (n: number): number => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return (seed / 2147483648) * n;
+    };
+    for (let i = 0; i < 400; i += 1) {
+      const zone = { x: rnd(1000), y: rnd(600), w: 50 + rnd(500), h: 50 + rnd(600) };
+      const avoid = [0, 1, 2].map(() => ({ x: rnd(1000), y: rnd(650), w: 20 + rnd(200), h: 20 + rnd(200) }));
+      const got = L.minimapFallback(map, frame, avoid, 10, 8, zone);
+      if (!got) continue;
+      const box = { x: got.x, y: got.y, w: frame.w, h: frame.h };
+      const hit = !(
+        box.x >= zone.x + zone.w ||
+        zone.x >= box.x + box.w ||
+        box.y >= zone.y + zone.h ||
+        zone.y >= box.y + box.h
+      );
+      expect(hit, `무작위 ${i}`).toBe(false);
+    }
+  });
 });
 
 // ───────────────────────── 조작 배치의 지도 칸 ─────────────────────────

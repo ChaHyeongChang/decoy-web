@@ -177,6 +177,8 @@ export function minimapFallback(
   zone: { x: number; y: number; w: number; h: number } | null = null,
 ): { x: number; y: number } | null {
   if (frame.w + margin * 2 > map.w || frame.h + margin * 2 > map.h) return null;
+  // 이동 영역은 모든 후보가 피한다: 틀이 그 위에 놓이면 지도를 탭해도 이동이 된다 (좌우 반전이면 이동 영역이 오른쪽이라
+  // 오른쪽 끝 후보도 걸칠 수 있다 — 플레이테스트 a PR #33 검토)
   const free = (x: number, y: number): boolean =>
     x >= map.x + margin &&
     y >= map.y + margin &&
@@ -185,11 +187,12 @@ export function minimapFallback(
     avoid.every(
       (b) =>
         x >= b.x + b.w + gap || b.x >= x + frame.w + gap || y >= b.y + b.h + gap || b.y >= y + frame.h + gap,
-    );
+    ) &&
+    !(zone && overlapsCss({ x, y, w: frame.w, h: frame.h }, zone));
   const top = map.y + margin;
   const right = map.x + map.w - margin - frame.w;
   if (free(right, top)) return { x: right, y: top };
-  // 오른쪽 위 구석을 막은 것들 (틀 자리와 간격 안에서 겹친다)
+  // 오른쪽 위 구석을 막은 것들 (틀 자리와 간격 안에서 겹친다). 이동 영역만 막았으면 없다 — 그때는 왼쪽 위 구석만 본다
   const blockers = avoid.filter(
     (b) =>
       !(
@@ -199,17 +202,19 @@ export function minimapFallback(
         b.y >= top + frame.h + gap
       ),
   );
-  if (blockers.length === 0) return null;
   // 그 아래 (오른쪽 끝 그대로)
-  const below = Math.max(...blockers.map((b) => b.y + b.h)) + gap;
-  if (free(right, below)) return { x: right, y: below };
-  // 맵 왼쪽 위 구석 (이동 영역과 겹치면 쓰지 않는다)
+  if (blockers.length > 0) {
+    const below = Math.max(...blockers.map((b) => b.y + b.h)) + gap;
+    if (free(right, below)) return { x: right, y: below };
+  }
+  // 맵 왼쪽 위 구석
   const corner = map.x + margin;
-  if (free(corner, top) && !(zone && overlapsCss({ x: corner, y: top, w: frame.w, h: frame.h }, zone)))
-    return { x: corner, y: top };
+  if (free(corner, top)) return { x: corner, y: top };
   // 막은 것의 왼쪽 (맵 위 끝 그대로)
-  const left = Math.min(...blockers.map((b) => b.x)) - gap - frame.w;
-  if (left >= map.x + map.w / 2 && free(left, top)) return { x: left, y: top };
+  if (blockers.length > 0) {
+    const left = Math.min(...blockers.map((b) => b.x)) - gap - frame.w;
+    if (left >= map.x + map.w / 2 && free(left, top)) return { x: left, y: top };
+  }
   return null;
 }
 
