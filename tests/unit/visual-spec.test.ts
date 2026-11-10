@@ -11,6 +11,7 @@ import * as charFrames from '../../client/src/art/charFrames';
 import * as chars from '../../client/src/art/chars/index';
 import * as fx from '../../client/src/art/fx';
 import * as icons from '../../client/src/art/icons';
+import * as keypad from '../../client/src/art/keypad';
 import * as mapArtBadges from '../../client/src/art/mapArtBadges';
 import * as mapArtGeom from '../../client/src/art/mapArtGeom';
 import * as palette from '../../client/src/art/palette';
@@ -41,6 +42,7 @@ const MODULES: Readonly<Record<string, { file: string; mod: object }>> = {
   colors: { file: 'client/src/render/colors.ts', mod: colors },
   mapArtGeom: { file: 'client/src/art/mapArtGeom.ts', mod: mapArtGeom },
   mapArtBadges: { file: 'client/src/art/mapArtBadges.ts', mod: mapArtBadges },
+  keypad: { file: 'client/src/art/keypad.ts', mod: keypad },
   shapes: { file: 'client/src/art/shapes.ts', mod: shapes },
   charFrames: { file: 'client/src/art/charFrames.ts', mod: charFrames },
   chars: { file: 'client/src/art/chars/index.ts', mod: chars },

@@ -112,6 +112,7 @@ import {
   rgbCss,
   unionOutline,
 } from './fogMath';
+import { ExitKeypads } from './keypad';
 import { Badges, type BadgeAlpha } from './objects';
 import {
   ATTACK_RANGE,
@@ -169,6 +170,8 @@ export interface FrameView {
   motion: MotionSource | null;
   /** 카메라: 보이는 창 (타일, 기기 픽셀 격자에 맞춘 왼쪽 위 — ui/layout CAM과 같은 값) */
   view: ViewRect;
+  /** 받은 비밀번호 조각 (앞 · 뒤, 못 받은 조각 null — 탈출구 자물쇠 판, 플레이테스트 a-9). 괴물 화면은 늘 [null, null] */
+  keypadCodes: readonly (string | null)[];
 }
 
 /**
@@ -364,6 +367,7 @@ export class WorldRenderer {
   private readonly attachG: Phaser.GameObjects.Graphics;
   private readonly markers: Phaser.GameObjects.Graphics;
   private readonly badges: Badges;
+  private readonly keypads: ExitKeypads;
   /** 기절 채도 감소 막 (괴물 화면): 맵 바로 위 · 배지와 캐릭터 아래. ScreenEffects가 켜고 끈다 */
   readonly stunVeil: Phaser.GameObjects.Rectangle;
   private readonly gfxCount: GfxCount = { arcs: 0, fills: 0 };
@@ -573,6 +577,8 @@ export class WorldRenderer {
     this.container = scene.add.container(MAP_X, MAP_Y).setScale(WORLD_SCALE);
     // 배지(바닥 문양 · 라벨)는 캐릭터보다 먼저 넣어 아래에 그린다 (정보 우선 R15: 배지가 캐릭터를 덮지 않음)
     this.badges = new Badges(scene, this.container);
+    // 탈출구 자물쇠 판도 배지 바로 뒤 (캐릭터 아래)
+    this.keypads = new ExitKeypads(scene, this.container);
     // 기절 채도 감소 막: 맵 바로 위, 배지 · 캐릭터 · 범위 · 마커 아래 (맨 앞에 끼운다)
     this.stunVeil = new Phaser.GameObjects.Rectangle(scene, 0, 0, MAP_PX_W, MAP_PX_H, STUN_VEIL.color)
       .setOrigin(0, 0)
@@ -1492,9 +1498,11 @@ export class WorldRenderer {
     blink.A = isMonster && blinkOn && capturing(snap.world.points, 'A');
     blink.B = isMonster && blinkOn && capturing(snap.world.points, 'B');
     this.badges.draw(snap.world.points, snap.world.exits, alpha, blink);
+    this.keypads.draw(snap.world.exits, v.keypadCodes, alpha.exits);
     const all = this.info;
     all.length = 0;
     for (const item of this.badges.info()) all.push(item);
+    for (const item of this.keypads.info()) all.push(item);
     for (const item of info) all.push(item);
     this.post.measure();
     gfxState.features.charGfxArcs = this.gfxCount.arcs;
