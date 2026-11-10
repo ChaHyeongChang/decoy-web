@@ -46,8 +46,9 @@ export interface InfoItem {
    * badge = 거점 · 탈출구 · 감옥 배지, progress = 진행 게이지(거점 점령 · 탈출구 개방 · 구조),
    * cone = 괴물 부채꼴, range = 범위 표시(공격 준비 · 밀치기 · 포효 · 캠핑 · 근접 원), marker = 안개 위 마커(탐지 · 포효),
    * reveal = 괴물 화면 능력 노출(역할색 테두리 + 문양)
+   * keypad = 탈출구 자물쇠 판(플레이테스트 a-9): value '모드:네 칸'(예 'typing:07__' — 숫자 · '•' 모름 · '_' 빈칸), 괴물 화면은 숫자 없음
    */
-  kind: 'badge' | 'progress' | 'cone' | 'range' | 'marker' | 'reveal';
+  kind: 'badge' | 'progress' | 'cone' | 'range' | 'marker' | 'reveal' | 'keypad';
   /** 세부 이름 (예: 'point-A', 'exit-N', 'prison', 'attack', 'shove', 'roar', 'camp', 'near', 'track', 'roarSelf', 'roarPing', 'rescue', 'runner') */
   tag: string;
   x: number;
@@ -131,6 +132,18 @@ export interface OffscreenMarkerDebug {
   x: number;
   y: number;
   dir: number;
+  /** 배지 배율 (괴물 화면 포효 핑만 1보다 크다) */
+  scale: number;
+  /** 포효 핑 펄스 고리: 구운 크기 대비 배율 · 알파 (고리가 없는 화살표는 null) */
+  halo: { scale: number; alpha: number } | null;
+  /** 셰브론 그림의 기준점 (논리 px — 보통은 배지 가운데, 큰 화살표는 끝이 창을 넘지 않게 배지 쪽으로 당긴 자리) */
+  chev: { x: number; y: number };
+}
+
+/** 미니맵 포효 핑 펄스 고리 하나 (디버그): 처음 크기 대비 배율 · 알파 */
+export interface PingRingDebug {
+  scale: number;
+  alpha: number;
 }
 
 /** 카메라 상태 (따라가는 카메라, 디버그 getCamera) */
@@ -156,6 +169,8 @@ export interface CameraDebug {
   shakeScale: number;
   /** 화면 밖 표시 */
   markers: OffscreenMarkerDebug[];
+  /** 미니맵 포효 핑 펄스 고리 (괴물 화면): 작은 지도 · 크게 본 지도(닫혀 있으면 빈 목록) — 핑마다 하나, 같은 프레임 같은 값 */
+  pingRings: { small: PingRingDebug[]; big: PingRingDebug[] };
 }
 
 /** 창 CSS px 사각형 (판 중 설정 효과 디버그) */

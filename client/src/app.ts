@@ -115,6 +115,17 @@ export interface AppParams {
    * 저장하지 않음, 그림 정보 · 판정과 무관해 배포 주소에서도 받는다). 없거나 그 밖의 값이면 true(맞춘다)
    */
   camSnap: boolean;
+  /**
+   * ?countdown=1: 시험(?debug) 연습 판에서도 판 시작 카운트다운을 켠다 (플레이테스트 a-8). ?debug 없는 연습 판은 늘 켜져 있고,
+   * 서버 방은 서버가 정한다(시험 훅 서버는 시험 명령 `startCountdown`)
+   */
+  countdown: boolean;
+  /**
+   * ?zoomguard=0: 터치 모드의 화면 확대 막기(뿌리 touch-action · 문서 터치 리스너, zoomGuard.ts)만 끄고 감지 · 확대 안내는 그대로 둔다
+   * (플레이테스트 a-1 — 막기가 잘 되면 사람이 확대 상태를 만들 수 없어, 실기기에서 안내 · 복구를 일부러 보는 진단용. 저장하지 않음,
+   * 자기 화면의 확대만 풀리고 판정 · 정보와 무관해 ?camSnap처럼 배포 주소에서도 받는다). 없거나 그 밖의 값이면 true(막는다)
+   */
+  zoomGuard: boolean;
 }
 
 /** ?cam 값 해석: 1~6 사이 수만 (소수 허용), 그 밖에는 null */
@@ -151,6 +162,8 @@ export function readParams(search: string): AppParams {
     chars: parseCharStyle(p.get('chars')),
     cam: parseCamZoom(p.get('cam')),
     camSnap: p.get('camSnap') !== '0',
+    countdown: p.get('countdown') === '1',
+    zoomGuard: p.get('zoomguard') !== '0',
   };
 }
 
@@ -738,7 +751,12 @@ export class App {
     this.clearRejoin();
     this.returning = null;
     this.roomCode = null;
-    const local = new mod.LocalTransport({ testHooks: this.params.debug !== 'off' || import.meta.env.DEV });
+    const debug = this.params.debug !== 'off';
+    const local = new mod.LocalTransport({
+      testHooks: debug || import.meta.env.DEV,
+      // 판 시작 카운트다운: 사람이 하는 연습 판은 늘(개발 빌드 포함), 시험(?debug) 판은 ?countdown=1일 때만
+      countdown: !debug || this.params.countdown,
+    });
     this.local = local;
     this.localUnsub = local.subscribe((msg) => this.onMessage(msg));
     this.renderWake();

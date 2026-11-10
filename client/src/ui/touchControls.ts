@@ -32,13 +32,15 @@ import {
 } from '../controlLayout';
 import { HUD_TEXT, TOUCH_TEXT } from '../data/storyText';
 import { canOfferFullscreen, device, enterFullscreen, onDeviceChange } from '../device';
-import { stickAlphaOf, stickScaleOf } from '../prefs';
-import { TOUCH, type StickKind, type TouchFeed } from '../touchInput';
+import { attackButtonOf, stickAlphaOf, stickScaleOf } from '../prefs';
+import { TOUCH, aimStartOf, type StickKind, type TouchFeed } from '../touchInput';
 import { ABILITY_ICON, ACCENT, TICKS, abilityName, litTicks, type ActionSlot, type SlotId } from './hudArt';
 import {
   CAM_ZOOM,
   EDGE_BAND,
   HUD,
+  MAP_RECT,
+  MINIMAP_INSET,
   MIN_GAP,
   MIN_TARGET,
   MOVE_ZONE_RATIO,
@@ -79,9 +81,10 @@ export interface TouchControlsOptions {
     onCovered?: (ids: ReadonlySet<string>) => void;
     /**
      * 다시 배치할 때마다 엄지 대상 사각형 (논리 px, thumbAvoidBoxes — 버튼 이름표 · 이동 스틱 고리까지): 화면 밖 화살표 · 옮긴
-     * 미니맵이 엄지 버튼 아래로 숨지 않게 피한다
+     * 미니맵이 엄지 버튼 아래로 숨지 않게 피한다. zone = 이동 영역(판 중 옮기는 미니맵이 그 위에 놓이지 않게), minimap = 조작 배치에서
+     * 옮긴 맵 창 안 미니맵 틀 (옮기지 않았으면 null — 플레이테스트 a-5)
      */
-    onThumbs?: (boxes: readonly Box[]) => void;
+    onThumbs?: (boxes: readonly Box[], zone: Box, minimap: Box | null) => void;
   };
 }
 
@@ -152,6 +155,8 @@ export interface TouchLayout {
   buttons: Partial<Record<TouchButtonId, Box>>;
   /** 저장한 조작 배치를 놓을 자리가 없어 기본 배치(반전이면 뒤집은 것)로 돌아갔다 (그때만 true) */
   fallback?: true;
+  /** 조작 배치에서 옮긴 맵 창 안 미니맵 틀 (옮겼을 때만 — 없으면 판 HUD 배치가 정한 자리) */
+  minimap?: Box;
 }
 
 /** touchLayout 추가 선택 (설정 화면 통합). 모두 빠지면 예전 배치 그대로 */
@@ -162,8 +167,14 @@ export interface TouchLayoutOptions {
   menu?: boolean;
   /** 저장한 조작 배치 (좌우 반전 · 옮긴 조작). 없거나 기본이면 기본 배치 */
   custom?: TeamLayout | null;
-  /** 옮긴 조작 · 반대쪽 이동 영역이 더 피할 사각형 (창 CSS px — 맵 창 안 미니맵처럼 avoid에 없는 HUD) */
+  /** 이동 영역 · 옮긴 조작이 더 피할 사각형 (창 CSS px — avoid에 없는 HUD) */
   obstacles?: readonly Box[];
+  /**
+   * 맵 창 안 미니맵 (창 CSS px, 옆 칸 미니맵 화면은 넘기지 않는다): frame = 판 HUD 배치가 정한 틀(좌우 반전까지 한 자리), map = 맵
+   * 사각형. 이동 영역 · 옮긴 조작이 틀을 피한다(탭해서 크게 보기가 이동 영역에 먹히지 않게 — 플레이테스트 a-5). 저장한 조작 배치에
+   * 지도 자리(items.minimap)가 있으면 그 자리로 옮긴다(결과 minimap, 맵 창 안에서만 — minimapRange)
+   */
+  minimap?: { frame: Box; map: Box } | null;
   /** 판 화면 논리 폭 / 높이 (전체 화면 버튼 세로 줄 판단). 없으면 지금 배치(VIEW_W / VIEW_H) */
   viewRatio?: number;
   /**
@@ -182,7 +193,8 @@ export interface TouchLayoutOptions {
  * avoid(M12) = 판 HUD 부품 사각형(창 CSS px): 이동 영역은 그와 가로로 겹치는 부품 아래에서 시작한다(이동 스틱 그림이 들어갈
  * 높이는 남긴다). 버튼 무리 · 시스템 버튼 자리는 판 HUD 배치(layout.touchHudPlan)가 같은 식으로 비워 두었다.
  * opts(설정 화면 통합): 조이스틱 크기 · 판 중 설정 버튼 · 저장한 조작 배치. 배치를 바꿨으면 기본 배치 위에 덮어(controlLayout
- * resolveLayout — 범위 안, 다른 조작 · HUD(avoid + obstacles)와 안 겹침) 이동 영역은 이동 스틱 고리가 있는 쪽 40% 띠가 된다
+ * resolveLayout — 범위 안, 다른 조작 · HUD(avoid + obstacles + 맵 창 안 미니맵)와 안 겹침) 이동 영역은 이동 스틱 고리가 있는 쪽
+ * 40% 띠가 된다. 맵 창 안 미니맵 틀(opts.minimap)은 기본 배치의 이동 영역도 피한다 (플레이테스트 a-5)
  */
 export function touchLayout(
   w: number,
@@ -243,8 +255,14 @@ export function touchLayout(
         : { x: rowLeft - gap - sysW, y: sysY, w: sysW, h: sysH };
   }
   const moveR = t.moveR;
+  const custom = opts.custom ?? null;
+  const mini = opts.minimap ?? null;
+  // 조작 배치에서 옮기는 지도 (맵 창 안 미니맵일 때만 — 옆 칸 미니맵 화면에서는 저장한 자리를 쓰지 않는다)
+  const moving = mini && custom?.items.minimap ? mini : null;
+  // 피할 것 = 판 HUD + 맵 창 안 미니맵 (옮기는 지도는 놓은 자리로 다시 피한다)
+  const hud = [...avoid, ...(opts.obstacles ?? []), ...(mini && !moving ? [mini.frame] : [])];
   const zoneAt = (side: Side, r: number, list: readonly Box[]): Box => moveZone(w, safe, side, r, list);
-  const zone = zoneAt('left', moveR, avoid);
+  const zone = zoneAt('left', moveR, hud);
   const def: TouchLayout = {
     safe,
     zone,
@@ -254,18 +272,19 @@ export function touchLayout(
     dashR: Math.round(btn * 0.9),
     buttons,
   };
-  const custom = opts.custom ?? null;
   if (isDefaultLayout(custom)) return def;
-  // 조작 배치: 기본 배치 위에 덮는다. 피할 것 = 판 HUD + 맵 창 안 미니맵
-  const hud = [...avoid, ...(opts.obstacles ?? [])];
+  // 조작 배치: 기본 배치 위에 덮는다
   const rules: PlaceRules = {
     range: moveRange(safe, pad),
     hud,
-    zone: (side, r) => zoneAt(side, r, hud),
+    zone: (side, r, extra = []) => zoneAt(side, r, [...hud, ...extra]),
     midX: safe.x + safe.w / 2,
+    ...(moving ? { mapRange: minimapRange(moving.map, safe) } : {}),
   };
-  const res = resolveLayout(controlBoxes(def), custom, safe, rules);
+  const res = resolveLayout(controlBoxes(def), custom, safe, rules, moving ? { minimap: moving.frame } : {});
   const b = res.boxes;
+  // 옮긴 지도 (기본 배치로 돌아갔으면 판 HUD 배치의 틀): 이동 영역이 그 아래에서 시작한다
+  const mm = b.minimap;
   const ring = b.move ?? ringOf(def);
   const R = ring.w / 2;
   const out: Partial<Record<TouchButtonId, Box>> = {};
@@ -275,14 +294,25 @@ export function touchLayout(
   }
   return {
     safe,
-    zone: rules.zone(sideOf(ring, rules.midX), R),
+    zone: rules.zone(sideOf(ring, rules.midX), R, mm ? [mm] : []),
     moveR: R,
     moveHome: { x: ring.x + R, y: ring.y + R },
     aim: b.attack ?? null,
     dashR: def.dashR,
     buttons: out,
     ...(res.fallback ? { fallback: true as const } : {}),
+    ...(mm && !res.fallback ? { minimap: mm } : {}),
   };
+}
+
+/**
+ * 조작 배치에서 지도(맵 창 안 미니맵)를 놓을 수 있는 범위 (창 CSS px): 맵 사각형 안쪽 MINIMAP_INSET.margin, 아래는 가장자리 띠
+ * (맨 아래 안내 줄 자리) 위까지. 늘 떠 있는 HUD는 맵 밖이라는 규칙(R15)의 예외가 '맵 창 안 미니맵' 하나라 맵 창 밖으로는 못 옮긴다
+ */
+export function minimapRange(map: Box, safe: Box): Box {
+  const M = MINIMAP_INSET.margin;
+  const y = map.y + M;
+  return { x: map.x + M, y, w: map.w - M * 2, h: Math.min(map.y + map.h - M, safe.y + safe.h) - y };
 }
 
 /**
@@ -398,7 +428,7 @@ export function effectiveTouchLayout(
       stickScale: tuning.stickScale,
       menu,
       custom: { mirror: tuning.mirror, items: saved?.items ?? {} },
-      obstacles: hud.inset ? [hud.inset] : [],
+      minimap: hud.inset ? { frame: hud.inset, map: hud.map } : null,
       viewRatio: hud.layout.viewW / hud.layout.viewH,
       sysRows: hud.sysRows,
     },
@@ -424,11 +454,16 @@ export function inEdgeBand(x: number, y: number, safe: Box): boolean {
 }
 
 /**
- * 스틱 중심 (CSS px): 조준 스틱은 고정 중심(요소 가운데), 이동 · 돌진은 누른 자리.
- * 돌진 버튼을 가운데에서 벗어나 탭해도 그 어긋남이 '끌기'로 잡히지 않게 한다(끌지 않은 탭 = 지금 방향)
+ * 스틱 중심 (CSS px): 이동 · 돌진 · 조준 스틱 모두 누른 자리.
+ * 버튼을 가운데에서 벗어나 탭해도 그 어긋남이 '끌기'로 잡히지 않게 한다(끌지 않은 탭 = 지금 방향). 조준 스틱은 요소 가운데가
+ * 고정 중심이었는데, 가운데에서 8px만 비켜 눌러도 그쪽으로 돌아 공격했다 (플레이테스트 반영 a-2)
  */
-export function stickCenter(kind: StickKind, L: TouchLayout, x: number, y: number): { x: number; y: number } {
-  if (kind === 'aim' && L.aim) return { x: L.aim.x + L.aim.w / 2, y: L.aim.y + L.aim.h / 2 };
+export function stickCenter(
+  _kind: StickKind,
+  _L: TouchLayout,
+  x: number,
+  y: number,
+): { x: number; y: number } {
   return { x, y };
 }
 
@@ -485,7 +520,9 @@ interface Finger {
   cx: number;
   cy: number;
   r: number;
-  /** 조준: 데드존 밖에 한 번이라도 나갔다 (가운데로 돌아오면 '취소' 표시) */
+  /** 이 손가락의 문턱 (반지름 대비, 상태 기계와 같은 값): 이동 · 돌진 = 데드존, 조준 스틱 = 조준 시작 문턱 */
+  dead: number;
+  /** 조준: 문턱 밖에 한 번이라도 나갔다 (가운데로 돌아오면 '취소' 표시) */
   out: boolean;
   /** 방향 표시 요소 (조준 스틱 · 돌진의 .tc-dir, 없으면 null) */
   dir: HTMLElement | null;
@@ -553,6 +590,8 @@ export class TouchControls {
   private readonly stickScale: number;
   /** 저장한 조작 배치 (판 시작 때 읽는다. 좌우 반전은 판 HUD 배치와 같은 값) */
   private readonly custom: TeamLayout;
+  /** 공격 버튼 방식 '누르면 바로' (설정 조작 탭, 판 시작 때 읽는다): 닿는 순간 지금 방향으로 공격, 끌기는 무시 */
+  private readonly attackInstant: boolean;
 
   constructor(
     readonly root: HTMLElement,
@@ -570,6 +609,7 @@ export class TouchControls {
     // 조이스틱 투명도 (설정 조작 탭): 이동 · 조준 스틱 불투명도에 곱한다 (style.css --stick-a)
     const alpha = stickAlphaOf();
     if (alpha < 1) this.layer.style.setProperty('--stick-a', String(alpha));
+    this.attackInstant = attackButtonOf() === 'instant';
     this.probe = h('div', { class: 'tc-probe' });
     this.zone = h('div', { class: 'tc-zone', 'data-touch-target': 'move-zone', 'data-touch-kind': 'zone' });
     this.moveKnob = h('div', { class: 'tc-knob' });
@@ -584,7 +624,15 @@ export class TouchControls {
     this.zone.addEventListener('pointerdown', (e) => this.startStick(e, 'move', this.zone, this.moveKnob));
     if (role === 'monster') {
       const aim = this.part('attack', 'aim-stick', 'attack', HUD_TEXT.attack, 'tc-aim');
-      aim.el.addEventListener('pointerdown', (e) => this.startStick(e, 'aim', aim.el, aim.face, aim.dir));
+      if (this.attackInstant) {
+        // '누르면 바로': 닿는 순간 지금 방향으로 공격한다(끌기는 읽지 않고 뗄 때는 아무것도 하지 않는다). 방향 표시는 없다.
+        // 요소 · id(aim-stick)는 그대로다 — 조작 배치 · 쿨타임 눈금이 같다
+        if (aim.dir) aim.dir.hidden = true;
+        aim.el.addEventListener('pointerdown', (e) => {
+          if (this.grab(e, 'tap', aim.el)) opts.feed.fire(BTN.ATTACK);
+        });
+      } else
+        aim.el.addEventListener('pointerdown', (e) => this.startStick(e, 'aim', aim.el, aim.face, aim.dir));
       const dash = this.part('dash', 'dash', 'dash', HUD_TEXT.dash, 'tc-btn tc-dash');
       dash.el.addEventListener('pointerdown', (e) =>
         this.startStick(e, 'dash', dash.el, dash.face, dash.dir),
@@ -683,14 +731,22 @@ export class TouchControls {
     this.apply();
   }
 
-  /** 맵 창 안 미니맵 틀 (창 CSS px): 옮긴 조작이 피한다 (판 HUD rects에는 없다). 따라가는 카메라에서 옆 칸에 자리가 없을 때만 */
-  private insetBoxes(): Box[] {
+  /**
+   * 맵 창 안 미니맵 틀 · 맵 사각형 (창 CSS px): 이동 영역 · 옮긴 조작이 틀을 피한다 (판 HUD rects에는 없다). 따라가는 카메라에서
+   * 옆 칸에 자리가 없을 때만
+   */
+  private insetBox(): { frame: Box; map: Box } | null {
     const plan = HUD.touch ? (this.team === 'monster' ? HUD.touch.monster : HUD.touch.survivor) : null;
     const c = this.opts.hud?.canvas();
     const i = plan?.minimapInset;
-    if (!i || !c || CAM_ZOOM <= 1) return [];
-    const f = minimapInsetFrame(i, HUD.s);
-    return [{ x: c.left + f.x * c.k, y: c.top + f.y * c.k, w: f.w * c.k, h: f.h * c.k }];
+    if (!i || !c || CAM_ZOOM <= 1) return null;
+    const css = (r: Box): Box => ({
+      x: c.left + r.x * c.k,
+      y: c.top + r.y * c.k,
+      w: r.w * c.k,
+      h: r.h * c.k,
+    });
+    return { frame: css(minimapInsetFrame(i, HUD.s)), map: css(MAP_RECT) };
   }
 
   /** 디버그 · 시험: 지금 배치 (getControlLayout) */
@@ -704,7 +760,8 @@ export class TouchControls {
     const L = this.layout;
     if (!L) return null;
     const hud = this.hudBoxes();
-    for (const b of this.insetBoxes()) hud.push({ id: 'minimapInset', b });
+    const mini = L.minimap ?? this.insetBox()?.frame;
+    if (mini) hud.push({ id: 'minimapInset', b: mini });
     return { team: this.team, mirror: this.custom.mirror, fallback: L.fallback === true, layout: L, hud };
   }
 
@@ -781,6 +838,7 @@ export class TouchControls {
       cx: 0,
       cy: 0,
       r: 1,
+      dead: TOUCH.deadZone,
       out: false,
       dir: null,
       knobT: '',
@@ -793,7 +851,10 @@ export class TouchControls {
     return true;
   }
 
-  /** 스틱 시작: 이동 · 돌진은 누른 자리가 중심, 조준은 고정 중심(stickCenter). 종류마다 손가락 하나 */
+  /**
+   * 스틱 시작: 누른 자리가 중심(stickCenter). 종류마다 손가락 하나. 조준 스틱은 데드존 대신 조준 시작 문턱(aimStartOf)을
+   * 상태 기계와 조준 · 취소 표시에 같이 쓴다
+   */
   private startStick(
     e: PointerEvent,
     kind: StickKind,
@@ -806,8 +867,10 @@ export class TouchControls {
     for (const f of this.fingers.values()) if (f.kind === kind) return;
     const c = stickCenter(kind, L, e.clientX, e.clientY);
     const r = kind === 'aim' && L.aim ? L.aim.w / 2 : kind === 'dash' ? L.dashR : L.moveR;
-    if (!this.grab(e, kind, el, { knob, cx: c.x, cy: c.y, r, dir, dirT: dir?.style.transform ?? '' })) return;
-    this.opts.feed.stickStart(e.pointerId, kind, performance.now());
+    const dead = kind === 'aim' ? aimStartOf(r) : TOUCH.deadZone;
+    if (!this.grab(e, kind, el, { knob, cx: c.x, cy: c.y, r, dead, dir, dirT: dir?.style.transform ?? '' }))
+      return;
+    this.opts.feed.stickStart(e.pointerId, kind, performance.now(), dead);
     if (kind === 'move') {
       this.move.style.transform = `translate(${c.x}px,${c.y}px)`;
       this.move.classList.add('live');
@@ -833,7 +896,7 @@ export class TouchControls {
       f.knobT = knobT;
       f.knob.style.transform = knobT;
     }
-    const outside = Math.hypot(v.x, v.y) > TOUCH.deadZone;
+    const outside = Math.hypot(v.x, v.y) > f.dead;
     if (outside) {
       f.out = true;
       // 방향 표시: 12시가 0, 시계 방향. 방향 표시 요소의 transform만 바꾼다 (스틱 전체에 CSS 변수를 쓰면 하위 요소 모두
@@ -847,7 +910,7 @@ export class TouchControls {
       }
     }
     f.el.classList.toggle('aiming', outside);
-    // 데드존 밖에 나갔다가 돌아오면 취소 표시 (조준 · 돌진, 상태 기계도 떼면 취소한다)
+    // 문턱 밖에 나갔다가 돌아오면 취소 표시 (조준 · 돌진, 상태 기계도 떼면 취소한다)
     f.el.classList.toggle('cancel', f.kind !== 'move' && f.out && !outside);
   }
 
@@ -936,7 +999,7 @@ export class TouchControls {
         stickScale: this.stickScale,
         menu: this.parts.has('menu'),
         custom: this.custom,
-        obstacles: isDefaultLayout(this.custom) ? [] : this.insetBoxes(),
+        minimap: this.insetBox(),
         sysRows: HUD.touch ? HUD.touch[this.team].sysRows : 1,
       },
     );
@@ -945,13 +1008,13 @@ export class TouchControls {
     const hud = this.opts.hud;
     const c = hud?.canvas();
     if (hud?.onThumbs && c && c.k > 0) {
-      const thumbs = thumbAvoidBoxes(L).map((b) => ({
+      const toL = (b: Box): Box => ({
         x: (b.x - c.left) / c.k,
         y: (b.y - c.top) / c.k,
         w: b.w / c.k,
         h: b.h / c.k,
-      }));
-      hud.onThumbs(thumbs);
+      });
+      hud.onThumbs(thumbAvoidBoxes(L).map(toL), toL(L.zone), L.minimap ? toL(L.minimap) : null);
     }
     const place = (el: HTMLElement | undefined, b: Box | null | undefined): void => {
       if (el && b)
@@ -1110,6 +1173,7 @@ export class TouchControls {
       cx: p.cx,
       cy: p.cy,
       r: p.r,
+      dead: TOUCH.deadZone,
       out: false,
       dir: null,
       knobT: '',
@@ -1133,15 +1197,16 @@ export class TouchControls {
 
   /** 꺼진 터치 화면에서 '설정' 버튼 누르기 (손가락은 따로 세지 않는다 — 다른 조작이 없다) */
   private menuTap(e: PointerEvent): boolean {
-    if (!this.menuOn || device.portrait) return false;
+    if (!this.menuOn || device.portrait || device.zoomed) return false;
     e.preventDefault();
     return true;
   }
 
-  /** 켜짐 = 바깥에서 켬 + 세로 화면이 아님 */
+  /** 켜짐 = 바깥에서 켬 + 세로 화면이 아님 + 화면이 확대되지 않음 (플레이테스트 a-1: 확대 안내가 덮은 동안) */
   private apply(): void {
-    this.layer.classList.toggle('menu-on', this.menuOn && !device.portrait);
-    const live = this.active && !device.portrait;
+    const held = device.portrait || device.zoomed;
+    this.layer.classList.toggle('menu-on', this.menuOn && !held);
+    const live = this.active && !held;
     if (live === this.live) return;
     this.live = live;
     if (!live) {

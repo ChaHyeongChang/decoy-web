@@ -14,6 +14,8 @@
 // 작은 미니맵과 같은 값(메인 그림 목록 · 세계 상태 · 보이는 창 · 깜빡임)을 같은 프레임에 넘기고, 바닥은 작은 미니맵이 다시 그린
 // 그 프레임에 같은 합성 그림(이미 합성된 캔버스)을 그린다 — 큰 지도는 작은 지도보다 많은 것을 보일 수 없다. 큰 지도의 캔버스는
 // 바닥 합성과 같은 해상도(늘리는 것은 렌더러)라 다시 그릴 때 줄이기 · 늘리기가 없다. 처음 열 때 만들고 닫으면 숨긴다
+// 포효 핑 (괴물 화면): 흰 마름모 둘레에 흰 펄스 고리를 더 그린다(hudArt.MM_PING, 박자 = prefsFx.pingPulse — 월드 핑 · 창 밖 화살표와
+// 같다). 고리는 메인 화면에 그린 핑마다 하나라 엔티티 목록(drawn)은 그대로이고, 작은 지도와 크게 본 지도가 같은 값을 받는다
 import Phaser from 'phaser';
 import {
   CAPTURE_POINTS,
@@ -42,6 +44,10 @@ import type { HudKit, Slice, Spr } from './hudKit';
 import type { CrispText } from './text';
 import { CAM_ZOOM, HUD } from './layout';
 import { MINIMAP_BIG } from '../render/prefsFx';
+// 포효 핑 펄스 고리 (a-3): 다른 줄과 섞이지 않게 따로 가져온다
+import type { PingRingDebug } from '@decoy/shared';
+import { MM_PING } from './hudArt';
+import type { PingPulse } from '../render/prefsFx';
 
 /** 미니맵 자리 (논리 px): 그림 왼쪽 위 · 폭, 틀 여백 · 제목 줄 */
 export interface Place {
@@ -86,6 +92,7 @@ const MM = {
   track: FR.mm('track'),
   roarSelf: FR.mm('roarSelf'),
   roarPing: FR.mm('roarPing'),
+  roarPingRing: FR.mm('roarPingRing'),
   monster: FR.mm('monster'),
   self: FR.mm('self'),
   hidden: FR.mm('hidden'),
@@ -128,6 +135,12 @@ export class Minimap {
   private readonly src: DrawnEntity[] = [];
   /** 엔티티 그림을 몇 개 썼는가 (update 안) */
   private used = 0;
+  /**
+   * 포효 핑 펄스 고리 (엔티티 아래, 핑마다 하나). 엔티티 풀과 따로 둔다 — 배율 · 알파를 바꾼 그림이 다음 프레임에 다른
+   * 엔티티 그림으로 다시 쓰여 흐리거나 커진 채 남지 않게
+   */
+  private readonly rings: Spr[] = [];
+  private ringsUsed = 0;
   /** 바닥을 그릴 프레임 (안개 그림이 바뀐 다음 프레임, hudGate.ts) */
   private readonly pacer = new BaseRefreshPacer();
   readonly w: number;
@@ -342,6 +355,8 @@ export class Minimap {
       else p.setVisible(!on);
     }
     for (const s of this.pool) s.show(false);
+    for (const s of this.rings) s.show(false);
+    this.ringsUsed = 0;
     this.watchRing?.show(false);
     this.src.length = 0;
   }
@@ -472,6 +487,28 @@ export class Minimap {
     if (this.iconScale !== 1) s.img.setScale(this.iconScale / this.kit.dev);
   }
 
+  /** 포효 핑 펄스 고리 하나를 다음 칸에 놓는다 (배율 · 알파는 매 프레임 다시 건다: 아틀라스를 다시 구우면 apply가 배율을 되돌린다) */
+  private putRing(x: number, y: number, pulse: Readonly<PingPulse>): void {
+    let s = this.rings[this.ringsUsed];
+    if (!s) {
+      s = this.kit.named(this.big ? BIG_TAG : 'minimap', () => this.kit.spr(41.9 + this.dz, false));
+      this.rings[this.ringsUsed] = s;
+    }
+    this.ringsUsed += 1;
+    s.set(MM.roarPingRing, x, y).show(true);
+    s.img
+      .setScale(((1 + (MM_PING.ringTo - 1) * pulse.t) * this.iconScale) / this.kit.dev)
+      .setAlpha(pulse.alpha);
+  }
+
+  /** 디버그 · 시험: 지금 보이는 포효 핑 펄스 고리 (처음 크기 대비 배율 · 알파) */
+  get pingRings(): PingRingDebug[] {
+    const k = this.kit.dev / this.iconScale;
+    return this.rings
+      .filter((s) => s.img.visible)
+      .map((s) => ({ scale: s.img.scaleX * k, alpha: s.img.alpha }));
+  }
+
   /**
    * 거점 · 탈출구 상태와 보이는 창 · 관전 중인 동료 (프레임마다, update 전). 세계 상태는 양쪽 화면에 같이 오는 값이고, 관전
    * 고리는 메인 화면에 그린 동료에만 붙는다(update가 그 자리를 찾는다)
@@ -513,14 +550,23 @@ export class Minimap {
   /** 관전 중인 동료 id (setWorld) */
   private watching: string | null = null;
 
-  /** 메인 화면에 그린 엔티티만 다시 찍는다 (프레임마다: 새 배열 · 사본 · 닫힘 함수 없이) */
-  update(mainDrawn: readonly DrawnEntity[], myRole: Role, roleOf: (id: string) => Role | null): void {
+  /**
+   * 메인 화면에 그린 엔티티만 다시 찍는다 (프레임마다: 새 배열 · 사본 · 닫힘 함수 없이). pulse = 이번 프레임 포효 핑 펄스 고리
+   * 값(prefsFx.pingPulse — 판 장면이 작은 지도 · 크게 본 지도 · 창 밖 화살표에 같은 값을 넘긴다. 핑이 없으면 알파 0)
+   */
+  update(
+    mainDrawn: readonly DrawnEntity[],
+    myRole: Role,
+    roleOf: (id: string) => Role | null,
+    pulse: Readonly<PingPulse>,
+  ): void {
     if (!this.shown) return;
     let ring = false;
     const src = this.src;
     src.length = 0;
     this.srcFrames.length = 0;
     this.used = 0;
+    this.ringsUsed = 0;
     for (const d of mainDrawn) {
       if (d.layer === 'minimap') continue;
       const x = this.px(d.x);
@@ -528,6 +574,7 @@ export class Minimap {
       let body: string;
       if (d.kind === 'mark') {
         body = d.tag === 'track' ? MM.track : d.tag === 'roarSelf' ? MM.roarSelf : MM.roarPing;
+        if (body === MM.roarPing && pulse.alpha > 0) this.putRing(x, y, pulse);
         this.put(body, x, y, 0);
       } else if (d.kind === 'monster' || (d.kind === 'self' && myRole === 'monster')) {
         body = MM.monster;
@@ -549,6 +596,7 @@ export class Minimap {
     }
     if (!ring) this.watchRing?.show(false);
     for (let i = this.used; i < this.pool.length; i += 1) this.pool[i]?.show(false);
+    for (let i = this.ringsUsed; i < this.rings.length; i += 1) this.rings[i]?.show(false);
   }
 
   destroy(): void {

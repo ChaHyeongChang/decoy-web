@@ -43,6 +43,8 @@ export interface Balance {
     players: number;
     survivors: number;
     timeLimit: number;
+    /** 판 시작 전 3 · 2 · 1 카운트다운 (초, 0 = 없음). 그동안 모두 정지하고 12분 시계 · 괴물 시작 정지는 그 뒤부터 */
+    startCountdown: number;
     monsterStartDelay: number;
     lastSurvivorGrace: number;
     reconnectGrace: number;
@@ -129,6 +131,7 @@ const SCHEMA: Shape = {
     players: 'int',
     survivors: 'int',
     timeLimit: 'pos',
+    startCountdown: 'nonneg',
     monsterStartDelay: 'nonneg',
     lastSurvivorGrace: 'nonneg',
     reconnectGrace: 'nonneg',

@@ -127,6 +127,11 @@ export interface RoomConfig {
   balance: Balance;
   seed: number;
   testHooks: boolean;
+  /**
+   * 판 시작 카운트다운 (초) 덮어쓰기. 없으면 수치 `match.startCountdown`이고, 시험 훅이 켜진 방(testHooks)은 0이다 —
+   * 기존 시험은 판 시작 직후를 가정한다(시험 명령 `startCountdown` · 이 값으로 전용 시험만 켠다, DECISIONS 16절)
+   */
+  startCountdown?: number;
   /** 기기 안 연습 서버 (M13b, client/src/localServer.ts): 새 방은 모두 연습 방(빈자리 = 실전 봇, `P-` 코드) */
   practice?: boolean;
   /** 서버 빌드 ID (M13d): welcome · pong에 실어 화면 빌드와 비교하게 한다. 없으면 null */
@@ -186,6 +191,8 @@ export class Room {
   quickDeadline: number | null = null;
   /** 빠른 매칭: 봇을 채우지 못해 4명을 기다리는 중 */
   private humansOnly = false;
+  /** 시험 명령 `startCountdown`으로 받은 다음 판의 카운트다운 (초). 판을 시작하면 비운다 (그 판 하나에만) */
+  private testCountdown: number | null = null;
 
   constructor(
     readonly code: string,
@@ -577,7 +584,10 @@ export class Room {
       .filter((s): s is Seat & { role: Role } => s.role !== null)
       .map((s) => ({ id: s.id, name: s.name, role: s.role, bot: s.bot }));
     this.matchCount += 1;
-    this.game = new Game(setup, this.config.balance, { seed: this.rng.int(2 ** 31) });
+    this.game = new Game(setup, this.config.balance, {
+      seed: this.rng.int(2 ** 31),
+      countdown: this.nextCountdown(),
+    });
     // 시작 순간 연결이 없는 사람 자리(빠른 매칭: 최근 3초 안에 소식은 있었지만 그사이 소켓이 닫힘)는 판에서도
     // 끊김으로 시작한다 — 9장 유예: 괴물이면 판 정지 뒤 무효, 생존자면 유예 뒤 사망, 돌아오면(attach) 이어서 (출시 전 검토)
     for (const s of this.seats) {
@@ -602,6 +612,17 @@ export class Room {
     // 서버 로그에 닉네임을 남기지 않는다 (M13c, 처리방침: 닉네임은 서버 메모리에만)
     const bots = setup.filter((p) => p.bot).length;
     this.hooks.log?.(`방 ${this.code} 판 시작 (${this.kind}, 사람 ${setup.length - bots} · 봇 ${bots})`);
+  }
+
+  /**
+   * 이번에 시작하는 판의 카운트다운 (초): 시험 명령 > 방 설정(RoomConfig.startCountdown) > 시험 훅 방 0 > 수치.
+   * 시험 명령 값은 한 판에만 쓰고 비운다
+   */
+  private nextCountdown(): number {
+    const test = this.testCountdown;
+    this.testCountdown = null;
+    const c = this.config;
+    return test ?? c.startCountdown ?? (c.testHooks ? 0 : c.balance.match.startCountdown);
   }
 
   /** 판이 끝났다: 결과(받는 사람 자기 평가 포함)를 보내고 결과 화면 단계로 */
@@ -834,6 +855,11 @@ export class Room {
 
   private applyTest(cmd: TestCommand): void {
     if (typeof cmd !== 'object' || cmd === null) return;
+    // 판 밖에서도 받는 명령: 다음에 시작하는 판 하나의 카운트다운 (로비에서 보낸다)
+    if (cmd.kind === 'startCountdown') {
+      if (Number.isFinite(cmd.seconds) && cmd.seconds >= 0) this.testCountdown = cmd.seconds;
+      return;
+    }
     const game = this.game;
     if (!game) return;
     switch (cmd.kind) {

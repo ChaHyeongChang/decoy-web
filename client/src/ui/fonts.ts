@@ -13,6 +13,8 @@ export const UI_FONT_WEIGHTS = ['400', '500', '700', '800'] as const;
 const SAMPLE = 'DECOY 생존자 괴물 0123';
 
 let ready = false;
+/** 첫 받기가 끝났는가 (받음 · 실패 · 시간 초과 — 그 뒤 늦게 받으면 세대가 한 번 더 오른다) */
+let settled = false;
 /** 폰트 세대: 받기 전 0, 받으면 1. 글자 폭으로 배치를 정한 부품은 세대가 바뀌면 다시 잰다(늦게 받은 폰트) */
 let generation = 0;
 
@@ -24,6 +26,14 @@ const lateListeners: (() => void)[] = [];
 /** UI 폰트를 다 받았는가 (판 장면은 시작 전에 이것을 확인한다) */
 export function uiFontsReady(): boolean {
   return ready;
+}
+
+/**
+ * 글꼴이 정해졌는가: 첫 받기가 끝났다(받음 · 실패 · 시간 초과). 글꼴로 그린 그림을 미리 굽는 쪽(HUD 아틀라스의 거점 진행 숫자)이
+ * 이때까지 기다려 대체 글꼴로 한 번 · 받은 글꼴로 또 한 번 굽지 않는다. 글꼴 API가 없는 환경은 바로 참
+ */
+export function uiFontsSettled(): boolean {
+  return settled;
 }
 
 /** 지금 폰트 세대 (글자 폭 캐시의 열쇠에 넣는다) */
@@ -46,9 +56,11 @@ export function onUiFontsLate(cb: () => void): void {
  */
 export function loadUiFonts(timeoutMs = 3000): Promise<boolean> {
   if (pending) return pending;
-  if (typeof document === 'undefined' || !('fonts' in document)) return (pending = Promise.resolve(false));
+  if (typeof document === 'undefined' || !('fonts' in document)) {
+    settled = true;
+    return (pending = Promise.resolve(false));
+  }
   const fonts = document.fonts;
-  let settled = false;
   const load = Promise.all(
     UI_FONT_WEIGHTS.map((w) => fonts.load(`${w} 16px '${UI_FONT_FAMILY}'`, SAMPLE)),
   ).then(

@@ -2,7 +2,8 @@
 // GPU 합성 경로(발광을 구운 정적 맵 조각 아틀라스 · 빛 지도 MULTIPLY · 테두리 리프트 ADD · 경계 셰이더)에서 한다.
 // 판 중 자동 하향은 injectFps(60)으로 막고 하향 0회를 단언한다. 텍스처 예산은 높음 32MiB.
 // 더해서: 맵 쪽 정적 · 동적 레이어 · 배지에 프레임마다 다시 테셀레이션하는 Graphics가 없다(R3), 멈춘 시계에서 열린 탈출구가
-// 다 열린 그림이다(R6), 페이지를 다시 열어도 맵 그림이 같다(T7 시드 결정성).
+// 다 열린 그림이다(R6) · 그 문 왼쪽 자물쇠 판(플레이테스트 a-9)이 캔버스 텍스처 올리기 경로로 실제 그려지고 바뀔 때만 굽는다,
+// 페이지를 다시 열어도 맵 그림이 같다(T7 시드 결정성).
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { CAM1 } from './helpers';
@@ -12,6 +13,7 @@ import {
   blockedPoint,
   darkAndLit,
   exitOpensWhileFrozen,
+  expectKeypadDrawn,
   expectBodiesOverBadges,
   expectDarkAndLit,
   expectNoMapGraphics,
@@ -76,6 +78,8 @@ test('시야 밖 구조 대비 2.5:1 · 시간 불변 · 시야 안 바닥 밝�
   // 열린 틈(어두운 초록 + 초록 빛)이 문짝(청회색)을 덮었다: 초록 채널이 닫힌 문보다 1.5배 · 10 이상 밝다
   expect(door.after[1]).toBeGreaterThanOrEqual(door.before[1] + 10);
   expect(door.after[1]).toBeGreaterThanOrEqual(door.before[1] * 1.5);
+  // 같은 장면의 문 왼쪽 자물쇠 판 (플레이테스트 a-9): 열린 판 숫자가 실제로 그려졌고, 바뀔 때만 굽는다
+  expectKeypadDrawn(door.keypad);
   expect((await s.page.evaluate(() => window.__DECOY__!.gfx)).downgrades).toBe(0);
   expect(s.problems).toEqual([]);
   await s.context.close();

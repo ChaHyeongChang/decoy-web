@@ -75,6 +75,7 @@ import { currentCharStyle } from '../gfx/charStyle';
 import { noteFogFrame } from '../gfx/frameStats';
 import { fogFollowDisabled, gfxNow, gfxState, onGfxChange } from '../gfx/state';
 import { MAP_PX_H, MAP_PX_W, MAP_X, MAP_Y, WORLD_SCALE, worldLine } from '../ui/layout';
+import type { WindupShown } from '../windupShow';
 import {
   MonsterRig,
   SurvivorRig,
@@ -94,6 +95,7 @@ import {
   type MonsterPose,
   type TeamSurvivorPose,
 } from './characters';
+import type { PingPulse } from './prefsFx';
 import { STUN_VEIL, WorldPostFx } from './effects';
 import { ALPHA, FOG } from './colors';
 import { chunkAtlasFor, createFogLayer, fogArtParams, stepFogArt, type FogLayer } from './baseLayer';
@@ -112,6 +114,7 @@ import {
   rgbCss,
   unionOutline,
 } from './fogMath';
+import { ExitKeypads } from './keypad';
 import { Badges, type BadgeAlpha } from './objects';
 import {
   ATTACK_RANGE,
@@ -153,22 +156,29 @@ export interface FrameView {
   nowMs: number;
   /** 괴물 화면: 포효로 드러난 생존자 위치 (발동 순간 고정, 1.5초) */
   roarPings: { x: number; y: number; until: number; start: number }[];
-  /** 괴물 화면: 서버 확인 전에 먼저 보여 주는 공격 준비 방향 (없으면 null) */
-  localWindupDir: number | null;
-  /** 괴물 화면: 서버의 준비 값이 이미 예측으로 보여 준 것과 같은 준비라 다시 그리지 않는다 */
-  hideServerWindup: boolean;
+  /**
+   * 괴물 화면: 이번 프레임 포효 핑 펄스 (prefsFx.pingPulse — 창 밖 화살표 · 미니맵 고리와 같은 객체). 핑 고리가 이 값으로 퍼지고,
+   * 번쩍임 줄이기면 고정된다
+   */
+  pingPulse: PingPulse;
+  /**
+   * 괴물 화면: 이번 프레임에 그릴 내 공격 준비 (없으면 null). 예측 · 서버 확인 · 끝에서 대기는 windupShow.ts가 정하고 여기서는
+   * 그 값만 그린다 — 방향(null이면 지금 내 방향), 채움 시작 시각, 대기 중 범위를 세워 둘 자리(null이면 지금 내 자리)
+   */
+  myWindup: WindupShown | null;
   /** 괴물 화면: 내가 기절 중 / 돌진 중 */
   myStunned: boolean;
   myDashing: boolean;
   /** 마지막 스냅샷을 받은 시각 (performance.now): 스냅샷으로 바뀐 상태가 시작된 순간 */
   snapAt: number;
-  /** 괴물 화면: 예측한 공격 준비 · 돌진을 누른 시각 (입력 틱, 없으면 null) */
-  localWindupAt: number | null;
+  /** 괴물 화면: 예측한 돌진을 누른 시각 (입력 틱, 없으면 null) */
   localDashAt: number | null;
   /** 보간 엔티티의 프레임 사이 경로 · 상태 경계 (없으면 프레임 사이 직선 · 프레임 시각을 쓴다) */
   motion: MotionSource | null;
   /** 카메라: 보이는 창 (타일, 기기 픽셀 격자에 맞춘 왼쪽 위 — ui/layout CAM과 같은 값) */
   view: ViewRect;
+  /** 받은 비밀번호 조각 (앞 · 뒤, 못 받은 조각 null — 탈출구 자물쇠 판, 플레이테스트 a-9). 괴물 화면은 늘 [null, null] */
+  keypadCodes: readonly (string | null)[];
 }
 
 /**
@@ -364,6 +374,7 @@ export class WorldRenderer {
   private readonly attachG: Phaser.GameObjects.Graphics;
   private readonly markers: Phaser.GameObjects.Graphics;
   private readonly badges: Badges;
+  private readonly keypads: ExitKeypads;
   /** 기절 채도 감소 막 (괴물 화면): 맵 바로 위 · 배지와 캐릭터 아래. ScreenEffects가 켜고 끈다 */
   readonly stunVeil: Phaser.GameObjects.Rectangle;
   private readonly gfxCount: GfxCount = { arcs: 0, fills: 0 };
@@ -507,8 +518,6 @@ export class WorldRenderer {
     moving: false,
     cloak: 0,
   };
-  /** 괴물 화면: 이미 windup만큼 그린 준비의 서버 값 꼬리 (서버 준비가 끝날 때까지 다시 그리지 않는다) */
-  private windupTail = false;
   /**
    * 생존자 화면: 받은 공격 준비 이벤트 중 아직 한 프레임도 그리지 못한 것(받은 시각 · 방향). 프레임이 준비 시간(0.4초)보다
    * 느린 기기에서도 예고가 한 번은 보이게, 보간된 준비를 한 번도 못 그린 채 준비 시간이 지나면 다음 프레임에 한 번 그린다
@@ -573,6 +582,8 @@ export class WorldRenderer {
     this.container = scene.add.container(MAP_X, MAP_Y).setScale(WORLD_SCALE);
     // 배지(바닥 문양 · 라벨)는 캐릭터보다 먼저 넣어 아래에 그린다 (정보 우선 R15: 배지가 캐릭터를 덮지 않음)
     this.badges = new Badges(scene, this.container);
+    // 탈출구 자물쇠 판도 배지 바로 뒤 (캐릭터 아래)
+    this.keypads = new ExitKeypads(scene, this.container);
     // 기절 채도 감소 막: 맵 바로 위, 배지 · 캐릭터 · 범위 · 마커 아래 (맨 앞에 끼운다)
     this.stunVeil = new Phaser.GameObjects.Rectangle(scene, 0, 0, MAP_PX_W, MAP_PX_H, STUN_VEIL.color)
       .setOrigin(0, 0)
@@ -1227,28 +1238,13 @@ export class WorldRenderer {
     let attackFill = 0;
     let windupDir: number | null = null;
     let windupAt: Vec2 | null = null;
-    if (isMonster && v.me) {
-      // 예측한 준비는 누른 순간부터 windup 동안. 서버가 그 입력을 확인하면(hideServerWindup) 예측 표시가 꺼지므로, 이미 그리기 시작한
-      // 준비는 같은 시작 시각으로 windup이 다 찰 때까지 이어 그린다(확인이 첫 프레임보다 먼저 와도 서버 값으로 그린다).
-      // 다 찬 뒤 서버 값의 꼬리(왕복 지연만큼 늦게 끝남)는 다시 그리지 않는다
-      const left = snap.you.mon?.windup ?? 0;
-      if (left <= 0) this.windupTail = false;
-      const shownMs = this.windupStart === null ? null : v.nowMs - this.windupStart;
-      if (v.hideServerWindup && left > 0 && shownMs !== null && shownMs >= atk.windup * 1000)
-        this.windupTail = true;
-      const serverWindup =
-        left > 0 &&
-        (!v.hideServerWindup || (!this.windupTail && (shownMs === null || shownMs < atk.windup * 1000)));
-      if (serverWindup || v.localWindupDir !== null) {
-        windupDir = v.localWindupDir ?? v.me.face;
-        windupAt = v.me;
-        // 예측한 준비는 누른 순간(입력 틱)부터, 서버 값만 있으면 그 스냅샷을 받은 순간의 남은 시간에서
-        if (this.windupStart === null)
-          this.windupStart =
-            v.localWindupDir !== null
-              ? (v.localWindupAt ?? v.nowMs)
-              : Math.min(v.nowMs, v.snapAt) - (atk.windup - left) * 1000;
-      }
+    if (isMonster && v.me && v.myWindup) {
+      // 내 준비: 언제부터 언제까지 그릴지는 windupShow.ts가 정했다(예측한 준비는 누른 입력 틱부터, 서버 값만 있으면 그 스냅샷의
+      // 남은 시간에서, 서버 확인으로 다시 시작하지 않는다). 다 찬 뒤 타격 결과가 올 때까지는 다 찬 채 타격 자리에 세워 둔다
+      const w = v.myWindup;
+      windupDir = w.dir ?? v.me.face;
+      windupAt = w.anchor ?? v.me;
+      this.windupStart = w.startAt;
     }
     // 생존자 화면: 준비 이벤트를 받았는데 보간된 준비(100ms 늦음)를 준비 시간 안에 한 번도 못 그렸으면 늦게라도 한 번
     const pend = this.oppWindupPending;
@@ -1456,7 +1452,7 @@ export class WorldRenderer {
     }
     for (const p of v.roarPings) {
       if (v.nowMs > p.until) continue;
-      drawRoarPing(this.markers, p.x, p.y, (v.nowMs - p.start) / (p.until - p.start));
+      drawRoarPing(this.markers, p.x, p.y, v.pingPulse);
       drawn.push({
         id: 'mark-roarPing',
         kind: 'mark',
@@ -1492,9 +1488,11 @@ export class WorldRenderer {
     blink.A = isMonster && blinkOn && capturing(snap.world.points, 'A');
     blink.B = isMonster && blinkOn && capturing(snap.world.points, 'B');
     this.badges.draw(snap.world.points, snap.world.exits, alpha, blink);
+    this.keypads.draw(snap.world.exits, v.keypadCodes, alpha.exits);
     const all = this.info;
     all.length = 0;
     for (const item of this.badges.info()) all.push(item);
+    for (const item of this.keypads.info()) all.push(item);
     for (const item of info) all.push(item);
     this.post.measure();
     gfxState.features.charGfxArcs = this.gfxCount.arcs;
@@ -2043,10 +2041,9 @@ export class WorldRenderer {
       if (isMonster) {
         const rig = this.monsterRig(v.selfId);
         const g = this.gait(v, v.selfId, v.me.x, v.me.y, frameMs, null);
-        // 새 스타일: 예측한 준비 표시가 다 찬 뒤에도 서버가 아직 준비 중(왕복 지연만큼 늦게 끝남)이면 준비 자세를 잇는다.
-        // 서버 준비가 0이 되는 스냅샷이 타격(attackHit)을 싣고 와서 타격 자세로 빈틈 없이 넘어간다 (기존 스타일 · 범위 표시는 그대로)
-        const hold = this.atlas?.params.style === 'new' && (snap.you.mon?.windup ?? 0) > 0;
-        const raise = this.windupStart !== null || hold ? 1 : 0;
+        // 준비 자세는 범위 표시와 같이 간다: 다 찬 뒤에도 타격 결과(attackHit)가 올 때까지 잇고(끝에서 대기, windupShow.ts)
+        // 그 스냅샷에서 타격 자세로 빈틈 없이 넘어간다 (두 스타일 모두)
+        const raise = this.windupStart !== null ? 1 : 0;
         const pose = this.monsterPose(
           body.x,
           body.y,

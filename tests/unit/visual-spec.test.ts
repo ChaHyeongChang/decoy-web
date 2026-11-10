@@ -11,6 +11,7 @@ import * as charFrames from '../../client/src/art/charFrames';
 import * as chars from '../../client/src/art/chars/index';
 import * as fx from '../../client/src/art/fx';
 import * as icons from '../../client/src/art/icons';
+import * as keypad from '../../client/src/art/keypad';
 import * as mapArtBadges from '../../client/src/art/mapArtBadges';
 import * as mapArtGeom from '../../client/src/art/mapArtGeom';
 import * as palette from '../../client/src/art/palette';
@@ -29,6 +30,7 @@ import * as perfChip from '../../client/src/ui/perfChip';
 import * as vision from '../../client/src/render/vision';
 import * as fonts from '../../client/src/ui/fonts';
 import * as hudArt from '../../client/src/ui/hudArt';
+import * as hudGate from '../../client/src/ui/hudGate';
 import * as layout from '../../client/src/ui/layout';
 
 const SPEC_PATH = 'docs/VISUAL_SPEC.md';
@@ -41,6 +43,7 @@ const MODULES: Readonly<Record<string, { file: string; mod: object }>> = {
   colors: { file: 'client/src/render/colors.ts', mod: colors },
   mapArtGeom: { file: 'client/src/art/mapArtGeom.ts', mod: mapArtGeom },
   mapArtBadges: { file: 'client/src/art/mapArtBadges.ts', mod: mapArtBadges },
+  keypad: { file: 'client/src/art/keypad.ts', mod: keypad },
   shapes: { file: 'client/src/art/shapes.ts', mod: shapes },
   charFrames: { file: 'client/src/art/charFrames.ts', mod: charFrames },
   chars: { file: 'client/src/art/chars/index.ts', mod: chars },
@@ -53,6 +56,7 @@ const MODULES: Readonly<Record<string, { file: string; mod: object }>> = {
   quality: { file: 'client/src/gfx/quality.ts', mod: quality },
   framePacing: { file: 'client/src/gfx/framePacing.ts', mod: framePacing },
   hudArt: { file: 'client/src/ui/hudArt.ts', mod: hudArt },
+  hudGate: { file: 'client/src/ui/hudGate.ts', mod: hudGate },
   layout: { file: 'client/src/ui/layout.ts', mod: layout },
   fonts: { file: 'client/src/ui/fonts.ts', mod: fonts },
   prefs: { file: 'client/src/prefs.ts', mod: prefs },

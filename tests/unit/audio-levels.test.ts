@@ -181,6 +181,48 @@ describe('소리 묶음 이득', () => {
     expect(sfx.log.map((e) => e.name)).toEqual(['hit']);
   });
 
+  it('판 시작 카운트다운 소리(count · go)는 효과음 묶음으로 가고 판 효과음 기록에 남는다. 시작 소리는 두 음', () => {
+    const { sfx, ctx, unlock } = setup();
+    unlock();
+    const c = ctx()!;
+    const [, s, u] = buses(c);
+    const g0 = c.gains.length;
+    sfx.count('count');
+    const countOut = c.gains[g0]!;
+    expect(countOut.out).toEqual([s]);
+    const oneTone = c.started.length;
+    expect(oneTone).toBe(1);
+    // 숫자는 1초에 하나지만 간격 제한 없이 요청마다 난다 (3 · 2 · 1 셋 다)
+    sfx.count('count');
+    sfx.count('count');
+    expect(c.started.length).toBe(3);
+    sfx.count('go');
+    expect(c.started.length).toBe(5);
+    expect(c.started.every((n) => !reaches(n, u))).toBe(true);
+    expect(sfx.log.map((e) => e.name)).toEqual(['count', 'count', 'count', 'go']);
+    expect(sfx.uiLog.length).toBe(0);
+  });
+
+  it('카운트다운 소리: 음소거 · 효과음 0 · 오디오가 열리기 전에는 기록만 남고 소리 노드를 만들지 않는다', () => {
+    const closed = setup();
+    closed.sfx.count('count');
+    expect(closed.ctx()).toBeNull();
+    expect(closed.sfx.log.map((e) => e.name)).toEqual(['count']);
+    const { sfx, ctx, unlock } = setup();
+    unlock();
+    const c = ctx()!;
+    sfx.setLevels(audioLevelsOf({ ...PREF_DEFAULTS, muted: true }));
+    sfx.count('count');
+    sfx.count('go');
+    sfx.setLevels({ master: 1, sfx: 0, ui: 1 });
+    sfx.count('go');
+    expect(c.started.length).toBe(0);
+    expect(sfx.log.map((e) => e.name)).toEqual(['count', 'go', 'go']);
+    sfx.setLevels(audioLevelsOf(PREF_DEFAULTS));
+    sfx.count('count');
+    expect(c.started.length).toBe(1);
+  });
+
   it('UI 소리 네 가지 모두 짧은 합성음 (소리 노드 시작), 같은 소리는 60ms 안에 한 번', () => {
     const { sfx, ctx, unlock } = setup();
     unlock();

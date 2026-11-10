@@ -192,6 +192,7 @@ describe('가장자리 배치', () => {
     prio,
     role: 'runner',
     state: null,
+    scale: 1,
   });
 
   it('둘레 거리 왕복', () => {

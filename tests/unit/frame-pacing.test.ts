@@ -11,10 +11,12 @@ import {
   LIMITER,
   Pacer,
   REFRESH,
+  REQUEST,
   RefreshEstimator,
   EVEN_RATE,
   capHzFor,
   divisorFor,
+  flipNeedsRequest,
   higherRate,
   isFrameLimit,
   lowerRate,
@@ -852,6 +854,171 @@ describe('Pacer (주사율 재기 + 제한기 + 판 없음 30fps)', () => {
     const lt = ticks(120, 100, { t0: 1500 });
     left.onTick(lt[0]!);
     expect(left.onTick(lt[1]!)).toBe(false);
+  });
+
+  // ───── 플레이테스트 반영 a-10: requestFrame(afterMs) — 요청 칸은 바뀐 틱의 명목 시각보다 뒤인 첫 rAF ─────
+
+  /** 판 중인 pacer + 그 뒤 rAF 시각들 + 제한대로 그리는 칸 하나(d, 그 뒤 d + n, d + 2n …) */
+  const paced = (limit: FrameLimit, hz: number, n: number): { p: Pacer; ts: number[]; d: number } => {
+    const p = new Pacer(limit);
+    feed(p, ticks(hz, 1500, { t0: 0 }));
+    p.setIdle(false);
+    const ts = ticks(hz, 400, { t0: 1500 });
+    // 앞의 몇 칸으로 위상을 본다: 처음 그린 칸에서 n칸 뒤가 다음 그릴 칸
+    let d = -1;
+    for (let i = 0; i < 2 * n && d < 0; i += 1) if (p.onTick(ts[i]!)) d = i;
+    for (let i = d + 1; i < d + n; i += 1) expect(p.onTick(ts[i]!), `${hz}Hz 건너뛸 칸 ${i}`).toBe(false);
+    return { p, ts, d: d + n };
+  };
+  /** from번째 rAF부터 count칸을 넣고 그린 칸 · 요청 칸 번호 */
+  const run = (p: Pacer, ts: readonly number[], from: number, count: number) => {
+    const drawn: number[] = [];
+    const extra: number[] = [];
+    for (let i = from; i < from + count; i += 1) {
+      if (p.onTick(ts[i]!)) drawn.push(i);
+      if (p.extraFrame) extra.push(i);
+    }
+    return { drawn, extra };
+  };
+
+  it('requestFrame(after): 다음 rAF가 after와 같은 시각 · 건너뛸 칸이면 그 칸을 쓰지 않고 다음 rAF(원래 그릴 칸)를 그린다 — 요청 칸 0개 (고치기 전: 같은 시각 칸을 요청 칸으로 그리고 다시 n칸)', () => {
+    // 틱 격자는 부동소수 오차로 vsync보다 1e-11ms쯤 이르다(타이머가 프레임보다 먼저 돈다): 정확히 같은 시각과 그 경우 둘 다
+    for (const before of [0, 1e-11]) {
+      const { p, ts, d } = paced('60', 144, 2);
+      expect(p.onTick(ts[d]!)).toBe(true);
+      p.requestFrame(ts[d + 1]! - before);
+      const got = run(p, ts, d + 1, 6);
+      expect(got.drawn, `after = t − ${before}`).toEqual([d + 2, d + 4, d + 6]);
+      expect(got.extra, `after = t − ${before}`).toEqual([]);
+    }
+  });
+
+  it('requestFrame(after): 같은 시각 · 그릴 칸이면 그 칸은 그대로 그리고(요청을 쓰지 않는다) 다음 rAF가 요청 칸, 거기서 다시 n칸 (고치기 전: 요청이 같은 시각 칸에 쓰여 다음 그림이 n칸 뒤)', () => {
+    const { p, ts, d } = paced('60', 144, 2);
+    p.requestFrame(ts[d]! - 1e-11);
+    const got = run(p, ts, d, 8);
+    expect(got.drawn).toEqual([d, d + 1, d + 3, d + 5, d + 7]);
+    expect(got.extra).toEqual([d + 1]);
+  });
+
+  it('requestFrame(after): rAF 시각이 after보다 앞이면(콜백이 늦게 시작 — 틱은 그 vsync 뒤에 처리됐다) 미루고 다음 rAF에 그린다', () => {
+    // 건너뛸 칸: 미룸 → 다음(원래 그릴 칸). 고치기 전에는 앞선 시각의 칸을 요청 칸으로 그렸다
+    const a = paced('60', 120, 2);
+    expect(a.p.onTick(a.ts[a.d]!)).toBe(true);
+    a.p.requestFrame(a.ts[a.d + 1]! + 2);
+    const skip = run(a.p, a.ts, a.d + 1, 4);
+    expect(skip.drawn).toEqual([a.d + 2, a.d + 4]);
+    expect(skip.extra).toEqual([]);
+    // 그릴 칸: 그대로 그리고 다음 rAF가 요청 칸
+    const b = paced('60', 120, 2);
+    b.p.requestFrame(b.ts[b.d]! + 2);
+    const draw = run(b.p, b.ts, b.d, 6);
+    expect(draw.drawn).toEqual([b.d, b.d + 1, b.d + 3, b.d + 5]);
+    expect(draw.extra).toEqual([b.d + 1]);
+  });
+
+  it('requestFrame(after): 경계는 after + REQUEST.leadMs(0.5ms) — 0.4ms 뒤의 rAF는 미루고 0.6ms 뒤의 rAF는 요청 칸으로 쓴다', () => {
+    expect(REQUEST.leadMs).toBe(0.5);
+    const early = paced('60', 144, 2);
+    expect(early.p.onTick(early.ts[early.d]!)).toBe(true);
+    early.p.requestFrame(early.ts[early.d + 1]! - 0.4);
+    expect(run(early.p, early.ts, early.d + 1, 2)).toEqual({ drawn: [early.d + 2], extra: [] });
+    const late = paced('60', 144, 2);
+    expect(late.p.onTick(late.ts[late.d]!)).toBe(true);
+    late.p.requestFrame(late.ts[late.d + 1]! - 0.6);
+    expect(run(late.p, late.ts, late.d + 1, 4)).toEqual({
+      drawn: [late.d + 1, late.d + 3],
+      extra: [late.d + 1],
+    });
+  });
+
+  it('requestFrame(after): 미루기는 한 번뿐(REQUEST.maxDefer 1) — 두 번째 rAF는 시각이 after보다 앞이어도 요청 칸이다', () => {
+    expect(REQUEST.maxDefer).toBe(1);
+    // n = 2 · 그릴 칸에서 미룸 → 다음 칸(여전히 after보다 앞)이 요청 칸
+    const a = paced('60', 144, 2);
+    a.p.requestFrame(a.ts[a.d]! + 1000);
+    expect(run(a.p, a.ts, a.d, 4)).toEqual({ drawn: [a.d, a.d + 1, a.d + 3], extra: [a.d + 1] });
+    // n = 3 · 건너뛸 칸에서 미룸 → 다음 건너뛸 칸이 요청 칸 (끝없이 미루지 않는다)
+    const b = paced('60', 165, 3);
+    expect(b.p.onTick(b.ts[b.d]!)).toBe(true);
+    b.p.requestFrame(b.ts[b.d + 1]! + 1000);
+    expect(run(b.p, b.ts, b.d + 1, 6)).toEqual({ drawn: [b.d + 2, b.d + 5], extra: [b.d + 2] });
+    // 새 요청은 미룬 수를 다시 센다
+    b.p.requestFrame(b.ts[b.d + 7]!);
+    expect(run(b.p, b.ts, b.d + 7, 4)).toEqual({ drawn: [b.d + 8], extra: [] });
+  });
+
+  it('requestFrame(after): 165Hz → 55(n = 3)에서 같은 시각 · 그릴 칸이면 1칸 뒤가 요청 칸이고 그 뒤 3칸마다', () => {
+    const { p, ts, d } = paced('60', 165, 3);
+    p.requestFrame(ts[d]! - 1e-11);
+    const got = run(p, ts, d, 9);
+    expect(got.drawn).toEqual([d, d + 1, d + 4, d + 7]);
+    expect(got.extra).toEqual([d + 1]);
+  });
+
+  it('requestFrame(after): 인자가 없거나 유한하지 않으면 예전과 같고(다음 rAF), 판 밖에서는 무시하며, setIdle은 미뤄 둔 요청도 지운다', () => {
+    for (const arg of [undefined, Number.NaN, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY]) {
+      const { p, ts, d } = paced('60', 144, 2);
+      expect(p.onTick(ts[d]!)).toBe(true);
+      p.requestFrame(arg);
+      expect(run(p, ts, d + 1, 4), String(arg)).toEqual({ drawn: [d + 1, d + 3], extra: [d + 1] });
+    }
+    // 판 밖: 시각을 줘도 무시 (30fps 그대로)
+    const idle = new Pacer();
+    feed(idle, ticks(120, 1500, { t0: 0 }));
+    idle.setIdle(true);
+    idle.requestFrame(1500);
+    expect(feed(idle, ticks(120, 100, { t0: 1500 }))).toBeLessThanOrEqual(4);
+    // 그릴 칸에서 미뤄 둔 요청: 판이 끝났다 다시 시작해도 남지 않는다 (지우지 않으면 다음 건너뛸 칸이 요청 칸이 된다)
+    const { p, ts, d } = paced('60', 144, 2);
+    p.requestFrame(ts[d]!);
+    expect(p.onTick(ts[d]!)).toBe(true);
+    p.setIdle(true);
+    p.setIdle(false);
+    expect(p.onTick(ts[d + 1]!)).toBe(false);
+    expect(p.extraFrame).toBe(false);
+  });
+
+  it('requestFrame(after): 목표가 화면 주사율 그대로면(n = 1 — 60Hz · 자동, 120Hz · 자동, 60Hz · 제한 60) 요청이 있든 없든 그리는 칸이 같다', () => {
+    for (const [limit, hz] of [
+      ['auto', 60],
+      ['auto', 120],
+      ['60', 60],
+      ['120', 144],
+    ] as const) {
+      const label = `${limit} · ${hz}Hz`;
+      const ts = ticks(hz, 600, { t0: 1500, jitter: 0.3, seed: hz });
+      const plain = new Pacer(limit);
+      const asked = new Pacer(limit);
+      for (const p of [plain, asked]) {
+        feed(p, ticks(hz, 1500, { t0: 0 }));
+        p.setIdle(false);
+      }
+      const drawnPlain: number[] = [];
+      const drawnAsked: number[] = [];
+      let extras = 0;
+      ts.forEach((t, i) => {
+        // 같은 시각 · 앞선 시각 · 뒤 시각 · 인자 없음을 돌아가며 요청한다
+        if (i % 4 === 0) asked.requestFrame([t, t + 3, t - 3, undefined][(i / 4) % 4]);
+        if (plain.onTick(t)) drawnPlain.push(i);
+        if (asked.onTick(t)) drawnAsked.push(i);
+        if (asked.extraFrame) extras += 1;
+      });
+      expect(drawnAsked, label).toEqual(drawnPlain);
+      expect(drawnPlain.length, label).toBe(ts.length);
+      expect([extras, asked.skipped], label).toEqual([0, 0]);
+    }
+  });
+
+  it('flipNeedsRequest: 타이머가 처리한 틱은 늘 요청하고, 렌더 프레임이 처리한 틱은 프레임 시각이 틱보다 0.5ms 넘게 뒤일 때만 요청하지 않는다', () => {
+    // 타이머가 처리 (프레임 밖): 처리한 시각과 상관없이 요청
+    for (const late of [0, 0.4, 0.6, 5]) expect(flipNeedsRequest(false, 1000 + late, 1000)).toBe(true);
+    // 렌더 프레임이 처리: 그 프레임이 틱과 같은 시각(변화 0으로 그린다)이면 요청, 뒤면 그 프레임이 그린다
+    expect(flipNeedsRequest(true, 1000, 1000)).toBe(true);
+    expect(flipNeedsRequest(true, 1000, 1000 - 1e-11)).toBe(true);
+    expect(flipNeedsRequest(true, 1000 + 0.4, 1000)).toBe(true);
+    expect(flipNeedsRequest(true, 1000 + 0.6, 1000)).toBe(false);
+    expect(flipNeedsRequest(true, 1000 + 8, 1000)).toBe(false);
   });
 
   it('fallback: 자동에서 60으로 내리고 되돌린다, 고정 제한(120)에는 쓰지 않는다, 잘못된 값은 null', () => {

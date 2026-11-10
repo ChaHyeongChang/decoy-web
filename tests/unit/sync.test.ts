@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { BTN, type MoveEnv } from '@decoy/shared';
-import { applyDashStart, applyWindupLock, predictMonsterPress } from '../../client/src/localActions';
+import {
+  INPUT_LAG,
+  InputLagBase,
+  applyDashStart,
+  applyWindupLock,
+  cooldownAheadSec,
+  inputAheadSec,
+  predictMonsterPress,
+} from '../../client/src/localActions';
 import type { TravelPiece } from '../../client/src/art/anim';
 import { Interpolator, Predictor, lerpNum, travelOf } from '../../client/src/sync';
 import { frame, loadTestBalance, newGame, readyGame } from '../helpers/fixtures';
@@ -136,6 +144,86 @@ describe('괴물 행동 즉시 피드백 어림 (M8)', () => {
     );
     expect(predictMonsterPress({ ...base, pressed: p, mon: { ...mon, windup: 0.2 } }).attack).toBe(false);
     expect(predictMonsterPress({ ...base, pressed: p, localWindupActive: true }).attack).toBe(false);
+  });
+
+  it('쿨타임은 입력 줄로 센다 (플레이테스트 반영 a-4): 스냅샷이 본 틱 뒤 새 입력을 서버가 처리할 때까지 seq − ack − 1틱', () => {
+    const dt = 1 / balance.network.serverTickHz;
+    // ack + 1은 바로 다음 틱에 처리된다: 쿨타임은 스냅샷 값 그대로 (0틱)
+    expect(inputAheadSec(101, 100, dt)).toBe(0);
+    expect(inputAheadSec(107, 100, dt)).toBeCloseTo(6 * dt, 12);
+    // 서버가 이미 그 입력까지 처리했다면(다시 맞춘 뒤) 0
+    expect(inputAheadSec(100, 100, dt)).toBe(0);
+    expect(inputAheadSec(90, 100, dt)).toBe(0);
+    // 왕복 200ms에서 흔한 모습: 스냅샷의 쿨타임 0.2초(6틱), 서버가 아직 처리하지 않은 내 입력 6개 → 이번 입력은 6틱 뒤에 처리되고
+    // 그때 쿨타임은 0이다. 옛 식(스냅샷을 받은 뒤 흐른 시간 약 0.025초 + 왕복 / 2 = 0.1초)은 0.075초가 남았다고 보아 예측하지 않았다
+    const snapMon = { ...mon, attackCd: 0.2, dashCd: 0.2 };
+    const p = BTN.ATTACK;
+    const ageSec = inputAheadSec(107, 100, dt);
+    expect(predictMonsterPress({ ...base, pressed: p, mon: snapMon, ageSec }).attack).toBe(true);
+    expect(predictMonsterPress({ ...base, pressed: p, mon: snapMon, ageSec: 0.125 }).attack).toBe(false);
+    // 한 틱 모자라면(대기 입력 5개) 아직이다
+    expect(
+      predictMonsterPress({ ...base, pressed: p, mon: snapMon, ageSec: inputAheadSec(106, 100, dt) }).attack,
+    ).toBe(false);
+    // 돌진 쿨타임도 같은 어림이다
+    expect(predictMonsterPress({ ...base, pressed: BTN.DASH, mon: snapMon, ageSec }).dash).toBe(true);
+  });
+
+  it('쿨타임 어림(cooldownAheadSec) = 입력 줄로 센 값, 다만 예전 시계 어림(스냅샷을 받은 뒤 흐른 시간 + 왕복 / 2)보다 작지 않게', () => {
+    const dt = 1 / balance.network.serverTickHz;
+    // 평소(왕복 200ms, 대기 입력 6개 = 0.2초): 입력 줄 쪽이 크다 (시계 어림 0.025 + 0.1 = 0.125초는 편도만큼 모자란다)
+    expect(cooldownAheadSec(107, 100, dt, 25, 200)).toBeCloseTo(6 * dt, 12);
+    // 탭이 멈췄다 깨어 입력 틱을 건너뛴 뒤(대기 입력이 1개뿐): 입력 줄(0.033초)이 실제보다 짧다 → 시계 어림만큼은 본다
+    expect(cooldownAheadSec(102, 100, dt, 25, 200)).toBeCloseTo(0.125, 12);
+    // 지연 없음: 스냅샷을 받은 뒤 흐른 시간만큼
+    expect(cooldownAheadSec(101, 100, dt, 40, 0)).toBeCloseTo(0.04, 12);
+    expect(cooldownAheadSec(101, 100, dt, 0, 0)).toBe(0);
+    // 잘못된 값(음수)은 0으로 본다
+    expect(cooldownAheadSec(107, 100, dt, -500, -100)).toBeCloseTo(6 * dt, 12);
+    expect(cooldownAheadSec(101, 100, dt, -500, -100)).toBe(0);
+  });
+
+  it('올라가는 길 끊김 보정 (검토): 입력 줄에서 서버가 평소보다 뒤처진 틱 수(excessTicks)를 뺀다 — 시계 어림 아래로는 내려가지 않는다', () => {
+    const dt = 1 / balance.network.serverTickHz;
+    // 끊긴 동안 서버가 4틱 굶어 ack가 멈췄다: 대기 입력 10개 중 4개는 한꺼번에 처리된다 → 실제로 흐를 틱은 6
+    expect(cooldownAheadSec(111, 100, dt, 25, 200, 4)).toBeCloseTo(6 * dt, 12);
+    expect(cooldownAheadSec(111, 100, dt, 25, 200)).toBeCloseTo(10 * dt, 12);
+    // 다 빼도 시계 어림(0.025 + 0.1초)보다 작게 보지 않는다
+    expect(cooldownAheadSec(111, 100, dt, 25, 200, 20)).toBeCloseTo(0.125, 12);
+    // 음수는 0으로 본다
+    expect(cooldownAheadSec(111, 100, dt, 0, 0, -3)).toBeCloseTo(10 * dt, 12);
+  });
+
+  it('InputLagBase: 기준선 = 최근 40개 스냅샷의 서버 틱 − ack 최솟값, excess = 지금 값이 기준선보다 한 틱 넘게 뒤처진 만큼', () => {
+    const lag = new InputLagBase();
+    // 스냅샷이 없으면 0
+    expect(lag.excess(100, 90)).toBe(0);
+    // 판 초반 ack 0(내 입력을 아직 처리하지 않음)은 서버 틱만 작아 기준선을 낮추므로 세지 않는다
+    lag.note(3, 0);
+    expect(lag.excess(100, 90)).toBe(0);
+    // 평소: 서버 틱 − ack가 6 ~ 7 (지터로 한 틱 흔들림)
+    for (let i = 0; i < 20; i += 1) lag.note(200 + i, 200 + i - 6 - (i % 2));
+    expect(lag.excess(300, 294)).toBe(0);
+    expect(lag.excess(300, 293)).toBe(0);
+    // 끊김: 서버 틱 − ack가 11 → 기준선 6 + 여유(한 틱)를 넘긴 4틱
+    expect(INPUT_LAG.slackTicks).toBe(1);
+    expect(lag.excess(300, 289)).toBe(4);
+    // 그 스냅샷을 세어도 기준선은 그대로 (최솟값)
+    lag.note(300, 289);
+    expect(lag.excess(300, 289)).toBe(4);
+    // ack 0인 스냅샷에서는 보정하지 않는다
+    expect(lag.excess(300, 0)).toBe(0);
+
+    // 지연이 늘어 그대로 머물면: 옛 값이 창(40개) 안에 하나라도 있는 동안은 옛 기준선, 모두 밀려나면 새 기준선
+    const moved = new InputLagBase();
+    for (let i = 0; i < INPUT_LAG.window; i += 1) moved.note(100 + i, 100 + i - 6);
+    for (let i = 0; i < INPUT_LAG.window - 1; i += 1) moved.note(200 + i, 200 + i - 11);
+    expect(moved.excess(300, 289)).toBe(4);
+    moved.note(300, 289);
+    expect(moved.excess(301, 290)).toBe(0);
+    // 지연이 줄면 바로 새 기준선 (보정은 0 그대로)
+    moved.note(302, 297);
+    expect([moved.excess(303, 298), moved.excess(303, 291)]).toEqual([0, 6]);
   });
 });
 

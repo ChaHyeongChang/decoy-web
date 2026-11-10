@@ -25,11 +25,12 @@ import {
 } from '@decoy/shared';
 import type { App } from '../app';
 import { LinearRamp, isWalking, selfPieces, type SelfStep, type TravelPiece } from '../art/anim';
+import { takeCode, type KeypadCodes } from '../art/keypad';
 import { sfx } from '../audio';
 import { HELP_TEXT, STORY_TEXT, UI_TEXT, formatText } from '../data/storyText';
 import { device } from '../device';
 import { FPS_WINDOW_MS, sessionFrameStats, type FrameWindow } from '../gfx/frameStats';
-import { ladderSize, pacingHooks } from '../gfx/framePacing';
+import { flipNeedsRequest, ladderSize, pacingHooks } from '../gfx/framePacing';
 import {
   lateWindowFor,
   qualityHooks,
@@ -44,18 +45,30 @@ import { InputLog, InputSampler } from '../input';
 import { matchMenu, toggleMatchMenu } from '../matchMenu';
 import { onPrefsChange, pref, shakeScaleOf, type PrefKey } from '../prefs';
 import { AimHold, aimAnchor } from '../aimHold';
-import { applyDashStart, applyWindupLock, predictMonsterPress, type LocalWindup } from '../localActions';
+import { assistAim, assistRange, assistTargets } from '../aimAssist';
+import {
+  InputLagBase,
+  applyDashStart,
+  applyWindupLock,
+  cooldownAheadSec,
+  predictMonsterPress,
+  type MonsterPressInput,
+} from '../localActions';
+import { WindupShow } from '../windupShow';
 import { COLOR } from '../render/colors';
 import { cullable } from '../render/camera';
 import { CameraDirector, devPerTile } from '../render/cameraDirector';
 import { UI } from '../art/palette';
 import { ScreenEffects, collectFxTargets } from '../render/effects';
 import { MINIMAP_BIG_TEXELS, bigMinimapPlace, bigMinimapTexels, spottedEdgeAlpha } from '../render/prefsFx';
+import { pingPulse, type PingPulse } from '../render/prefsFx';
 import { WorldRenderer, type MotionSource } from '../render/worldRenderer';
+import { roarResultText } from '../roarFeedback';
 import { TouchInput, type TouchFrameCtx } from '../touchInput';
 import { TOUCH_HINT_MS, takeTouchHints } from '../touchTutorial';
 import type { IconId } from '../art/icons';
 import { Banners, type BannerLine } from '../ui/banners';
+import { CountdownTracker } from '../ui/countdownView';
 import { Hud } from '../ui/hud';
 import type { Tone } from '../ui/hudArt';
 import { HudKit, type Slice } from '../ui/hudKit';
@@ -186,6 +199,10 @@ export class GameScene extends Phaser.Scene {
 
   /** 판 중 창이 낮아져 엄지 버튼이 옆 칸 미니맵을 덮었다 (TouchControls onCovered) */
   private minimapCovered = false;
+  /** 이동 영역 (논리 px, TouchControls onThumbs): 판 중 옮기는 미니맵이 그 위에 놓이지 않게 */
+  private moveZoneBox: { x: number; y: number; w: number; h: number } | null = null;
+  /** 조작 배치에서 옮긴 맵 창 안 미니맵 틀 (논리 px, 없으면 null — 판 HUD 배치의 자리) */
+  private minimapSpot: { x: number; y: number } | null = null;
 
   // ── 판 중 설정 효과 (설정 화면 통합) ──
   /** OS '동작 줄이기' (판 장면을 만들 때 읽는다): 흔들림 0 */
@@ -229,13 +246,14 @@ export class GameScene extends Phaser.Scene {
   private bigSharp = true;
 
   /**
-   * 미니맵 자리: 엄지 버튼이 덮지 않으면 처음 자리. 덮으면 확대 화면에서는 맵 창 안 빈 구석으로 옮기고(미니맵이 필수, 검토 반영),
-   * 옮길 자리가 없거나 확대 1이면 예전처럼 숨긴다(M12 — 판 화면 전체가 보여 같은 정보)
+   * 미니맵 자리: 엄지 버튼이 덮지 않으면 처음 자리(조작 배치에서 맵 창 안 미니맵을 옮겼으면 그 자리 — 플레이테스트 a-5). 덮으면 확대
+   * 화면에서는 맵 창 안 빈 구석으로 옮기고(미니맵이 필수, 검토 반영), 옮길 자리가 없거나 확대 1이면 예전처럼 숨긴다(M12 — 판 화면
+   * 전체가 보여 같은 정보)
    */
   private placeMinimap(): void {
     const mm = this.minimap;
     if (!this.minimapCovered) {
-      mm.relocate(null);
+      mm.relocate(this.minimapSpot);
       mm.setHidden(false);
       return;
     }
@@ -243,7 +261,14 @@ export class GameScene extends Phaser.Scene {
     const L = HUD.touch?.L ?? 1;
     const spot =
       CAM_ZOOM > 1 && size
-        ? minimapFallback(MAP_RECT, size, this.thumbBoxes, MINIMAP_INSET.margin * L, MIN_GAP * L)
+        ? minimapFallback(
+            MAP_RECT,
+            size,
+            this.thumbBoxes,
+            MINIMAP_INSET.margin * L,
+            MIN_GAP * L,
+            this.moveZoneBox,
+          )
         : null;
     mm.relocate(spot);
     mm.setHidden(spot === null);
@@ -306,12 +331,34 @@ export class GameScene extends Phaser.Scene {
   private unsubscribe: (() => void) | null = null;
   /** 포효 핑 (괴물 화면) */
   private roarPings: { x: number; y: number; until: number; start: number }[] = [];
+  /** 마지막 프레임에 그린 생존자 (보간 표본 그대로 — 탭 공격 조준 보정이 '화면에 보이는 자리'로 쓴다). 그리기 전이면 null */
+  private drawnSurvivors: ReadonlyMap<string, SurvivorView> | null = null;
+  /**
+   * 터치 탭 공격 조준 보정 (aimAssist.ts, 입력 틱마다 새로 만들지 않는다 — 탭 공격을 낼 때만 불린다): 내 스냅샷에 있고 화면에
+   * 그린 자유 생존자만 본다. 포효로 드러난 자리(roarPings)는 넘기지 않는다
+   */
+  private readonly tapAssist = (base: number): number => {
+    const app = this.app;
+    const snap = app.lastSnap;
+    const me = app.predictor?.state;
+    const drawn = this.drawnSurvivors;
+    if (!snap?.you.mon || !me || !drawn || !app.balance) return base;
+    return assistAim(base, me, assistTargets(snap.survivors, drawn), assistRange(app.balance));
+  };
+  /** 이번 프레임 포효 핑 펄스 고리 값 (그릇 — 프레임마다 다시 쓴다): 창 밖 화살표 · 작은 지도 · 크게 본 지도가 같은 값을 그린다 */
+  private readonly pingPulseNow: PingPulse = { t: 0, alpha: 0 };
+  /** 받은 비밀번호 조각 (탈출구 자물쇠 판, 메모 이벤트 id로 자리). 괴물은 메모를 받지 않아 늘 [null, null] */
+  private keypadCodes: KeypadCodes = [null, null];
   /** 마지막으로 그린 내 위치 (예측) */
   localPos = { x: 0, y: 0, face: 0 };
   /** 피격 플래시 · 수감 페이드 · 기절 채도 감소 */
   private screenFx!: ScreenEffects;
-  /** 괴물: 서버 확인 전에 먼저 보여 주는 공격 준비 */
-  private localWindup: LocalWindup | null = null;
+  /** 괴물: 내 화면의 공격 준비 표시 판단 (예측 → 서버 확인 → 끝에서 대기, windupShow.ts) */
+  private windupShow!: WindupShow;
+  /** 괴물: 서버가 내 입력을 평소 몇 틱 늦게 처리하는가 (쿨타임 어림의 끊김 보정, localActions.ts) */
+  private inputLag!: InputLagBase;
+  /** 방금 받은 스냅샷의 attackStart가 예측하지 못한 준비인가 (준비 소리를 이벤트에서 낸다) */
+  private windupUnheard = false;
   /** 판 중 FPS 감시를 하는가 (세션 상태는 sessionAutoDowngrade: 느리면 한 단계 내리고 효과를 확인한다) */
   private watchingFps = false;
   /** 적응형 품질 입력 (프레임마다 새로 만들지 않는다). 최근 1초 측정은 ADAPT_WINDOW_EVERY_MS마다 다시 낸다 */
@@ -327,6 +374,8 @@ export class GameScene extends Phaser.Scene {
   private readonly touchView: TouchView = { slots: [] };
   /** 괴물 재접속 대기 줄 (남은 초가 바뀔 때만 새로) */
   private pausedMemo: { sec: number; line: BannerLine } | null = null;
+  /** 판 시작 카운트다운 표시 (카운트다운을 본 판에서만 만들고 "시작!"이 사라지면 지운다) */
+  private countdown: CountdownTracker | null = null;
   /** 미니맵: 팀원 id → 역할 (이 판 명단. 프레임마다 · 엔티티마다 닫힘 함수를 만들지 않는다) */
   private readonly roleOf = (id: string): Role | null => {
     for (const r of this.app.match?.roster ?? []) if (r.id === id) return r.role;
@@ -448,6 +497,8 @@ export class GameScene extends Phaser.Scene {
       scoreboard: this.scoreboard.visible,
       scoreText: this.scoreboard.text,
       help: this.tutorial?.visible ?? false,
+      helpClose: this.tutorial?.closeHintShown ?? false,
+      countdown: this.banners.countdownText,
       spotted: this.spottedEdge.shown,
       hudGraphics,
       panels: JSON.stringify(drawn),
@@ -538,7 +589,10 @@ export class GameScene extends Phaser.Scene {
     this.minimap = new Minimap(this, this.kit, info.role === 'monster');
     this.edges = CAM_ZOOM > 1 ? new EdgeMarkers(this.kit) : null;
     this.thumbBoxes = [];
+    this.moveZoneBox = null;
+    this.minimapSpot = null;
     this.banners = new Banners(this.kit);
+    this.countdown = null;
     // 첫 판 조작 안내는 키보드 · 마우스용이라 터치 모드에서는 만들지 않는다 (터치는 판 직전 안내 + 판 중 위치 표시, M12)
     this.tutorial = info.firstMatch && !device.touch ? new TutorialOverlay(this.kit, info) : null;
     this.scoreboard = new Scoreboard(this.kit, info, balance, device.touch);
@@ -546,7 +600,8 @@ export class GameScene extends Phaser.Scene {
     // 판 중 설정 효과: 번쩍임 줄이기 · FPS 칩 (설정이 바뀌면 판 중에도 바로 — onPref)
     this.applyFlash();
     this.chipWanted = pref('perfChip');
-    this.localWindup = null;
+    this.windupShow = new WindupShow(balance.monster.attack.windup * 1000, app.dt * 1000);
+    this.inputLag = new InputLagBase();
     this.spottedEdge = this.kit.slice(38);
     this.spottedEdge.hollow = true;
     this.spottedEdge.set('spot', 0, 0, VIEW_W, VIEW_H).show(false);
@@ -595,8 +650,10 @@ export class GameScene extends Phaser.Scene {
             this.minimapCovered = ids.has('minimap');
             this.placeMinimap();
           },
-          onThumbs: (boxes) => {
+          onThumbs: (boxes, zone, spot) => {
             this.thumbBoxes = boxes;
+            this.moveZoneBox = zone;
+            this.minimapSpot = spot;
             this.placeMinimap();
           },
         },
@@ -615,6 +672,8 @@ export class GameScene extends Phaser.Scene {
     );
     this.setupMatchPrefs();
     this.roarPings = [];
+    this.drawnSurvivors = null;
+    this.keypadCodes = [null, null];
     // 'match' 뒤 이 장면이 생기기 전(판 시작 대기 · 세로 안내 · 다시 들어온 판의 장면 재시작)에 온 거점 메모를 다시 보인다.
     // 장면이 생긴 뒤의 메모는 아래 구독이 받는다 (M12 검토: 재접속 때 서버가 남겨 보낸 메모가 터치에서 사라지던 것)
     for (const ev of app.matchNotes) this.onEvent(ev);
@@ -625,6 +684,13 @@ export class GameScene extends Phaser.Scene {
       const age = app.link.synced ? Math.max(0, app.link.serverNow() - e.snap.st) : 0;
       const stale = app.link.synced && age > staleEventLimitMs(this.frameMs);
       this.eventAgeMs = age;
+      // 괴물 공격 준비 표시: 오래된 스냅샷도 상태는 따라간다 (서버 확인 · 거절 · 타격 결과 · 기절 — windupShow.ts)
+      const mine = e.snap.you.mon;
+      // 쿨타임 어림의 끊김 보정: 서버 틱 − ack의 최근 기준선 (오래된 스냅샷도 센다)
+      if (mine !== null) this.inputLag.note(e.snap.tick, e.snap.ack);
+      this.windupUnheard =
+        mine !== null &&
+        this.windupShow.snapshot(e.snap.ack, mine.windup, e.snap.events, app.lastSnapAt, app.link.rtt);
       // 괴물 시야 모드 보간 · 내 걷기 기록은 받은 순간부터 잰다
       this.noteBlend(e.snap, performance.now());
       this.noteSelfReconcile(performance.now());
@@ -1029,7 +1095,7 @@ export class GameScene extends Phaser.Scene {
     if (baseNew || refit || baked)
       big.refreshBase(this.world.bigBaseCanvas ?? this.world.baseCanvas, baseNew);
     big.setWorld(snap.world.points, snap.world.exits, view, this.director?.spectating ?? null, blinkOff);
-    big.update(this.drawn, snap.you.role, this.roleOf);
+    big.update(this.drawn, snap.you.role, this.roleOf, this.pingPulseNow);
   }
 
   /** 캔버스 자리 (창 CSS px의 왼쪽 위 · 논리 1px의 CSS px). 보이지 않으면 null */
@@ -1181,6 +1247,10 @@ export class GameScene extends Phaser.Scene {
       shakes: d.shake.active,
       shakeScale: d.shake.scale,
       markers: this.edges?.debug() ?? [],
+      pingRings: {
+        small: this.minimap?.pingRings ?? [],
+        big: this.bigOpen ? (this.minimapBig?.pingRings ?? []) : [],
+      },
     };
   }
 
@@ -1191,13 +1261,10 @@ export class GameScene extends Phaser.Scene {
     // 월드 연출(불꽃 · 충격파 · 베기 호 등)은 받은 이벤트 좌표에서만 생긴다 (상대 잔여 효과 규칙)
     this.world.onEvent(ev, now);
     switch (ev.k) {
-      case 'attackStart': {
-        // 괴물 본인은 누른 순간 이미 들었다 (즉시 피드백). 예측하지 못한 경우만 여기서
-        const lw = this.localWindup;
-        const predicted = isMonster && lw !== null && now - lw.until < 1000;
-        if (!predicted) sfx.play('windup', isMonster ? 1 : 0.8);
+      case 'attackStart':
+        // 괴물 본인은 누른 순간 이미 들었다 (즉시 피드백). 예측하지 못한 경우만 여기서 (WindupShow.snapshot이 가린다)
+        if (!isMonster || this.windupUnheard) sfx.play('windup', isMonster ? 1 : 0.8);
         return;
-      }
       case 'attackHit':
         if (isMonster && ev.hits > 0) {
           sfx.play('hit', 0.7);
@@ -1221,6 +1288,7 @@ export class GameScene extends Phaser.Scene {
         if (ev.you) this.screenFx.imprison(now);
         return;
       case 'text': {
+        takeCode(this.keypadCodes, ev);
         if (ev.id === 'ALERT_CAPTURE_START') sfx.play('captureStart');
         else if (ev.id === 'ALERT_CAPTURE_DONE') sfx.play('captureDone');
         else if (ev.id === 'ALERT_EXIT_OPEN') sfx.play('doorOpen');
@@ -1242,6 +1310,10 @@ export class GameScene extends Phaser.Scene {
         this.director?.shake.add('roar', now);
         const dur = (this.app.balance?.monster.roar.revealDuration ?? 1.5) * 1000;
         for (const p of ev.pts) this.roarPings.push({ x: p.x, y: p.y, start: now, until: now + dur });
+        // 결과 피드백: 드러난 수(= 그리는 핑 수)만큼 같은 음의 핑 · 한 줄 알림. 0명이면 빈 메아리 · '아무도 없다'.
+        // 알림은 핑과 같은 시각에 사라진다(다른 알림에 밀려 못 띄웠으면 버린다)
+        sfx.roarResult(ev.pts.length);
+        this.banners.push(roarResultText(ev.pts.length), dur / 1000, 'info', 'roar', now, true);
         return;
       }
       case 'shoveMiss':
@@ -1294,24 +1366,44 @@ export class GameScene extends Phaser.Scene {
    */
   private touchCtx(): TouchFrameCtx | undefined {
     if (!this.touch) return undefined;
-    const app = this.app;
     const nowMs = performance.now();
+    // 이 프레임의 seq는 이미 올렸다 (stepInput). 어림은 마우스 · 키 경로(predictMonster)와 같은 monsterPressBase를 거친다
+    const base = this.monsterPressBase(this.seq, nowMs);
+    if (!base) return { nowMs, face: this.app.predictor?.state?.face ?? 0, canAttack: false, canDash: false };
+    return {
+      nowMs,
+      face: base.move.face,
+      canAttack: predictMonsterPress({ ...base, pressed: BTN.ATTACK }).attack,
+      canDash: predictMonsterPress({ ...base, pressed: BTN.DASH }).dash,
+      assist: this.tapAssist,
+    };
+  }
+
+  /**
+   * 괴물 행동 어림의 입력 (터치 touchCtx · 마우스 · 키 predictMonster가 함께 쓴다 — 한쪽만 다른 식이 되지 않게): 입력 seq를 서버가
+   * 처리할 때의 상황. 쿨타임은 입력 줄로 세고(마지막 스냅샷이 본 틱 뒤 이 입력을 서버가 처리할 때까지 흐를 틱 수), 올라가는 길이
+   * 끊겨 서버가 평소보다 뒤처진 틱 수는 뺀다 (cooldownAheadSec · InputLagBase). 예측 상태 · 스냅샷이 없으면 null
+   */
+  private monsterPressBase(seq: number, nowMs: number): Omit<MonsterPressInput, 'pressed'> | null {
+    const app = this.app;
+    const snap = app.lastSnap;
+    const mon = snap?.you.mon;
     const st = app.predictor?.state;
-    const mon = app.lastSnap?.you.mon;
     const balance = app.balance;
-    if (!st || !mon || !balance) return { nowMs, face: st?.face ?? 0, canAttack: false, canDash: false };
-    const base = {
+    if (!snap || !mon || !st || !balance) return null;
+    return {
       move: st,
       mon,
       balance,
-      ageSec: (nowMs - app.lastSnapAt) / 1000 + app.link.rtt / 2000,
-      localWindupActive: this.localWindup !== null && nowMs < this.localWindup.until,
-    };
-    return {
-      nowMs,
-      face: st.face,
-      canAttack: predictMonsterPress({ ...base, pressed: BTN.ATTACK }).attack,
-      canDash: predictMonsterPress({ ...base, pressed: BTN.DASH }).dash,
+      ageSec: cooldownAheadSec(
+        seq,
+        snap.ack,
+        app.dt,
+        nowMs - app.lastSnapAt,
+        app.link.rtt,
+        this.inputLag.excess(snap.tick, snap.ack),
+      ),
+      localWindupActive: this.windupShow.active,
     };
   }
 
@@ -1329,10 +1421,21 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     // 괴물 재접속 대기(판 전체 일시정지): 서버가 입력을 처리하지 않으므로 보내지도 예측하지도 않는다.
-    // 터치 모드 세로 화면도 입력을 보내지 않는다 (판은 흐른다, 그동안 무방비)
-    if ((app.lastSnap?.world.paused ?? null) !== null || (this.touch !== null && device.portrait)) {
+    // 터치 모드 세로 화면 · 확대된 화면(확대 안내, zoomGuard.ts)도 입력을 보내지 않는다 (판은 흐른다, 그동안 무방비)
+    if (
+      (app.lastSnap?.world.paused ?? null) !== null ||
+      (this.touch !== null && (device.portrait || device.zoomed))
+    ) {
       this.acc = 0;
       this.sampler.clearPressed();
+      this.stopSelfWalk();
+      return;
+    }
+    // 판 시작 카운트다운 (서버가 입력을 버린다): 보내지도 예측하지도 않는다 — 내 캐릭터가 먼저 움직였다 되돌아오지 않게.
+    // 그사이 누른 버튼은 버리되 누르고 있는 이동 키 · 스틱은 둔다("시작!" 순간 다시 누르지 않아도 걷는다, dropPressed)
+    if ((app.lastSnap?.world.countdown ?? 0) > 0) {
+      this.acc = 0;
+      this.sampler.dropPressed();
       this.stopSelfWalk();
       return;
     }
@@ -1342,19 +1445,27 @@ export class GameScene extends Phaser.Scene {
     // 입력 반응 (잔렉 고치기): 이번 틱들에서 멈춤 ↔ 걷기가 바뀌었는가
     let walking = this.selfSteps[this.selfSteps.length - 1]?.walk ?? false;
     let walkFlip = false;
+    // 마지막으로 바뀐 틱의 명목 시각 (요청 칸은 이 시각보다 뒤인 첫 rAF — Pacer.requestFrame)
+    let flipAt = Number.NaN;
     while (this.acc >= dtMs - STEP_EPS_MS) {
       this.acc = Math.max(0, this.acc - dtMs);
       this.seq += 1;
       const frame = this.sampler.sample(this.seq, this.aimTarget(), this.touchCtx());
-      if (frame.pressed !== 0 && app.match?.role === 'monster') this.predictMonster(frame);
       // 명목 시각 (입력 틱 격자 위 = 쌓인 시간이 이 틱의 경계에 닿은 순간, 밀려서 한 번에 여러 틱이면 앞 틱일수록 이르다).
       // 그린 자리는 이 시각부터 보간하고(Predictor.alphaAt) 내 걷기 기록도 이 시각으로 적는다. 늦게 깬 타이머가 처리한 시각을
       // 쓰면 늦은 만큼 멈췄다 다음 틱에 튄다 (내 움직임 고르기)
       const at = nowMs - this.acc;
+      if (frame.pressed !== 0 && app.match?.role === 'monster') this.predictMonster(frame, at);
       app.predictor.applyLocal(frame, env, at);
+      // 공격 준비 표시: 타격을 판정할 입력(누른 입력 + 11번째)을 적용한 자리를 적어 둔다 (끝에서 대기 중 범위를 세울 자리)
+      const stepped = app.predictor.state;
+      if (stepped) this.windupShow.noteStep(frame.seq, stepped.x, stepped.y);
       const moved = app.predictor.stepDistance;
       const walk = isWalking(moved, dtMs);
-      if (walk !== walking) walkFlip = true;
+      if (walk !== walking) {
+        walkFlip = true;
+        flipAt = at;
+      }
       walking = walk;
       this.noteSelfStep(at, moved / dtMs, at + dtMs, walk);
       frames.push(frame);
@@ -1362,32 +1473,29 @@ export class GameScene extends Phaser.Scene {
       this.inputHistory.push(frame, performance.now(), this.sampler.mode);
     }
     if (frames.length > 0) app.link.send({ t: 'input', frames });
-    // 멈춤 ↔ 걷기가 바뀌었으면 다음 rAF를 제한과 상관없이 한 번 그린다(목표를 화면의 절반으로 낮춰도 첫 움직임 · 멈춤이 다음 그릴
-    // 차례까지 늦지 않게). 렌더 프레임이 처리한 틱이면(catchUpInput) 그 프레임이 이미 그린다
-    if (walkFlip && !this.inFrameInput) pacingHooks.requestFrame?.();
+    // 멈춤 ↔ 걷기가 바뀌었으면 그 틱의 명목 시각보다 뒤인 첫 rAF를 제한과 상관없이 한 번 그린다(목표를 화면의 절반으로 낮춰도
+    // 첫 움직임 · 멈춤이 다음 그릴 차례까지 늦지 않게). 렌더 프레임이 처리한 틱이고(catchUpInput) 그 프레임 시각(nowMs)이 명목
+    // 시각보다 뒤면 그 프레임이 변화를 그리므로 부르지 않는다. 프레임 시각이 틱과 같으면 그 프레임은 변화를 0으로 그려(보간 비율 0)
+    // 다음 rAF가 필요하다 (flipNeedsRequest, 플레이테스트 반영 a-10)
+    if (walkFlip && flipNeedsRequest(this.inFrameInput, nowMs, flipAt)) pacingHooks.requestFrame?.(flipAt);
   }
 
-  /** 괴물: 공격 준비 · 돌진을 서버 확인 전에 먼저 보여 준다 (판정은 서버, 어긋나면 보정) */
-  private predictMonster(frame: InputFrame): void {
+  /**
+   * 괴물: 공격 준비 · 돌진을 서버 확인 전에 먼저 보여 준다 (판정은 서버, 어긋나면 보정). at = 이 입력 틱의 명목 시각.
+   * 어림은 터치 경로와 같은 monsterPressBase를 거친다 (쿨타임은 입력 줄로 센다)
+   */
+  private predictMonster(frame: InputFrame, at: number): void {
     const app = this.app;
-    const mon = app.lastSnap?.you.mon;
-    const st = app.predictor?.state;
-    const balance = app.balance;
-    if (!mon || !st || !balance || !app.predictor) return;
     const now = performance.now();
-    const res = predictMonsterPress({
-      pressed: frame.pressed,
-      move: st,
-      mon,
-      balance,
-      ageSec: (now - app.lastSnapAt) / 1000 + app.link.rtt / 2000,
-      localWindupActive: this.localWindup !== null && now < this.localWindup.until,
-    });
+    const base = this.monsterPressBase(frame.seq, now);
+    if (!base || !app.predictor) return;
+    const { move: st, balance } = base;
+    const res = predictMonsterPress({ ...base, pressed: frame.pressed });
     if (res.attack) {
       app.predictor.predictAction(frame.seq, applyWindupLock(balance));
-      this.localWindup = { seq: frame.seq, until: now + balance.monster.attack.windup * 1000, dir: st.face };
+      this.windupShow.press(frame.seq, at, st.face, app.link.rtt);
       sfx.play('windup');
-    }
+    } else if ((frame.pressed & BTN.ATTACK) !== 0) this.windupShow.notePress(frame.seq);
     if (res.dash) {
       app.predictor.predictAction(frame.seq, applyDashStart(balance));
       this.localDashAt = now;
@@ -1437,19 +1545,11 @@ export class GameScene extends Phaser.Scene {
     if (this.sys.isActive()) this.scheduleInput();
   }
 
-  /** catchUpInput이 렌더 프레임 안에서 입력 틱을 처리하는 중 (그 프레임이 이미 그린다 — requestFrame을 부르지 않는다) */
-  private inFrameInput = false;
-
   /**
-   * 공격 준비 표시: 누른 순간부터 내 시계로 0.4초 (예측). 서버가 그 입력을 처리한 뒤 도착하는 같은 준비(서버 값)는
-   * 이미 보여 줬으므로 다시 그리지 않는다. 예측하지 못한 준비(서버가 받아들인 경우)는 서버 값을 그린다
+   * catchUpInput이 렌더 프레임 안에서 입력 틱을 처리하는 중 (그 프레임이 이미 그린다 — 프레임 시각이 틱의 명목 시각보다
+   * REQUEST.leadMs 넘게 뒤면 requestFrame을 부르지 않는다, stepInput)
    */
-  private windupView(ack: number, now: number): { dir: number | null; hideServer: boolean } {
-    const lw = this.localWindup;
-    if (!lw) return { dir: null, hideServer: false };
-    if (ack < lw.seq) return { dir: now < lw.until ? lw.dir : null, hideServer: false };
-    return { dir: null, hideServer: now < lw.until + this.app.link.rtt + 150 };
-  }
+  private inFrameInput = false;
 
   /** 프레임 독립성 시험용 연출 상태 (렌더링 최적화, 디버그 훅 getAnimState): 같은 시각이면 60 · 120fps에서 같아야 한다 */
   get animDebug(): AnimDebug | null {
@@ -1662,7 +1762,16 @@ export class GameScene extends Phaser.Scene {
       bodies,
       this.edgePlaced,
     );
-    edges.update(this.edgePlaced, role === 'monster', now);
+    edges.update(this.edgePlaced, role === 'monster', now, this.pingPulseNow);
+  }
+
+  /**
+   * 포효 핑이 지난 비율 0~1 (살아 있는 핑이 없으면 −1). 포효 쿨타임이 표시 시간보다 길어 살아 있는 핑은 늘 한 번의 포효에서 온
+   * 것이라 시작 시각이 하나다. 받은 시각으로 재므로 주사율과 무관하다
+   */
+  private pingK(now: number): number {
+    for (const p of this.roarPings) if (now <= p.until) return (now - p.start) / (p.until - p.start);
+    return -1;
   }
 
   /** 그리는 내 자리 그릇 (프레임마다 다시 쓴다: world.draw는 이번 프레임 안에서만 읽는다) */
@@ -1689,6 +1798,7 @@ export class GameScene extends Phaser.Scene {
     const snap = app.lastSnap;
     if (!snap || !app.balance || !app.match) {
       this.drawn = [];
+      this.drawnSurvivors = null;
       return;
     }
     const now = performance.now();
@@ -1705,7 +1815,6 @@ export class GameScene extends Phaser.Scene {
     span.prevNow = this.lastRenderTime === null ? null : span.now;
     span.now = now;
     this.lastRenderTime = renderTime;
-    const windup = this.windupView(snap.ack, now);
     // 보간 비율은 예측기가 마지막 입력 틱의 명목 시각으로 잰다 (Predictor.alphaAt)
     const me = app.predictor?.renderPos(delta, undefined, frameAt) ?? null;
     if (me) this.localPos = me;
@@ -1715,13 +1824,16 @@ export class GameScene extends Phaser.Scene {
       if (!this.blendRamp) this.noteBlend(snap, now);
       this.myBlend = this.blendRamp?.valueAt(now) ?? this.myBlend;
     }
-    const lw = this.localWindup;
     const survivors = app.survivorsInterp.sample(renderTime);
+    this.drawnSurvivors = survivors;
     this.applySpectatePick(snap);
     const view = this.updateCamera(now, delta, me, survivors);
     // 내 몸을 그리는 자리: 카메라가 창을 기기 픽셀 격자에 맞추며 옮긴 만큼 같이 옮긴다(화면에서는 맞추기 전 창 기준 — 고르게
     // 움직인다). 시야 · 부채꼴 · 범위 · 정보 레이어는 예측 자리 그대로(맵에 붙은 그림, 판정과 같은 자리)
     const drawMe = this.drawSelfAt(me);
+    // 포효 핑 펄스: 이번 프레임 값 하나 — 월드 핑 고리 · 작은 지도 · 크게 본 지도 · 창 밖 화살표가 같은 객체를 그린다(같은 시각 ·
+    // 같은 식). 번쩍임 줄이기면 넷 다 퍼지지 않는 고정 고리
+    const pulse = pingPulse(this.pingK(now), this.flashReduced, this.pingPulseNow);
     this.world.draw(
       {
         balance: app.balance,
@@ -1736,15 +1848,15 @@ export class GameScene extends Phaser.Scene {
         myBlend: this.myBlend,
         nowMs: now,
         roarPings: this.roarPings,
-        localWindupDir: windup.dir,
-        hideServerWindup: windup.hideServer,
+        pingPulse: pulse,
+        myWindup: snap.you.role === 'monster' ? this.windupShow.view(now) : null,
         myStunned: snap.you.role === 'monster' && (app.predictor?.state?.stun ?? 0) > 0,
         myDashing: snap.you.role === 'monster' && (app.predictor?.state?.dash ?? 0) > 0,
         snapAt: app.lastSnapAt,
-        localWindupAt: windup.dir !== null && lw ? lw.until - app.balance.monster.attack.windup * 1000 : null,
         localDashAt: this.localDashAt,
         motion: this.motion,
         view,
+        keypadCodes: this.keypadCodes,
       },
       delta,
     );
@@ -1762,7 +1874,7 @@ export class GameScene extends Phaser.Scene {
       d?.spectating ?? null,
       blinkOff,
     );
-    this.minimap.update(this.drawn, snap.you.role, this.roleOf);
+    this.minimap.update(this.drawn, snap.you.role, this.roleOf, pulse);
     // 지도 크게 보기: 작은 지도와 같은 값 · 같은 프레임
     this.updateBigMap(snap, view, blinkOff, baseNew);
     this.updateEdges(snap, view, now);
@@ -1794,13 +1906,16 @@ export class GameScene extends Phaser.Scene {
           : lastChance
             ? lastChanceLine()
             : null;
+    const counting = this.updateCountdown(snap, now);
     this.banners.update(persistent, warn, now);
     this.updateTouch(snap);
     const anyKey = this.sampler.anyKeyPressed;
     this.sampler.anyKeyPressed = false;
     // Tab 점수판(터치: 점수판 버튼)이 열리면 조작 안내를 닫는다 (두 패널이 겹치지 않게)
     const tab = this.sampler.tabHeld || (this.touchControls?.scoreboard ?? false);
-    this.tutorial?.update(now, anyKey || tab);
+    // 판 시작 카운트다운 동안에는 조작 안내를 키로 닫지 않고 표시 시간도 세지 않는다 (읽을 틈 — "시작!"부터 다시 센다)
+    if (counting) this.tutorial?.update(0, tab, true);
+    else this.tutorial?.update(now, anyKey || tab);
     this.scoreboard.update(tab, snap);
     // 이번 프레임 월드 그림이 다 놓인 뒤: 창 밖 그림은 그리지 않는다
     this.cullWorld();
@@ -1808,7 +1923,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * 터치 화면: 판 중이고 관전 · 결과 · 판 정지 · 세로 화면 · 판 중 메뉴가 아닐 때만 입력을 받는다('설정' 버튼은 결과 전이면 늘). 끄는 순간 손가락 · 발사 대기를 비운다.
+   * 터치 화면: 판 중이고 관전 · 결과 · 판 정지 · 세로 화면 · 확대된 화면 · 판 중 메뉴가 아닐 때만 입력을 받는다('설정' 버튼은 결과 전이면 늘). 끄는 순간 손가락 · 발사 대기를 비운다.
    * 행동 칸은 이번 프레임 캔버스 HUD가 계산한 actionSlots 결과를 그대로 쓴다 (쿨타임 게이지 · 못 씀 표시)
    */
   private updateTouch(snap: Snapshot): void {
@@ -1820,7 +1935,8 @@ export class GameScene extends Phaser.Scene {
       status !== 'dead' &&
       status !== 'escaped' &&
       snap.world.paused === null &&
-      !device.portrait;
+      !device.portrait &&
+      !device.zoomed;
     const active = playable && !this.menuOpen;
     if (active !== this.touchActive) {
       this.touchActive = active;
@@ -1834,6 +1950,29 @@ export class GameScene extends Phaser.Scene {
       this.touchView.slots = this.hud.lastSlots;
       controls.update(this.touchView);
     }
+  }
+
+  /**
+   * 판 시작 카운트다운 (GAME_DESIGN 1장): 스냅샷의 남은 초를 큰 숫자 3 · 2 · 1로, 0이 되면 "시작!"을 잠깐 띄운다(메모 상자 자리 —
+   * 시작 문구는 그 뒤에). 숫자마다 소리 하나 · 시작 소리 하나. 카운트다운을 본 판에서만 추적기 · 글자를 만든다: 시험 방 · 판 중
+   * 재접속은 처음부터 0이라 아무것도 만들지 않는다. 품질 · 줄이기 설정과 무관하게 숫자는 보인다(게임 정보 — 튐만 끈다).
+   * 돌려주는 값 = 지금 카운트다운 중인가
+   */
+  private updateCountdown(snap: Snapshot, now: number): boolean {
+    const left = snap.world.countdown;
+    const counting = left > 0;
+    let c = this.countdown;
+    if (!c) {
+      if (!counting) return false;
+      c = this.countdown = new CountdownTracker();
+    }
+    c.update(left, now - this.app.lastSnapAt, snap.world.paused !== null, now);
+    if (c.sound) sfx.count(c.sound);
+    // "시작!": 떠 있던 첫 판 조작 안내는 이때부터 표시 시간을 센다
+    if (c.sound === 'go' && this.tutorial?.visible) this.tutorial.show(now, TUTORIAL_SECONDS);
+    this.banners.setCountdown(c.label, now, !this.flashReduced && (this.director?.shake.scale ?? 1) > 0);
+    if (!counting && c.label === null) this.countdown = null;
+    return counting;
   }
 
   /** 괴물 재접속 대기 줄 (남은 초가 같으면 같은 객체) */

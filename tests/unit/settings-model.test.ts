@@ -160,6 +160,7 @@ describe('설정 화면 값', () => {
     m.prefs.setPref('uiSize', 'xlarge');
     m.prefs.setPref('muted', true);
     m.prefs.setPref('stickSize', 120);
+    m.prefs.setPref('attackButton', 'instant');
     store.data.set(STORAGE_KEYS.haptics.key, '0');
     store.data.set(STORAGE_KEYS.controlLayout.key, '{"v":1,"survivor":{"mirror":true,"items":{}}}');
     expect(m.model.controlLayoutCustomized()).toBe(true);
@@ -167,6 +168,7 @@ describe('설정 화면 값', () => {
     for (const k of ['quality', 'frameLimit', 'charStyle', 'settings', 'haptics', 'controlLayout'] as const)
       expect(store.data.has(STORAGE_KEYS[k].key), k).toBe(false);
     expect(m.prefs.pref('uiSize')).toBe('normal');
+    expect(m.prefs.pref('attackButton')).toBe('drag');
     expect(m.model.charStyleNow()).toBe('new');
     expect(m.model.controlLayoutCustomized()).toBe(false);
   });

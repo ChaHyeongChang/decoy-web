@@ -222,6 +222,8 @@ function worldView(game: Game, forMonster: boolean): WorldView {
   return {
     timeLeft: round(game.timeLeft, 2),
     grace: game.grace === null ? null : round(game.grace, 2),
+    // 남은 값이 0.005초보다 작은 마지막 틱에도 0으로 반올림하지 않는다 (화면 · 봇은 0을 받은 뒤에만 입력을 보낸다)
+    countdown: game.countdownLeft > 0 ? Math.max(0.01, round(game.countdownLeft, 2)) : 0,
     monsterWait: round(game.monster.move.frozen, 2),
     paused: game.paused === null ? null : round(game.paused, 2),
     points,

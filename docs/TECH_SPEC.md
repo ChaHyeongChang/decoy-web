@@ -56,6 +56,10 @@ decoy-web/
 │  └─ bots.ts                 ← 개발 · 테스트용 WebSocket 봇
 ├─ client/src/
 │  ├─ main.ts, net.ts         ← 연결, 예측 · 보정, 보간
+│  ├─ zoomGuard.ts            ← 화면 확대 막기 · 감지 (터치 모드: 문서 터치 리스너 + visualViewport 배율 → device.zoomed · 확대 안내 ui/zoomNotice.ts)
+│  ├─ aimAssist.ts            ← 터치 탭 공격 조준 보정 (순수: 내 화면에 그린 자유 생존자 ±30° · 1.7타일 안이면 어긋남의 절반, 최대 12°)
+│  ├─ localActions.ts · windupShow.ts ← 괴물 행동 즉시 표시: 쿨타임 어림(입력 줄 · 끊김 보정 InputLagBase) · 공격 준비 표시 상태 기계(예측 · 서버 확인 · 끝에서 대기 · 거절)
+│  ├─ art/keypad.ts · render/keypad.ts ← 탈출구 자물쇠 판 (순수 그림 판단 · 캔버스 텍스처 굽기 ExitKeypads)
 │  ├─ scenes/                 ← Lobby, Game, Result
 │  ├─ render/                 ← 맵, 캐릭터, 안개, 부채꼴, 효과
 │  ├─ ui/                     ← HUD, 미니맵, 배너, 튜토리얼, 레벨 · 불씨 칩, 결과 화면 · '내 기록' 창 · 옷장 · 설정 화면 · 조작 배치 편집(나눠 받는 조각 `result` · `hub` · `wardrobe` · `settingsPanel` · `layoutEditor` — resultHost · hubHost · hub · settingsHost · layoutEditorLoader가 받는다)
@@ -83,7 +87,10 @@ decoy-web/
 - **내 캐릭터 예측**: 입력을 보내는 동시에 `shared/movement.ts`로 즉시 움직인다. 스냅샷이 오면 서버가 처리한 마지막 `seq` 이후 입력을 다시 적용해 보정한다
 - **내 캐릭터 그리기** (내 움직임 고르기, DECISIONS 10절): 그리는 자리 = 직전 · 지금 입력 틱 상태를 그 틱의 **명목 시각**(1/30초 격자, 타이머가 늦게 깬 시각이 아니다)부터 틱 길이 동안 보간한 자리 + 보정 어긋남. 늦게 깬 입력 틱은 렌더 프레임이 먼저 처리한다. 보정 때 다시 적용할 입력이 없어도 보간 구간을 잇고(직전 상태를 보정량만큼 옮김), 어긋남은 그 순간 그린 자리끼리의 차이로 잡아 `correctionSmoothMs` 동안 줄인다. 내 자리 · 카메라는 그 프레임의 rAF 시각(vsync)으로 재고, 카메라는 같은 프레임의 그 자리를 따라간다
 - **다른 캐릭터 보간**: 100ms 지난 시점의 두 스냅샷 사이를 보간해서 그린다
-- 공격 · 능력은 예측하지 않는다(서버 확정 후 표시). 대신 버튼을 누른 즉시 준비 모션 효과음/작은 이펙트를 로컬로 보여 반응성을 준다
+- 공격 · 능력의 판정은 예측하지 않는다(서버 확정 후 표시). 괴물의 공격 준비(범위 · 소리 · 자세 · 조준 고정)와 돌진은 누른 입력 틱에 내 화면에 먼저 보여 준다 — 서버가 받아들일지는 예측 상태(대기 · 기절 · 돌진)와 마지막 스냅샷의 쿨타임을 **입력 줄**로 센 시간(서버가 아직 처리하지 않은 내 입력 수 × 틱, 올라가는 길이 끊겨 서버가 평소보다 뒤처진 틱 수는 뺀다 — 스냅샷의 '서버 틱 − ack' 최근 최솟값이 기준)으로 어림한다(`client/src/localActions.ts`). 서버가 확인하면 같은 시작 시각으로 이어 그리고, 다 찬 뒤에는 타격 결과가 올 때까지 다 찬 범위를 타격 자리에 둔다. 서버가 거절하거나 기절하면 끈다(`client/src/windupShow.ts`, DECISIONS 16절 a-4). 타격 표시는 서버 이벤트 그대로다
+- **터치 탭 공격 조준 보정**(DECISIONS 16절 a-2): 보정이 걸린 탭 공격은 입력 프레임 두 개다 — 보정한 `aim`만 실은 프레임 → `ATTACK` 프레임(서버는 `ATTACK` 프레임의 `aim`을 공격 방향에 쓰지 않는다). 전송 원문은 PC가 마우스를 그 각도에 두고 한 프레임 뒤 클릭한 것과 같다
+- **판 시작 카운트다운**(`world.countdown > 0`) 동안 서버는 입력을 버리고(ack만 올린다) 화면 · 봇은 입력을 보내지도 예측하지도 않는다(괴물 재접속 대기와 같은 자리 세 곳: `GameScene.stepInput` · `BotDriver.beforeStep` · `server/src/bots.ts`). 그사이 눌린 버튼은 버리고 누르고 있는 이동 키 · 스틱은 남긴다(`InputSampler.dropPressed`). 화면은 서버가 0을 보낸 뒤에만 "시작!"을 띄운다
+- **멈춤 ↔ 걷기가 바뀐 틱 뒤 한 프레임**: 프레임 제한 목표가 화면 주사율의 약수(n ≥ 2)이면 그 틱의 명목 시각을 넘겨 `Pacer.requestFrame(afterMs)`로 그보다 0.5ms(`REQUEST.leadMs`) 넘게 뒤인 첫 rAF를 한 번 그린다(같은 시각 rAF는 한 번만 미룬다, `client/src/gfx/framePacing.ts`, DECISIONS 12 · 16절 a-10)
 - **지연 시뮬레이션**: 서버 실행 옵션 `--lag=100` 또는 `?lag=100`으로 송수신에 인위적 지연과 ±20ms 흔들림을 건다. 100ms, 200ms에서 테스트한다
 
 ### 3.3 관심 영역 (정보 필터링)
@@ -93,13 +100,15 @@ decoy-web/
 |---|---|---|
 | 생존자 | 팀원 전원(항상), 생존자 시야 합집합 안의 괴물과 부채꼴(모드 · 각도), 스카우트 탐지 · 포효 경고 중의 괴물 위치 | 그 밖의 괴물 정보 |
 | 괴물 | 자기 상태, 부채꼴 · 근접 원 안 생존자(역할 정보 없이 흰색, 능력 사용 직후 1초만 역할 포함), 포효 중 반경 안 생존자 | 그 밖의 생존자 위치, 역할 정보 |
-| 공통 | 거점 게이지 · 상태, 탈출구 상태, 감옥 상태(누가 갇혔는지는 생존자만), 알림 이벤트, 남은 시간 | — |
+| 공통 | 거점 게이지 · 상태(`world.points[].progress` · `state` — 괴물 · 생존자가 같은 값, HUD 진행 숫자는 이 값의 내림 %), 탈출구 상태, 감옥 상태(누가 갇혔는지는 생존자만), 알림 이벤트, 남은 시간, 판 시작 카운트다운 남은 초(`world.countdown` — 받는 사람과 무관하게 같은 값, 0이면 판이 흐른다) | 탈출구 개방 진행 · 거점 메모(비밀번호 조각)는 생존자만 |
 | 판 결과 (메타) | 받는 사람 **자기** 판 평가(`result.rating`, 판이 끝날 때 한 번) | 남의 평가 · 레벨(판이 끝난 뒤에도), 판 중의 평가 · 레벨 · 판 기록 |
 | 의상 (메타 c) | 판 시작 명단(`match.info.roster[].costume`, 기본이면 칸 없음): 생존자 명단에 생존자 넷의 그 역할 의상(동료 · 괴물), 괴물 명단은 자기 하나뿐. 빠른 매칭은 자기 의상만 | 괴물에게 생존자 의상(판 시작 명단에 생존자가 없다), 로비 · 결과 · 스냅샷의 의상 칸(누구에게도), 빠른 매칭의 남의 의상(봇 자리는 늘 기본이라 사람 단서) |
 | 계정 (선택형 구글 로그인, 3.6) | 그 자리 **본인** 연결의 `welcome.account`(서버가 이 자리에 받아들인 계정 tag, 게스트 자리면 null — 다음 판용)와 본인 `result.account`(그 판을 서버가 적립한 계정 tag — 판 끝 값 그대로, 화면이 결과 적립 갈래를 정한다). 그 계정의 연결에만 `credit`(적립한 계정 tag · 적립 결과 · 계정 기록 글, 판 결과를 보낸 뒤). 계정 상태 · 기록은 게임 메시지가 아니라 HTTP 계정 API로 자기 세션에만 | 다른 참가자에게 가는 게임 메시지(로비 · 판 시작 명단 · 스냅샷 · 결과 · 남의 welcome)의 계정 ID · 로그인 여부 · 레벨 · 계정 기록 · 남의 tag — 계정 ID(`Seat.account`)는 서버 안에만, 계정 tag는 본인이 보내는 `join` · `quick` · `rematch`의 `account`와 본인 `welcome` · `result`의 `account`에만, 계정 기록 글은 그 계정 연결의 `credit`에만. 같은 방 다른 사람의 `credit`. 로그인한 사람이 있는 판과 없는 판에서 다른 자리가 받는 메시지가 같다(본인 welcome · result의 `account`만 다르다 — 친구 방 · 빠른 매칭 단위 시험) |
 
 - 시야 판정은 `shared/visibility.ts` 하나를 서버(필터링)와 클라이언트(안개 그리기)가 같이 쓴다
 - **테스트로 보장한다**: 괴물 클라이언트가 받은 모든 스냅샷에 시야 밖 생존자의 좌표가 없어야 한다
+- 플레이테스트 반영 a(DECISIONS 16절)에서 늘어난 것은 `world.countdown` 하나다. 거점 게이지가 공통 정보라는 것은 `tests/unit/interest.test.ts` 「거점 게이지는 공통 정보: …」가, 거점 메모(`NOTE_FIRST` · `NOTE_SECOND`)의 비밀번호 숫자와 탈출구 개방 진행이 생존자에게만 간다는 것은 `tests/unit/capture-exit.test.ts`(점령부터 문 열림까지 괴물이 받은 스냅샷 · 이벤트 전체)가 지킨다. 탈출구 자물쇠 판은 이 두 값만 그리고 괴물 화면은 숫자 없는 빈 판이다
+- 화면만 쓰는 값: 터치 탭 공격 조준 보정(`client/src/aimAssist.ts`)은 괴물 스냅샷의 `survivors` 가운데 화면에 그린 생존자의 `x` · `y` · `status` · `protected`만 입력으로 받는다(타입 `AssistTarget`) — 스냅샷에 없는 생존자 · 포효로 드러난 자리 · 역할 · 임시 ID에는 닿지 않는다(`tests/unit/aim-assist.test.ts`, 실제 `buildSnapshot`). 포효 결과 알림 · 핑 소리의 수는 이미 받은 `roarPings`의 핑 수다
 
 ### 3.4 방과 접속
 - 방 코드 4글자, 링크 `/?room=ABCD`
@@ -179,6 +188,7 @@ decoy-web/
 - `?debug=1` 오버레이 (`client/src/ui/debugOverlay.ts`, 배포 빌드에서도 뜬다): FPS · 목표 · 화면 주사율 · 프레임 제한, 프레임 간격(평균 · p95 · 늦은 프레임 % — 간격 ≥ 목표 주기 + 반 vsync · 넘김 % — rAF 시각부터 그리기를 마칠 때까지가 한 vsync보다 긴 프레임) · 작업 시간(평균 · p95 · 안개 주기 프레임 p95), 그리기 호출(WebGL 호출 수 · Canvas는 그린 객체 수, 이 오버레이를 켰을 때만 센다), 핑 · 서버 틱 · 스냅샷, 예측 오차 · 대기 입력, 품질 · 자동 조정, DPR · 백버퍼, 렌더러 · 입력 방식 · 밸런스 해시. 칩을 눌러 접고 펼친다(터치 기기는 접은 채, PC는 펼친 채 시작, 저장하지 않음). 칩만 입력을 받고 판 입력으로 보내지 않는다. 터치 기기의 칩은 맵 왼쪽 위(판 HUD · 터치 대상과 겹치지 않음, `tests/e2e/debug-overlay.spec.ts`)
 - M10 그래픽 검사 훅: `gfx`(렌더 해상도 · 품질 · 안개 방식 · 프레임 제한 · 화면 주사율 · 목표 FPS · 내림 · 올림 횟수), `freezeClock`(장식 애니메이션 시계 고정), `injectFps`(품질 자동 하향 시험), `probeText`(선명도 탐침).
 - 렌더링 최적화 훅: `getFrameStats()`(최근 1초 FPS · 프레임 간격 · 작업 시간 평균 · p95 · 그리기 호출 · 건너뛴 rAF, `gfx/frameStats.ts`), `getAnimState()`(보간 · 연출 · 걷기 상태, 60 · 120Hz 프레임 독립성 E2E가 같은 시각끼리 견준다), `setFrameLimit(limit)`(프레임 제한 'auto' · '60' · '120' · 'half' 바꾸기, 저장은 로비 설정만), `setFogFollowDisabled(off)`(내 빛 따라가기 끄기 — 같은 빌드에서 예전 그림과 화소 비교). 진단 주소 `?camSnap=0`은 따라가는 카메라 창을 기기 픽셀 격자에 맞추지 않는다(저장하지 않음). 캐릭터 리디자인: `setCharStyle(style)`(캐릭터 스타일 'classic' · 'new' 바꾸기, 저장하지 않음 — 판 중이면 다음 프레임에 그림을 다시 굽는다), `gfx.charStyle`. 주소 `?chars=new|classic`은 이번 접속만. 타입은 `shared/src/debugTypes.ts`. 리마스터 전후 비교 촬영은 `npm run shots:remaster`(`scripts/remaster-shots.mjs`)
+- 플레이테스트 반영 a(DECISIONS 16절): 진단 주소 `?zoomguard=0`(`app.ts` `readParams` → `AppParams.zoomGuard`)은 화면 확대 막기(뿌리 `touch-action` · 문서 리스너)만 끄고 감지 · 확대 안내는 둔다(실기기에서 안내 · 복구를 일부러 보기, 저장하지 않음, `?camSnap=0`과 같이 배포 주소에서도 받는다). **판 시작 카운트다운**: 시험 훅이 켜진 방(`--test-hooks` 서버, `?debug` 연습)은 카운트다운이 0이다(기존 시험은 판 시작 직후를 가정한다) — 서버 방은 로비에서 시험 명령 `{ kind: 'startCountdown', seconds }`(다음 판 하나), 연습은 주소 `?countdown=1`(수치 `match.startCountdown`), 단위 시험은 `RoomConfig.startCountdown`으로 켠다. 디버그 훅에 더한 값: `getHud()`의 `countdown`('3' · '2' · '1' · '시작!', 없으면 '') · `point{A,B}Pct` · `point{A,B}PctFrame`(거점 진행 숫자 · 그 아틀라스 프레임), `getSounds()`의 `count` · `go` · `roarFound`(드러난 자리마다) · `roarEmpty`, `getCamera().markers[]`의 `scale`(배지 배율) · `halo`(포효 핑 고리 배율 · 알파) · `chev`(셰브론 기준점)와 `pingRings`(미니맵 고리 small · big), `getControlLayout().hud.minimapInset`(맵 창 안 미니맵의 **지금** 자리 — 조작 배치에서 옮겼으면 옮긴 자리), 정보 레이어 종류 `keypad`(값 '모드:네 칸', 예 'typing:07__'), `gfx.features.keypadBakes`(자물쇠 판 굽기 누계)
 - 서버 `--seed` 옵션으로 무작위 요소 고정
 - 봇: `server/bots.ts`가 실제 WebSocket 클라이언트로 접속해 정해진 행동(순찰, 따라가기, 거점 머물기, 구조)을 한다
 
@@ -199,6 +209,14 @@ decoy-web/
 | 의상 (메타 c) | 정보 숨김 · 굽기 · 유불리 없음 · 해금 | 판 시작 명단(생존자끼리 · 괴물은 자기만 · 빠른 매칭은 자기만) · 로비 · 결과 · 스냅샷에 의상 칸 없음 · 받은 의상 거르기 · 판 중 받은 의상은 판 뒤에(`tests/unit/costume-room.test.ts`), 값 · 해금 · 입기 · 기록 칸 · 다음 빌드 의상 보존(`meta-costume` · `meta-client`), 같은 칸 · 같은 상자 · 공통 생존자 칸은 의상과 무관 · 크기 기준 · 청록 없음(`char-frames-costume`), 괴물 의상 보이는 정도 = 기본 · 몸 가운데 원판 — Canvas처럼 칠하는 Node 래스터 · 게임 크기 10가지 × 21프레임 × 회전 · 위상 · Chromium 기준 값(`costume-parity*.test.ts`), 괴물이 받은 원문 프레임 · 의상이 다른 생존자 셋의 괴물 화면 조각이 같다 · 옷장 해금 · 두 번 누름 · 조각 막힘(`tests/e2e/costume.spec.ts`) |
 | 계정 (선택형 구글 로그인, 3.6 · ACCOUNT_PLAN 9절) | 토큰 검증 · 세션 · 설정 · 적립 · 계정 API · 정보 숨김 · 화면 · 실기기 없는 E2E | 단위: 토큰 검증(정상 · 가짜 서명 · 다른 키 · alg none/HS256 · 만료 · 미래 iat · aud · iss · nonce · 모양 깨짐 · 모르는 kid 다시 받기), 세션(위조 · 만료 · 다른 비밀), 쿠키 읽기, 설정(기본 꺼짐 · 빠진 값 · 배포에서 메모리 저장소 · 가짜 구글 거절), 서비스(첫 로그인 · 서버 적립 = 공용 함수 결과 · 같은 판 한 번 · 지운 계정 다시 안 만듦 · 동시 적립 순서 · DB 실패 다시 시도 · 계정 날짜), PostgreSQL 저장소(가짜 연결 · 닫힌 포트 · 가짜 DB 서버 — `DATABASE_URL` 해석 · 연결 오류 한 번 더(예산 안) · 오류 분류 · 시간 제한 사슬 · DB 쉬기 · 조건부 쓰기 · 멈춘 연결 묶음 버리기 · TLS 경고, `DECOY_TEST_DATABASE_URL`이 이 컴퓨터 DB면 실제 PostgreSQL), 라우트(꺼짐 · CSRF · 크기 · 401 · 503 · 삭제 즉시 · 삭제 페이지 · 기기 기록 올리기 두 갈래), 방(계정 ID가 메시지에 없음 · rated 훅 · 빠른 매칭 메시지 같음), 클라이언트(계정 모드 MetaState · 연습 판 적립 안 함 · credit · 실패 시 게스트), 서비스 워커 PASS, 계약(`account-contract`), 처리방침 · 스토어 문서 대조(`privacy` — `ACCOUNT_DATA` · 쿠키 표 · 계정 API 요청 필드). E2E(가짜 구글 · 메모리 저장소): 로그인 → 기기 기록 올리기 · 고르기 → 서버 판 적립 → 새 브라우저 컨텍스트에서 같은 기록 → 로그아웃 → 계정 삭제(설정 · 웹 페이지), 로그인 꺼짐(계정 요청 없음 · 칸 없음), DB 장애에서 게스트로 판 끝까지, 괴물이 받은 원문에 계정 단서 없음, 번들 두 줄 · 조각 따로, 오프라인 시작 |
 | 번들 · 나눠 받기 · 압축 (번들 줄이기) | 첫 로딩이 늘지 않는지 · 조각이 제때 오는지 · 오프라인 · 새 배포 직후 | 첫 로딩 JS(첫 묶음) · 전체 JS(모든 조각) gzip이 상한 · 마일스톤 예산 아래, 나눠 받는 조각 여덟이 따로 있다(`tests/e2e/bundle-size.spec.ts` @core), 첫 화면 HTML은 첫 묶음 하나 · 쉬는 시간에 결과 · 내 기록 · 설정(화면까지) · 연습 · 의상 그림을 받고 ?debug가 없으면 디버그 조각을 받지 않는다 · 연습 시작 · 판 중 설정 처음 열기에 JS를 더 받지 않고 긴 작업 없음 · 조각을 못 받으면 "새 버전이 있어요"(`lazy-chunks.spec.ts`), 셸에 모든 조각 · 오프라인으로 다시 열어 설정 · 배치 편집 · 연습 · 새 배포 뒤 옛 화면이 앞 빌드 셸에서 옛 조각을 연다(`m13-offline.spec.ts`), 서비스 워커 결정표 · 미리 압축(`sw-shell.test.ts`), brotli · gzip 사본 전송 · 옛 사본 안 씀(`static-gzip.test.ts`), Phaser 사용자 빌드에 없는 기능을 쓰지 않음(`phaser-core.test.ts`). 배포판은 `verify:deploy --url`(GitHub Actions '배포판 검증') |
+| 화면 확대 막기 (플레이테스트 a-1) | 아이폰이 무시하는 viewport 잠금 대신 CSS · 리스너가 막는지, 뚫리면 갇히지 않는지 | 단위: 판단 함수(배율 판정 · 멀티터치 · 두 번 탭 창 · 버튼 예외 · 안내 자리) · 리스너 배선 · CSS 원문(`zoom-guard.test.ts`). E2E `zoom-guard.spec.ts`: Chromium으로 아이폰 흉내(파싱 때 viewport meta를 열고 전체 화면 API를 없앤다) — 안전 영역 띠 핀치 배율 1(첫 화면 · 내 기록 · 방 · 판 중 · 결과), 화면 격자 8,037점의 실효 `touch-action`에 확대 허용 0, `?zoomguard=0` 대조, 배율 2 → 안내 · 조작 멈춤 → 오므리면 닫힘. 낮은 화면 설정 창은 `settings-low.spec.ts`. 두 번 탭 · `gesture*` · 실제 아이폰은 HUMAN_CHECKS |
+| 터치 공격 조준 · 보정 (a-2) | 탭 판정, "PC보다 유리하지 않게", 안 보이는 생존자에게 반응 없음 | 단위: `touch-input` · `aim-assist`(보정 폭 12° < 한 틱 회전 18° < 호 반 45° · 절반 남김 · 공격을 앞당기지 않음 · 전송 원문 = PC 프레임 열 · 부채꼴 밖 · 벽 뒤 · 포효 핑 · 철창 너머 0 — 실제 `buildSnapshot`) · `attack-button`. E2E `attack-button.spec.ts`: 비켜 누른 탭 · 끌어 놓기 · 보정 12° / 시야 밖 0 · 설정 저장 · 누르면 바로 · PC 무보정 · 작은 휴대폰 + UI 크기 큼 점수판 폭 |
+| 포효 표시 (a-3) | 화살표 + 창 안 핑 = 미니맵 = 소리 = 알림 = 서버가 보낸 수, 같은 위상의 펄스 고리, 0명, 번쩍임 줄이기, 밀린 알림, 생존자 화면 불변 | `tests/unit/roar-feedback.test.ts` · `tests/e2e/roar-feedback.spec.ts` |
+| 공격 준비 표시 · 첫 움직임 (a-4 · a-10) | 지연 때도 누른 입력 틱에 준비가 보이고 타격 결과까지 잇는지, 약수 목표의 첫 움직임 | 단위: `windup-show`(상태 전이) · `windup-lag`(실제 `Game` · `LagQueue` 위 가상 시계 지연 · 올라가는 길 끊김, `tests/helpers/lagSim.ts`) · `sync` · `frame-pacing`. E2E `m8-effects`(왕복 200ms 쿨타임 끝 무렵 · 대기 · 거절) · `smooth-motion`(144Hz · 제한 60 최악 위상, 120Hz · 제한 60 작업 모형) |
+| 괴물 미니맵 자리 (a-5) | 맵 안 미니맵이 위 가운데를 가리지 않는지, 생존자 · 태블릿 · PC 자리 불변 | 단위 `minimap-place.test.ts`(격자 3,472가지 불변식 · 상한 · 축소 하한 · 이동 영역 · 옮길 자리 · 지도 칸 · 저장 호환). E2E `minimap-place.spec.ts` · `layout-editor`(지도 옮기기) · `m12-screen` |
+| 거점 진행 숫자 (a-7) | 숫자 = 자기 스냅샷 진행의 내림 %, 괴물 · 생존자 같은 값, 판 중 글자 그리기 0 | 단위 `hud.test.ts` · `interest.test.ts`. E2E `m10-hud`(두 화면 같은 값 · 정지 · 완료 100 · 다시 굽지 않음) · `m12-hud`(터치 줄 게이지) · `m7-hud` · `hud-fit` |
+| 판 시작 카운트다운 (a-8) | 모두 정지 · 끝난 뒤의 판이 카운트다운 없는 판과 같음 · 화면 차례 | 단위 `countdown.test.ts`(`Game` 90틱 불변 + 3000틱 동일성, 방이 넘기는 값, 스냅샷 값이 받는 사람과 무관, 괴물 끊김, 재접속, 봇 입력 0, 예측 보정 0) · `countdown-view.test.ts`(숫자 · 소리 차례, 지연 지터에서 되올라가지 않음, `dropPressed`). E2E `countdown.spec.ts`: 서버 방 4명 · 휴대폰 스틱 이어받기 · 낮은 화면 겹침 · 연습 `?countdown=1` · 새로고침 · 괴물 끊김 |
+| 탈출구 자물쇠 판 (a-9) | 판이 한 자리씩 → 열림 · 지워짐, 괴물 화면은 빈 판, 바뀔 때만 굽기 | 단위 `keypad.test.ts` · `capture-exit.test.ts`(정보 범위 잠금). E2E `keypad.spec.ts`(정보 레이어 `keypad` · 픽셀, 844×300 겹침 0) · `m10-map` · `m10-map.webgl`(멈춘 시계 탈출구 열림 장면에서 판 숫자 칸 · `keypadBakes`) |
 | 판정 불변 골든 (Vitest) | 그래픽 · 모바일 작업(M10~) 중 규칙 · 판정 · 정보 차단이 그대로인지 | 고정 시드 + 스크립트 입력(이동 · 조준 · 공격 · 돌진 · 포효 · 능력 · 구조 · 시야 전환) 960틱 → 60틱마다 게임 상태 해시 (`tests/unit/rules-golden.test.ts`). 바뀌면 GAME_DESIGN 변경 이력과 함께 갱신 |
 
 E2E 스크린샷은 `artifacts/`에 저장하고, 사람이 볼 수 있게 마지막 보고에 경로를 적는다.

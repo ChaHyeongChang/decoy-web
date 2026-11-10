@@ -56,6 +56,10 @@ const CAP = BEFORE_M10 + 88 * 1024;
 // 조각 'account'(로그인한 기기의 부팅 · 설정을 열 때만 받는다). 구글 스크립트는 없다(페이지째 이동 로그인).
 // 계정 적립 재설계(화면이 밝힌 계정 + 쿠키가 같을 때만, DECISIONS 15절)에서 첫 묶음 여유가 모자라 계정 문구(ACCOUNT_TEXT)를 첫 묶음에서
 // 빼 나눠 받는 조각들(설정 · 결과 · '내 기록' · 옷장 · 계정)이 함께 쓰는 조각 'accountText'로 옮겼다
+// 플레이테스트 반영(docs/PLAYTEST_PLAN.md 0절, DECISIONS 16절 '번들 예산'): 기준을 PR #32 병합(첫 로딩 320,524B · 전체 388,149B)으로
+// 옮기고 a · b · c를 상한 안에서 나눈다 — 첫 로딩 +10 · +4 · +6KiB(합 20KiB, 상한까지 약 5.5KiB 남김), 전체 +14 · +6 · +14KiB
+// (합 34KiB, 약 13.5KiB 남김). 나눠 받는 조각이 느는 몫도 전체 줄에 든다
+// a(버그 · 조작 · 화면): 확대 막기 · 조준 보정 · 포효 표시 · 준비 동작 표시 · 미니맵 자리 · 게이지 숫자 · 카운트다운 · 자물쇠 판
 /** 첫 로딩 JS 상한: M10 전 전체 번들 크기 (첫 화면에 받는 JS가 비주얼 리마스터 전 전체보다 크지 않게) */
 const INITIAL_CAP = BEFORE_M10;
 /** 첫 묶음(첫 화면) 조각 파일 이름 앞부분 */
@@ -74,10 +78,10 @@ const LAZY_CHUNKS = [
   'accountText',
 ];
 const MILESTONE = {
-  name: '선택형 구글 로그인',
-  baseName: 'PR #31 병합',
-  base: { total: 379_219, initial: 317_761 },
-  budget: { total: 12 * 1024, initial: 3 * 1024 },
+  name: '플레이테스트 반영 a',
+  baseName: 'PR #32 병합',
+  base: { total: 388_149, initial: 320_524 },
+  budget: { total: 14 * 1024, initial: 10 * 1024 },
 };
 
 test(

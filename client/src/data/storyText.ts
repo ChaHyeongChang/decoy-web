@@ -1,6 +1,7 @@
 // 게임 내 문구는 이 파일 한 곳에 모은다 (docs/STORY_TEXT.md). 계정 문구(ACCOUNT_TEXT)만 나눠 받는 조각에서 쓰므로 accountText.ts에 따로
 // 둔다(첫 묶음을 작게 — DECISIONS 15절).
 import type { Role, TextId } from '@decoy/shared';
+import type { AttackButton } from '../prefs';
 
 export interface TextEntry {
   text: string;
@@ -12,16 +13,16 @@ export const STORY_TEXT: Record<TextId, TextEntry> = {
   INTRO_WALL: { text: '탈출구의 비밀번호는 두 장소에 나뉘어 있다. 문은 혼자서는 열리지 않는다.', seconds: 4 },
   INTRO_MONSTER: { text: '감옥을 빠져나간 자들을 다시 가둬라.', seconds: 3 },
   NOTE_FIRST: {
-    text: '숫자를 새겼다. 저것은 앞만 본다. 등 뒤로 돌아라. — 비밀번호 앞자리 {code}',
+    text: '숫자를 새겼다. 저것은 앞만 본다. 등 뒤로 돌아라. — 비밀번호 앞자리 {code} · 문에 입력된다',
     seconds: 4,
   },
   NOTE_SECOND: {
-    text: '혼자서는 안 된다. 누군가는 저것의 눈을 끌어야 한다. — 비밀번호 뒷자리 {code}',
+    text: '혼자서는 안 된다. 누군가는 저것의 눈을 끌어야 한다. — 비밀번호 뒷자리 {code} · 문에 입력된다',
     seconds: 5,
   },
   ALERT_CAPTURE_START: { text: '거점 {point}에서 무언가 움직인다.', seconds: 2 },
   ALERT_CAPTURE_DONE: { text: '거점 {point} 해독 완료', seconds: 1.5 },
-  ALERT_EXITS_ON: { text: '탈출구가 깨어났다. 두 사람이 함께 열어야 한다.', seconds: 2 },
+  ALERT_EXITS_ON: { text: '탈출구가 깨어났다. 둘이 함께 서면 비밀번호가 입력된다.', seconds: 2 },
   ALERT_EXIT_OPEN: { text: '{exit}쪽 문이 열렸다.', seconds: 1.5 },
   ALERT_RESCUED: { text: '감옥 문이 열렸다.', seconds: 1.5 },
   ALERT_ROAR: { text: '괴물이 포효했다.', seconds: 1 },
@@ -139,7 +140,12 @@ export const UI_TEXT = {
   rematch: '다시 하기',
   spotted: '발각',
   outOfRange: '범위 밖',
+  /** 괴물 화면 포효 결과 알림 (포효 핑이 보이는 동안): 드러난 수 = 그린 핑 수 ({n}), 0명이면 roarNone */
+  roarFound: '{n}명을 포착했다.',
+  roarNone: '근처에 아무도 없다.',
   monsterWait: '괴물이 깨어나기까지',
+  /** 판 시작 카운트다운 3 · 2 · 1 뒤 (플레이테스트 a-8): 큰 글자로 잠깐 */
+  countdownGo: '시작!',
   monsterReconnect: '괴물 재접속 대기',
   disconnected: '연결이 끊겼습니다. 다시 연결하는 중…',
   wakingTitle: '서버를 깨우는 중…',
@@ -223,21 +229,38 @@ export const CONTROLS_TOUCH: Record<'monster' | 'survivor', string[]> = {
   ],
   monster: [
     '왼쪽 스틱  이동 · 오른쪽 스틱  조준',
-    '오른쪽 스틱을 놓으면  공격 (가운데로 되돌리면 취소)',
+    // 짧은 탭은 둘째 칸으로 둔다: ControlsBlock은 열 단위로 폭을 재서 첫 칸이 길어지면 패널 전체가 넓어진다(TOUCH_BOARD_W)
+    '오른쪽 스틱을 놓으면  공격 (되돌리면 취소) · 짧게 탭  보는 방향',
     '돌진 버튼 (끌어서 방향)  돌진 · 포효 · 시야 버튼',
     '점수판 버튼  점수판 · 상태',
     '생존자를 두 번 때리면 감옥으로. 두 명을 죽이거나 셋 모두 가두면 승리',
   ],
 };
 
+/**
+ * 공격 버튼(터치 괴물, 설정 조작 탭 prefs.AttackButton)이 '누르면 바로'일 때 조작 안내의 첫 두 줄 — CONTROLS_TOUCH.monster의
+ * 조준 · 공격 줄 대신. 조준 스틱이 없다(닿는 순간 보는 방향으로 공격)
+ */
+export const CONTROLS_TOUCH_INSTANT: readonly string[] = [
+  '왼쪽 스틱  이동 (바라보는 방향 = 이동 방향)',
+  '공격 버튼  누르면 바로 보는 방향으로 공격',
+];
+
 /** 입력 방식에 맞는 역할 능력 줄 (로비 역할 카드) */
 export function roleAbility(role: Role, mode: InputMode): string {
   return mode === 'touch' ? ROLE_CARDS[role].abilityTouch : ROLE_CARDS[role].ability;
 }
 
-/** 입력 방식에 맞는 조작 안내 */
-export function controlsText(team: 'monster' | 'survivor', mode: InputMode): string[] {
-  return mode === 'touch' ? CONTROLS_TOUCH[team] : CONTROLS[team];
+/** 입력 방식(과 터치 괴물의 공격 버튼 방식)에 맞는 조작 안내 */
+export function controlsText(
+  team: 'monster' | 'survivor',
+  mode: InputMode,
+  attack: AttackButton = 'drag',
+): string[] {
+  if (mode !== 'touch') return CONTROLS[team];
+  const lines = CONTROLS_TOUCH[team];
+  if (team !== 'monster' || attack !== 'instant') return lines;
+  return [...CONTROLS_TOUCH_INSTANT, ...lines.slice(CONTROLS_TOUCH_INSTANT.length)];
 }
 
 export const HUD_TEXT = {
@@ -288,6 +311,8 @@ export const TOUCH_TEXT = {
   menu: '설정',
   rotateTitle: '가로로 돌려 주세요',
   rotateBody: 'DECOY는 가로 화면에서 합니다. 세로로 두는 동안에는 조작할 수 없고, 판은 계속 흘러가요.',
+  /** 확대 안내 (플레이테스트 a-1, ui/zoomNotice.ts): 화면이 확대된 동안. 버튼은 UI_TEXT.updateReload */
+  zoomNotice: '화면이 확대됐어요 — 두 손가락으로 오므려 주세요',
   // ── 첫 실행 터치 안내 (M12): 판 직전 본문 · 판 중 처음 10초 위치 표시 ──
   tutorialTitle: '터치 조작',
   tutorialSurvivor: [
@@ -297,7 +322,7 @@ export const TOUCH_TEXT = {
   ],
   tutorialMonster: [
     '왼쪽 아래를 누르고 끌면 이동 — 누른 자리가 스틱 가운데',
-    '오른쪽 조준 스틱을 끌어 조준하고, 놓으면 공격 · 가운데로 되돌리면 취소',
+    '오른쪽 조준 스틱은 짧게 누르면 보는 방향으로 공격, 끌어 놓으면 그쪽으로 · 되돌리면 취소',
     '돌진 버튼은 끌어서 방향을 정하고, 짧게 탭하면 지금 방향으로',
     '포효 · 시야 버튼은 탭 · 오른쪽 위 점수판 버튼',
   ],
@@ -309,16 +334,36 @@ export const TOUCH_TEXT = {
   ],
   tutorialMonsterCustom: [
     '이동 영역을 누르고 끌면 이동 — 누른 자리가 스틱 가운데',
-    '조준 스틱을 끌어 조준하고, 놓으면 공격 · 가운데로 되돌리면 취소',
+    '조준 스틱은 짧게 누르면 보는 방향으로 공격, 끌어 놓으면 그쪽으로 · 되돌리면 취소',
     '돌진 버튼은 끌어서 방향을 정하고, 짧게 탭하면 지금 방향으로',
     '포효 · 시야 버튼은 탭 · 점수판 버튼',
   ],
+  /** 공격 버튼이 '누르면 바로'일 때 괴물 본문의 둘째 줄 (조준 스틱 줄 대신 — 기본 배치 / 조작 배치를 바꿨을 때) */
+  tutorialAttackInstant: '오른쪽 공격 버튼을 누르면 바로 보는 방향으로 공격',
+  tutorialAttackInstantCustom: '공격 버튼을 누르면 바로 보는 방향으로 공격',
   /** 조작 배치를 바꿨을 때 그림 밑 한 줄 */
   tutorialCustomNote: '그림은 내가 바꾼 조작 배치예요',
   tutorialOk: '알겠어요',
   /** 판 중 위치 표시의 이동 영역 이름 */
   hintMove: '여기를 누르고 끌어 이동',
 } as const;
+
+/**
+ * 판 직전 터치 안내 본문 (번호 = 그림의 번호). custom = 조작 배치를 바꿨다(자리 말이 없는 쪽), attack = 괴물 공격 버튼 방식
+ * ('누르면 바로'면 둘째 줄이 조준 스틱 대신 공격 버튼 줄)
+ */
+export function tutorialLines(
+  team: 'monster' | 'survivor',
+  custom: boolean,
+  attack: AttackButton = 'drag',
+): readonly string[] {
+  if (team === 'survivor') return custom ? TOUCH_TEXT.tutorialSurvivorCustom : TOUCH_TEXT.tutorialSurvivor;
+  const lines = custom ? TOUCH_TEXT.tutorialMonsterCustom : TOUCH_TEXT.tutorialMonster;
+  if (attack !== 'instant') return lines;
+  const out: string[] = [...lines];
+  out[1] = custom ? TOUCH_TEXT.tutorialAttackInstantCustom : TOUCH_TEXT.tutorialAttackInstant;
+  return out;
+}
 
 /** 앱 생명주기 · 설정 문구 (M12): 로비 설정 · 다른 탭 안내 · 뒤로 가기 확인 */
 export const APP_TEXT = {
@@ -393,6 +438,12 @@ export const SETTINGS_TEXT = {
   stickSize: '조이스틱 크기',
   stickClear: '조이스틱 투명도',
   stickHint: '다음 판부터 적용돼요',
+  /** 괴물 공격 버튼 방식 (플레이테스트 반영 a-2) */
+  attackButton: '공격 버튼',
+  attackButtonDrag: '끌어서 조준',
+  attackButtonInstant: '누르면 바로',
+  attackButtonHint:
+    '괴물 공격 버튼 — 끌어서 조준은 짧게 누르면 보는 방향, 끌면 그쪽으로 공격해요. 누르면 바로는 닿자마자 공격해요. 다음 판부터 적용돼요',
   layoutEdit: '조작 배치 편집',
   layoutEditHint: '버튼 자리와 크기를 바꿔요 (생존자 · 괴물 따로, 로비에서만)',
   controlsPc: '키보드 · 마우스 조작',
@@ -435,6 +486,8 @@ export const EDITOR_TEXT = {
   cancel: '취소',
   saved: '저장했어요',
   blocked: '다른 버튼 · HUD와 겹치거나 화면 가장자리 밖이라 놓을 수 없어요',
+  /** 지도(맵 창 안 미니맵)를 놓을 수 없는 자리 */
+  blockedMap: '지도는 맵 안에서 버튼 · 이동 영역과 겹치지 않는 곳에만 놓을 수 있어요',
   hudPreview: '판 HUD 미리보기 (겹치지 않게 피해요)',
   timer: '남은 시간',
   gaugeA: '거점 A',

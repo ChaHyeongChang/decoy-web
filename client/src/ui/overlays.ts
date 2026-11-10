@@ -13,6 +13,7 @@ import { clearPathCache, drawToCanvas, type Drawing } from '../art/chars/kit';
 import { FRONT_REST } from '../art/chars/types';
 import { NEON, ROLE, UI } from '../art/palette';
 import { currentCharStyle } from '../gfx/charStyle';
+import { attackButtonOf } from '../prefs';
 import { createCanvasTexture, makeCanvas, nextFogKey, removeCanvasTexture, rgba } from '../render/fogPaint';
 import { ABILITY_ICON, ACCENT, FR, HC, STATUS_LOOK, parseControl, teamCards } from './hudArt';
 import { fontGeneration } from './fonts';
@@ -386,6 +387,11 @@ export class TutorialOverlay {
   private gen = -1;
   private until = 0;
   private on = false;
+  /**
+   * 닫기 안내 줄('아무 키나 누르면 닫힘')을 보이는가: 판 시작 카운트다운 동안에는 키로 닫히지 않으므로 숨기고 "시작!"부터 보인다
+   * (플레이테스트 a-8 — 화면 문구와 동작이 어긋나지 않게)
+   */
+  private closeOn = false;
 
   constructor(
     kit: HudKit,
@@ -449,6 +455,7 @@ export class TutorialOverlay {
 
   private apply(on: boolean): void {
     this.on = on;
+    this.closeOn = on;
     this.panel.show(on);
     this.controls.show(on);
     for (const p of this.parts) showPart(p, on);
@@ -461,12 +468,25 @@ export class TutorialOverlay {
     this.apply(true);
   }
 
-  /** close = 아무 키나 눌림 또는 Tab 점수판이 열림 */
-  update(nowMs: number, close: boolean): void {
+  /** close = 아무 키나 눌림 또는 Tab 점수판이 열림. counting = 판 시작 카운트다운 중(닫기 안내 줄을 숨긴다) */
+  update(nowMs: number, close: boolean, counting = false): void {
     if (!this.on) return;
-    if (close || nowMs >= this.until) this.apply(false);
-    else if (this.gen !== fontGeneration()) this.layout();
+    if (close || nowMs >= this.until) {
+      this.apply(false);
+      return;
+    }
+    // 바뀔 때만 (프레임마다 보이기를 다시 걸지 않는다)
+    if (this.closeOn === counting) {
+      this.closeOn = !counting;
+      showPart(this.close, this.closeOn);
+    }
+    if (this.gen !== fontGeneration()) this.layout();
     else if (this.figure?.stale) this.figure.show(true);
+  }
+
+  /** 닫기 안내 줄이 보이는가 (디버그 훅 · 시험) */
+  get closeHintShown(): boolean {
+    return this.on && this.closeOn;
   }
 
   get visible(): boolean {
@@ -528,7 +548,8 @@ export class Scoreboard {
     const team = info.role === 'monster' ? 'monster' : 'survivor';
     this.controls = new ControlsBlock(
       kit,
-      controlsText(team, touchMode ? 'touch' : 'keyboard'),
+      // 터치 괴물의 조준 · 공격 줄은 공격 버튼 방식을 따른다 (터치 화면과 같이 판 시작 때 읽는다)
+      controlsText(team, touchMode ? 'touch' : 'keyboard', attackButtonOf()),
       team === 'monster' ? FR.icon('attack', HC.red, 18) : FR.icon('point', 0x22d3ee, 18),
     );
     this.closeHint = touchMode

@@ -54,6 +54,7 @@ import { drawProbeText, relayoutAll, retextAll } from './ui/text';
 import { matchMenu } from './matchMenu';
 import { audioLevelsOf, onPrefsChange, uiScaleOf } from './prefs';
 import { initSettingsUrl } from './settingsModel';
+import { startZoomGuard } from './ui/zoomNotice';
 
 /** 창 크기 · DPR이 바뀐 뒤 백버퍼를 다시 만들 때까지 기다리는 시간 (끌어서 바꾸는 동안 매번 만들지 않게) */
 const RESIZE_DEBOUNCE_MS = 150;
@@ -68,6 +69,8 @@ setCamZoom(
 gfxState.camZoom = CAM_ZOOM;
 // 터치 모드 · 세로 · 브라우저 안 (M11). 로비가 전체 화면 버튼을 그리기 전에 정한다
 initDevice(params.touch);
+// 화면 확대 막기 · 감지 (플레이테스트 a-1): 터치 모드에서만. PC는 브라우저 확대를 그대로 둔다
+if (device.touch) startZoomGuard(params.zoomGuard);
 const uiRoot = document.getElementById('ui-root') ?? document.body;
 const gameRoot = document.getElementById('game-root') ?? document.body;
 const app = new App(params, uiRoot);
@@ -244,8 +247,8 @@ timeStep.step = function measuredStep(this: Phaser.Core.TimeStep, time: number):
 };
 patchTimeStep(timeStep, pacer);
 pacer.onSkip = () => sessionFrameStats.noteSkipped();
-// 입력 반응 (잔렉 고치기): 판 장면이 멈춤 ↔ 걷기가 바뀐 입력 틱에 다음 rAF를 한 번 바로 그리게 한다
-pacingHooks.requestFrame = () => pacer.requestFrame();
+// 입력 반응 (잔렉 고치기): 판 장면이 멈춤 ↔ 걷기가 바뀐 입력 틱에 그 틱의 명목 시각(afterMs)보다 뒤인 첫 rAF를 한 번 바로 그리게 한다
+pacingHooks.requestFrame = (afterMs) => pacer.requestFrame(afterMs);
 
 /** 디버그 훅 · 오버레이 · 적응형 품질이 읽는 페이싱 상태 */
 function syncPacing(): void {
@@ -617,7 +620,7 @@ function schedulePrebake(): void {
     // 로비 대기가 없다. 온라인 서버 수치가 다르면 로비에서 다시 굽는다
     const b = app.balance ?? PRACTICE_BALANCE;
     prebakeAtlas(game.scene.getScene('idle'), b.survivor.radius, b.monster.radius);
-    // HUD 아틀라스도 (배율 2 Canvas에서 약 28ms, 같은 배율이면 아무것도 하지 않는다)
+    // HUD 아틀라스도 (배율 2 Canvas에서 약 28ms, 같은 배율이면 아무것도 하지 않는다). 글꼴이 정해진 뒤에만 굽는다 — 아래에서 다시 부른다
     prebakeHud(game.textures);
     // 의상 그림 조각도 (판이 시작될 때 동료 · 괴물 의상을 바로 굽게 — 판 시작 명단은 판이 시작돼야 온다)
     void loadCostumeArt();
@@ -654,9 +657,12 @@ const relayoutScenes = (): void => {
 };
 void loadUiFonts().then((ok) => {
   if (ok) relayoutScenes();
+  // HUD 아틀라스에 글꼴로 그린 그림(거점 진행 숫자)이 있어 글꼴이 정해진 지금 미리 굽는다 (그 전의 미리 굽기는 HUD를 건너뛴다)
+  schedulePrebake();
 });
 // 시간 제한(3초)을 넘겨 늦게 받았으면 그때 다시 그린다 (그 사이 판이 대체 글꼴로 시작했을 수 있다)
 onUiFontsLate(relayoutScenes);
+onUiFontsLate(schedulePrebake);
 
 /** 판 시작 전 크기 대기를 멈춘다 (로비 복귀 · 결과 · 새 판: 그 판 장면은 시작하지 않는다) */
 let stopSettle = (): void => undefined;

@@ -2,9 +2,12 @@
 // ⑧ 판 직전 터치 안내 카드(그림 번호 · 목록 번호)와 판 중 터치 레이어의 보이는 글자가 모두 CSS 12px 이상,
 // ⑨ 낮은 화면에서 배너를 쌓아도 메모 상자가 감옥(맵 14~18타일)을 덮지 않고, 알림이 빠지면 메모가 뜬다,
 // ⑩ 가로 180° 뒤집기(창 크기는 그대로, 안전 영역 좌우만 바뀜)에서 터치 화면을 새 안전 영역에 맞춰 다시 배치한다.
+// 거점 줄 게이지(플레이테스트 a-7): 생존자 · 괴물 화면마다 진행 숫자가 자기 스냅샷 진행의 내림 %, 두 줄이 위아래로 맞닿는다.
+// (같은 판 두 화면이 같은 값인지는 사람 넷이 든 PC 판에서 m10-hud가 본다)
 // 혼자 봇 방(?bots=1)에서 판을 시작한다. 기기 배율 1. 느린 CI 대비: 간격 폴링(100~200ms) · 서버 정답으로 상태 확인
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import type { HudLayout, HudLayoutItem, Role, TestCommand, TouchTarget } from '@decoy/shared';
+import { GAUGE_IDS, TOUCH_PART, TOUCH_UI } from '../../client/src/ui/layout';
 import {
   PHONE_BROWSER,
   PHONE_LANDSCAPE,
@@ -12,6 +15,7 @@ import {
   PHONE_SMALL,
   createRoom,
   dpr1,
+  hudPctTexts,
   myId,
   newPlayerPage,
   pickRoleAndReady,
@@ -19,6 +23,7 @@ import {
   sendTest,
   truth,
   waitForSnapshots,
+  waitPointPct,
   type DeviceOptions,
 } from './helpers';
 import {
@@ -447,4 +452,79 @@ test('가로 180° 뒤집기: 창 크기는 그대로 안전 영역 좌우만 �
     expect(s.problems, role).toEqual([]);
     await s.context.close();
   }
+});
+
+// ───────────── 거점 줄 게이지 · 진행 숫자 (플레이테스트 a-7) ─────────────
+
+/** HUD 배치에서 한 부품이 그린 것을 모두 감싼 사각형 (CSS px) */
+function partBox(l: HudLayout, id: string): { x: number; y: number; w: number; h: number } {
+  const items = l.items.filter((i) => i.id === id);
+  if (items.length === 0) throw new Error(`${id} 없음`);
+  const x0 = Math.min(...items.map((i) => i.x));
+  const y0 = Math.min(...items.map((i) => i.y));
+  return {
+    x: x0,
+    y: y0,
+    w: Math.max(...items.map((i) => i.x + i.w)) - x0,
+    h: Math.max(...items.map((i) => i.y + i.h)) - y0,
+  };
+}
+
+test('터치 거점 줄 게이지: 생존자 · 괴물 화면마다 진행 숫자가 자기 스냅샷 진행의 내림 %, 두 줄이 위아래로 맞닿아 예전 링 한 쌍 높이 안이고, 숫자가 바뀌어도 다시 굽지 않는다', async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const still: Record<string, number | string> = {};
+  // 아이폰 14 Chrome 가로 (노치 뺀 게임 영역 750×369)
+  for (const role of ['runner', 'monster'] as const) {
+    const s = await soloMatch(browser, touchDevice(750, 369), role);
+    const { page } = s;
+    const send = (cmd: TestCommand): Promise<void> => sendTest(page, cmd);
+    const ids = (await truth(page, s.code)).players;
+    const idOf = (r: string): string => ids.find((p) => p.role === r)?.id ?? '';
+    // 봇은 모두 멈추고 거점 밖으로 (괴물 봇은 멀리). 점령하는 사람: 생존자 화면은 나, 괴물 화면은 러너 봇
+    if (role === 'runner') await send({ kind: 'teleport', target: idOf('monster'), x: 45, y: 2, face: 0 });
+    for (const r of ['monster', 'runner', 'guard', 'scout'])
+      if (r !== role) await send({ kind: 'freeze', target: idOf(r), frozen: true });
+    await send({ kind: 'teleport', target: idOf('guard'), x: 24, y: 22 });
+    await send({ kind: 'teleport', target: idOf('scout'), x: 30, y: 24 });
+    const capturer = role === 'runner' ? s.id : idOf('runner');
+    await send({ kind: 'teleport', target: capturer, x: 14, y: 16.5 });
+    await send({ kind: 'setPoint', point: 'A', progress: 0 });
+    await send({ kind: 'setPoint', point: 'B', progress: 0.37 });
+    // 멈춘 진행 (아무도 없는 B): 이 화면 스냅샷 진행(0.37)의 내림 % — 괴물 화면도 숫자를 보인다(PCT_FOR_MONSTER)
+    const b = await waitPointPct(page, 'B', (q) => q.state === 'idle' && q.want === 37, `${role} B 37`);
+    expect(b.frame, role).toBe('pct:text:o7');
+    still[role] = b.shown;
+    const a0 = await waitPointPct(page, 'A', (q) => q.want === 0, `${role} A 0`);
+    expect(a0.frame, role).toBe('pct:dim:o0');
+    const l = await hudLayout(page);
+    const bakes = Number((await page.evaluate(() => window.__DECOY__?.getHud() ?? {})).bakes);
+    // 점령 중: 오르는 숫자가 자기 스냅샷을 따라간다
+    await send({ kind: 'teleport', target: capturer, x: 8, y: 16.5 });
+    const start = await waitPointPct(page, 'A', (q) => q.state === 'capturing', `${role} A 점령 시작`);
+    for (let k = 1; k <= 3; k += 1)
+      await waitPointPct(
+        page,
+        'A',
+        (q) => q.state === 'capturing' && Number(q.shown) >= Number(start.shown) + k,
+        `${role} A 점령 중 +${k}`,
+      );
+    // 줄 게이지: A가 윗줄 · B가 아랫줄로 맞닿고(겹치지 않고) 두 줄이 예전 링 한 쌍 높이(52 그림 단위) 안
+    const ga = partBox(l, 'gaugeA');
+    const gb = partBox(l, 'gaugeB');
+    const blockH = TOUCH_PART.gaugeRow.h * GAUGE_IDS.length * TOUCH_UI.art;
+    expect(ga.y + ga.h, role).toBeLessThanOrEqual(gb.y + 0.5);
+    expect(Math.abs(ga.x - gb.x), role).toBeLessThan(1);
+    expect(gb.y + gb.h - ga.y, role).toBeLessThanOrEqual(blockH + 1);
+    // 폭: 그린 상자에는 프레임 둘레 빈 1텍셀(기기 배율 1 = 1 CSS px)씩이 들어간다
+    expect(Math.max(ga.w, gb.w), role).toBeLessThanOrEqual(TOUCH_PART.gaugeRow.w * TOUCH_UI.art + 2.5);
+    // 숫자가 바뀌어도 아틀라스를 다시 굽지 않고, 숫자는 글자 객체가 아니다
+    const info = await page.evaluate(() => window.__DECOY__?.getHud() ?? {});
+    expect([Number(info.bakes), info.missingFrames], role).toEqual([bakes, '']);
+    expect(await hudPctTexts(page), role).toEqual([]);
+    expect(s.problems, role).toEqual([]);
+    await s.context.close();
+  }
+  console.log(`[m12-hud] 줄 게이지 B 멈춘 진행 (화면마다): ${JSON.stringify(still)}`);
 });

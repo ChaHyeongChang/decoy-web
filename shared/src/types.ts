@@ -194,6 +194,11 @@ export interface WorldView {
   timeLeft: number;
   /** 최후의 30초 남은 시간 (없으면 null) */
   grace: number | null;
+  /**
+   * 판 시작 카운트다운 남은 시간 (초, 0 = 판이 흐른다). 받는 사람과 무관하게 같은 값이다. 0보다 큰 동안 서버는 입력을 버리고
+   * 판 시간 · 12분 시계 · 괴물 시작 대기가 흐르지 않는다 (GAME_DESIGN 1장)
+   */
+  countdown: number;
   /** 괴물 시작 대기 남은 시간 */
   monsterWait: number;
   /** 괴물 재접속 대기 남은 시간 (일시정지 중이면) */
@@ -409,7 +414,9 @@ export type TestCommand =
   | { kind: 'setPoint'; point: PointId; progress: number }
   /** elapsed: 흐른 판 시간(초)도 바꾼다 — 결과의 판 길이 (M15 스토어 촬영). 시험 전용 */
   | { kind: 'setTime'; timeLeft: number; elapsed?: number }
-  | { kind: 'freeze'; target: string; frozen: boolean };
+  | { kind: 'freeze'; target: string; frozen: boolean }
+  /** 다음에 시작하는 판 하나의 시작 카운트다운(초). 로비에서 보낸다 — 시험 훅 방은 기본 0이라 카운트다운 시험만 켠다 */
+  | { kind: 'startCountdown'; seconds: number };
 
 export type ClientMessage =
   | {
