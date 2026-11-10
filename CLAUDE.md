@@ -20,6 +20,7 @@
 | `docs/META_PLAN.md` | 판 밖 성장 · 보상(메타) 설계 · 저장 형식 · 마일스톤(a 평가 · 레벨, b 재화 · 도전, c 의상). 메타 수치는 `config/progression.json` |
 | `docs/ACCOUNT_PLAN.md` | 선택형 구글 로그인 · 계정 저장 설계 (기본 꺼짐) |
 | `docs/LOGIN_GUIDE.md` | 로그인을 켜기 위해 사람이 할 일 (구글 클라우드 · DB · Render · Play 신고) |
+| `docs/PLAYTEST_PLAN.md` | 팀원 플레이테스트 피드백 반영 계획: 항목별 원인 · 고칠 방법 · 범위 (a 버그 · 조작 · 화면, b 거점 세 곳 중 두 곳, c 봇 · 손맛) |
 | `docs/FEEDBACK_REVIEW.md` | 왜 이렇게 바뀌었는지 |
 | `docs/reference/` | v1(Unity) 문서. 참고만. 어긋나면 v2 문서가 우선 |
 | `docs/images/concept_*.png` | 생성형 AI로 만든 컨셉 이미지. 분위기 참고만. 괴물 여러 마리 · 거점 3개 · 감지 3단계 · 아이템 상자는 v1 초기 안이라 따르지 않는다 |
