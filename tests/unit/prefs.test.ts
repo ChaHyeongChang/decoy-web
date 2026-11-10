@@ -1,9 +1,12 @@
 // 설정 저장소 (설정 화면 통합, client/src/prefs.ts): 저장 · 복원 · 칸별 검사 · 되돌리기 · 막힌 저장소
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  ATTACK_BUTTONS,
+  PREFS_VERSION,
   PREF_DEFAULTS,
   PREF_KEYS,
   allPrefs,
+  attackButtonOf,
   audioLevelsOf,
   isDefaultPref,
   onPrefsChange,
@@ -64,8 +67,30 @@ describe('설정 저장 형식', () => {
       muted: true,
       stickSize: 125,
       stickClear: 40,
+      attackButton: 'instant' as const,
     };
     expect(parsePrefs(serializePrefs(p))).toEqual(p);
+  });
+
+  it("공격 버튼 방식: 기본 '끌어서 조준'(저장하지 않음), '누르면 바로'만 적는다 · 이상한 값은 그 칸만 기본값 · 저장 형식 판은 그대로 1", () => {
+    expect(PREF_DEFAULTS.attackButton).toBe('drag');
+    expect(ATTACK_BUTTONS).toEqual(['drag', 'instant']);
+    expect(serializePrefs({ ...PREF_DEFAULTS, attackButton: 'drag' })).toBeNull();
+    expect(JSON.parse(serializePrefs({ ...PREF_DEFAULTS, attackButton: 'instant' })!)).toEqual({
+      v: 1,
+      attackButton: 'instant',
+    });
+    // 칸을 더해도 판 번호를 올리지 않는다: 이 칸이 없는 예전 저장값을 그대로 읽는다 (올리면 모두의 설정이 지워진다)
+    expect(PREFS_VERSION).toBe(1);
+    const old = parsePrefs(JSON.stringify({ v: 1, uiSize: 'large', stickSize: 120 }));
+    expect(old).toEqual({ ...PREF_DEFAULTS, uiSize: 'large', stickSize: 120 });
+    for (const bad of ['tap', 'INSTANT', '', 1, true, null, ['instant']]) {
+      const p = parsePrefs(JSON.stringify({ v: 1, attackButton: bad, muted: true }));
+      expect(p.attackButton, String(bad)).toBe('drag');
+      expect(p.muted).toBe(true);
+    }
+    expect(attackButtonOf(PREF_DEFAULTS)).toBe('drag');
+    expect(attackButtonOf({ ...PREF_DEFAULTS, attackButton: 'instant' })).toBe('instant');
   });
 
   it('깨진 JSON · 다른 판 · 객체가 아님 → 모두 기본값', () => {
@@ -122,6 +147,29 @@ describe('설정 저장소', () => {
     expect(pref('reduceShake')).toBe(true);
     expect(pref('volUi')).toBe(20);
     expect(pref('uiSize')).toBe('normal');
+  });
+
+  it('공격 버튼 방식: 고르면 저장되고 새 접속에서 복원, 이상한 값은 바꾸지 않는다, 항목별 · 모두 되돌리기에 든다', () => {
+    const seen: (string | null)[] = [];
+    onPrefsChange((k) => seen.push(k));
+    expect(pref('attackButton')).toBe('drag');
+    expect(setPref('attackButton', 'instant')).toBe(true);
+    expect(JSON.parse(s.data.get('decoy:settings')!)).toEqual({ v: 1, attackButton: 'instant' });
+    resetPrefsForTest(s);
+    expect(pref('attackButton')).toBe('instant');
+    expect(attackButtonOf()).toBe('instant');
+    setPref('attackButton', 'hold' as never);
+    expect(pref('attackButton')).toBe('instant');
+    expect(isDefaultPref('attackButton')).toBe(false);
+    resetPref('attackButton');
+    expect(pref('attackButton')).toBe('drag');
+    expect(s.data.has('decoy:settings')).toBe(false);
+    setPref('attackButton', 'instant');
+    setPref('muted', true);
+    resetPrefs();
+    expect(attackButtonOf()).toBe('drag');
+    expect(s.data.has('decoy:settings')).toBe(false);
+    expect(seen).toEqual(['attackButton']);
   });
 
   it('항목별 되돌리기 · 모두 되돌리기: 모두 기본값이면 키를 지운다', () => {

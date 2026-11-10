@@ -44,6 +44,7 @@ import { InputLog, InputSampler } from '../input';
 import { matchMenu, toggleMatchMenu } from '../matchMenu';
 import { onPrefsChange, pref, shakeScaleOf, type PrefKey } from '../prefs';
 import { AimHold, aimAnchor } from '../aimHold';
+import { assistAim, assistRange, assistTargets } from '../aimAssist';
 import { applyDashStart, applyWindupLock, predictMonsterPress, type LocalWindup } from '../localActions';
 import { COLOR } from '../render/colors';
 import { cullable } from '../render/camera';
@@ -307,6 +308,20 @@ export class GameScene extends Phaser.Scene {
   private unsubscribe: (() => void) | null = null;
   /** 포효 핑 (괴물 화면) */
   private roarPings: { x: number; y: number; until: number; start: number }[] = [];
+  /** 마지막 프레임에 그린 생존자 (보간 표본 그대로 — 탭 공격 조준 보정이 '화면에 보이는 자리'로 쓴다). 그리기 전이면 null */
+  private drawnSurvivors: ReadonlyMap<string, SurvivorView> | null = null;
+  /**
+   * 터치 탭 공격 조준 보정 (aimAssist.ts, 입력 틱마다 새로 만들지 않는다 — 탭 공격을 낼 때만 불린다): 내 스냅샷에 있고 화면에
+   * 그린 자유 생존자만 본다. 포효로 드러난 자리(roarPings)는 넘기지 않는다
+   */
+  private readonly tapAssist = (base: number): number => {
+    const app = this.app;
+    const snap = app.lastSnap;
+    const me = app.predictor?.state;
+    const drawn = this.drawnSurvivors;
+    if (!snap?.you.mon || !me || !drawn || !app.balance) return base;
+    return assistAim(base, me, assistTargets(snap.survivors, drawn), assistRange(app.balance));
+  };
   /** 마지막으로 그린 내 위치 (예측) */
   localPos = { x: 0, y: 0, face: 0 };
   /** 피격 플래시 · 수감 페이드 · 기절 채도 감소 */
@@ -620,6 +635,7 @@ export class GameScene extends Phaser.Scene {
     );
     this.setupMatchPrefs();
     this.roarPings = [];
+    this.drawnSurvivors = null;
     // 'match' 뒤 이 장면이 생기기 전(판 시작 대기 · 세로 안내 · 다시 들어온 판의 장면 재시작)에 온 거점 메모를 다시 보인다.
     // 장면이 생긴 뒤의 메모는 아래 구독이 받는다 (M12 검토: 재접속 때 서버가 남겨 보낸 메모가 터치에서 사라지던 것)
     for (const ev of app.matchNotes) this.onEvent(ev);
@@ -1317,6 +1333,7 @@ export class GameScene extends Phaser.Scene {
       face: st.face,
       canAttack: predictMonsterPress({ ...base, pressed: BTN.ATTACK }).attack,
       canDash: predictMonsterPress({ ...base, pressed: BTN.DASH }).dash,
+      assist: this.tapAssist,
     };
   }
 
@@ -1705,6 +1722,7 @@ export class GameScene extends Phaser.Scene {
     const snap = app.lastSnap;
     if (!snap || !app.balance || !app.match) {
       this.drawn = [];
+      this.drawnSurvivors = null;
       return;
     }
     const now = performance.now();
@@ -1733,6 +1751,7 @@ export class GameScene extends Phaser.Scene {
     }
     const lw = this.localWindup;
     const survivors = app.survivorsInterp.sample(renderTime);
+    this.drawnSurvivors = survivors;
     this.applySpectatePick(snap);
     const view = this.updateCamera(now, delta, me, survivors);
     // 내 몸을 그리는 자리: 카메라가 창을 기기 픽셀 격자에 맞추며 옮긴 만큼 같이 옮긴다(화면에서는 맞추기 전 창 기준 — 고르게

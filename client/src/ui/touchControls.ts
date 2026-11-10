@@ -32,8 +32,8 @@ import {
 } from '../controlLayout';
 import { HUD_TEXT, TOUCH_TEXT } from '../data/storyText';
 import { canOfferFullscreen, device, enterFullscreen, onDeviceChange } from '../device';
-import { stickAlphaOf, stickScaleOf } from '../prefs';
-import { TOUCH, type StickKind, type TouchFeed } from '../touchInput';
+import { attackButtonOf, stickAlphaOf, stickScaleOf } from '../prefs';
+import { TOUCH, aimStartOf, type StickKind, type TouchFeed } from '../touchInput';
 import { ABILITY_ICON, ACCENT, TICKS, abilityName, litTicks, type ActionSlot, type SlotId } from './hudArt';
 import {
   CAM_ZOOM,
@@ -424,11 +424,16 @@ export function inEdgeBand(x: number, y: number, safe: Box): boolean {
 }
 
 /**
- * 스틱 중심 (CSS px): 조준 스틱은 고정 중심(요소 가운데), 이동 · 돌진은 누른 자리.
- * 돌진 버튼을 가운데에서 벗어나 탭해도 그 어긋남이 '끌기'로 잡히지 않게 한다(끌지 않은 탭 = 지금 방향)
+ * 스틱 중심 (CSS px): 이동 · 돌진 · 조준 스틱 모두 누른 자리.
+ * 버튼을 가운데에서 벗어나 탭해도 그 어긋남이 '끌기'로 잡히지 않게 한다(끌지 않은 탭 = 지금 방향). 조준 스틱은 요소 가운데가
+ * 고정 중심이었는데, 가운데에서 8px만 비켜 눌러도 그쪽으로 돌아 공격했다 (플레이테스트 반영 a-2)
  */
-export function stickCenter(kind: StickKind, L: TouchLayout, x: number, y: number): { x: number; y: number } {
-  if (kind === 'aim' && L.aim) return { x: L.aim.x + L.aim.w / 2, y: L.aim.y + L.aim.h / 2 };
+export function stickCenter(
+  _kind: StickKind,
+  _L: TouchLayout,
+  x: number,
+  y: number,
+): { x: number; y: number } {
   return { x, y };
 }
 
@@ -485,7 +490,9 @@ interface Finger {
   cx: number;
   cy: number;
   r: number;
-  /** 조준: 데드존 밖에 한 번이라도 나갔다 (가운데로 돌아오면 '취소' 표시) */
+  /** 이 손가락의 문턱 (반지름 대비, 상태 기계와 같은 값): 이동 · 돌진 = 데드존, 조준 스틱 = 조준 시작 문턱 */
+  dead: number;
+  /** 조준: 문턱 밖에 한 번이라도 나갔다 (가운데로 돌아오면 '취소' 표시) */
   out: boolean;
   /** 방향 표시 요소 (조준 스틱 · 돌진의 .tc-dir, 없으면 null) */
   dir: HTMLElement | null;
@@ -553,6 +560,8 @@ export class TouchControls {
   private readonly stickScale: number;
   /** 저장한 조작 배치 (판 시작 때 읽는다. 좌우 반전은 판 HUD 배치와 같은 값) */
   private readonly custom: TeamLayout;
+  /** 공격 버튼 방식 '누르면 바로' (설정 조작 탭, 판 시작 때 읽는다): 닿는 순간 지금 방향으로 공격, 끌기는 무시 */
+  private readonly attackInstant: boolean;
 
   constructor(
     readonly root: HTMLElement,
@@ -570,6 +579,7 @@ export class TouchControls {
     // 조이스틱 투명도 (설정 조작 탭): 이동 · 조준 스틱 불투명도에 곱한다 (style.css --stick-a)
     const alpha = stickAlphaOf();
     if (alpha < 1) this.layer.style.setProperty('--stick-a', String(alpha));
+    this.attackInstant = attackButtonOf() === 'instant';
     this.probe = h('div', { class: 'tc-probe' });
     this.zone = h('div', { class: 'tc-zone', 'data-touch-target': 'move-zone', 'data-touch-kind': 'zone' });
     this.moveKnob = h('div', { class: 'tc-knob' });
@@ -584,7 +594,15 @@ export class TouchControls {
     this.zone.addEventListener('pointerdown', (e) => this.startStick(e, 'move', this.zone, this.moveKnob));
     if (role === 'monster') {
       const aim = this.part('attack', 'aim-stick', 'attack', HUD_TEXT.attack, 'tc-aim');
-      aim.el.addEventListener('pointerdown', (e) => this.startStick(e, 'aim', aim.el, aim.face, aim.dir));
+      if (this.attackInstant) {
+        // '누르면 바로': 닿는 순간 지금 방향으로 공격한다(끌기는 읽지 않고 뗄 때는 아무것도 하지 않는다). 방향 표시는 없다.
+        // 요소 · id(aim-stick)는 그대로다 — 조작 배치 · 쿨타임 눈금이 같다
+        if (aim.dir) aim.dir.hidden = true;
+        aim.el.addEventListener('pointerdown', (e) => {
+          if (this.grab(e, 'tap', aim.el)) opts.feed.fire(BTN.ATTACK);
+        });
+      } else
+        aim.el.addEventListener('pointerdown', (e) => this.startStick(e, 'aim', aim.el, aim.face, aim.dir));
       const dash = this.part('dash', 'dash', 'dash', HUD_TEXT.dash, 'tc-btn tc-dash');
       dash.el.addEventListener('pointerdown', (e) =>
         this.startStick(e, 'dash', dash.el, dash.face, dash.dir),
@@ -781,6 +799,7 @@ export class TouchControls {
       cx: 0,
       cy: 0,
       r: 1,
+      dead: TOUCH.deadZone,
       out: false,
       dir: null,
       knobT: '',
@@ -793,7 +812,10 @@ export class TouchControls {
     return true;
   }
 
-  /** 스틱 시작: 이동 · 돌진은 누른 자리가 중심, 조준은 고정 중심(stickCenter). 종류마다 손가락 하나 */
+  /**
+   * 스틱 시작: 누른 자리가 중심(stickCenter). 종류마다 손가락 하나. 조준 스틱은 데드존 대신 조준 시작 문턱(aimStartOf)을
+   * 상태 기계와 조준 · 취소 표시에 같이 쓴다
+   */
   private startStick(
     e: PointerEvent,
     kind: StickKind,
@@ -806,8 +828,10 @@ export class TouchControls {
     for (const f of this.fingers.values()) if (f.kind === kind) return;
     const c = stickCenter(kind, L, e.clientX, e.clientY);
     const r = kind === 'aim' && L.aim ? L.aim.w / 2 : kind === 'dash' ? L.dashR : L.moveR;
-    if (!this.grab(e, kind, el, { knob, cx: c.x, cy: c.y, r, dir, dirT: dir?.style.transform ?? '' })) return;
-    this.opts.feed.stickStart(e.pointerId, kind, performance.now());
+    const dead = kind === 'aim' ? aimStartOf(r) : TOUCH.deadZone;
+    if (!this.grab(e, kind, el, { knob, cx: c.x, cy: c.y, r, dead, dir, dirT: dir?.style.transform ?? '' }))
+      return;
+    this.opts.feed.stickStart(e.pointerId, kind, performance.now(), dead);
     if (kind === 'move') {
       this.move.style.transform = `translate(${c.x}px,${c.y}px)`;
       this.move.classList.add('live');
@@ -833,7 +857,7 @@ export class TouchControls {
       f.knobT = knobT;
       f.knob.style.transform = knobT;
     }
-    const outside = Math.hypot(v.x, v.y) > TOUCH.deadZone;
+    const outside = Math.hypot(v.x, v.y) > f.dead;
     if (outside) {
       f.out = true;
       // 방향 표시: 12시가 0, 시계 방향. 방향 표시 요소의 transform만 바꾼다 (스틱 전체에 CSS 변수를 쓰면 하위 요소 모두
@@ -847,7 +871,7 @@ export class TouchControls {
       }
     }
     f.el.classList.toggle('aiming', outside);
-    // 데드존 밖에 나갔다가 돌아오면 취소 표시 (조준 · 돌진, 상태 기계도 떼면 취소한다)
+    // 문턱 밖에 나갔다가 돌아오면 취소 표시 (조준 · 돌진, 상태 기계도 떼면 취소한다)
     f.el.classList.toggle('cancel', f.kind !== 'move' && f.out && !outside);
   }
 
@@ -1110,6 +1134,7 @@ export class TouchControls {
       cx: p.cx,
       cy: p.cy,
       r: p.r,
+      dead: TOUCH.deadZone,
       out: false,
       dir: null,
       knobT: '',

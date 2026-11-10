@@ -2,7 +2,7 @@
 // 이동 스틱은 왼쪽 40% 안, 생존자는 조준 스틱이 없다. 가장자리 띠에서 시작한 터치는 무시, 스틱 값은 길이 1로 자른다
 import { describe, expect, it } from 'vitest';
 import { BTN } from '../../shared/src/types';
-import { TouchInput } from '../../client/src/touchInput';
+import { TouchInput, aimStartOf } from '../../client/src/touchInput';
 import {
   EDGE_BAND,
   MIN_GAP,
@@ -169,7 +169,7 @@ describe('스틱 값 stickVector', () => {
   });
 });
 
-describe('스틱 중심 (M11 검토): 돌진은 누른 자리, 조준 스틱은 고정 중심', () => {
+describe('스틱 중심 (M11 검토 · 플레이테스트 반영 a-2): 돌진 · 조준 · 이동 모두 누른 자리', () => {
   const L = touchLayout(844, 390, { l: 0, r: 0, t: 0, b: 0 }, true, false);
   const dash = L.buttons.dash;
   if (!dash || !L.aim) throw new Error('괴물 배치에 돌진 · 조준 스틱이 없음');
@@ -196,9 +196,50 @@ describe('스틱 중심 (M11 검토): 돌진은 누른 자리, 조준 스틱은 
     expect(aim === null || Math.abs(aim - face) < 1e-9).toBe(true);
   });
 
-  it('조준 스틱은 누른 자리와 상관없이 요소 가운데가 중심', () => {
+  it('조준 스틱 · 이동 스틱도 누른 자리가 중심 (플레이테스트 반영 a-2: 요소 가운데가 고정 중심이면 비켜 누른 탭이 조준이 된다)', () => {
     const a = L.aim!;
-    expect(stickCenter('aim', L, a.x + 3, a.y + 4)).toEqual({ x: a.x + a.w / 2, y: a.y + a.h / 2 });
+    expect(stickCenter('aim', L, a.x + 3, a.y + 4)).toEqual({ x: a.x + 3, y: a.y + 4 });
     expect(stickCenter('move', L, 120, 200)).toEqual({ x: 120, y: 200 });
+  });
+
+  it('조준 스틱 가운데에서 (−20, +15)px 비켜 누른 짧은 탭: 스틱 값 (0, 0) → 다음 프레임에 지금 방향으로 공격 1번, 조준은 이동 방향 그대로', () => {
+    const a = L.aim!;
+    const r = a.w / 2;
+    const press = { x: a.x + r - 20, y: a.y + r + 15 };
+    // 요소 가운데가 중심이었다면 이 어긋남(25px)은 데드존(0.15r)도 조준 시작 문턱도 넘는다 — 그쪽(143°)으로 돌아 공격했다
+    expect(Math.hypot(20, 15) / r).toBeGreaterThan(aimStartOf(r));
+    const c = stickCenter('aim', L, press.x, press.y);
+    const v = stickVector(press.x - c.x, press.y - c.y, r);
+    expect(v).toEqual({ x: 0, y: 0 });
+    const t = new TouchInput();
+    // 오른쪽(0°)으로 걷는 중
+    t.stickStart(1, 'move', 0);
+    t.stickMove(1, 1, 0);
+    t.stickStart(2, 'aim', 0, aimStartOf(r));
+    t.stickMove(2, v.x, v.y);
+    const held = { nowMs: 50, face: 0, canAttack: true, canDash: true };
+    expect(t.takePressed(held)).toBe(0);
+    expect(t.aimAngle(held)).toBe(0);
+    t.stickEnd(2, 100);
+    const ctx = { nowMs: 133, face: 0, canAttack: true, canDash: true };
+    expect(t.takePressed(ctx)).toBe(BTN.ATTACK);
+    expect(t.aimAngle(ctx)).toBe(0);
+    expect(t.takePressed({ ...ctx, nowMs: 166 })).toBe(0);
+  });
+
+  it('조준 시작 문턱(px): 기본 크기 배치에서 15~19px, 조이스틱 크기 80~130%에서도 14~24px — 예전 데드존(7.5~9.5px)의 약 두 배', () => {
+    for (const [name, w, h] of SCREENS)
+      for (const inset of INSETS) {
+        const px = (stickScale: number): number => {
+          const r = touchLayout(w, h, inset, true, false, [], { stickScale }).aim!.w / 2;
+          return aimStartOf(r) * r;
+        };
+        expect(px(1), name).toBeGreaterThanOrEqual(15);
+        expect(px(1), name).toBeLessThanOrEqual(19);
+        for (const s of [0.8, 1.3]) {
+          expect(px(s), `${name} × ${s}`).toBeGreaterThanOrEqual(14);
+          expect(px(s), `${name} × ${s}`).toBeLessThanOrEqual(24);
+        }
+      }
   });
 });

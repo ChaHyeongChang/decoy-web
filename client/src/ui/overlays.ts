@@ -13,6 +13,7 @@ import { clearPathCache, drawToCanvas, type Drawing } from '../art/chars/kit';
 import { FRONT_REST } from '../art/chars/types';
 import { NEON, ROLE, UI } from '../art/palette';
 import { currentCharStyle } from '../gfx/charStyle';
+import { attackButtonOf } from '../prefs';
 import { createCanvasTexture, makeCanvas, nextFogKey, removeCanvasTexture, rgba } from '../render/fogPaint';
 import { ABILITY_ICON, ACCENT, FR, HC, STATUS_LOOK, parseControl, teamCards } from './hudArt';
 import { fontGeneration } from './fonts';
@@ -528,7 +529,8 @@ export class Scoreboard {
     const team = info.role === 'monster' ? 'monster' : 'survivor';
     this.controls = new ControlsBlock(
       kit,
-      controlsText(team, touchMode ? 'touch' : 'keyboard'),
+      // 터치 괴물의 조준 · 공격 줄은 공격 버튼 방식을 따른다 (터치 화면과 같이 판 시작 때 읽는다)
+      controlsText(team, touchMode ? 'touch' : 'keyboard', attackButtonOf()),
       team === 'monster' ? FR.icon('attack', HC.red, 18) : FR.icon('point', 0x22d3ee, 18),
     );
     this.closeHint = touchMode

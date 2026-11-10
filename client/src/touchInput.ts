@@ -2,6 +2,9 @@
 // 터치 화면(ui/touchControls.ts)이 손가락 이벤트를 스틱 반지름으로 정규화해 넣고(TouchFeed),
 // InputSampler(input.ts)가 입력 프레임마다 읽는다(TouchSource). 보내는 형식은 키보드 · 마우스와 같은 InputFrame이다.
 // 시각은 인자로 받는다(performance · window를 쓰지 않는다 — 단위 테스트에서 시간을 정한다).
+// 플레이테스트 반영 a-2: 조준 스틱도 누른 자리가 중심이고, 데드존과 별개의 '조준 시작 문턱'(손가락마다 든다)을 넘게 끌어야
+// 조준이 시작된다 — 그 전에는 이동 방향을 그대로 보낸다(비켜 누른 탭 · 밀린 탭이 엉뚱한 방향 공격이 되지 않게).
+// 탭 공격(짧은 탭 · '누르면 바로')에만 조준 보정 훅(ctx.assist)을 거친다: 보정한 aim을 한 프레임 먼저 보내고 공격한다
 import { BTN, angleDiff } from '@decoy/shared';
 
 /** 조작 수치 (판정과 무관한 입력 해석 값이라 balance.json이 아니라 여기 둔다. DECISIONS M11) */
@@ -12,9 +15,33 @@ export const TOUCH = {
   aimTolerance: (10 * Math.PI) / 180,
   /** 발사 대기 최대 시간 (ms). 지나면 face가 덜 돌았어도 공격 */
   maxFireWaitMs: 350,
-  /** 조준 스틱 짧은 탭 (ms): 데드존을 벗어나지 않고 이 안에 떼면 지금 방향으로 공격 */
-  shortTapMs: 250,
+  /**
+   * 조준 스틱 짧은 탭 (ms): 조준을 시작하지 않고(조준 시작 문턱 안) 이 안에 떼면 지금 방향으로 공격.
+   * 플랫폼의 길게 누르기 기준(400~500ms) 아래는 탭으로 본다 (0.25초는 쫓는 중 엄지 탭에 빠듯했다)
+   */
+  shortTapMs: 400,
+  /**
+   * 조준 시작 문턱 (조준 스틱 반지름 대비, 누른 자리에서). 이만큼 끌기 전에는 조준이 바뀌지 않는다 — 데드존(0.15 ≈ 8px)은
+   * 엄지 볼이 구르는 폭(2~3mm ≈ 12~19px)보다 좁아 탭이 조준으로 읽혔다. 조준 시작 · 각도 갱신 · 취소 구역에 같은 값을 쓴다
+   */
+  aimStart: 0.3,
+  /** 조준 시작 문턱을 자르는 범위 (CSS px): 손가락 크기는 버튼 크기와 무관하다 (aimStartOf) */
+  aimStartMinPx: 14,
+  aimStartMaxPx: 24,
+  /**
+   * 탭 공격 조준 보정의 발사 대기 허용 오차 (라디안, 0.5°). 공격 프레임의 aim은 서버가 쓰지 않으므로(공격 방향 = 그 앞
+   * 프레임까지 돈 face) 예측 face가 보정한 각도에 온 뒤에 낸다 — ±10°(aimTolerance)면 그 프레임에 바로 나가 보정이 헛돈다
+   */
+  assistTolerance: (0.5 * Math.PI) / 180,
 } as const;
+
+/**
+ * 조준 시작 문턱 (반지름 r(CSS px)인 조준 스틱에서, 반지름 대비 값): 0.3 × r을 14~24px로 자른 것 / r.
+ * 기본 크기(r 50~63)에서 15~19px, 가장 작게 줄인 스틱(r 32)도 14px · 가장 크게 키운 스틱(r 123)도 24px
+ */
+export function aimStartOf(r: number): number {
+  return Math.max(TOUCH.aimStartMinPx, Math.min(TOUCH.aimStartMaxPx, TOUCH.aimStart * r)) / r;
+}
 
 /** 스틱 종류: 왼쪽 이동, 오른쪽 조준(괴물), 돌진 버튼을 끌어 만든 작은 스틱(괴물) */
 export type StickKind = 'move' | 'aim' | 'dash';
@@ -28,6 +55,11 @@ export interface TouchFrameCtx {
   canAttack: boolean;
   /** 지금 돌진할 수 있는가 */
   canDash: boolean;
+  /**
+   * 탭 공격 조준 보정 (지금 방향 → 보정한 방향, aimAssist.ts). 탭 공격(조준 스틱 짧은 탭 · '누르면 바로')을 낼 때만 부른다 —
+   * 끌어 놓기 · 돌진에는 쓰지 않는다. 없으면 보정 없음
+   */
+  assist?: (base: number) => number;
 }
 
 /**
@@ -52,8 +84,11 @@ export interface TouchSource {
  * 화면 y는 아래가 +다(게임 좌표와 같다)
  */
 export interface TouchFeed {
-  /** 손가락이 스틱에 닿음 (이동 · 돌진은 누른 자리가 중심, 조준 스틱은 고정 중심) */
-  stickStart(pointerId: number, kind: StickKind, nowMs: number): void;
+  /**
+   * 손가락이 스틱에 닿음 (모든 스틱이 누른 자리가 중심). dead = 이 손가락의 문턱(반지름 대비) — 안 주면 조준 스틱은
+   * 조준 시작 문턱(TOUCH.aimStart), 이동 · 돌진은 데드존. 터치 화면은 조준 스틱에 aimStartOf(반지름)을 넘긴다
+   */
+  stickStart(pointerId: number, kind: StickKind, nowMs: number, dead?: number): void;
   stickMove(pointerId: number, nx: number, ny: number): void;
   /** 손가락을 뗌 (조준 · 돌진은 규칙에 따라 발사 대기로 가거나 취소) */
   stickEnd(pointerId: number, nowMs: number): void;
@@ -61,6 +96,11 @@ export interface TouchFeed {
   stickCancel(pointerId: number): void;
   /** 탭 버튼 (포효 · 시야 모드 · 능력): 다음 프레임 pressed */
   tap(bit: number): void;
+  /**
+   * 지금 방향으로 바로 (공격 버튼 '누르면 바로' 방식의 누름 = ATTACK): 다음 프레임에 낸다. 그 프레임에 할 수 없으면(쿨타임 ·
+   * 행동 불가) 버린다 — 짧은 탭과 같은 규칙 · 같은 조준 보정
+   */
+  fire(bit: number): void;
   /** 누르고 있는 버튼 (구조 = RESCUE): 누르는 동안 held, 누른 순간 pressed */
   hold(bit: number, down: boolean): void;
 }
@@ -72,12 +112,14 @@ interface Finger {
   x: number;
   y: number;
   startMs: number;
-  /** 데드존 밖에 한 번이라도 나갔다 (조준 스틱 ② 조준 중) */
+  /** 문턱 밖에 한 번이라도 나갔다 (조준 스틱 ② 조준 중) */
   armed: boolean;
-  /** 마지막으로 데드존 밖에 있던 각도 (데드존 안에서는 갱신하지 않는다) */
+  /** 마지막으로 문턱 밖에 있던 각도 (문턱 안에서는 갱신하지 않는다) */
   angle: number;
   /** 닿은 순서 (같은 종류 손가락이 여럿이면 나중 것을 쓴다) */
   order: number;
+  /** 이 손가락의 문턱 (반지름 대비): 이동 · 돌진 = 데드존, 조준 = 조준 시작 문턱. 시작 · 각도 갱신 · 취소 구역이 같은 값 */
+  dead: number;
 }
 
 /** ③ 발사 대기: 각도 θ를 고정하고 예측 face가 따라오면(또는 0.35초가 지나면) bit를 낸다 */
@@ -85,11 +127,13 @@ interface PendingFire {
   bit: number;
   angle: number;
   atMs: number;
+  /** 허용 오차 (라디안): 끌어 놓기 · 돌진 = aimTolerance, 탭 공격 조준 보정 = assistTolerance */
+  tol: number;
 }
 
-/** 데드존 밖인가 (길이가 데드존과 같으면 안으로 본다) */
+/** 문턱 밖인가 (길이가 문턱과 같으면 안으로 본다) */
 function outside(f: Finger): boolean {
-  return Math.hypot(f.x, f.y) > TOUCH.deadZone;
+  return Math.hypot(f.x, f.y) > f.dead;
 }
 
 /** 터치 입력 상태 기계 */
@@ -127,7 +171,13 @@ export class TouchInput implements TouchSource, TouchFeed {
     this.queued = 0;
     this.firedAngle = null;
     // 짧은 탭 · 돌진 탭: 할 수 없는 순간이면 보내지 않는다 (서버가 버리더라도 예측 효과음이 나지 않게)
-    if ((this.fireNow & BTN.ATTACK) !== 0 && ctx.canAttack) out |= BTN.ATTACK;
+    if ((this.fireNow & BTN.ATTACK) !== 0 && ctx.canAttack) {
+      // 탭 공격 조준 보정: 보정한 각도가 지금 방향과 다르면 그 각도를 한 프레임 먼저 보내고(발사 대기) face가 온 뒤 공격한다.
+      // 다른 발사 대기가 있으면(같은 프레임의 돌진 끌어 놓기) 그것을 덮지 않게 보정 없이 바로 낸다
+      const target = ctx.assist && !this.pending ? ctx.assist(ctx.face) : ctx.face;
+      if (Math.abs(angleDiff(ctx.face, target)) <= TOUCH.assistTolerance) out |= BTN.ATTACK;
+      else this.pending = { bit: BTN.ATTACK, angle: target, atMs: ctx.nowMs, tol: TOUCH.assistTolerance };
+    }
     if ((this.fireNow & BTN.DASH) !== 0 && ctx.canDash) out |= BTN.DASH;
     this.fireNow = 0;
     const p = this.pending;
@@ -137,7 +187,7 @@ export class TouchInput implements TouchSource, TouchFeed {
         // 쿨타임 · 행동 불가면 ③에 들어가지 않는다 (기다리는 동안 기절해도 버린다)
         this.pending = null;
       } else if (
-        Math.abs(angleDiff(ctx.face, p.angle)) <= TOUCH.aimTolerance ||
+        Math.abs(angleDiff(ctx.face, p.angle)) <= p.tol ||
         ctx.nowMs - p.atMs >= TOUCH.maxFireWaitMs
       ) {
         out |= p.bit;
@@ -171,7 +221,7 @@ export class TouchInput implements TouchSource, TouchFeed {
 
   // ───────────── TouchFeed (터치 화면이 넣는다) ─────────────
 
-  stickStart(pointerId: number, kind: StickKind, nowMs: number): void {
+  stickStart(pointerId: number, kind: StickKind, nowMs: number, dead?: number): void {
     this.order += 1;
     this.fingers.set(pointerId, {
       kind,
@@ -181,6 +231,7 @@ export class TouchInput implements TouchSource, TouchFeed {
       armed: false,
       angle: 0,
       order: this.order,
+      dead: dead ?? (kind === 'aim' ? TOUCH.aimStart : TOUCH.deadZone),
     });
   }
 
@@ -200,9 +251,10 @@ export class TouchInput implements TouchSource, TouchFeed {
     if (!f) return;
     this.fingers.delete(pointerId);
     if (f.kind === 'aim') {
-      // ② 바깥에서 뗌 → ③ 발사 대기, ② 가운데로 돌아와 뗌 → 취소, ① 0.25초 안에 뗌 → 지금 방향으로 공격
+      // ② 바깥에서 뗌 → ③ 발사 대기, ② 가운데로 돌아와 뗌 → 취소, ① 조준을 시작하지 않고 0.4초 안에 뗌 → 지금 방향으로 공격
       if (f.armed) {
-        if (outside(f)) this.pending = { bit: BTN.ATTACK, angle: f.angle, atMs: nowMs };
+        if (outside(f))
+          this.pending = { bit: BTN.ATTACK, angle: f.angle, atMs: nowMs, tol: TOUCH.aimTolerance };
       } else if (nowMs - f.startMs <= TOUCH.shortTapMs) {
         this.fireNow |= BTN.ATTACK;
       }
@@ -210,10 +262,11 @@ export class TouchInput implements TouchSource, TouchFeed {
       // 끌어서 바깥에서 뗌 → 그 각도로 발사 대기, 끌었다 가운데로 돌아와 뗌 → 취소(조준 스틱과 같게),
       // 끌지 않고 뗌 → 조준 스틱을 잡고 있으면 그 각도로 발사 대기, 아니면 지금 방향으로 즉시
       if (f.armed) {
-        if (outside(f)) this.pending = { bit: BTN.DASH, angle: f.angle, atMs: nowMs };
+        if (outside(f))
+          this.pending = { bit: BTN.DASH, angle: f.angle, atMs: nowMs, tol: TOUCH.aimTolerance };
       } else {
         const aim = this.armedAngle('aim');
-        if (aim !== null) this.pending = { bit: BTN.DASH, angle: aim, atMs: nowMs };
+        if (aim !== null) this.pending = { bit: BTN.DASH, angle: aim, atMs: nowMs, tol: TOUCH.aimTolerance };
         else this.fireNow |= BTN.DASH;
       }
     }
@@ -230,6 +283,10 @@ export class TouchInput implements TouchSource, TouchFeed {
     this.queued |= bit;
   }
 
+  fire(bit: number): void {
+    this.fireNow |= bit;
+  }
+
   hold(bit: number, down: boolean): void {
     if (down) {
       this.holds |= bit;
@@ -241,7 +298,7 @@ export class TouchInput implements TouchSource, TouchFeed {
 
   // ───────────── 내부 ─────────────
 
-  /** 그 종류의 가장 나중에 닿은 손가락 (armedOnly면 데드존 밖에 나간 적이 있는 손가락만) */
+  /** 그 종류의 가장 나중에 닿은 손가락 (armedOnly면 문턱 밖에 나간 적이 있는 손가락만) */
   private latest(kind: StickKind, armedOnly: boolean): Finger | null {
     let best: Finger | null = null;
     for (const f of this.fingers.values()) {
