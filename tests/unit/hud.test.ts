@@ -76,6 +76,7 @@ function snapshot(role: Snapshot['you']['role'], patch: (s: Snapshot) => void = 
     world: {
       timeLeft: 600,
       grace: null,
+      countdown: 0,
       monsterWait: 0,
       paused: null,
       points: [],

@@ -6,6 +6,7 @@ import {
   PRISON_CENTER,
   PRISON_SLOTS,
   Rng,
+  countdown,
   createMoveState,
   stepMovement,
   type Balance,
@@ -43,6 +44,11 @@ export interface GamePlayerSetup {
 
 export interface GameOptions {
   seed: number;
+  /**
+   * 판 시작 카운트다운 (초, 없으면 0 — 바로 시작). 수치(`match.startCountdown`)는 방(room.ts)이 넘긴다:
+   * 판을 바로 만드는 단위 시험 · 봇 시뮬레이션(simMatch)은 카운트다운 없이 돈다
+   */
+  countdown?: number;
 }
 
 /** 한 틱에 처리할 수 있는 최대 입력 수와 크레딧 상한 */
@@ -103,6 +109,11 @@ export class Game {
   grace: number | null = null;
   /** 괴물 재접속 대기 (일시정지) 남은 시간 */
   paused: number | null = null;
+  /**
+   * 판 시작 카운트다운 남은 시간 (초, GAME_DESIGN 1장). 0보다 큰 동안 step()은 입력을 버리고(ack만 올림) 판 시간 · 12분 시계 ·
+   * 괴물 시작 정지 · 모든 규칙이 흐르지 않는다 — 판 정지(paused)와 같은 모양이고, 끝난 뒤의 판은 카운트다운 없는 판과 상태가 같다
+   */
+  countdownLeft: number;
   end: MatchEnd | null = null;
   /** 점령 순서대로 보여 줄 비밀번호 두 자리 × 2 */
   readonly codes: [string, string];
@@ -118,6 +129,8 @@ export class Game {
     this.dt = 1 / balance.network.serverTickHz;
     this.rng = new Rng(options.seed);
     this.timeLeft = balance.match.timeLimit;
+    const cd = options.countdown ?? 0;
+    this.countdownLeft = Number.isFinite(cd) && cd > 0 ? cd : 0;
     const digits = (): string => String(this.rng.int(100)).padStart(2, '0');
     this.codes = [digits(), digits()];
 
@@ -283,12 +296,17 @@ export class Game {
     matchTick(this);
   }
 
+  /** 입력을 받기만 하고 버린다 (클라이언트 예측이 쌓이지 않게 ack는 올린다): 관전 · 판 시작 카운트다운 */
+  private discardInputs(p: GamePlayer): void {
+    const last = p.queue[p.queue.length - 1];
+    if (last) p.ack = last.seq;
+    p.queue.length = 0;
+  }
+
   private processPlayerInputs(p: GamePlayer): void {
     if (p.kind === 'survivor' && (p.status === 'dead' || p.status === 'escaped')) {
-      // 관전 중: 입력은 받기만 하고 버린다 (클라이언트 예측이 쌓이지 않게 ack는 올린다)
-      const last = p.queue[p.queue.length - 1];
-      if (last) p.ack = last.seq;
-      p.queue.length = 0;
+      // 관전 중: 입력은 받기만 하고 버린다
+      this.discardInputs(p);
       return;
     }
     p.credit = Math.min(CREDIT_CAP, p.credit + 1);
@@ -351,6 +369,13 @@ export class Game {
     if (this.end) return;
     this.tick += 1;
     if (this.paused !== null) return;
+    if (this.countdownLeft > 0) {
+      // 판 시작 카운트다운: 판은 아직 흐르지 않는다. 입력(이동 · 조준 · 버튼)은 모두 버리고 남은 시간만 줄인다.
+      // 판 정지 검사 뒤라 괴물이 끊겨 판이 멈춘 동안에는 카운트다운도 멈춘다
+      for (const p of this.players.values()) this.discardInputs(p);
+      this.countdownLeft = countdown(this.countdownLeft, this.dt);
+      return;
+    }
     this.time += this.dt;
     // 괴물 먼저, 그다음 생존자 (각자 다른 몸은 이 시점 위치의 정지한 원으로 본다)
     this.processPlayerInputs(this.monster);

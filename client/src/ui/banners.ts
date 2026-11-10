@@ -11,6 +11,8 @@
 // 지속 배너만으로 넘으면 그대로 띄운다(지속 배너는 30초까지 이어져 미루면 비밀번호를 놓친다. 802×293도 지속 + 메모 아래 끝이 감옥
 // 위 23px 앞이라 시험 화면에서는 생기지 않는다, E2E m12-hud). PC는 고정 자리 그대로
 // 렌더링 최적화 2: 프레임마다 서명 문자열 · 새 배열을 만들지 않는다(리본은 값을 하나씩 견주고, 끝난 알림은 제자리에서 뺀다)
+// 판 시작 카운트다운 (플레이테스트 a-8): 큰 숫자 3 · 2 · 1 → "시작!"을 메모 상자 자리에 띄운다. 자리를 시간으로 나눠 쓴다 — 글자가
+// 떠 있는 동안 메모를 꺼내지 않아 시작 문구는 "시작!" 뒤에 뜬다. 글자 객체는 카운트다운을 처음 본 프레임에 만들고 끝나면 지운다
 import { PRISON_RECT, TILE_PX } from '@decoy/shared';
 import type { IconId } from '../art/icons';
 import { NEON_DIM, UI } from '../art/palette';
@@ -35,6 +37,12 @@ interface Item extends BannerLine {
 /** 대기열에서 이보다 오래 기다린 알림은 버린다 (지난 일) */
 const MAX_QUEUE_WAIT_MS = 6000;
 const DEPTH = 60;
+/**
+ * 판 시작 카운트다운 글자: 크기 = 메모 글자의 배수(PC 23px × 5.2 = 120 논리 px, 터치 CSS 14px × 3.4 = 48px — 메모 위 끝에서
+ * 시작해 화면 가운데의 내 캐릭터에 닿지 않는 높이), 테두리 = 글자 크기의 8%(맵 위에서도 읽히게 바탕색), 숫자가 바뀐 순간
+ * popMs 동안 pop배에서 1배로 줄어든다(흔들림 · 번쩍임 줄이기면 끔 — 숫자는 그대로 보인다)
+ */
+const COUNT = { pc: 5.2, touch: 3.4, stroke: 0.08, pop: 1.25, popMs: 160 } as const;
 
 /** 가로 가운데 · 최대 폭: PC는 화면 가운데, 터치는 맵 안 범위 (HUD.touch.overlay) */
 function span(): { cx: number; max: number } {
@@ -134,6 +142,12 @@ export class Banners {
   /** 메모 상자 위 끝: PC 고정(HUD.noteY), 터치는 보이는 배너 아래 · 지금 놓인 자리 */
   private noteY = HUD.noteY;
   private noteAt = HUD.noteY;
+  /** 판 시작 카운트다운 글자 (떠 있는 동안만 있다) · 지금 글자를 띄운 시각 (튐 연출) */
+  private count: CrispText | null = null;
+  private countAt = 0;
+  private countPop = false;
+  /** 카운트다운 중 (글자를 숨긴 판 정지 중 포함): 메모를 꺼내지 않는다 */
+  private countHold = false;
   /** 디버그 · 테스트: 지금 보이는 문구들 (지속형 · 알림 · 메모. 괴물 경고 줄은 넣지 않는다). 읽을 때 만든다 */
   get visible(): string[] {
     const out: string[] = [];
@@ -143,7 +157,7 @@ export class Banners {
     return out;
   }
 
-  constructor(kit: HudKit) {
+  constructor(private readonly kit: HudKit) {
     const B = HUD.banner;
     const F = HUD.font;
     [this.persistent, this.rows] = kit.named('banner', () => [
@@ -174,6 +188,46 @@ export class Banners {
 
   pushNote(text: string, seconds: number): void {
     this.notes.push({ text, ms: seconds * 1000 });
+  }
+
+  /** 디버그 · 테스트: 지금 보이는 판 시작 카운트다운 글자 ('' = 없음) */
+  get countdownText(): string {
+    return this.count?.text ?? '';
+  }
+
+  /**
+   * 판 시작 카운트다운 글자. null = 카운트다운 표시가 끝났다(글자를 지우고 메모를 다시 꺼낸다), '' = 카운트다운 중이지만 글자는
+   * 숨긴다(판 정지 — 메모는 계속 미룬다). update보다 먼저 부른다: 카운트다운 중인 프레임에는 메모를 꺼내지 않는다.
+   * pop = 글자가 바뀐 순간 잠깐 키우는가 (흔들림 · 번쩍임 줄이기면 false)
+   */
+  setCountdown(label: string | null, nowMs: number, pop: boolean): void {
+    this.countHold = label !== null;
+    let t = this.count;
+    if (!label) {
+      t?.destroy();
+      this.count = null;
+      return;
+    }
+    if (!t) {
+      const size = Math.round(HUD.font.note * (HUD.touch ? COUNT.touch : COUNT.pc));
+      t = makeText(this.kit.scene, 0, 0, '', {
+        fontFamily: UI_FONT,
+        fontSize: `${size}px`,
+        fontStyle: 'bold',
+        color: hexColor(UI.white),
+        stroke: hexColor(UI.background),
+        strokeThickness: Math.max(2, Math.round(size * COUNT.stroke)),
+      })
+        .setOrigin(0.5, 0)
+        .setDepth(DEPTH + 2)
+        .setName('countdown');
+      this.count = t;
+    }
+    this.countPop = pop;
+    if (t.text !== label) {
+      t.setText(label);
+      this.countAt = nowMs;
+    }
   }
 
   /** 지속형(null이면 숨김)과 괴물 경고 줄(지속형이 없을 때 같은 자리) */
@@ -210,10 +264,17 @@ export class Banners {
       if (line) y += row.height + gap;
     });
     if (touch) this.noteY = y;
+    const count = this.count;
+    if (count) {
+      // 메모 상자 자리 (가로 가운데, 위 끝 = 메모 위 끝). 글자가 바뀐 직후에만 잠깐 크게
+      const k = this.countPop ? Math.max(0, 1 - (nowMs - this.countAt) / COUNT.popMs) : 0;
+      count.setScale(1 + (COUNT.pop - 1) * k).setPosition(span().cx, this.noteY);
+    }
     const cur = this.note.text;
     if (nowMs >= this.noteUntil) {
       const n = this.notes[0];
-      if (n && !this.blocked(n.text)) {
+      // 판 시작 카운트다운 중에는 메모를 꺼내지 않는다 (같은 자리 — 시작 문구는 "시작!" 뒤에)
+      if (n && !this.countHold && !this.blocked(n.text)) {
         this.notes.shift();
         this.showNote(n.text);
         this.noteUntil = nowMs + n.ms;

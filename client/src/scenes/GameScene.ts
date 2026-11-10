@@ -56,6 +56,7 @@ import { TouchInput, type TouchFrameCtx } from '../touchInput';
 import { TOUCH_HINT_MS, takeTouchHints } from '../touchTutorial';
 import type { IconId } from '../art/icons';
 import { Banners, type BannerLine } from '../ui/banners';
+import { CountdownTracker } from '../ui/countdownView';
 import { Hud } from '../ui/hud';
 import type { Tone } from '../ui/hudArt';
 import { HudKit, type Slice } from '../ui/hudKit';
@@ -327,6 +328,8 @@ export class GameScene extends Phaser.Scene {
   private readonly touchView: TouchView = { slots: [] };
   /** 괴물 재접속 대기 줄 (남은 초가 바뀔 때만 새로) */
   private pausedMemo: { sec: number; line: BannerLine } | null = null;
+  /** 판 시작 카운트다운 표시 (카운트다운을 본 판에서만 만들고 "시작!"이 사라지면 지운다) */
+  private countdown: CountdownTracker | null = null;
   /** 미니맵: 팀원 id → 역할 (이 판 명단. 프레임마다 · 엔티티마다 닫힘 함수를 만들지 않는다) */
   private readonly roleOf = (id: string): Role | null => {
     for (const r of this.app.match?.roster ?? []) if (r.id === id) return r.role;
@@ -448,6 +451,7 @@ export class GameScene extends Phaser.Scene {
       scoreboard: this.scoreboard.visible,
       scoreText: this.scoreboard.text,
       help: this.tutorial?.visible ?? false,
+      countdown: this.banners.countdownText,
       spotted: this.spottedEdge.shown,
       hudGraphics,
       panels: JSON.stringify(drawn),
@@ -539,6 +543,7 @@ export class GameScene extends Phaser.Scene {
     this.edges = CAM_ZOOM > 1 ? new EdgeMarkers(this.kit) : null;
     this.thumbBoxes = [];
     this.banners = new Banners(this.kit);
+    this.countdown = null;
     // 첫 판 조작 안내는 키보드 · 마우스용이라 터치 모드에서는 만들지 않는다 (터치는 판 직전 안내 + 판 중 위치 표시, M12)
     this.tutorial = info.firstMatch && !device.touch ? new TutorialOverlay(this.kit, info) : null;
     this.scoreboard = new Scoreboard(this.kit, info, balance, device.touch);
@@ -1336,6 +1341,14 @@ export class GameScene extends Phaser.Scene {
       this.stopSelfWalk();
       return;
     }
+    // 판 시작 카운트다운 (서버가 입력을 버린다): 보내지도 예측하지도 않는다 — 내 캐릭터가 먼저 움직였다 되돌아오지 않게.
+    // 그사이 누른 버튼은 버리되 누르고 있는 이동 키 · 스틱은 둔다("시작!" 순간 다시 누르지 않아도 걷는다, dropPressed)
+    if ((app.lastSnap?.world.countdown ?? 0) > 0) {
+      this.acc = 0;
+      this.sampler.dropPressed();
+      this.stopSelfWalk();
+      return;
+    }
     const dtMs = app.dt * 1000;
     this.acc = Math.min(this.acc + deltaMs, dtMs * MAX_CATCHUP_STEPS);
     const frames: InputFrame[] = [];
@@ -1794,13 +1807,16 @@ export class GameScene extends Phaser.Scene {
           : lastChance
             ? lastChanceLine()
             : null;
+    const counting = this.updateCountdown(snap, now);
     this.banners.update(persistent, warn, now);
     this.updateTouch(snap);
     const anyKey = this.sampler.anyKeyPressed;
     this.sampler.anyKeyPressed = false;
     // Tab 점수판(터치: 점수판 버튼)이 열리면 조작 안내를 닫는다 (두 패널이 겹치지 않게)
     const tab = this.sampler.tabHeld || (this.touchControls?.scoreboard ?? false);
-    this.tutorial?.update(now, anyKey || tab);
+    // 판 시작 카운트다운 동안에는 조작 안내를 키로 닫지 않고 표시 시간도 세지 않는다 (읽을 틈 — "시작!"부터 다시 센다)
+    if (counting) this.tutorial?.update(0, tab);
+    else this.tutorial?.update(now, anyKey || tab);
     this.scoreboard.update(tab, snap);
     // 이번 프레임 월드 그림이 다 놓인 뒤: 창 밖 그림은 그리지 않는다
     this.cullWorld();
@@ -1834,6 +1850,29 @@ export class GameScene extends Phaser.Scene {
       this.touchView.slots = this.hud.lastSlots;
       controls.update(this.touchView);
     }
+  }
+
+  /**
+   * 판 시작 카운트다운 (GAME_DESIGN 1장): 스냅샷의 남은 초를 큰 숫자 3 · 2 · 1로, 0이 되면 "시작!"을 잠깐 띄운다(메모 상자 자리 —
+   * 시작 문구는 그 뒤에). 숫자마다 소리 하나 · 시작 소리 하나. 카운트다운을 본 판에서만 추적기 · 글자를 만든다: 시험 방 · 판 중
+   * 재접속은 처음부터 0이라 아무것도 만들지 않는다. 품질 · 줄이기 설정과 무관하게 숫자는 보인다(게임 정보 — 튐만 끈다).
+   * 돌려주는 값 = 지금 카운트다운 중인가
+   */
+  private updateCountdown(snap: Snapshot, now: number): boolean {
+    const left = snap.world.countdown;
+    const counting = left > 0;
+    let c = this.countdown;
+    if (!c) {
+      if (!counting) return false;
+      c = this.countdown = new CountdownTracker();
+    }
+    c.update(left, now - this.app.lastSnapAt, snap.world.paused !== null, now);
+    if (c.sound) sfx.count(c.sound);
+    // "시작!": 떠 있던 첫 판 조작 안내는 이때부터 표시 시간을 센다
+    if (c.sound === 'go' && this.tutorial?.visible) this.tutorial.show(now, TUTORIAL_SECONDS);
+    this.banners.setCountdown(c.label, now, !this.flashReduced && (this.director?.shake.scale ?? 1) > 0);
+    if (!counting && c.label === null) this.countdown = null;
+    return counting;
   }
 
   /** 괴물 재접속 대기 줄 (남은 초가 같으면 같은 객체) */

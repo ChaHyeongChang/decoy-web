@@ -22,6 +22,11 @@ export interface LocalOptions {
   testHooks: boolean;
   /** 판 시드 (없으면 무작위) */
   seed?: number;
+  /**
+   * 판 시작 카운트다운을 켜는가 (app.ts: ?debug 시험 판은 ?countdown=1일 때만, 그 밖의 연습 판은 늘). 켜면 수치
+   * `match.startCountdown`, 끄면 0. 없으면 방 기본(시험 훅 방은 0)
+   */
+  countdown?: boolean;
 }
 
 export class LocalTransport implements Transport {
@@ -43,7 +48,15 @@ export class LocalTransport implements Transport {
     // 한 방의 봇은 같은 시드를 쓴다 (생존자 봇의 계획 — 어느 거점을 혼자 · 함께 — 이 시드에서 나와 서로 맞물린다)
     const driver = new BotDriver((info) => practiceBrain(info.role, seed), PRACTICE_BALANCE);
     this.core = new ServerCore(
-      { balance: PRACTICE_BALANCE, seed, testHooks: options.testHooks, practice: true },
+      {
+        balance: PRACTICE_BALANCE,
+        seed,
+        testHooks: options.testHooks,
+        practice: true,
+        ...(options.countdown === undefined
+          ? {}
+          : { startCountdown: options.countdown ? PRACTICE_BALANCE.match.startCountdown : 0 }),
+      },
       driver.hooks(),
       () => performance.now(),
     );

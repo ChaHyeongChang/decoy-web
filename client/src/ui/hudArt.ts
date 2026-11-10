@@ -283,11 +283,11 @@ export function abilityName(role: RoleId): string {
 
 /**
  * 역할별 행동 칸 (순수 함수, 서버 스냅샷만 본다). 생존자: 능력(Space) · 구조(E), 괴물: 공격 · 돌진 · 포효 · 시야 모드.
- * 판이 멈췄으면(괴물 재접속 대기) 모두 못 씀. 생존자는 자유 상태일 때만, 괴물은 대기 · 기절 · 돌진 · 공격 준비 중이 아닐 때만 쓸 수 있다
+ * 판이 멈췄으면(괴물 재접속 대기 · 판 시작 카운트다운) 모두 못 씀. 생존자는 자유 상태일 때만, 괴물은 대기 · 기절 · 돌진 · 공격 준비 중이 아닐 때만 쓸 수 있다
  * (서버 monsterCanAct · survivorAbilityInput과 같은 조건). 구조는 팀원이 수감 중이고 내가 구조 구역 안일 때 ready
  */
 export function actionSlots(snap: Snapshot, balance: Balance, role: Role): ActionSlot[] {
-  const paused = snap.world.paused !== null;
+  const paused = snap.world.paused !== null || snap.world.countdown > 0;
   const mv = snap.you.move;
   if (role !== 'monster') {
     const s = snap.you.surv;

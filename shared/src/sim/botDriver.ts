@@ -89,7 +89,7 @@ export class BotDriver {
     return [...(this.bots.get(room)?.values() ?? [])];
   }
 
-  /** 틱마다: 판에 있는 봇 자리마다 입력 하나. 괴물 재접속 대기(판 정지) 중에는 넣지 않는다 */
+  /** 틱마다: 판에 있는 봇 자리마다 입력 하나. 괴물 재접속 대기(판 정지) · 판 시작 카운트다운 중에는 넣지 않는다 */
   beforeStep(room: Room): void {
     const map = this.bots.get(room);
     const game = room.game;
@@ -100,7 +100,8 @@ export class BotDriver {
         map.delete(id);
         continue;
       }
-      if (game.paused !== null || !game.players.has(id)) continue;
+      // 카운트다운 중에는 두뇌를 부르지 않는다: 봇 난수 · 막힘 판정이 판이 흐르기 전에 쓰이지 않는다
+      if (game.paused !== null || game.countdownLeft > 0 || !game.players.has(id)) continue;
       bot.seq += 1;
       const snap = bot.lastSnap;
       let input: InputFrame;

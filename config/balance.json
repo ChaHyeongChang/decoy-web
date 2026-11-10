@@ -5,6 +5,7 @@
     "players": 4,
     "survivors": 3,
     "timeLimit": 720,
+    "startCountdown": 3,
     "monsterStartDelay": 5,
     "lastSurvivorGrace": 30,
     "reconnectGrace": 30

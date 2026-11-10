@@ -140,6 +140,8 @@ export const UI_TEXT = {
   spotted: '발각',
   outOfRange: '범위 밖',
   monsterWait: '괴물이 깨어나기까지',
+  /** 판 시작 카운트다운 3 · 2 · 1 뒤 (플레이테스트 a-8): 큰 글자로 잠깐 */
+  countdownGo: '시작!',
   monsterReconnect: '괴물 재접속 대기',
   disconnected: '연결이 끊겼습니다. 다시 연결하는 중…',
   wakingTitle: '서버를 깨우는 중…',
