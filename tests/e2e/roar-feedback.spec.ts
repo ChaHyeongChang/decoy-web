@@ -280,9 +280,10 @@ test('포효 (괴물): 화살표 + 창 안 핑 = 미니맵 = 소리 = 알림의 
       expect(tip.y).toBeGreaterThanOrEqual(MAP_RECT.y);
       expect(tip.y).toBeLessThanOrEqual(MAP_RECT.y + MAP_RECT.h);
       // 셰브론은 배지 밖 대상 쪽을 가리킨다: 끝이 커진 배지 테두리보다 멀고, 보통 화살표의 끝과 같은 거리다
+      // (배지는 기기 픽셀에 맞춰 놓고 셰브론은 맞추지 않아 1px 안에서 어긋난다)
       const reach = Math.hypot(tip.x - m.x, tip.y - m.y);
       expect(reach).toBeGreaterThan(r);
-      expect(reach).toBeCloseTo((EDGE_ART.r + EDGE_ART.chevGap + EDGE_ART.chevLen) * HUD.s, 3);
+      expect(Math.abs(reach - (EDGE_ART.r + EDGE_ART.chevGap + EDGE_ART.chevLen) * HUD.s)).toBeLessThan(1);
     }
     // 고리: 구운 크기(배지 둘레)에서 haloTo까지, 알파는 퍼질수록 옅게 — 같은 위상에서 나온 두 값이다
     expect(halo.scale).toBeGreaterThanOrEqual(1 - 1e-6);

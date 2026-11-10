@@ -50,14 +50,8 @@ import { cullable } from '../render/camera';
 import { CameraDirector, devPerTile } from '../render/cameraDirector';
 import { UI } from '../art/palette';
 import { ScreenEffects, collectFxTargets } from '../render/effects';
-import {
-  MINIMAP_BIG_TEXELS,
-  bigMinimapPlace,
-  bigMinimapTexels,
-  pingPulse,
-  spottedEdgeAlpha,
-  type PingPulse,
-} from '../render/prefsFx';
+import { MINIMAP_BIG_TEXELS, bigMinimapPlace, bigMinimapTexels, spottedEdgeAlpha } from '../render/prefsFx';
+import { pingPulse, type PingPulse } from '../render/prefsFx';
 import { WorldRenderer, type MotionSource } from '../render/worldRenderer';
 import { roarResultText } from '../roarFeedback';
 import { TouchInput, type TouchFrameCtx } from '../touchInput';

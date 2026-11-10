@@ -25,7 +25,6 @@ import {
   PRISON_CENTER,
   type DrawnEntity,
   type ExitView,
-  type PingRingDebug,
   type PointView,
   type Role,
 } from '@decoy/shared';
@@ -39,12 +38,16 @@ import {
   resizeCanvasTexture,
   uploadCanvasTexture,
 } from '../render/fogPaint';
-import { FR, MM_PING } from './hudArt';
+import { FR } from './hudArt';
 import { BaseRefreshPacer } from './hudGate';
 import type { HudKit, Slice, Spr } from './hudKit';
 import type { CrispText } from './text';
 import { CAM_ZOOM, HUD } from './layout';
-import { MINIMAP_BIG, type PingPulse } from '../render/prefsFx';
+import { MINIMAP_BIG } from '../render/prefsFx';
+// 포효 핑 펄스 고리 (a-3): 다른 줄과 섞이지 않게 따로 가져온다
+import type { PingRingDebug } from '@decoy/shared';
+import { MM_PING } from './hudArt';
+import type { PingPulse } from '../render/prefsFx';
 
 /** 미니맵 자리 (논리 px): 그림 왼쪽 위 · 폭, 틀 여백 · 제목 줄 */
 export interface Place {
