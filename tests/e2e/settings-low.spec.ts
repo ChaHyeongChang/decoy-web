@@ -1,12 +1,13 @@
 // 낮은 휴대폰 가로의 설정 화면 (플레이테스트 a-6, client/src/ui/settings.css의 (max-height: 420px) 블록 · style.css):
 // 아이폰 14 가로 · 주소창이 있는 채(844×300 · 844×340)와 좁은 휴대폰(667×330), 안전 영역 좌우 47 · 아래 21 흉내.
 //  - 설명 글씨 12px(글자 하한), 카드 안 글자는 모두 12px 이상
-//  - 판 중 그래픽 탭 세 줄이 스크롤 없이 다 보인다 (고치기 전 844×300: 1.9줄)
+//  - 판 중 그래픽 탭 세 줄이 스크롤 없이 다 보인다 (고치기 전 844×300: 1.9줄, 667×330: 1.4줄)
 //  - '닫기' · '모두 기본값으로' · '기본값'은 보이는 면만 34 · 34 · 30px, 누르는 자리(요소 상자)는 48px 그대로 — 면 밖 가장자리를
 //    눌러도 그 버튼이 눌린다
-//  - 탭 칸 · 본문이 넘치지 않고(가로 스크롤 없음 · 탭 글자가 칸 안), 판 중 '판은 멈추지 않아요'는 머리 줄에 있다(폭 740 이상)
+//  - 탭 칸 · 본문이 넘치지 않고(가로 스크롤 없음 · 탭 글자가 칸 안), 판 중 '판은 멈추지 않아요'는 머리 줄에 있다(폭 600 이상)
 //  - 좁은 화면(폭 739 이하)은 고르는 칸 넷이 한 줄
-//  - 6자 선택지 두 개짜리 줄(조작 탭에 더해질 '공격 버튼' 줄 흉내)도 한 줄에 든다
+//  - 조작 탭의 '공격 버튼' 줄(a-2: 6자 선택지 둘 + 긴 설명)도 고르는 칸이 한 줄이고 넘치지 않는다 — 그 줄이 있으면 실제 줄, 없으면
+//    a-2와 같은 글의 흉내
 //  - 높이 420 초과는 그대로다 (설명 13px · 면 = 상자)
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { SETTINGS_TEXT } from '../../client/src/data/storyText';
@@ -93,6 +94,7 @@ interface Measured {
   overflowX: string[];
   note: Box | null;
   close: Box;
+  resetAll: Box;
 }
 
 async function measure(page: Page): Promise<Measured> {
@@ -159,6 +161,7 @@ async function measure(page: Page): Promise<Measured> {
       ].filter((s) => s !== ''),
       note: note && visible(note) ? box(note) : null,
       close: box(q('[data-testid="settings-close"]')),
+      resetAll: box(q('[data-testid="settings-reset-all"]')),
     };
   });
 }
@@ -241,40 +244,75 @@ async function tapTopEdge(page: Page, f: Face): Promise<void> {
 }
 
 /**
- * 조작 탭에 더해질 '공격 버튼' 줄(6자 선택지 둘)을 흉내 낸다: 진동 줄을 베껴 이름 · 선택지 · 설명 글자만 바꿔 그 줄 다음에 넣고
- * 잰 뒤 지운다. 고르는 칸이 한 줄인가 · 줄 높이 · 가로 넘침
+ * a-2(괴물 공격 버튼 방식)의 설명 — a-2의 `SETTINGS_TEXT.attackButtonHint`와 같은 글이다. 이 브랜치에는 그 줄이 아직 없어 흉내에 쓴다
+ * (a-2를 합친 뒤에는 실제 줄을 잰다 — attackRowFit)
  */
-async function attackRowFit(page: Page): Promise<{ oneLine: boolean; h: number; overflow: boolean }> {
-  return page.evaluate(() => {
-    const src = document.querySelector<HTMLElement>('[data-testid="row-haptics"]');
-    if (!src || src.offsetParent === null) throw new Error('진동 줄 없음');
-    const row = src.cloneNode(true) as HTMLElement;
-    row.dataset.testid = 'row-e2e-attack';
-    row.querySelector('.field-label')!.textContent = '공격 버튼';
-    const segs = [...row.querySelectorAll<HTMLElement>('.seg')];
-    const names = ['끌어서 조준', '누르면 바로'];
-    segs.forEach((s, i) => {
-      for (const n of [...s.childNodes]) if (n.nodeType === 3) n.textContent = names[i] ?? '';
-    });
-    let hint = row.querySelector<HTMLElement>('.set-hint');
-    if (!hint) {
-      hint = document.createElement('div');
-      hint.className = 'set-hint';
-      row.append(hint);
+const ATTACK_HINT =
+  '괴물 공격 버튼 — 끌어서 조준은 짧게 누르면 보는 방향, 끌면 그쪽으로 공격해요. 누르면 바로는 닿자마자 공격해요. 다음 판부터 적용돼요';
+
+interface AttackRow {
+  /** 실제 줄(row-attack-button)을 쟀는가 (거짓 = 흉내) */
+  real: boolean;
+  /** 고르는 칸 둘이 한 줄 */
+  oneLine: boolean;
+  /** 줄 높이 (px) */
+  h: number;
+  /** 설명 줄 수 */
+  hintLines: number;
+  /** 설명이 이름 아래 왼쪽 칸(고르는 칸 옆)에 있다 — 폭 740 이상 배치 */
+  hintBeside: boolean;
+  /** 본문 가로 넘침 */
+  overflow: boolean;
+}
+
+/**
+ * 조작 탭의 '공격 버튼' 줄(a-2, 6자 선택지 둘 + 긴 설명)을 잰다. 그 줄이 있으면 실제 줄을 재고, 없으면 진동 줄을 베껴 이름 ·
+ * 선택지 · 설명을 a-2와 같은 글('끌어서 조준' · '누르면 바로' · ATTACK_HINT)로 바꿔 그 줄 다음에 넣고 잰 뒤 지운다
+ */
+async function attackRowFit(page: Page): Promise<AttackRow> {
+  return page.evaluate((hintText) => {
+    const real = document.querySelector<HTMLElement>('[data-testid="row-attack-button"]');
+    const isReal = real !== null && real.offsetParent !== null;
+    let row: HTMLElement;
+    if (real && isReal) row = real;
+    else {
+      const src = document.querySelector<HTMLElement>('[data-testid="row-haptics"]');
+      if (!src || src.offsetParent === null) throw new Error('진동 줄 없음');
+      row = src.cloneNode(true) as HTMLElement;
+      row.dataset.testid = 'row-e2e-attack';
+      row.querySelector('.field-label')!.textContent = '공격 버튼';
+      const names = ['끌어서 조준', '누르면 바로'];
+      [...row.querySelectorAll<HTMLElement>('.seg')].forEach((s, i) => {
+        for (const n of [...s.childNodes]) if (n.nodeType === 3) n.textContent = names[i] ?? '';
+      });
+      let made = row.querySelector<HTMLElement>('.set-hint');
+      if (!made) {
+        made = document.createElement('div');
+        made.className = 'set-hint';
+        row.append(made);
+      }
+      made.hidden = false;
+      made.textContent = hintText;
+      src.after(row);
     }
-    hint.hidden = false;
-    hint.textContent = '누르면 바로는 닿는 순간 지금 방향으로 공격해요 · 다음 판부터';
-    src.after(row);
+    const segs = [...row.querySelectorAll<HTMLElement>('.seg')];
+    const hint = row.querySelector<HTMLElement>('.set-hint');
+    if (!hint || segs.length === 0) throw new Error('공격 버튼 줄의 칸 · 설명 없음');
     const tops = segs.map((s) => Math.round(s.getBoundingClientRect().top));
+    const hb = hint.getBoundingClientRect();
+    const sb = segs[0]!.getBoundingClientRect();
     const body = document.querySelector<HTMLElement>('.set-body')!;
     const out = {
+      real: isReal,
       oneLine: tops.length === 2 && tops[0] === tops[1],
       h: Math.round(row.getBoundingClientRect().height * 10) / 10,
+      hintLines: Math.round(hb.height / Number.parseFloat(getComputedStyle(hint).lineHeight)),
+      hintBeside: hb.right <= sb.left && hb.top < sb.bottom,
       overflow: body.scrollWidth > body.clientWidth,
     };
-    row.remove();
+    if (!isReal) row.remove();
     return out;
-  });
+  }, ATTACK_HINT);
 }
 
 for (const [width, height] of [
@@ -301,10 +339,16 @@ for (const [width, height] of [
         for (const r of m.rows) expect(r.h, `${name} ${r.id} 줄 높이`).toBeLessThanOrEqual(64);
       }
     }
-    // 조작 탭: 6자 선택지 두 개짜리 줄이 들어와도 한 줄 · 가로 넘침 없음
+    // 조작 탭: '공격 버튼' 줄(6자 선택지 둘 + 77자 설명)도 고르는 칸이 한 줄 · 가로 넘침 없음. 설명은 이름 아래 왼쪽 칸에 세 줄로
+    // 접혀(12px) 줄 높이 = 이름 + 설명 세 줄 + 여백 76.8px — 설명이 전체 폭 줄로 내려가면(폭 739 이하 배치) 칸 52px 아래에 붙는다
     const attack = await attackRowFit(page);
-    expect(attack, `${name} 공격 버튼 줄 흉내`).toMatchObject({ oneLine: true, overflow: false });
-    expect(attack.h).toBeLessThanOrEqual(64);
+    expect(attack, `${name} 공격 버튼 줄`).toMatchObject({
+      oneLine: true,
+      overflow: false,
+      hintBeside: true,
+    });
+    expect(attack.hintLines, `${name} 공격 버튼 설명 줄 수`).toBeLessThanOrEqual(3);
+    expect(attack.h, `${name} 공격 버튼 줄 높이`).toBeLessThanOrEqual(80);
 
     // 보이는 면: '닫기' · '모두 기본값으로' 34px, '기본값' 30px (누르는 자리 48px)
     await openSettingsTab(page, 'screen');
@@ -345,7 +389,7 @@ for (const [width, height] of [
     if (!g.note) throw new Error('판 중 안내 없음');
     expect(g.note.bottom, `${name} 판 중 안내가 머리 줄 안`).toBeLessThanOrEqual(g.close.bottom + 0.5);
     expect(g.note.top).toBeGreaterThanOrEqual(g.close.top - 0.5);
-    expect(g.note.right).toBeLessThanOrEqual(g.close.left);
+    expect(g.note.right).toBeLessThanOrEqual(g.resetAll.left);
     // 본문이 머리 줄 바로 아래에서 시작한다 (안내 줄이 따로 높이를 쓰지 않는다)
     expect(g.body.top - g.close.bottom).toBeLessThanOrEqual(4);
     for (const tab of ['screen', 'sound']) {
@@ -409,8 +453,11 @@ test('좁은 휴대폰 가로 667×330(안전 영역): 설명 12px · 고르는 
       }
     }
   }
+  // '공격 버튼' 줄: 고르는 칸 한 줄 · 넘침 없음. 설명은 전체 폭으로 칸 아래 두 줄 (줄 높이 = 칸 52 + 설명 두 줄 + 여백 93.2px)
   const attack = await attackRowFit(page);
-  expect(attack, '667x330 공격 버튼 줄 흉내').toMatchObject({ oneLine: true, overflow: false });
+  expect(attack, '667x330 공격 버튼 줄').toMatchObject({ oneLine: true, overflow: false, hintBeside: false });
+  expect(attack.hintLines, '667x330 공격 버튼 설명 줄 수').toBeLessThanOrEqual(2);
+  expect(attack.h, '667x330 공격 버튼 줄 높이').toBeLessThanOrEqual(96);
 
   await openSettingsTab(page, 'screen');
   await press(page.getByTestId('reduce-shake-on'));
@@ -424,15 +471,23 @@ test('좁은 휴대폰 가로 667×330(안전 영역): 설명 12px · 고르는 
   await tapTopEdge(page, close);
   await expect(page.getByTestId('settings-panel')).toBeHidden();
 
-  // 판 중: 폭 739 이하는 안내가 머리 줄 아래 한 줄(12px), 그래픽은 두 줄 넘게 보인다 (고치기 전 1.4줄)
+  // 판 중: 그래픽 세 줄이 본문 안에 온전히 보인다 (고치기 전 1.4줄. 안내를 머리 줄 아래에 두면 2.7줄 — 폭 600 이상은 머리 줄로 올린다).
+  // 안내는 제목 · '모두 기본값으로' 사이 칸(233px)에 12px 두 줄로 머리 줄 안에 든다
   await openMatchSettings(page);
   await openSettingsTab(page, 'graphics');
   const g = await measure(page);
   expectCompact(g, '667x330 판 중 graphics');
-  expect(g.rows.filter((r) => r.inside).length).toBeGreaterThanOrEqual(2);
+  expect(g.rows.map((r) => r.id)).toEqual(['quality', 'frame-limit', 'char-style']);
+  expect(
+    g.rows.every((r) => r.inside),
+    '667x330 판 중 그래픽 세 줄',
+  ).toBe(true);
+  expect(g.bodyScroll, '667x330 판 중 그래픽 스크롤').toBeLessThanOrEqual(4);
   if (!g.note) throw new Error('판 중 안내 없음');
-  expect(g.note.top).toBeGreaterThanOrEqual(g.close.bottom - 0.5);
-  expect(g.note.height).toBeLessThanOrEqual(26);
+  expect(g.note.top, '667x330 판 중 안내가 머리 줄 안').toBeGreaterThanOrEqual(g.close.top - 0.5);
+  expect(g.note.bottom, '667x330 판 중 안내가 머리 줄 안').toBeLessThanOrEqual(g.close.bottom + 0.5);
+  expect(g.note.right).toBeLessThanOrEqual(g.resetAll.left);
+  expect(g.body.top - g.close.bottom).toBeLessThanOrEqual(4);
   expect(problems).toEqual([]);
   await context.close();
 });

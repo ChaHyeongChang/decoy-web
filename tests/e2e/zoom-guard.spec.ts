@@ -4,7 +4,8 @@
 // 잠금이 풀리지 않는다. 응답을 route.fulfill로 바꾸면 그 문서의 서버 WebSocket이 막힌다), 전체 화면 API를 없애고, 아이폰 14 가로의
 // 안전 영역(좌우 47 · 아래 21)을 준다. 기기는 844×340(주소창이 있는 가로).
 //  ① 띠 핀치: 고치기 전에는 두 손가락이 모두 안전 영역 띠(body)에 닿으면 5배까지 확대됐다 → 배율 1
-//  ② 구멍 훑기: 화면 격자의 점마다 실효 touch-action을 셈해 확대가 허용되는 점 0 (고치기 전 판 중 1,412점)
+//  ② 구멍 훑기: 화면 격자의 점마다 실효 touch-action을 셈해 확대가 허용되는 점 0 (고치기 전 판 중 1,412점) — 첫 화면 · 내 기록 ·
+//     설정 · 방 화면 · 판 직전 안내 · 판 중 · 판 중 설정 · 결과
 //  ③ 감지 · 복구: 배율 2(CDP) → 안내가 보이는 화면 안 · 조작 멈춤 → 안내 위에서 오므리면 1 → 안내 닫힘 · 다시 막음
 //  ④ 방어가 스크롤 · 버튼 · 스틱을 깨지 않는다
 // 자동으로 못 보는 것(실기기 HUMAN_CHECKS): 두 번 탭 확대(Chromium 흉내에서는 나지 않는다) · gesture* 이벤트(WebKit에만 있다) ·
@@ -25,6 +26,7 @@ import {
   pointerCounts,
   press,
   recordInputs,
+  sendTest,
   waitForSnapshots,
   type DeviceOptions,
 } from './helpers';
@@ -224,7 +226,15 @@ function scanHoles(step: number): Holes {
       for (const m of ['blink', 'webkit'] as const)
         if (eff(el, m).pz) out[m][label(el)] = (out[m][label(el)] ?? 0) + 1;
     }
-  for (const sel of ['.lobby', '.set-body', '.set-tabs', '.life-tutorial', '.hub-card']) {
+  for (const sel of [
+    '.lobby',
+    '.set-body',
+    '.set-tabs',
+    '.life-tutorial',
+    '.hub-card',
+    '.result',
+    '.table-wrap',
+  ]) {
     const el = document.querySelector<HTMLElement>(sel);
     if (!el || !el.checkVisibility()) continue;
     out.scroll[sel] = eff(el, 'blink').py && eff(el, 'webkit').py;
@@ -374,7 +384,7 @@ test('로비: 안전 영역 띠를 핀치해도 확대되지 않고, 손가락 �
   await s.context.close();
 });
 
-test('구멍 훑기(로비): 첫 화면 · 설정 · 방 화면 · 판 직전 안내 어디에도 확대가 허용되는 점이 없고 스크롤 컨테이너는 세로 끌기가 된다', async ({
+test('구멍 훑기(로비): 첫 화면 · 내 기록 · 설정 · 방 화면 · 판 직전 안내 어디에도 확대가 허용되는 점이 없고 스크롤 컨테이너는 세로 끌기가 된다', async ({
   browser,
 }) => {
   test.setTimeout(120_000);
@@ -382,6 +392,16 @@ test('구멍 훑기(로비): 첫 화면 · 설정 · 방 화면 · 판 직전 �
   const { page } = s;
   // 고치기 전: body(띠) 1,412점
   await expectNoHoles(page, '첫 화면', ['.lobby']);
+  // 내 기록(오늘 · 옷장): 스크롤 컨테이너 .hub-card (탭 줄 · 옷장 칸은 그 안 — 격자 훑기가 덮는다)
+  await press(page.getByTestId('level-chip'));
+  await expect(page.getByTestId('hub')).toBeVisible();
+  await expectNoHoles(page, '내 기록 오늘', ['.lobby', '.hub-card']);
+  await press(page.getByTestId('hub-tab-wardrobe'));
+  await expect(page.getByTestId('wardrobe')).toBeVisible();
+  await expectNoHoles(page, '내 기록 옷장', ['.lobby', '.hub-card']);
+  await pinchBands(s, '내 기록');
+  await press(page.getByTestId('hub-close'));
+  await expect(page.getByTestId('hub')).toBeHidden();
   await press(page.getByTestId('settings-button').first());
   await expect(page.getByTestId('settings-panel')).toBeVisible();
   for (const tab of ['graphics', 'screen', 'sound', 'controls']) {
@@ -404,7 +424,7 @@ test('구멍 훑기(로비): 첫 화면 · 설정 · 방 화면 · 판 직전 �
   await s.context.close();
 });
 
-test('판 중: 띠 핀치 · 이동 스틱을 누른 채 띠를 문질러도 확대되지 않고 조작은 그대로다. 판 중 · 판 중 설정에도 구멍이 없다', async ({
+test('판 중: 띠 핀치 · 이동 스틱을 누른 채 띠를 문질러도 확대되지 않고 조작은 그대로다. 판 중 · 판 중 설정 · 결과에도 구멍이 없다', async ({
   browser,
 }) => {
   test.setTimeout(150_000);
@@ -464,6 +484,34 @@ test('판 중: 띠 핀치 · 이동 스틱을 누른 채 띠를 문질러도 확
   await expect(page.getByTestId('settings-panel')).toBeVisible();
   await press(page.getByTestId('settings-close'));
   await expect(page.getByTestId('settings-panel')).toBeHidden();
+
+  // 결과 화면(스크롤 컨테이너 .result 안에 가로 스크롤 표 .table-wrap): 구멍 없음 · 띠 핀치 배율 1 · 표에서 시작한 세로 끌기는 결과를 스크롤한다
+  await sendTest(page, { kind: 'setTime', timeLeft: 0.1 });
+  await expect(page.getByTestId('result')).toBeVisible();
+  await expectNoHoles(page, '결과', ['.result', '.table-wrap']);
+  await pinchBands(s, '결과');
+  const res = await page.evaluate((h) => {
+    const r = document.querySelector<HTMLElement>('.result')!;
+    const t = document.querySelector<HTMLElement>('.table-wrap')!.getBoundingClientRect();
+    // 표의 보이는 부분 가운데
+    const top = Math.max(t.top, 0);
+    const bottom = Math.min(t.bottom, h);
+    return {
+      max: r.scrollHeight - r.clientHeight,
+      top: r.scrollTop,
+      x: t.left + t.width / 2,
+      y: (top + bottom) / 2,
+      seen: bottom - top,
+    };
+  }, H);
+  // 결과가 화면보다 길다 (스크롤 시험이 뜻이 있다) · 표가 보인다
+  expect(res.max - res.top).toBeGreaterThan(60);
+  expect(res.seen).toBeGreaterThan(40);
+  await drag(touch, res.x, res.y, Math.max(res.y - 160, 8));
+  await expect
+    .poll(() => page.evaluate(() => document.querySelector('.result')!.scrollTop), POLL)
+    .toBeGreaterThan(res.top + 40);
+  expect(await scaleNow(page)).toBe(1);
 
   expect(s.problems).toEqual([]);
   await touch.detach();
@@ -590,9 +638,10 @@ test('?zoomguard=0(진단: 막기만 끔): 띠 핀치로 실제로 확대되고 
   const room = await page.evaluate(() => window.__DECOY__?.room ?? '');
   expect(room).toMatch(/^[A-Z]{4}$/);
 
-  // 대조: 막지 않으면 이 흉내에서 아래 띠 핀치가 확대된다 (위 시험들의 "배율 1"이 뜻이 있다)
+  // 대조: 막지 않으면 이 흉내에서 아래 띠 핀치가 확대된다. 막기 시험들과 같은 읽기(그린 프레임 세 장 뒤 한 번 — scaleNow)로
+  // 확대가 보여야 그 시험들의 "배율 1"이 뜻이 있다 (기다렸다가 읽으면 늦게 반영되는 러너에서 막기 시험의 구멍을 놓친다)
   await touch.pinch(W / 2, H - 6, 80, 260, { steps: 10, stepMs: 16 });
-  await expect.poll(() => scaleNow(page), POLL).toBeGreaterThan(1.5);
+  expect(await scaleNow(page), '막지 않은 아래 띠 핀치 (pinchBands와 같은 읽기)').toBeGreaterThan(1.5);
   // 감지 · 안내는 그대로다
   await expect(page.getByTestId('zoom-notice')).toBeVisible();
   await expect.poll(async () => (await noticeState(page)).cardInside, POLL).toBe(true);

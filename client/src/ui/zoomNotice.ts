@@ -29,12 +29,11 @@ function buildNotice(): HTMLDivElement {
 
 /**
  * 확대 막기 · 감지를 켠다 (main.ts, 터치 모드에서만 부팅 때 한 번).
- * ?zoomguard=0은 진단용이다: 막기(CSS 뿌리 규칙 · 문서 리스너)만 끄고 감지 · 안내는 그대로 둔다 — 막기가 잘 되면 사람이 확대
- * 상태를 만들 수 없어서, 실기기에서 안내 · 복구를 확인할 때 쓴다 (docs/HUMAN_CHECKS.md). 판정 · 정보와 무관해 배포 주소에서도 받는다
+ * guard가 거짓(주소 ?zoomguard=0, app.ts readParams)이면 막기(CSS 뿌리 규칙 · 문서 리스너)만 끄고 감지 · 안내는 그대로 둔다 — 막기가
+ * 잘 되면 사람이 확대 상태를 만들 수 없어서, 실기기에서 안내 · 복구를 확인할 때 쓴다 (docs/HUMAN_CHECKS.md)
  */
-export function startZoomGuard(): void {
+export function startZoomGuard(guard: boolean): void {
   const root = document.documentElement;
-  const guard = new URLSearchParams(window.location.search).get('zoomguard') !== '0';
   if (!guard) {
     root.style.touchAction = 'auto';
     document.body.style.touchAction = 'auto';

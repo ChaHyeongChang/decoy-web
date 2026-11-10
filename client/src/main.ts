@@ -70,7 +70,7 @@ gfxState.camZoom = CAM_ZOOM;
 // 터치 모드 · 세로 · 브라우저 안 (M11). 로비가 전체 화면 버튼을 그리기 전에 정한다
 initDevice(params.touch);
 // 화면 확대 막기 · 감지 (플레이테스트 a-1): 터치 모드에서만. PC는 브라우저 확대를 그대로 둔다
-if (device.touch) startZoomGuard();
+if (device.touch) startZoomGuard(params.zoomGuard);
 const uiRoot = document.getElementById('ui-root') ?? document.body;
 const gameRoot = document.getElementById('game-root') ?? document.body;
 const app = new App(params, uiRoot);

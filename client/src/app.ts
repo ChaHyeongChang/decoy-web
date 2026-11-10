@@ -115,6 +115,12 @@ export interface AppParams {
    * 저장하지 않음, 그림 정보 · 판정과 무관해 배포 주소에서도 받는다). 없거나 그 밖의 값이면 true(맞춘다)
    */
   camSnap: boolean;
+  /**
+   * ?zoomguard=0: 터치 모드의 화면 확대 막기(뿌리 touch-action · 문서 터치 리스너, zoomGuard.ts)만 끄고 감지 · 확대 안내는 그대로 둔다
+   * (플레이테스트 a-1 — 막기가 잘 되면 사람이 확대 상태를 만들 수 없어, 실기기에서 안내 · 복구를 일부러 보는 진단용. 저장하지 않음,
+   * 자기 화면의 확대만 풀리고 판정 · 정보와 무관해 ?camSnap처럼 배포 주소에서도 받는다). 없거나 그 밖의 값이면 true(막는다)
+   */
+  zoomGuard: boolean;
 }
 
 /** ?cam 값 해석: 1~6 사이 수만 (소수 허용), 그 밖에는 null */
@@ -151,6 +157,7 @@ export function readParams(search: string): AppParams {
     chars: parseCharStyle(p.get('chars')),
     cam: parseCamZoom(p.get('cam')),
     camSnap: p.get('camSnap') !== '0',
+    zoomGuard: p.get('zoomguard') !== '0',
   };
 }
 
