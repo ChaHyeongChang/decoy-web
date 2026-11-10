@@ -9,6 +9,7 @@ import type { DrawnEntity, PointView } from '@decoy/shared';
 import { HIDDEN_SURVIVOR, UI } from '../../client/src/art/palette';
 import { ROAR_RESULT, Sfx } from '../../client/src/audio';
 import { STORY_TEXT, UI_TEXT } from '../../client/src/data/storyText';
+import { drawRoarPing } from '../../client/src/render/characters';
 import {
   edgeTargets,
   inView,
@@ -25,6 +26,15 @@ import { EDGE_HALO, chevBack, edgeLook, haloScale } from '../../client/src/ui/ed
 import { EDGE_ART, EDGE_GLYPH, FR, MM_BODY, MM_PING, hudSpecs } from '../../client/src/ui/hudArt';
 import { BANNER_MIN_MS, BANNER_TIED_MIN_MS, shownUntil } from '../../client/src/ui/hudGate';
 import { loadTestBalance } from '../helpers/fixtures';
+
+// characters.ts는 불러올 때 Phaser 벡터를 만든다 (월드 핑 그림은 펜만 쓴다)
+vi.mock('phaser', () => {
+  class Vector2 {
+    x = 0;
+    y = 0;
+  }
+  return { default: { Math: { Vector2 } } };
+});
 
 const balance = loadTestBalance();
 
@@ -116,6 +126,72 @@ describe('포효 핑 펄스 (창 밖 화살표 · 미니맵 고리)', () => {
       for (const reduced of [false, true]) expect(pingPulse(k, reduced, out).alpha).toBe(0);
   });
 
+  it('월드 핑 고리도 같은 펄스 값으로 그린다: 보통은 예전 식 그대로 1.5초에 3번 퍼지고, 번쩍임 줄이기면 시간과 무관한 고정 고리', () => {
+    /** 기록 펜: 선 · 채움마다 스타일과 경로 반지름(가운데에서 가장 먼 점) */
+    const record = (pulse: PingPulse): { stroke: boolean; color: number; alpha: number; r: number }[] => {
+      const ops: { stroke: boolean; color: number; alpha: number; r: number }[] = [];
+      const style = { line: { color: 0, alpha: 0 }, fill: { color: 0, alpha: 0 } };
+      let r = 0;
+      const pt = (x: number, y: number): void => {
+        r = Math.max(r, Math.hypot(x - 64, y - 96));
+      };
+      const pen = {
+        lineStyle(_w: number, color: number, alpha = 1): void {
+          style.line = { color, alpha };
+        },
+        fillStyle(color: number, alpha = 1): void {
+          style.fill = { color, alpha };
+        },
+        beginPath(): void {
+          r = 0;
+        },
+        closePath(): void {
+          return undefined;
+        },
+        moveTo: pt,
+        lineTo: pt,
+        strokePath(): void {
+          ops.push({ stroke: true, ...style.line, r });
+        },
+        fillPath(): void {
+          ops.push({ stroke: false, ...style.fill, r });
+        },
+      };
+      // 타일 (2, 3) = 그림 px (64, 96)
+      drawRoarPing(pen, 2, 3, pulse);
+      return ops;
+    };
+    const out: PingPulse = { t: 0, alpha: 0 };
+    // 보통: 고리 반지름 6 + 위상 × 22, 알파 0.55 · 0.95 × (1 − 위상) — 예전 식 (k × 3) % 1 그대로. 가운데 점은 늘 같다
+    const radii = new Set<string>();
+    for (let i = 0; i <= 150; i += 1) {
+      const k = i / 150;
+      const phase = (k * 3) % 1;
+      const ops = record(pingPulse(k, false, out));
+      expect(ops).toHaveLength(4);
+      const [outline, white, dot0, dot1] = ops;
+      for (const ring of [outline!, white!]) {
+        expect(ring.stroke).toBe(true);
+        expect(ring.r).toBeCloseTo(6 + phase * 22, 9);
+      }
+      expect(outline!.alpha).toBeCloseTo(0.55 * (1 - phase), 9);
+      expect(white!.color).toBe(0xffffff);
+      expect(white!.alpha).toBeCloseTo(0.95 * (1 - phase), 9);
+      expect(dot0!.r).toBeCloseTo(6, 9);
+      expect(dot1!.r).toBeCloseTo(4, 9);
+      expect([dot0!.stroke, dot0!.alpha, dot1!.stroke, dot1!.alpha]).toEqual([false, 0.85, false, 1]);
+      radii.add(white!.r.toFixed(3));
+    }
+    expect(radii.size).toBeGreaterThan(20);
+    // 번쩍임 줄이기: 어느 시각이든 같은 그림 — 퍼지지 않는 고리가 가운데 점 밖에 보인다
+    const steady = record(pingPulse(0, true, out));
+    for (let i = 0; i <= 150; i += 1) expect(record(pingPulse(i / 150, true, out))).toEqual(steady);
+    expect(steady[1]!.r).toBeCloseTo(6 + PING_PULSE.steadyT * 22, 9);
+    expect(steady[1]!.r).toBeGreaterThan(steady[2]!.r + 3);
+    expect(steady[1]!.alpha).toBeCloseTo((0.95 * PING_PULSE.steadyAlpha) / PING_PULSE.alpha, 9);
+    expect(steady[1]!.alpha).toBeGreaterThanOrEqual(0.5);
+  });
+
   it('펄스 고리 크기: 커진 배지 둘레에서 시작해 보통 배지 반지름의 haloTo배까지', () => {
     const baked = EDGE_ART.r * EDGE_ART.pingScale;
     expect(haloScale(0)).toBe(1);
@@ -123,6 +199,18 @@ describe('포효 핑 펄스 (창 밖 화살표 · 미니맵 고리)', () => {
     expect(EDGE_ART.haloTo).toBeGreaterThan(EDGE_ART.pingScale);
     // 번쩍임 줄이기의 고정 고리는 배지 밖에 보인다 (배지에 가려지지 않는다)
     expect(haloScale(PING_PULSE.steadyT)).toBeGreaterThan(1.05);
+    // 맵 창 밖 번짐 (VISUAL_SPEC 12.4): 배지 가운데는 창 가장자리에서 inset 안쪽이다. 고리 그림(hudArt ringFrame — 흰 선 ring,
+    // 그 아래 어두운 외곽선 ring + 1.6을 알파 0.7로)의 바깥 끝이 inset을 넘는 것은 흰 선이 알파 0.35 이하 · 외곽선이 실제 알파
+    // 0.3 이하로 옅어진 뒤이고, 끝에서도 6 그림 단위 안이다
+    const whiteOut = baked + EDGE_ART.ring / 2;
+    const darkOut = baked + (EDGE_ART.ring + 1.6) / 2;
+    for (let i = 0; i <= 1000; i += 1) {
+      const t = i / 1000;
+      const alpha = PING_PULSE.alpha * (1 - t);
+      if (haloScale(t) * whiteOut > EDGE_ART.inset) expect(alpha, `t=${t}`).toBeLessThanOrEqual(0.35);
+      if (haloScale(t) * darkOut > EDGE_ART.inset) expect(alpha * 0.7, `t=${t}`).toBeLessThanOrEqual(0.3);
+    }
+    expect(haloScale(1) * darkOut - EDGE_ART.inset).toBeLessThan(6);
   });
 });
 
@@ -290,12 +378,48 @@ describe('포효 핑 화살표: 크게 + 같은 그림', () => {
     placeEdges([target('roarPing', 'ping0', 40, 15)], VIEW, { ...LAYOUT, avoid: [box] }, [], out);
     expect(out[0]!.y).toBeLessThan(at.y);
     expect(clear(out[0]!, big)).toBeGreaterThanOrEqual(-1e-6);
+    // 어디까지 비키는가도 커진 반지름으로 잰다: 배지 아래 10px 사각형이면 둘 다 걸린다. 보통 배지는 위로 8(사이 18 ≥ 17)에서
+    // 멈추고, 큰 배지는 그 자리(18 < 22.1)를 지나 16까지 간다 — 비킨 자리를 보통 반지름으로 재면 반쯤 걸린 채 멈춘다
+    box.y = at.y + 10;
+    placeEdges([target('point', 'A', 40, 15)], VIEW, { ...LAYOUT, avoid: [box] }, [], out);
+    expect(out[0]!.y).toBeCloseTo(at.y - 8, 6);
+    expect(clear(out[0]!, R)).toBeGreaterThanOrEqual(-1e-6);
+    placeEdges([target('roarPing', 'ping0', 40, 15)], VIEW, { ...LAYOUT, avoid: [box] }, [], out);
+    expect(out[0]!.y).toBeCloseTo(at.y - 16, 6);
+    expect(clear(out[0]!, big)).toBeGreaterThanOrEqual(-1e-6);
     // 몸: 배지 가운데에서 31px 떨어진 캐릭터 — 보통(17 + 12 = 29)은 안 겹치고 큰 배지(22.1 + 12 = 34.1)는 겹쳐 흐려진다
     const body = [{ x: at.x - 31, y: at.y }];
     placeEdges([target('point', 'A', 40, 15)], VIEW, LAYOUT, body, out);
     expect(out[0]!.faded).toBe(false);
     placeEdges([target('roarPing', 'ping0', 40, 15)], VIEW, LAYOUT, body, out);
     expect(out[0]!.faded).toBe(true);
+  });
+
+  it('같은 사각형에 막힌 큰 화살표 둘은 커진 반지름 합 + 틈만큼 떨어져 같은 쪽으로 비켜난다 (겹쳐 쌓이지 않는다)', () => {
+    const big = LAYOUT.r * EDGE_ART.pingScale;
+    const track = { x0: 30, y0: 30, x1: 930, y1: 610 };
+    const out: EdgeMarker[] = [];
+    // 동쪽으로 거의 겹치는 포효 핑 둘: 겹침 풀기 뒤 동쪽 가장자리 위아래로 하나씩
+    const pair = [target('roarPing', 'ping0', 40, 15), target('roarPing', 'ping1', 40, 15.05)];
+    placeEdges(pair, VIEW, LAYOUT, [], out);
+    const ys = out.map((m) => m.y);
+    // 위쪽 핑 바로 아래부터 오른쪽 아래 구석 너머까지 덮는 사각형: 둘 다 걸리고, 빠져나갈 빈자리는 위쪽뿐이다
+    const box = { x: 880, y: Math.min(...ys) + 11, w: 80, h: 640 };
+    placeEdges(pair, VIEW, { ...LAYOUT, avoid: [box] }, [], out);
+    expect(out).toHaveLength(2);
+    const clear = (m: EdgeMarker): number => {
+      const nx = Math.max(box.x, Math.min(box.x + box.w, m.x));
+      const ny = Math.max(box.y, Math.min(box.y + box.h, m.y));
+      return Math.hypot(m.x - nx, m.y - ny) - big;
+    };
+    for (const m of out) {
+      expect(m.x).toBeCloseTo(930, 6);
+      expect(m.y).toBeLessThan(box.y);
+      expect(clear(m), m.id).toBeGreaterThanOrEqual(-1e-6);
+    }
+    // 먼저 옮긴 화살표와 커진 반지름 합 + 틈 이상 (보통 반지름 합 + 틈 39로 재면 약 43에서 멈춰 5 넘게 겹친다)
+    const d = Math.abs(toPerim(track, out[0]!.x, out[0]!.y) - toPerim(track, out[1]!.x, out[1]!.y));
+    expect(d).toBeGreaterThanOrEqual(big * 2 + LAYOUT.gap - 1e-6);
   });
 
   it('큰 화살표의 셰브론 끝은 보통 화살표와 같은 자리다 (창 가장자리를 넘지 않는다)', () => {

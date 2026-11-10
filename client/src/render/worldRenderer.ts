@@ -94,6 +94,7 @@ import {
   type MonsterPose,
   type TeamSurvivorPose,
 } from './characters';
+import type { PingPulse } from './prefsFx';
 import { STUN_VEIL, WorldPostFx } from './effects';
 import { ALPHA, FOG } from './colors';
 import { chunkAtlasFor, createFogLayer, fogArtParams, stepFogArt, type FogLayer } from './baseLayer';
@@ -153,6 +154,11 @@ export interface FrameView {
   nowMs: number;
   /** 괴물 화면: 포효로 드러난 생존자 위치 (발동 순간 고정, 1.5초) */
   roarPings: { x: number; y: number; until: number; start: number }[];
+  /**
+   * 괴물 화면: 이번 프레임 포효 핑 펄스 (prefsFx.pingPulse — 창 밖 화살표 · 미니맵 고리와 같은 객체). 핑 고리가 이 값으로 퍼지고,
+   * 번쩍임 줄이기면 고정된다
+   */
+  pingPulse: PingPulse;
   /** 괴물 화면: 서버 확인 전에 먼저 보여 주는 공격 준비 방향 (없으면 null) */
   localWindupDir: number | null;
   /** 괴물 화면: 서버의 준비 값이 이미 예측으로 보여 준 것과 같은 준비라 다시 그리지 않는다 */
@@ -1456,7 +1462,7 @@ export class WorldRenderer {
     }
     for (const p of v.roarPings) {
       if (v.nowMs > p.until) continue;
-      drawRoarPing(this.markers, p.x, p.y, (v.nowMs - p.start) / (p.until - p.start));
+      drawRoarPing(this.markers, p.x, p.y, v.pingPulse);
       drawn.push({
         id: 'mark-roarPing',
         kind: 'mark',

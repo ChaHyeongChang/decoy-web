@@ -62,51 +62,61 @@ interface RoarRecord {
 
 /**
  * 페이지 안 프레임 기록기: rAF마다 포효 표시(핑 · 화살표 · 미니맵 · 고리 · 알림)를 적는다. 포효가 보이기 시작하면 started,
- * 모든 표시가 사라진 뒤 10프레임이 더 지나면 done (그 10프레임이 '잔상 없음'의 증거다)
+ * 모든 표시가 사라진 뒤 10프레임이 더 지나면 done (그 10프레임이 '잔상 없음'의 증거다). hold = 떠 있는 동안은 끝내지 않을 다른
+ * 알림 글 (그 알림이 비켜 준 뒤에 뜨는 밀린 결과 알림까지 적는다)
  */
-async function record(page: Page): Promise<void> {
-  await page.evaluate((texts) => {
-    const w = window as unknown as { __roar?: RoarRecord };
-    const d = window.__DECOY__!;
-    const rec: RoarRecord = { frames: [], sounds0: d.getSounds(), sounds1: [], started: false, done: false };
-    w.__roar = rec;
-    const t0 = performance.now();
-    let quiet = 0;
-    const step = (): void => {
-      const c = d.getCamera();
-      const drawn = d.getDrawn();
-      const f: RoarFrame = {
-        t: performance.now() - t0,
-        pings: drawn.filter((e) => e.tag === 'roarPing').map((e) => ({ x: e.x, y: e.y })),
-        marks: drawn.filter((e) => e.tag === 'roarSelf').length,
-        mini: d.getDrawnMinimap().filter((e) => e.tag === 'roarPing').length,
-        big: d.getDrawnMinimapBig().filter((e) => e.tag === 'roarPing').length,
-        markers: c?.markers ?? [],
-        rings: c?.pingRings ?? { small: [], big: [] },
-        banners: d.getBanners(),
-        view: c?.view ?? null,
+async function record(page: Page, hold: readonly string[] = []): Promise<void> {
+  await page.evaluate(
+    ([texts, holdTexts]) => {
+      const w = window as unknown as { __roar?: RoarRecord };
+      const d = window.__DECOY__!;
+      const rec: RoarRecord = {
+        frames: [],
+        sounds0: d.getSounds(),
+        sounds1: [],
+        started: false,
+        done: false,
       };
-      rec.frames.push(f);
-      const showing =
-        f.pings.length > 0 ||
-        f.marks > 0 ||
-        f.mini > 0 ||
-        f.big > 0 ||
-        f.rings.small.length > 0 ||
-        f.rings.big.length > 0 ||
-        f.markers.some((m) => m.kind === 'roarPing' || m.halo !== null) ||
-        f.banners.some((b) => texts.includes(b));
-      if (showing) rec.started = true;
-      quiet = showing ? 0 : quiet + 1;
-      if (rec.started && quiet >= 10) {
-        rec.sounds1 = d.getSounds();
-        rec.done = true;
-        return;
-      }
+      w.__roar = rec;
+      const t0 = performance.now();
+      let quiet = 0;
+      const step = (): void => {
+        const c = d.getCamera();
+        const drawn = d.getDrawn();
+        const f: RoarFrame = {
+          t: performance.now() - t0,
+          pings: drawn.filter((e) => e.tag === 'roarPing').map((e) => ({ x: e.x, y: e.y })),
+          marks: drawn.filter((e) => e.tag === 'roarSelf').length,
+          mini: d.getDrawnMinimap().filter((e) => e.tag === 'roarPing').length,
+          big: d.getDrawnMinimapBig().filter((e) => e.tag === 'roarPing').length,
+          markers: c?.markers ?? [],
+          rings: c?.pingRings ?? { small: [], big: [] },
+          banners: d.getBanners(),
+          view: c?.view ?? null,
+        };
+        rec.frames.push(f);
+        const showing =
+          f.pings.length > 0 ||
+          f.marks > 0 ||
+          f.mini > 0 ||
+          f.big > 0 ||
+          f.rings.small.length > 0 ||
+          f.rings.big.length > 0 ||
+          f.markers.some((m) => m.kind === 'roarPing' || m.halo !== null) ||
+          f.banners.some((b) => texts.includes(b));
+        if (showing) rec.started = true;
+        quiet = showing || f.banners.some((b) => holdTexts.includes(b)) ? 0 : quiet + 1;
+        if (rec.started && quiet >= 10) {
+          rec.sounds1 = d.getSounds();
+          rec.done = true;
+          return;
+        }
+        requestAnimationFrame(step);
+      };
       requestAnimationFrame(step);
-    };
-    requestAnimationFrame(step);
-  }, ROAR_TEXTS);
+    },
+    [ROAR_TEXTS, hold] as const,
+  );
 }
 
 async function recorded(page: Page): Promise<RoarRecord> {
@@ -467,6 +477,73 @@ test('포효 (괴물, 번쩍임 줄이기): 화살표 · 미니맵 고리가 퍼
   expect(last.rings.small).toEqual([]);
   // 포효 핑에 썼던 화살표 칸을 거점 화살표가 다시 써도 커진 채 남지 않는다
   expect(last.markers.map((m) => [m.kind, m.scale, m.halo])).toEqual([['point', 1, null]]);
+  expect(s.problems).toEqual([]);
+  await s.context.close();
+});
+
+test('포효 (괴물, 알림 줄이 찼을 때): 밀린 결과 알림은 핑이 사라진 뒤에 남지 않는다 — 늦게 떠도 늘리지 않고, 너무 늦으면 버린다', async ({
+  browser,
+}) => {
+  // 러너 · 스카우트는 멀리(곧 거점 A · B로 옮겨 점령 시작 알림 둘로 알림 줄 둘을 채운다), 가드는 반경 안 · 창 밖
+  const { s } = await monsterScene(
+    browser,
+    async (x) => {
+      await x.send({ kind: 'teleport', target: x.id('runner'), x: 44.5, y: 2.5, face: 0 });
+      await x.send({ kind: 'teleport', target: x.id('scout'), x: 40.5, y: 2.5, face: -1.2 });
+      await x.send({ kind: 'teleport', target: x.id('guard'), x: 29.5, y: 25.5, face: 0.4 });
+    },
+    [[29.5, 25.5]],
+  );
+  const { page } = s;
+  await page.waitForFunction(() => (window.__DECOY__?.getBanners() ?? []).length === 0, null, {
+    timeout: 15_000,
+  });
+  // 같은 평가에서 둘을 거점 위로 (같은 틱에 점령이 시작되어 알림 둘이 함께 뜨고 함께 끝난다)
+  await page.evaluate(
+    ([runner, scout]) => {
+      const d = window.__DECOY__!;
+      d.sendTest({ kind: 'teleport', target: runner!, x: 8, y: 16, face: 0 });
+      d.sendTest({ kind: 'freeze', target: runner!, frozen: true });
+      d.sendTest({ kind: 'teleport', target: scout!, x: 40, y: 16, face: 0 });
+      d.sendTest({ kind: 'freeze', target: scout!, frozen: true });
+    },
+    [s.id('runner'), s.id('scout')],
+  );
+  const capture = ['A', 'B'].map((p) => STORY_TEXT.ALERT_CAPTURE_START.text.replace('{point}', p));
+  await page.waitForFunction(
+    (texts) => texts.every((t) => window.__DECOY__!.getBanners().includes(t)),
+    capture,
+    {
+      timeout: 10_000,
+    },
+  );
+  const found = await truthFound(page);
+  expect(found, '서버 정답: 반경 안 생존자 하나(가드)').toBe(1);
+  // 알림 줄 둘이 찬 채로 바로 포효한다: 결과 알림은 대기열에서 기다린다. 점령 알림이 사라진 뒤(줄이 비어 결과 알림이 뜰 수
+  // 있는 때)까지 적는다
+  await record(page, capture);
+  await page.keyboard.press('KeyQ');
+  const rec = await recorded(page);
+  const live = rec.frames.filter((f) => f.pings.length > 0);
+  expect(live.length).toBeGreaterThan(8);
+  const result = roarResultText(found);
+  // 밀렸다 (빈 통과가 아님): 핑이 보이는 동안 점령 알림 둘이 줄을 차지하고 결과 알림은 아직 없는 프레임이 있다
+  expect(
+    live.some((f) => capture.every((t) => f.banners.includes(t)) && !f.banners.includes(result)),
+    '결과 알림이 점령 알림 둘에 밀린 프레임',
+  ).toBe(true);
+  // 결과 알림은 핑이 보이는 프레임에만 (밀려 늦게 떴으면 핑과 같은 프레임에 사라지고, 너무 늦었으면 아예 뜨지 않는다).
+  // 보통 알림처럼 '최소 0.8초'를 다시 주면 핑이 사라진 뒤에 글만 남아 여기서 걸린다
+  for (const f of rec.frames) {
+    const shown = f.banners.filter((b) => RESULT_TEXTS.includes(b));
+    if (shown.length > 0) expect(f.pings.length, `t=${Math.round(f.t)} ${shown.join()}`).toBe(found);
+  }
+  // 소리는 밀리지 않는다: 드러난 수만큼 핑
+  expect(added(rec, 'roarFound')).toBe(found);
+  const shownFrames = rec.frames.filter((f) => f.banners.includes(result)).length;
+  console.log(
+    `[roar-feedback] 밀린 알림: 결과 알림 ${shownFrames > 0 ? `${shownFrames}프레임 (핑과 함께 사라짐)` : '버림'} · 핑 ${live.length}프레임`,
+  );
   expect(s.problems).toEqual([]);
   await s.context.close();
 });

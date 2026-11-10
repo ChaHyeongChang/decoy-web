@@ -29,6 +29,7 @@ import * as perfChip from '../../client/src/ui/perfChip';
 import * as vision from '../../client/src/render/vision';
 import * as fonts from '../../client/src/ui/fonts';
 import * as hudArt from '../../client/src/ui/hudArt';
+import * as hudGate from '../../client/src/ui/hudGate';
 import * as layout from '../../client/src/ui/layout';
 
 const SPEC_PATH = 'docs/VISUAL_SPEC.md';
@@ -53,6 +54,7 @@ const MODULES: Readonly<Record<string, { file: string; mod: object }>> = {
   quality: { file: 'client/src/gfx/quality.ts', mod: quality },
   framePacing: { file: 'client/src/gfx/framePacing.ts', mod: framePacing },
   hudArt: { file: 'client/src/ui/hudArt.ts', mod: hudArt },
+  hudGate: { file: 'client/src/ui/hudGate.ts', mod: hudGate },
   layout: { file: 'client/src/ui/layout.ts', mod: layout },
   fonts: { file: 'client/src/ui/fonts.ts', mod: fonts },
   prefs: { file: 'client/src/prefs.ts', mod: prefs },

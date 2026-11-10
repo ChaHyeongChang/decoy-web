@@ -1743,6 +1743,9 @@ export class GameScene extends Phaser.Scene {
     // 내 몸을 그리는 자리: 카메라가 창을 기기 픽셀 격자에 맞추며 옮긴 만큼 같이 옮긴다(화면에서는 맞추기 전 창 기준 — 고르게
     // 움직인다). 시야 · 부채꼴 · 범위 · 정보 레이어는 예측 자리 그대로(맵에 붙은 그림, 판정과 같은 자리)
     const drawMe = this.drawSelfAt(me);
+    // 포효 핑 펄스: 이번 프레임 값 하나 — 월드 핑 고리 · 작은 지도 · 크게 본 지도 · 창 밖 화살표가 같은 객체를 그린다(같은 시각 ·
+    // 같은 식). 번쩍임 줄이기면 넷 다 퍼지지 않는 고정 고리
+    const pulse = pingPulse(this.pingK(now), this.flashReduced, this.pingPulseNow);
     this.world.draw(
       {
         balance: app.balance,
@@ -1757,6 +1760,7 @@ export class GameScene extends Phaser.Scene {
         myBlend: this.myBlend,
         nowMs: now,
         roarPings: this.roarPings,
+        pingPulse: pulse,
         localWindupDir: windup.dir,
         hideServerWindup: windup.hideServer,
         myStunned: snap.you.role === 'monster' && (app.predictor?.state?.stun ?? 0) > 0,
@@ -1783,9 +1787,6 @@ export class GameScene extends Phaser.Scene {
       d?.spectating ?? null,
       blinkOff,
     );
-    // 포효 핑 펄스: 월드 핑(world.draw의 nowMs)과 같은 시각 · 같은 식 — 작은 지도 · 크게 본 지도 · 창 밖 화살표가 같은 값을 쓴다.
-    // 번쩍임 줄이기면 퍼지지 않는 고정 고리
-    const pulse = pingPulse(this.pingK(now), this.flashReduced, this.pingPulseNow);
     this.minimap.update(this.drawn, snap.you.role, this.roleOf, pulse);
     // 지도 크게 보기: 작은 지도와 같은 값 · 같은 프레임
     this.updateBigMap(snap, view, blinkOff, baseNew);

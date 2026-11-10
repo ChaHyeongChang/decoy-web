@@ -48,7 +48,7 @@ import {
   type Disc,
   type PathPen,
 } from '../art/shapes';
-import { pingPhase } from './prefsFx';
+import { PING_PULSE, type PingPulse } from './prefsFx';
 
 const T = TILE_PX;
 
@@ -622,17 +622,18 @@ export function drawRoarMark(g: Phaser.GameObjects.Graphics, x: number, y: numbe
 }
 
 /**
- * 포효 핑: 흰 원 펄스 + 가운데 점 (괴물 화면 1.5초). k = 지난 비율. 박자는 창 밖 화살표 · 미니맵 펄스 고리와 같은
- * 식(prefsFx.pingPhase — 표시 시간에 3번)
+ * 포효 핑: 흰 원 펄스 + 가운데 점 (괴물 화면 1.5초). pulse = 이번 프레임 펄스 값(prefsFx.pingPulse — 창 밖 화살표 · 미니맵
+ * 고리와 같은 객체): 고리 반지름 6 + t × 22, 알파는 퍼질수록 옅게(1.5초에 3번). 번쩍임 줄이기면 퍼지지 않는 고정 고리
  */
-export function drawRoarPing(g: Phaser.GameObjects.Graphics, x: number, y: number, k: number): void {
+export function drawRoarPing(g: PathPen, x: number, y: number, pulse: PingPulse): void {
   const px = x * T;
   const py = y * T;
-  const phase = pingPhase(k);
-  g.lineStyle(5, OUTLINE, 0.55 * (1 - phase));
-  strokeCirclePen(g, px, py, 6 + phase * 22);
-  g.lineStyle(2.5, 0xffffff, 0.95 * (1 - phase));
-  strokeCirclePen(g, px, py, 6 + phase * 22);
+  const r = 6 + pulse.t * 22;
+  const fade = pulse.alpha / PING_PULSE.alpha;
+  g.lineStyle(5, OUTLINE, 0.55 * fade);
+  strokeCirclePen(g, px, py, r);
+  g.lineStyle(2.5, 0xffffff, 0.95 * fade);
+  strokeCirclePen(g, px, py, r);
   g.fillStyle(OUTLINE, 0.85);
   fillCirclePen(g, px, py, 6);
   g.fillStyle(0xffffff, 1);
