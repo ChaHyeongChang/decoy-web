@@ -52,6 +52,8 @@ export const device = {
   touch: false,
   /** 세로 화면 (터치 모드에서 입력을 보내지 않는다) */
   portrait: false,
+  /** 화면이 확대됐다 (zoomGuard.ts — 확대 안내가 덮고 있는 동안 세로 화면처럼 입력을 보내지 않는다) */
+  zoomed: false,
   /** 브라우저 안 (설치 앱 · TWA가 아님): "전체 화면" 버튼을 보인다 */
   inBrowser: true,
   /** 설치 앱 (standalone · iOS 홈 화면): 앱 생명주기를 쓴다 */
@@ -60,10 +62,17 @@ export const device = {
 
 const listeners = new Set<() => void>();
 
-/** 세로 ↔ 가로가 바뀌면 부른다. 반환값을 부르면 구독을 끝낸다 */
+/** 세로 ↔ 가로 · 확대 여부가 바뀌면 부른다. 반환값을 부르면 구독을 끝낸다 */
 export function onDeviceChange(fn: () => void): () => void {
   listeners.add(fn);
   return () => listeners.delete(fn);
+}
+
+/** 확대 상태를 적고(zoomGuard.ts) 바뀌었으면 구독자에게 알린다 — 터치 화면이 세로 화면과 같은 길로 손가락 · 입력을 비운다 */
+export function setZoomed(on: boolean): void {
+  if (on === device.zoomed) return;
+  device.zoomed = on;
+  for (const fn of listeners) fn();
 }
 
 function media(query: string): MediaQueryList | null {

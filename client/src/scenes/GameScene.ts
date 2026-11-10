@@ -1334,8 +1334,11 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     // 괴물 재접속 대기(판 전체 일시정지): 서버가 입력을 처리하지 않으므로 보내지도 예측하지도 않는다.
-    // 터치 모드 세로 화면도 입력을 보내지 않는다 (판은 흐른다, 그동안 무방비)
-    if ((app.lastSnap?.world.paused ?? null) !== null || (this.touch !== null && device.portrait)) {
+    // 터치 모드 세로 화면 · 확대된 화면(확대 안내, zoomGuard.ts)도 입력을 보내지 않는다 (판은 흐른다, 그동안 무방비)
+    if (
+      (app.lastSnap?.world.paused ?? null) !== null ||
+      (this.touch !== null && (device.portrait || device.zoomed))
+    ) {
       this.acc = 0;
       this.sampler.clearPressed();
       this.stopSelfWalk();
@@ -1824,7 +1827,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * 터치 화면: 판 중이고 관전 · 결과 · 판 정지 · 세로 화면 · 판 중 메뉴가 아닐 때만 입력을 받는다('설정' 버튼은 결과 전이면 늘). 끄는 순간 손가락 · 발사 대기를 비운다.
+   * 터치 화면: 판 중이고 관전 · 결과 · 판 정지 · 세로 화면 · 확대된 화면 · 판 중 메뉴가 아닐 때만 입력을 받는다('설정' 버튼은 결과 전이면 늘). 끄는 순간 손가락 · 발사 대기를 비운다.
    * 행동 칸은 이번 프레임 캔버스 HUD가 계산한 actionSlots 결과를 그대로 쓴다 (쿨타임 게이지 · 못 씀 표시)
    */
   private updateTouch(snap: Snapshot): void {
@@ -1836,7 +1839,8 @@ export class GameScene extends Phaser.Scene {
       status !== 'dead' &&
       status !== 'escaped' &&
       snap.world.paused === null &&
-      !device.portrait;
+      !device.portrait &&
+      !device.zoomed;
     const active = playable && !this.menuOpen;
     if (active !== this.touchActive) {
       this.touchActive = active;

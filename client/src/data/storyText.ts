@@ -290,6 +290,8 @@ export const TOUCH_TEXT = {
   menu: '설정',
   rotateTitle: '가로로 돌려 주세요',
   rotateBody: 'DECOY는 가로 화면에서 합니다. 세로로 두는 동안에는 조작할 수 없고, 판은 계속 흘러가요.',
+  /** 확대 안내 (플레이테스트 a-1, ui/zoomNotice.ts): 화면이 확대된 동안. 버튼은 UI_TEXT.updateReload */
+  zoomNotice: '화면이 확대됐어요 — 두 손가락으로 오므려 주세요',
   // ── 첫 실행 터치 안내 (M12): 판 직전 본문 · 판 중 처음 10초 위치 표시 ──
   tutorialTitle: '터치 조작',
   tutorialSurvivor: [

@@ -105,6 +105,13 @@ describe('브라우저 기본 동작 막기', () => {
     expect(css).toMatch(/input,\s*select \{\s*user-select: text;/);
   });
 
+  it('html · body는 브라우저의 글자 자동 확대를 끈다 (아이폰 가로에서 넓은 글 블록의 작은 글자가 커지던 것 — 플레이테스트 a-6)', () => {
+    const body = /html,\s*body \{([^}]*)\}/.exec(css)?.[1] ?? '';
+    // 접두사 붙은 것(지금 아이폰) · 표준 속성 둘 다. 헤드리스 크롬은 이 확대를 하지 않아 CSS 원문으로만 지킨다
+    expect(body).toMatch(/(?:^|\s)-webkit-text-size-adjust: 100%;/);
+    expect(body).toMatch(/(?:^|\s)text-size-adjust: 100%;/);
+  });
+
   it('게임 영역 · 터치 레이어는 touch-action: none, 로비 · 결과는 세로 스크롤만(pan-y)', () => {
     const block = (sel: string): string =>
       new RegExp(`(?:^|\\n)${sel.replace(/[.#]/g, '\\$&')} \\{([^}]*)\\}`).exec(css)?.[1] ?? '';

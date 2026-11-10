@@ -74,6 +74,14 @@ describe('readParams', () => {
       expect(readParams(`?camSnap=${v}`).camSnap, v).toBe(true);
   });
 
+  it('?zoomguard=0이면 화면 확대 막기만 끈다(진단용, 플레이테스트 a-1), 없거나 그 밖의 값이면 막는다', () => {
+    expect(readParams('').zoomGuard).toBe(true);
+    expect(readParams('?zoomguard=0').zoomGuard).toBe(false);
+    expect(readParams('?bots=1&zoomguard=0&debug=hook').zoomGuard).toBe(false);
+    for (const v of ['1', 'false', 'off', '', ' 0', 'no'])
+      expect(readParams(`?zoomguard=${v}`).zoomGuard, v).toBe(true);
+  });
+
   it('측정 표시는 ?debug=1 오버레이: 따로 ?fps 매개변수는 없다', () => {
     expect(readParams('?fps=1')).not.toHaveProperty('fps');
     expect(readParams('?debug=1').debug).toBe('overlay');
@@ -93,6 +101,7 @@ describe('readParams', () => {
       quality: null,
       fpsLimit: null,
       camSnap: true,
+      zoomGuard: true,
     });
   });
 });

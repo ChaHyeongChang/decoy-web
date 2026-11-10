@@ -63,12 +63,40 @@ body {
   /* 휴대폰 기본 동작 막기 (M11): 당겨서 새로고침 · 끝 튕김, 탭 강조 */
   overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;
+  /* 아이폰 가로에서 넓은 글 블록의 작은 글자를 브라우저가 키우는 것(text autosizing)을 끈다 — 글자 크기는 설정의 UI 크기로만 (플레이테스트 a-6) */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 /* 터치 모드(html.touch)에서만 문서 전체의 길게 눌러 글자 선택 · 메뉴를 막는다. PC는 방 코드 · 결과 글자를 고르고 복사할 수 있다 */
 html.touch body {
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
+}
+/* 화면 확대 막기 (플레이테스트 a-1, zoomGuard.ts): 터치 모드는 문서 뿌리부터 브라우저 확대 · 끌기를 막는다. 아이폰은 viewport의
+   user-scalable=no를 무시하고, #game-root · .lobby가 덮지 않는 안전 영역 띠(body)가 확대되는 구멍이었다. 스크롤이 필요한 곳은
+   그 컨테이너가 pan-y를 적는다(.lobby · .result · .set-body 등). 확대된 동안(html.zoomed)에는 푼다 — 오므려 되돌릴 수 있게 */
+html.touch:not(.zoomed),
+html.touch:not(.zoomed) body {
+  touch-action: none;
+}
+/* 게임 영역 · 터치 화면은 하위 요소에도 적는다 (엔진이 overflow 요소에서 실효값을 다시 셈해도 구멍이 생기지 않게) */
+#game-root *,
+.touch-layer * {
+  touch-action: none;
+}
+/* 누르는 것: 두 번 탭 확대 없음. 빠르게 두 번 누르는 click은 그대로다 (zoomGuard는 이 대상의 두 번째 탭을 막지 않는다) */
+button,
+a,
+label,
+select,
+input,
+textarea {
+  touch-action: manipulation;
+}
+/* 입력 칸 글자가 16px보다 작으면 아이폰이 포커스할 때 화면을 확대한다 (이름 · 방 코드는 16px) */
+html.touch .invite-link input {
+  font-size: 16px;
 }
 /* 입력칸은 글자를 고르고 붙여 넣을 수 있게 */
 input,
@@ -2902,6 +2930,7 @@ html:not(.touch) #debug-overlay .dbg-toggle {
   max-height: 100%;
   overflow-y: auto;
   overscroll-behavior: contain;
+  touch-action: pan-y;
   padding: 16px 20px 18px;
   zoom: var(--ui-zoom, 1);
 }
