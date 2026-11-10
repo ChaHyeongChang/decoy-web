@@ -3,7 +3,7 @@
 // (lifecycle.css, style.css 토큰), 문구는 storyText.ts(APP_TEXT · TOUCH_TEXT · UI_TEXT)에서만. 판 중 매 프레임 건드리지 않는다
 // (열고 닫을 때만 DOM을 바꾼다)
 import { teamOf, type Role, type Team } from '@decoy/shared';
-import { isDefaultLayout, loadControlLayout, matchTuning } from '../controlLayout';
+import { controlsMoved, loadControlLayout, matchTuning } from '../controlLayout';
 import { APP_TEXT, HELP_TEXT, TOUCH_TEXT, tutorialLines } from '../data/storyText';
 import { canOfferFullscreen } from '../device';
 import { currentCharStyle, type CharStyle } from '../gfx/charStyle';
@@ -252,10 +252,10 @@ const NO_INSET = { l: 0, r: 0, t: 0, b: 0 } as const;
 /**
  * 바꾼 조작 배치의 자리 그림 (설정 화면 통합): 지금 창 크기(가로로 본 것)에서 판이 쓸 배치(effectiveTouchLayout — 조이스틱 크기 ·
  * UI 크기 · 좌우 반전 · 옮긴 조작 · HUD 피하기)를 100 × 50 단위로 줄여 그린다. 번호는 기본 그림과 같은 뜻(조작 위쪽에 붙인다).
- * 기본 배치면 null (손으로 다듬은 기본 그림을 쓴다)
+ * 기본 배치면 null (손으로 다듬은 기본 그림을 쓴다 — 지도만 옮긴 배치도: 그림은 지도를 그리지 않는다)
  */
 function customDiagram(team: Team): string | null {
-  if (isDefaultLayout(loadControlLayout(team))) return null;
+  if (!controlsMoved(loadControlLayout(team))) return null;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const W = Math.max(vw, vh);
@@ -375,9 +375,9 @@ export class TouchTutorialCard {
     const style = currentCharStyle();
     // 바꾼 배치의 그림은 조이스틱 크기 · UI 크기 · 창 크기에도 달라진다 (기본 배치는 손으로 다듬은 그림 하나)
     const saved = loadControlLayout(team);
-    const layoutKey = isDefaultLayout(saved)
-      ? ''
-      : JSON.stringify([saved, pref('stickSize'), pref('uiSize'), window.innerWidth, window.innerHeight]);
+    const layoutKey = controlsMoved(saved)
+      ? JSON.stringify([saved, pref('stickSize'), pref('uiSize'), window.innerWidth, window.innerHeight])
+      : '';
     const attack = attackButtonOf();
     if (this.role === role && this.style === style && this.layoutKey === layoutKey && this.attack === attack)
       return this.el;

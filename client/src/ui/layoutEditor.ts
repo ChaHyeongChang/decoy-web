@@ -9,6 +9,8 @@
 // 마지막 자리에 둔다. 막은 조작 · HUD를 잠깐 경고 모양(점선 테두리 + ! 표시 — 색만으로 구분하지 않기)으로 보이고 안내를 띄운다.
 // 고른 조작은 작게 · 크게(10%씩, 같은 규칙), 화살표 키로 4px(Shift 16px). 창 크기 · 방향이 바뀌면 비율 자리로 다시 그린다.
 // 두 역할의 고친 배치는 저장 · 취소까지 둘 다 남는다. 저장 = 보이는 자리 그대로 두 역할을 저장, 취소 = 버린다
+// 지도(플레이테스트 a-5): 맵 창 안 미니맵(옆 칸에 자리가 없는 화면)은 조작처럼 끌어 옮긴다 — 자리만(크기는 그대로), 맵 창 안에서만,
+// 다른 조작 · 이동 영역과 겹치지 않게. 옆 칸(맵 밖) 미니맵은 예전처럼 놓을 수 없는 자리(HUD 미리보기)로만 보인다
 import type { ControlLayoutInfo, Team } from '@decoy/shared';
 import { iconSvg, type IconId } from '../art/icons';
 import {
@@ -28,6 +30,7 @@ import {
   occupied,
   placeOf,
   placeOk,
+  rangeOf,
   saveControlLayouts,
   sizedBox,
   type Box,
@@ -46,6 +49,7 @@ import { thumbMetrics, tuningOf } from './layout';
 import {
   controlBoxes,
   hudPreview,
+  minimapRange,
   moveZone,
   touchLayout,
   type HudPreview,
@@ -68,7 +72,7 @@ export interface LayoutEditorHandle {
 
 /** 조작 모양: 종류 · 아이콘 · 이름표(판 중과 같은 글자) */
 const LOOK: Readonly<
-  Record<ControlId, { kind: 'btn' | 'sys' | 'aim' | 'move'; icon: IconId; label: string }>
+  Record<ControlId, { kind: 'btn' | 'sys' | 'aim' | 'move' | 'map'; icon: IconId; label: string }>
 > = {
   move: { kind: 'move', icon: 'dash', label: TOUCH_TEXT.move },
   attack: { kind: 'aim', icon: 'attack', label: HUD_TEXT.attack },
@@ -80,6 +84,7 @@ const LOOK: Readonly<
   scoreboard: { kind: 'sys', icon: 'scoreboard', label: HUD_TEXT.scoreboard },
   menu: { kind: 'sys', icon: 'sliders', label: TOUCH_TEXT.menu },
   fullscreen: { kind: 'sys', icon: 'fullscreen', label: TOUCH_TEXT.fullscreen },
+  minimap: { kind: 'map', icon: 'map', label: EDITOR_TEXT.minimap },
 };
 
 /** 고른 조작 이름 (명령 판) */
@@ -94,7 +99,6 @@ const HUD_LABEL: Readonly<Record<string, string>> = {
   gaugeB: EDITOR_TEXT.gaugeB,
   card0: EDITOR_TEXT.cards,
   minimap: EDITOR_TEXT.minimap,
-  minimapInset: EDITOR_TEXT.minimap,
 };
 
 /** 화살표 키로 옮기는 양 (CSS px, Shift는 4배) */
@@ -200,6 +204,7 @@ class LayoutEditor {
   private readonly els = new Map<ControlId, HTMLElement>();
   private hudEls: HTMLElement[] = [];
   private rangeEl: HTMLDivElement | null = null;
+  private mapEl: HTMLDivElement | null = null;
   private drag: Drag | null = null;
   private warnTimer = 0;
   private closeTimer = 0;
@@ -333,34 +338,42 @@ class LayoutEditor {
     const hud = hudPreview(team, w, hh, inset, { ...matchTuning(team), mirror: draft.mirror });
     const T = tuningOf(hud.layout);
     const avoid = hud.rects.map((r) => r.box);
-    const obstacles = hud.inset ? [hud.inset] : [];
+    // 맵 창 안 미니맵: 피할 HUD가 아니라 끌 수 있는 조작 '지도' (옆 칸 미니맵은 avoid 안의 HUD 그대로)
+    const mini = hud.inset ? { frame: hud.inset, map: hud.map } : null;
     const base = {
       stickScale: T.stickScale,
       menu: true,
       viewRatio: hud.layout.viewW / hud.layout.viewH,
       sysRows: hud.sysRows,
+      minimap: mini,
     };
     const monster = team === 'monster';
     const fs = canOfferFullscreen();
     const D = touchLayout(w, hh, inset, monster, fs, avoid, base);
-    const L = touchLayout(w, hh, inset, monster, fs, avoid, { ...base, custom: draft, obstacles });
-    const list = [...avoid, ...obstacles];
+    const L = touchLayout(w, hh, inset, monster, fs, avoid, { ...base, custom: draft });
     const pad = thumbMetrics(hh - inset.t - inset.b).pad;
+    const def = baseBoxes(controlBoxes(D), draft.mirror, L.safe);
+    const boxes = controlBoxes(L);
+    if (mini) {
+      def.minimap = mini.frame;
+      boxes.minimap = L.minimap ?? mini.frame;
+    }
     return {
       team,
       w,
       h: hh,
       hud,
-      hudIds: [...hud.rects.map((r) => r.id), ...(hud.inset ? ['minimapInset'] : [])],
-      def: baseBoxes(controlBoxes(D), draft.mirror, L.safe),
-      boxes: controlBoxes(L),
+      hudIds: hud.rects.map((r) => r.id),
+      def,
+      boxes,
       safe: L.safe,
       zone: L.zone,
       rules: {
         range: moveRange(L.safe, pad),
-        hud: list,
-        zone: (side, r) => moveZone(w, L.safe, side, r, list),
+        hud: avoid,
+        zone: (side, r, extra = []) => moveZone(w, L.safe, side, r, [...avoid, ...extra]),
         midX: L.safe.x + L.safe.w / 2,
+        ...(mini ? { mapRange: minimapRange(mini.map, L.safe) } : {}),
       },
       fallback: L.fallback === true,
     };
@@ -392,6 +405,7 @@ class LayoutEditor {
     // 맵 윤곽 + 아래 가운데 'HUD 미리보기' 이름표
     const map = h('div', { class: 'le-map' }, h('span', {}, EDITOR_TEXT.hudPreview));
     px(map, g.hud.map);
+    this.mapEl = map;
     const zone = h('div', { class: 'le-zone' });
     px(zone, g.zone);
     this.rangeEl = h('div', { class: 'le-range' });
@@ -440,7 +454,14 @@ class LayoutEditor {
       'aria-label': nameOf(id),
     };
     let el: HTMLElement;
-    if (look.kind === 'move') {
+    if (look.kind === 'map') {
+      // 지도(맵 창 안 미니맵): HUD 미리보기 모양(사선 무늬)에 지도 아이콘 + 이름표 — 끌 수 있다
+      el = h(
+        'div',
+        { ...attrs, class: 'le-ctl le-hud le-mini', 'data-hud': 'minimapInset' },
+        h('span', {}, icon(look.icon, 14), look.label),
+      );
+    } else if (look.kind === 'move') {
       el = h(
         'div',
         { ...attrs, class: 'le-ctl le-move' },
@@ -492,8 +513,10 @@ class LayoutEditor {
     const base = g.def[id];
     const lo = base ? clampScale(base, 0) : SIZE_SCALE.min;
     this.selLabel.textContent = `${nameOf(id)} · ${EDITOR_TEXT.size} ${Math.round(s * 100)}%`;
-    this.smallerBtn.disabled = s <= lo + 1e-6;
-    this.biggerBtn.disabled = s >= SIZE_SCALE.max - 1e-6;
+    // 지도는 자리만 옮긴다 (크기는 화면에 맞춰 정해진다)
+    const fixed = id === 'minimap';
+    this.smallerBtn.disabled = fixed || s <= lo + 1e-6;
+    this.biggerBtn.disabled = fixed || s >= SIZE_SCALE.max - 1e-6;
   }
 
   /**
@@ -598,8 +621,9 @@ class LayoutEditor {
     if (!g) return null;
     const others = { ...g.boxes };
     delete others[id];
-    const cand = clampBox(raw, g.rules.range);
-    const outside = !insideBox(raw, g.rules.range);
+    const range = rangeOf(id, g.rules);
+    const cand = clampBox(raw, range);
+    const outside = !insideBox(raw, range);
     if (placeOk(id, cand, others, g.rules)) {
       if (outside) this.warn(id, { controls: [], hud: [], outside: true });
       return cand;
@@ -636,7 +660,7 @@ class LayoutEditor {
     const g = this.geo;
     if (!g) return;
     const draft = this.drafts[g.team];
-    const place: ControlPlace = placeOf(box, this.scaleOf(g, id), g.rules.range);
+    const place: ControlPlace = placeOf(box, this.scaleOf(g, id), rangeOf(id, g.rules));
     draft.items = { ...draft.items, [id]: place };
     this.touched.add(g.team);
     this.render();
@@ -646,7 +670,7 @@ class LayoutEditor {
   private resize(dir: 1 | -1): void {
     const g = this.geo;
     const id = this.selected;
-    if (!g || !id) return;
+    if (!g || !id || id === 'minimap') return;
     const base = g.def[id];
     const cur = g.boxes[id];
     if (!base || !cur) return;
@@ -667,9 +691,11 @@ class LayoutEditor {
     this.clearWarn();
     for (const c of b.controls) this.els.get(c)?.classList.add('blocked');
     for (const i of b.hud) this.hudEls[i]?.classList.add('blocked');
-    if (b.outside) this.rangeEl?.classList.add('blocked');
+    // 지도는 맵 창 밖으로 못 나간다: 맵 윤곽을 경고 모양으로
+    const map = id === 'minimap';
+    if (b.outside) (map ? this.mapEl : this.rangeEl)?.classList.add('blocked');
     this.els.get(id)?.classList.add('refused');
-    this.say(EDITOR_TEXT.blocked, true);
+    this.say(map ? EDITOR_TEXT.blockedMap : EDITOR_TEXT.blocked, true);
     this.warnTimer = window.setTimeout(() => this.clearWarn(), WARN_MS);
   }
 
@@ -761,7 +787,10 @@ class LayoutEditor {
     if (!g.fallback)
       for (const id of TEAM_CONTROLS[team]) {
         const b = g.boxes[id];
-        if (b && draft.items[id]) items[id] = placeOf(b, this.scaleOf(g, id), g.rules.range);
+        const p = draft.items[id];
+        if (b && p) items[id] = placeOf(b, this.scaleOf(g, id), rangeOf(id, g.rules));
+        // 옆 칸 미니맵 화면(지도를 옮길 수 없다)에서 저장해도 낮은 화면에서 옮겨 둔 지도 자리는 남긴다
+        else if (p && id === 'minimap') items[id] = p;
       }
     return { mirror: draft.mirror, items };
   }
@@ -803,11 +832,15 @@ class LayoutEditor {
       safe: box(g.safe),
       range: box(g.rules.range),
       zone: box(g.zone),
+      // 지도(맵 창 안 미니맵)는 조작 목록이 아니라 HUD 목록에 지금 자리로 (판 중 getControlLayout과 같은 모양)
       controls: TEAM_CONTROLS[g.team].flatMap((id) => {
         const b = g.boxes[id];
-        return b ? [{ id, ...box(b) }] : [];
+        return b && id !== 'minimap' ? [{ id, ...box(b) }] : [];
       }),
-      hud: g.rules.hud.map((b, i) => ({ id: g.hudIds[i] ?? '', ...box(b) })),
+      hud: [
+        ...g.rules.hud.map((b, i) => ({ id: g.hudIds[i] ?? '', ...box(b) })),
+        ...(g.boxes.minimap ? [{ id: 'minimapInset', ...box(g.boxes.minimap) }] : []),
+      ],
       selected: this.selected,
     };
   }
