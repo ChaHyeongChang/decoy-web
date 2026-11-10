@@ -30,6 +30,7 @@ import {
   pctShown,
   pctTone,
   pctWidth,
+  pointOf,
   pointPercent,
   sliceSpans,
   statusKey,
@@ -401,6 +402,28 @@ describe('거점 진행 숫자 (플레이테스트 a-7)', () => {
       [1, 'done'],
     ] as const)
       expect(pointPercent({ id: 'B', progress, state } as PointView)).toBe(pointPercent({ progress, state }));
+  });
+
+  it('게이지는 거점 값을 순서 번호가 아니라 id로 찾는다 — 스냅샷 순서가 게이지 순서(GAUGE_IDS)와 달라도 줄마다 제 거점 값', () => {
+    const a: PointView = { id: 'A', progress: 0.12, state: 'capturing' };
+    const b: PointView = { id: 'B', progress: 0.87, state: 'blocked' };
+    // 마일스톤 b의 셋째 거점(지금 PointId에 없다)이 앞에 끼어도
+    const c = { id: 'C', progress: 0.5, state: 'idle' } as unknown as PointView;
+    for (const points of [
+      [a, b],
+      [b, a],
+      [c, b, a],
+      [b, c, a],
+    ]) {
+      const shown = GAUGE_IDS.map((id) => {
+        const p = pointOf(points, id);
+        return p ? `${p.id}:${pointPercent(p)}` : '';
+      });
+      expect(shown, points.map((p) => p.id).join('')).toEqual(['A:12', 'B:87']);
+    }
+    // 스냅샷에 없는 거점은 그리지 않는다 (순서 번호로 짝지으면 다른 거점 값이 나온다)
+    expect(pointOf([b], 'A')).toBeUndefined();
+    expect(pointOf([], 'B')).toBeUndefined();
   });
 
   it('괴물 화면에도 같은 숫자를 보인다 — 빼는 스위치는 상수 하나 (PCT_FOR_MONSTER)', () => {

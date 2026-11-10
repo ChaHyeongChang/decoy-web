@@ -189,6 +189,15 @@ export function pointPercent(p: Pick<PointView, 'progress' | 'state'>): number {
 }
 
 /**
+ * 게이지 한 줄 · 한 칸이 그릴 거점: 스냅샷 world.points에서 id로 찾는다(없으면 undefined — 그리지 않는다). 게이지 순서
+ * (layout.GAUGE_IDS)와 스냅샷 순서(서버 game.points)가 달라도(거점이 늘거나 꺼진 거점이 생겨도) 'B' 줄에 다른 거점 값이 나오지 않는다
+ */
+export function pointOf(points: readonly PointView[], id: string): PointView | undefined {
+  for (const p of points) if (p.id === id) return p;
+  return undefined;
+}
+
+/**
  * 괴물 화면에도 진행 숫자를 보이는가. 서버는 거점 진행을 받는 사람과 무관하게 같은 값으로 보내고(interest.ts worldView) 괴물 HUD도
  * 그 값으로 게이지를 그려 왔으므로 같은 숫자를 보인다. 사람 확인 뒤 괴물에게만 빼려면 이 값 하나를 false로 (HUMAN_CHECKS)
  */

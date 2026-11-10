@@ -31,6 +31,7 @@ import {
   pctFrames,
   pctShown,
   pctTone,
+  pointOf,
   pointPercent,
   teamCards,
   timerView,
@@ -175,7 +176,8 @@ class Gauge {
 
   constructor(
     private readonly kit: HudKit,
-    id: string,
+    /** 거점 id (스냅샷 world.points에서 이 id로 값을 찾는다 — hudArt.pointOf) */
+    readonly id: string,
     private readonly side: 1 | -1,
     showPct: boolean,
   ) {
@@ -274,7 +276,8 @@ class RowGauge {
 
   constructor(
     private readonly kit: HudKit,
-    private readonly id: string,
+    /** 거점 id (스냅샷 world.points에서 이 id로 값을 찾는다 — hudArt.pointOf) */
+    readonly id: string,
     /** 줄 차례 (0 = 맨 윗줄) */
     private readonly index: number,
     /** 맨 윗줄 사각형 (논리 px): 덩어리 왼쪽 위 · 한 줄 크기 */
@@ -386,7 +389,7 @@ export class Hud {
     this.plan = t ? (this.isMonster ? t.monster : t.survivor) : null;
     const plan = this.plan;
     const F = HUD.font;
-    // 거점 게이지: 스냅샷 world.points 순서(GAUGE_IDS). 터치는 거점 수만큼 줄 게이지, PC는 타이머 양옆 둘
+    // 거점 게이지: 줄 · 자리 순서는 GAUGE_IDS, 값은 스냅샷 world.points에서 id로 찾는다(drawTop). 터치는 거점 수만큼 줄 게이지, PC는 타이머 양옆 둘
     const showPct = pctShown(this.isMonster);
     const first = plan?.gauges[0];
     this.gauges =
@@ -512,10 +515,10 @@ export class Hud {
 
   private drawTop(snap: Snapshot): void {
     const w = snap.world;
-    this.gauges.forEach((g, i) => {
-      const p = w.points[i];
+    for (const g of this.gauges) {
+      const p = pointOf(w.points, g.id);
       g.update(p, this.isMonster && p?.state === 'capturing');
-    });
+    }
     // 타이머: [아이콘] [최후] 0:00 — 가운데 정렬. 터치는 자리가 모자라면 '최후' 글자 없이 (색 + 문 아이콘)
     const T = this.plan?.timer ?? HUD.timer;
     const k = HUD.s;
@@ -833,15 +836,15 @@ export class Hud {
   /** 디버그 · 테스트 값 (hudDebug) */
   debug(): Record<string, number | boolean | string> {
     const points: Record<string, number | string> = {};
-    this.gauges.forEach((g, i) => {
-      const id = GAUGE_IDS[i] ?? String(i);
+    for (const g of this.gauges) {
+      const id = g.id;
       points[`point${id}`] = g.state;
       // 상태에서 다시 계산하지 않고 칩에 실제로 건 프레임 (보이지 않으면 '')
       points[`point${id}Chip`] = g.chip.shown ? g.chip.frameName : '';
       // 지금 보이는 진행 숫자 (정수 %, 숫자를 보이지 않는 화면이면 '')
       points[`point${id}Pct`] = g.pct.value ?? '';
       points[`point${id}PctFrame`] = g.pct.frame;
-    });
+    }
     return {
       ...points,
       timer: this.timerMode,

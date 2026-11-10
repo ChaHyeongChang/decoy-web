@@ -603,7 +603,7 @@ function planCss(
   map: Box,
   T: Readonly<LayoutTuning> = DEFAULT_TUNING,
   /** 거점 줄 게이지 줄 수 (거점 수) */
-  rows: number = GAUGE_IDS.length,
+  gaugeRows: number = GAUGE_IDS.length,
 ): {
   timer: Box & { label: boolean };
   gauges: Box[];
@@ -621,14 +621,14 @@ function planCss(
   const cardH = P.card.h * a;
   // 거점 줄 게이지 덩어리: 폭 = 한 줄 폭, 높이 = 줄 높이 × 줄 수 (두 줄 = 예전 링 한 쌍 110 × 52)
   const rowH = P.gaugeRow.h * a;
-  const g = rowH * rows;
+  const g = rowH * gaugeRows;
   const pairW = P.gaugeRow.w * a;
   const timerH = P.timer.h * a;
   const grid = (cols: number): { w: number; h: number } => {
     const rows = Math.ceil(3 / cols);
     return { w: cols * cardW + (cols - 1) * U.gap, h: rows * cardH + (rows - 1) * U.gap };
   };
-  const pairAt = (x: number, y: number, n: number = rows): Box[] =>
+  const pairAt = (x: number, y: number, n: number = gaugeRows): Box[] =>
     Array.from({ length: n }, (_, i) => ({ x, y: y + i * rowH, w: pairW, h: rowH }));
 
   if (mode === 'band') {
@@ -884,9 +884,9 @@ function touchHudFits(l: LayoutInfo): boolean {
  * 터치 HUD 배치 (순수). 화면(CSS) 기준으로 정하고 논리 px로 돌려준다. 늘 떠 있는 부품은 맵 사각형 · 엄지 영역
  * (오른쪽 아래 버튼 무리 · 오른쪽 위 시스템 버튼 · 이동 스틱 그림)과 겹치지 않는다(tests/unit/touch-hud.test.ts).
  * 좌우 반전(tuning.mirror)이면 다 정한 뒤 좌우로 뒤집는다 (거점 줄 게이지는 A가 늘 윗줄이라 줄 순서는 그대로)
- * rows = 거점 줄 게이지 줄 수 (기본 = 거점 수)
+ * gaugeRows = 거점 줄 게이지 줄 수 (기본 = 거점 수)
  */
-export function touchHudPlan(l: LayoutInfo, rows: number = GAUGE_IDS.length): TouchHud | null {
+export function touchHudPlan(l: LayoutInfo, gaugeRows: number = GAUGE_IDS.length): TouchHud | null {
   if (l.kind === 'pc') return null;
   const U = TOUCH_UI;
   const { T, a, L, W, H, band, mapLeft, mapCss, mode } = touchGeom(l);
@@ -895,7 +895,7 @@ export function touchHudPlan(l: LayoutInfo, rows: number = GAUGE_IDS.length): To
   // 좌우 반전: CSS 사각형을 화면 가운데 기준으로 뒤집는다
   const flip = (b: Box): Box => (T.mirror ? { ...b, x: W - b.x - b.w } : b);
   const plan = (monster: boolean): TouchHudPlan => {
-    const p = planCss(W, H, mode, band, mapLeft, monster, mapCss, T, rows);
+    const p = planCss(W, H, mode, band, mapLeft, monster, mapCss, T, gaugeRows);
     const gauges = p.gauges.map(flip);
     const c = p.cards;
     const gridW = c.cols * c.cw + (c.cols - 1) * U.gap;
