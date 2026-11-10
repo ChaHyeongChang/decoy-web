@@ -36,8 +36,11 @@ export function parseFrameLimit(raw: string | null): FrameLimit | null {
 export const pacingHooks: {
   /** 고른 제한을 바로 적용한다 (저장은 부르는 쪽이 먼저 한다) */
   setLimit: ((limit: FrameLimit) => void) | null;
-  /** 다음 rAF를 제한과 상관없이 한 번 그린다 (Pacer.requestFrame — 판 장면이 멈춤 ↔ 걷기가 바뀐 입력 틱에 부른다) */
-  requestFrame: (() => void) | null;
+  /**
+   * 다음 rAF를 제한과 상관없이 한 번 그린다 (Pacer.requestFrame — 판 장면이 멈춤 ↔ 걷기가 바뀐 입력 틱에 부른다).
+   * afterMs = 바뀐 틱의 명목 시각: 그 시각보다 뒤인 첫 rAF가 요청 칸이다
+   */
+  requestFrame: ((afterMs?: number) => void) | null;
 } = { setLimit: null, requestFrame: null };
 
 // ───────────── 저장 (로비에서 고른 값, 'decoy:frameLimit') ─────────────
@@ -385,6 +388,31 @@ export function heldAfter(heldHz: number, measuredHz: number, rawHz: number | nu
   return Math.abs(r - Math.round(r)) > HELD_DROP_SLACK ? measuredHz : heldHz;
 }
 
+/**
+ * 입력 반응 요청 (Pacer.requestFrame, 플레이테스트 반영 a-10). 요청 칸은 '바뀐 입력 틱의 명목 시각보다 뒤'인 첫 rAF여야 한다:
+ * 그 틱의 움직임은 명목 시각부터 틱 길이에 걸쳐 풀려(Predictor.alphaAt) 같은 시각 · 그 앞 시각의 rAF는 변화를 0으로 그린다.
+ * 거기에 요청을 쓰면 제한기가 그 칸에서 다시 n칸을 세어 첫 움직임이 n칸 뒤에야 보였다(144Hz · 제한 60: 틱 + 13.9ms)
+ */
+export const REQUEST = {
+  /**
+   * 요청 칸은 바뀐 틱의 명목 시각보다 이만큼 넘게 뒤인 첫 rAF다 (ms). 0이면 부동소수 오차(틱 격자가 vsync보다 1e-11ms 이르다)로
+   * 같은 시각의 rAF가 '뒤'가 된다. 틱 뒤 0.5ms 안의 프레임이 보이는 변위는 걷기 0.0025타일(1080p 약 0.2px)이라 사실상 0이고,
+   * 가장 짧은 vsync(540Hz 1.85ms)보다 짧다
+   */
+  leadMs: 0.5,
+  /** 그런 rAF를 기다리며 미루는 rAF 수 상한 (rAF 시각이 performance.now보다 늘 한 프레임 넘게 뒤지는 환경에서 끝없이 미루지 않게) */
+  maxDefer: 1,
+} as const;
+
+/**
+ * 멈춤 ↔ 걷기가 바뀐 입력 틱(명목 시각 flipAt)을 처리한 뒤 requestFrame을 불러야 하는가 (판 장면 stepInput).
+ * 렌더 프레임이 처리한 틱이고(inFrame) 그 프레임 시각 nowMs가 명목 시각보다 REQUEST.leadMs 넘게 뒤면 그 프레임이 변화를 그리므로
+ * 부르지 않는다. 타이머가 처리했거나, 프레임 시각이 틱과 같은 시각이면(그 프레임은 변화를 0으로 그린다) 부른다
+ */
+export function flipNeedsRequest(inFrame: boolean, nowMs: number, flipAt: number): boolean {
+  return !(inFrame && nowMs - flipAt > REQUEST.leadMs);
+}
+
 /** 프레임 제한 · 화면 주사율 · 제한기를 묶는다. main.ts가 하나 만들어 patchTimeStep으로 Phaser 루프에 끼운다 */
 export class Pacer {
   readonly estimator = new RefreshEstimator();
@@ -398,6 +426,10 @@ export class Pacer {
   private heldHz: number | null = null;
   /** 다음 rAF를 제한과 상관없이 그린다 (requestFrame) */
   private once = false;
+  /** 요청 칸은 이 시각보다 REQUEST.leadMs 넘게 뒤인 rAF다 (requestFrame의 afterMs, 없으면 −∞ = 다음 rAF) */
+  private onceAfter = Number.NEGATIVE_INFINITY;
+  /** 이 요청을 미룬 rAF 수 (REQUEST.maxDefer까지) */
+  private onceDeferred = 0;
   /** 지난 onTick이 requestFrame 때문에 그린 rAF인가 (제한대로면 건너뛸 칸) */
   private extra = false;
 
@@ -434,10 +466,15 @@ export class Pacer {
   /**
    * 입력 반응 (잔렉 고치기): 다음 rAF를 제한과 상관없이 한 번 그리고 거기서 다시 n칸을 센다. 판 밖이면 무시한다. 판 장면이 내 캐릭터가
    * 멈춤 ↔ 걷기로 바뀐 입력 틱에 부른다(pacingHooks.requestFrame) — 목표를 화면의 절반으로 낮춰도 첫 움직임 · 멈춤이 다음 그릴
-   * 차례까지 늦지 않게. 바뀐 바로 그 순간의 프레임 하나뿐이라 걷는 중 간격은 그대로다
+   * 차례까지 늦지 않게. 바뀐 바로 그 순간의 프레임 하나뿐이라 걷는 중 간격은 그대로다.
+   * afterMs(바뀐 틱의 명목 시각)를 주면 그 시각보다 REQUEST.leadMs 넘게 뒤인 첫 rAF가 요청 칸이다: 같은 시각 · 앞선 시각의 rAF
+   * (타이머가 vsync와 같은 시각에 깸 · rAF 콜백이 늦게 시작함)는 요청을 쓰지 않고 한 번만 미룬다. 주지 않으면 다음 rAF
    */
-  requestFrame(): void {
-    if (!this.idleOn) this.once = true;
+  requestFrame(afterMs: number = Number.NEGATIVE_INFINITY): void {
+    if (this.idleOn) return;
+    this.once = true;
+    this.onceAfter = Number.isFinite(afterMs) ? afterMs : Number.NEGATIVE_INFINITY;
+    this.onceDeferred = 0;
   }
 
   /** 지난 rAF가 requestFrame 때문에 그린 칸인가 (프레임 측정이 늦은 프레임 · FPS 창에서 그 간격을 뺀다) */
@@ -448,7 +485,7 @@ export class Pacer {
   /** 판이 없으면 true: 그리기를 IDLE_CAP_HZ로 묶는다(제한 설정과 상관없이). false면 제한 설정대로 */
   setIdle(idle: boolean): void {
     this.idleOn = idle;
-    if (idle) this.once = false;
+    if (idle) this.clearRequest();
     this.heldHz = idle ? null : this.estimator.hz;
   }
 
@@ -487,18 +524,27 @@ export class Pacer {
     if (this.heldHz !== null) this.heldHz = heldAfter(this.heldHz, this.estimator.hz, this.estimator.rawHz);
     this.limiter.setCap(this.capHz);
     this.extra = false;
+    // 이 rAF가 요청한 틱보다 뒤가 아니면(그 틱의 변화를 0으로 그린다) 요청을 쓰지 않고 한 번 미룬다
+    const hold = this.once && !(t > this.onceAfter + REQUEST.leadMs) && this.onceDeferred < REQUEST.maxDefer;
+    if (hold) this.onceDeferred += 1;
     if (this.limiter.shouldRun(t, this.displayHz)) {
-      this.once = false;
+      if (!hold) this.clearRequest();
       return true;
     }
-    if (this.once && !this.idleOn) {
-      this.once = false;
+    if (this.once && !hold && !this.idleOn) {
+      this.clearRequest();
       this.extra = true;
       this.limiter.takeOver(t);
       return true;
     }
     this.onSkip?.(t);
     return false;
+  }
+
+  private clearRequest(): void {
+    this.once = false;
+    this.onceAfter = Number.NEGATIVE_INFINITY;
+    this.onceDeferred = 0;
   }
 }
 

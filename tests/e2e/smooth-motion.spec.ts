@@ -6,6 +6,9 @@
 //  - 고치기 전에는 입력 틱을 처리한 시각부터 보간하고(늦게 깬 타이머만큼 멈칫 → 튐), 서버가 마지막 입력까지 처리한 스냅샷마다
 //    보간 구간이 사라져(prev = state) 한 틱만큼 튀었다 — 60Hz에서도 프레임의 약 19%가 멈칫 · 튐, 화면 위 자리 폭 6.6px
 //  - 입력 지연: 키를 누른 뒤 첫 움직임이 다음 입력 틱 + 한 프레임 안에 그려진다 (보간 때문에 늘지 않는다)
+//  - 플레이테스트 반영 a-10: 약수 목표(n ≥ 2)에서 걷기 시작 틱이 vsync와 같은 시각이거나(가상 시계 위상을 맞춰 결정적으로 만든다)
+//    요청 칸의 rAF 시각이 틱보다 앞이면(작업 모형) 요청한 프레임이 움직임 0으로 그려져 첫 움직임이 목표 한 칸 늦었다 —
+//    Pacer.requestFrame(바뀐 틱의 명목 시각). 상한(입력 틱 + 한 vsync + 1ms)은 그대로다
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { installVirtualClock, type VirtualClockConfig, type VirtualFrameLog } from '../helpers/virtualClock';
 import { newPlayerPage, waitPrefetched } from './helpers';
@@ -93,6 +96,9 @@ interface Walk {
   intervals: number[];
   /** 누른 뒤 처음 움직인 프레임까지 (ms) */
   firstMove: number;
+  /** 걷기 시작 입력 틱(누른 뒤 이동 입력이 처음 실린 틱)을 처리한 시각의 vsync 위상 (칸, 0 ~ 1) · 가장 가까운 vsync와의 차 (ms) */
+  tickPhase: number;
+  tickOffVsync: number;
   /**
    * 누른 직후 · 뗀 직후 EDGE_MS 동안 (잔렉 고치기 — 입력 반응 requestFrame): 그린 간격 중 목표 주기가 아닌 것의 수 · 보인 프레임
    * |표시 간격 − rAF 간격| (ms). 멈춤 ↔ 걷기가 바뀐 틱 뒤 한 칸만 짧고, 표시는 계산 시각과 어긋나지 않아야 한다
@@ -108,6 +114,11 @@ interface WalkOpts {
   adapt?: boolean;
   /** ?fpsLimit= */
   limit?: string;
+  /**
+   * 가상 시계 위상 (vsync 칸): 펌프를 멈춘 뒤 가상 시각을 '짝수 번째 vsync + phase칸'에 맞추고 시작한다. 판 장면이 입력 틱 격자의
+   * 원점을 그 시각 + 500ms에 잡으므로 걷기 시작 틱의 vsync 위상이 정해진다 (없으면 펌프가 멈춘 시각 그대로 — 실행마다 다르다)
+   */
+  phase?: number;
 }
 
 /** 적응형이 정할 시간: 예열 5초 + 지속 10초 + 여유 */
@@ -126,6 +137,16 @@ async function walk(browser: Browser, cfg: VirtualClockConfig, opts: WalkOpts = 
     await context.setOffline(true);
     await page.waitForTimeout(300);
     await page.evaluate(() => window.__VCLOCK__?.pump(false));
+    if (opts.phase !== undefined)
+      await page.evaluate(
+        async ([ph, hz]) => {
+          const c = window.__VCLOCK__;
+          if (!c) throw new Error('가상 시계 없음');
+          const k0 = Math.ceil((c.now() * hz) / 1000) + 2;
+          await c.advanceTo(((k0 + (k0 % 2) + ph) * 1000) / hz);
+        },
+        [opts.phase, cfg.hz] as const,
+      );
     await domClick(page, 'practice');
     await advance(page, 500);
     await domClick(page, 'practice-role-runner');
@@ -172,6 +193,8 @@ async function walk(browser: Browser, cfg: VirtualClockConfig, opts: WalkOpts = 
         keys: s.keys,
         logs: window.__VCLOCK__?.frameLog.slice() ?? [],
         targetHz: window.__DECOY__?.gfx.targetHz ?? 0,
+        // 입력 기록은 최근 120틱(4초)이라 걷기 시작(약 1.9초 전)이 들어 있다
+        inputs: (window.__DECOY__?.getInputLog() ?? []).map((e) => ({ t: e.t, mx: e.mx })),
       };
     });
     expect(problems, '콘솔 에러 · 경고').toEqual([]);
@@ -192,6 +215,10 @@ async function walk(browser: Browser, cfg: VirtualClockConfig, opts: WalkOpts = 
     const first = fr[0];
     const last = fr[fr.length - 1];
     if (!first || !last || !moved) throw new Error('걷기 기록 없음');
+    const startTick = trace.inputs.find((e) => e.t >= down - 1e-6 && e.mx !== 0);
+    if (!startTick) throw new Error('걷기 시작 틱 기록 없음');
+    const vsync = 1000 / cfg.hz;
+    const tickSlots = startTick.t / vsync;
     const v = Math.hypot(last.mx - first.mx, last.my - first.my) / (last.t - first.t);
     const out: Walk = {
       targetHz: trace.targetHz,
@@ -200,6 +227,8 @@ async function walk(browser: Browser, cfg: VirtualClockConfig, opts: WalkOpts = 
       screen: [],
       intervals: [],
       firstMove: moved.t - down,
+      tickPhase: tickSlots - Math.floor(tickSlots),
+      tickOffVsync: startTick.t - Math.round(tickSlots) * vsync,
       edges: [down, up].map((at) => {
         const ef = trace.frames.filter((f) => f.t >= at - 50 && f.t <= at + EDGE_MS);
         const period = 1000 / trace.targetHz;
@@ -302,54 +331,107 @@ const SCENES: Scene[] = [
   },
 ];
 
+/** 한 번 걸은 기록을 장면 기준으로 본다 (기록 한 줄 + 단언) */
+function checkWalk(sc: Scene, w: Walk, label = sc.name): void {
+  const lo = Math.min(...w.ratios);
+  const hi = Math.max(...w.ratios);
+  const shake = Math.max(...w.screen);
+  console.log(
+    `[smooth-motion] ${label}: 프레임 ${w.ratios.length + 1}개 · 간격 ${Math.min(...w.intervals).toFixed(2)}~${Math.max(...w.intervals).toFixed(2)}ms · ` +
+      `① 비율 ${lo.toFixed(4)}~${hi.toFixed(4)} · ③ 프레임당 변화 최대 ${shake.toFixed(4)}px · 첫 움직임 ${w.firstMove.toFixed(3)}ms · ` +
+      `걷기 틱 vsync 위상 ${w.tickPhase.toFixed(4)}칸 (가장 가까운 vsync와 ${w.tickOffVsync.toExponential(2)}ms) · ` +
+      `누른 · 뗀 직후 주기 밖 간격 ${w.edges.map((e) => e.offPeriod.length).join(' · ')}`,
+  );
+  if (sc.cfg.dropFrames) expect(Math.max(...w.intervals), '건너뛴 vsync가 섞였다').toBeGreaterThan(15);
+  // 목표 FPS: 적응형 · 고정 제한이 화면 주사율의 약수로 정했다. 걷는 동안 그린 간격이 모두 그 주기 (고르다)
+  const period = 1000 / (sc.target ?? sc.cfg.hz);
+  if (sc.target !== undefined) expect(w.targetHz, '목표 FPS').toBe(sc.target);
+  if (!sc.cfg.dropFrames)
+    for (const dt of w.intervals) expect(Math.abs(dt - period), `간격 ${dt.toFixed(2)}ms`).toBeLessThan(0.01);
+  // 작업 시간 모형: 보인 프레임마다 표시 간격 = 계산 간격 (화면에 보인 시각에 맞는 자리)
+  if (sc.cfg.work) {
+    expect(w.mismatch.length, '보인 프레임').toBeGreaterThan(5);
+    expect(Math.max(...w.mismatch), '표시 − 계산 간격 차 (ms)').toBeLessThan(0.01);
+  }
+  // ① 그린 자리 이동 = 빠르기 × 프레임 간격 (멈칫 · 튐 없음)
+  expect(lo, '① 가장 덜 움직인 프레임 (멈칫)').toBeGreaterThan(0.98);
+  expect(hi, '① 가장 많이 움직인 프레임 (튐)').toBeLessThan(1.02);
+  // ③ 카메라 기준 화면 위 내 자리: 같은 빠르기면 따라가기 늦음이 그대로라 움직이지 않는다 (격자 맞추기 반 픽셀도 없다)
+  expect(shake, '③ 화면 위 내 자리 프레임당 변화 (px)').toBeLessThan(0.05);
+  // 입력 지연: 다음 입력 틱(최대 1/30초) + 한 프레임 안 (vsync를 건너뛰는 장면은 건너뛴 두 칸까지). 약수 목표(n칸)여도 한 vsync 안:
+  // 멈춤 ↔ 걷기가 바뀐 틱 뒤 rAF를 바로 그린다(requestFrame — 예전에는 다음 그릴 차례까지 n칸)
+  const frames = sc.cfg.dropFrames ? 3 : 1;
+  expect(w.firstMove, `${label} 첫 움직임 (ms)`).toBeLessThanOrEqual(
+    1000 / 30 + frames * (1000 / sc.cfg.hz) + 1,
+  );
+  // 누른 직후 · 뗀 직후: 목표 주기가 아닌 간격은 바뀐 틱 뒤 한 칸뿐이고(그 칸은 주기보다 짧다), 보인 프레임은 계산 시각과 맞다
+  if (sc.target !== undefined && !sc.cfg.dropFrames)
+    for (const [k, e] of w.edges.entries()) {
+      const edge = k === 0 ? '누른 직후' : '뗀 직후';
+      expect(
+        e.offPeriod.length,
+        `${label} ${edge} 주기가 아닌 간격 ${e.offPeriod.map((d) => d.toFixed(2)).join(' ')}`,
+      ).toBeLessThanOrEqual(1);
+      for (const d of e.offPeriod) expect(d, `${label} ${edge} 짧은 칸`).toBeLessThan(period);
+      if (sc.cfg.work && e.mismatch.length > 0)
+        expect(Math.max(...e.mismatch), `${label} ${edge} 표시 − 계산 간격 차 (ms)`).toBeLessThan(0.01);
+    }
+}
+
 for (const sc of SCENES) {
   test(
     `따라가는 카메라에서 내 캐릭터 화면 이동이 프레임마다 고르다 — ${sc.name}`,
     sc.core ? { tag: '@core' } : {},
     async ({ browser }) => {
       test.setTimeout(sc.core ? 150_000 : 300_000);
-      const w = await walk(browser, sc.cfg, sc.opts);
-      const lo = Math.min(...w.ratios);
-      const hi = Math.max(...w.ratios);
-      const shake = Math.max(...w.screen);
-      console.log(
-        `[smooth-motion] ${sc.name}: 프레임 ${w.ratios.length + 1}개 · 간격 ${Math.min(...w.intervals).toFixed(2)}~${Math.max(...w.intervals).toFixed(2)}ms · ` +
-          `① 비율 ${lo.toFixed(4)}~${hi.toFixed(4)} · ③ 프레임당 변화 최대 ${shake.toFixed(4)}px · 첫 움직임 ${w.firstMove.toFixed(1)}ms · ` +
-          `누른 · 뗀 직후 주기 밖 간격 ${w.edges.map((e) => e.offPeriod.length).join(' · ')}`,
-      );
-      if (sc.cfg.dropFrames) expect(Math.max(...w.intervals), '건너뛴 vsync가 섞였다').toBeGreaterThan(15);
-      // 목표 FPS: 적응형 · 고정 제한이 화면 주사율의 약수로 정했다. 걷는 동안 그린 간격이 모두 그 주기 (고르다)
-      const period = 1000 / (sc.target ?? sc.cfg.hz);
-      if (sc.target !== undefined) expect(w.targetHz, '목표 FPS').toBe(sc.target);
-      if (!sc.cfg.dropFrames)
-        for (const dt of w.intervals)
-          expect(Math.abs(dt - period), `간격 ${dt.toFixed(2)}ms`).toBeLessThan(0.01);
-      // 작업 시간 모형: 보인 프레임마다 표시 간격 = 계산 간격 (화면에 보인 시각에 맞는 자리)
-      if (sc.cfg.work) {
-        expect(w.mismatch.length, '보인 프레임').toBeGreaterThan(5);
-        expect(Math.max(...w.mismatch), '표시 − 계산 간격 차 (ms)').toBeLessThan(0.01);
-      }
-      // ① 그린 자리 이동 = 빠르기 × 프레임 간격 (멈칫 · 튐 없음)
-      expect(lo, '① 가장 덜 움직인 프레임 (멈칫)').toBeGreaterThan(0.98);
-      expect(hi, '① 가장 많이 움직인 프레임 (튐)').toBeLessThan(1.02);
-      // ③ 카메라 기준 화면 위 내 자리: 같은 빠르기면 따라가기 늦음이 그대로라 움직이지 않는다 (격자 맞추기 반 픽셀도 없다)
-      expect(shake, '③ 화면 위 내 자리 프레임당 변화 (px)').toBeLessThan(0.05);
-      // 입력 지연: 다음 입력 틱(최대 1/30초) + 한 프레임 안 (vsync를 건너뛰는 장면은 건너뛴 두 칸까지). 약수 목표(n칸)여도 한 vsync 안:
-      // 멈춤 ↔ 걷기가 바뀐 틱 뒤 rAF를 바로 그린다(requestFrame — 예전에는 다음 그릴 차례까지 n칸)
-      const frames = sc.cfg.dropFrames ? 3 : 1;
-      expect(w.firstMove).toBeLessThanOrEqual(1000 / 30 + frames * (1000 / sc.cfg.hz) + 1);
-      // 누른 직후 · 뗀 직후: 목표 주기가 아닌 간격은 바뀐 틱 뒤 한 칸뿐이고(그 칸은 주기보다 짧다), 보인 프레임은 계산 시각과 맞다
-      if (sc.target !== undefined && !sc.cfg.dropFrames)
-        for (const [k, e] of w.edges.entries()) {
-          const label = k === 0 ? '누른 직후' : '뗀 직후';
-          expect(
-            e.offPeriod.length,
-            `${label} 주기가 아닌 간격 ${e.offPeriod.map((d) => d.toFixed(2)).join(' ')}`,
-          ).toBeLessThanOrEqual(1);
-          for (const d of e.offPeriod) expect(d, `${label} 짧은 칸`).toBeLessThan(period);
-          if (sc.cfg.work && e.mismatch.length > 0)
-            expect(Math.max(...e.mismatch), `${label} 표시 − 계산 간격 차 (ms)`).toBeLessThan(0.01);
-        }
+      checkWalk(sc, await walk(browser, sc.cfg, sc.opts));
     },
   );
 }
+
+// ───── 플레이테스트 반영 a-10: 약수 목표에서 요청한 프레임이 움직임을 못 보이던 두 경우 (상한은 위와 같다) ─────
+
+/** 걷기 시작 틱과 vsync가 같은 시각이라고 보는 차 (ms). 틱 격자는 부동소수 오차로 vsync보다 1e-11ms쯤 이르다 */
+const SAME_TIME_MS = 1e-6;
+
+test('약수 목표의 첫 움직임 — 144Hz 화면 · 프레임 제한 60: 걷기 시작 틱이 vsync와 같은 시각 (최악 위상)', async ({
+  browser,
+}) => {
+  test.setTimeout(300_000);
+  const sc: Scene = {
+    name: '144Hz 화면 · 프레임 제한 60 (→ 고른 72)',
+    cfg: { seed: SEED, hz: 144 },
+    opts: { limit: '60' },
+    target: 72,
+    core: false,
+  };
+  // 입력 틱은 4.8칸이라 격자 원점 위상이 0.2칸의 배수면 다섯 틱마다 vsync와 겹친다. 판이 시작할 때까지 기다린 횟수(틱 3개씩 =
+  // 0.4칸씩)와 상관없이 다섯 위상 가운데 정확히 하나에서 걷기 시작 틱이 겹친다 — 고치기 전에는 그 하나가 47.222ms(상한 41.278)
+  const walks: Walk[] = [];
+  for (const phase of [0, 0.2, 0.4, 0.6, 0.8]) {
+    const w = await walk(browser, sc.cfg, { ...sc.opts, phase });
+    walks.push(w);
+    checkWalk(sc, w, `${sc.name} · 위상 ${phase}칸`);
+  }
+  // 전제: 다섯 가운데 정확히 하나가 틱 = vsync였다 (시험 틀이 바뀌어 겹치는 위상을 지나치면 여기서 알린다)
+  expect(
+    walks.filter((w) => Math.abs(w.tickOffVsync) < SAME_TIME_MS).length,
+    `걷기 틱 − vsync (ms): ${walks.map((w) => w.tickOffVsync.toExponential(2)).join(' · ')}`,
+  ).toBe(1);
+});
+
+test('약수 목표의 첫 움직임 — 120Hz 화면 · 프레임 제한 60 · 약 108fps: 요청 칸의 rAF 시각이 틱보다 앞 (늦게 시작한 콜백)', async ({
+  browser,
+}) => {
+  test.setTimeout(300_000);
+  // 그린 프레임이 한 칸을 넘기면(작업 모형) 그 사이 깬 타이머가 걷기 틱을 처리한 바로 뒤에, 틱보다 앞선 vsync 시각을 가진 rAF가
+  // 늦게 시작한다. 고치기 전에는 그 rAF가 요청 칸이 되어 움직임 0으로 그려지고 다음 그림이 두 칸 뒤였다(48.667ms, 상한 42.667)
+  const sc: Scene = {
+    name: '120Hz 화면 · 프레임 제한 60 · 약 108fps',
+    cfg: { seed: SEED, hz: 120, work: SHORT },
+    opts: { limit: '60', phase: 0.16 },
+    target: 60,
+    core: false,
+  };
+  checkWalk(sc, await walk(browser, sc.cfg, sc.opts));
+});

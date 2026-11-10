@@ -247,8 +247,8 @@ timeStep.step = function measuredStep(this: Phaser.Core.TimeStep, time: number):
 };
 patchTimeStep(timeStep, pacer);
 pacer.onSkip = () => sessionFrameStats.noteSkipped();
-// 입력 반응 (잔렉 고치기): 판 장면이 멈춤 ↔ 걷기가 바뀐 입력 틱에 다음 rAF를 한 번 바로 그리게 한다
-pacingHooks.requestFrame = () => pacer.requestFrame();
+// 입력 반응 (잔렉 고치기): 판 장면이 멈춤 ↔ 걷기가 바뀐 입력 틱에 그 틱의 명목 시각(afterMs)보다 뒤인 첫 rAF를 한 번 바로 그리게 한다
+pacingHooks.requestFrame = (afterMs) => pacer.requestFrame(afterMs);
 
 /** 디버그 훅 · 오버레이 · 적응형 품질이 읽는 페이싱 상태 */
 function syncPacing(): void {
