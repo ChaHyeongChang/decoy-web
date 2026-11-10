@@ -121,6 +121,14 @@ export function isDefaultLayout(t: TeamLayout | null | undefined): boolean {
   return !t || (!t.mirror && Object.keys(t.items).length === 0);
 }
 
+/**
+ * 조작(스틱 · 버튼)을 옮겼거나 좌우 반전했는가. 지도(맵 창 안 미니맵)만 옮긴 배치는 아니다 — 판 직전 터치 안내 그림 · 본문은
+ * 지도를 다루지 않아 손으로 다듬은 기본 그림이 그대로 맞다 (플레이테스트 a-5)
+ */
+export function controlsMoved(t: TeamLayout | null | undefined): boolean {
+  return !!t && (t.mirror || Object.keys(t.items).some((id) => id !== 'minimap'));
+}
+
 function cleanPlace(v: unknown): ControlPlace | null {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
   const o = v as Record<string, unknown>;

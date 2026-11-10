@@ -4,6 +4,7 @@
 //  - 틀을 누르면 지도 크게 보기가 열리고 이동 스틱은 생기지 않는다(이동 영역이 틀을 피한다), 아무 데나 누르면 닫히고 이동 영역은 그대로 쓴다
 //  - 생존자는 그대로: 667×375는 맵 오른쪽(시스템 버튼 아래), 750×340은 옆 칸(맵 밖)
 //  - 판 중 창이 낮아지면(750×369에서 시작 → 주소창이 나와 300): 옮긴 틀이 맵 왼쪽 위 구석, 크기가 돌아오면 처음 자리
+//  - 조작 배치에서 지도만 옮겼으면 판 직전 터치 안내는 기본 그림 · 본문 그대로(안내 그림은 지도를 그리지 않는다)
 // 틀은 디버그 훅 getMatchPrefs().minimapTap(미니맵 객체의 틀 사각형 — 누르는 자리)과 getHudLayout()(표시 목록에서 잰 그림)으로 본다.
 // 혼자 봇 방(?bots=1). 기능 시험은 기기 배율 1. 느린 CI 대비: 조건을 간격 폴링으로 기다린다. 화면 사진은 artifacts/screens/
 // (커밋하지 않음)에 남긴다
@@ -20,6 +21,7 @@ import {
   waitForSnapshots,
   type DeviceOptions,
 } from './helpers';
+import { TOUCH_TEXT } from '../../client/src/data/storyText';
 import {
   MultiTouch,
   measureTouchLayout,
@@ -293,4 +295,31 @@ test('판 중 창이 낮아짐 (750×369에서 시작한 괴물 → 주소창이
   expect(await page.evaluate(() => window.__DECOY__?.getHudLayout()?.minimapInset)).toBe(false);
   expect(s.problems).toEqual([]);
   await s.context.close();
+});
+
+test('지도만 옮긴 조작 배치(괴물 750×340)면 판 직전 터치 안내는 손으로 다듬은 기본 그림 · 본문 그대로 — 안내 그림은 지도를 그리지 않는다', async ({
+  browser,
+}) => {
+  const { context, page, problems } = await newPlayerPage(browser, phone(750, 340));
+  const place = { u: 0.5, v: 0.5, s: 1 };
+  await context.addInitScript(
+    (raw) => {
+      if (localStorage.getItem('decoy:controlLayout') === null)
+        localStorage.setItem('decoy:controlLayout', raw);
+    },
+    JSON.stringify({ v: 1, monster: { mirror: false, items: { minimap: place } } }),
+  );
+  await createRoom(page);
+  await pickRoleAndReady(page, 'monster');
+  const card = page.getByTestId('touch-tutorial');
+  await expect(card).toBeVisible();
+  // 바꾼 배치 그림(자동 그림 + '그림은 내가 바꾼 조작 배치예요')이 아니라 기본 그림(쉬는 이동 스틱 손잡이까지)과 자리 말이 있는 본문
+  await expect(page.getByTestId('touch-tutorial-custom')).toHaveCount(0);
+  await expect(card.locator('.tt-art .tt-knob')).toHaveCount(1);
+  expect(await card.locator('li').allTextContents()).toEqual([...TOUCH_TEXT.tutorialMonster]);
+  // 저장한 지도 자리는 그대로다
+  const saved = await page.evaluate(() => localStorage.getItem('decoy:controlLayout'));
+  expect(JSON.parse(saved ?? 'null')?.monster?.items).toEqual({ minimap: place });
+  expect(problems).toEqual([]);
+  await context.close();
 });

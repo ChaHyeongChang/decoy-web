@@ -3,25 +3,32 @@
 //  - 자리 규칙: 옆 칸에 자리가 없을 때 ① 맵 오른쪽 위(시스템 버튼 아래)와 ③ 맵 왼쪽 위 구석 중 큰 쪽(같으면 ①). 화면 격자(폭 540~1000 ×
 //    높이 270~440 + 시험 화면 · 아이폰 14 주소창 높이) × 두 역할 × 시스템 버튼 2 · 3칸 × 좌우 반전에서: 괴물 틀이 맵 위 가운데 칸(가로
 //    가운데 1/3 × 위 1/3)과 겹치는 면적 0, 생존자 자리는 예전 규칙 그대로, 틀이 맵 안이고 엄지 대상(이름표 · 이동 고리) · HUD · 이동
-//    영역과 겹침 0. 태블릿 · PC는 그대로
-//  - 낮은 화면(게임 영역 높이 350 이하) 축소: 맵 가로의 0.22 → 0.18, 72 CSS px 아래로는 줄이지 않는다 (어느 화면도 60 미만이 아니다)
+//    영역과 겹침 0. 태블릿 · PC는 그대로. ③의 아래 끝 상한(이동 영역 위)이 걸리는 낮은 화면, ②(맵 위 가운데)가 남는 아주 낮은
+//    창(게임 영역 높이 약 250 이하 — ③이 최소 크기로도 안 들어갈 때만)
+//  - 낮은 화면(게임 영역 높이 350 이하) 축소: 맵 가로의 0.22 → 0.18, 72 CSS px 아래로는 줄이지 않는다 (어느 화면도 60 미만이 아니다,
+//    두 역할 공통 — 생존자는 같은 자리에서 크기만)
 //  - 이동 영역이 맵 안 미니맵 틀을 피한다 (탭해서 크게 보기가 이동 영역에 먹히지 않게)
 //  - 판 중 창이 낮아질 때 옮길 자리: 맵 왼쪽 위 구석이 '막은 것의 왼쪽(맵 위 가운데 쪽)'보다 먼저
 //  - 조작 배치의 지도 칸: 자리만(크기 배율 1), 맵 창 안에서만, 다른 조작 · 이동 영역과 안 겹침, 옆 칸 미니맵 화면에서는 쓰지 않음,
-//    저장 형식 판 1 그대로(지도 칸이 없는 옛 저장값 · 지도 칸이 있는 새 저장값을 옛 파서가 읽는 경우)
+//    좌우 반전 + 기본 배치로 돌아갈 때도 뒤집힌 틀 그대로, 저장 형식 판 1 그대로(지도 칸이 없는 옛 저장값 · 지도 칸이 있는 새
+//    저장값을 옛 파서가 읽는 경우), 지도만 옮긴 배치는 판 직전 안내 그림에서 기본 배치로 본다
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   CONTROL_IDS,
   CONTROL_LAYOUT_VERSION,
   TEAM_CONTROLS,
+  baseBoxes,
   blockersOf,
   boxAt,
+  controlsMoved,
   flipItems,
+  isDefaultLayout,
   moveRange,
   occupied,
   parseControlLayout,
   rangeOf,
   ratioOf,
+  resolveLayout,
   separated,
   serializeControlLayout,
   type ControlBoxes,
@@ -243,12 +250,13 @@ function frameProblems(s: Scene, label: string): string[] {
 }
 
 describe('맵 창 안 미니맵 자리 규칙 (layout.insetCss — 플레이테스트 a-5)', () => {
-  it('화면 격자 × 두 역할 × 시스템 버튼 2 · 3칸 × 좌우 반전: 괴물 틀은 맵 위 가운데 칸과 겹치지 않고, 생존자 자리는 예전 규칙 그대로, 틀은 맵 안 · 엄지 대상 · HUD · 이동 영역과 안 겹친다', () => {
+  it('화면 격자 × 두 역할 × 시스템 버튼 2 · 3칸 × 좌우 반전: 괴물 틀은 맵 위 가운데 칸과 겹치지 않고, 생존자 자리는 예전 규칙 그대로(크기는 낮은 화면 축소만큼만 — 두 역할 공통), 틀은 맵 안 · 엄지 대상 · HUD · 이동 영역과 안 겹친다', () => {
     const bad: string[] = [];
     let cases = 0;
     let insets = 0;
     let monsterMoved = 0;
     let survivorInsets = 0;
+    let survivorShrunk = 0;
     for (const [w, h] of [...PHONES, ...TABLETS])
       for (const monster of [true, false])
         for (const sysSlots of [2, 3])
@@ -286,10 +294,27 @@ describe('맵 창 안 미니맵 자리 규칙 (layout.insetCss — 플레이테�
                   `${label}: 생존자 자리가 바뀜 (${old.box.x.toFixed(1)}, ${old.box.y.toFixed(1)}, ${old.box.w.toFixed(1)}) → (${now.x.toFixed(1)}, ${now.y.toFixed(1)}, ${now.w.toFixed(1)})`,
                 );
               if (old?.which === 2) bad.push(`${label}: 생존자가 예전에 ② 자리였다 (불변식의 전제가 깨짐)`);
+              // 크기까지 예전 코드(폭 상한 0.22 그대로)와 견준다: 붙는 끝(오른쪽 끝 · 위 끝)은 같고, 폭은 게임 영역 높이 350
+              // 넘으면 같고 그 이하면 낮은 화면 축소만큼만 작다 (축소는 두 역할 공통 — VISUAL_SPEC 12.6)
+              const prev = oldRule(s, Math.min(s.map.w * 0.22, 200));
+              if (prev?.which !== 1) bad.push(`${label}: 예전 코드의 생존자 자리가 ①이 아님`);
+              else {
+                const edge = now.x + now.w - (prev.box.x + prev.box.w);
+                if (Math.abs(edge) > 0.01 || Math.abs(now.y - prev.box.y) > 0.01)
+                  bad.push(`${label}: 생존자 틀이 붙는 끝이 바뀜 (오른쪽 ${edge.toFixed(2)})`);
+                if (now.w > prev.box.w + 0.01) bad.push(`${label}: 생존자 그림이 예전보다 큼`);
+                if (h > 350 && Math.abs(now.w - prev.box.w) > 0.01)
+                  bad.push(`${label}: 높이 350 넘는 화면의 생존자 크기가 바뀜`);
+                if (now.w < prev.box.w - 0.01) {
+                  survivorShrunk += 1;
+                  const cap = Math.max(72, s.map.w * 0.18);
+                  if (now.w > cap + 0.01) bad.push(`${label}: 줄었는데 축소 상한(${cap.toFixed(1)})보다 큼`);
+                }
+              }
             }
           }
     console.log(
-      `[minimap-place] 확인 ${cases}가지 · 맵 안 미니맵 ${insets} (생존자 ${survivorInsets}) · 예전에 위 가운데(②)였던 괴물 ${monsterMoved}`,
+      `[minimap-place] 확인 ${cases}가지 · 맵 안 미니맵 ${insets} (생존자 ${survivorInsets}, 그중 낮은 화면 축소 ${survivorShrunk}) · 예전에 위 가운데(②)였던 괴물 ${monsterMoved}`,
     );
     expect(bad.slice(0, 20)).toEqual([]);
     // 빈 통과가 아니다: 맵 안 미니맵 화면이 충분히 있고, 예전에 위 가운데였던 괴물 화면이 실제로 있다
@@ -297,6 +322,8 @@ describe('맵 창 안 미니맵 자리 규칙 (layout.insetCss — 플레이테�
     expect(insets).toBeGreaterThan(1000);
     expect(survivorInsets).toBeGreaterThan(300);
     expect(monsterMoved).toBeGreaterThan(300);
+    // 낮은 화면의 생존자는 같은 자리에서 크기만 준다 (정한 동작 — 사람 확인 HUMAN_CHECKS '크기 · 생존자')
+    expect(survivorShrunk).toBeGreaterThan(200);
   });
 
   it('조정 값(UI 크기 1.15 · 1.3, 조이스틱 크기 0.8 · 1.3, 좌우 반전)에서도: 틀은 맵 안 · 엄지 대상 · HUD · 이동 영역과 안 겹치고 괴물 틀은 맵 위 가운데 칸 밖', () => {
@@ -359,6 +386,75 @@ describe('맵 창 안 미니맵 자리 규칙 (layout.insetCss — 플레이테�
     expect(frame(750, 300)).toEqual([156, 6, 89, 74]);
     expect(frame(667, 375)).toEqual([97, 32, 115, 91]);
     expect(frame(640, 360)).toEqual([95, 32, 110, 88]);
+  });
+
+  it('③의 아래 끝 상한이 실제로 걸리는 낮은 화면(게임 영역 높이 250 — 위 띠 배치)의 괴물: 왼쪽 위 틀은 이동 스틱 그림 위 이동 영역(moveTop − 16)에서 멈춰 폭 상한보다 작고, 이동 영역 · 엄지 대상과 안 겹치며 이동 스틱 자리가 남는다', () => {
+    for (const w of [480, 500, 520, 540]) {
+      const s = scene(w, 250, true);
+      const label = `${w}×250`;
+      const f = s.frame!;
+      expect(f, label).not.toBeNull();
+      // ③ 맵 왼쪽 위 구석
+      expect(f.x, label).toBeCloseTo(s.map.x + L.MINIMAP_INSET.margin, 6);
+      expect(f.y, label).toBeCloseTo(s.map.y + L.MINIMAP_INSET.margin, 6);
+      // 틀 아래 끝 = 상한 (상한이 폭을 정했다 — 폭 상한 max(72, 맵 가로 × 0.18)보다 작다)
+      const r = L.thumbReserve(s.cssW, s.h, true, s.T, s.map.x + s.map.w);
+      const cap = r.moveTop - L.TOUCH_UI.zoneTop;
+      expect(f.y + f.h, label).toBeCloseTo(cap, 6);
+      expect(s.imgW, label).toBeLessThan(fullWidth(s.map.w, 250) - 1);
+      expect(s.imgW, label).toBeGreaterThanOrEqual(L.MINIMAP_INSET.min);
+      // 이동 영역은 틀 아래 8px에서 시작하고 이동 스틱 그림 + 24px 높이가 남는다
+      expect(s.touch.zone.y, label).toBeGreaterThanOrEqual(f.y + f.h + MIN_GAP - 0.01);
+      expect(frameProblems(s, label)).toEqual([]);
+    }
+  });
+
+  it('아주 낮은 화면(게임 영역 높이 200~265): 괴물 틀이 맵 위 가운데 칸에 걸리는 것은 ② 시스템 버튼 왼쪽의 맵 위 끝뿐이고, 맵 왼쪽 위 구석에 이동 영역 위로 최소 틀(그림 60)이 들어가지 않을 때만이다 (VISUAL_SPEC 12.6 — 지원 시험 화면 밖)', () => {
+    const bad: string[] = [];
+    let insets = 0;
+    let left = 0;
+    let second = 0;
+    for (let h = 200; h <= 265; h += 5)
+      for (let w = 480; w <= 1000; w += 20) {
+        if (w / h < 1.5) continue;
+        for (const sysSlots of [2, 3]) {
+          const s = scene(w, h, true, { sysSlots });
+          const f = s.frame;
+          if (!f) continue;
+          insets += 1;
+          const label = `${w}×${h} 칸${sysSlots}`;
+          const m = s.map;
+          if (
+            f.x < m.x - 0.01 ||
+            f.y < m.y - 0.01 ||
+            f.x + f.w > m.x + m.w + 0.01 ||
+            f.y + f.h > m.y + m.h + 0.01
+          )
+            bad.push(`${label}: 틀이 맵 밖`);
+          for (const r of s.rects) if (overlaps(f, r.box)) bad.push(`${label}: ${r.id}와 겹침`);
+          if (Math.abs(f.x - (m.x + L.MINIMAP_INSET.margin)) < 0.01) left += 1;
+          if (overlapArea(f, topCenter(m)) <= 0.01) continue;
+          second += 1;
+          // 맵 왼쪽 위 구석에 이동 영역 위(moveTop − 16)까지 들어가는 그림 폭이 최소(60)보다 작다
+          const a = L.TOUCH_UI.art * s.T.uiScale;
+          const pad = L.TOUCH_PART.minimap.pad * a;
+          const title = L.TOUCH_PART.minimap.title * a;
+          const r = L.thumbReserve(s.cssW, h, true, s.T, m.x + m.w);
+          const room =
+            (r.moveTop - L.TOUCH_UI.zoneTop - (m.y + L.MINIMAP_INSET.margin) - title - pad) / RATIO;
+          if (room >= L.MINIMAP_INSET.min)
+            bad.push(`${label}: 왼쪽 위에 그림 ${room.toFixed(1)}이 들어가는데 위 가운데`);
+          // ② 자리: 틀 오른쪽 끝 = 시스템 버튼 왼쪽 − 8 (맵 오른쪽 끝 − 6 이하), 맵 위 끝 + 6
+          const edge = Math.min(m.x + m.w - L.MINIMAP_INSET.margin, r.sysLeft - MIN_GAP);
+          if (Math.abs(f.x + f.w - edge) > 0.01 || Math.abs(f.y - (m.y + L.MINIMAP_INSET.margin)) > 0.01)
+            bad.push(`${label}: 위 가운데에 걸린 틀이 ② 자리가 아님`);
+        }
+      }
+    expect(bad.slice(0, 20)).toEqual([]);
+    expect(insets).toBeGreaterThan(200);
+    // 높이 245~265에도 왼쪽 위 구석이 있다(상한 안에 들어갈 때). ②는 그보다 낮은 창의 예외로 남는다
+    expect(left).toBeGreaterThan(30);
+    expect(second).toBeGreaterThan(0);
   });
 
   it('생존자 · 오른쪽에 자리가 있는 괴물 · 태블릿은 그대로: 고정 수치와 예전 규칙이 같다 (높이 350 넘는 화면은 크기까지)', () => {
@@ -832,6 +928,60 @@ describe('조작 배치: 지도 (맵 창 안 미니맵 자리 옮기기)', () =>
     expect('minimap' in T).toBe(false);
     expect(overlaps(s.frame!, T.zone)).toBe(false);
   });
+
+  it('좌우 반전 + 놓을 자리가 없어 기본 배치 (fallback): 지도는 판 HUD 배치가 뒤집어 둔 틀(맵 오른쪽 위) 그대로 — 다시 뒤집지 않아 이동 영역(오른쪽)이 그 틀 아래에서 시작한다', () => {
+    // 위 띠 배치의 작은 창: HUD가 모두 위 띠라 이동 영역이 틀을 피하지 않으면 띠 바로 아래부터다
+    const s = scene(600, 400, true, { mirror: true });
+    const f = s.frame!;
+    expect(f.x + f.w).toBeCloseTo(s.map.x + s.map.w - L.MINIMAP_INSET.margin, 6);
+    const hud = s.rects.map((r) => r.box);
+    const opts = {
+      menu: true,
+      viewRatio: s.l.viewW / s.l.viewH,
+      sysRows: s.plan.sysRows,
+      minimap: { frame: f, map: s.map },
+    };
+    const D = touchLayout(600, 400, NO_INSET, true, true, hud, {
+      ...opts,
+      custom: { mirror: true, items: {} },
+    });
+    // 시험용 벽: 이동 영역 띠(오른쪽 40%) 왼쪽을 다 막아(띠와 가로로 겹치지 않는다) 화면 왼쪽 끝으로 옮긴 포효 버튼을 200px
+    // 안에 놓을 곳이 없다
+    const wall = { x: 0, y: 0, w: D.zone.x - MIN_GAP, h: 400 };
+    const T = touchLayout(600, 400, NO_INSET, true, true, hud, {
+      ...opts,
+      obstacles: [wall],
+      custom: { mirror: true, items: { roar: { u: 0, v: 0.4, s: 1 }, minimap: { u: 0.2, v: 0.5, s: 1 } } },
+    });
+    expect(T.fallback).toBe(true);
+    expect('minimap' in T).toBe(false);
+    expect(T.buttons).toEqual(D.buttons);
+    // 이동 영역은 오른쪽이고 판 HUD 배치의 틀(맵 오른쪽 위) 아래 8px에서 시작한다 (다시 뒤집은 왼쪽 위 자리를 피하면 겹친다)
+    expect(T.zone.x).toBeGreaterThan(300);
+    expect(overlaps(f, T.zone)).toBe(false);
+    expect(T.zone.y).toBeGreaterThanOrEqual(f.y + f.h + MIN_GAP - 0.01);
+    expect(T.zone).toEqual(D.zone);
+    // 규칙 함수로 직접: fixed(이미 제자리인 지도 틀)는 fallback 결과에서도 그대로, 다른 조작은 뒤집힌 기본 자리
+    const safe = D.safe;
+    const base: ControlBoxes = { roar: { x: 400, y: 100, w: 50, h: 50 } };
+    const blocked: PlaceRules = {
+      range: moveRange(safe, 6),
+      hud: [{ x: 0, y: 0, w: 600, h: 400 }],
+      zone: (side, r, extra = []) => moveZone(600, safe, side, r, extra),
+      midX: safe.x + safe.w / 2,
+      mapRange: minimapRange(s.map, safe),
+    };
+    const res = resolveLayout(
+      base,
+      { mirror: true, items: { roar: { u: 0.5, v: 0.5, s: 1 }, minimap: { u: 0, v: 0, s: 1 } } },
+      safe,
+      blocked,
+      { minimap: f },
+    );
+    expect(res.fallback).toBe(true);
+    expect(res.boxes.minimap).toEqual(f);
+    expect(res.boxes.roar).toEqual(baseBoxes(base, true, safe).roar);
+  });
 });
 
 describe('조작 배치 저장 형식: 지도 칸 (판 1 그대로 — 옛 저장값 · 옛 묶음 양쪽 호환)', () => {
@@ -931,6 +1081,24 @@ describe('조작 배치 저장 형식: 지도 칸 (판 1 그대로 — 옛 저�
     // 판 HUD 배치의 틀(반전이라 맵 오른쪽 위)을 옮긴 포효 버튼 · 이동 영역이 피한다
     expect(separated(occupied('roar', T.buttons.roar!), s.frame!, MIN_GAP)).toBe(true);
     expect(overlaps(s.frame!, T.zone)).toBe(false);
+  });
+
+  it('지도만 옮긴 배치는 조작을 바꾼 배치가 아니다 (controlsMoved — 판 직전 터치 안내는 손으로 다듬은 기본 그림 · 본문)', () => {
+    const map = { u: 0.5, v: 0.5, s: 1 };
+    expect(controlsMoved(null)).toBe(false);
+    expect(controlsMoved({ mirror: false, items: {} })).toBe(false);
+    expect(controlsMoved({ mirror: false, items: { minimap: map } })).toBe(false);
+    expect(controlsMoved({ mirror: false, items: { roar: map } })).toBe(true);
+    expect(controlsMoved({ mirror: false, items: { minimap: map, roar: map } })).toBe(true);
+    expect(controlsMoved({ mirror: true, items: {} })).toBe(true);
+    expect(controlsMoved({ mirror: true, items: { minimap: map } })).toBe(true);
+    // 저장값으로는 지도만 옮긴 배치도 기본이 아니다 (판의 지도 자리 · 설정 화면 '기본값' 대상) — 안내 그림만 기본을 쓴다
+    const saved = parseControlLayout(
+      serializeControlLayout({ survivor: null, monster: { mirror: false, items: { minimap: map } } }),
+    );
+    expect(Object.keys(saved.monster!.items)).toEqual(['minimap']);
+    expect(isDefaultLayout(saved.monster)).toBe(false);
+    expect(controlsMoved(saved.monster)).toBe(false);
   });
 
   it('새 저장값(지도 칸 있음)을 옛 파서가 읽으면: 판 1이라 버리지 않고, 모르는 지도 칸만 빠진 나머지가 그대로다', () => {
