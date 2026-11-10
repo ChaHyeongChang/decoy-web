@@ -111,6 +111,87 @@ describe('카운트다운 표시 (CountdownTracker)', () => {
     expect(r.sounds).toEqual(['count', 'count', 'count', 'go']);
   });
 
+  it('늦게 온 스냅샷이 있어도 숫자가 되올라가지 않는다: 2.10을 받고 120ms 공백 → 2.03 → 2.00 (소리도 다시 나지 않는다)', () => {
+    const tr = new CountdownTracker();
+    const step = (left: number, rcvAt: number, now: number): [string | null, string | null] => {
+      tr.update(left, now - rcvAt, false, now);
+      return [tr.label, tr.sound];
+    };
+    expect(step(3, 0, 0)).toEqual(['3', 'count']);
+    expect(step(2.1, 900, 900)).toEqual(['3', null]);
+    // 다음 스냅샷이 늦다: 받은 뒤 지난 시간으로 이어 2로 내려간다
+    expect(step(2.1, 900, 1000)).toEqual(['2', 'count']);
+    // 늦게 온 스냅샷(2.03 — 받은 뒤 지난 시간 0)이 3을 가리켜도 되올라가지 않는다
+    expect(step(2.03, 1018, 1018)).toEqual(['2', null]);
+    expect(step(2.03, 1018, 1051)).toEqual(['2', null]);
+    expect(step(2, 1051, 1051)).toEqual(['2', null]);
+    expect(step(1, 2050, 2050)).toEqual(['1', 'count']);
+    expect(step(0, 3050, 3050)).toEqual([GO, 'go']);
+  });
+
+  it('스냅샷 도착 지터(순서 보존)에도 글자는 언제나 3 · 2 · 1 · 시작!, 소리는 count 셋 + go 하나다', () => {
+    // 서버가 보내는 값: 실제 Game(3초 카운트다운)의 스냅샷 틱(30Hz 중 20Hz)마다 world.countdown
+    const game = new Game(setup4(), balance, { seed: 5, countdown: 3 });
+    const sent: { at: number; left: number }[] = [];
+    const isSnapTick = (tick: number): boolean =>
+      Math.floor((tick * balance.network.snapshotHz) / balance.network.serverTickHz) !==
+      Math.floor(((tick - 1) * balance.network.snapshotHz) / balance.network.serverTickHz);
+    const id = [...game.players.keys()][0]!;
+    for (let tick = 1; tick <= 4 * balance.network.serverTickHz; tick += 1) {
+      game.step();
+      if (!isSnapTick(tick)) continue;
+      const snap = buildSnapshot(game, id, 0, computeVisibility(game), new AliasBook());
+      if (!snap) throw new Error('스냅샷 없음');
+      sent.push({ at: (tick * 1000) / balance.network.serverTickHz, left: snap.world.countdown });
+    }
+    expect(sent.at(-1)?.left).toBe(0);
+    // 결정적 난수 (mulberry32)
+    const rand = (seed: number): (() => number) => {
+      let a = seed >>> 0;
+      return () => {
+        a = (a + 0x6d2b79f5) >>> 0;
+        let t = a;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    };
+    /** 한 판: 스냅샷마다 지연을 더하되 보낸 순서대로 받는다(TCP). 60fps 프레임마다 마지막으로 받은 스냅샷으로 update */
+    const play = (delay: () => number, phase: number): string => {
+      const tr = new CountdownTracker();
+      const arrive: number[] = [];
+      for (const s of sent) arrive.push(Math.max(arrive.at(-1) ?? 0, s.at + 40 + delay()));
+      const labels: string[] = [];
+      const sounds: string[] = [];
+      let k = -1;
+      for (let now = phase; now <= (arrive.at(-1) ?? 0) + GO_SHOW_MS + 200; now += 1000 / 60) {
+        while (k + 1 < sent.length && arrive[k + 1]! <= now) k += 1;
+        if (k < 0) continue;
+        tr.update(sent[k]!.left, now - arrive[k]!, false, now);
+        if (tr.sound) sounds.push(tr.sound);
+        if (tr.label !== null && labels.at(-1) !== tr.label) labels.push(tr.label);
+      }
+      return `${labels.join(' ')} / ${sounds.join(' ')}`;
+    };
+    const want = `3 2 1 ${GO} / count count count go`;
+    const models: [string, (r: () => number) => number][] = [
+      ['지수 분포 평균 10ms', (r) => -10 * Math.log(1 - r())],
+      ['지수 분포 평균 30ms', (r) => -30 * Math.log(1 - r())],
+      ['지수 분포 평균 60ms', (r) => -60 * Math.log(1 - r())],
+      ['5%가 120ms 늦음', (r) => (r() < 0.05 ? 120 : 0)],
+      ['고르게 0~150ms', (r) => r() * 150],
+    ];
+    for (const [name, model] of models) {
+      const r = rand(name.length * 7919);
+      const bad = new Map<string, number>();
+      for (let run = 0; run < 300; run += 1) {
+        const got = play(() => model(r), r() * 16);
+        if (got !== want) bad.set(got, (bad.get(got) ?? 0) + 1);
+      }
+      expect([...bad.entries()], name).toEqual([]);
+    }
+  });
+
   it('"시작!"은 서버가 0을 보낸 뒤에만 뜬다: 스냅샷이 끊기면 1에서 기다린다', () => {
     const tr = new CountdownTracker();
     tr.update(0.4, 0, false, 0);

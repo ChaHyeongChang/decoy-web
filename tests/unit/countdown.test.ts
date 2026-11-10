@@ -1,7 +1,7 @@
 // 판 시작 카운트다운 (플레이테스트 a-8, GAME_DESIGN 1장): 수치 match.startCountdown, Game의 사전 단계(모두 정지 · 판 시간 · 12분 시계 ·
 // 괴물 시작 정지가 흐르지 않음), 끝난 뒤의 판이 카운트다운 없는 판과 같음(틱 · ack만 다름), 방이 넘기는 값(시험 훅 방 0 · 방 설정 ·
 // 시험 명령), 스냅샷 world.countdown(받는 사람과 무관하게 같은 값), 괴물이 끊기면 같이 멈춤, 재접속, 봇 · 판 기록 · 예측 보정
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
   BTN,
@@ -595,6 +595,8 @@ describe('WebSocket 봇(server/src/bots.ts)과 카운트다운', () => {
         });
       });
     });
+    // 봇 입력 루프가 돈 횟수: tick은 private이라 프로토타입을 감싸 센다 (고정 대기 뒤 한 번 읽으면 루프가 한 번도 돌지 않아도 통과한다)
+    const loop = vi.spyOn(BotClient.prototype as unknown as { tick: () => void }, 'tick');
     const bot = new BotClient({ url: `ws://127.0.0.1:${addr.port}`, room: 'ABCD', token: null });
     const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
     /** 조건이 참이 될 때까지 (바쁜 기기에서도 고정 대기에 기대지 않게, 최대 10초) */
@@ -605,10 +607,12 @@ describe('WebSocket 봇(server/src/bots.ts)과 카운트다운', () => {
     try {
       const ws = await client;
       expect(snapOf().world.countdown).toBeGreaterThan(0);
-      // 봇이 카운트다운 스냅샷을 받은 뒤(입력 루프가 돈다): 봇 입력 주기는 33ms라 0.3초면 9번쯤 — 그동안 하나도 보내지 않는다
+      // 봇이 카운트다운 스냅샷을 받은 뒤 입력 루프(33ms 주기)가 여섯 번 넘게 도는 동안 하나도 보내지 않는다
       await until(() => bot.lastSnap !== null);
       expect(bot.lastSnap?.world.countdown).toBeGreaterThan(0);
-      await wait(300);
+      const from = loop.mock.calls.length;
+      await until(() => loop.mock.calls.length >= from + 6);
+      expect(loop.mock.calls.length).toBeGreaterThanOrEqual(from + 6);
       expect(inputs.length).toBe(0);
       // 카운트다운이 끝난 스냅샷을 받으면 틱마다 보낸다
       for (let t = 0; t < COUNT_TICKS; t += 1) game.step();
@@ -618,6 +622,7 @@ describe('WebSocket 봇(server/src/bots.ts)과 카운트다운', () => {
       expect(inputs.length).toBeGreaterThanOrEqual(3);
     } finally {
       bot.stop();
+      loop.mockRestore();
       await new Promise<void>((resolve) => wss.close(() => resolve()));
     }
   });

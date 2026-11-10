@@ -66,6 +66,8 @@ interface CountSample {
   /** 이 판에서 만든 입력 프레임 수 */
   inputs: number;
   banners: string[];
+  /** PC 첫 판 조작 안내가 떠 있다 */
+  help: boolean;
   /** 기기 안 연습: 모든 자리의 정답 위치 */
   truth: string;
 }
@@ -95,6 +97,7 @@ function countRecorder(): void {
       pos: me ? `${me.x.toFixed(4)},${me.y.toFixed(4)},${me.face.toFixed(4)}` : '',
       inputs: d.getInputLog().length,
       banners: d.getBanners(),
+      help: hud.help === true,
       truth: truth ? truth.players.map((p) => `${p.id}:${p.x.toFixed(3)},${p.y.toFixed(3)}`).join(' ') : '',
     });
   }, 25);
@@ -266,7 +269,17 @@ test('서버 방 4명: 숫자 → 시작! 동안 키를 눌러도 모두 정지 
       `${p.role}: 키를 누른 뒤 남은 카운트다운`,
     ).toBeGreaterThan(1);
 
-  await Promise.all(players.map((p) => waitGo(p.page)));
+  // 첫 판 조작 안내: "시작!" 뒤에는 새로 누른 키 하나에 닫힌다 (가드만, 시작! 직후 — 아무 동작이 없는 키. 나머지 셋은 누르지 않고 시간을 본다)
+  const guard = players.find((p) => p.role === 'guard')!;
+  let keyAt = Number.NaN;
+  await Promise.all(
+    players.map(async (p) => {
+      await waitGo(p.page);
+      if (p !== guard) return;
+      keyAt = await p.page.evaluate(() => performance.now());
+      await p.page.keyboard.press('KeyZ');
+    }),
+  );
   // "시작!" 직후: 첫 입력 프레임(seq 1)부터 누르고 있던 방향이다 (다시 누르지 않았다)
   for (const p of players) {
     const log = await inputLog(p.page);
@@ -316,8 +329,29 @@ test('서버 방 4명: 숫자 → 시작! 동안 키를 눌러도 모두 정지 
     await expect
       .poll(async () => (await samples(p.page)).some((s) => s.banners.includes(intro)), POLL)
       .toBe(true);
+    // 첫 판 조작 안내 (PC 첫 판): 카운트다운 중에는 이동 키 · 능력 키를 눌러도 닫히지 않고 표시 시간도 세지 않는다 → "시작!"부터 5초
+    await p.page.waitForFunction(() => window.__DECOY__?.getHud().help === false, null, {
+      polling: 50,
+      timeout: 15_000,
+    });
     const all = await samples(p.page);
+    const firstGo = all.find((s) => s.label === GO)!.t;
     const lastGo = all.filter((s) => s.label === GO).at(-1)!.t;
+    const digitSamples = all.filter((s) => /^\d+$/.test(s.label));
+    expect(digitSamples[0]?.help, `${label}: 판 장면이 숫자를 처음 그린 때 조작 안내`).toBe(true);
+    expect(
+      digitSamples.filter((s) => !s.help).length,
+      `${label}: 카운트다운 중 조작 안내가 닫힌 표본 (키를 누른 뒤)`,
+    ).toBe(0);
+    const closedAt = all.find((s) => s.t > firstGo && !s.help)!.t;
+    if (p === guard) {
+      // "시작!" 뒤 새 키에 닫힌다 (5초가 다 되기 전에)
+      expect(closedAt, `${label}: 키를 누른 뒤 조작 안내가 닫힌 때`).toBeGreaterThanOrEqual(keyAt);
+      expect(closedAt - firstGo, `${label}: "시작!"부터 조작 안내가 닫힌 때 (ms)`).toBeLessThan(4000);
+    } else {
+      // 판 장면을 만든 때부터 셌으면(숫자 3을 본 장면은 "시작!" 2초 넘게 전에 생겼다) 시작 뒤 3초 안에 닫힌다
+      expect(closedAt - firstGo, `${label}: "시작!"부터 조작 안내가 닫힌 때 (ms)`).toBeGreaterThan(3500);
+    }
     const firstIntro = all.find((s) => s.banners.includes(intro))!.t;
     expect(firstIntro, `${label}: 시작 문구가 뜬 때`).toBeGreaterThan(lastGo);
     expect(

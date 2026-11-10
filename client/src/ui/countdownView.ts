@@ -43,7 +43,11 @@ export class CountdownTracker {
         this.label = '';
         return;
       }
-      const d = countdownDigit(left, ageMs);
+      // 한 카운트다운 동안 숫자는 늘지 않는다: 스냅샷 하나가 늦으면 받은 뒤 지난 시간으로 이은 숫자가 먼저 내려가고, 그 뒤에 온
+      // (보낸 때가 이른) 스냅샷이 한 칸 위를 가리킨다 — 따르면 '2 → 3 → 2'로 튀고 소리가 더 난다. 서버 값은 늘지 않으므로(판 정지
+      // 중에는 그대로, 재접속 · 새 판은 장면과 추적기를 새로 만든다) 지금 숫자 아래로만 따른다
+      const raw = countdownDigit(left, ageMs);
+      const d = this.digit > 0 ? Math.min(raw, this.digit) : raw;
       if (d !== this.digit) {
         this.digit = d;
         this.sound = 'count';
