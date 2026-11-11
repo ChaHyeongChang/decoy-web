@@ -139,8 +139,6 @@ const RING_FIRST_GAP = 1.5;
 const STRAFE_SPEED = 0.3;
 const STRAFE_LOOKAHEAD = 0.6;
 const STRAFE_FLIP = 0.5;
-/** 하나 남은 거점 대신 들르는 가운데 모퉁이에서 둘러보는 시간 (초) */
-const CORNER_LOOK = 0.8;
 /** 조사 지점까지 가는 시간 한도 (초) */
 const GOAL_TIME = 25;
 /** 탈출구 · 구조 알림 지점에 닿아 아무도 없을 때 포효할 확률 */
@@ -212,7 +210,7 @@ interface Sighting {
   since: number;
 }
 
-type GoalKind = 'lost' | 'search' | 'point' | 'ring' | 'corner' | 'roar' | 'exit' | 'rescue' | 'watch';
+type GoalKind = 'lost' | 'search' | 'point' | 'ring' | 'roar' | 'exit' | 'rescue' | 'watch';
 
 interface Goal {
   kind: GoalKind;
@@ -255,7 +253,6 @@ interface GoalOptions {
 const GOAL_PRIORITY: Readonly<Record<GoalKind, number>> = {
   watch: 0,
   ring: 0,
-  corner: 0,
   rescue: 1,
   lost: 2,
   search: 2,
@@ -268,7 +265,7 @@ const NEVER = -1e9;
 
 export class PracticeMonsterBrain implements BotBrain {
   private readonly rng: Rng;
-  /** 플레이테스트 반영 c에서 더한 행동의 난수 (둘러보기 길이 · 둘레 도는 방향) */
+  /** 플레이테스트 반영 c에서 더한 행동의 난수 (둘러보기 길이 · 둘레 도는 방향 · 거리 좁히기 돌진 주사위) */
   private readonly tactics: Rng;
   private readonly walker = new Walker();
   private hz = 30;
@@ -680,7 +677,8 @@ export class PracticeMonsterBrain implements BotBrain {
     const end = { x: me.x + Math.cos(dashDir) * reachEnd, y: me.y + Math.sin(dashDir) * reachEnd };
     if (!clearPath(me, end, b.monster.radius)) return mode;
     if (this.now < this.dashBlockedUntil) return mode;
-    if (this.rng.next() < this.dashChance) {
+    // 주사위: 가까운 창은 예전 흐름(this.rng), 새 거리 좁히기는 새 행동 흐름(tactics) — 예전 행동의 뽑기 순서를 덜 민다
+    if ((close ? this.rng : this.tactics).next() < this.dashChance) {
       out.pressed |= BTN.DASH;
       this.comboUntil = this.now + this.sec(dur + COMBO_WINDOW);
       this.lastDashKind = close ? 'close' : 'far';
@@ -740,8 +738,7 @@ export class PracticeMonsterBrain implements BotBrain {
     // 둘 이상 갇혀 있으면 할 일이 없을 때마다 감시 자리 셋을 오간다 (한 명만 더 잡으면 이긴다). 알림 · 핑 · 수색은 그대로
     const guardPrison = snap.world.imprisoned >= 2;
     const g0 = this.goal;
-    const idleGoal =
-      !g0 || g0.kind === 'ring' || g0.kind === 'corner' || (g0.kind === 'point' && !g0.alerted);
+    const idleGoal = !g0 || g0.kind === 'ring' || (g0.kind === 'point' && !g0.alerted);
     if (guardPrison && idleGoal) this.goal = this.watchGoal(me, WATCH_STOPS_GUARD);
     // 새 정보가 먼저: 기억하는 점령 알림 → 점령 중 배지(진행 큰 쪽) → 포효 핑 (놓친 곳 수색 · 둘레 돌기 · 감시보다 앞)
     const curPrio = this.goal ? GOAL_PRIORITY[this.goal.kind] : -1;
@@ -783,19 +780,13 @@ export class PracticeMonsterBrain implements BotBrain {
   }
 
   /**
-   * 할 일이 없을 때 (M5): 안 끝난 거점 하나를 골라 훑고 둘레를 돌거나, 순찰 몇 구간.
-   * 같은 거점을 연달아 고르지 않는다 — 열린 곳이 하나뿐이면 그 거점 ↔ 가까운 가운데 모퉁이를 번갈아
+   * 할 일이 없을 때 (M5): 안 끝난 거점 하나를 골라 훑고 둘레를 돌거나, 순찰 몇 구간. 같은 거점을 연달아 고르지 않는다.
+   * (열린 거점이 하나만 남는 때는 없다: 둘째 거점이 끝나는 틱에 셋째가 꺼지고 탈출구가 켜진다 — capture.ts, balance.ts 구조 검사
+   * count 3 · required 2. 탈출구가 켜지면 이 함수를 부르지 않는다)
    */
   private idleChoice(snap: Snapshot, b: Balance, me: Vec2): void {
     const open = snap.world.points.filter((p) => pointOpen(p.state));
     if (open.length > 0 && this.rng.next() < POINT_PATROL_PROB) {
-      const only = open.length === 1 ? open[0] : undefined;
-      if (only && this.lastGuarded === only.id) {
-        this.lastGuarded = null;
-        const corner = nearestOf(MONSTER_CROSS, CAPTURE_POINTS[only.id]);
-        this.setGoal('corner', corner, GOAL_TIME, { look: CORNER_LOOK });
-        return;
-      }
       const next = this.pickGuard(open);
       this.lastGuarded = next;
       this.pointGoal(next, me, b, false);
@@ -1126,9 +1117,10 @@ function nearestOf(spots: readonly Vec2[], to: Vec2): Vec2 {
 
 /**
  * 놓친 뒤 수색할 도주 후보 (M7): 마지막 위치에서 길 거리 SEARCH_PATH_MIN~MAX인 도주 후보 중 지금 괴물 자리에서 안 보이고
- * 달아나던 쪽(멈춰 있었으면 괴물 반대쪽)에 있는 곳. 그쪽으로 곧은 순서로 SEARCH_SPOTS곳 (서로 SEARCH_SPREAD 넘게 떨어진)
+ * 달아나던 쪽(멈춰 있었으면 괴물 반대쪽)에 있는 곳. 그쪽으로 곧은 순서로 SEARCH_SPOTS곳 (서로 SEARCH_SPREAD 넘게 떨어진).
+ * c는 마지막으로 본 자리 · 속도(타일/초), me는 놓친 때 괴물 자리. 시험이 직접 부른다
  */
-function searchSpots(c: Sighting, me: Vec2): Vec2[] {
+export function searchSpots(c: Vec2 & { vx: number; vy: number }, me: Vec2): Vec2[] {
   const speed = Math.hypot(c.vx, c.vy);
   const dir = speed > 0.5 ? unit(c.vx, c.vy) : unit(c.x - me.x, c.y - me.y);
   const cands: { p: Vec2; score: number }[] = [];
