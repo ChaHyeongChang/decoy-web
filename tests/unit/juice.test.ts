@@ -8,6 +8,9 @@ import {
   FX_PRESETS,
   FxSystem,
   STRIKE_FEEL,
+  releaseRingAllowed,
+  strikeArcKind,
+  strikeFeelHits,
   strikePunch,
   type FxPen,
 } from '../../client/src/art/fx';
@@ -304,6 +307,35 @@ describe('효과 수명 · 모양 (fx.ts)', () => {
     expect(strikePunch(STRIKE_FEEL.punchMs / 2)).toBeCloseTo(1 + STRIKE_FEEL.punch, 9);
     expect(strikePunch(STRIKE_FEEL.punchMs)).toBe(1);
     expect(STRIKE_FEEL.punchMs).toBeLessThanOrEqual(FX_LIMITS.eventLifeMaxS * 1000);
+  });
+});
+
+describe('괴물 화면 그림 고르기 (art/fx.ts — worldRenderer가 이 판단을 부른다, 0장 ③)', () => {
+  const STATUSES: readonly SurvivorStatus[] = ['free', 'imprisoned', 'escaped', 'dead'];
+
+  it('풀려남 청록 고리는 생존자 화면의 수감 → 자유 전환에만 — 괴물 화면에는 풀려난 생존자 자리에 아무것도 없다', () => {
+    expect(releaseRingAllowed('imprisoned', 'free', false)).toBe(true);
+    for (const prev of [undefined, ...STATUSES])
+      for (const next of STATUSES) {
+        expect(releaseRingAllowed(prev, next, true), `괴물 ${String(prev)} → ${next}`).toBe(false);
+        if (!(prev === 'imprisoned' && next === 'free'))
+          expect(releaseRingAllowed(prev, next, false), `${String(prev)} → ${next}`).toBe(false);
+      }
+  });
+
+  it('타격 호: 맞은 수 0이면 양쪽 화면 늘 빗나간 호, 명중은 괴물 화면 굵은 호 · 생존자 화면 보통 호 (맞은 수 · 화면 쪽만의 함수)', () => {
+    for (const isMonster of [true, false]) expect(strikeArcKind(0, isMonster)).toBe('slashMiss');
+    for (const hits of [1, 2, 3]) {
+      expect(strikeArcKind(hits, true)).toBe('slashHit');
+      expect(strikeArcKind(hits, false)).toBe('slash');
+    }
+  });
+
+  it('명중 몸 펀치 · 자세 유지는 괴물 화면의 맞은 수뿐 — 생존자 화면은 늘 0 (괴물 자신의 몸에만 붙는다)', () => {
+    for (const hits of [0, 1, 2, 3]) {
+      expect(strikeFeelHits(hits, true)).toBe(hits);
+      expect(strikeFeelHits(hits, false)).toBe(0);
+    }
   });
 });
 

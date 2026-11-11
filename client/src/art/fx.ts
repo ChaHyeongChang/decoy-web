@@ -7,7 +7,14 @@
 //  - 빛 속 먼지는 자기 팀 시야(판정 다각형) 안에서만 보이고, 시계(gfxNow)와 시드 고정 해시로만 움직인다
 //  - 품질은 개수만 바꾼다(FX_LIMITS). 정보(범위 · 링 · 마커)는 이 모듈이 그리지 않는다
 // 난수는 시드 고정(mulberry32, @decoy/shared Rng). Math.random()을 쓰지 않는다.
-import { Rng, angleDiff, circleIntersectsSector, pointInPolygon, type Vec2 } from '@decoy/shared';
+import {
+  Rng,
+  angleDiff,
+  circleIntersectsSector,
+  pointInPolygon,
+  type SurvivorStatus,
+  type Vec2,
+} from '@decoy/shared';
 import type { QualityTier } from '../gfx/presets';
 import { fillCircleFan, fillCirclePen, penArc, strokeCirclePen, type FanPen, type PathPen } from './shapes';
 
@@ -83,6 +90,28 @@ export const STRIKE_FEEL = { punch: 0.08, punchMs: 100, holdMs: 70 } as const;
 export function strikePunch(elapsedMs: number): number {
   const k = elapsedMs / STRIKE_FEEL.punchMs;
   return k >= 0 && k < 1 ? 1 + STRIKE_FEEL.punch * Math.sin(Math.PI * k) : 1;
+}
+
+// 손맛 그림 고르기 (worldRenderer가 부르는 순수 판단 — 괴물 화면 정보 숨김, VISUAL_SPEC 0장 ③을 단위 시험이 직접 본다)
+
+/** 타격 호 종류: 빗나감(맞은 수 0)은 양쪽 화면 옅고 가는 호, 명중은 괴물 화면 굵고 따뜻한 흰 호 · 생존자 화면 보통 호 (맞은 수 · 화면 쪽만의 함수) */
+export function strikeArcKind(hits: number, isMonster: boolean): 'slash' | 'slashHit' | 'slashMiss' {
+  if (hits === 0) return 'slashMiss';
+  return isMonster ? 'slashHit' : 'slash';
+}
+
+/** 명중 몸 펀치 · 타격 자세 유지에 쓰는 맞은 수: 괴물 화면은 맞은 수 그대로(괴물 자신의 몸에만), 생존자 화면은 늘 0 */
+export function strikeFeelHits(hits: number, isMonster: boolean): number {
+  return isMonster ? hits : 0;
+}
+
+/** 풀려남 청록 고리: 생존자 화면의 수감 → 자유 전환에만. 괴물 화면에는 풀려난 생존자 자리에 아무것도 그리지 않는다 */
+export function releaseRingAllowed(
+  prev: SurvivorStatus | undefined,
+  next: SurvivorStatus,
+  isMonster: boolean,
+): boolean {
+  return !isMonster && prev === 'imprisoned' && next === 'free';
 }
 
 /** 빛 속 먼지 (장식): 알파 · 크기 · 칸 크기 · 수명 주기 */

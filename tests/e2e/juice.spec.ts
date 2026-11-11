@@ -2,7 +2,8 @@
 // 소리 · 그림 · 배너를 낸다.
 //  - 아슬아슬 회피: 괴물 정면 1.7타일의 러너 화면에만(괴물 · 가드 화면은 없음), 2.2타일은 없음, 1.0타일은 피격만
 //  - 빗나감은 바람 소리, 명중은 괴물 화면에 낮은 쿵. 수감은 철창 소리 + 본인 · 동료 · 괴물 배너(괴물 배너는 누구 · 어디 없이) + 괴물 익명 칸
-//    펄스, 구조 완료는 생존자 화음 · 청록 가장자리 · 구조자 '문을 열었다.', 괴물은 경고음뿐 (풀려난 자리 효과 없음)
+//    펄스, 구조 완료는 생존자 화음 · 청록 가장자리 · 구조자 '문을 열었다.', 괴물은 경고음뿐 — 괴물이 감옥 · 풀려난 자리를 보고 있어도
+//    풀려난 자리 청록 고리는 생존자 화면에만 (VISUAL_SPEC 0장 ③)
 import { expect, test, type Page } from '@playwright/test';
 import { RESCUE_POINT, validateBalance } from '@decoy/shared';
 import { readFileSync } from 'node:fs';
@@ -21,6 +22,10 @@ async function count(page: Page, name: string): Promise<number> {
 
 async function nearMisses(page: Page): Promise<number> {
   return page.evaluate(() => Number(window.__DECOY__?.getEffects().nearMisses ?? 0));
+}
+
+async function releaseRings(page: Page): Promise<number> {
+  return page.evaluate(() => Number(window.__DECOY__?.getEffects().releaseRings ?? 0));
 }
 
 async function waitBanner(page: Page, text: string): Promise<void> {
@@ -134,9 +139,25 @@ test('수감 · 구조 손맛: 철창 소리 · 본인 · 동료 · 괴물 배�
   for (const t of await monster.page.evaluate(() => window.__DECOY__?.getBanners() ?? []))
     for (const name of ['러너', '가드', '스카우트']) expect(t).not.toContain(name);
 
-  // 구조: 괴물은 멀리, 가드가 구조 자리에서 구조 키를 누르고 있다
-  await sendTest(scout.page, { kind: 'teleport', target: monster.id, x: 40, y: 16 });
+  // 구조: 괴물은 감옥 문 남쪽에서 북쪽(감옥 · 풀려날 자리)을 본다 — 수감자를 계속 보고 있어 같은 임시 ID가 수감 → 자유로 바뀌는 것을
+  // 괴물 화면도 그린다(그래도 풀려난 자리 고리는 없어야 한다). 가드가 구조 자리에서 구조 키를 누르고 있다
+  await sendTest(scout.page, {
+    kind: 'teleport',
+    target: monster.id,
+    x: RESCUE_POINT.x,
+    y: RESCUE_POINT.y + 1.7,
+    face: -Math.PI / 2,
+  });
+  await aimMonsterAt(monster.page, RESCUE_POINT.x, RESCUE_POINT.y - 5);
   await sendTest(scout.page, { kind: 'teleport', target: guard.id, x: RESCUE_POINT.x, y: RESCUE_POINT.y });
+  // 전제: 괴물 화면에 수감자가 보인다 (그 임시 ID를 풀려난 뒤에도 본다)
+  const prisonerAlias = await monster.page
+    .waitForFunction(
+      () => window.__DECOY__?.getLastSnapshot()?.survivors.find((s) => s.status === 'imprisoned')?.id ?? null,
+      null,
+      { timeout: 8_000 },
+    )
+    .then((h) => h.jsonValue());
   await guard.page.waitForTimeout(400);
   // 가장자리 선은 0.3초뿐이라 먼저 기다리기 시작한다
   const rim = guard.page.waitForFunction(
@@ -170,6 +191,16 @@ test('수감 · 구조 손맛: 철창 소리 · 본인 · 동료 · 괴물 배�
       timeout: 5_000,
     })
     .toBeGreaterThanOrEqual(2);
+  // 괴물 화면: 같은 임시 ID가 자유로 보인다(전환을 그렸다) — 그래도 풀려난 자리 고리는 0. 생존자 화면(구조자 · 본인 · 멀리 있는 팀원)은 고리
+  await monster.page.waitForFunction(
+    (id) => window.__DECOY__?.getLastSnapshot()?.survivors.find((s) => s.id === id)?.status === 'free',
+    prisonerAlias,
+    { timeout: 5_000 },
+  );
+  for (const p of [guard, runner, scout])
+    await expect.poll(() => releaseRings(p.page), { timeout: 5_000 }).toBeGreaterThanOrEqual(1);
+  await monster.page.waitForTimeout(400);
+  expect(await releaseRings(monster.page)).toBe(0);
   // 새 배너 아이콘 · 펄스 틀이 HUD 아틀라스에 있다
   for (const p of players)
     expect(await p.page.evaluate(() => window.__DECOY__?.getHud().missingFrames)).toBe('');

@@ -68,6 +68,9 @@ import {
   FxSystem,
   STRIKE_FEEL,
   pickDissolveTarget,
+  releaseRingAllowed,
+  strikeArcKind,
+  strikeFeelHits,
   strikePunch,
   type DustEye,
   type DustMote,
@@ -548,6 +551,8 @@ export class WorldRenderer {
     particles: 0,
     dust: 0,
     reveal: 0,
+    /** 풀려남 청록 고리를 만든 횟수 (누계, E2E: 괴물 화면은 늘 0) */
+    releaseRings: 0,
   };
   info: InfoItem[] = [];
 
@@ -712,7 +717,7 @@ export class WorldRenderer {
         if (isMonster) this.lastStrike = { x: ev.x, y: ev.y, dir: ev.dir, hits: ev.hits, at: nowMs };
         this.strikeAt = nowMs;
         // 괴물 화면 명중: 몸 배율 펀치 · 타격 자세 더 유지 (맞은 수의 함수뿐, 괴물 자신의 몸에만 — fx.STRIKE_FEEL)
-        this.strikeHits = isMonster ? ev.hits : 0;
+        this.strikeHits = strikeFeelHits(ev.hits, isMonster);
         // 호: 빗나감은 양쪽 화면 옅고 가는 선, 명중은 괴물 화면 굵고 따뜻한 흰색 · 생존자 화면 보통 (모양으로도 갈린다)
         if (balance)
           this.fxs.slash(
@@ -724,7 +729,7 @@ export class WorldRenderer {
             tS,
             isMonster ? null : 'monster',
             !isMonster,
-            ev.hits === 0 ? 'slashMiss' : isMonster ? 'slashHit' : 'slash',
+            strikeArcKind(ev.hits, isMonster),
           );
         return;
       case 'ability': {
@@ -1740,10 +1745,11 @@ export class WorldRenderer {
     self: boolean,
   ): void {
     const prev = this.lastStatus.get(id);
-    if (prev && prev.status === 'imprisoned' && status === 'free' && !isMonster) {
+    if (prev && releaseRingAllowed(prev.status, status, isMonster)) {
       // 풀려남 (생존자 화면만): 풀려난 자리에서 청록 고리. 괴물 화면에는 풀려난 생존자 자리에 아무것도 그리지 않는다
       const t0 = this.statusFlip(v, id, self);
       this.fxs.ring('release', x, y, sR * 2.4, (clockMs - (realMs - t0)) / 1000, null, false);
+      this.fx.releaseRings += 1;
     } else if (prev && prev.status === 'free' && status === 'imprisoned') {
       const t0 = this.statusFlip(v, id, self);
       this.fxs.dissolve(prev.x, prev.y, sR, (clockMs - (realMs - t0)) / 1000, null, isMonster);
