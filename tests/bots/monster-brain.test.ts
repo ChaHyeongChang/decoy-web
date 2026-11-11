@@ -526,6 +526,117 @@ describe('실전 괴물 봇: 놓친 뒤 · 포효 · 알림 (M3 · M4 · M7)', (
       expect(roarAt, `seed ${seed}: 후보를 다 본 뒤 포효`).toBeGreaterThan(second ?? 0);
     }
   });
+
+  /**
+   * 쫓던 표적이 눈앞에서 사라졌지만 놓친 것이 아닌 장면 (세 번째로 잡혀 죽었다 · 열린 탈출구로 나갔다): seconds초 동안 두뇌가 한 일과
+   * 포효했는지 (괴물의 포효 쿨이 올라갔는지)
+   */
+  const afterGone = (
+    sim: SimMatch,
+    brain: PracticeMonsterBrain,
+    seconds: number,
+  ): { acts: string[]; roared: boolean } => {
+    const acts = new Set<string>();
+    let roared = false;
+    let cd = sim.game.monster.roarCd;
+    for (let k = 0; k < seconds * HZ && !sim.game.end; k += 1) {
+      sim.step();
+      acts.add(brain.act);
+      if (sim.game.monster.roarCd > cd) roared = true;
+      cd = sim.game.monster.roarCd;
+    }
+    return { acts: [...acts], roared };
+  };
+  const searching = (act: string): boolean => /:(lost|search)$/.test(act);
+
+  it("세 번째로 잡혀 죽은 표적은 놓친 것이 아니다: 시체 자리 · 도주 후보를 수색하지 않고, 수색 뒤 포효도 없다 ('died')", () => {
+    for (const seed of [1, 2, 3]) {
+      const brain = monsterBrain(seed);
+      const sim = scene(seed, { p1: brain });
+      const g = sim.game;
+      place(g, 'p1', 36, 19.5, 0);
+      place(g, 'p2', 37.3, 19.5);
+      place(g, 'p3', 2.5, 29.5);
+      place(g, 'p4', 3.5, 29.5);
+      const p2 = g.survivors.find((s) => s.id === 'p2');
+      if (!p2) throw new Error('p2 없음');
+      p2.imprisonCount = balance.survivor.maxImprisonments;
+      p2.hp = 1;
+      expect(
+        sim.runUntil(() => p2.status === 'dead', 3),
+        `seed ${seed}: 죽었다`,
+      ).toBe(true);
+      const { acts, roared } = afterGone(sim, brain, 5);
+      expect(acts.filter(searching), `seed ${seed}: ${acts.join(' ')}`).toEqual([]);
+      expect(roared, `seed ${seed}: 죽은 뒤 5초 안에 포효했다`).toBe(false);
+    }
+  });
+
+  it("열린 탈출구로 나간 표적도 놓친 것이 아니다: 탈출구 앞을 수색하지 않고, 수색 뒤 포효도 없다 ('escaped')", () => {
+    for (const seed of [1, 2, 3]) {
+      const brain = monsterBrain(seed);
+      const sim = scene(seed, { p1: brain });
+      const g = sim.game;
+      // 북 탈출구(문 x 23~25, y 0~1)가 열려 있다. 괴물은 북쪽 방 (24, 6.5)에서 북쪽을 보고, 표적은 탈출구 바로 앞 (24, 2)
+      const north = g.exits.find((e) => e.id === 'N');
+      if (!north) throw new Error('북 탈출구 없음');
+      north.state = 'open';
+      place(g, 'p1', 24, 6.5, -Math.PI / 2);
+      place(g, 'p2', 24, 2);
+      place(g, 'p3', 2.5, 29.5);
+      place(g, 'p4', 3.5, 29.5);
+      const p2 = g.survivors.find((s) => s.id === 'p2');
+      if (!p2) throw new Error('p2 없음');
+      expect(
+        sim.runUntil(() => brain.act === 'chase', 1),
+        `seed ${seed}: 쫓기 시작`,
+      ).toBe(true);
+      // 반응 시간(0.25초) 전에 문 칸으로 들어가 나간다 (돌진 · 공격 전)
+      place(g, 'p2', 24, 0.5);
+      expect(
+        sim.runUntil(() => p2.status === 'escaped', 0.5),
+        `seed ${seed}: 탈출했다`,
+      ).toBe(true);
+      expect(p2.hp, `seed ${seed}: 맞지 않고 나갔다`).toBe(balance.survivor.maxHp);
+      const { acts, roared } = afterGone(sim, brain, 5);
+      expect(acts.filter(searching), `seed ${seed}: ${acts.join(' ')}`).toEqual([]);
+      expect(roared, `seed ${seed}: 나간 뒤 5초 안에 포효했다`).toBe(false);
+    }
+  });
+
+  it('다른 생존자가 탈출하거나 죽은 스냅샷에도 쫓던 표적이 보이면 그대로 쫓는다 (표적 유지 덤 안의 더 가까운 생존자로 바꾸지 않는다)', () => {
+    const { snap: base, info } = baseSnap();
+    const me = { x: 36, y: 19.5, face: 0 };
+    // a (3.5타일, 동쪽)를 쫓다가 b (2.5타일, 남동)가 보인다: 차이 1.0이 표적 유지 덤 1.5 안이라 a를 그대로 쫓는다
+    const aimAfter = (events: GameEvent[]): number => {
+      const brain = practiceBrain('monster', 1);
+      let aim = Number.NaN;
+      for (let k = 0; k < 12; k += 1) {
+        const o = brain.decide(
+          synth(base, {
+            tick: 100 + k,
+            me,
+            attackCd: 1,
+            dashCd: 5,
+            survivors: k >= 6 ? [seen('a', 39.5, 19.5), seen('b', 37.5, 21.5)] : [seen('a', 39.5, 19.5)],
+            events: k === 6 ? events : [],
+          }),
+          info,
+          balance,
+          100 + k,
+        );
+        aim = o.aim;
+      }
+      return aim;
+    };
+    const towardB = Math.atan2(21.5 - 19.5, 37.5 - 36);
+    const cases: GameEvent[][] = [[], [{ k: 'escaped', you: false }], [{ k: 'died', you: false }]];
+    for (const events of cases) {
+      const aim = aimAfter(events);
+      expect(Math.abs(aim), `${JSON.stringify(events)}: a 쪽(0)을 겨눈다`).toBeLessThan(0.3);
+      expect(Math.abs(aim - towardB)).toBeGreaterThan(0.5);
+    }
+  });
 });
 
 describe('실전 괴물 봇: 알림 · 핑 · 거점 · 감시 행동 하나씩 (합성 스냅샷, 두뇌 입력대로 움직인다)', () => {

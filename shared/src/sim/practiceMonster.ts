@@ -11,7 +11,8 @@
 //  - M5 서지 않기: 거점 매복 · 감옥 감시에 서 있는 대신 짧게 훑고 거점 둘레 · 감시 자리 사이를 걷는다. 같은 거점을 연달아 고르지 않는다.
 //    추적 · 시작 대기 · 기절이 아니면 한자리에 STAND_LIMIT 넘게 머물지 않는다 (서 있기 감시)
 //  - M6 추적 중 표적이 가까우면 탐색 시야(넓게), 멀면 추적 시야
-//  - M7 놓친 뒤: 마지막 위치 → 달아나던 쪽의 안 보이는 도주 후보 둘 → 그래도 없으면 포효
+//  - M7 놓친 뒤: 마지막 위치 → 달아나던 쪽의 안 보이는 도주 후보 둘 → 그래도 없으면 포효. 가뒀거나 죽었거나(세 번째로 잡힘)
+//    탈출해 사라진 표적은 놓친 것이 아니다 (같은 스냅샷의 'imprisoned' · 'died' · 'escaped' 이벤트로 안다)
 //  - 표적 동점(같은 거리)은 위치 → 속도 → 처음 본 틱으로 가르고, 그래도 같은 생존자들은 하나로 묶어 쫓는다 (누구인지 고르지 않는다)
 //  - '아무도 못 본 시간'은 판 시작 카운트다운이 끝난 때부터 센다
 //  - 조정 A (손): 공격을 겨누고 누를지 정하고 준비 동안 따라갈 때는 판마다 0.05~0.15초 전에 본 표적 모습을 이어 짐작한다 (방향을 튼
@@ -427,8 +428,11 @@ export class PracticeMonsterBrain implements BotBrain {
     if (prevTick < 0 || snap.world.countdown > 0 || this.counting) this.lastSawFree = snap.tick;
     this.counting = snap.world.countdown > 0;
     const me = snap.you.move;
+    // 이 스냅샷에 누가 죽었거나(세 번째로 잡힘 — 괴물의 공격으로만 죽는다) 탈출했다: 그 생존자는 괴물 화면에서 사라진다
+    let gone = false;
     for (const ev of snap.events) {
-      if (ev.k === 'roarPings') this.takePings(ev.pts, me);
+      if (ev.k === 'died' || ev.k === 'escaped') gone = true;
+      else if (ev.k === 'roarPings') this.takePings(ev.pts, me);
       else if (ev.k === 'text') {
         if (ev.id === 'ALERT_CAPTURE_START' && ev.point) {
           // 쫓는 중이면 기억만 하고 추적이 끝나면 간다 (M4). 다른 알림 거점으로 가는 중이면 더 급할 때만 바꾼다
@@ -500,14 +504,16 @@ export class PracticeMonsterBrain implements BotBrain {
         this.tracks.delete(id);
         this.history.delete(id);
       }
-    // 놓친 표적 (묶어 쫓던 것 중 아무도 안 보일 때): 알림이 기억나면 그 거점부터, 아니면 마지막 모습에서 조금 앞 → 도주 후보 (M4 · M7)
+    // 놓친 표적 (묶어 쫓던 것 중 아무도 안 보일 때): 알림이 기억나면 그 거점부터, 아니면 마지막 모습에서 조금 앞 → 도주 후보 (M4 · M7).
+    // 같은 스냅샷에 누가 죽었거나 탈출했으면 쫓던 표적이 그렇게 사라진 것이다: 놓친 것이 아니므로 시체 자리 · 탈출구 앞을 수색하지 않고
+    // (수색 뒤 포효도 없다) 다음 할 일로 — 기억하는 알림 · 거점 · 순찰은 roam이 고른다 (가둔 표적과 같다). 표적이 그대로 보이면 쫓기를 잇는다
     if (this.chase && ![...this.chaseIds].some((id) => seenNow.has(id))) {
       const c = this.chase;
       this.chase = null;
       this.chaseIds = new Set<string>();
-      const alert = this.freshAlert(snap.world.points);
+      const alert = gone ? null : this.freshAlert(snap.world.points);
       if (alert) this.pointGoal(alert, me, b, true);
-      else {
+      else if (!gone) {
         let lx = c.vx * LOST_LEAD;
         let ly = c.vy * LOST_LEAD;
         const l = Math.hypot(lx, ly);
