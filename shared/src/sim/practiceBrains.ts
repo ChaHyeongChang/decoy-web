@@ -975,6 +975,8 @@ const HOT_TIME = 10;
 const HOT_RADIUS = 7;
 /** 최근 본 괴물이 이 거리(타일) 안이고 목표에 나보다 가까우면(가는 길에 있으면) 그 목표도 위험 */
 const ROUTE_DANGER = 9;
+/** 모두 위험할 때 지금 점령 목표를 가장 가까운 곳으로 옮기기 전에 유지하는 시간 (초) — pickPoint */
+const GOAL_KEEP = 1.5;
 /** 기다리는 자리를 다시 고르는 간격 (틱) */
 const LURK_REPLAN_TICKS = 30;
 /** 위험한 목표 근처에서 기다리는 자리: 목표에서 이 길 거리쯤 (타일) */
@@ -1063,9 +1065,53 @@ export function teamPlan(seed: number): { order: readonly PointId[]; solo: RoleI
   return { order, solo: together ? null : solo };
 }
 
+/**
+ * 생존자 한 명이 거점을 들를 순서 (팀 계획에서, PracticeSurvivorBrain이 그대로 쓴다): 혼자 가는 역할은 둘째 거점부터,
+ * 나머지는 첫 거점부터. 셋째는 둘 다 지켜질 때 갈 곳
+ */
+export function survivorPlan(seed: number, role: RoleId): readonly PointId[] {
+  const plan = teamPlan(seed);
+  const [first, second, third] = plan.order;
+  return (plan.solo === role ? [second, first, third] : [first, second, third]).filter(
+    (id): id is PointId => id !== undefined,
+  );
+}
+
 /** 아직 점령할 수 있는 거점인가 (끝났거나 꺼진 곳은 할 일이 아니다) */
 export function pointOpen(state: PointState): boolean {
   return state !== 'done' && state !== 'off';
+}
+
+/**
+ * 점령할 거점 고르기. undone은 계획 순서로 남은 거점(비어 있지 않다), hot · near는 거점별 위험 · 내게서 거리, cur는 지금 목표,
+ * held는 지금 목표를 고른 지 GOAL_KEEP초 안인가.
+ * 규칙: 계획 첫 곳이 위험하면 계획 순서 앞쪽의 안전한 곳, 모두 위험하면 가장 가까운 곳(그 근처에서 기다린다).
+ * 이력: '가는 길' 위험은 내 자리에 따라 깜빡이므로, 지금 목표가 안전하면 그대로 간다(안전한 곳끼리 · 계획 첫 곳으로 오가지 않는다).
+ * 지금 목표가 위험해지면 안전한 곳으로 바로 바꾸고, 모두 위험할 때 가까운 곳으로 옮기는 것은 유지 시간이 지난 뒤
+ */
+export function pickPoint(
+  undone: readonly PointId[],
+  hot: Readonly<Record<PointId, boolean>>,
+  near: Readonly<Record<PointId, number>>,
+  cur: PointId | null,
+  held: boolean,
+): PointId {
+  const first = undone[0] ?? 'A';
+  let pick: PointId = first;
+  if (hot[first] && undone.length > 1) {
+    let safe: PointId | null = null;
+    for (const id of undone) {
+      if (!hot[id]) {
+        safe = id;
+        break;
+      }
+    }
+    if (safe !== null) pick = safe;
+    else for (const id of undone) if (near[id] < near[pick]) pick = id;
+  }
+  if (cur === null || cur === pick || !undone.includes(cur)) return pick;
+  if (!hot[cur]) return cur;
+  return hot[pick] && held ? cur : pick;
 }
 
 /** 괴물이 할 일 없을 때 번갈아 지킬 다음 거점: 지난번 거점 다음 id (A → B → C → A 순환, 열린 곳만) */
@@ -1103,18 +1149,19 @@ export class PracticeSurvivorBrain implements BotBrain {
   private wiggleDir: Vec2 = { x: 0, y: 0 };
   private lurk: { ax: number; ay: number; spot: Vec2; until: number } | null = null;
   private pathCache: { tick: number; cell: number; limit: number; d: number } | null = null;
+  /** 고른 점령 목표와 고른 틱 (pickPoint의 이력) */
+  private pointGoal: PointId | null = null;
+  private pointGoalAt = -1e9;
+  /** 이번 틱 거점별 위험 · 거리 (pickPoint에 넘긴다. 틱마다 새 객체를 만들지 않게 재사용) */
+  private readonly hotNow: Record<PointId, boolean> = { A: false, B: false, C: false };
+  private readonly nearNow: Record<PointId, number> = { A: 0, B: 0, C: 0 };
 
   constructor(
     private readonly role: RoleId,
     seed: number,
   ) {
     this.rng = brainRng(seed, role);
-    const plan = teamPlan(seed);
-    const [first, second, third] = plan.order;
-    // 혼자 가는 역할은 둘째 거점부터, 나머지는 첫 거점부터. 셋째는 둘 다 지켜질 때 갈 곳
-    this.plan = (plan.solo === role ? [second, first, third] : [first, second, third]).filter(
-      (id): id is PointId => id !== undefined,
-    );
+    this.plan = survivorPlan(seed, role);
     this.trackIdle = TRACK_IDLE_MIN + this.rng.next() * TRACK_IDLE_SPAN;
   }
 
@@ -1245,18 +1292,19 @@ export class PracticeSurvivorBrain implements BotBrain {
       if (r.kind !== 'lurk' || undone.length === 0 || freeMates.length === 0) return r;
     }
     if (undone.length > 0) {
-      let goal: PointId = undone[0] as PointId;
-      if (this.hot(CAPTURE_POINTS[goal], me) && undone.length > 1) {
-        // 지켜지는 거점은 버리고 안전한 다른 거점으로 (계획 순서 앞쪽 먼저). 모두 위험하면 가장 가까운 곳 근처에서 기다린다
-        const safe = undone.find((id) => id !== goal && !this.hot(CAPTURE_POINTS[id], me));
-        if (safe) goal = safe;
-        else {
-          for (const id of undone)
-            if (dist(me, CAPTURE_POINTS[id]) < dist(me, CAPTURE_POINTS[goal])) goal = id;
-        }
+      // 지켜지는 거점은 버리고 안전한 다른 거점으로 (계획 순서 앞쪽 먼저). 모두 위험하면 가장 가까운 곳 근처에서 기다린다
+      for (const id of undone) {
+        this.hotNow[id] = this.hot(CAPTURE_POINTS[id], me);
+        this.nearNow[id] = dist(me, CAPTURE_POINTS[id]);
+      }
+      const held = this.now - this.pointGoalAt < this.sec(GOAL_KEEP);
+      const goal = pickPoint(undone, this.hotNow, this.nearNow, this.pointGoal, held);
+      if (goal !== this.pointGoal) {
+        this.pointGoal = goal;
+        this.pointGoalAt = this.now;
       }
       const c = CAPTURE_POINTS[goal];
-      if (this.hot(c, me) && dist(me, c) > b.capturePoint.radius) {
+      if (this.hotNow[goal] && dist(me, c) > b.capturePoint.radius) {
         return { kind: 'lurk', target: this.lurkSpot(c, me), tol: 0.8, held: 0, commit: false };
       }
       const o = POINT_OFFSET[this.role];
