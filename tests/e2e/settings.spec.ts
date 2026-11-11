@@ -63,7 +63,12 @@ test('PC · 휴대폰 같은 구성: 탭 그래픽 · 화면 · 소리 · 조작
         .getByTestId(`settings-page-${tab}`)
         .locator('[data-testid^="row-"]:visible')
         .evaluateAll((els) => els.map((e) => e.getAttribute('data-testid') ?? ''));
-    expect(await rowsOf('graphics'), label).toEqual(['row-quality', 'row-frame-limit', 'row-char-style', 'row-depth']);
+    expect(await rowsOf('graphics'), label).toEqual([
+      'row-quality',
+      'row-frame-limit',
+      'row-char-style',
+      'row-depth',
+    ]);
     await openSettings(page, 'screen');
     expect(await rowsOf('screen'), label).toEqual([
       'row-ui-size',
