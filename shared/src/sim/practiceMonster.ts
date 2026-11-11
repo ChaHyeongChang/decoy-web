@@ -14,6 +14,8 @@
 //  - M7 놓친 뒤: 마지막 위치 → 달아나던 쪽의 안 보이는 도주 후보 둘 → 그래도 없으면 포효
 //  - 표적 동점(같은 거리)은 위치 → 속도 → 처음 본 틱으로 가르고, 그래도 같은 생존자들은 하나로 묶어 쫓는다 (누구인지 고르지 않는다)
 //  - '아무도 못 본 시간'은 판 시작 카운트다운이 끝난 때부터 센다
+//  - 조정 A (손): 공격을 겨누고 누를지 정하고 준비 동안 따라갈 때는 판마다 0.05~0.15초 전에 본 표적 모습을 이어 짐작한다 (방향을 튼
+//    것은 늦게 안다). 공격마다 조준 오차 ±0.08라디안, 12%는 닿는 거리를 0.15~0.4타일 길게 보고 이르게 누른다. 쫓기 · 돌진은 그대로
 import {
   BTN,
   CAPTURE_POINTS,
@@ -198,6 +200,23 @@ const SWEEP_RATE = 0.09;
 /** 새 행동(c)의 난수 흐름 소금: 예전 난수 흐름(this.rng)의 순서를 밀지 않게 따로 뽑는다 */
 const TACTICS_SALT = 0x7f4a7c15;
 
+// ── 손 (플레이테스트 반영 c 조정 A): 전술(언제 · 어디로 쫓고 돌진하나)은 그대로 두고, 공격을 겨누고 누르고 준비 동안 따라가는 손에
+//    사람다운 한계를 둔다. 예전에는 표적의 예상 위치를 1~2틱 만에 따라가 옆걸음을 거의 다 맞혔다 (docs/playtest/c-bots.md 2.2절)
+/** 표적의 움직임이 바뀐 것을 알아채기까지 (초, 판마다 최소 + 시드 범위 — 판마다 사람이 다르듯). 공격을 겨누고 누를지 정할 때와
+ *  준비 동안 따라갈 때는 이만큼 전에 본 모습을 그때 속도로 이어 짐작한다: 곧게 달아나는 표적은 그대로 맞히고, 방향을 튼 것은 늦게 안다 */
+const HAND_LAG_MIN = 0.05;
+const HAND_LAG_SPAN = 0.1;
+/** 조준 오차 (±라디안, 균등): 공격 한 번마다 새로 뽑는다 */
+const HAND_AIM_ERROR = 0.08;
+/** 이르게 누르기: 공격 한 번마다 이 확률로 닿는 거리를 U(MIN, MAX)타일 길게 본다 */
+const HAND_EARLY_PROB = 0.12;
+const HAND_EARLY_MIN = 0.15;
+const HAND_EARLY_MAX = 0.4;
+/** 알아채기 지연을 넘는 모습 기록은 버린다 (틱, 여유) */
+const HAND_HISTORY_EXTRA = 3;
+/** 손의 난수 흐름 소금 (예전 흐름 · 새 행동 흐름의 뽑기 순서를 밀지 않는다) */
+const HAND_SALT = 0x2c1b3c6d;
+
 interface Sighting {
   id: string;
   x: number;
@@ -267,6 +286,15 @@ export class PracticeMonsterBrain implements BotBrain {
   private readonly rng: Rng;
   /** 플레이테스트 반영 c에서 더한 행동의 난수 (둘러보기 길이 · 둘레 도는 방향 · 거리 좁히기 돌진 주사위) */
   private readonly tactics: Rng;
+  /** 손 (조정 A)의 난수: 판마다 알아채기 지연, 공격마다 조준 오차 · 이르게 누르기 */
+  private readonly hand: Rng;
+  /** 알아채기 지연 (초, 판마다 시드로) */
+  private readonly handLag: number;
+  /** 이번 공격의 조준 오차 (라디안) · 닿는 거리 덤 (타일, 이르게 누르기) */
+  private aimErr = 0;
+  private reachErr = 0;
+  /** 임시 ID별 최근 모습 기록 (오래된 것부터, 알아채기 지연만큼) */
+  private readonly history = new Map<string, Sighting[]>();
   private readonly walker = new Walker();
   private hz = 30;
   private lastObserved = -1;
@@ -324,6 +352,18 @@ export class PracticeMonsterBrain implements BotBrain {
     this.dashChance = DASH_CHANCE_MIN + this.rng.next() * DASH_CHANCE_SPAN;
     this.sweep = this.rng.next() * Math.PI * 2;
     this.tactics = new Rng((Math.imul(seed | 0, 0x9e3779b1) ^ TACTICS_SALT) >>> 0);
+    this.hand = new Rng((Math.imul(seed | 0, 0x85ebca6b) ^ HAND_SALT) >>> 0);
+    this.handLag = HAND_LAG_MIN + this.hand.next() * HAND_LAG_SPAN;
+    this.rollHand();
+  }
+
+  /** 다음 공격의 손 오차를 뽑는다 (늘 세 번 뽑는다) */
+  private rollHand(): void {
+    const r = this.hand;
+    this.aimErr = (r.next() * 2 - 1) * HAND_AIM_ERROR;
+    const early = r.next() < HAND_EARLY_PROB;
+    const extra = HAND_EARLY_MIN + r.next() * (HAND_EARLY_MAX - HAND_EARLY_MIN);
+    this.reachErr = early ? extra : 0;
   }
 
   private sec(s: number): number {
@@ -422,11 +462,30 @@ export class PracticeMonsterBrain implements BotBrain {
         }
       }
       const since = prev ? prev.since : snap.tick;
-      this.tracks.set(s.id, { id: s.id, x: s.x, y: s.y, vx, vy, tick: snap.tick, prot: s.protected, since });
+      const sighting: Sighting = {
+        id: s.id,
+        x: s.x,
+        y: s.y,
+        vx,
+        vy,
+        tick: snap.tick,
+        prot: s.protected,
+        since,
+      };
+      this.tracks.set(s.id, sighting);
+      // 손 (조정 A): 알아채기 지연만큼 지난 모습을 기억한다 (끊겼다 다시 보이면 새로)
+      const keep = this.handLag * this.hz + HAND_HISTORY_EXTRA;
+      const hist = prev && snap.tick - prev.tick <= 3 ? (this.history.get(s.id) ?? []) : [];
+      hist.push(sighting);
+      while (hist.length > 1 && (hist[1]?.tick ?? snap.tick) <= snap.tick - keep) hist.shift();
+      this.history.set(s.id, hist);
       this.lastSawFree = snap.tick;
     }
     for (const [id, t] of this.tracks)
-      if (!seenNow.has(id) && snap.tick - t.tick > 30) this.tracks.delete(id);
+      if (!seenNow.has(id) && snap.tick - t.tick > 30) {
+        this.tracks.delete(id);
+        this.history.delete(id);
+      }
     // 놓친 표적 (묶어 쫓던 것 중 아무도 안 보일 때): 알림이 기억나면 그 거점부터, 아니면 마지막 모습에서 조금 앞 → 도주 후보 (M4 · M7)
     if (this.chase && ![...this.chaseIds].some((id) => seenNow.has(id))) {
       const c = this.chase;
@@ -625,9 +684,12 @@ export class PracticeMonsterBrain implements BotBrain {
     else if (d >= WIDE_FAR) this.chaseMode = 'hunt';
     const mode = this.chaseMode;
     if (!mon) return mode;
-    const lead = Math.min(CHASE_LEAD_MAX, d / b.monster.moveSpeed);
-    const predRaw = { x: t.x + t.vx * lead, y: t.y + t.vy * lead };
-    const pred = walkableAt(predRaw) ? predRaw : { x: t.x, y: t.y };
+    // 손 (조정 A): 겨누기 · 누르기 · 준비 중 따라가기는 알아채기 지연만큼 전에 본 모습으로 짐작한 자리로
+    const seenAs = this.perceived(t);
+    const follow = mon.windup > 0 ? seenAs : t;
+    const lead = Math.min(CHASE_LEAD_MAX, dist(me, follow) / b.monster.moveSpeed);
+    const predRaw = { x: follow.x + follow.vx * lead, y: follow.y + follow.vy * lead };
+    const pred = walkableAt(predRaw) ? predRaw : { x: follow.x, y: follow.y };
     if (d < DIRECT_CHASE && clearPath(me, pred, b.monster.radius)) {
       const u = unit(pred.x - me.x, pred.y - me.y);
       out.mx = u.x;
@@ -638,29 +700,34 @@ export class PracticeMonsterBrain implements BotBrain {
       out.my = w.my;
     }
     const wind = b.monster.attack.windup;
-    const strike = { x: t.x + t.vx * wind, y: t.y + t.vy * wind };
-    out.aim = aimAt(me, strike);
+    const strike = { x: seenAs.x + seenAs.vx * wind, y: seenAs.y + seenAs.vy * wind };
+    // 손 (조정 A): 이번 공격의 조준 오차만큼 비껴 겨눈다 (누를지는 짐작한 표적 쪽과 견준다)
+    out.aim = aimAt(me, strike) + this.aimErr;
     const canAct = me.stun <= 0 && me.dash <= 0 && mon.windup <= 0;
     if (!canAct || t.prot) return mode;
     const combo = this.now <= this.comboUntil;
     if (!combo && this.now - t.since < this.sec(REACT_TIME)) return mode;
-    // 공격: 준비가 끝날 때 예상 거리 (표적이 멀어지는 속도만큼 덜 따라잡는다). 돌진 직후는 조금 느슨하게 (M1)
-    const u = unit(t.x - me.x, t.y - me.y);
-    const away = Math.max(-APPROACH_TRUST, t.vx * u.x + t.vy * u.y);
+    // 공격: 준비가 끝날 때 예상 거리 (표적이 멀어지는 속도만큼 덜 따라잡는다). 돌진 직후는 조금 느슨하게 (M1).
+    // 거리 · 속도는 짐작한 모습으로, 이번 공격이 '이르게 누르기'면 닿는 거리를 길게 본다 (조정 A)
+    const dSeen = dist(me, seenAs);
+    const u = unit(seenAs.x - me.x, seenAs.y - me.y);
+    const away = Math.max(-APPROACH_TRUST, seenAs.vx * u.x + seenAs.vy * u.y);
     const closing = b.monster.moveSpeed * b.monster.attack.windupMoveMultiplier - away;
     const contact = b.monster.radius + b.survivor.radius;
-    const gap = Math.max(contact, d - closing * wind);
-    const reach = b.monster.attack.range + b.survivor.radius - (combo ? COMBO_MARGIN : ATTACK_MARGIN);
+    const gap = Math.max(contact, dSeen - closing * wind);
+    const reach =
+      b.monster.attack.range + b.survivor.radius - (combo ? COMBO_MARGIN : ATTACK_MARGIN) + this.reachErr;
     const slack = combo ? COMBO_NOW_SLACK : ATTACK_NOW_SLACK;
     const facing = Math.abs(angleDiff(me.face, aimAt(me, strike)));
     if (
       mon.attackCd <= 0 &&
       gap <= reach &&
-      d <= reach + slack &&
+      dSeen <= reach + slack &&
       facing <= (combo ? COMBO_FACING : ATTACK_FACING)
     ) {
       out.pressed |= BTN.ATTACK;
       this.comboUntil = NEVER;
+      this.rollHand();
       return mode;
     }
     // 돌진: 가까운 창은 끝나자마자 칠 수 있을 때(M1), 그 바깥은 멀어지는 표적에게 거리 좁히기(M2). 직선 · 조준이 맞을 때
@@ -684,6 +751,29 @@ export class PracticeMonsterBrain implements BotBrain {
       this.lastDashKind = close ? 'close' : 'far';
     } else this.dashBlockedUntil = this.now + this.sec(DASH_REROLL);
     return mode;
+  }
+
+  /**
+   * 손 (조정 A): 알아채기 지연만큼 전에 본 표적 모습을 그때 속도로 지금까지 이어 짐작한 것. 기록이 그만큼 길지 않으면 가장 오래된
+   * 모습에서. 이어 간 자리가 바닥이 아니면 본 자리 그대로. 묶어 쫓는 생존자가 여럿이면 각각 짐작해 위치 → 속도 순으로 앞인 것
+   * (임시 ID 값 · 배열 순서와 무관)
+   */
+  private perceived(t: Sighting): Sighting {
+    let best: Sighting | null = null;
+    const ids = this.chaseIds.has(t.id) ? this.chaseIds : new Set([t.id]);
+    for (const id of ids) {
+      const hist = this.history.get(id);
+      const cur = this.tracks.get(id) ?? t;
+      let h = hist?.[0] ?? cur;
+      const cut = this.now - this.handLag * this.hz;
+      for (const e of hist ?? []) if (e.tick <= cut) h = e;
+      const dt = (this.now - h.tick) / this.hz;
+      const ahead = { x: h.x + h.vx * dt, y: h.y + h.vy * dt };
+      const at = dt > 0 && walkableAt(ahead) && clearPath(h, ahead, 0.1) ? ahead : { x: h.x, y: h.y };
+      const s: Sighting = { ...cur, x: at.x, y: at.y, vx: h.vx, vy: h.vy };
+      if (!best || compareSighting(s, best) < 0) best = s;
+    }
+    return best ?? t;
   }
 
   /** 아무도 안 보일 때: 포효 → 캠핑 · 거점 유예 피하기 → 알림 · 핑 · 수색 → 감옥 감시 → 거점 둘레 · 순찰. 원하는 시야 모드를 돌려준다 */
