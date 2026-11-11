@@ -463,8 +463,8 @@ function touchShape(
  *   맵(3:2)보다 좁은 화면(태블릿 4:3 등)은 띠를 키워 HUD를 위 띠로 모은다(한 줄에 다 들어가지 않으면 두 줄 높이 — touchShape)
  * uiScale = 그림 1단위의 논리 px = TOUCH_UI.art × UI 크기 × (논리 px / CSS px)
  * tuning(터치만) = 조이스틱 크기 · UI 크기 · 좌우 반전 · 시스템 버튼 칸 수. 없거나 기본값이면 예전 배치 그대로(tuning 칸 없음).
- * UI 크기 · 조이스틱 크기가 1보다 크면 HUD가 맵 · 서로 · 엄지 자리와 겹치지 않고 점수판이 화면 폭에 들어가는 만큼만 키운다
- * (0.05씩 줄여 본다 — 적용한 값이 tuning에 남는다)
+ * UI 크기 · 조이스틱 크기가 1보다 크면 HUD가 맵 · 서로 · 엄지 자리와 겹치지 않고 오른쪽 아래 엄지 버튼 무리와 최소 간격(MIN_GAP)
+ * 이상 떨어지고 점수판이 화면 폭에 들어가는 만큼만 키운다 (0.05씩 줄여 본다 — 적용한 값이 tuning에 남는다, touchHudFits)
  */
 export function layoutFor(
   screenW: number,
@@ -878,7 +878,8 @@ function planCss(
   });
   // 넘치는 양: 왼쪽 칸은 이동 영역이 조금 줄어드는 것. 오른쪽 칸은 엄지 버튼 무리 위 최소 간격(MIN_GAP) 안으로 들어가는 것(왼쪽 칸과
   // 같은 무게)과 버튼 위 끝 아래로 내려가 겹치는 것(훨씬 무겁게). 간격 안으로 몇 px 들어가는 것까지 100배로 치면 낮은 넓은 휴대폰
-  // 괴물(658×291 등)이 왼쪽 칸에 다 쌓아 팀 카드 둘이 이동 스틱 그림을 덮었다(검토 반영)
+  // 괴물(658×291 등)이 왼쪽 칸에 다 쌓아 팀 카드 둘이 이동 스틱 그림을 덮었다(검토 반영). 간격 안으로 들어간 배치는 기본 크기에서만
+  // 쓴다 — 키운 크기는 touchHudFits가 버튼 무리와의 간격을 보고 크기를 줄인다
   const cardsH = (c: Cand): number => grid(c.cardsAt?.cols ?? cols).h;
   const leftOver = (c: Cand): number => Math.max(0, c.cardsY + cardsH(c) - leftLimit);
   const rightOver = (c: Cand): number => (c.right === null ? 0 : Math.max(0, c.right - rightLimit));
@@ -1079,7 +1080,10 @@ function touchGeom(l: LayoutInfo): {
 
 /**
  * UI 크기를 키운 배치가 들어가는가 (layoutFor가 UI 크기를 고를 때): 두 역할 모두 늘 떠 있는 부품이 화면 안이고 맵 · 서로 · 엄지
- * 자리(버튼 무리 · 시스템 버튼 칸 · 이동 스틱 그림 위 이동 영역)와 겹치지 않고, 점수판이 화면 폭에 들어간다
+ * 자리(시스템 버튼 칸 · 이동 스틱 그림 위 이동 영역)와 겹치지 않고, 오른쪽 아래 버튼 무리와는 최소 간격(MIN_GAP) 이상 떨어지고,
+ * 점수판이 화면 폭에 들어간다. 버튼 무리 간격: 기본 크기의 고르기(planCss)는 넘칠 때 오른쪽 칸 부품이 간격 안으로 몇 px 들어가는
+ * 것을 왼쪽 칸 넘침과 같은 무게로 쳐서(낮은 넓은 휴대폰 괴물) 겹침만 보면 키운 크기를 그대로 쓰며 게이지 · 타이머를 버튼에 붙였다
+ * — 키운 크기는 크기를 줄여 간격을 지킨다(판 중 창이 조금 낮아져도 버튼에 덮이지 않게, 검토 반영)
  */
 function touchHudFits(l: LayoutInfo): boolean {
   const U = TOUCH_UI;
@@ -1094,7 +1098,8 @@ function touchHudFits(l: LayoutInfo): boolean {
     for (const [i, b] of boxes.entries()) {
       if (b.x < -0.01 || b.y < -0.01 || b.x + b.w > W + 0.01 || b.y + b.h > H + 0.01) return false;
       if (overlapsCss(b, g.mapCss) || overlapsCss(b, sys)) return false;
-      if (r.cluster.some((c) => overlapsCss(b, c))) return false;
+      const near = { x: b.x - MIN_GAP, y: b.y - MIN_GAP, w: b.w + MIN_GAP * 2, h: b.h + MIN_GAP * 2 };
+      if (r.cluster.some((c) => overlapsCss(near, c))) return false;
       if (b.x < W * MOVE_ZONE_RATIO && b.y + b.h > r.moveTop - U.zoneTop + 0.01) return false;
       for (const o of boxes.slice(i + 1)) if (overlapsCss(b, o)) return false;
     }

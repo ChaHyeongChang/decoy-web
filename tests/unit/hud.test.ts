@@ -368,6 +368,8 @@ describe('거점 게이지 · 타이머 · 상태 표시', () => {
     applyLayout(layoutFor(750, 369, true));
     expect(strokesOf('grow:off').has(hex(HC.off))).toBe(true);
     expect(strokesOf('grow:off').has(hex(HC.gaugeOff))).toBe(false);
+    // 줄 게이지 ⊘ 상태 아이콘(따로 굽는 프레임)은 상태색 — 틀 색(HC.off)이면 패널 위 약 1.9:1
+    expect([...strokesOf('gicon:off')]).toEqual([hex(HC.gaugeOff)]);
   });
 
   it('타이머: 최후의 30초 > 1분 미만 > 보통, 모드마다 아이콘도 다르다', () => {

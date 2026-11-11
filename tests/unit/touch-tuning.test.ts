@@ -244,6 +244,89 @@ describe('UI 크기 (uiScale)', () => {
   });
 });
 
+describe('키운 UI 크기 · 조이스틱 크기: 엄지 버튼 무리 위 최소 간격 (MIN_GAP)', () => {
+  /** 두 사각형 사이 간격 (CSS px): 가로 · 세로 틈 중 큰 쪽 (겹치면 0) */
+  const sep = (a: Box, b: Box): number =>
+    Math.max(b.x - (a.x + a.w), a.x - (b.x + b.w), b.y - (a.y + a.h), a.y - (b.y + b.h), 0);
+  /**
+   * 판과 같은 조정(시스템 버튼 세 칸)으로 받은 배치: 적용한 조정 값, 그리고 역할마다 늘 떠 있는 HUD 부품과 오른쪽 아래 엄지 버튼
+   * 무리(조준 스틱 · 버튼 — 시스템 버튼 제외) 사이 가장 좁은 간격 (CSS px)
+   */
+  const nearest = (
+    w: number,
+    h: number,
+    tuning: Partial<L.LayoutTuning>,
+  ): { T: L.LayoutTuning; gaps: { team: 'monster' | 'survivor'; d: number; at: string }[] } => {
+    const l = L.layoutFor(w, h, true, { ...tuning, sysSlots: L.SYS_SLOTS_MENU });
+    const T = L.tuningOf(l);
+    const t = L.touchHudPlan(l)!;
+    const k = 1 / t.L;
+    const gaps = (['monster', 'survivor'] as const).map((team) => {
+      const plan = t[team];
+      const rects = plan.rects.map((r) => ({
+        id: r.id,
+        css: { x: r.rect.x * k, y: r.rect.y * k, w: r.rect.w * k, h: r.rect.h * k },
+      }));
+      const TL = touchLayout(
+        w,
+        h,
+        { l: 0, r: 0, t: 0, b: 0 },
+        team === 'monster',
+        true,
+        rects.map((r) => r.css),
+        { stickScale: T.stickScale, menu: true, sysRows: plan.sysRows },
+      );
+      const thumbs: [string, Box][] = TL.aim ? [['aim', TL.aim]] : [];
+      for (const [id, b] of Object.entries(TL.buttons))
+        if (b && id !== 'scoreboard' && id !== 'menu' && id !== 'fullscreen') thumbs.push([id, b]);
+      let best = { d: Infinity, at: '' };
+      for (const r of rects)
+        for (const [id, b] of thumbs) {
+          const d = sep(r.css, b);
+          if (d < best.d) best = { d, at: `${r.id} ↔ ${id}` };
+        }
+      return { team, ...best };
+    });
+    return { T, gaps };
+  };
+
+  it('흔한 휴대폰 괴물(750×340 · 760×330 · 732×331 UI 1.2~1.5, 863×360 UI 1.5, 540×300 조이스틱 1.2): 키운 값을 그대로 쓰며 오른쪽 칸 게이지 · 타이머를 엄지 버튼에 붙이지 않고, 크기를 줄여 최소 간격을 지킨다', () => {
+    for (const [w, h, tuning] of [
+      [750, 340, { uiScale: 1.2 }],
+      [750, 340, { uiScale: 1.5 }],
+      [760, 330, { uiScale: 1.2 }],
+      [732, 331, { uiScale: 1.2 }],
+      [863, 360, { uiScale: 1.5 }],
+      [540, 300, { stickScale: 1.2 }],
+    ] as const) {
+      const { T, gaps } = nearest(w, h, tuning);
+      const label = `${w}×${h} ${JSON.stringify(tuning)} → UI ${T.uiScale} · 조이스틱 ${T.stickScale}`;
+      for (const g of gaps)
+        expect(g.d, `${label} ${g.team} ${g.at}`).toBeGreaterThanOrEqual(L.MIN_GAP - 0.01);
+      // 들어가지 않는 만큼은 줄였다 (그대로 받지 않는다)
+      const ui = 'uiScale' in tuning ? tuning.uiScale : 1;
+      const st = 'stickScale' in tuning ? tuning.stickScale : 1;
+      expect(T.uiScale < ui || T.stickScale < st, label).toBe(true);
+    }
+  });
+
+  it('화면 격자(높이 270~560) × UI 크기 1.2 · 조이스틱 1.2 · 둘 다: 1보다 큰 값을 적용한 배치는 두 역할 모두 HUD 부품이 엄지 버튼 무리와 MIN_GAP 이상 떨어진다 (기본 크기는 낮은 넓은 휴대폰 괴물이 간격 안으로 들어갈 수 있다 — 줄일 크기가 없다)', () => {
+    let grown = 0;
+    for (let h = 270; h <= 560; h += 10)
+      for (let w = Math.ceil(h * 1.3); w <= Math.min(1200, h * 2.7); w += 17)
+        for (const tuning of [{ uiScale: 1.2 }, { stickScale: 1.2 }, { uiScale: 1.2, stickScale: 1.2 }]) {
+          const { T, gaps } = nearest(w, h, tuning);
+          if (T.uiScale <= 1 && T.stickScale <= 1) continue;
+          grown += 1;
+          const label = `${w}×${h} ${JSON.stringify(tuning)} → UI ${T.uiScale} · 조이스틱 ${T.stickScale}`;
+          for (const g of gaps)
+            expect(g.d, `${label} ${g.team} ${g.at}`).toBeGreaterThanOrEqual(L.MIN_GAP - 0.01);
+        }
+    // 대부분 실제로 키운다 (시험이 비지 않게)
+    expect(grown).toBeGreaterThan(1500);
+  });
+});
+
 describe('조이스틱 크기 (stickScale) · 시스템 버튼 칸 (sysSlots)', () => {
   it('stickScale은 이동 · 조준 스틱 반지름만 바꾸고 버튼은 그대로', () => {
     for (const h of [293, 360, 412, 640]) {
