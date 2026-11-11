@@ -468,6 +468,9 @@ async function shootMatch(browsers, composer, base, res, plan) {
       await steady(host, pages);
       const meta = { scene: `role-${role}`, ...res, ...(await pageMeta(page)) };
       await settleCamera(page);
+      // 카메라가 자리 잡은 뒤 한 번 더 맞춘다: 느린 WebGL 탭은 자리 잡기에 20초 넘게 걸려 그동안 러너가 A를 계속 점령한다.
+      // A가 완료되면 setPoint는 진행만 바꾸고 완료 상태는 되돌리지 않아 뒤 장면(Tab · 결과)이 '✓ 100%'에 빈 막대로 찍혔다
+      await steady(host, pages);
       const spots = {};
       for (const [name, t] of Object.entries(ZOOM_SPOTS)) {
         // 따라가는 카메라: 창 밖 자리는 확대 비교를 만들지 않는다 (창 밖은 가리개 색뿐)
