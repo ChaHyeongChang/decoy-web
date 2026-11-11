@@ -38,7 +38,14 @@ import {
   type AdaptContext,
   type FrameSample,
 } from '../gfx/quality';
-import { getFpsOverride, gfxNow, gfxState, onGfxChange, probeSlot } from '../gfx/state';
+import {
+  getFpsOverride,
+  getTextureBudgetOverride,
+  gfxNow,
+  gfxState,
+  onGfxChange,
+  probeSlot,
+} from '../gfx/state';
 import { TEXTURE_BUDGET } from '../gfx/presets';
 import { haptics } from '../haptics';
 import { InputLog, InputSampler } from '../input';
@@ -436,6 +443,7 @@ export class GameScene extends Phaser.Scene {
       minimapTap: tap ? box(tap) : null,
       minimapBig: {
         open,
+        shown: big?.shown ?? false,
         frame: open ? big.frameRect : null,
         image: open ? big.imageRect : null,
         frames: open ? big.drawnFrames : [],
@@ -1032,7 +1040,9 @@ export class GameScene extends Phaser.Scene {
     this.bigTexelsDirty = true;
     this.fitBigTexels(big);
     if (this.bigTexels === 0) {
+      // 자리가 없으면 열지 않는다 (누르기는 삼켜 공격으로 가지 않게). 이 판에서 처음 만든 크게 본 지도는 보이는 채로 생기므로 숨긴다
       this.bigTexels = null;
+      big.setHidden(true);
       return true;
     }
     this.bigOpen = true;
@@ -1065,13 +1075,21 @@ export class GameScene extends Phaser.Scene {
     const others = Number(gfxState.features.textureBytes ?? 0) - own.w * own.h * 4;
     const z = gfxState.zoom > 0 ? gfxState.zoom : 1;
     const w = this.bigSharp
-      ? bigMinimapTexels(big.w * z, base.width, MAP_W / MAP_H, TEXTURE_BUDGET[gfxState.quality], others)
+      ? bigMinimapTexels(
+          big.w * z,
+          base.width,
+          MAP_W / MAP_H,
+          getTextureBudgetOverride() ?? TEXTURE_BUDGET[gfxState.quality],
+          others,
+        )
       : null;
     // 안개 레이어를 새로 만들었으면(품질 · 배율 변경) 같은 폭이어도 새 레이어에 다시 정한다
     const same = w === this.bigTexels && (w ?? 0) === this.world.bigMiniWidth;
     this.bigTexels = w;
     this.world.setBigMini(w);
     gfxState.features.minimapBigTexels = w ?? 0;
+    // 결정에 쓴 나머지 텍스처 바이트 (시험이 같은 순수 함수로 다시 계산해 견준다 — 잰 때와 누른 때 사이 텍스처 변화에 흔들리지 않게)
+    gfxState.features.minimapBigOthers = others;
     return !same;
   }
 

@@ -25,6 +25,8 @@ interface BigMapResult {
   needW: number;
   tex: { w: number; h: number };
   closedBytes: number;
+  /** 게임이 폭을 정할 때 쓴 나머지 텍스처 바이트 (누른 순간 — gfx.features.minimapBigOthers) */
+  othersAt: number;
   openBytes: number;
   /** 연 뒤 굽기를 기다리는 동안 잰 텍스처 합계의 최대 */
   maxOpenBytes: number;
@@ -64,6 +66,8 @@ async function bigMapScene(browser: Browser, dpr: number): Promise<BigMapResult>
   // 바닥 폭은 열 때 정한다 (0 = 작은 지도 합성을 늘려 씀)
   await expect.poll(texels).toBeGreaterThanOrEqual(0);
   const w = await texels();
+  const othersAt = await page.evaluate(() => Number(window.__DECOY__!.gfx.features.minimapBigOthers ?? -1));
+  expect(othersAt).toBeGreaterThan(0);
   // 굽는 동안에도 예산 안이어야 한다 (굽기 전 바닥은 작은 지도 합성을 정한 폭 이하로 담는다): 기다리는 동안 합계를 잰다
   let maxOpenBytes = await bytes();
   if (w > 0) {
@@ -111,6 +115,7 @@ async function bigMapScene(browser: Browser, dpr: number): Promise<BigMapResult>
     needW: big.needW,
     tex: big.tex,
     closedBytes,
+    othersAt,
     openBytes,
     maxOpenBytes,
     bigBytesOpen,
@@ -123,7 +128,8 @@ test('지도 크게 보기 (WebGL PC 1920×1080@2 높음 — 가장 빠듯함): 
   test.setTimeout(240_000);
   const r = await bigMapScene(browser, 2);
   // 결정은 남은 예산 규칙 그대로다: 닫혀 있던 텍스처(지도 바닥 1×1 포함)로 같은 순수 함수를 돌린 값과 같다 (0 = 열지 않음인데 열렸다)
-  const others = r.closedBytes - 4;
+  // 누른 순간 게임이 쓴 나머지 바이트로 같은 순수 함수를 돌린다 (잰 때와 누른 때 사이 안내 그림 · 틴트 조각 변화에 흔들리지 않게)
+  const others = r.othersAt;
   const d = bigMinimapTexels(r.needW, r.smallTexW, MAP_W / MAP_H, HIGH_BUDGET, others);
   expect(d).not.toBe(0);
   expect(r.texels).toBe(d ?? 0);

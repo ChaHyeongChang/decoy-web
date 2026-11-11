@@ -16,7 +16,14 @@ import {
   type FrameWindow,
 } from './gfx/frameStats';
 import { lateWindowFor } from './gfx/quality';
-import { freezeGfxClock, gfxState, probeSlot, setFogFollowDisabled, setFpsOverride } from './gfx/state';
+import {
+  freezeGfxClock,
+  gfxState,
+  probeSlot,
+  setFogFollowDisabled,
+  setFpsOverride,
+  setTextureBudgetOverride,
+} from './gfx/state';
 import { matchMenu } from './matchMenu';
 import { textureBytesByKey } from './render/fogPaint';
 import { setPref } from './prefs';
@@ -132,6 +139,7 @@ export function installDebug(app: App, overlay: boolean): void {
     },
     freezeClock: (ms) => freezeGfxClock(ms),
     injectFps: (fps) => setFpsOverride(fps),
+    injectTextureBudget: (bytes) => setTextureBudgetOverride(bytes),
     getFrameStats: () => frameStatsInfo(),
     getAnimState: () => gameScene(app)?.animDebug ?? null,
     setFogFollowDisabled: (off) => setFogFollowDisabled(off),

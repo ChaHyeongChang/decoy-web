@@ -342,3 +342,43 @@ test('지도 크게 보기 선명도 (태블릿 1024×640 배율 2.5 · 터치 �
   expect(problems).toEqual([]);
   await context.close();
 });
+
+test('지도 크게 보기 — 텍스처 예산에 자리가 없으면 열지 않는다 (괴물 PC 낮음): 크게 본 지도가 보이지 않고 누르기는 공격으로 가지 않으며, 예산이 돌아오면 다시 열린다', async ({
+  browser,
+}) => {
+  const s = await startBotRoom(browser, '&renderer=canvas&quality=low', 'monster');
+  const { page } = s;
+  await s.send({ kind: 'teleport', target: s.id('monster'), x: 18, y: 16, face: 0 });
+  await settle(page);
+  await waitCamera(page);
+  // 남은 예산이 바닥 128텍셀 한 장도 안 되게: 예산 = 지금 텍스처 + 여유(256KiB) + 1KiB
+  const closed = await textureBytes(page);
+  await page.evaluate((b) => window.__DECOY__!.injectTextureBudget(b), closed + 256 * 1024 + 1024);
+  const tap = (await prefs(page)).minimapTap!;
+  await page.mouse.click(tap.x + tap.w / 2, tap.y + tap.h / 2);
+  // 누른 순간 폭을 정한다: 0 = 자리 없음 (이 판에서 처음 누른 것 — 크게 본 지도를 처음 만드는 길)
+  await expect
+    .poll(() => page.evaluate(() => Number(window.__DECOY__!.gfx.features.minimapBigTexels ?? -1)))
+    .toBe(0);
+  await waitForSnapshots(page, 6);
+  let p = await prefs(page);
+  expect(p.minimapBig.open).toBe(false);
+  expect(p.minimapBig.shown).toBe(false);
+  expect(await page.evaluate(() => window.__DECOY__!.getDrawnMinimapBig().length)).toBe(0);
+  expect(
+    await page.evaluate(() => window.__DECOY__!.getTextureBytesByKey()['minimap-big'] ?? 0),
+  ).toBeLessThanOrEqual(4);
+  // 누르기는 삼켰다: 공격 준비 · 쿨타임이 시작되지 않았다
+  const mon = await page.evaluate(() => window.__DECOY__!.getLastSnapshot()?.you.mon ?? null);
+  expect(mon?.windup ?? -1).toBe(0);
+  expect(mon?.attackCd ?? -1).toBe(0);
+  // 예산이 돌아오면 다시 누를 때 정상으로 열리고, 닫으면 다시 숨는다
+  await page.evaluate(() => window.__DECOY__!.injectTextureBudget(null));
+  await openBig(page, false);
+  p = await prefs(page);
+  expect(p.minimapBig.shown).toBe(true);
+  await closeBig(page);
+  expect((await prefs(page)).minimapBig.shown).toBe(false);
+  expect(s.problems).toEqual([]);
+  await s.context.close();
+});
