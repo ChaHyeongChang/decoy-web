@@ -10,8 +10,9 @@
 //  - M4 점령 알림을 기억해 추적이 끝나면 그 거점부터 (놓친 곳 수색보다 앞)
 //  - M5 서지 않기: 거점 매복 · 감옥 감시에 서 있는 대신 짧게 훑고 거점 둘레 · 감시 자리 사이를 걷는다. 같은 거점을 연달아 고르지 않는다.
 //    추적 · 시작 대기 · 기절이 아니면 한자리에 STAND_LIMIT 넘게 머물지 않는다 (서 있기 감시)
-//  - M6 추적 중 표적이 가까우면 탐색 시야(넓게), 멀면 추적 시야
-//  - M7 놓친 뒤: 마지막 위치 → 달아나던 쪽의 안 보이는 도주 후보 둘 → 그래도 없으면 포효
+//  - M6 추적 중 표적이 가까우면 탐색 시야(넓게), 넓히는 중에 탐색 시야 사거리 밖으로 멀어지면 추적 시야로 되돌림 (다 넓힌 뒤에는 놓칠 때까지)
+//  - M7 놓친 뒤: 마지막 위치 → 달아나던 쪽의 안 보이는 도주 후보 둘 → 그래도 없으면 포효. 가뒀거나 죽었거나(세 번째로 잡힘)
+//    탈출해 사라진 표적은 놓친 것이 아니다 (같은 스냅샷의 'imprisoned' · 'died' · 'escaped' 이벤트로 안다)
 //  - 표적 동점(같은 거리)은 위치 → 속도 → 처음 본 틱으로 가르고, 그래도 같은 생존자들은 하나로 묶어 쫓는다 (누구인지 고르지 않는다)
 //  - '아무도 못 본 시간'은 판 시작 카운트다운이 끝난 때부터 센다
 //  - 조정 A (손): 공격을 겨누고 누를지 정하고 준비 동안 따라갈 때는 판마다 0.05~0.15초 전에 본 표적 모습을 이어 짐작한다 (방향을 튼
@@ -95,9 +96,11 @@ const COMBO_FACING = 0.5;
 const DIRECT_CHASE = 3.5;
 /** 추적 중 표적의 이동을 내다보는 최대 시간 (초) */
 const CHASE_LEAD_MAX = 0.35;
-/** 추적 중 시야 (M6): 표적이 이 거리 안이면 탐색 시야(넓게), 이 거리 밖이면 추적 시야. 사이는 그대로 (이력, 타일) */
+/**
+ * 추적 중 시야 (M6): 표적이 WIDE_NEAR 안이면 탐색 시야(넓게), 탐색 시야 사거리(balance) 밖이면 추적 시야. 사이는 그대로 (이력, 타일).
+ * 거두는 거리는 chaseVisionBand가 balance에서 읽는다
+ */
 const WIDE_NEAR = 3.5;
-const WIDE_FAR = 5.0;
 /** 보호 중인 생존자는 이만큼 먼 것으로 친다 (타일): 다른 표적이 있으면 그쪽 */
 const PROTECTED_PENALTY = 8;
 /** 지금 쫓는 표적을 유지하는 덤 (타일): 비슷하면 표적을 바꾸지 않는다 */
@@ -157,6 +160,16 @@ const ROAR_WANT_TIME = 1.0;
 const PING_MEMORY = 10;
 const PING_TIME = 6;
 const PING_LOOK = 1.0;
+/**
+ * 감옥 안 바닥 (철창 한 칸 안쪽 2×2): 수감자가 있을 수 있는 곳. 갇힌 생존자는 감옥 문 칸을 못 지나가므로(map.ts blocksMove) 이 밖의
+ * 포효 핑(문 칸 · 문 앞)은 자유 생존자다
+ */
+const PRISON_INNER = {
+  x0: PRISON_RECT.x0 + 1,
+  y0: PRISON_RECT.y0 + 1,
+  x1: PRISON_RECT.x1 - 1,
+  y1: PRISON_RECT.y1 - 1,
+} as const;
 /** 점령 알림을 기억하는 시간 (초, M4): 추적이 끝났을 때 이 안이면 그 거점부터 */
 const ALERT_MEMORY = 18;
 /** 알림 거점으로 가는 중 다른 거점 알림이 오면: 진행이 이만큼(0~1) 더 많거나, 비슷하면 길이 이만큼(타일) 더 가까울 때만 바꾼다 */
@@ -423,8 +436,11 @@ export class PracticeMonsterBrain implements BotBrain {
     if (prevTick < 0 || snap.world.countdown > 0 || this.counting) this.lastSawFree = snap.tick;
     this.counting = snap.world.countdown > 0;
     const me = snap.you.move;
+    // 이 스냅샷에 누가 죽었거나(세 번째로 잡힘 — 괴물의 공격으로만 죽는다) 탈출했다: 그 생존자는 괴물 화면에서 사라진다
+    let gone = false;
     for (const ev of snap.events) {
-      if (ev.k === 'roarPings') this.takePings(ev.pts, me);
+      if (ev.k === 'died' || ev.k === 'escaped') gone = true;
+      else if (ev.k === 'roarPings') this.takePings(ev.pts, me);
       else if (ev.k === 'text') {
         if (ev.id === 'ALERT_CAPTURE_START' && ev.point) {
           // 쫓는 중이면 기억만 하고 추적이 끝나면 간다 (M4). 다른 알림 거점으로 가는 중이면 더 급할 때만 바꾼다
@@ -496,14 +512,16 @@ export class PracticeMonsterBrain implements BotBrain {
         this.tracks.delete(id);
         this.history.delete(id);
       }
-    // 놓친 표적 (묶어 쫓던 것 중 아무도 안 보일 때): 알림이 기억나면 그 거점부터, 아니면 마지막 모습에서 조금 앞 → 도주 후보 (M4 · M7)
+    // 놓친 표적 (묶어 쫓던 것 중 아무도 안 보일 때): 알림이 기억나면 그 거점부터, 아니면 마지막 모습에서 조금 앞 → 도주 후보 (M4 · M7).
+    // 같은 스냅샷에 누가 죽었거나 탈출했으면 쫓던 표적이 그렇게 사라진 것이다: 놓친 것이 아니므로 시체 자리 · 탈출구 앞을 수색하지 않고
+    // (수색 뒤 포효도 없다) 다음 할 일로 — 기억하는 알림 · 거점 · 순찰은 roam이 고른다 (가둔 표적과 같다). 표적이 그대로 보이면 쫓기를 잇는다
     if (this.chase && ![...this.chaseIds].some((id) => seenNow.has(id))) {
       const c = this.chase;
       this.chase = null;
       this.chaseIds = new Set<string>();
-      const alert = this.freshAlert(snap.world.points);
+      const alert = gone ? null : this.freshAlert(snap.world.points);
       if (alert) this.pointGoal(alert, me, b, true);
-      else {
+      else if (!gone) {
         let lx = c.vx * LOST_LEAD;
         let ly = c.vy * LOST_LEAD;
         const l = Math.hypot(lx, ly);
@@ -529,9 +547,13 @@ export class PracticeMonsterBrain implements BotBrain {
     this.campTicks = snap.world.imprisoned > 0 && inCamp ? this.campTicks + elapsed : 0;
   }
 
-  /** 포효 핑: 감옥 안(수감자)은 빼고, 가까운 것부터 차례로 들를 순서로 기억한다 (좌표 순으로 동점을 가른다 — 배열 순서와 무관) */
+  /**
+   * 포효 핑: 감옥 안 바닥(수감자 자리)의 핑은 빼고, 가까운 것부터 차례로 들를 순서로 기억한다 (좌표 순으로 동점을 가른다 — 배열 순서와
+   * 무관). 감옥 문 칸 · 문 앞은 자유 생존자만 설 수 있으니(구조하러 온 생존자) 따라간다. 감옥 안에 들어간 자유 생존자는 수감자와
+   * 가를 수 없어 함께 빠진다
+   */
   private takePings(pts: readonly Vec2[], me: Vec2): void {
-    const left = pts.filter((p) => distToRect(p, PRISON_RECT) > 0.3).map((p) => snapToFloor(p));
+    const left = pts.filter((p) => distToRect(p, PRISON_INNER) > 0).map((p) => snapToFloor(p));
     const order: Vec2[] = [];
     let from: Vec2 = me;
     while (left.length > 0) {
@@ -688,10 +710,11 @@ export class PracticeMonsterBrain implements BotBrain {
     const me = snap.you.move;
     const mon = snap.you.mon;
     const d = dist(me, t);
-    // 시야 (M6): 가까우면 넓게, 멀면 멀리. 막 쫓기 시작했으면 지금 모드에서 시작한다
+    // 시야 (M6): 가까우면 넓게, 넓히는 중에 탐색 시야 사거리 밖으로 멀어지면 되돌린다. 막 쫓기 시작했으면 지금 모드에서 시작한다
     if (!this.chasing && mon) this.chaseMode = mon.mode;
-    if (d <= WIDE_NEAR) this.chaseMode = 'search';
-    else if (d >= WIDE_FAR) this.chaseMode = 'hunt';
+    const band = chaseVisionBand(b);
+    if (d <= band.near) this.chaseMode = 'search';
+    else if (d >= band.far) this.chaseMode = 'hunt';
     const mode = this.chaseMode;
     if (!mon) return mode;
     // 손 (조정 A): 겨누기 · 누르기 · 준비 중 따라가기는 알아채기 지연만큼 전에 본 모습으로 짐작한 자리로
@@ -1215,6 +1238,17 @@ function nearestOf(spots: readonly Vec2[], to: Vec2): Vec2 {
   let best: Vec2 = spots[0] ?? to;
   for (const s of spots) if (closerThan(to, s, best)) best = s;
   return best;
+}
+
+/**
+ * 추적 중 시야 문턱 (M6, 타일): near 안이면 탐색 시야(넓게), far 밖이면 추적 시야. far는 탐색 시야 사거리(balance) 그대로(여유 0)다.
+ * 탐색 시야는 사거리 밖을 하드 컷으로 못 보므로 far 갈래는 넓히는 동안(추적 → 탐색 0.4초, 사거리가 아직 탐색 시야보다 길다)에만 닿는다:
+ * 넓히는 중에 표적이 탐색 시야 사거리 밖이면 넓히기를 되돌리고, 탐색 시야로 다 바뀐 뒤에는 놓칠 때까지 유지한다.
+ * 사거리 안쪽(예: 사거리 − 0.6 = 4.4)에서 좁히면 놓침은 줄지 않고 좁혔다 다시 넓히기를 1초 안에 오가며 누르는 일이 열 배 가까이 늘며
+ * (생존자 화면에도 괴물 부채꼴이 떨린다) 봇끼리 판 괴물 승률이 약 4점 내려가 쓰지 않는다
+ */
+export function chaseVisionBand(b: Balance): { near: number; far: number } {
+  return { near: WIDE_NEAR, far: b.monster.visionModes.search.range };
 }
 
 /**

@@ -10,9 +10,11 @@ import {
   CAPTURE_POINTS,
   POINT_IDS,
   PRISON_RECT,
+  PRISON_SLOTS,
   RESCUE_POINT,
   distToRect,
   lineOfSight,
+  monsterConeShape,
   type GameEvent,
   type InputFrame,
   type MatchInfo,
@@ -36,7 +38,7 @@ import {
   type BotBrain,
 } from '@decoy/shared/sim';
 import { fieldFrom, pathDist } from '../../shared/src/sim/practiceMap';
-import { ringSpots, searchSpots } from '../../shared/src/sim/practiceMonster';
+import { chaseVisionBand, ringSpots, searchSpots } from '../../shared/src/sim/practiceMonster';
 import { loadTestBalance, place } from '../helpers/fixtures';
 
 const balance = loadTestBalance();
@@ -102,6 +104,8 @@ interface SynthFrame {
   attackCd?: number;
   dashCd?: number;
   mode?: 'search' | 'hunt';
+  /** 추적 시야 쪽으로 섞인 정도 0(탐색)~1(추적). 없으면 mode에 다 바뀐 상태 (탐색 0 · 추적 1) */
+  blend?: number;
   countdown?: number;
   events?: GameEvent[];
   /** 거점 상태 (없으면 바탕 스냅샷 그대로: 모두 idle) */
@@ -135,6 +139,7 @@ function synth(base: Snapshot, f: SynthFrame): Snapshot {
         windup: 0,
         roarCd: f.roarCd ?? 0,
         mode: f.mode ?? 'hunt',
+        blend: f.blend ?? ((f.mode ?? 'hunt') === 'hunt' ? 1 : 0),
         camp: 0,
       },
     },
@@ -346,9 +351,10 @@ describe('실전 괴물 봇: 추격 (M1 돌진 → 공격, M2 거리 좁히기 �
     }
   });
 
-  it('추적 중 표적이 3.5타일 안이면 탐색 시야(넓게)로 바꾸고, 5타일 밖이면 추적 시야로 (M6)', () => {
+  it('추적 중 표적이 3.5타일 안이면 탐색 시야(넓게)로 바꾸고, 넓히는 중에 표적이 탐색 시야 사거리 밖으로 멀어지면 되돌린다. 다 넓힌 뒤에는 놓칠 때까지 그대로 (M6)', () => {
     const { snap: base, info } = baseSnap();
-    const modePress = (d: number, mode: 'search' | 'hunt'): boolean => {
+    const searchRange = balance.monster.visionModes.search.range;
+    const modePress = (d: number, mode: 'search' | 'hunt', blend?: number): boolean => {
       const brain = practiceBrain('monster', 3);
       let any = false;
       for (let t = 100; t < 106; t += 1) {
@@ -357,6 +363,7 @@ describe('실전 괴물 봇: 추격 (M1 돌진 → 공격, M2 거리 좁히기 �
             tick: t,
             me: { x: 35.5, y: Y, face: 0 },
             mode,
+            blend,
             attackCd: 1,
             dashCd: 5,
             survivors: [seen('s', 35.5 + d, Y)],
@@ -371,11 +378,36 @@ describe('실전 괴물 봇: 추격 (M1 돌진 → 공격, M2 거리 좁히기 �
     };
     expect(modePress(2.5, 'hunt')).toBe(true);
     expect(modePress(2.5, 'search')).toBe(false);
-    expect(modePress(6.5, 'search')).toBe(true);
+    // 넓히는 중(추적 → 탐색 0.4초, blend 1 → 0): 사거리가 아직 탐색 시야(5.0)보다 길어 그 밖의 표적이 보인다. 표적이 탐색 시야 사거리
+    // 밖으로 멀어지면 넓히기를 되돌린다 (그대로 두면 다 넓혔을 때 놓친다)
+    for (const blend of [0.4, 0.5, 0.6]) {
+      for (const d of [5.5, 6.5]) {
+        expect(
+          monsterConeShape(balance, blend).range,
+          `blend ${blend}: ${d}타일이 보이는 장면`,
+        ).toBeGreaterThan(d);
+        expect(modePress(d, 'search', blend), `blend ${blend} · ${d}타일`).toBe(true);
+      }
+    }
+    // 다 넓힌 뒤(blend 0)에는 표적이 사거리 가까이(4.7 · 사거리 − 0.1) 가도 놓칠 때까지 그대로 둔다 — 사거리 안쪽(예: 4.4)에서 좁히면
+    // 좁혔다 다시 넓히기를 오가며 누르고(생존자 화면에도 부채꼴이 떨린다) 놓침은 줄지 않는다 (봇끼리 판 괴물 승률 −4점)
+    expect(modePress(4.7, 'search', 0)).toBe(false);
+    expect(modePress(searchRange - 0.1, 'search', 0)).toBe(false);
+    expect(modePress(4.7, 'hunt')).toBe(false);
     expect(modePress(6.5, 'hunt')).toBe(false);
     // 사이(4.2타일)에서는 지금 모드를 그대로 둔다 (오가며 누르지 않게)
     expect(modePress(4.2, 'hunt')).toBe(false);
     expect(modePress(4.2, 'search')).toBe(false);
+  });
+
+  it('M6 문턱: 넓은 시야를 거두는 거리는 탐색 시야 사거리(balance) 그대로이고 넓히는 거리보다 바깥 (숫자를 박지 않는다)', () => {
+    const band = chaseVisionBand(balance);
+    expect(band.far).toBe(balance.monster.visionModes.search.range);
+    expect(band.far).toBeGreaterThan(band.near + 0.5);
+    // balance의 탐색 시야 사거리를 바꾸면 따라간다
+    const wider = structuredClone(balance);
+    wider.monster.visionModes.search.range = 6;
+    expect(chaseVisionBand(wider).far).toBe(6);
   });
 });
 
@@ -515,6 +547,117 @@ describe('실전 괴물 봇: 놓친 뒤 · 포효 · 알림 (M3 · M4 · M7)', (
       expect(roarAt, `seed ${seed}: 후보를 다 본 뒤 포효`).toBeGreaterThan(second ?? 0);
     }
   });
+
+  /**
+   * 쫓던 표적이 눈앞에서 사라졌지만 놓친 것이 아닌 장면 (세 번째로 잡혀 죽었다 · 열린 탈출구로 나갔다): seconds초 동안 두뇌가 한 일과
+   * 포효했는지 (괴물의 포효 쿨이 올라갔는지)
+   */
+  const afterGone = (
+    sim: SimMatch,
+    brain: PracticeMonsterBrain,
+    seconds: number,
+  ): { acts: string[]; roared: boolean } => {
+    const acts = new Set<string>();
+    let roared = false;
+    let cd = sim.game.monster.roarCd;
+    for (let k = 0; k < seconds * HZ && !sim.game.end; k += 1) {
+      sim.step();
+      acts.add(brain.act);
+      if (sim.game.monster.roarCd > cd) roared = true;
+      cd = sim.game.monster.roarCd;
+    }
+    return { acts: [...acts], roared };
+  };
+  const searching = (act: string): boolean => /:(lost|search)$/.test(act);
+
+  it("세 번째로 잡혀 죽은 표적은 놓친 것이 아니다: 시체 자리 · 도주 후보를 수색하지 않고, 수색 뒤 포효도 없다 ('died')", () => {
+    for (const seed of [1, 2, 3]) {
+      const brain = monsterBrain(seed);
+      const sim = scene(seed, { p1: brain });
+      const g = sim.game;
+      place(g, 'p1', 36, 19.5, 0);
+      place(g, 'p2', 37.3, 19.5);
+      place(g, 'p3', 2.5, 29.5);
+      place(g, 'p4', 3.5, 29.5);
+      const p2 = g.survivors.find((s) => s.id === 'p2');
+      if (!p2) throw new Error('p2 없음');
+      p2.imprisonCount = balance.survivor.maxImprisonments;
+      p2.hp = 1;
+      expect(
+        sim.runUntil(() => p2.status === 'dead', 3),
+        `seed ${seed}: 죽었다`,
+      ).toBe(true);
+      const { acts, roared } = afterGone(sim, brain, 5);
+      expect(acts.filter(searching), `seed ${seed}: ${acts.join(' ')}`).toEqual([]);
+      expect(roared, `seed ${seed}: 죽은 뒤 5초 안에 포효했다`).toBe(false);
+    }
+  });
+
+  it("열린 탈출구로 나간 표적도 놓친 것이 아니다: 탈출구 앞을 수색하지 않고, 수색 뒤 포효도 없다 ('escaped')", () => {
+    for (const seed of [1, 2, 3]) {
+      const brain = monsterBrain(seed);
+      const sim = scene(seed, { p1: brain });
+      const g = sim.game;
+      // 북 탈출구(문 x 23~25, y 0~1)가 열려 있다. 괴물은 북쪽 방 (24, 6.5)에서 북쪽을 보고, 표적은 탈출구 바로 앞 (24, 2)
+      const north = g.exits.find((e) => e.id === 'N');
+      if (!north) throw new Error('북 탈출구 없음');
+      north.state = 'open';
+      place(g, 'p1', 24, 6.5, -Math.PI / 2);
+      place(g, 'p2', 24, 2);
+      place(g, 'p3', 2.5, 29.5);
+      place(g, 'p4', 3.5, 29.5);
+      const p2 = g.survivors.find((s) => s.id === 'p2');
+      if (!p2) throw new Error('p2 없음');
+      expect(
+        sim.runUntil(() => brain.act === 'chase', 1),
+        `seed ${seed}: 쫓기 시작`,
+      ).toBe(true);
+      // 반응 시간(0.25초) 전에 문 칸으로 들어가 나간다 (돌진 · 공격 전)
+      place(g, 'p2', 24, 0.5);
+      expect(
+        sim.runUntil(() => p2.status === 'escaped', 0.5),
+        `seed ${seed}: 탈출했다`,
+      ).toBe(true);
+      expect(p2.hp, `seed ${seed}: 맞지 않고 나갔다`).toBe(balance.survivor.maxHp);
+      const { acts, roared } = afterGone(sim, brain, 5);
+      expect(acts.filter(searching), `seed ${seed}: ${acts.join(' ')}`).toEqual([]);
+      expect(roared, `seed ${seed}: 나간 뒤 5초 안에 포효했다`).toBe(false);
+    }
+  });
+
+  it('다른 생존자가 탈출하거나 죽은 스냅샷에도 쫓던 표적이 보이면 그대로 쫓는다 (표적 유지 덤 안의 더 가까운 생존자로 바꾸지 않는다)', () => {
+    const { snap: base, info } = baseSnap();
+    const me = { x: 36, y: 19.5, face: 0 };
+    // a (3.5타일, 동쪽)를 쫓다가 b (2.5타일, 남동)가 보인다: 차이 1.0이 표적 유지 덤 1.5 안이라 a를 그대로 쫓는다
+    const aimAfter = (events: GameEvent[]): number => {
+      const brain = practiceBrain('monster', 1);
+      let aim = Number.NaN;
+      for (let k = 0; k < 12; k += 1) {
+        const o = brain.decide(
+          synth(base, {
+            tick: 100 + k,
+            me,
+            attackCd: 1,
+            dashCd: 5,
+            survivors: k >= 6 ? [seen('a', 39.5, 19.5), seen('b', 37.5, 21.5)] : [seen('a', 39.5, 19.5)],
+            events: k === 6 ? events : [],
+          }),
+          info,
+          balance,
+          100 + k,
+        );
+        aim = o.aim;
+      }
+      return aim;
+    };
+    const towardB = Math.atan2(21.5 - 19.5, 37.5 - 36);
+    const cases: GameEvent[][] = [[], [{ k: 'escaped', you: false }], [{ k: 'died', you: false }]];
+    for (const events of cases) {
+      const aim = aimAfter(events);
+      expect(Math.abs(aim), `${JSON.stringify(events)}: a 쪽(0)을 겨눈다`).toBeLessThan(0.3);
+      expect(Math.abs(aim - towardB)).toBeGreaterThan(0.5);
+    }
+  });
 });
 
 describe('실전 괴물 봇: 알림 · 핑 · 거점 · 감시 행동 하나씩 (합성 스냅샷, 두뇌 입력대로 움직인다)', () => {
@@ -638,6 +781,61 @@ describe('실전 괴물 봇: 알림 · 핑 · 거점 · 감시 행동 하나씩 
         expect(farAt, `seed ${seed}: 그다음 먼 핑`).toBeGreaterThan(nearAt);
       }
     }
+  });
+
+  it('포효 핑: 감옥 안(수감자가 있을 수 있는 2×2 바닥)의 핑만 거르고, 감옥 문 칸 · 문 앞에 선 생존자(구조하러 온)의 핑은 따라간다 (M3)', () => {
+    const { snap: base, info } = baseSnap();
+    const jailed: GameEvent = { k: 'imprisoned', you: false };
+    // 따라갈 핑: 문 칸 (24, 17.6) · 철창 바로 아래 (24, 18.25) — 둘 다 구조 구역(구조 지점에서 1.2) 안, 자유 생존자만 설 수 있다.
+    // 거를 핑: 수감 자리 셋 · 문에 붙은 수감자 (24, 16.7)
+    const cases: ReadonlyArray<readonly [Vec2, boolean]> = [
+      [{ x: 24, y: 17.6 }, true],
+      [{ x: 24, y: 18.25 }, true],
+      ...PRISON_SLOTS.map((p) => [p, false] as const),
+      [{ x: 24, y: 16.7 }, false],
+    ];
+    let watchedFirst = 0;
+    let leftFirst = 0;
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
+      for (const [ping, follow] of cases) {
+        expect(
+          dist(ping, RESCUE_POINT) <= balance.prison.rescueRadius,
+          `(${ping.x}, ${ping.y}) 구조 구역`,
+        ).toBe(follow);
+        const brain = monsterBrain(seed);
+        const me = { x: 34, y: 18.5, face: Math.PI };
+        // 한 명을 막 가뒀다: 감옥 감시로 가거나, 감시를 감시 간격만큼 미루고 다른 할 일로 (주사위 반반 — 시드마다 둘 다 나온다)
+        const pre = drive(brain, base, info, me, 100, 10, (k) => ({
+          imprisoned: 1,
+          roarCd: 25,
+          events: k === 0 ? [jailed] : [],
+        }));
+        if (pre.some((t) => t.act.endsWith(':watch'))) watchedFirst += 1;
+        else leftFirst += 1;
+        const log = drive(
+          brain,
+          base,
+          info,
+          me,
+          110,
+          4 * HZ,
+          (k) => ({ imprisoned: 1, roarCd: 25, events: k === 0 ? [{ k: 'roarPings', pts: [ping] }] : [] }),
+          (t) => t.act === 'look:roar',
+        );
+        const at = `seed ${seed} 핑 (${ping.x}, ${ping.y})`;
+        if (follow) {
+          expect(log[0]?.act, at).toBe('go:roar');
+          const last = log[log.length - 1];
+          expect(last?.act, `${at}: 핑 자리에 닿아 둘러본다`).toBe('look:roar');
+          expect(dist(last?.at ?? me, ping), at).toBeLessThan(0.65);
+        } else {
+          expect(log.filter((t) => t.act.endsWith(':roar')).length, at).toBe(0);
+        }
+      }
+    }
+    // 검사가 헛돌지 않게: 감시 중에 받은 핑 · 감시를 미룬 뒤 받은 핑 둘 다 봤다
+    expect(watchedFirst, '감시 중').toBeGreaterThan(0);
+    expect(leftFirst, '감시를 미룬 뒤').toBeGreaterThan(0);
   });
 
   it('알림으로 온 거점을 훑었는데 아무도 없으면 곧 포효한다 (오래 못 봤을 때보다 훨씬 일찍, M3)', () => {
@@ -950,15 +1148,18 @@ describe('실전 괴물 봇: 시간 · 결정성', () => {
   });
 
   /**
-   * 봇끼리 판: 괴물 두뇌가 받는 임시 ID를 다른 값으로 바꾸고 배열 순서를 뒤집어도 판이 지문까지 같다.
+   * 봇끼리 판: 괴물 두뇌가 받는 임시 ID를 다른 값으로 바꾸고, 배열 순서나 임시 ID의 크기 순서를 뒤집어도 판이 지문까지 같다.
    * 같은 임시 ID는 판 내내 같은 새 값이고, 새 임시 ID(시야에 다시 들어옴)는 새 값을 받는다. 바꿔 끼우는 값 · 순서는 시험이
-   * 실제 자리로 정해(두뇌에는 안 간다) 두 판이 서로 반대 순서를 받게 한다.
+   * 실제 자리로 정한다(두뇌에는 안 간다): 임시 ID는 `접두사-순위-번호`(순위는 실제 자리 p2 < p3 < p4, 뒤집으면 9 - 순위)이고
+   * 배열은 임시 ID가 아니라 실제 순위로 늘어놓는다. 그래서 두 축이 따로 바뀐다 — 기준 판과 견주어 배열 순서만 뒤집은 판,
+   * 임시 ID 크기 순서만 뒤집은 판 (예전 시험은 ID 안에 실제 자리를 그대로 넣고 ID로 정렬해, 두 판의 ID 크기 순서가 같았다 —
+   * '동점이면 작은 임시 ID'처럼 ID 값으로 가르는 두뇌도 통과했다).
    * 동점은 시험이 만든다 (판 흐름의 우연에 기대지 않게): 괴물에게 자유 생존자가 둘 이상 보이기 시작하면 그들에게 새 임시 ID를 주고
    * MERGE_SNAPS 스냅샷 동안 실제 번호(p2 < p3 < p4)가 가장 앞선 생존자 자리에 함께 둔다 — 두뇌에는 같은 때 처음 보인 · 같은 자리 ·
    * 같은 속도의 생존자 여럿으로 보인다 (b 최종 시드 36에서 구조로 함께 풀려난 둘이 (24.594, 18.493)에 겹친 것과 같은 꼴).
-   * 두 판에 같은 변환을 하므로(실제 자리로 정한다) 다른 것은 배열 순서 · 임시 ID 값뿐이다. b 최종 두뇌로는 이 시험이 실패한다
+   * 세 판에 같은 변환을 하므로(실제 자리로 정한다) 다른 것은 배열 순서 · 임시 ID 값뿐이다. b 최종 두뇌로는 이 시험이 실패한다
    */
-  it('같은 시드는 임시 ID 값 · 배열 순서가 달라도 같은 판 (괴물에게 보이는 생존자 둘 이상을 같은 자리에 겹쳐도)', () => {
+  it('같은 시드는 임시 ID 값 · ID 크기 순서 · 배열 순서가 달라도 같은 판 (괴물에게 보이는 생존자 둘 이상을 같은 자리에 겹쳐도)', () => {
     preparePracticeMap();
     const MERGE_SNAPS = 12;
     const MERGE_GAP = 10 * HZ;
@@ -966,7 +1167,14 @@ describe('실전 괴물 봇: 시간 · 결정성', () => {
     const tiesBySeed: number[] = [];
     for (const seed of [36, 1, 2]) {
       const tiesOf: number[] = [];
-      const play = (prefix: string, desc: boolean): string => {
+      /** 실제 자리의 순위 (p2 < p3 < p4, 모르는 자리는 맨 뒤) */
+      const REAL = ['p2', 'p3', 'p4'];
+      const rankOf = (real: string): number => {
+        const i = REAL.indexOf(real);
+        return i < 0 ? REAL.length : i;
+      };
+      /** desc: 배열을 실제 순위 거꾸로 · invert: 임시 ID의 크기 순서를 실제 순위 거꾸로 */
+      const play = (prefix: string, desc: boolean, invert: boolean): string => {
         const setup = SimMatch.roles();
         let ties = 0;
         const holder: { sim: SimMatch | null } = { sim: null };
@@ -980,15 +1188,15 @@ describe('실전 괴물 봇: 시간 · 결정성', () => {
         const rename = (alias: string, real: string): string => {
           const k = (seq.get(real) ?? 0) + 1;
           seq.set(real, k);
-          const id = `${prefix}-${real}-${k}`;
+          const rank = rankOf(real);
+          const id = `${prefix}-${invert ? 9 - rank : rank}-${k}`;
           fresh.set(alias, id);
           return id;
         };
         const transform = (snap: Snapshot): SurvivorView[] => {
           // 시험만 아는 실제 자리 (두뇌에는 새 임시 ID만 간다)
           const book = (holder.sim as unknown as { aliases: AliasBook } | null)?.aliases;
-          const realOf = (alias: string): string =>
-            ['p2', 'p3', 'p4'].find((id) => book?.get(id) === alias) ?? 'p?';
+          const realOf = (alias: string): string => REAL.find((id) => book?.get(id) === alias) ?? 'p?';
           const rows = snap.survivors.map((s) => ({ s, real: realOf(s.id) }));
           const free = rows.filter((r) => r.s.status === 'free');
           if (!merge && merges < MERGES && free.length >= 2 && snap.tick - mergeEnd >= MERGE_GAP) {
@@ -1002,9 +1210,11 @@ describe('실전 괴물 봇: 시간 · 결정성', () => {
           const at = cur ? free.find((r) => r.real === cur.anchor)?.s : undefined;
           const list = rows.map(({ s, real }) => {
             const id = fresh.get(s.id) ?? rename(s.id, real);
-            return at && cur?.members.has(real) && s.status === 'free'
-              ? { ...s, id, x: at.x, y: at.y, face: at.face }
-              : { ...s, id };
+            const v: SurvivorView =
+              at && cur?.members.has(real) && s.status === 'free'
+                ? { ...s, id, x: at.x, y: at.y, face: at.face }
+                : { ...s, id };
+            return { v, rank: rankOf(real) };
           });
           if (cur) {
             cur.left -= 1;
@@ -1013,12 +1223,13 @@ describe('실전 괴물 봇: 시간 · 결정성', () => {
               mergeEnd = snap.tick;
             }
           }
-          const shown = list.filter((v) => v.status === 'free');
+          const shown = list.map((e) => e.v).filter((v) => v.status === 'free');
           for (let i = 0; i < shown.length; i += 1)
             for (let j = i + 1; j < shown.length; j += 1)
               if (shown[i]?.x === shown[j]?.x && shown[i]?.y === shown[j]?.y) ties += 1;
-          list.sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0) * (desc ? -1 : 1));
-          return list;
+          // 배열 순서는 임시 ID가 아니라 실제 순위로 (ID 크기 순서와 따로 바뀌게)
+          list.sort((x, y) => (x.rank - y.rank) * (desc ? -1 : 1));
+          return list.map((e) => e.v);
         };
         const wrapped: BotBrain = {
           decide: (snap, info, b, n) => {
@@ -1043,7 +1254,9 @@ describe('실전 괴물 봇: 시간 · 결정성', () => {
           pos: [...g.players.values()].map((p) => [Math.round(p.move.x * 1000), Math.round(p.move.y * 1000)]),
         });
       };
-      expect(play('k', true), `seed ${seed}`).toBe(play('q', false));
+      const base = play('q', false, false);
+      expect(play('k', true, false), `seed ${seed}: 배열 순서만 뒤집은 판`).toBe(base);
+      expect(play('r', false, true), `seed ${seed}: 임시 ID 크기 순서만 뒤집은 판`).toBe(base);
       tiesBySeed.push(tiesOf[0] ?? 0);
     }
     // 검사가 헛돌지 않게: 같은 자리에 겹친 생존자를 괴물이 실제로 봤다 (시드마다)
