@@ -5,6 +5,7 @@
 //  - 미끼 차례는 연습 방(봇 여부를 아는 방)의 사람 동료를 건너뛴다. 빠른 매칭은 남의 봇 여부를 모르니 순서 그대로
 //  - 미끼가 들어가 보기는 한 번에 한 번 다가가기: 다음 라운드가 다시 걸지 않고(5초 뒤 끝), 달아나기 시작하면 끝난다 —
 //    괴물이 지켜 서 있기만 해도 도주 반경 경계에서 들어가 보기 ↔ 도주를 끝없이 되풀이하던 것
+//  - 돌아가는 길 기억(거쳐 갈 곳 · 이미 돌아감)은 그 접근 동안만: 오래전 · 다른 자리에서 만든 결정을 다시 쓰지 않는다
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   BTN,
@@ -19,6 +20,7 @@ import {
   type Vec2,
 } from '@decoy/shared';
 import {
+  FLEE_SPOTS,
   PracticeSurvivorBrain,
   SimMatch,
   idleBrain,
@@ -363,5 +365,120 @@ describe('생존자 봇: 미끼가 들어가 보기는 한 번에 한 번 다가
         expect(p.to - p.from, msg).toBe(Math.round(5 * HZ));
       }
     }
+  });
+});
+
+// ───────────────────────── 돌아가는 길 기억 ─────────────────────────
+
+describe('생존자 봇: 돌아가는 길 기억(거쳐 갈 곳 · 이미 돌아감)은 그 접근 동안만', () => {
+  /** 스카우트 장면: 러너는 갇혔고(스카우트가 구조 담당) 가드는 멀리 자유. 괴물이 나를 보고 있지는 않다 */
+  function viaScene(): (tick: number, monster: Snapshot['monster'], p: Vec2) => Snapshot {
+    const { snap } = closeUp('scout', 1.0);
+    const survivors = snap.survivors.map((v) =>
+      v.role === 'runner' ? { ...v, status: 'imprisoned' as const, x: 23.5, y: 15.5 } : v,
+    );
+    return (tick, monster, p) => ({
+      ...at(snap, tick, monster),
+      survivors,
+      you: {
+        ...snap.you,
+        move: { ...snap.you.move, x: p.x, y: p.y },
+        surv: snap.you.surv ? { ...snap.you.surv, spotted: false } : null,
+      },
+    });
+  }
+  const scoutInfo = (): MatchInfo => closeUp('scout', 1.0).info;
+  const monsterAt = (p: Vec2): Snapshot['monster'] => {
+    const base = closeUp('scout', 1.0).snap.monster;
+    if (!base) throw new Error('괴물 없음');
+    return { ...base, x: p.x, y: p.y, windup: 0 };
+  };
+
+  /** tick에 괴물을 보고 그 뒤 70틱(괴물 안 보임) 같은 자리 — 두뇌가 고른 할 일 */
+  function seeThenHold(
+    brain: PracticeSurvivorBrain,
+    view: ReturnType<typeof viaScene>,
+    info: MatchInfo,
+    me: Vec2,
+    t1: Vec2,
+    tick: number,
+  ): ReturnType<PracticeSurvivorBrain['debugState']> {
+    brain.decide(view(tick, monsterAt(t1), me), info, balance, tick);
+    for (let k = 1; k <= 70; k += 1) brain.decide(view(tick + k, null, me), info, balance, tick + k);
+    return brain.debugState();
+  }
+
+  /** 3~9타일 떨어진 (나, 괴물) 도주 후보 쌍 (step개마다 하나 — 시험 시간) */
+  function pairs(step: number): [Vec2, Vec2][] {
+    const out: [Vec2, Vec2][] = [];
+    let i = 0;
+    for (const me of FLEE_SPOTS)
+      for (const t of FLEE_SPOTS) {
+        const d = Math.hypot(me.x - t.x, me.y - t.y);
+        if (d < 3 || d > 9) continue;
+        if (i++ % step === 0) out.push([me, t]);
+      }
+    return out;
+  }
+
+  it('거쳐 갈 곳에 닿은 뒤 6초 지나 같은 자리의 괴물을 다시 만나면 새 두뇌처럼 다시 돌아간다 (옛 결정으로 곧장 가지 않는다)', () => {
+    const view = viaScene();
+    const info = scoutInfo();
+    const later = 104 + 6 * HZ;
+    let cases = 0;
+    const wrong: string[] = [];
+    for (const [me0, t1] of pairs(2)) {
+      const fresh = seeThenHold(new PracticeSurvivorBrain('scout', 3), view, info, me0, t1, later);
+      if (!fresh?.via || fresh.fleeing) continue;
+      const br = new PracticeSurvivorBrain('scout', 3);
+      br.decide(view(100, monsterAt(t1), me0), info, balance, 1);
+      br.decide(view(101, null, me0), info, balance, 2);
+      const first = br.debugState();
+      if (!first?.via) continue;
+      // 거쳐 갈 곳에 닿는다 (이 괴물 자리에 대해서는 돌아갔다) → 처음 자리로 돌아와 6초 (괴물 안 보임)
+      br.decide(view(102, null, first.target), info, balance, 3);
+      br.decide(view(103, null, first.target), info, balance, 4);
+      for (let k = 104; k < later; k += 1) br.decide(view(k, null, me0), info, balance, k);
+      const stale = seeThenHold(br, view, info, me0, t1, later);
+      cases += 1;
+      if (!stale?.via) wrong.push(`나 (${me0.x}, ${me0.y}) 괴물 (${t1.x}, ${t1.y}): ${stale?.kind}`);
+    }
+    expect(cases).toBeGreaterThan(50);
+    expect(wrong.slice(0, 5)).toEqual([]);
+  });
+
+  it('6초 뒤 다른 자리에서 같은 자리의 괴물을 다시 만나면 거쳐 갈 곳을 지금 자리에서 다시 고른다 (새 두뇌와 같은 곳)', () => {
+    const view = viaScene();
+    const info = scoutInfo();
+    let compared = 0;
+    let firsts = 0;
+    const wrong: string[] = [];
+    for (const [me0, t1] of pairs(3)) {
+      if (firsts >= 40) break;
+      const probe = seeThenHold(new PracticeSurvivorBrain('scout', 3), view, info, me0, t1, 100);
+      if (!probe?.via || probe.fleeing) continue;
+      firsts += 1;
+      let tried = 0;
+      for (const me2 of FLEE_SPOTS) {
+        const d2 = Math.hypot(me2.x - t1.x, me2.y - t1.y);
+        if (me2 === me0 || d2 < 3 || d2 > 9 || tried >= 4) continue;
+        const later = 171 + 6 * HZ;
+        const fresh = seeThenHold(new PracticeSurvivorBrain('scout', 3), view, info, me2, t1, later);
+        if (!fresh?.via || fresh.fleeing) continue;
+        tried += 1;
+        const br = new PracticeSurvivorBrain('scout', 3);
+        seeThenHold(br, view, info, me0, t1, 100);
+        for (let k = 171; k < later; k += 1) br.decide(view(k, null, me2), info, balance, k);
+        const stale = seeThenHold(br, view, info, me2, t1, later);
+        if (!stale || stale.anchor.x !== fresh.anchor.x || stale.anchor.y !== fresh.anchor.y) continue;
+        compared += 1;
+        if (!stale.via || stale.target.x !== fresh.target.x || stale.target.y !== fresh.target.y)
+          wrong.push(
+            `처음 나 (${me0.x}, ${me0.y}) → 나 (${me2.x}, ${me2.y}), 괴물 (${t1.x}, ${t1.y}): 새 두뇌 (${fresh.target.x}, ${fresh.target.y}) / ${stale.via ? `(${stale.target.x}, ${stale.target.y})` : stale.kind}`,
+          );
+      }
+    }
+    expect(compared).toBeGreaterThan(50);
+    expect(wrong.slice(0, 5)).toEqual([]);
   });
 });

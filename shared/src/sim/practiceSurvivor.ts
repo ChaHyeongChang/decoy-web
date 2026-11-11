@@ -109,6 +109,13 @@ const DETOUR_EXTRA = 10;
 const DETOUR_RETRY_TICKS = 15;
 const DETOUR_REACHED = 1.5;
 const DETOUR_THREAT_MOVE = 2;
+/**
+ * 돌아가는 길 기억은 그 접근 동안만: 거쳐 갈 곳은 이만큼(틱) 넘게 쓰지 않으면(그 목표로 가던 접근이 끝났다) 잊고, 이미 돌아갔다는
+ * 기억은 ROUTE_MEMORY초 뒤 잊는다. 쓰던 거쳐 갈 곳도 지금 자리에서 가는 다리가 괴물 곁을 지나게 되면(달아났다 돌아옴 ·
+ * 괴물이 옮김) 다시 고른다 — 이만큼(타일) 여유를 둔다 (경계에서 거쳐 갈 곳이 바뀌어 흔들리지 않게)
+ */
+const DETOUR_KEEP_TICKS = 15;
+const DETOUR_LEG_SLACK = 1;
 /** 모두 위험할 때 지금 점령 목표를 가장 가까운 곳으로 옮기기 전에 유지하는 시간 (초) — pickPoint */
 const GOAL_KEEP = 1.5;
 /** 기다리기 (남은 할 일이 모두 지켜질 때): 목표에서 이 길 거리(타일)쯤인 자리 WAIT_SPOT_COUNT곳을 오가며 서성인다 */
@@ -424,11 +431,14 @@ export class PracticeSurvivorBrain implements BotBrain {
   private wait: WaitPlan | null = null;
   /**
    * 돌아가는 길, 목표별 (한 틱에 구조 지점 · 거점을 차례로 볼 수 있어 하나만 두면 서로 덮어써 닿음을 알아채지 못한다):
-   * 그때 괴물 자리 · 거쳐 갈 곳(없으면 null) · 없을 때 다시 찾는 틱
+   * 그때 괴물 자리 · 거쳐 갈 곳(없으면 null) · 없을 때 다시 찾는 틱 · 마지막으로 쓴 틱
    */
-  private readonly vias = new Map<number, { tx: number; ty: number; spot: Vec2 | null; retryAt: number }>();
-  /** 이 괴물 자리에 대해서는 이미 돌아갔다 (거쳐 갈 곳에 닿음) */
-  private viaDone: Vec2 | null = null;
+  private readonly vias = new Map<
+    number,
+    { tx: number; ty: number; spot: Vec2 | null; retryAt: number; last: number }
+  >();
+  /** 이 괴물 자리에 대해서는 이미 돌아갔다 (거쳐 갈 곳에 닿은 틱) */
+  private viaDone: { x: number; y: number; at: number } | null = null;
   private pathCache: { tick: number; cell: number; limit: number; d: number } | null = null;
   /** 고른 점령 목표와 고른 틱 (pickPoint의 이력) */
   private pointGoal: PointId | null = null;
@@ -795,17 +805,25 @@ export class PracticeSurvivorBrain implements BotBrain {
 
   /**
    * 가는 길에 괴물이 있을 때 거쳐 갈 곳 (괴물 자리가 크게 바뀌지 않으면 같은 곳을 유지한다). 이 괴물 자리에 대해 이미 거쳐 갈 곳에
-   * 닿았으면 'go'(목표로 곧장 — 다시 돌면 제자리 지그재그), 없으면 null
+   * 닿았으면 'go'(목표로 곧장 — 다시 돌면 제자리 지그재그), 없으면 null. 두 기억 모두 그 접근 동안만 쓴다 (DETOUR_KEEP_TICKS ·
+   * ROUTE_MEMORY — 오래전 · 다른 자리에서 만든 결정을 같은 괴물 자리라는 이유로 다시 쓰지 않게)
    */
   private detour(anchor: Vec2, me: Vec2, t: Threat): Vec2 | 'go' | null {
     const done = this.viaDone;
-    if (done && Math.hypot(t.x - done.x, t.y - done.y) <= DETOUR_THREAT_MOVE) return 'go';
+    if (done && this.now - done.at > this.sec(ROUTE_MEMORY)) this.viaDone = null;
+    else if (done && Math.hypot(t.x - done.x, t.y - done.y) <= DETOUR_THREAT_MOVE) return 'go';
     const key = Math.round(anchor.y * 4) * 1024 + Math.round(anchor.x * 4);
     const v = this.vias.get(key);
-    if (v && Math.hypot(t.x - v.tx, t.y - v.ty) <= DETOUR_THREAT_MOVE) {
+    if (
+      v &&
+      this.now - v.last <= DETOUR_KEEP_TICKS &&
+      Math.hypot(t.x - v.tx, t.y - v.ty) <= DETOUR_THREAT_MOVE &&
+      (!v.spot || this.legClear(v.spot, me, t, DETOUR_LEG_SLACK))
+    ) {
+      v.last = this.now;
       if (v.spot) {
         if (dist(me, v.spot) > DETOUR_REACHED) return v.spot;
-        this.viaDone = { x: t.x, y: t.y };
+        this.viaDone = { x: t.x, y: t.y, at: this.now };
         this.vias.delete(key);
         return 'go';
       }
@@ -813,18 +831,34 @@ export class PracticeSurvivorBrain implements BotBrain {
     }
     const fa = fieldFrom(anchor);
     const direct = pathDist(fa, me);
-    const spot = Number.isFinite(direct) ? this.pickVia(fa, me, t, direct, dist(me, t)) : null;
-    this.vias.set(key, { tx: t.x, ty: t.y, spot, retryAt: this.now + DETOUR_RETRY_TICKS });
+    const spot = Number.isFinite(direct) ? this.pickVia(fa, me, t, direct) : null;
+    this.vias.set(key, {
+      tx: t.x,
+      ty: t.y,
+      spot,
+      retryAt: this.now + DETOUR_RETRY_TICKS,
+      last: this.now,
+    });
     return spot;
+  }
+
+  /**
+   * 내 자리 → 거쳐 갈 곳 s 다리가 괴물을 본 자리 t에서 떨어져 지나는가 (pickVia와 같은 삼각 부등식, slack만큼 느슨하게).
+   * 그 길을 따라 걸으면 참이 거짓으로 바뀌지 않는다 (내 길 거리가 줄어드는 만큼 괴물까지 직선 거리도 많아야 그만큼 준다)
+   */
+  private legClear(s: Vec2, me: Vec2, t: Vec2, slack: number): boolean {
+    const fs = fieldFrom(s);
+    const dMeT = dist(me, t);
+    const rMe = Math.min(DETOUR_CLEAR, 0.5 * dMeT);
+    return dMeT + pathDist(fs, t) > pathDist(fs, me) + 2 * rMe - slack;
   }
 
   /**
    * 거쳐 갈 곳: 도주 후보 중 (내 자리 → 그곳 → 목표) 길이 가장 짧은 곳. 두 다리 모두 괴물을 본 자리에서 떨어져 지나야 한다
    * (길 위 점이 r 안이면 두 끝까지의 길 거리 합이 길이 + 2r 이하 — 그보다 크면 r 밖). 곧장 가는 길의 DETOUR_RATIO배 + 덤까지만
    */
-  private pickVia(fa: Float32Array, me: Vec2, t: Vec2, direct: number, dMeT: number): Vec2 | null {
+  private pickVia(fa: Float32Array, me: Vec2, t: Vec2, direct: number): Vec2 | null {
     const ta = pathDist(fa, t);
-    const rMe = Math.min(DETOUR_CLEAR, 0.5 * dMeT);
     let best: Vec2 | null = null;
     let bestCost = direct * DETOUR_RATIO + DETOUR_EXTRA;
     for (let k = 0; k < FLEE_SPOTS.length; k += 1) {
@@ -839,7 +873,7 @@ export class PracticeSurvivorBrain implements BotBrain {
       if (cost >= bestCost) continue;
       const dT = pathDist(fs, t);
       if (dT + ta <= dA + 2 * DETOUR_CLEAR) continue;
-      if (dMeT + dT <= dMe + 2 * rMe) continue;
+      if (!this.legClear(s, me, t, 0)) continue;
       best = s;
       bestCost = cost;
     }
