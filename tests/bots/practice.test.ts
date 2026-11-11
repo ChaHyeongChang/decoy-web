@@ -4,6 +4,8 @@
 import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
+  CAPTURE_POINTS,
+  POINT_IDS,
   PRISON_RECT,
   RESCUE_POINT,
   blocksMove,
@@ -26,8 +28,10 @@ import {
   buildResult,
   computeVisibility,
   findPath,
+  nextGuarded,
   practiceBrain,
   preparePracticeMap,
+  teamPlan,
   type BotBrain,
   type Game,
 } from '@decoy/shared/sim';
@@ -304,6 +308,8 @@ describe('실전 봇 두뇌: 기기 안 연습 방 (BotDriver)', () => {
     const bots = driver.botsOf(room);
     expect(bots.map((b) => b.seat.role).sort()).toEqual(['guard', 'monster', 'runner']);
     const start = new Map(bots.map((b) => [b.seat.id, { ...game.players.get(b.seat.id)?.move }]));
+    // 20초 동안 시작 자리에서 가장 멀리 간 거리 (끝 순간 자리는 수감되면 감옥 옆이라 보지 않는다)
+    const farthest = new Map<string, number>();
     const ticks = 20 * balance.network.serverTickHz;
     for (let t = 1; t <= ticks && !game.end; t += 1) {
       clock.t += core.tickMs;
@@ -311,16 +317,88 @@ describe('실전 봇 두뇌: 기기 안 연습 방 (BotDriver)', () => {
       for (const b of bots) {
         expect(b.inputs).toBe(t);
         expect(game.players.get(b.seat.id)?.starved).toBe(0);
+        const p = game.players.get(b.seat.id);
+        const s = start.get(b.seat.id);
+        if (!p || !s || s.x === undefined || s.y === undefined) throw new Error('자리 없음');
+        const d = Math.hypot(p.move.x - s.x, p.move.y - s.y);
+        farthest.set(b.seat.id, Math.max(farthest.get(b.seat.id) ?? 0, d));
       }
     }
-    for (const b of bots) {
-      const p = game.players.get(b.seat.id);
-      const s = start.get(b.seat.id);
-      if (!p || !s || s.x === undefined || s.y === undefined) throw new Error('자리 없음');
-      expect(Math.hypot(p.move.x - s.x, p.move.y - s.y)).toBeGreaterThan(3);
-    }
+    for (const b of bots) expect(farthest.get(b.seat.id) ?? 0).toBeGreaterThan(3);
     // 괴물 봇이 받은 MatchInfo 명단에는 자기 자신만 있다
     const monsterBot = bots.find((b) => b.seat.role === 'monster');
     expect(monsterBot?.info?.roster.map((r) => r.role)).toEqual(['monster']);
+  });
+});
+
+describe('실전 봇: 거점 세 곳 중 두 곳 (플레이테스트 반영 b)', () => {
+  it('팀 계획: 거점 순서는 시드로 섞이고, 어느 역할이든 세 거점 모두가 첫 거점이 될 수 있으며 혼자 가는 역할도 셋 다 나온다 (역할을 거점에 묶지 않는다 — 괴물 화면 단서)', () => {
+    const firstOf = new Map<string, Set<string>>();
+    const solos = new Set<string>();
+    for (let seed = 1; seed <= 300; seed += 1) {
+      const plan = teamPlan(seed);
+      expect([...plan.order].sort()).toEqual([...POINT_IDS].sort());
+      if (plan.solo) solos.add(plan.solo);
+      for (const role of ['runner', 'guard', 'scout']) {
+        const first = plan.solo === role ? plan.order[1] : plan.order[0];
+        const set = firstOf.get(role) ?? new Set<string>();
+        set.add(first ?? '');
+        firstOf.set(role, set);
+      }
+    }
+    expect([...solos].sort()).toEqual(['guard', 'runner', 'scout']);
+    for (const role of ['runner', 'guard', 'scout'])
+      expect([...(firstOf.get(role) ?? [])].sort()).toEqual(['A', 'B', 'C']);
+  });
+
+  it('괴물이 번갈아 지킬 거점: 지난번 다음 id로 돈다 (A → B → C → A), 끝나거나 꺼진 곳은 건너뛴다', () => {
+    expect(nextGuarded(['A', 'B', 'C'], null)).toBe('A');
+    expect(nextGuarded(['A', 'B', 'C'], 'A')).toBe('B');
+    expect(nextGuarded(['A', 'B', 'C'], 'B')).toBe('C');
+    expect(nextGuarded(['A', 'B', 'C'], 'C')).toBe('A');
+    expect(nextGuarded(['A', 'C'], 'A')).toBe('C');
+    expect(nextGuarded(['B'], 'B')).toBe('B');
+  });
+
+  it('봇끼리 판(시드 1~24): 생존자가 이긴 판의 끝난 거점 조합이 AB에 묶이지 않고(C가 든 조합도 나온다), 꺼진 거점 안에 서 있는 생존자 봇이 없다', () => {
+    preparePracticeMap();
+    const combos = new Set<string>();
+    let stillInOff = 0;
+    for (let seed = 1; seed <= 24; seed += 1) {
+      const setup = SimMatch.roles();
+      const brains = new Map<string, BotBrain>(setup.map((p) => [p.id, practiceBrain(p.role, seed)]));
+      const sim = new SimMatch(setup, balance, brains, seed);
+      const g = sim.game;
+      const prev = new Map<string, [number, number]>();
+      const limit = Math.ceil(balance.match.timeLimit / g.dt) + 2;
+      for (let t = 0; t < limit && !g.end; t += 1) {
+        sim.step();
+        for (const s of g.survivors) {
+          const pv = prev.get(s.id);
+          prev.set(s.id, [s.move.x, s.move.y]);
+          if (s.status !== 'free' || !pv) continue;
+          const inOff = g.points.some(
+            (p) =>
+              p.off &&
+              Math.hypot(s.move.x - CAPTURE_POINTS[p.id].x, s.move.y - CAPTURE_POINTS[p.id].y) <=
+                balance.capturePoint.radius,
+          );
+          if (inOff && Math.hypot(s.move.x - pv[0], s.move.y - pv[1]) < 1e-3) stillInOff += 1;
+        }
+      }
+      // 끝난 거점은 언제나 두 곳 이하, 셋째는 끝나지 않는다
+      expect(g.points.filter((p) => p.done).length).toBeLessThanOrEqual(balance.capturePoint.required);
+      if (g.end?.winner === 'survivors') {
+        combos.add(
+          g.points
+            .filter((p) => p.done)
+            .map((p) => p.id)
+            .join(''),
+        );
+      }
+    }
+    expect(combos.size).toBeGreaterThanOrEqual(2);
+    expect([...combos].some((c) => c.includes('C'))).toBe(true);
+    expect(stillInOff).toBe(0);
   });
 });

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { BalanceError, validateBalance } from '@decoy/shared';
+import { BalanceError, CAPTURE_POINTS, POINT_IDS, validateBalance } from '@decoy/shared';
 
 const raw = JSON.parse(readFileSync('config/balance.json', 'utf8')) as Record<string, unknown>;
 
@@ -32,8 +32,28 @@ describe('balance.json', () => {
   });
 
   it('구조에 묶인 값(거점 수)을 바꾸면 실패한다', () => {
-    const broken = structuredClone(raw);
-    (broken.capturePoint as Record<string, unknown>).count = 3;
-    expect(() => validateBalance(broken)).toThrow(/capturePoint\.count/);
+    for (const n of [2, 4]) {
+      const broken = structuredClone(raw);
+      (broken.capturePoint as Record<string, unknown>).count = n;
+      expect(() => validateBalance(broken)).toThrow(/capturePoint\.count/);
+    }
+  });
+
+  it('capturePoint.required(탈출구를 켜는 점령 수)는 있어야 하고 2(비밀번호 두 조각)여야 한다 (플레이테스트 반영 b)', () => {
+    const missing = structuredClone(raw);
+    delete (missing.capturePoint as Record<string, unknown>).required;
+    expect(() => validateBalance(missing)).toThrow(/capturePoint\.required/);
+    for (const n of [1, 3]) {
+      const broken = structuredClone(raw);
+      (broken.capturePoint as Record<string, unknown>).required = n;
+      expect(() => validateBalance(broken)).toThrow(/capturePoint\.required/);
+    }
+  });
+
+  it('거점 수(count)가 맵의 거점 목록과 같고, 필요한 수(required)는 그보다 적다', () => {
+    const b = validateBalance(raw);
+    expect(POINT_IDS).toHaveLength(b.capturePoint.count);
+    expect(Object.keys(CAPTURE_POINTS).sort()).toEqual([...POINT_IDS].sort());
+    expect(b.capturePoint.required).toBeLessThan(b.capturePoint.count);
   });
 });
