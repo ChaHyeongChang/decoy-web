@@ -1011,7 +1011,9 @@ export class GameScene extends Phaser.Scene {
 
   /**
    * 지도 크게 보기를 연다: 처음이면 만든다(맵 창 가운데, prefsFx.bigMinimapPlace). 바닥은 지금 합성 그림으로 한 번 — 작은 지도도 같은
-   * 그림으로 맞춰 둘이 같은 것을 보인다. 그다음부터는 작은 지도가 다시 그리는 프레임에만 같이 그린다(MINIMAP_BASE_MS 간격 그대로)
+   * 그림으로 맞춰 둘이 같은 것을 보인다. 그다음부터는 작은 지도가 다시 그리는 프레임에만 같이 그린다(MINIMAP_BASE_MS 간격 그대로).
+   * 바닥 폭을 먼저 정하고, 텍스처 예산에 크게 본 지도 자리가 없으면(bigMinimapTexels 0) 열지 않는다 — 작은 지도는 그대로다.
+   * 누르기를 받았으면 true (열지 않았어도 지도를 누른 것이라 공격 · 시야 전환으로 가지 않는다)
    */
   private openBigMap(): boolean {
     if (this.bigOpen || CAM_ZOOM <= 1 || !this.minimap.shown) return false;
@@ -1025,21 +1027,34 @@ export class GameScene extends Phaser.Scene {
       });
       this.minimapBig = big;
     }
-    this.bigOpen = true;
-    this.bigOpens += 1;
-    big.setHidden(false);
     const base = this.world.baseCanvas;
     this.minimap.refreshBase(base);
     this.bigTexelsDirty = true;
     this.fitBigTexels(big);
-    big.refreshBase(this.world.bigBaseCanvas ?? base);
+    if (this.bigTexels === 0) {
+      this.bigTexels = null;
+      return true;
+    }
+    this.bigOpen = true;
+    this.bigOpens += 1;
+    big.setHidden(false);
+    big.refreshBase(this.world.bigBaseCanvas ?? base, true, this.bigTexCap);
     return true;
   }
 
   /**
+   * 크게 본 지도 텍스처 폭 상한 (Minimap.refreshBase maxW): 정한 폭이 있으면 그 폭 — 예산이 모자라 작은 지도 합성보다 작게 굽는 동안
+   * 굽기 전 바닥도 그 폭으로 줄여 담는다(작은 합성보다 크게 굽는 동안은 작은 합성 크기 그대로). 늘려 쓰면 상한 없음(작은 합성 크기)
+   */
+  private get bigTexCap(): number {
+    return this.bigTexels ?? Number.POSITIVE_INFINITY;
+  }
+
+  /**
    * 크게 본 지도 바닥 해상도 (열 때 · 그래픽 상태가 바뀐 뒤 한 번): 그림이 화면에서 차지하는 기기 px에 맞춰 안개 레이어에 따로 합성을
-   * 맡긴다(같은 기록 · 빛). 텍스처 예산에서 다른 텍스처를 뺀 만큼만, 작은 미니맵 합성보다 클 때만(아니면 그것을 늘려 쓴다 — 예전과 같다).
-   * 바뀌었으면 true
+   * 맡긴다(같은 기록 · 빛). 텍스처 예산에서 다른 텍스처를 뺀 만큼만 — 작은 미니맵 합성보다 크게 못 구우면 그것을 늘려 쓰고(예전과
+   * 같다), 늘려 쓰는 사본도 예산에 들어가지 않으면 들어가는 만큼 작게 굽는다(prefsFx.bigMinimapTexels, 0 = 자리 없음).
+   * 시험 토글(bigSharp 끔)은 예전처럼 늘려 쓴다(선명도 비교용). 바뀌었으면 true
    */
   private fitBigTexels(big: Minimap): boolean {
     if (!this.bigTexelsDirty) return false;
@@ -1091,9 +1106,14 @@ export class GameScene extends Phaser.Scene {
     // (바닥 다시 그린 횟수 bakes는 작은 지도와 같은 때만 센다)
     if ((this.bigTexels ?? 0) !== this.world.bigMiniWidth) this.bigTexelsDirty = true;
     const refit = this.fitBigTexels(big);
+    // 바뀐 그래픽 상태에서는 텍스처 예산에 자리가 없다 (prefsFx.bigMinimapTexels 0): 닫는다
+    if (this.bigTexels === 0) {
+      this.closeBigMap();
+      return;
+    }
     const baked = this.world.stepBigMini(MINIMAP_BIG_TEXELS.stepMs);
     if (baseNew || refit || baked)
-      big.refreshBase(this.world.bigBaseCanvas ?? this.world.baseCanvas, baseNew);
+      big.refreshBase(this.world.bigBaseCanvas ?? this.world.baseCanvas, baseNew, this.bigTexCap);
     big.setWorld(snap.world.points, snap.world.exits, view, this.director?.spectating ?? null, blinkOff);
     big.update(this.drawn, snap.you.role, this.roleOf, this.pingPulseNow);
   }
