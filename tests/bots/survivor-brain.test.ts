@@ -13,6 +13,7 @@ import {
   EXITS,
   POINT_IDS,
   RESCUE_POINT,
+  blocksMove,
   emptyInput,
   monsterSees,
   type Balance,
@@ -24,6 +25,7 @@ import {
   type Vec2,
 } from '@decoy/shared';
 import {
+  FLEE_SPOTS,
   PracticeSurvivorBrain,
   SimMatch,
   WATCH_SPOTS,
@@ -41,6 +43,8 @@ import { loadTestBalance, place } from '../helpers/fixtures';
 const balance = loadTestBalance();
 const HZ = balance.network.serverTickHz;
 const ROLES: readonly RoleId[] = ['runner', 'guard', 'scout'];
+/** 자유 생존자 · 괴물이 함께 다닐 수 있는 칸 (탈출구 닫힘) */
+const OPEN_CTX = { kind: 'monster' as const, imprisoned: false, openExits: { N: false, S: false } };
 /** SimMatch.roles()의 자리: 괴물 p1, 러너 p2, 가드 p3, 스카우트 p4 */
 const SEAT: Readonly<Record<RoleId, string>> = { runner: 'p2', guard: 'p3', scout: 'p4' };
 
@@ -612,6 +616,64 @@ describe('생존자 봇: 남은 할 일이 모두 지켜지면 서성이며 기�
       expect(kinds.has('probe'), `seed ${seed}`).toBe(true);
       expect(path, `seed ${seed}`).toBeGreaterThan(20);
     }
+  });
+});
+
+describe('생존자 봇: 가는 길에 괴물이 있으면 돌아간다 (서지 않는다)', () => {
+  it('거쳐 갈 곳 가까이(0.6타일) 오면 닿은 것으로 알고 서 버리지 않는다 — 구조 담당이라 한 틱에 구조 지점 · 거점 길을 차례로 볼 때도', () => {
+    // 검토 재현(mid 흉내 seed 238 스카우트): 구조 지점 길이 막혀 거점으로 넘어가는 틱마다 거쳐 갈 곳을 하나만 기억해 서로 덮어써,
+    // 닿은 거쳐 갈 곳을 다시 골라 1.6초 서 있었다
+    const { snap, info } = closeUp('scout', 1.0);
+    const base = snap.monster;
+    if (!base) throw new Error('괴물 없음');
+    // 러너는 갇혀 있고 가드는 멀리 자유 (스카우트가 구조 담당, 거점이 남아 있어 구조 길이 막히면 점령으로 넘어간다)
+    const survivors = snap.survivors.map((v) =>
+      v.role === 'runner' ? { ...v, status: 'imprisoned' as const, x: 23.5, y: 15.5 } : v,
+    );
+    const view = (tick: number, monster: Snapshot['monster'], p: Vec2): Snapshot => ({
+      ...at(snap, tick, monster),
+      survivors,
+      you: { ...snap.you, move: { ...snap.you.move, x: p.x, y: p.y } },
+    });
+    const offsets = [
+      { x: 0.6, y: 0 },
+      { x: -0.6, y: 0 },
+      { x: 0, y: 0.6 },
+      { x: 0, y: -0.6 },
+    ];
+    let checked = 0;
+    for (const me0 of FLEE_SPOTS) {
+      for (const t1 of FLEE_SPOTS) {
+        const d1 = far(me0, t1);
+        if (d1 < 3 || d1 > 9) continue;
+        // ① 괴물을 보고(다음 스냅샷에는 안 보임) 거쳐 갈 곳 V를 고른다
+        const start = (): PracticeSurvivorBrain => {
+          const br = new PracticeSurvivorBrain('scout', 3);
+          br.decide(view(100, { ...base, x: t1.x, y: t1.y, windup: 0 }, me0), info, balance, 1);
+          br.decide(view(101, null, me0), info, balance, 2);
+          return br;
+        };
+        const first = start().debugState();
+        if (!first?.via) continue;
+        const v = first.target;
+        // ② V 0.6타일 앞까지 왔다 (괴물 기억은 그대로)
+        for (const o of offsets) {
+          const me1 = { x: v.x + o.x, y: v.y + o.y };
+          if (blocksMove(Math.floor(me1.x), Math.floor(me1.y), OPEN_CTX)) continue;
+          const br = start();
+          br.decide(view(130, null, me1), info, balance, 3);
+          br.decide(view(131, null, me1), info, balance, 4);
+          const st = br.debugState();
+          checked += 1;
+          if (st?.via)
+            expect(far(st.target, me1), `나 (${me1.x}, ${me1.y}) 괴물 (${t1.x}, ${t1.y})`).toBeGreaterThan(
+              1.5,
+            );
+        }
+      }
+    }
+    // 검사가 헛돌지 않게
+    expect(checked).toBeGreaterThan(50);
   });
 });
 

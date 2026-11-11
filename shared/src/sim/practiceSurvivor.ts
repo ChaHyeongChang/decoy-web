@@ -411,9 +411,11 @@ export class PracticeSurvivorBrain implements BotBrain {
   private wiggleUntil = 0;
   private wiggleDir: Vec2 = { x: 0, y: 0 };
   private wait: WaitPlan | null = null;
-  /** 돌아가는 길: 목표 · 그때 괴물 자리 · 거쳐 갈 곳(없으면 null) · 없을 때 다시 찾는 틱 */
-  private via: { ax: number; ay: number; tx: number; ty: number; spot: Vec2 | null; retryAt: number } | null =
-    null;
+  /**
+   * 돌아가는 길, 목표별 (한 틱에 구조 지점 · 거점을 차례로 볼 수 있어 하나만 두면 서로 덮어써 닿음을 알아채지 못한다):
+   * 그때 괴물 자리 · 거쳐 갈 곳(없으면 null) · 없을 때 다시 찾는 틱
+   */
+  private readonly vias = new Map<number, { tx: number; ty: number; spot: Vec2 | null; retryAt: number }>();
   /** 이 괴물 자리에 대해서는 이미 돌아갔다 (거쳐 갈 곳에 닿음) */
   private viaDone: Vec2 | null = null;
   private pathCache: { tick: number; cell: number; limit: number; d: number } | null = null;
@@ -779,17 +781,13 @@ export class PracticeSurvivorBrain implements BotBrain {
   private detour(anchor: Vec2, me: Vec2, t: Threat): Vec2 | 'go' | null {
     const done = this.viaDone;
     if (done && Math.hypot(t.x - done.x, t.y - done.y) <= DETOUR_THREAT_MOVE) return 'go';
-    const v = this.via;
-    if (
-      v &&
-      v.ax === anchor.x &&
-      v.ay === anchor.y &&
-      Math.hypot(t.x - v.tx, t.y - v.ty) <= DETOUR_THREAT_MOVE
-    ) {
+    const key = Math.round(anchor.y * 4) * 1024 + Math.round(anchor.x * 4);
+    const v = this.vias.get(key);
+    if (v && Math.hypot(t.x - v.tx, t.y - v.ty) <= DETOUR_THREAT_MOVE) {
       if (v.spot) {
         if (dist(me, v.spot) > DETOUR_REACHED) return v.spot;
         this.viaDone = { x: t.x, y: t.y };
-        this.via = null;
+        this.vias.delete(key);
         return 'go';
       }
       if (this.now < v.retryAt) return null;
@@ -797,7 +795,7 @@ export class PracticeSurvivorBrain implements BotBrain {
     const fa = fieldFrom(anchor);
     const direct = pathDist(fa, me);
     const spot = Number.isFinite(direct) ? this.pickVia(fa, me, t, direct, dist(me, t)) : null;
-    this.via = { ax: anchor.x, ay: anchor.y, tx: t.x, ty: t.y, spot, retryAt: this.now + DETOUR_RETRY_TICKS };
+    this.vias.set(key, { tx: t.x, ty: t.y, spot, retryAt: this.now + DETOUR_RETRY_TICKS });
     return spot;
   }
 
@@ -815,7 +813,8 @@ export class PracticeSurvivorBrain implements BotBrain {
       if (!s) continue;
       const fs = fieldFrom(s);
       const dMe = pathDist(fs, me);
-      if (!Number.isFinite(dMe)) continue;
+      // 이미 닿아 있는 곳은 거쳐 갈 곳이 아니다 (괴물 자리가 바뀌어 다시 고를 때 내 자리를 다시 고르면 거기 서 버린다)
+      if (!Number.isFinite(dMe) || dMe <= DETOUR_REACHED) continue;
       const dA = pathDist(fa, s);
       const cost = dMe + dA;
       if (cost >= bestCost) continue;
