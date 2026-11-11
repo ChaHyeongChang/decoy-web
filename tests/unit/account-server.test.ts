@@ -6,7 +6,13 @@
 //   가고 적립은 다시 시도한다
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
-import type { AccountStatus, ClientMessage, Role, ServerMessage } from '@decoy/shared';
+import {
+  PROTOCOL_VERSION,
+  type AccountStatus,
+  type ClientMessage,
+  type Role,
+  type ServerMessage,
+} from '@decoy/shared';
 import { parseProfile } from '@decoy/shared/meta';
 import { CookieJar, LOGIN_ENV, loginFlow, type AccountEndpoint } from '../helpers/accountServer';
 import { startServer, type RunningServer } from '../helpers/serverProcess';
@@ -59,6 +65,7 @@ const ROLES: Role[] = ['runner', 'monster', 'guard', 'scout'];
 function join(room: string | null, account?: string): ClientMessage {
   const m: Extract<ClientMessage, { t: 'join' }> = {
     t: 'join',
+    proto: PROTOCOL_VERSION,
     room,
     create: room === null,
     name: '',

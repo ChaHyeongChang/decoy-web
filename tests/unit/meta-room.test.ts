@@ -1,6 +1,7 @@
 // 판 평가를 방이 보낸다 (GAME_DESIGN 12장, 정보 숨김): 판이 끝날 때 받는 사람 자기 평가만, 판 중에는 누구에게도 평가 · 레벨 칸이 없다
 import { describe, expect, it } from 'vitest';
 import {
+  PROTOCOL_VERSION,
   MONSTER_EMBLEMS,
   SURVIVOR_EMBLEMS,
   type ClientMessage,
@@ -15,7 +16,16 @@ const balance = loadTestBalance();
 const ROLES: Role[] = ['monster', 'runner', 'guard', 'scout'];
 
 function joinMsg(room: string | null, bots = false): Extract<ClientMessage, { t: 'join' }> {
-  return { t: 'join', room, create: room === null, name: '', token: null, altTokens: [], bots };
+  return {
+    t: 'join',
+    proto: PROTOCOL_VERSION,
+    room,
+    create: room === null,
+    name: '',
+    token: null,
+    altTokens: [],
+    bots,
+  };
 }
 
 function startRoom(): { mgr: RoomManager; room: Room; seats: Seat[]; conns: FakeConn[] } {

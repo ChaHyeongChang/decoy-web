@@ -2,6 +2,7 @@
 import type Phaser from 'phaser';
 import {
   LOGIN_RESULT_PARAM,
+  PROTOCOL_VERSION,
   isKeptNote,
   validateBalance,
   type Balance,
@@ -391,6 +392,7 @@ export class App {
           saveName(name);
           this.net.send({
             t: 'join',
+            proto: PROTOCOL_VERSION,
             room: null,
             create: true,
             name,
@@ -406,7 +408,13 @@ export class App {
           saveName(name);
           this.joinFromLink = false;
           this.returning = null;
-          this.net.send({ t: 'quick', name, costume: this.meta.costumes(), account: this.meta.tag });
+          this.net.send({
+            t: 'quick',
+            proto: PROTOCOL_VERSION,
+            name,
+            costume: this.meta.costumes(),
+            account: this.meta.tag,
+          });
         },
         leaveQueue: () => this.leaveToHome(),
         leaveRoom: () => this.leaveToHome(),
@@ -764,6 +772,7 @@ export class App {
     setBakeCostumes(lobbyCostumeSet(role, this.meta.costumes()));
     local.send({
       t: 'join',
+      proto: PROTOCOL_VERSION,
       room: null,
       create: true,
       name,
@@ -843,6 +852,7 @@ export class App {
     if (!room) return;
     this.net.send({
       t: 'join',
+      proto: PROTOCOL_VERSION,
       room,
       create: false,
       name,
@@ -1224,6 +1234,12 @@ export class App {
           this.forgetRoom(true);
           return;
         }
+        // 서버가 이 화면과 맞지 않는 새 프로토콜이다 (docs/DEPLOY.md 7장): 자리에 묶이지 않았다. "새 버전이 있어요" 띠를 띄우고
+        // 아래에서 첫 화면으로 돌아가 서버의 새로고침 안내를 오류 줄에 띄운다 (마지막 방은 지우지 않는다 — 새로고침한 화면이 돌아가게)
+        if (msg.code === 'update-required') {
+          this.showUpdate();
+          this.returning = null;
+        }
         // 마지막 방 복귀: 옛 소켓이 아직 그 자리에 붙어 있으면 30초 창 안에서 2초마다 다시
         if ((msg.code === 'in-progress' || msg.code === 'room-full') && this.retryReturn()) return;
         if (this.returning && msg.code === 'room-not-found') {
@@ -1233,7 +1249,12 @@ export class App {
         // 판 중 다시 연결했는데 방이 사라졌거나 자리가 없으면 나가기처럼 정리한다 (화면 꺼짐 방지 · 뒤로 가기 항목 · 판 장면).
         // 방 밖(첫 화면)에서 들어가려던 방이 진행 중 · 가득 참이면 친 코드는 남긴다: 결과 단계 방은 '다시 하기'로 대기로
         // 돌아가면 다시 들어갈 수 있다 (검토 반영)
-        if (msg.code === 'room-not-found' || msg.code === 'in-progress' || msg.code === 'room-full') {
+        if (
+          msg.code === 'room-not-found' ||
+          msg.code === 'in-progress' ||
+          msg.code === 'room-full' ||
+          msg.code === 'update-required'
+        ) {
           const keep =
             msg.code !== 'room-not-found' && this.lobby === null && this.match === null
               ? (this.roomCode ?? '')

@@ -228,5 +228,8 @@ export const TARGET_AGE = {
   appealsToChildren: false,
 } as const;
 
-/** 메시지 종류 표시('t')는 보내는 데이터가 아니라 메시지 이름이라 대응표에 넣지 않는다 */
-export const PROTOCOL_FIELDS = ['t'] as const;
+/**
+ * 메시지 형식 칸은 보내는 데이터가 아니라 대응표에 넣지 않는다: 메시지 종류 표시('t' — 메시지 이름)와 프로토콜 버전('proto' — join ·
+ * quick에만, 모든 화면이 같은 빌드 상수 PROTOCOL_VERSION을 싣는다. 사람 · 기기와 무관, docs/DEPLOY.md 7장)
+ */
+export const PROTOCOL_FIELDS = ['t', 'proto'] as const;

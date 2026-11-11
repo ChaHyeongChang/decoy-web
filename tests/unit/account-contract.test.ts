@@ -3,7 +3,13 @@
 // 본인 welcome · 본인 result(판 끝에 적립한 계정 — 결과 단계에 다시 붙어도 그대로) 말고는 어떤 메시지에도 싣지 않는다(정보 숨김 —
 // 로그인 여부가 괴물 · 빠른 매칭에 사람 단서가 되지 않게)
 import { describe, expect, it } from 'vitest';
-import { type ClientMessage, type MatchRating, type Role, type ServerMessage } from '@decoy/shared';
+import {
+  PROTOCOL_VERSION,
+  type ClientMessage,
+  type MatchRating,
+  type Role,
+  type ServerMessage,
+} from '@decoy/shared';
 import {
   PROGRESSION,
   applyRating,
@@ -94,6 +100,7 @@ function joinMsg(
 ): Extract<ClientMessage, { t: 'join' }> {
   const m: Extract<ClientMessage, { t: 'join' }> = {
     t: 'join',
+    proto: PROTOCOL_VERSION,
     room,
     create: room === null,
     name: '',
@@ -279,7 +286,11 @@ function quickRun(players: Player[]): QuickRun {
   const conns = players.map((p) => new FakeConn(p.account, p.tag));
   const links = conns.map((c) => core.connect(c, fail));
   links.forEach((l, i) => {
-    const quick: Extract<ClientMessage, { t: 'quick' }> = { t: 'quick', name: `사람${i}` };
+    const quick: Extract<ClientMessage, { t: 'quick' }> = {
+      t: 'quick',
+      proto: PROTOCOL_VERSION,
+      name: `사람${i}`,
+    };
     if (players[i]!.declare !== undefined) quick.account = players[i]!.declare;
     l.receive(JSON.stringify(quick));
   });

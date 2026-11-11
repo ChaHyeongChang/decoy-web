@@ -2,6 +2,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import {
+  PROTOCOL_VERSION,
   PRACTICE_ROOM_PREFIX,
   ROOM_CODE_ALPHABET,
   type ClientMessage,
@@ -46,7 +47,16 @@ function startPractice(
     throw err;
   });
   link.receive(
-    raw({ t: 'join', room: null, create: true, name: '나', token: null, altTokens: [], bots: true }),
+    raw({
+      t: 'join',
+      proto: PROTOCOL_VERSION,
+      room: null,
+      create: true,
+      name: '나',
+      token: null,
+      altTokens: [],
+      bots: true,
+    }),
   );
   link.receive(raw({ t: 'role', role }));
   link.receive(raw({ t: 'ready', ready: true }));
@@ -227,12 +237,22 @@ describe('나가기 (leave)', () => {
     const conns = [new FakeConn(), new FakeConn()];
     const links = conns.map((c) => core.connect(c, () => {}));
     links[0]?.receive(
-      raw({ t: 'join', room: null, create: true, name: '방장', token: null, altTokens: [], bots: false }),
+      raw({
+        t: 'join',
+        proto: PROTOCOL_VERSION,
+        room: null,
+        create: true,
+        name: '방장',
+        token: null,
+        altTokens: [],
+        bots: false,
+      }),
     );
     const room = [...core.manager.rooms.values()][0];
     links[1]?.receive(
       raw({
         t: 'join',
+        proto: PROTOCOL_VERSION,
         room: room?.code ?? '',
         create: false,
         name: '손님',
@@ -258,7 +278,16 @@ describe('나가기 (leave)', () => {
     // 풀린 연결: 이제 방 메시지는 무시하고, join이 다시 된다
     links[0]?.receive(raw({ t: 'ready', ready: true }));
     links[0]?.receive(
-      raw({ t: 'join', room: null, create: true, name: '방장', token: null, altTokens: [], bots: false }),
+      raw({
+        t: 'join',
+        proto: PROTOCOL_VERSION,
+        room: null,
+        create: true,
+        name: '방장',
+        token: null,
+        altTokens: [],
+        bots: false,
+      }),
     );
     expect(core.manager.rooms.size).toBe(2);
   });

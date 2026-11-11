@@ -1,7 +1,7 @@
 // 출시 전 검토: 연결 하나로 방을 끝없이 쌓지 못한다 (나가기로 사람이 남지 않은 로비 · 결과 방은 바로 지운다),
 // 개발용 봇 방(?bots=1, join.bots)은 개발 서버(devBots)에서만 받는다
 import { describe, expect, it } from 'vitest';
-import type { ClientMessage } from '@decoy/shared';
+import { PROTOCOL_VERSION, type ClientMessage } from '@decoy/shared';
 import { ServerCore, type RoomConfig, type RoomHooks } from '@decoy/shared/sim';
 import { FakeConn } from '../helpers/fakeConn';
 import { loadTestBalance } from '../helpers/fixtures';
@@ -9,7 +9,16 @@ import { loadTestBalance } from '../helpers/fixtures';
 const balance = loadTestBalance();
 const raw = (msg: ClientMessage): string => JSON.stringify(msg);
 const create = (bots = false): string =>
-  raw({ t: 'join', room: null, create: true, name: '시험', token: null, altTokens: [], bots });
+  raw({
+    t: 'join',
+    proto: PROTOCOL_VERSION,
+    room: null,
+    create: true,
+    name: '시험',
+    token: null,
+    altTokens: [],
+    bots,
+  });
 
 function newCore(
   extra: Partial<RoomConfig> = {},
@@ -44,7 +53,7 @@ describe('나가기로 빈 방 정리 (연결 하나가 방을 쌓지 못하게)
     const { core } = newCore();
     const { conn, link } = connect(core);
     for (let i = 0; i < 100; i += 1) {
-      link.receive(raw({ t: 'quick', name: '시험' }));
+      link.receive(raw({ t: 'quick', proto: PROTOCOL_VERSION, name: '시험' }));
       link.receive(raw({ t: 'leave' }));
     }
     expect(conn.count('welcome')).toBe(100);
@@ -58,7 +67,16 @@ describe('나가기로 빈 방 정리 (연결 하나가 방을 쌓지 못하게)
     a.link.receive(create());
     const code = a.conn.last('welcome')?.room ?? '';
     b.link.receive(
-      raw({ t: 'join', room: code, create: false, name: '손님', token: null, altTokens: [], bots: false }),
+      raw({
+        t: 'join',
+        proto: PROTOCOL_VERSION,
+        room: code,
+        create: false,
+        name: '손님',
+        token: null,
+        altTokens: [],
+        bots: false,
+      }),
     );
     const room = core.manager.rooms.get(code);
     expect(room?.seats).toHaveLength(2);
@@ -76,7 +94,16 @@ describe('나가기로 빈 방 정리 (연결 하나가 방을 쌓지 못하게)
     a.link.receive(create());
     const code = a.conn.last('welcome')?.room ?? '';
     b.link.receive(
-      raw({ t: 'join', room: code, create: false, name: '손님', token: null, altTokens: [], bots: false }),
+      raw({
+        t: 'join',
+        proto: PROTOCOL_VERSION,
+        room: code,
+        create: false,
+        name: '손님',
+        token: null,
+        altTokens: [],
+        bots: false,
+      }),
     );
     const token = b.conn.last('welcome')?.token ?? null;
     b.link.close();
@@ -84,7 +111,16 @@ describe('나가기로 빈 방 정리 (연결 하나가 방을 쌓지 못하게)
     expect(core.manager.rooms.has(code)).toBe(true);
     const back = connect(core);
     back.link.receive(
-      raw({ t: 'join', room: code, create: false, name: '손님', token, altTokens: [], bots: false }),
+      raw({
+        t: 'join',
+        proto: PROTOCOL_VERSION,
+        room: code,
+        create: false,
+        name: '손님',
+        token,
+        altTokens: [],
+        bots: false,
+      }),
     );
     expect(back.conn.last('welcome')?.room).toBe(code);
   });
@@ -118,7 +154,7 @@ describe('개발용 봇 방 (?bots=1)은 개발 서버에서만', () => {
     let spawned = 0;
     const { core, clock } = newCore({ devBots: false }, { spawnBot: () => (spawned += 1) });
     const { conn, link } = connect(core);
-    link.receive(raw({ t: 'quick', name: '시험' }));
+    link.receive(raw({ t: 'quick', proto: PROTOCOL_VERSION, name: '시험' }));
     const end = clock.t + balance.matchmaking.quickMatchWait * 1000 + 200;
     while (clock.t < end) {
       clock.t += core.tickMs;

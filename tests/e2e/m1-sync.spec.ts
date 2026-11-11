@@ -1,5 +1,6 @@
 // M1: 접속과 이동 동기화
 import { expect, test } from '@playwright/test';
+import { UI_TEXT } from '../../client/src/data/storyText';
 import {
   closeAll,
   createRoom,
@@ -167,4 +168,48 @@ test('방 코드가 틀리면 안내가 나온다', async ({ browser }) => {
   await expect(page.getByTestId('lobby-error')).toHaveText('방 ZZZY을(를) 찾을 수 없습니다');
   await context.close();
   void waitForSnapshots;
+});
+
+// 프로토콜 관문 (docs/DEPLOY.md 7장, 플레이테스트 반영 b): 화면이 보내는 join · quick에서 proto를 빼 옛 화면을 흉내 낸다.
+// 서버는 자리에 묶지 않고 update-required로 거절하고, 새 화면은 "새 버전이 있어요" 띠 + 서버의 새로고침 안내를 오류 줄에 띄운다
+test('옛 화면 흉내(join · quick의 proto를 뺌): 서버가 거절하면 방에 들어가지 않고 "새 버전이 있어요" 띠 + 새로고침 안내', async ({
+  browser,
+}) => {
+  const { context, page, problems } = await newPlayerPage(browser);
+  const stripped: string[] = [];
+  const replies: string[] = [];
+  await page.routeWebSocket(/\/ws$/, (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((m) => {
+      const msg = JSON.parse(typeof m === 'string' ? m : m.toString('utf8')) as Record<string, unknown>;
+      if (msg.t === 'join' || msg.t === 'quick') {
+        expect(msg.proto, '새 화면은 proto를 싣는다').toBeDefined();
+        delete msg.proto;
+        stripped.push(String(msg.t));
+        server.send(JSON.stringify(msg));
+        return;
+      }
+      server.send(m);
+    });
+    server.onMessage((m) => {
+      const msg = JSON.parse(typeof m === 'string' ? m : m.toString('utf8')) as { t: string; code?: string };
+      if (msg.t !== 'pong') replies.push(msg.code ? `${msg.t}:${msg.code}` : msg.t);
+      ws.send(m);
+    });
+  });
+  await page.goto('/?debug=hook');
+  await expect(page.getByTestId('quick-match')).toBeEnabled();
+  await page.getByTestId('quick-match').click();
+  await expect(page.getByTestId('update-available')).toContainText(UI_TEXT.updateAvailable);
+  await expect(page.getByTestId('lobby-error')).toHaveText(UI_TEXT.updateRequired);
+  await expect(page.getByTestId('quick-match')).toBeVisible();
+  await page.getByTestId('create-room').click();
+  await expect.poll(() => stripped).toEqual(['quick', 'join']);
+  await expect(page.getByTestId('lobby-error')).toHaveText(UI_TEXT.updateRequired);
+  await expect(page.getByTestId('create-room')).toBeVisible();
+  expect(await page.evaluate(() => window.__DECOY__?.room ?? null)).toBeNull();
+  // 서버는 welcome · lobby를 보내지 않았다 (자리에 묶이지 않음)
+  expect(replies).toEqual(['error:update-required', 'error:update-required']);
+  expect(problems).toEqual([]);
+  await context.close();
 });

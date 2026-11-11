@@ -4,7 +4,7 @@
 //   npx tsx scripts/measure-bot-rooms.ts [방 수=6] [판 초=180]
 import { readFileSync } from 'node:fs';
 import { cpuUsage } from 'node:process';
-import { validateBalance, type ClientMessage, type ServerMessage } from '@decoy/shared';
+import { PROTOCOL_VERSION, validateBalance, type ClientMessage, type ServerMessage } from '@decoy/shared';
 import { BotDriver, ServerCore, practiceBrain, type Conn, type CoreLink } from '@decoy/shared/sim';
 
 const ROOMS = Number(process.argv[2] ?? 6);
@@ -46,7 +46,16 @@ const links: CoreLink[] = [];
 for (let i = 0; i < ROOMS; i += 1) {
   const l = human();
   l.receive(
-    raw({ t: 'join', room: null, create: true, name: `p${i}`, token: null, altTokens: [], bots: true }),
+    raw({
+      t: 'join',
+      proto: PROTOCOL_VERSION,
+      room: null,
+      create: true,
+      name: `p${i}`,
+      token: null,
+      altTokens: [],
+      bots: true,
+    }),
   );
   l.receive(raw({ t: 'role', role: 'runner' }));
   l.receive(raw({ t: 'ready', ready: true }));
