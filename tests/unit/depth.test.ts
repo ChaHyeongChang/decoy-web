@@ -339,17 +339,32 @@ describe('입체감 후처리 (등불 · 가라앉히기)는 어둡게만 하고
     }
   });
 
+  it('시야 밖 빈 바닥이 검게 묻히지 않는다: 고른 시안(B) · A는 등불 바깥 · 괴물 붉은 기운까지 바닥 밝기 ≥ 6 (숨은 상대 픽셀 시험의 빈 통과 하한), C는 더 어둡다', () => {
+    const luma = (c: number): number =>
+      0.2126 * ((c >> 16) & 255) + 0.7152 * ((c >> 8) & 255) + 0.0722 * (c & 255);
+    const floor = darkOf(MAP_COLOR.floor, AMB_RGB);
+    const worst = (look: DepthLook): number =>
+      Math.min(
+        luma(gradePixel(floor, look.lanternMin, look.crush)),
+        luma(gradePixel(floor, look.lanternMin, look.crush, look.monsterRed)),
+      );
+    expect(worst(DEPTH_LOOKS[DEFAULT_DEPTH_LOOK])).toBeGreaterThanOrEqual(6);
+    expect(worst(DEPTH_LOOKS.a)).toBeGreaterThanOrEqual(6);
+    expect(worst(DEPTH_LOOKS.c)).toBeLessThan(6);
+  });
+
   it('R14: 등불이 가장 어둡게 한 자리(시야 반경 밖)에서도 어둠 속 테두리 / 바닥 대비 ≥ 2.5 (모든 시안, 비네트 밖)', () => {
     const rim = darkRim(AMB_RGB);
     for (const look of LOOKS)
       for (const k of [1, look.lanternMin])
-        for (const f of [MAP_COLOR.floor, MAP_COLOR.floorHi]) {
-          const ratio = contrastRatio(
-            gradePixel(rim, k, look.crush),
-            gradePixel(darkOf(f, AMB_RGB), k, look.crush),
-          );
-          expect(ratio, `${look.id} k=${k}`).toBeGreaterThanOrEqual(2.5);
-        }
+        for (const f of [MAP_COLOR.floor, MAP_COLOR.floorHi])
+          for (const red of [0, look.monsterRed]) {
+            const ratio = contrastRatio(
+              gradePixel(rim, k, look.crush, red),
+              gradePixel(darkOf(f, AMB_RGB), k, look.crush, red),
+            );
+            expect(ratio, `${look.id} k=${k} red=${red}`).toBeGreaterThanOrEqual(2.5);
+          }
   });
 });
 

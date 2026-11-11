@@ -173,8 +173,8 @@ void main ()
         float sink = 1.0 - uCrush * (1.0 - smoothstep(${DEPTH_SINK.lo.toFixed(3)}, ${DEPTH_SINK.hi.toFixed(3)}, L));
         straight *= mix(1.0, uLanternMin, lt) * sink;
         straight *= mix(vec3(1.0), uWarm, 1.0 - lt);
-        float redK = uRed * (1.0 - smoothstep(0.0, 0.35, L));
-        straight *= vec3(1.0, 1.0 - 0.45 * redK, 1.0 - 0.4 * redK);
+        float redK = uRed * (1.0 - smoothstep(0.0, ${DEPTH_SINK.redHi.toFixed(3)}, L));
+        straight *= vec3(1.0, 1.0 - ${DEPTH_SINK.redG.toFixed(3)} * redK, 1.0 - ${DEPTH_SINK.redB.toFixed(3)} * redK);
         straight = mix(straight, straight * vec3(1.0, 0.55, 0.55), v * uRed * 2.0);
     }
     gl_FragColor = vec4(clamp(straight, 0.0, 1.0) * (1.0 - v) * c.a, c.a);

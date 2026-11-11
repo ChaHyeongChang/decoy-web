@@ -22,7 +22,14 @@ export function isDepthLookId(v: unknown): v is DepthLookId {
  * 후처리 가라앉히기 밝기 문턱 (sRGB 가중 합): lo 이하는 crush만큼 어둡게, hi 이상은 그대로. 셰이더(render/effects.ts)와
  * art/depthGeom gradePixel이 같이 쓴다 — 셰이더는 첫 묶음, 계산은 나눠 받는 조각이라 둘이 함께 쓰는 값을 여기 둔다
  */
-export const DEPTH_SINK = { lo: 0.02, hi: 0.2 } as const;
+export const DEPTH_SINK = {
+  lo: 0.02,
+  hi: 0.2,
+  /** 괴물 화면 붉은 기운: 밝기 redHi 이하 화소에서 초록 · 파랑을 붉은 기운 × redG · redB만큼 줄인다 (밝기를 조금만 깎게 초록은 덜) */
+  redHi: 0.35,
+  redG: 0.25,
+  redB: 0.35,
+} as const;
 
 let urlOn: boolean | null = null;
 let urlLook: DepthLookId | null = null;

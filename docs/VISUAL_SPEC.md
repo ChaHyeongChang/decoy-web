@@ -1231,7 +1231,7 @@ PC · 휴대폰이 **같은 구성의 한 화면**이다. 여는 곳: 첫 화면
 
 - 입체 레이어는 구조 레이어(`fogRoot`) 안, 빛 지도 · 테두리 리프트 뒤에 그린다. 캐릭터 · 부채꼴 · 공격 범위 · 마커 · 배지 · 안개 경계 림 · 화면 밖 화살표는 늘 그 위라 **가려지지 않는다**(R1 순서 그대로)
 - 그래도 그려진 캐릭터 몸(+ `fadePad`)이 띄운 윗면 아래에 오거나 거점 · 탈출구 판정 원(+ `objectivePad`)과 겹치면, 그 칸 · 기둥의 **바닥 위로 뻗은 윗면 조각만 반투명**(`fadeAlpha`)으로 그린다(받침 안쪽은 불투명 — 맵 그림 옛 벽이 겹쳐 비치지 않게). 몸 원은 이번 프레임에 그린 것만이라 안 보이는 상대 때문에 바뀌는 것은 없다
-- 정보 레이어(`getInfoLayer`) · 그린 엔티티(`getDrawn`)는 입체감을 켜고 꺼도 같다(R10과 같은 원칙). 후처리는 어둡게만 하고, 등불이 가장 어둡게 한 자리에서도 시야 밖 테두리 / 바닥 2.5:1(R14)이 남는 값으로 시안을 정했다
+- 정보 레이어(`getInfoLayer`) · 그린 엔티티(`getDrawn`)는 입체감을 켜고 꺼도 같다(R10과 같은 원칙). 후처리는 어둡게만 하고, 등불이 가장 어둡게 한 자리에서도 시야 밖 테두리 / 바닥 2.5:1(R14)이 남고, 고른 시안은 시야 밖 빈 바닥 밝기 6 이상(숨은 상대 픽셀 시험의 빈 통과 하한 — 생존자 · 괴물 화면)이 남는 값으로 정했다: `tests/unit/depth.test.ts` 「시야 밖 빈 바닥이 검게 묻히지 않는다: 고른 시안(B) · A는 등불 바깥 · 괴물 붉은 기운까지 바닥 밝기 ≥ 6 (숨은 상대 픽셀 시험의 빈 통과 하한), C는 더 어둡다」
 - `tests/e2e/depth.webgl.spec.ts` 「입체감 (WebGL 높음): 띄운 벽 북쪽(윗면 아래)에 선 팀원이 가려지지 않고, 켜고 꺼도 정보 레이어 · 그린 엔티티가 같다, 품질 낮음은 지금 그대로」 · 「입체감 괴물 화면 (WebGL 높음): 기둥 윗면 아래에 선 생존자도 흰 공통 몸이 보이고, 셋 모두 같은 그림 키 · 입체감 후처리는 구조 레이어에만」
 - `tests/unit/depth.test.ts` 「그린 캐릭터 몸이 띄운 윗면 아래(받침 북쪽 바로 밖)에 오면 반투명, 멀어지면 불투명 — 받은 몸 원만 본다」 · 「벽 그림자 = 시야 다각형 경계: 벽 남쪽 면 표본은 내 눈이 그 면을 볼 때만 빛을 받고, 벽 너머(북쪽 면) 표본은 0」 · 「gradePixel · 등불 색은 화소를 밝히지 않는다 (시야 밖을 밝히지 않음)」 · 「벽 등: 빛 0(내 시야 밖)이면 시간에 따라 변하지 않고(R9), 빛이 있으면 깜빡임이 있다 — 시드 · 시계만의 결정적 값」 · 「비스듬 그림자 오프셋은 시안 · 몸 반지름 두 인자만 받는다 — 역할 · 체력 · 능력 자리가 없다 (인자 수 · 같은 반지름이면 같은 값)」 · 「예약 색: 입체 색에 역할 4색 · #F8FAFC가 없다 (벽 등은 청록)」
 - 기존 시험도 입체감 켬(WebGL 높음 기본값)으로 돈다: `tests/e2e/m10-visual.webgl.spec.ts` 「괴물 화면 흰색 위장 (WebGL 높음: 셰이더 비네트 · 색보정 · 눈빛 켬) + 공격 범위 = 판정값 + 후처리는 구조 레이어에만」(세 몸의 흰 폭 · 그림자 폭 · 평균색이 같다)
@@ -1247,7 +1247,7 @@ PC · 휴대폰이 **같은 구성의 한 화면**이다. 여는 곳: 첫 화면
 | 비스듬 그림자 알파 | `0.22` | `0.32` | `0.42` | `depthGeom.DEPTH_LOOKS.a.castAlpha` `depthGeom.DEPTH_LOOKS.b.castAlpha` `depthGeom.DEPTH_LOOKS.c.castAlpha` |
 | 비스듬 그림자 오프셋 동 · 남 (몸 반지름 배) | `0.3` · `0.45` | `0.38` · `0.58` | `0.46` · `0.7` | `depthGeom.DEPTH_LOOKS.a.castDx` `depthGeom.DEPTH_LOOKS.a.castDy` `depthGeom.DEPTH_LOOKS.b.castDx` `depthGeom.DEPTH_LOOKS.b.castDy` `depthGeom.DEPTH_LOOKS.c.castDx` `depthGeom.DEPTH_LOOKS.c.castDy` |
 | 가라앉히기 (어두운 화소) | `0.2` | `0.3` | `0.42` | `depthGeom.DEPTH_LOOKS.a.crush` `depthGeom.DEPTH_LOOKS.b.crush` `depthGeom.DEPTH_LOOKS.c.crush` |
-| 등불 바깥 밝기 배율 | `0.92` | `0.88` | `0.86` | `depthGeom.DEPTH_LOOKS.a.lanternMin` `depthGeom.DEPTH_LOOKS.b.lanternMin` `depthGeom.DEPTH_LOOKS.c.lanternMin` |
+| 등불 바깥 밝기 배율 | `0.92` | `0.9` | `0.86` | `depthGeom.DEPTH_LOOKS.a.lanternMin` `depthGeom.DEPTH_LOOKS.b.lanternMin` `depthGeom.DEPTH_LOOKS.c.lanternMin` |
 | 등불 가운데 따뜻한 빛 | `0.07` | `0.12` | `0.16` | `depthGeom.DEPTH_LOOKS.a.lanternWarm` `depthGeom.DEPTH_LOOKS.b.lanternWarm` `depthGeom.DEPTH_LOOKS.c.lanternWarm` |
 | 셰이더 비네트 (품질 높음) | `0.32` | `0.36` | `0.42` | `depthGeom.DEPTH_LOOKS.a.vignette` `depthGeom.DEPTH_LOOKS.b.vignette` `depthGeom.DEPTH_LOOKS.c.vignette` |
 | 괴물 화면 붉은 기운 | `0.16` | `0.26` | `0.36` | `depthGeom.DEPTH_LOOKS.a.monsterRed` `depthGeom.DEPTH_LOOKS.b.monsterRed` `depthGeom.DEPTH_LOOKS.c.monsterRed` |
@@ -1264,6 +1264,7 @@ PC · 휴대폰이 **같은 구성의 한 화면**이다. 여는 곳: 첫 화면
 | 테두리 두께 (타일) | `0.06` | `depthGeom.DEPTH.rim` |
 | 등불 감쇠 시작 · 끝 (시야 반경 배) | `0.35` · `1.25` | `depthGeom.DEPTH.lanternIn` `depthGeom.DEPTH.lanternOut` |
 | 가라앉히기 밝기 문턱 아래 · 위 (sRGB 가중 합) | `0.02` · `0.2` | `depth.DEPTH_SINK.lo` `depth.DEPTH_SINK.hi` |
+| 괴물 붉은 기운: 밝기 문턱 · 초록 · 파랑 줄이는 비 | `0.35` · `0.25` · `0.35` | `depth.DEPTH_SINK.redHi` `depth.DEPTH_SINK.redG` `depth.DEPTH_SINK.redB` |
 | 벽 등: 이어진 남쪽 면 최소 · 간격 (칸) · 깜빡임 최저 배율 · 확률 | `4` · `6` · `0.35` · `0.09` | `depthGeom.DEPTH.lampMinRun` `depthGeom.DEPTH.lampEvery` `depthGeom.DEPTH.lampDip` `depthGeom.DEPTH.lampChance` |
 | 자기 빛 반경: 거점 · 감옥 · 탈출구 (타일) | `3.1` · `3.4` · `2.4` | `depthGeom.DEPTH.haloPoint` `depthGeom.DEPTH.haloPrison` `depthGeom.DEPTH.haloExit` |
 | 옆면 색 (빛 속): 벽 · 기둥 | `#3B4E64` · `#3A4C60` | `depthGeom.DEPTH_COLOR.wallFace` `depthGeom.DEPTH_COLOR.pillarFace` |
@@ -1277,7 +1278,7 @@ PC · 휴대폰이 **같은 구성의 한 화면**이다. 여는 곳: 첫 화면
 | 항목 | 2D 입체감 (이번) | 3D로 옮길 때 |
 |---|---|---|
 | 카메라 | 위에서 보는 시점 + 화면 북쪽으로 기운 느낌(윗면 `lift` 0.46타일 · 시차 0.035) | 위에서 비스듬히 내려다보는 쿼터뷰. 벽 높이 ≈ 1타일, 남쪽 면이 보이는 기울기 |
-| 바탕 어둠 (시야 밖) | 빛 지도 하한 0.45 × `#A8C4E0`(차가운 청회색, 0장) → 후처리 가라앉히기 0.3 · 등불 바깥 0.88배 | 환경광 = 차가운 청회색 아주 낮게. 시야 밖 구조 테두리 / 바닥 2.5:1은 3D에서도 지킨다 |
+| 바탕 어둠 (시야 밖) | 빛 지도 하한 0.45 × `#A8C4E0`(차가운 청회색, 0장) → 후처리 가라앉히기 0.3 · 등불 바깥 0.9배 | 환경광 = 차가운 청회색 아주 낮게. 시야 밖 구조 테두리 / 바닥 2.5:1은 3D에서도 지킨다 |
 | 내 시야 빛 | 판정 다각형 안만 밝힘(밝게 그린 곳 ⊆ 판정 영역), 가장자리 1.2타일 흐림, 등불 가운데 따뜻하게(초록 · 파랑 −5 · −11%) | 판정 모양으로 자른 스포트라이트 · 그림자 맵. 빛 색 따뜻한 흰색(시야 틴트 `#FFE2B8`) |
 | 그림자 방향 | 캐릭터 비스듬 그림자 동 0.38 · 남 0.58 (몸 반지름 배, 화면 오른쪽 아래), 벽 그림자 = 시야 다각형 경계 | 고정 방향광(왼쪽 위 → 오른쪽 아래)의 약한 그림자 + 내 시야 광원이 만드는 그림자(판정 다각형과 일치) |
 | 구조 색 | 바닥 `#17212B` · 윗면 `#283646` · 옆면(빛 속) `#3B4E64` · 테두리 `#8BA3BA` · 네온 `#22D3EE` | 같은 재질 색, 네온은 발광 재질 |

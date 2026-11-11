@@ -79,7 +79,7 @@ export const DEPTH_LOOKS: Readonly<Record<DepthLookId, DepthLook>> = {
     castDy: 0.58,
     castAlpha: 0.32,
     crush: 0.3,
-    lanternMin: 0.88,
+    lanternMin: 0.9,
     lanternWarm: 0.12,
     vignette: 0.36,
     monsterRed: 0.26,
@@ -564,18 +564,24 @@ function smoothstep(e0: number, e1: number, x: number): number {
 }
 
 /**
- * 후처리 입체감 줄을 화소 하나에 (render/effects.ts WORLD_GRADE_FRAG의 uDepth 줄과 같은 식 — 색보정 · 비네트 · 붉은 기운 · 따뜻한 빛
- * 제외): 등불 배율 k(1 ~ lanternMin) × 가라앉히기. 어둡게만 한다(결과 ≤ 입력). 단위 테스트가 R14(시야 밖 구조 2.5:1)를 이 식으로 본다
+ * 후처리 입체감 줄을 화소 하나에 (render/effects.ts WORLD_GRADE_FRAG의 uDepth 줄과 같은 식 — 색보정 · 비네트 · 따뜻한 빛 제외):
+ * 등불 배율 k(1 ~ lanternMin) × 가라앉히기, 괴물 화면 붉은 기운 red(초록 · 파랑을 어두운 화소에서 조금 줄인다). 어둡게만 한다(결과 ≤ 입력).
+ * 단위 테스트가 R14(시야 밖 구조 2.5:1)와 시야 밖 빈 바닥 밝기를 이 식으로 본다
  */
-export function gradePixel(color: number, k: number, crush: number): number {
+export function gradePixel(color: number, k: number, crush: number, red = 0): number {
   const r = ((color >> 16) & 255) / 255;
   const g = ((color >> 8) & 255) / 255;
   const b = (color & 255) / 255;
   const L = 0.2126 * r + 0.7152 * g + 0.0722 * b;
   const sink = 1 - crush * (1 - smoothstep(DEPTH_SINK.lo, DEPTH_SINK.hi, L));
   const m = k * sink;
-  const c = (v: number): number => Math.round(Math.max(0, Math.min(1, v * m)) * 255);
-  return (c(r) << 16) | (c(g) << 8) | c(b);
+  const redK = red * (1 - smoothstep(0, DEPTH_SINK.redHi, L));
+  const c = (v: number): number => Math.round(Math.max(0, Math.min(1, v)) * 255);
+  return (
+    (c(r * m) << 16) |
+    (c(g * m * (1 - DEPTH_SINK.redG * redK)) << 8) |
+    c(b * m * (1 - DEPTH_SINK.redB * redK))
+  );
 }
 
 /** 색에 배율 (0~1) — palette.multiplyRgb에 회색을 곱한 것과 같은 값 */
