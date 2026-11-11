@@ -8,6 +8,7 @@ import {
   cullable,
   CAMERA,
   CameraRig,
+  KICK_RISE_MS,
   SHAKE,
   ScreenShake,
   clampCenter,
@@ -176,6 +177,25 @@ describe('잘라 옮김 어두워짐 · 흔들림', () => {
     off.scale = 0;
     off.add('roar', 0);
     expect(off.offset(50, { x: 0, y: 0 })).toEqual({ x: 0, y: 0 });
+  });
+
+  it('방향 킥 (괴물 명중, 플레이테스트 반영 c): 조준 방향으로만 밀렸다 돌아오고, 최대 0.06타일 · 길이가 지나면 0 · 세기 0이면 0', () => {
+    const dir = 2.1;
+    const k = new ScreenShake();
+    k.add('kick', 1000, dir);
+    const top = k.offset(1000 + KICK_RISE_MS, { x: 0, y: 0 });
+    expect(Math.hypot(top.x, top.y)).toBeCloseTo(SHAKE.kick.amp, 9);
+    // 방향은 조준 방향 그대로 (옆으로 떨리지 않는다)
+    expect(Math.atan2(top.y, top.x)).toBeCloseTo(dir, 9);
+    const mid = k.offset(1000 + KICK_RISE_MS + 30, { x: 0, y: 0 });
+    expect(Math.hypot(mid.x, mid.y)).toBeLessThan(SHAKE.kick.amp);
+    expect(Math.atan2(mid.y, mid.x)).toBeCloseTo(dir, 9);
+    expect(SHAKE.kick.amp).toBeLessThanOrEqual(SHAKE.hitMe.amp);
+    expect(k.offset(1000 + SHAKE.kick.ms + 1, { x: 0, y: 0 })).toEqual({ x: 0, y: 0 });
+    const off = new ScreenShake();
+    off.scale = 0;
+    off.add('kick', 0, dir);
+    expect(off.offset(KICK_RISE_MS, { x: 0, y: 0 })).toEqual({ x: 0, y: 0 });
   });
 });
 

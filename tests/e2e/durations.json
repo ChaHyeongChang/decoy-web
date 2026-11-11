@@ -15,6 +15,7 @@
   "frame-independence.spec.ts": 65,
   "frame-limit.spec.ts": 45,
   "hud-fit.spec.ts": 53,
+  "juice.spec.ts": 60,
   "keypad.spec.ts": 70,
   "layout-editor.spec.ts": 60,
   "lazy-chunks.spec.ts": 25,

@@ -5,6 +5,7 @@
 //  - 지도 크게 보기: 맵 창 가운데에 같은 미니맵 내용을 크게 (틀 높이 = 맵 창 높이 비율). 정보는 작은 미니맵과 같다(minimap.ts)
 //  - 포효 핑 펄스: 월드 핑 · 창 밖 화살표 · 미니맵의 흰 펄스 고리 박자(한 프레임 한 값). 번쩍임 줄이기면 퍼지지 않는 고정 고리
 // 화면 흔들림 줄이기는 camera.ts ScreenShake.scale(prefs.shakeScaleOf) 한 곳이다
+// 플레이테스트 반영 c 손맛: 수감 암전 곡선(검정이 잠깐 오른 뒤 밝아짐) · 구조 완료 청록 가장자리 선(번쩍임 줄이기면 피격 가장자리와 같은 식)
 
 /**
  * 번쩍임 줄이기의 피격 붉은 가장자리: 가장 진할 때 세기(보통 1의 0.35배) · 그 세기까지 오르는 시간(ms). 길이는 보통과 같은
@@ -23,6 +24,26 @@ export function hitFlashLevel(elapsedMs: number, durMs: number, reduced: boolean
   if (elapsedMs < riseMs) return (peak * elapsedMs) / riseMs;
   return peak * (1 - (elapsedMs - riseMs) / Math.max(1, durMs - riseMs));
 }
+
+/** 수감 암전 (갇힌 생존자 화면): 검정까지 오르는 시간 · 밝아지는 시간 (ms) */
+export const IMPRISON_RISE_MS = 70;
+export const IMPRISON_FADE_MS = 500;
+
+/**
+ * 수감 암전 알파 0~1 (수감 뒤 elapsedMs): IMPRISON_RISE_MS에 0 → 1, 그 뒤 IMPRISON_FADE_MS에 1 → 0. 같은 스냅샷 피격의 붉은
+ * 가장자리(깊이 52)가 암전(깊이 55)에 덮이기 전에 먼저 읽힌다
+ */
+export function imprisonFadeLevel(elapsedMs: number): number {
+  if (!(elapsedMs >= 0)) return 0;
+  if (elapsedMs < IMPRISON_RISE_MS) return elapsedMs / IMPRISON_RISE_MS;
+  return Math.max(0, 1 - (elapsedMs - IMPRISON_RISE_MS) / IMPRISON_FADE_MS);
+}
+
+/**
+ * 구조 완료 가장자리 선 (생존자 화면): 길이(ms) · 색(청록 — 시설 · 목표, R6) · 안쪽 들임 · 굵기(논리 px) · 최고 알파. 세기 곡선은
+ * hitFlashLevel(번쩍임 줄이기면 0.35배 · 60ms 상승)
+ */
+export const RESCUE_RIM = { ms: 300, color: 0x22d3ee, inset: 6, width: 3, alpha: 0.9 } as const;
 
 /**
  * 발각 빛 테두리 (생존자 화면, 깊이 38): 보통은 pulseHz로 mid ± swing(0.6~1) 맥동, 번쩍임 줄이기면 맥동 없이 steady.

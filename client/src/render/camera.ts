@@ -303,8 +303,10 @@ export function dipAlpha(elapsedMs: number): number {
 export const SHAKE = {
   /** 생존자: 내가 맞음 */
   hitMe: { amp: 0.1, ms: 220 },
-  /** 괴물: 내 공격이 맞음 */
+  /** 괴물: 내 공격이 둘 이상 맞음 (방향 킥에 더한다) */
   strike: { amp: 0.05, ms: 140 },
+  /** 괴물: 내 공격이 맞음 — 조준 방향으로 한 번 밀렸다 돌아오는 킥 (방향 있음, 떨림 없음) */
+  kick: { amp: 0.06, ms: 120 },
   /** 괴물: 내가 기절 */
   stunMe: { amp: 0.09, ms: 260 },
   /** 괴물: 내 포효 */
@@ -314,17 +316,20 @@ export type ShakeKind = keyof typeof SHAKE;
 
 /** 동시에 남기는 흔들림 수 (오래된 것부터 버린다) */
 const SHAKE_MAX = 4;
+/** 방향 킥이 끝까지 밀리는 시간 (ms). 그 뒤 길이의 나머지 동안 제곱으로 돌아온다 */
+export const KICK_RISE_MS = 24;
 
 /**
  * 화면 흔들림. 모든 흔들림은 여기서만 생기고, offset의 세기는 scale(0 = 끔, 1 = 보통 — '흔들림 줄이기' 설정 · 동작 줄이기가
  * 넣는다)을 곱한다. 흔들림은 시각만의 함수(결정적, 난수 없음)이고 월드에만 걸린다(HUD는 흔들지 않는다)
  */
 export class ScreenShake {
-  private readonly items: { kind: ShakeKind; t0: number }[] = [];
+  private readonly items: { kind: ShakeKind; t0: number; dir: number }[] = [];
   scale = 1;
 
-  add(kind: ShakeKind, nowMs: number): void {
-    this.items.push({ kind, t0: nowMs });
+  /** dir = 방향 킥의 방향 (라디안, 다른 종류는 쓰지 않는다) */
+  add(kind: ShakeKind, nowMs: number, dir = 0): void {
+    this.items.push({ kind, t0: nowMs, dir });
     while (this.items.length > SHAKE_MAX) this.items.shift();
   }
 
@@ -347,6 +352,13 @@ export class ScreenShake {
       const e = nowMs - it.t0;
       if (e >= s.ms || e < 0) {
         if (e >= s.ms) this.items.splice(i, 1);
+        continue;
+      }
+      if (it.kind === 'kick') {
+        // 방향 킥: KICK_RISE_MS에 조준 방향으로 끝까지 밀렸다가 제곱으로 돌아온다 (결정적, 한 번)
+        const k = e < KICK_RISE_MS ? e / KICK_RISE_MS : (1 - (e - KICK_RISE_MS) / (s.ms - KICK_RISE_MS)) ** 2;
+        out.x += s.amp * k * this.scale * Math.cos(it.dir);
+        out.y += s.amp * k * this.scale * Math.sin(it.dir);
         continue;
       }
       // 빠르게 줄어드는 세기 × 서로 다른 두 진동 (결정적)

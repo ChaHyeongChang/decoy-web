@@ -129,9 +129,17 @@ test('공격 준비는 누른 순간 보이고, 피격 플래시 · 수감 페�
   await sendTest(scout.page, { kind: 'teleport', target: guard.id, x: 38, y: 15.5 });
   // 돌진 방향(동쪽)도 창이 자리 잡은 뒤 조준하고 서버 조준까지 확인한다 (위 공격과 같은 까닭)
   await aimMonsterAt(monster.page, 42, 13);
+  for (const p of [monster, guard])
+    expect(await p.page.evaluate(() => window.__DECOY__?.getSounds() ?? [])).not.toContain('dash');
   await monster.page.keyboard.press('Shift');
   await waitEffect(monster.page, 'dashGhosts');
   await waitEffect(guard.page, 'dashGhosts');
+  // 돌진 소리 (플레이테스트 반영 c 손맛 P10): 괴물은 누른 순간(예측 — 서버 dash 이벤트로는 내지 않는다), 괴물이 보이는 생존자는
+  // 서버가 보낸 dash 이벤트로
+  for (const p of [monster, guard])
+    await p.page.waitForFunction(() => (window.__DECOY__?.getSounds() ?? []).includes('dash'), null, {
+      timeout: 5_000,
+    });
 
   // 4) 포효: 괴물과 생존자 모두 포효 소리
   await monster.page.waitForTimeout(500);
