@@ -645,7 +645,7 @@ export class PracticeSurvivorBrain implements BotBrain {
       const enter = this.rescueEnter(snap, b);
       const go = this.approach(enter, me, this.rescueInZone(snap, b));
       if (go) return go;
-      if (undone.length === 0 || freeMates.length === 0) return this.waitTask(snap, enter);
+      if (undone.length === 0 || freeMates.length === 0) return this.waitTask(snap, info, enter);
     }
     if (undone.length > 0) {
       // 지켜지거나 가는 길에 괴물이 있는 거점은 버리고 안전한 다른 거점으로 (계획 순서 앞쪽 먼저).
@@ -671,11 +671,13 @@ export class PracticeSurvivorBrain implements BotBrain {
         commit: false,
         anchor: c,
       };
-      return this.approach(enter, me, dist(me, c) <= b.capturePoint.radius) ?? this.waitTask(snap, enter);
+      return (
+        this.approach(enter, me, dist(me, c) <= b.capturePoint.radius) ?? this.waitTask(snap, info, enter)
+      );
     }
     if (jailed.length > 0) {
       const enter = this.rescueEnter(snap, b);
-      return this.approach(enter, me, this.rescueInZone(snap, b)) ?? this.waitTask(snap, enter);
+      return this.approach(enter, me, this.rescueInZone(snap, b)) ?? this.waitTask(snap, info, enter);
     }
     return { kind: 'idle', target: { x: me.x, y: me.y }, tol: 1, held: 0, commit: false, anchor: me };
   }
@@ -759,7 +761,7 @@ export class PracticeSurvivorBrain implements BotBrain {
       commit: inside && (ex?.progress ?? 0) >= COMMIT_EXIT,
       anchor: c,
     };
-    return this.approach(enter, me, inside) ?? this.waitTask(snap, enter);
+    return this.approach(enter, me, inside) ?? this.waitTask(snap, info, enter);
   }
 
   /**
@@ -849,7 +851,7 @@ export class PracticeSurvivorBrain implements BotBrain {
    * 기다림 한도가 지나면 다른 쪽 자리로 옮기고, 미끼(decoyOrder의 첫 자유 생존자)는 PROBE_TIME 동안 목표로 들어가 본다
    * (PROBE_ALL_ROUND부터는 모두). enter는 들어갈 때의 할 일
    */
-  private waitTask(snap: Snapshot, enter: Task): Task {
+  private waitTask(snap: Snapshot, info: MatchInfo, enter: Task): Task {
     const me = snap.you.move;
     const anchor = enter.anchor;
     const t = this.threat;
@@ -881,7 +883,8 @@ export class PracticeSurvivorBrain implements BotBrain {
       w.patienceAt = this.now + this.patience();
       if (w.spots.length > 0) w.prev = w.spots;
       w.spots = [];
-      if (w.round >= PROBE_ALL_ROUND || this.isDecoy(snap)) w.probeUntil = this.now + this.sec(PROBE_TIME);
+      if (w.round >= PROBE_ALL_ROUND || this.isDecoy(snap, info))
+        w.probeUntil = this.now + this.sec(PROBE_TIME);
     }
     if (this.now < w.probeUntil) return { ...enter, probe: true };
     const moved = t !== null && !(Math.hypot(t.x - w.tx, t.y - w.ty) <= WAIT_REPLAN_MOVE);
@@ -916,10 +919,17 @@ export class PracticeSurvivorBrain implements BotBrain {
     return this.sec(WAIT_PATIENCE_MIN + this.waitRng.next() * WAIT_PATIENCE_SPAN);
   }
 
-  /** 미끼 차례인가: 미끼 순서(판 시드)에서 자유로운 첫 생존자가 나 (동료 상태는 팀 모두가 같은 스냅샷으로 본다) */
-  private isDecoy(snap: Snapshot): boolean {
+  /**
+   * 미끼 차례인가: 미끼 순서(판 시드)에서 자유로운 첫 생존자가 나 (동료 상태는 팀 모두가 같은 스냅샷으로 본다).
+   * 사람 동료는 미끼 행동을 하지 않으니 건너뛴다 — 단 봇 여부를 믿을 수 있을 때만(나 말고 봇 자리가 보이는 연습 방).
+   * 빠른 매칭은 남의 봇 여부를 늘 false로 보내므로(결과 화면에서만 알린다) 순서 그대로 본다: 봇마다 남을 모두 사람으로 보고
+   * 저마다 미끼가 되어 셋이 함께 들어가지 않게
+   */
+  private isDecoy(snap: Snapshot, info: MatchInfo): boolean {
+    const known = info.roster.some((r) => r.id !== info.you && r.bot);
     for (const role of this.decoys) {
       if (role === this.role) return true;
+      if (known && info.roster.some((r) => r.role === role && !r.bot)) continue;
       const mate = snap.survivors.find((s) => s.role === role);
       if (mate && mate.status === 'free') return false;
     }

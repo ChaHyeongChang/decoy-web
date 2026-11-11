@@ -2,6 +2,7 @@
 //  - 두뇌 시계는 판이 흐른 시간만 센다: 판 정지(괴물 재접속 대기) 동안 두뇌를 부르지 않아 스냅샷 틱이 건너뛰어도
 //    탐지 대기 · 지켜짐 기억 · 기다림 차례가 정지가 없을 때와 같다
 //  - 질주 · 밀치기 반응 대기는 갇히면 처음부터 (풀려난 첫 틱에 반응 시간 없이 누르지 않는다)
+//  - 미끼 차례는 연습 방(봇 여부를 아는 방)의 사람 동료를 건너뛴다. 빠른 매칭은 남의 봇 여부를 모르니 순서 그대로
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   BTN,
@@ -20,6 +21,7 @@ import {
   survivorPlan,
   type BotBrain,
 } from '@decoy/shared/sim';
+import { decoyOrder } from '../../shared/src/sim/practiceSurvivor';
 import { loadTestBalance, place } from '../helpers/fixtures';
 
 const balance = loadTestBalance();
@@ -204,5 +206,56 @@ describe('생존자 봇: 질주 · 밀치기 반응 대기는 갇히면 처음�
         expect(press, `${role} seed ${seed}`).toBeGreaterThanOrEqual(Math.round(0.2 * HZ));
       }
     }
+  });
+});
+
+// ───────────────────────── 미끼 차례 ─────────────────────────
+
+describe('생존자 봇: 미끼 차례는 연습 방의 사람 동료를 건너뛴다', () => {
+  /**
+   * 미끼 순서 첫째가 러너인 판: 러너는 자유(멀리), 나는 미끼 순서 둘째, 셋째는 갇힘. 거점은 모두 끝나 할 일은 구조뿐이고,
+   * 괴물은 구조 지점 바로 남쪽에 계속 보인다(지켜짐). 러너를 사람으로 볼지는 roster 의 bot 값. 첫 들어가 보기 시각(초)
+   */
+  function firstProbe(runnerBot: boolean, othersKnown: boolean): number {
+    let seed = 1;
+    while ((decoyOrder(seed)[0] ?? '') !== 'runner') seed += 1;
+    const role = decoyOrder(seed)[1] ?? 'scout';
+    const { snap, info } = closeUp(role, 1.0);
+    const base = snap.monster;
+    if (!base) throw new Error('괴물 없음');
+    // 연습 방: 봇 여부가 정확하다. 빠른 매칭: 내 자리 말고는 모두 bot false 로 온다 (room.ts matchInfo)
+    const roster = info.roster.map((r) => {
+      if (r.id === info.you) return r;
+      if (!othersKnown) return { ...r, bot: false };
+      return r.id === SEAT.runner ? { ...r, bot: runnerBot } : r;
+    });
+    const brain = new PracticeSurvivorBrain(role, seed);
+    for (let k = 0; k < 20 * HZ; k += 1) {
+      const s: Snapshot = {
+        ...at(snap, 100 + k, { ...base, x: RESCUE_POINT.x, y: RESCUE_POINT.y + 1, windup: 0 }),
+        survivors: snap.survivors.map((v) =>
+          v.role === 'runner'
+            ? { ...v, x: 4.5, y: 4.5 }
+            : { ...v, status: 'imprisoned' as const, x: 23.5, y: 15.5 },
+        ),
+        world: { ...snap.world, points: snap.world.points.map((p) => ({ ...p, state: 'done' as const })) },
+        you: { ...snap.you, surv: snap.you.surv ? { ...snap.you.surv, spotted: false } : null },
+      };
+      brain.decide(s, { ...info, roster }, balance, k + 1);
+      if (brain.debugState()?.probe) return k / HZ;
+    }
+    return -1;
+  }
+
+  it('연습 방에서 미끼 순서 첫째가 사람이면 다음 봇이 첫 기다림 한도(3~4초) 뒤 들어가 본다', () => {
+    const t = firstProbe(false, true);
+    expect(t).toBeGreaterThanOrEqual(3 - 1e-9);
+    expect(t).toBeLessThanOrEqual(4 + 1 / HZ);
+  });
+
+  it('미끼 순서 첫째가 봇이면 그 봇 차례라 나는 기다린다 · 빠른 매칭(남의 봇 여부를 모름)은 순서 그대로', () => {
+    // 3라운드(기다림 한도 셋, 9초 이상)부터는 모두 들어가 본다
+    expect(firstProbe(true, true)).toBeGreaterThanOrEqual(9 - 1e-9);
+    expect(firstProbe(false, false)).toBeGreaterThanOrEqual(9 - 1e-9);
   });
 });
