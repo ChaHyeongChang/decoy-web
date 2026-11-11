@@ -2,29 +2,27 @@
 
 `docs/BUILD_PLAN.md` 마일스톤별 결과. 막힌 항목은 `> 보류:`로 표시한다.
 
-## 플레이테스트 반영: 진행 상황과 인수인계 (2026-11-11 — a · b 병합, c 남음)
+## 플레이테스트 반영: 진행 상황과 인수인계 (2026-11-11 — 플레이테스트 반영 a · b · c 끝)
 
-팀원 플레이테스트 피드백을 세 PR로 반영하는 중이다(사용자 요청 원문의 요지는 `docs/PLAYTEST_PLAN.md` 머리 · 0절). **a(버그 · 조작 · 화면)는 PR #33, b(거점 세 곳 중 두 곳)는 PR #34로 병합했다**(아래 '플레이테스트 반영 a' · 'b' 절). 다음 세션은 이 절부터 읽고 c를 이어 간다. 이 절은 c가 병합되면 고쳐 쓴다.
+팀원 플레이테스트 피드백 세 PR을 모두 병합했다(사용자 요청 원문의 요지는 `docs/PLAYTEST_PLAN.md` 머리 · 0절): **a(버그 · 조작 · 화면) PR #33, b(거점 세 곳 중 두 곳) PR #34, c(봇 · 손맛) PR #35**(아래 '플레이테스트 반영 a' · 'b' · 'c' 절, 결정 DECISIONS 16절, 사람 확인 HUMAN_CHECKS 'a' · 'b' · 'c' 절). 다음 세션은 이 절부터 읽는다.
 
-**남은 일: c — 봇 · 손맛** (설계 `docs/PLAYTEST_PLAN.md` c절, 조사 `docs/playtest/c-bots.md` · `c-juice.md` · `c-bot-stats-baseline.md`)
-- 사용자가 정한 것(다시 묻지 않는다): 기준 통계의 원인(생존자 lurk 과제, 반응 지연 0, 괴물 돌진 연계 · 포효 핑 버려짐 · 점령 알림 무시 · 매복)대로 고친다. 처음 괴물을 하는 사람도 봇전 한 판에 수감을 두세 번 해낼 수 있게(사람 흉내 괴물 모형으로 잰다), 봇끼리 판은 괴물 승률 30~40% · 판 길이 7~10분이 목표 — 봇만으로 못 미치면 밸런스 후보로 보고(`balance.json`은 c에서 바꾸지 않는다). 손맛은 `c-juice.md`대로(우선 1: 빗나감 · 명중 강화 · 구조 완료, 우선 2: 수감 · 돌진 소리, 아슬아슬 회피는 클라이언트 계산 δ 0.3타일 · 서버 · 프로토콜 변경 0 · 괴물에게 어떤 형태로도 알리지 않는다)
-- **c의 기준선은 b 최종**(`docs/playtest/b-bot-stats.md` '후' 열, 같은 도구 · 시드 300판): 괴물 승률 45.3% · 판 길이 중앙값 2:10 · 판당 수감 4.39 · 명중률 82.5% · 생존자 봇 서 있던 시간 5.9초. 전후 비교는 b 병합 커밋을 git worktree로 꺼내 `--repo`로 잰다(`npx tsx scripts/bot-stats.ts --matches 300 --seed 1 --repo <worktree> --quiet --out before.json`)
-- b에서 이미 넣은 봇 변경(`shared/src/sim/practiceBrains.ts`): 세 곳 팀 계획 `teamPlan` · `survivorPlan`(시드 난수, 역할과 묶지 않음 — 괴물 화면 단서), 지켜지는 거점은 버리고 안전한 곳으로, 목표 거점 이력 `pickPoint`(제자리 왕복 수리), 괴물 번갈아 지키기 `nextGuarded`, `pointOpen`. c의 서성이기(lurk 대신) · 점수 고르기는 이 위에 얹는다. **역할에 거점 · 자리를 묶지 않는다**(기존 `POINT_OFFSET` 역할별 비켜 서기는 c에서 다시 본다)
-- c에서 같이 볼 기존 사항: 같은 시드 봇 판이 프로세스마다 드물게 다르다(괴물 스냅샷 생존자 배열이 암호 난수 임시 ID 순 → `PracticeMonsterBrain.pickTarget` 동점, DECISIONS 16절 'b: 봇 판 결정성'), a-8의 '첫 포효 · 첫 탐지가 판 시간으로 3초 이르다'(카운트다운), 판 평가 '점령' 빛 40%(META_PLAN 5절 — c 봇으로 다시 잰 뒤 기준 후보 `[12, 28, 44, 60]` 판단)
-- c에서 꼭 할 것: 봇 동선이 바뀌면 **일의 양 기준값을 다시 잰다**(`tests/e2e/perfBudget.ts` 머리 주석 절차 — 장면이 봇과 연습 판이라 봇이 바뀌면 장면이 바뀐다. b에서 봇 배정만 예전처럼 고정한 사본으로 원인을 나눠 잰 방법은 DECISIONS 16절 'b: 일의 양 기준값'), `tests/bots/practice.test.ts` SEEDS 다시 고르기(생존자 · 괴물 승 셋씩), 봇 장면에 기대는 E2E(b에서 `frame-independence` 생존자 장면이 봇 동선에 기대 깨졌다 — 지금은 다른 봇을 묶어 무관하게 했다)
-- 번들 예산: `MILESTONE`을 c(기준 PR #34 병합 — 첫 로딩 331,340B · 전체 400,273B, 예산 +6 · +14KiB)로 옮겨 두었다(DECISIONS 16절 '번들 예산')
-- 매 마일스톤: 브랜치 → PR → 빠른 검사 → Codex 리뷰 확인 → 병합 전 전체 샤딩 검사(workflow_dispatch) → main 병합 → '배포판 검증'(verify-live.yml, url `https://decoy-web.onrender.com`) → 보고(바뀐 것 · 봇 통계 전후 표 · 아이폰/PC 확인 · 밸런스 후보 · 남은 문제)
+**다음 작업: 입체감 다듬기 → 3D** (사용자가 정한 차례. 설계 문서는 아직 없다 — 시작할 때 계획부터 세운다)
+- 텍스처 예산 32MiB는 사용자 지시로 그대로 뒀다 — 3D 작업 때 다시 정한다. 지금 PC 1920×1080 배율 2 · 품질 높음의 크게 본 지도 바닥은 527px(b 542px, b 전 954px — c의 손맛 HUD 그림 셋 +44KB 몫), 33MiB면 약 818px(계산). 바꿀 곳: `client/src/gfx/presets.ts` `TEXTURE_BUDGET` 높음 · 중간, `tests/e2e/minimap-sharp.webgl.spec.ts` `HIGH_BUDGET`, 문서(DECISIONS 13 · 16절, VISUAL_SPEC 12.6, PERF 7.1)
+- 번들 예산: 다음 작업은 `tests/e2e/bundle-size.spec.ts` `MILESTONE`을 PR #35 병합 값(첫 로딩 335,020B · 전체 410,340B, gzip zlib 기본)으로 옮기고 예산을 정한다. 상한(첫 로딩 346,679B · 전체 436,791B)까지 11,659B · 26,451B 남았다 — 3D는 상한부터 다시 정해야 할 가능성이 크다(DECISIONS 11절 '번들 상한 올리기'처럼 구성 표 먼저, PERF 8절 `node scripts/bundle-breakdown.mjs`)
+- 일의 양 예산(`tests/e2e/perf-budget.json`, 기준 × 1.05)은 c 최종으로 다시 쟀다. 봇 동선 · 그리기가 바뀌면 `tests/e2e/perfBudget.ts` 머리 주석 절차로 다시 재고, 원인은 봇만 되돌린 사본으로 나눠 잰다(DECISIONS 16절 'b: 일의 양 기준값' · 'c: 일의 양 기준값')
 
-**사용자에게 물어 둔 것 (b 보고)**
-- 텍스처 예산: PC 1920×1080 배율 2 · 품질 높음은 거점 C 뒤 크게 본 지도 바닥이 542px(b 전 954px)다. 예산 32MiB(사용자가 지키라고 한 값)를 33MiB로 올리면 약 829px — `client/src/gfx/presets.ts` `TEXTURE_BUDGET` 높음 · 중간과 `tests/e2e/minimap-sharp.webgl.spec.ts` `HIGH_BUDGET`, 문서(DECISIONS 13 · 16절, VISUAL_SPEC 12.6, PERF 7.1)
-- 판 평가 '점령' 기준 `[10, 24, 38, 52]` → `[12, 28, 44, 60]` 후보(c 뒤 다시 잼)
+**사용자에게 물어 둔 것 (c 보고)**
+- 판 길이 7~10분은 봇만으로 닿지 않는다(c 최종 봇끼리 중앙 2:18). `balance.json` 후보(`docs/playtest/c-bot-stats.md` 8절, 1,200판): 1위 `survivor.maxImprisonments` 2 → 8 · `capturePoint.captureTime` 40 → 160(괴물 승률 34.8% · 중앙 8:23 · 7~10분 81%), 2위 7 · 150(39.1% · 7:49), 3위 8 · 150(29.7% · 7:54). 고르면 HUD 체력 · 수감 칸(2개 고정, `client/src/ui/hud.ts`) · 문구 · `config/progression.json` 판 평가 기준 · 일일 도전을 다시 맞춰야 하고, '세 번째로 잡히면 사망' 긴장이 줄어 판이 감옥 ↔ 구조 반복 중심이 된다 — 사람 판으로 먼저 보는 것을 권했다
+- 거점 C는 c 봇에서 가장 덜 끝난다(지나치게 쉽지 않다). 맵은 그대로, 사람 판에서 'C 마지막 → 북문'이 괴물에게 불리하면 후보(북쪽 통로 기둥 등, `c-bot-stats.md` 7절)
+- 텍스처 예산 33MiB(위) — 3D 때 다시
 
-**작업 방식 (a · b에서 쓴 것 — c도 같게)**
-- 이 세션의 브랜치는 `claude/modest-mendel-53xfoh`였다. 다음 세션은 자기 브랜치를 `origin/main`(b 병합 뒤 이 인수인계 커밋까지 든 브랜치)에서 시작한다(force push 없음)
-- ultracode: 계약 커밋 → 파일 소유가 겹치지 않는 갈래(git worktree, `node_modules`는 원래 리포를 가리키는 링크 + `@decoy/*`만 worktree 쪽 링크) → 합치기 → 검토 워크플로(일곱 관점 찾기 → 지적마다 재현 · 정확성 · 영향 반박) → 묶음별 수리(실패하는 시험 먼저) → 독립 재검토 → 문서 담당이 메모를 문서로. 구현 담당은 기준 문서를 고치지 않고 메모로 넘긴다
-- 4코어 컨테이너: 여럿이 시험을 돌리면 시간 문턱 시험(봇 평균 틱 비용 · `camera.test` 60초 · 긴 작업 50ms · `costume` 한 프레임 최대 — b에서 CI 러너에서도 한 번 48.1ms로 실패, 같은 head 다른 실행은 통과)이 흔들린다 — 혼자 다시 돌려 판단. 로컬 전체 E2E(1 worker)는 약 60분. 이 컨테이너에서 main도 실패하는 것: `m10-resolution.webgl` DPR, `m10-visual.webgl` 팀원 역할색(흔들림), `smoke` WebGL '설치된 Chromium을 쓴다'(chromium-1194 경로 없음 — CI는 통과). Playwright 1.56.1이 찾는 `chromium_headless_shell-1194`는 1243 파일을 링크해 만든다(PROGRESS 3절 '테스트 요령'). E2E 두 묶음을 같은 폴더에서 동시에 돌리지 않는다(결과 폴더) — worktree면 따로 돌 수 있다(포트를 다르게)
+**작업 방식 (a · b · c에서 쓴 것)**
+- 이 세션의 브랜치는 `claude/bold-hopper-hwzud5`였다(이 인수인계 커밋은 c 병합 뒤 이 브랜치에만 있다 — main에 없는 커밋은 받아서 쓴다). 다음 세션은 자기 브랜치를 `origin/main`에서 시작한다(force push 없음)
+- ultracode: 계약(기반) 커밋 → 파일 소유가 겹치지 않는 갈래(git worktree, `node_modules`는 원래 리포를 가리키는 링크 + `@decoy/*`만 worktree 쪽 링크) → 합치기 → 검토 워크플로(일곱 관점 찾기 → 지적마다 재현 · 반박) → 묶음별 수리(실패하는 시험 먼저) → 독립 재검토 → 문서 담당이 메모를 문서로(사실 대조 검토 한 번). 구현 담당은 기준 문서를 고치지 않고 메모로 넘긴다. 봇 밸런스처럼 결과가 서로 얽힌 일은 손잡이마다 worktree 갈래로 600판씩 재고 조합을 1,200판으로 고른다(c 절 '봇끼리 판 조정 경로')
+- 봇 통계: `npx tsx scripts/bot-stats.ts --matches 300 --seed 1 --quiet --out <결과.json>`(실제 방 흐름, 판마다 시드 임시 ID — 같은 명령은 같은 결과), 사람 흉내 괴물 `--monster novice|mid`, 전후 `--repo <옛 커밋 worktree>` · `--compare`, 결정성 `--alias-salt 7` + `--diff`, 수치 후보 `--balance <사본>`. 같은 코드도 300판 시드 묶음끼리 ±4%p 흔들린다 — 판단은 600~1,200판으로
+- 4코어 컨테이너: 여럿이 시험을 돌리면 시간 문턱 시험(봇 평균 틱 비용 · `camera.test` 60초 · 긴 작업 50ms · `costume` 한 프레임 최대)이 흔들린다 — 혼자 다시 돌려 판단. 로컬 전체 E2E(1 worker)는 약 60분(c 349개). 이 컨테이너에서 main도 실패하는 것: `m10-resolution.webgl` DPR, `m10-visual.webgl` 팀원 역할색(흔들림), `smoke` WebGL '설치된 Chromium을 쓴다'(chromium-1194 경로 없음 — CI는 통과). Playwright 1.56.1이 찾는 `chromium_headless_shell-1194`는 1243 파일을 링크해 만든다(PROGRESS 3절 '테스트 요령'). E2E 두 묶음을 같은 폴더에서 동시에 돌리지 않는다(결과 폴더) — worktree면 따로 돌 수 있다(포트를 다르게)
 - 컨테이너가 재시작되면 백그라운드 일(워크플로 · E2E)이 끊긴다. 워크플로는 `resumeFromRunId`로 끝난 에이전트 결과를 다시 쓸 수 있다
-- 병합 전 문서 커밋을 더하지 않는다: 전체 검사한 head 그대로 `expectedHeadSha`로 병합하고, 병합 기록 · 인수인계는 병합 뒤 커밋으로 남긴다(이 절처럼)
+- 매 마일스톤: 브랜치 → PR → 빠른 검사 → Codex 리뷰 확인 → 병합 전 전체 샤딩 검사(workflow_dispatch) → main 병합 → '배포판 검증'(verify-live.yml, url `https://decoy-web.onrender.com`) → 보고. 병합 전 문서 커밋을 더하지 않는다: 전체 검사한 head 그대로 `expectedHeadSha`로 병합하고, 병합 기록 · 인수인계는 병합 뒤 커밋으로 남긴다(이 절처럼)
 
 ## 현재 상태와 인수인계 (2026-10-28, M15 + 출시 전 검토 · 렌더링 최적화 · 캐릭터 리디자인 · 따라가는 카메라 · 내 움직임 고르기 · 설정 화면 통합 · 잔렉 고치기 · 남은 문제 정리 · 번들 상한 올리기 · 판 밖 성장 a(판 평가 · 레벨) · b(불씨 · 도전 · 접속 보상) · c(의상 · 옷장) · 번들 줄이기)
 
