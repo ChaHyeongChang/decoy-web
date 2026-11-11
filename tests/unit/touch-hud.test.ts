@@ -39,6 +39,8 @@ const SCREENS: [string, number, number][] = [
   ['4:3 태블릿', 1024, 768],
   ['iPad Pro 11', 1194, 834],
   ['iPad Pro 12.9', 1366, 1024],
+  ['iPad 가로 Split View 1/2', 820, 590],
+  ['4:3 작은 창', 800, 600],
 ];
 
 /** 겹치는가 (닿기만 하면 아니다) */
@@ -334,6 +336,9 @@ describe('터치 HUD 자리 touchHudPlan', () => {
     [568, 320],
     [758, 277],
     [915, 412],
+    [820, 590],
+    [800, 600],
+    [900, 600],
   ];
   /**
    * 거점 셋(플레이테스트 b)의 줄 게이지 자리 (판과 같은 조정, CSS px): [쌓기 | 가로 한 줄, 첫 줄 x · y, 타이머 틀 왼쪽 위 x · y].
@@ -341,7 +346,9 @@ describe('터치 HUD 자리 touchHudPlan', () => {
    * 생존자는 타이머를 오른쪽 칸 미니맵 아래로(④), 괴물은 오른쪽 칸이 좁아(포효 줄) 타이머를 옮기면 옆 칸 미니맵이 없어지므로 왼쪽 칸에
    * 다 두고 이동 영역을 최소로(②). 낮은 16:9 · 태블릿은 위 띠에 가로 한 줄(⑤ · 태블릿은 PC처럼 A · B · 타이머 · C), 낮은 넓은 화면은
    * 왼쪽 칸 두 열(⑥ — 타이머 + 게이지 | 팀 카드), 가장 낮은 휴대폰은 괴물 ④(타이머가 오른쪽 칸 남는 자리 가운데) · 생존자 ③(게이지가
-   * 오른쪽 칸). 바꾸면 이 표를 고친다 (자리가 바뀌는 것을 모르고 넘기지 않게)
+   * 오른쪽 칸). 좌우 칸이 없는 좁은 태블릿 창(폭 약 920 미만 — 위 띠 한 줄이 판 중 시스템 버튼 왼쪽에 들어가지 않는다)은 띠를 두 줄로
+   * 키워 아랫줄에 가로 한 줄(820×590 · 800×600 — 타이머 아래 가운데), 그만큼 띠를 키우면 좌우 칸이 생기는 화면은 좌우 칸 배치(900×600).
+   * 바꾸면 이 표를 고친다 (자리가 바뀌는 것을 모르고 넘기지 않게)
    */
   const GAUGE_SPOT: Readonly<Record<string, readonly ['stack' | 'run', number, number, number, number]>> = {
     '863×360 monster': ['stack', 43.34, 35.12, 30.74, 6],
@@ -374,6 +381,12 @@ describe('터치 HUD 자리 touchHudPlan', () => {
     '758×277 survivor': ['stack', 7.82, 35.12, 7.22, 6],
     '915×412 monster': ['stack', 36.82, 35.12, 24.22, 6],
     '915×412 survivor': ['stack', 36.82, 35.12, 24.22, 6],
+    '820×590 monster': ['run', 291.68, 41.92, 359.88, 9.4],
+    '820×590 survivor': ['run', 291.68, 41.92, 359.88, 9.4],
+    '800×600 monster': ['run', 281.91, 41.92, 350.11, 9.4],
+    '800×600 survivor': ['run', 281.91, 41.92, 350.11, 9.4],
+    '900×600 monster': ['stack', 6.58, 6, 399.96, 17.77],
+    '900×600 survivor': ['stack', 6.58, 6, 399.96, 17.77],
   };
   /** 판과 같은 배치 (main.ts applyMatchLayout: 시스템 버튼 세 칸 · 내 팀) */
   const matchPlan = (w: number, h: number, team: 'monster' | 'survivor', rows?: number) => {
@@ -431,6 +444,46 @@ describe('터치 HUD 자리 touchHudPlan', () => {
     expect(tab.gauges[2]!.x).toBeGreaterThan(tab.timer.x + tab.timer.w / 2);
   });
 
+  it('위 띠 두 줄: 한 줄(팀 카드 · 타이머 · 게이지 셋)이 시스템 버튼 왼쪽에 들어가지 않는 창은 띠를 두 줄 높이로 키워 게이지를 아랫줄에 — 띠를 키워 좌우 칸이 생기면 좌우 칸 배치, 들어가는 창은 띠 44 한 줄 그대로', () => {
+    const U = L.TOUCH_UI;
+    // 두 줄 띠 = 위 · 아래 여백 + 팀 카드 줄 + 간격 + 게이지 줄 (CSS)
+    const two = U.edge * 2 + U.gap + (L.TOUCH_PART.card.h + L.TOUCH_PART.gaugeRow.h) * U.art;
+    const cases: [number, number, 'band' | 'column', number, 'two' | 'one'][] = [
+      [820, 590, 'band', two, 'two'],
+      [800, 600, 'band', two, 'two'],
+      [720, 540, 'band', two, 'two'],
+      // 맵이 폭에 들어가려면 원래 띠가 더 높다 (띠는 그대로, 두 줄은 띠 가운데)
+      [820, 780, 'band', (780 * 1.5 - 820) / 3, 'two'],
+      // 두 줄 띠면 좌우 칸이 팀 카드 폭 이상 → 좌우 칸이 팀 카드 폭이 되는 띠의 좌우 칸 배치 (맵이 더 크다)
+      [900, 600, 'column', (600 * 1.5 - 900 + 2 * U.minSide) / 3, 'one'],
+      // 한 줄에 들어간다 (그대로)
+      [1024, 768, 'band', U.bandStack, 'one'],
+      [1194, 834, 'band', U.bandStack, 'one'],
+    ];
+    for (const [w, h, mode, band, rows] of cases)
+      for (const team of ['monster', 'survivor'] as const) {
+        const label = `${w}×${h} ${team}`;
+        const { l, t, plan, k } = matchPlan(w, h, team);
+        expect(t.mode, label).toBe(mode);
+        expect(l.hudBand * k, label).toBeCloseTo(band, 4);
+        if (mode !== 'band') continue;
+        const g = plan.gauges.map((r) => ({ x: r.x * k, y: r.y * k, w: r.w * k, h: r.h * k }));
+        const cardsBottom = (plan.cards.y + plan.cards.h) * k;
+        const timerBottom = (plan.timer.y + plan.timer.h / 2) * k;
+        if (rows === 'two') {
+          // 아랫줄: 팀 카드 · 타이머 아래, 띠 안. 타이머 아래 가운데 (720은 시스템 버튼에 닿아 그 왼쪽)
+          for (const r of g) {
+            expect(r.y, label).toBeGreaterThanOrEqual(Math.max(cardsBottom, timerBottom) + U.gap - 1e-6);
+            expect(r.y + r.h, label).toBeLessThanOrEqual(l.hudBand * k + 1e-6);
+          }
+          if (w !== 720) expect((g[0]!.x + g[2]!.x + g[2]!.w) / 2, label).toBeCloseTo(w / 2, 0);
+        } else {
+          // 한 줄: 게이지 가운데 높이 = 띠 가운데
+          for (const r of g) expect(r.y + r.h / 2, label).toBeCloseTo(band / 2, 4);
+        }
+      }
+  });
+
   it('거점 줄 게이지는 다른 HUD 부품 · 맵 · 터치 버튼 · 스틱과 겹치지 않는다 (화면 격자 × 두 역할, 판과 같은 조정)', () => {
     let pairs = 0;
     for (const [w, h] of GAUGE_GRID)
@@ -478,6 +531,108 @@ describe('터치 HUD 자리 touchHudPlan', () => {
         });
       }
     expect(pairs).toBeGreaterThan(150);
+  });
+
+  /**
+   * 좌우 칸이 없는 좁은 태블릿 창 (CSS px, 폭 약 920 미만): 위 띠 한 줄에 팀 카드 · 타이머 · 게이지 셋(348px)이 판 중 시스템 버튼 세 칸
+   * 왼쪽에 들어가지 않는다 — iPad 가로 Split View 1/2(820×590) · 4:3 작은 창 · 낮은 창. 예전 두 줄 덩어리는 띠 44에 세로로 들어갔다
+   */
+  const NARROW_BAND: [number, number][] = [
+    [820, 590],
+    [820, 780],
+    [829, 690],
+    [800, 600],
+    [904, 690],
+    [910, 700],
+    [720, 540],
+    [787, 501],
+    [700, 600],
+    [900, 600],
+    [800, 540],
+    [720, 480],
+    [768, 694],
+  ];
+
+  it('좁은 태블릿 창(위 띠 한 줄에 다 들어가지 않는다): 거점 줄 게이지가 팀 카드 · 타이머 · 시스템 버튼 · 맵과 겹치지 않는다 (두 역할 · 좌우 반전 · 판 조정)', () => {
+    let checked = 0;
+    for (const [w, h] of NARROW_BAND)
+      for (const team of ['monster', 'survivor'] as const)
+        for (const mirror of [false, true]) {
+          const label = `${w}×${h} ${team}${mirror ? ' 반전' : ''}`;
+          const l = L.layoutFor(w, h, true, { sysSlots: L.SYS_SLOTS_MENU, team, mirror });
+          const t = L.touchHudPlan(l)!;
+          const plan = t[team];
+          const k = 1 / t.L;
+          const toCss = (r: Box): Box => ({ x: r.x * k, y: r.y * k, w: r.w * k, h: r.h * k });
+          const rects = plan.rects.map((r) => ({ id: r.id, css: toCss(r.rect) }));
+          const map = toCss({ x: l.mapX, y: l.mapY, w: L.MAP_DRAW_W, h: L.MAP_DRAW_H });
+          const T = touchLayout(
+            w,
+            h,
+            { l: 0, r: 0, t: 0, b: 0 },
+            team === 'monster',
+            true,
+            rects.map((r) => r.css),
+            {
+              menu: true,
+              sysRows: plan.sysRows,
+              viewRatio: l.viewW / l.viewH,
+              custom: mirror ? { mirror: true, items: {} } : null,
+            },
+          );
+          const targets = Object.entries(T.buttons).filter((e): e is [string, Box] => e[1] !== undefined);
+          if (T.aim) targets.push(['aim-stick', T.aim]);
+          for (const [i, r] of rects.entries()) {
+            expect(r.css.x, `${label} ${r.id} 화면 안`).toBeGreaterThanOrEqual(-1e-6);
+            expect(r.css.y, `${label} ${r.id} 화면 안`).toBeGreaterThanOrEqual(-1e-6);
+            expect(r.css.x + r.css.w, `${label} ${r.id} 화면 안`).toBeLessThanOrEqual(w + 1e-6);
+            expect(overlaps(r.css, map), `${label} ${r.id} ↔ 맵`).toBe(false);
+            for (const o of rects.slice(i + 1))
+              expect(overlaps(r.css, o.css), `${label} ${r.id} ↔ ${o.id}`).toBe(false);
+            for (const [id, b] of targets) expect(overlaps(r.css, b), `${label} ${r.id} ↔ ${id}`).toBe(false);
+          }
+          // 게이지는 읽는 차례(위 → 아래, 왼쪽 → 오른쪽)로 A · B · C
+          const g = plan.gauges;
+          for (let i = 1; i < g.length; i += 1)
+            expect(g[i]!.y > g[i - 1]!.y + 1e-6 || g[i]!.x > g[i - 1]!.x, `${label} 게이지 차례`).toBe(true);
+          checked += 1;
+        }
+    expect(checked).toBe(NARROW_BAND.length * 4);
+  });
+
+  it('낮은 넓은 휴대폰 괴물(높이 291): 어디에 두어도 넘치면 엄지 버튼 위 최소 간격 안으로만 들어가는 오른쪽 칸 타이머를 고른다 — 왼쪽 칸에 다 쌓아 팀 카드 둘이 이동 스틱 그림을 덮지 않는다 (타이머는 버튼과 겹치지 않는다)', () => {
+    const cardH = L.TOUCH_PART.card.h * L.TOUCH_UI.art;
+    for (const w of [613, 640, 658, 694]) {
+      const h = 291;
+      const label = `${w}×${h}`;
+      const { l, plan, k } = matchPlan(w, h, 'monster');
+      const toCss = (r: Box): Box => ({ x: r.x * k, y: r.y * k, w: r.w * k, h: r.h * k });
+      const rects = plan.rects.map((r) => ({ id: r.id, css: toCss(r.rect) }));
+      const T = touchLayout(
+        w,
+        h,
+        { l: 0, r: 0, t: 0, b: 0 },
+        true,
+        true,
+        rects.map((r) => r.css),
+        { menu: true, sysRows: plan.sysRows, viewRatio: l.viewW / l.viewH },
+      );
+      const ghost = { x: T.moveHome.x - T.moveR, y: T.moveHome.y - T.moveR, w: T.moveR * 2, h: T.moveR * 2 };
+      const timer = rects.find((r) => r.id === 'timer')!.css;
+      // 타이머는 오른쪽 칸 (시스템 버튼 아래), 엄지 버튼 · 조준 스틱과 겹치지 않는다
+      expect(timer.x, label).toBeGreaterThan(w / 2);
+      for (const b of [T.aim!, ...Object.values(T.buttons)])
+        if (b) expect(overlaps(timer, b), `${label} 타이머 ↔ 버튼`).toBe(false);
+      // 이동 스틱 그림에 걸치는 팀 카드는 맨 아래 하나뿐이고, 걸친 깊이는 카드 높이보다 얕다
+      const deep = rects
+        .filter((r) => /^card/.test(r.id) && overlaps(r.css, ghost))
+        .map((r) => ({ id: r.id, d: r.css.y + r.css.h - ghost.y }));
+      expect(
+        deep.map((d) => d.id),
+        label,
+      ).toEqual(['card2']);
+      expect(deep[0]!.d, label).toBeLessThan(cardH);
+    }
   });
 
   it('줄 수를 인자로 받는다: 한 줄 · 두 줄 · 네 줄도 같은 폭 · 같은 줄 높이로 쌓거나(왼쪽 · 오른쪽 칸) 가로 한 줄(위 띠), 기본값은 거점 수', () => {

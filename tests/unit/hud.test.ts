@@ -1,7 +1,7 @@
 // HUD (M10c, VISUAL_SPEC 8장): 행동 칸 값(M11 터치 버튼과 공유) · 거점 게이지 · 타이머 · 팀 카드 · 상태 표시(색만으로 구분하지 않기) ·
 // 글자 대비 · 9조각 배치 · 아틀라스 목록 · 조작 안내 줄 나누기 · 거점 진행 숫자(플레이테스트 a-7: 값 · 프레임 · 숫자 칸)
 import { readFileSync } from 'node:fs';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { validateBalance } from '../../shared/src/balance';
 import { createMoveState } from '../../shared/src/movement';
 import { RESCUE_POINT } from '../../shared/src/map';
@@ -36,6 +36,7 @@ import {
   pctWidth,
   pointOf,
   pointPercent,
+  rgba,
   sliceSpans,
   statusKey,
   teamCards,
@@ -303,7 +304,7 @@ describe('거점 게이지 · 타이머 · 상태 표시', () => {
     const others = (['idle', 'capturing', 'paused', 'done'] as const).map(gaugeColor);
     expect(gaugeColor('off')).toBe(HC.gaugeOff);
     expect(others).not.toContain(gaugeColor('off'));
-    // 틀(막대 · 배지 · 줄 판)은 꺼진 칸 색, 다른 상태의 틀과 다르다
+    // 틀(PC 막대 · 터치 줄 판)은 꺼진 칸 색, 다른 상태의 틀과 다르다 (◇ 배지 테두리는 틀이 아니라 상태색 — 아래 시험)
     expect(gaugeFrameColor('off')).toBe(HC.off);
     expect((['idle', 'capturing', 'paused', 'done'] as const).map(gaugeFrameColor)).not.toContain(HC.off);
     // 진행을 보이지 않는 것은 꺼짐뿐 (멈춘 진행 · 0%는 그대로 보인다)
@@ -317,6 +318,56 @@ describe('거점 게이지 · 타이머 · 상태 표시', () => {
       const want = touch ? ['grow:off', 'gicon:off'] : ['gbar:off', 'dia:off', 'chip:off'];
       for (const n of want) expect(names.has(n), `${touch} ${n}`).toBe(true);
     }
+  });
+
+  it('꺼진 거점이 구운 그림의 선 색: PC 막대 틀 · 터치 줄 판 테두리는 HC.off(틀 색), ◇ 배지 · 칩 테두리 · 줄 게이지 ⊘ 아이콘은 HC.gaugeOff(상태색 — 패널 위 3:1)', () => {
+    /** 프레임 하나를 그리며 선(stroke)에 쓴 색 (rgba 문자열의 rgb 부분) */
+    const strokesOf = (name: string): Set<string> => {
+      const spec = hudSpecs().find((x) => x.name === name);
+      expect(spec, name).toBeDefined();
+      if (!spec || spec.kind !== 'frame') return new Set();
+      const out = new Set<string>();
+      const state: Record<string, unknown> = {};
+      const rgb = (v: unknown): string => String(v).replace(/,[^,]*\)$/, ')');
+      const call = (t: Record<string, unknown>, p: string | symbol): unknown => {
+        if (p === 'stroke') return () => out.add(rgb(t.strokeStyle));
+        if (p === 'measureText') return () => ({ width: 10 });
+        if (p === 'createLinearGradient' || p === 'createRadialGradient')
+          return () => ({ addColorStop: (): void => undefined });
+        return (): void => undefined;
+      };
+      const ctx = new Proxy(state, {
+        get: (t, p) => (typeof p === 'string' && p in t ? t[p] : call(t, p)),
+        set: (t, p, v) => {
+          t[p as string] = v;
+          return true;
+        },
+      });
+      vi.stubGlobal(
+        'Path2D',
+        class {
+          constructor(readonly d?: string) {}
+        },
+      );
+      try {
+        spec.paint(ctx as unknown as CanvasRenderingContext2D, 1);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+      return out;
+    };
+    const hex = (c: number): string => rgba(c).replace(/,[^,]*\)$/, ')');
+    // PC
+    expect([...strokesOf('dia:off')]).toEqual([hex(HC.gaugeOff)]);
+    expect(strokesOf('chip:off').has(hex(HC.gaugeOff))).toBe(true);
+    expect(strokesOf('gbar:off').has(hex(HC.off))).toBe(true);
+    expect(strokesOf('gbar:off').has(hex(HC.gaugeOff))).toBe(false);
+    // 다른 상태의 ◇ 배지 테두리도 상태색 (대기 = 흐린 글자색)
+    expect([...strokesOf('dia:idle')]).toEqual([hex(gaugeColor('idle'))]);
+    // 터치 줄 게이지
+    applyLayout(layoutFor(750, 369, true));
+    expect(strokesOf('grow:off').has(hex(HC.off))).toBe(true);
+    expect(strokesOf('grow:off').has(hex(HC.gaugeOff))).toBe(false);
   });
 
   it('타이머: 최후의 30초 > 1분 미만 > 보통, 모드마다 아이콘도 다르다', () => {

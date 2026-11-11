@@ -262,6 +262,12 @@ describe('PC 판 중 메뉴 버튼 자리', () => {
       [800, 600],
       [1280, 540],
       [640, 360],
+      // 중간 크기 창 · 위 여백 52px 미만 (아래 시험)
+      [800, 520],
+      [750, 480],
+      [720, 450],
+      [854, 520],
+      [900, 560],
     ];
     for (const [ww, wh] of sizes) {
       const c = canvasOf(ww, wh);
@@ -296,6 +302,28 @@ describe('PC 판 중 메뉴 버튼 자리', () => {
     const s800 = menuButtonPlace(canvasOf(800, 600), SIZE, KEEP);
     expect(s800.scale).toBe(1);
     expect(s800.top + SIZE.h).toBeLessThanOrEqual(75);
+  });
+
+  it('중간 크기 창(폭 700~960, 캔버스 위 여백 52px 미만): 위 띠에 두면 거점 A 게이지 왼쪽 끝까지로 줄인다 — 0.71배 이상 (거점 셋: A가 왼쪽(259)에 붙어 예전 1배이던 창도 줄어든다, 받아들인 값을 고정)', () => {
+    // 버튼이 위 띠와 세로로 겹치므로(위 여백 < 버튼 높이 + 8) 가로 폭 = A 게이지 왼쪽 끝 − 간격 − 버튼 왼쪽 끝. 맵 옆(팀 카드 위)은 더 좁다
+    const want: [number, number, number][] = [
+      [800, 520, 0.822],
+      [750, 480, 0.774],
+      [720, 450, 0.74],
+      [854, 520, 0.884],
+      [900, 560, 0.927],
+      // 가장 작은 값: 폭 700 (글자 약 10.8px)
+      [700, 419, 0.717],
+    ];
+    for (const [ww, wh, scale] of want) {
+      const c = canvasOf(ww, wh);
+      expect(c.top, `${ww}×${wh} 위 여백`).toBeLessThan(SIZE.h + 2 * MENU_BUTTON.gapCss);
+      const p = menuButtonPlace(c, SIZE, KEEP);
+      expect(p.scale, `${ww}×${wh}`).toBeCloseTo(scale, 3);
+      const room = c.left + KEEP.gaugeLeft * c.k - MENU_BUTTON.gapCss - p.left;
+      expect(SIZE.w * p.scale, `${ww}×${wh} 게이지 왼쪽까지`).toBeLessThanOrEqual(room + 1e-6);
+      expect(SIZE.w * (p.scale + 0.002), `${ww}×${wh} 들어가는 만큼`).toBeGreaterThan(room);
+    }
   });
 
   it('크기를 아직 모르면(0) 기본 높이로 계산하고 배율은 하한 아래로 내려가지 않는다', () => {

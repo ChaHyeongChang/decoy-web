@@ -558,12 +558,18 @@ describe('낮은 화면 축소 (MINIMAP_INSET.lowH · fracLow)', () => {
 describe('이동 영역이 맵 창 안 미니맵 틀을 피한다 (touchLayout opts.minimap)', () => {
   it('기본 배치(저장한 조작 배치 없음)에서도 틀과 가로로 겹치는 이동 영역은 틀 아래에서 시작한다 — 위 띠 배치의 작은 창 괴물(HUD가 위 띠에 다 있어 영역이 띠 바로 아래부터였다)', () => {
     let moved = 0;
+    // 앞 다섯은 거점 셋(플레이테스트 b)부터 좌우 칸 배치(위 띠 한 줄에 다 들어가지 않아 띠를 키우면 좌우 칸이 생긴다 — 틀이 이동 영역
+    // 밖), 뒤 넷이 위 띠(두 줄) 배치
     for (const [w, h] of [
       [540, 340],
       [560, 360],
       [600, 400],
       [640, 400],
       [580, 380],
+      [480, 360],
+      [500, 380],
+      [520, 380],
+      [540, 380],
     ] as const) {
       const s = scene(w, h, true);
       const label = `${w}×${h}`;
@@ -964,8 +970,10 @@ describe('조작 배치: 지도 (맵 창 안 미니맵 자리 옮기기)', () =>
   });
 
   it('좌우 반전 + 놓을 자리가 없어 기본 배치 (fallback): 지도는 판 HUD 배치가 뒤집어 둔 틀(맵 오른쪽 위) 그대로 — 다시 뒤집지 않아 이동 영역(오른쪽)이 그 틀 아래에서 시작한다', () => {
-    // 위 띠 배치의 작은 창: HUD가 모두 위 띠라 이동 영역이 틀을 피하지 않으면 띠 바로 아래부터다
-    const s = scene(600, 400, true, { mirror: true });
+    // 위 띠 배치의 작은 창: HUD가 모두 위 띠라 이동 영역이 틀을 피하지 않으면 띠 바로 아래부터다 (거점 셋부터 600×400은 좌우 칸
+    // 배치라 520×380 — 위 띠 두 줄)
+    const [W, H] = [520, 380];
+    const s = scene(W, H, true, { mirror: true });
     const f = s.frame!;
     expect(f.x + f.w).toBeCloseTo(s.map.x + s.map.w - L.MINIMAP_INSET.margin, 6);
     const hud = s.rects.map((r) => r.box);
@@ -975,14 +983,14 @@ describe('조작 배치: 지도 (맵 창 안 미니맵 자리 옮기기)', () =>
       sysRows: s.plan.sysRows,
       minimap: { frame: f, map: s.map },
     };
-    const D = touchLayout(600, 400, NO_INSET, true, true, hud, {
+    const D = touchLayout(W, H, NO_INSET, true, true, hud, {
       ...opts,
       custom: { mirror: true, items: {} },
     });
     // 시험용 벽: 이동 영역 띠(오른쪽 40%) 왼쪽을 다 막아(띠와 가로로 겹치지 않는다) 화면 왼쪽 끝으로 옮긴 포효 버튼을 200px
     // 안에 놓을 곳이 없다
-    const wall = { x: 0, y: 0, w: D.zone.x - MIN_GAP, h: 400 };
-    const T = touchLayout(600, 400, NO_INSET, true, true, hud, {
+    const wall = { x: 0, y: 0, w: D.zone.x - MIN_GAP, h: H };
+    const T = touchLayout(W, H, NO_INSET, true, true, hud, {
       ...opts,
       obstacles: [wall],
       custom: { mirror: true, items: { roar: { u: 0, v: 0.4, s: 1 }, minimap: { u: 0.2, v: 0.5, s: 1 } } },
@@ -991,7 +999,7 @@ describe('조작 배치: 지도 (맵 창 안 미니맵 자리 옮기기)', () =>
     expect('minimap' in T).toBe(false);
     expect(T.buttons).toEqual(D.buttons);
     // 이동 영역은 오른쪽이고 판 HUD 배치의 틀(맵 오른쪽 위) 아래 8px에서 시작한다 (다시 뒤집은 왼쪽 위 자리를 피하면 겹친다)
-    expect(T.zone.x).toBeGreaterThan(300);
+    expect(T.zone.x).toBeGreaterThan(W / 2);
     expect(overlaps(f, T.zone)).toBe(false);
     expect(T.zone.y).toBeGreaterThanOrEqual(f.y + f.h + MIN_GAP - 0.01);
     expect(T.zone).toEqual(D.zone);
@@ -1000,8 +1008,8 @@ describe('조작 배치: 지도 (맵 창 안 미니맵 자리 옮기기)', () =>
     const base: ControlBoxes = { roar: { x: 400, y: 100, w: 50, h: 50 } };
     const blocked: PlaceRules = {
       range: moveRange(safe, 6),
-      hud: [{ x: 0, y: 0, w: 600, h: 400 }],
-      zone: (side, r, extra = []) => moveZone(600, safe, side, r, extra),
+      hud: [{ x: 0, y: 0, w: W, h: H }],
+      zone: (side, r, extra = []) => moveZone(W, safe, side, r, extra),
       midX: safe.x + safe.w / 2,
       mapRange: minimapRange(s.map, safe),
     };

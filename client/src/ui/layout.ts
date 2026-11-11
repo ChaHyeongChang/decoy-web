@@ -126,7 +126,8 @@ export const MIN_GAP = 8;
 /**
  * 터치 HUD (CSS px). 그림(HUD 아틀라스) 1단위 = art CSS px, 글자는 CSS px로 정한다(보조 12 · 주요 14 이상, 화면 높이와 상관없이).
  * - edge · gap: 칸 안 여백 · 부품 사이
- * - band: 16:9 화면 위 · 아래 띠 최소 높이(타이머 한 줄), bandStack: 좌우 칸이 없는 화면(태블릿 4:3)의 띠
+ * - band: 16:9 화면 위 · 아래 띠 최소 높이(타이머 한 줄), bandStack: 좌우 칸이 없는 화면(태블릿 4:3)의 띠 (한 줄에 다 들어가지
+ *   않는 좁은 창은 두 줄 — bandTwoRows)
  * - minSide: 좌우 칸 최소 폭(팀 카드 한 줄). 2:1 이상이어도 이보다 좁으면 16:9 배치를 쓴다
  * - zoneTop: 이동 스틱 그림 위로 남기는 이동 영역, hintH: 맨 아래 안내 줄 높이(가장자리 띠 24px 안 — 터치 대상이 없다)
  * - minimapMin: 미니맵을 보일 최소 폭(자리가 없으면 숨긴다 — 판 화면 전체가 늘 보여 같은 정보다)
@@ -371,10 +372,66 @@ export function thumbReserve(
 }
 
 /**
- * 터치 화면 (CSS px)의 맵 크기 · 띠 · 배치 방식. ui = UI 크기 배율: 띠 · 칸 최소 크기(그림 단위 부품이 들어갈 자리)도 같이
- * 키운다 (맵이 그만큼 작아진다 — 보이는 타일 수는 같다)
+ * 위 띠(좌우 칸이 없는 화면 — 태블릿 4:3 등) 한 줄 배치 (CSS px, touchShape · planCss 공통): 띠 가운데 높이에 맨 왼쪽 팀 카드 한 줄,
+ * 가운데 타이머, 거점 줄 게이지 가로 한 줄. 게이지 후보 ① PC와 같은 차례(앞쪽 절반은 타이머 왼쪽, 나머지는 오른쪽 — A · B · 타이머 · C)
+ * ② 타이머 왼쪽에 모두 ③ 오른쪽에 모두 — 팀 카드와 오른쪽 위 시스템 버튼(띠까지 내려온다) 사이에 들어가는 첫 후보(fits). 셋 줄을
+ * 세로로 쌓으면 띠 44보다 높다. 들어가는 후보가 없으면 fits = false, gauges = ① (좁은 창 — 띠를 두 줄로: touchShape · bandTwoRows)
  */
-function touchShape(w: number, h: number, ui = 1): { kind: LayoutKind; band: number; mode: TouchHudMode } {
+function bandRow(
+  W: number,
+  band: number,
+  ui: number,
+  sys: { sysLeft: number; sysBottom: number },
+  n: number,
+): { timer: Box & { label: boolean }; cards: Box; gauges: Box[]; fits: boolean } {
+  const U = TOUCH_UI;
+  const P = TOUCH_PART;
+  const a = U.art * ui;
+  const rowW = P.gaugeRow.w * a;
+  const rowH = P.gaugeRow.h * a;
+  const runW = (k: number): number => k * rowW + Math.max(0, k - 1) * U.gap;
+  const runAt = (x: number, y: number, k: number): Box[] =>
+    Array.from({ length: k }, (_, i) => ({ x: x + i * (rowW + U.gap), y, w: rowW, h: rowH }));
+  const cy = band / 2;
+  const timerW = TIMER_CSS.label * ui;
+  const timerH = P.timer.h * a;
+  const timer = { x: W / 2 - timerW / 2, y: cy - timerH / 2, w: timerW, h: timerH, label: true };
+  const cardH = P.card.h * a;
+  const cards = { x: U.edge, y: cy - cardH / 2, w: 3 * P.card.w * a + 2 * U.gap, h: cardH };
+  const y = cy - rowH / 2;
+  const lo = cards.x + cards.w + U.gap * 2;
+  const hi = sys.sysBottom > y ? sys.sysLeft - U.gap : W - U.edge;
+  const l0 = timer.x - U.gap * 2;
+  const r0 = timer.x + timer.w + U.gap * 2;
+  const half = Math.ceil(n / 2);
+  const cands = [
+    [...runAt(l0 - runW(half), y, half), ...runAt(r0, y, n - half)],
+    runAt(l0 - runW(n), y, n),
+    runAt(r0, y, n),
+  ];
+  const fit = cands.find((c) => c.every((b) => b.x >= lo - 0.01 && b.x + b.w <= hi + 0.01));
+  return { timer, cards, gauges: fit ?? cands[0]!, fits: fit !== undefined };
+}
+
+/**
+ * 위 띠 두 줄 높이 (CSS px, UI 크기 1): 윗줄 팀 카드 · 타이머, 아랫줄 거점 줄 게이지 (위 · 아래 여백 TOUCH_UI.edge, 줄 사이 gap).
+ * 한 줄에 들어가지 않는 좁은 창(bandRow fits = false)의 띠 (그림 단위 부분은 UI 크기만큼 커진다 — bandTwoRows)
+ */
+function bandTwoRows(ui: number): number {
+  const a = TOUCH_UI.art * ui;
+  return TOUCH_UI.edge * 2 + TOUCH_UI.gap + (TOUCH_PART.card.h + TOUCH_PART.gaugeRow.h) * a;
+}
+
+/**
+ * 터치 화면 (CSS px)의 맵 크기 · 띠 · 배치 방식. ui = UI 크기 배율: 띠 · 칸 최소 크기(그림 단위 부품이 들어갈 자리)도 같이
+ * 키운다 (맵이 그만큼 작아진다 — 보이는 타일 수는 같다). sysSlots = 오른쪽 위 시스템 버튼 칸 수 (위 띠 한 줄이 그 왼쪽에 들어가는가)
+ */
+function touchShape(
+  w: number,
+  h: number,
+  ui = 1,
+  sysSlots: number = DEFAULT_TUNING.sysSlots,
+): { kind: LayoutKind; band: number; mode: TouchHudMode } {
   const U = TOUCH_UI;
   const minSide = U.minSide * ui;
   const ratio = MAP_DRAW_W / MAP_DRAW_H;
@@ -385,7 +442,16 @@ function touchShape(w: number, h: number, ui = 1): { kind: LayoutKind; band: num
   const fitSide = Math.max(0, (h * ratio - w + 2 * minSide) / (2 * ratio));
   const column = Math.max(U.band * ui, fitMap, fitSide);
   if (column <= U.bandStack * ui) return { kind: 'touchNarrow', band: column, mode: 'column' };
-  return { kind: 'touchNarrow', band: Math.max(U.bandStack * ui, fitMap), mode: 'band' };
+  const band = Math.max(U.bandStack * ui, fitMap);
+  // 위 띠 한 줄(팀 카드 · 타이머 · 게이지 셋)이 시스템 버튼 왼쪽에 들어가지 않으면(폭 약 920 미만 — iPad 가로 Split View 1/2 등,
+  // 거점 셋) 띠를 두 줄 높이로 키운다. 그만큼 띠를 키우면 좌우 칸이 팀 카드 폭 이상 생기는 화면은 좌우 칸 배치(띠 column)가 맵이 크다.
+  // 폭은 1px 덜 보고 잰다: 판 화면 논리 폭은 정수로 반올림해 planCss가 보는 폭이 0.5 CSS px 안에서 다르다(넓을수록 들어간다)
+  const sys = thumbReserve(w - 1, h, true, { sysSlots });
+  if (bandRow(w - 1, band, ui, sys, GAUGE_IDS.length).fits)
+    return { kind: 'touchNarrow', band, mode: 'band' };
+  const two = Math.max(bandTwoRows(ui), fitMap);
+  if (column <= two) return { kind: 'touchNarrow', band: column, mode: 'column' };
+  return { kind: 'touchNarrow', band: two, mode: 'band' };
 }
 
 /**
@@ -394,7 +460,7 @@ function touchShape(w: number, h: number, ui = 1): { kind: LayoutKind; band: num
  * - touchWide(2:1 이상, 좌우 칸 ≥ TOUCH_UI.minSide): 논리 높이 = 맵 높이(띠 0), 논리 폭 = 높이 × 화면비. 상한을 두지 않고
  *   더 넓은 화면은 좌우 칸이 넓어진다(빈 여백 · 레터박스 없음, DECISIONS)
  * - touchNarrow: 위 · 아래 띠(CSS 26px 이상, 좌우 칸이 팀 카드 폭이 되게)를 남기고 논리 크기를 키워 맵을 줄인다.
- *   맵(3:2)보다 좁은 화면(태블릿 4:3 등)은 띠를 키워 HUD를 위 띠로 모은다
+ *   맵(3:2)보다 좁은 화면(태블릿 4:3 등)은 띠를 키워 HUD를 위 띠로 모은다(한 줄에 다 들어가지 않으면 두 줄 높이 — touchShape)
  * uiScale = 그림 1단위의 논리 px = TOUCH_UI.art × UI 크기 × (논리 px / CSS px)
  * tuning(터치만) = 조이스틱 크기 · UI 크기 · 좌우 반전 · 시스템 버튼 칸 수. 없거나 기본값이면 예전 배치 그대로(tuning 칸 없음).
  * UI 크기 · 조이스틱 크기가 1보다 크면 HUD가 맵 · 서로 · 엄지 자리와 겹치지 않고 점수판이 화면 폭에 들어가는 만큼만 키운다
@@ -411,7 +477,7 @@ export function layoutFor(
   const h = Math.max(1, Math.min(screenW, screenH));
   const T = cleanTuning(tuning);
   const build = (ui: number, stickScale: number): LayoutInfo => {
-    const shape = touchShape(w, h, ui);
+    const shape = touchShape(w, h, ui, T.sysSlots);
     const cssMapH = h - shape.band * 2;
     // 논리 px / CSS px: 맵 높이(논리 MAP_DRAW_H)가 CSS cssMapH가 되게
     const L = MAP_DRAW_H / cssMapH;
@@ -566,7 +632,8 @@ export interface TouchHudPlan {
   timer: { x: number; y: number; w: number; h: number; label: boolean };
   /**
    * 거점 줄 게이지: 줄마다 사각형 (GAUGE_IDS 차례 = 읽는 차례 — 위 → 아래, 왼쪽 → 오른쪽). 세로로 쌓으면 서로 맞닿고, 위 띠에
-   * 가로로 늘어놓으면 같은 높이에 틈을 두고 (태블릿 띠는 PC처럼 타이머 양옆)
+   * 가로로 늘어놓으면 같은 높이에 틈을 두고 (태블릿 띠는 PC처럼 타이머 양옆, 한 줄에 다 들어가지 않는 좁은 창은 팀 카드 · 타이머
+   * 아랫줄 — touchShape가 띠를 두 줄 높이로 키운다)
    */
   gauges: Rect[];
   /** 팀 카드 격자: 첫 카드 왼쪽 위, 한 장 크기, 열 수, 간격 */
@@ -662,27 +729,25 @@ function planCss(
     Array.from({ length: k }, (_, i) => ({ x: x + i * (rowW + U.gap), y, w: rowW, h: rowH }));
 
   if (mode === 'band') {
-    // 위 띠에 모두: 가운데 타이머, 맨 왼쪽 팀 카드 한 줄, 거점 줄 게이지는 가로 한 줄. 미니맵은 자리가 없어 숨긴다
-    const cy = band / 2;
-    const timerW = timerCss.label;
-    const timer = { x: W / 2 - timerW / 2, y: cy - timerH / 2, w: timerW, h: timerH, label: true };
-    const gr = grid(3);
-    const cards = { x: U.edge, y: cy - gr.h / 2, w: gr.w, h: gr.h, cols: 3, cw: cardW, ch: cardH };
-    // 후보: ① PC와 같은 차례(앞쪽 절반은 타이머 왼쪽, 나머지는 오른쪽 — A · B · 타이머 · C) ② 타이머 왼쪽에 모두 ③ 오른쪽에 모두.
-    // 팀 카드와 오른쪽 위 시스템 버튼(띠까지 내려온다) 사이에 들어가는 첫 후보 (셋 줄을 세로로 쌓으면 띠 44보다 높다)
-    const y = cy - rowH / 2;
-    const lo = cards.x + cards.w + U.gap * 2;
+    // 위 띠에 모두: 가운데 타이머, 맨 왼쪽 팀 카드 한 줄, 거점 줄 게이지는 가로 한 줄(bandRow). 미니맵은 자리가 없어 숨긴다
+    const row = bandRow(W, band, T.uiScale, r, n);
+    const cards = { ...row.cards, cols: 3, cw: cardW, ch: cardH };
+    const inset = insetCss(map, r, a);
+    if (row.fits || band < bandTwoRows(T.uiScale) - 0.01)
+      return { timer: row.timer, gauges: row.gauges, cards, minimap: null, inset };
+    // 한 줄에 들어가지 않는 좁은 창(touchShape가 띠를 두 줄 높이로 키웠다): 윗줄 팀 카드 · 타이머, 아랫줄 거점 줄 게이지 — 타이머 아래
+    // 가운데, 시스템 버튼에 닿으면 그 왼쪽으로. 두 줄 덩어리는 띠 가운데
+    const top = (band - (cardH + U.gap + rowH)) / 2;
+    const y = top + cardH + U.gap;
     const hi = r.sysBottom > y ? r.sysLeft - U.gap : W - U.edge;
-    const l0 = timer.x - U.gap * 2;
-    const r0 = timer.x + timer.w + U.gap * 2;
-    const half = Math.ceil(n / 2);
-    const cands = [
-      [...runAt(l0 - runW(half), y, half), ...runAt(r0, y, n - half)],
-      runAt(l0 - runW(n), y, n),
-      runAt(r0, y, n),
-    ];
-    const gauges = cands.find((c) => c.every((b) => b.x >= lo - 0.01 && b.x + b.w <= hi + 0.01)) ?? cands[0]!;
-    return { timer, gauges, cards, minimap: null, inset: insetCss(map, r, a) };
+    const x = Math.max(U.edge, Math.min(W / 2 - runW(n) / 2, hi - runW(n)));
+    return {
+      timer: { ...row.timer, y: top + (cardH - timerH) / 2 },
+      gauges: runAt(x, y, n),
+      cards: { ...cards, y: top },
+      minimap: null,
+      inset,
+    };
   }
 
   const cw = mapLeft;
@@ -811,11 +876,16 @@ function planCss(
     rightY: rightTop + g + U.gap,
     right: rightTop + g,
   });
-  // 넘치는 양: 왼쪽 칸은 이동 영역이 조금 줄어드는 것, 오른쪽 칸은 버튼과 겹치는 것이라 훨씬 무겁게 친다
+  // 넘치는 양: 왼쪽 칸은 이동 영역이 조금 줄어드는 것. 오른쪽 칸은 엄지 버튼 무리 위 최소 간격(MIN_GAP) 안으로 들어가는 것(왼쪽 칸과
+  // 같은 무게)과 버튼 위 끝 아래로 내려가 겹치는 것(훨씬 무겁게). 간격 안으로 몇 px 들어가는 것까지 100배로 치면 낮은 넓은 휴대폰
+  // 괴물(658×291 등)이 왼쪽 칸에 다 쌓아 팀 카드 둘이 이동 스틱 그림을 덮었다(검토 반영)
   const cardsH = (c: Cand): number => grid(c.cardsAt?.cols ?? cols).h;
   const leftOver = (c: Cand): number => Math.max(0, c.cardsY + cardsH(c) - leftLimit);
   const rightOver = (c: Cand): number => (c.right === null ? 0 : Math.max(0, c.right - rightLimit));
-  const over = (c: Cand): number => leftOver(c) + rightOver(c) * 100;
+  /** 오른쪽 칸 부품이 버튼 위 끝 아래로 내려간 양 (겹침) · 최소 간격 안으로만 들어간 양 (rightOver = 둘의 합) */
+  const rightHit = (c: Cand): number => (c.right === null ? 0 : Math.max(0, c.right - r.clusterTop));
+  const rightGap = (c: Cand): number => rightOver(c) - rightHit(c);
+  const over = (c: Cand): number => leftOver(c) + rightGap(c) + rightHit(c) * 100;
   // 옆 칸 미니맵 폭: 오른쪽 칸 남는 자리 (3:2 + 제목 · 틀, 오른쪽 칸 타이머 자리는 아래에 남긴다)
   const mm = P.minimap;
   const sideMinimapW = (c: Cand): number =>
