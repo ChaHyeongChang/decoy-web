@@ -733,7 +733,9 @@ export class PracticeSurvivorBrain implements BotBrain {
   /** 구조 담당인가: 구조 지점에 가장 가까운 자유 생존자 (비슷하면 둘 다 간다 — 아무도 안 가는 것보다 낫다) */
   private isRescuer(snap: Snapshot, freeMates: readonly SurvivorView[]): boolean {
     if (freeMates.length === 0) return true;
-    if (freeMates.some((s) => (s.rescue ?? 0) > 0)) return false;
+    // 동료가 구조 중이면 맡긴다 — 단 나도 이미 구조 중이면 이어 간다 (둘이 같은 틱에 시작하면 서로 미뤘다 다시 잡기를 되풀이해
+    // 구조 진행이 매 틱 0으로 돌아가 끝나지 않던 것, 통합 조정 tc)
+    if ((snap.you.surv?.rescue ?? 0) <= 0 && freeMates.some((s) => (s.rescue ?? 0) > 0)) return false;
     const f = fieldFrom(RESCUE_POINT);
     const mine = pathDist(f, snap.you.move);
     let others = Infinity;
