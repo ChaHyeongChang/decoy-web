@@ -349,7 +349,7 @@ A와 B는 터치 소스 인터페이스(`moveVector · heldBits · takePressed �
    - "다른 탭에서 접속" 안내를 받은 기기에 "여기서 계속하기" 버튼
    - (터치 · 설치 앱만) **뒤로 가기**: 판 안 첫 사용자 탭 핸들러에서 기록 항목을 넣고(사용자 활성화 없이 넣은 항목은 Chrome이 건너뛴다), 뒤로 가기에 "나가시겠어요?" 확인. "계속"을 누를 때 그 핸들러에서 다시 넣는다
 9. **화면 꺼짐 방지(Wake Lock)**: 판 시작 때 요청, 결과 · 로비에서 해제, 판 중 다시 보이면 재요청. 지원 안 함 · 거부는 조용히
-10. **진동**: 내가 맞았을 때 한 번, 발각이 꺼짐 → 켜짐으로 바뀔 때 짧게 두 번. 2초 넘게 지난 일에는 울리지 않는다. 사용자가 아직 화면을 누르지 않았으면 부르지 않는다. 설정에서 끌 수 있다
+10. **진동**: 내가 맞았을 때 한 번, 발각이 꺼짐 → 켜짐으로 바뀔 때 짧게 두 번. 2초 넘게 지난 일에는 울리지 않는다. 사용자가 아직 화면을 누르지 않았으면 부르지 않는다. 설정에서 끌 수 있다 (플레이테스트 반영 c 손맛에서 판 순간마다 패턴 하나로 넓혔다 — `haptics.ts` `HAPTIC_PATTERNS`: 내 피격 · 발각 · 내 수감 · 구조 완료(구조자 · 풀려난 사람) · 아슬아슬 회피 · 괴물 명중 · 괴물이 가둠 · 괴물 기절. 한 스냅샷에 여럿이면 `juice.ts`가 하나만 고른다 — `navigator.vibrate`는 새 호출이 앞 패턴을 끊는다. 허용 조건은 그대로, DECISIONS 16절 c)
 11. 오디오: 다시 보이면 AudioContext 재개 시도
 12. **기기 저장 키 목록**(제안 14): 새 `client/src/storageKeys.ts`(키 · 설명 · 보관 기간)와 그 밖에서 storage를 쓰면 실패하는 테스트, 처리방침 대조 테스트 뼈대, `storyText.ts` ↔ `STORY_TEXT.md` 동기화 테스트
 
@@ -361,7 +361,7 @@ A와 B는 터치 소스 인터페이스(`moveVector · heldBits · takePressed �
 | C 성능 | `client/src/main.ts`, `client/src/gfx/quality.ts`, `client/src/render/worldRenderer.ts` · `baseLayer.ts`, `server/src/static.ts` |
 | 메인 | `client/src/debug.ts` · `shared/src/debugTypes.ts`(`getHudLayout` 등), 문서, 통합, E2E |
 
-B는 `haptics.hit()` · `haptics.spotted(bool)`만 내놓고, `GameScene`에서 부르는 한 줄은 A가 넣는다.
+B는 `haptics.hit()` · `haptics.spotted(bool)`만 내놓고, `GameScene`에서 부르는 한 줄은 A가 넣는다(플레이테스트 반영 c부터 판 장면은 `haptics.play(kind)` · `spotted(bool)`을 부른다).
 
 ### 자동 검증
 - **단위**: `configureLayout`(PC는 항상 1920×1080, 터치는 화면비 규칙), 터치 글자 크기 × 배율 ≥ 12px(높이 360), `actionSlots`, 품질 자동 하향(터치 기준값 · 온라인/연습 분리), 진동 판단(활성화 전 · 오래된 일 · 발각 전환), 재연결 정책(백오프 · 숨김/오프라인 정지 · 즉시 재시도), **수신 감시**(60초 숨김 → 복귀 → 1초 안에 pong이 오면 재연결 0회), `lastRoom` 30초 만료와 `in-progress` 재시도, 저장 키 목록 밖 storage 사용 0건, 문구 동기화, gzip(`content-encoding`, `Vary`, png 비압축, `x-decoy-server` 유지 — 임시 폴더의 가짜 파일로)
