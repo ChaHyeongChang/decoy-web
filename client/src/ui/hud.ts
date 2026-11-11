@@ -180,8 +180,8 @@ class Pct {
  * 채움은 배지 쪽에서). 진행 숫자를 보이지 않는 화면(괴물)은 막대를 칩 옆으로 당겨 빈 칸이 게이지 안쪽 끝(타이머 쪽)에 남는다
  */
 class Gauge {
-  /** 막대 틀 (한 장 — 폭이 늘 HUD.gauge.barW) */
-  private readonly frame: Spr;
+  /** 막대 틀 (가로 3조각 — 폭 HUD.gauge.barW) */
+  private readonly frame: Slice;
   private readonly dia: Spr;
   readonly chip: Spr;
   private readonly fill: Spr;
@@ -218,7 +218,7 @@ class Gauge {
     this.pctX = side === 1 ? o.x + cell + G.pctW : o.x - cell;
     const inner = o.x + side * (cell + (showPct ? G.pctW + G.pctGap : 0));
     this.bar = { x: side === 1 ? inner : inner - G.barW, y: o.y - G.barH / 2 };
-    this.frame = kit.spr(D_PANEL);
+    this.frame = kit.slice(D_PANEL);
     this.fill = kit.spr(D_ART);
     this.stripe = kit.spr(D_ART + 0.2);
     this.dia = kit.spr(D_ART);
@@ -244,7 +244,7 @@ class Gauge {
     this.state = s;
     this.blinkable = blinkable;
     const y = this.y;
-    this.frame.set(`gbar:${s}`, this.bar.x, this.bar.y);
+    this.frame.set(`gbar:${s}`, this.bar.x, this.bar.y, G.barW, G.barH);
     this.dia.set(`dia:${s}`, this.diaX, y);
     this.chip.set(GAUGE_ICON[s] ? `chip:${s}` : '', this.chipX, y);
     this.pct.set(p, s, this.pctX, y);
@@ -278,7 +278,7 @@ class Gauge {
     const alpha = this.blinkable && blinkOff ? 0.3 : 1;
     if (alpha === this.alpha) return;
     this.alpha = alpha;
-    this.frame.img.setAlpha(alpha);
+    this.frame.setAlpha(alpha);
     this.fill.img.setAlpha(alpha);
     this.stripe.img.setAlpha(alpha);
     this.dia.img.setAlpha(alpha);
