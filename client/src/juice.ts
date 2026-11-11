@@ -1,6 +1,6 @@
 // 판 순간의 손맛 (플레이테스트 반영 c, docs/playtest/c-juice.md 4장): 한 스냅샷의 이벤트 → 소리 · 진동 · 흔들림 · 화면 효과 · 일시 배너.
 // 순수 함수 (Phaser · DOM 없음). 받는 사람이 이미 받은 이벤트와 자기 스냅샷만 쓴다 — 서버 · 공유 코드 · 프로토콜은 그대로다.
-// 괴물 화면 (VISUAL_SPEC 0장 ③ 흰색 위장 · 정보 숨김): 괴물 쪽 반응은 이벤트 종류 · 맞은 수(attackHit.hits) · 자기 조준 방향의 함수뿐이다.
+// 괴물 화면 (VISUAL_SPEC 0장 ③ 흰색 위장 · 정보 숨김): 괴물 쪽 반응은 이벤트 종류 · 개수(가둔 수) · 맞은 수(attackHit.hits) · 자기 조준 방향의 함수뿐이다.
 //  역할 · 이름 · 체력 · 누가 맞았는지 · 시야 밖 존재 · 생존자와의 거리 · 방향에 따라 달라지지 않는다(빗나감 소리는 늘 같다). 일시 배너에
 //  역할 · 이름 · 자리를 넣지 않고, 풀려난 생존자 자리에 효과를 그리지 않는다
 // 같은 소리는 한 스냅샷에 한 번 가장 큰 음량으로 낸다 (동료 피격 0.4가 먼저 와도 내 피격 1.0이 60ms 간격 검사에 밀리지 않게 — c-juice 1.4 ⑥).
@@ -63,6 +63,8 @@ export const JUICE_BANNER = {
   jailedMe: { sec: 2, tone: 'danger', icon: 'prison' },
   jailedMate: { sec: 1.5, tone: 'warn', icon: 'prison' },
   jailedOne: { sec: 1.5, tone: 'info', icon: 'prison' },
+  /** 한 번에 둘 이상 (한 번 휘둘러 부상자 둘을 함께 가둠): 모양은 한 명과 같고 글자만 가둔 수 */
+  jailedMany: { sec: 1.5, tone: 'info', icon: 'prison' },
 } as const satisfies Record<string, Omit<JuiceBanner, 'text'>>;
 
 /** 팀원 한 명 (생존자 화면 스냅샷) */
@@ -127,6 +129,8 @@ export function snapshotJuice(p: JuiceInput): JuicePlan {
     if (!plan.banners.some((b) => b.text === text)) plan.banners.push({ text, ...JUICE_BANNER[key] });
   };
   let mates = 0;
+  /** 괴물이 이 스냅샷에 가둔 수 (imprisoned 이벤트 수 — 누구인지 · 어디인지는 쓰지 않는다) */
+  let caught = 0;
   let freed = false;
   for (const ev of p.events) {
     switch (ev.k) {
@@ -154,7 +158,7 @@ export function snapshotJuice(p: JuiceInput): JuicePlan {
           play('jail', V.jailMonster);
           plan.anonPulse = true;
           buzz('capture');
-          banner('jailedOne', UI_TEXT.jailedOne);
+          caught += 1;
         } else if (ev.you) {
           play('jail', V.jailMe);
           plan.imprisonFade = true;
@@ -192,6 +196,9 @@ export function snapshotJuice(p: JuiceInput): JuicePlan {
         break;
     }
   }
+  // 괴물이 가둔 배너: 한 스냅샷에 한 줄, 가둔 수가 사실과 맞게 (한 명 · n명). 역할 · 이름 · 자리는 넣지 않는다
+  if (caught === 1) banner('jailedOne', UI_TEXT.jailedOne);
+  else if (caught > 1) banner('jailedMany', UI_TEXT.jailedMany.replace('{n}', String(caught)));
   // 풀려난 사람이 나 (rescued.you는 문을 연 사람만 참이다 — 내 상태가 수감 → 자유로 바뀐 것으로 안다)
   if (freed && p.prevStatus === 'imprisoned' && p.status === 'free') buzz('rescue');
   // 팀원 수감 배너: 누구인지는 같은 스냅샷에서 자유 → 수감으로 바뀐 팀원으로 안다 (모르면 띄우지 않는다)

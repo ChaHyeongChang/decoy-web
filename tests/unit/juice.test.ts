@@ -162,10 +162,39 @@ describe('수감 (P6)', () => {
     expect(withTeam).toEqual(p);
     for (const b of p.banners)
       for (const name of ['러너', '가드', '스카우트']) expect(b.text).not.toContain(name);
-    // 둘이 한 번에 갇혀도 배너는 한 줄 (같은 문구)
+    // 둘이 한 번에 갇혀도 배너는 한 줄
     expect(
       mon([atk(2), { k: 'imprisoned', you: false }, { k: 'imprisoned', you: false }]).banners,
     ).toHaveLength(1);
+  });
+
+  it('괴물 화면: 한 번에 둘 · 셋을 가두면 배너 한 줄이 가둔 수를 말한다("2명을 가뒀다.") — 철창 · 진동 · 펄스는 하나, 역할 · 이름 · 자리 없음', () => {
+    const jail: GameEvent = { k: 'imprisoned', you: false };
+    const two = mon([atk(2), jail, jail]);
+    expect(two.banners).toEqual([{ text: '2명을 가뒀다.', ...JUICE_BANNER.jailedMany }]);
+    expect(sounds(two).filter((x) => x.startsWith('jail:'))).toEqual([`jail:${JUICE_VOL.jailMonster}`]);
+    expect(two.haptic).toBe('capture');
+    expect(two.anonPulse).toBe(true);
+    const three = mon([atk(3), jail, jail, jail]);
+    expect(three.banners).toEqual([{ text: '3명을 가뒀다.', ...JUICE_BANNER.jailedMany }]);
+    // 배너 모양은 한 명일 때와 같다 (정보 톤 + 감옥 아이콘 1.5초) — 수만 다르다
+    expect(JUICE_BANNER.jailedMany).toEqual(JUICE_BANNER.jailedOne);
+    // 한 명이면 그대로 '한 명을 가뒀다.'
+    expect(mon([atk(1), jail]).banners.map((b) => b.text)).toEqual([UI_TEXT.jailedOne]);
+    // 팀 정보를 넣어도(괴물에게는 원래 없다) 같다 — 수는 이벤트 수뿐
+    const withTeam = mon([atk(2), jail, jail], {
+      team: [
+        { id: 'x', role: 'guard', status: 'imprisoned' },
+        { id: 'y', role: 'runner', status: 'imprisoned' },
+      ],
+      prevTeam: new Map([
+        ['x', 'free'],
+        ['y', 'free'],
+      ]),
+    });
+    expect(withTeam).toEqual(two);
+    for (const b of [...two.banners, ...three.banners])
+      for (const name of ['러너', '가드', '스카우트']) expect(b.text).not.toContain(name);
   });
 });
 
