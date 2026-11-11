@@ -11,10 +11,12 @@
 import type Phaser from 'phaser';
 import {
   CAPTURE_POINTS,
+  POINT_IDS,
   TILE_PX,
   type ExitState,
   type ExitView,
   type InfoItem,
+  type PointId,
   type PointState,
   type PointView,
 } from '@decoy/shared';
@@ -256,22 +258,29 @@ export function paintLockBadge(c: BadgeCtx, x: number, y: number, a: number): vo
 }
 
 /** 배지 다섯 장 (아틀라스 칸 순서 = 프레임 이름) */
-export type BadgeId = 'point-A' | 'point-B' | 'exit-N' | 'exit-S' | 'prison';
-export const BADGE_IDS: readonly BadgeId[] = ['point-A', 'point-B', 'exit-N', 'exit-S', 'prison'];
+export type BadgeId = 'point-A' | 'point-B' | 'point-C' | 'exit-N' | 'exit-S' | 'prison';
+export const BADGE_IDS: readonly BadgeId[] = ['point-A', 'point-B', 'point-C', 'exit-N', 'exit-S', 'prison'];
 const BADGE_KIND: Readonly<Record<BadgeId, keyof typeof BADGE_BOX>> = {
   'point-A': 'point',
   'point-B': 'point',
+  'point-C': 'point',
   'exit-N': 'exit',
   'exit-S': 'exit',
   prison: 'lock',
 };
-const POINT_BADGE: Readonly<Record<'A' | 'B', BadgeId>> = { A: 'point-A', B: 'point-B' };
+const POINT_BADGE: Readonly<Record<PointId, BadgeId>> = { A: 'point-A', B: 'point-B', C: 'point-C' };
+const BADGE_POINT: Readonly<Partial<Record<BadgeId, PointId>>> = {
+  'point-A': 'A',
+  'point-B': 'B',
+  'point-C': 'C',
+};
 const EXIT_BADGE: Readonly<Record<'N' | 'S', BadgeId>> = { N: 'exit-N', S: 'exit-S' };
 
 /** 배지 기준점 (월드 px): 거점 = 패드 위쪽 가장자리, 탈출구 = 문 옆 표지판, 감옥 = 남쪽 문 칸 */
 function badgeAnchor(id: BadgeId): Pt {
-  if (id === 'point-A' || id === 'point-B') {
-    const c = CAPTURE_POINTS[id === 'point-A' ? 'A' : 'B'];
+  const point = BADGE_POINT[id];
+  if (point !== undefined) {
+    const c = CAPTURE_POINTS[point];
     return [c.x * T, (c.y + BADGE.pointDy) * T];
   }
   if (id === 'exit-N' || id === 'exit-S') {
@@ -284,6 +293,7 @@ function badgeAnchor(id: BadgeId): Pt {
 const BADGE_AT: Readonly<Record<BadgeId, Pt>> = {
   'point-A': badgeAnchor('point-A'),
   'point-B': badgeAnchor('point-B'),
+  'point-C': badgeAnchor('point-C'),
   'exit-N': badgeAnchor('exit-N'),
   'exit-S': badgeAnchor('exit-S'),
   prison: badgeAnchor('prison'),
@@ -353,9 +363,15 @@ export function layoutBadgeAtlas(zoom: number): BadgeAtlasLayout {
 }
 
 /** 상태 코드 (서명용 수) */
-const POINT_CODE: Readonly<Record<PointState, number>> = { idle: 0, capturing: 1, blocked: 2, done: 3 };
+const POINT_CODE: Readonly<Record<PointState, number>> = {
+  idle: 0,
+  capturing: 1,
+  blocked: 2,
+  done: 3,
+  off: 4,
+};
 const EXIT_CODE: Readonly<Record<ExitState, number>> = { inactive: 0, active: 1, open: 2 };
-const POINT_STATES: readonly PointState[] = ['idle', 'capturing', 'blocked', 'done'];
+const POINT_STATES: readonly PointState[] = ['idle', 'capturing', 'blocked', 'done', 'off'];
 const EXIT_STATES: readonly ExitState[] = ['inactive', 'active', 'open'];
 
 /** 배지 한 장의 마지막으로 구운 서명 (배율 · 상태 코드 · 알파: 문자열 대신 수) */
@@ -455,7 +471,7 @@ export class Badges {
   private readonly atlas: BadgeAtlas;
   private readonly images = new Map<BadgeId, Phaser.GameObjects.Image>();
   private readonly sigs: Record<BadgeId, BadgeSig>;
-  private readonly labels = new Map<'A' | 'B', CrispText>();
+  private readonly labels = new Map<PointId, CrispText>();
   private last: InfoItem[] = [];
 
   constructor(
@@ -467,10 +483,17 @@ export class Badges {
     container.add(this.box);
     this.atlas = new BadgeAtlas(scene);
     const sig = (): BadgeSig => ({ zoom: NaN, code: -1, alpha: NaN });
-    this.sigs = { 'point-A': sig(), 'point-B': sig(), 'exit-N': sig(), 'exit-S': sig(), prison: sig() };
+    this.sigs = {
+      'point-A': sig(),
+      'point-B': sig(),
+      'point-C': sig(),
+      'exit-N': sig(),
+      'exit-S': sig(),
+      prison: sig(),
+    };
     // A · B 글자는 맵 컨테이너(0.93배) 밖 화면 좌표에 둔다(글자 텍셀 = 화면 픽셀). 캐릭터를 덮지 않게 맵 컨테이너 바로 아래로 내린다
     // (안개 레이어보다는 위: 시야 밖에서도 45%로 보인다)
-    for (const id of ['A', 'B'] as const) {
+    for (const id of POINT_IDS) {
       const c = CAPTURE_POINTS[id];
       const p = tileToScreen(c.x, c.y + BADGE.pointDy);
       const t = makeText(scene, p.x, p.y, id, {
@@ -544,7 +567,7 @@ export class Badges {
     points: readonly PointView[],
     exits: readonly ExitView[],
     alpha: BadgeAlpha,
-    blink: Record<'A' | 'B', boolean>,
+    blink: Record<PointId, boolean>,
   ): void {
     this.last = badgeInfo(points, exits, alpha, blink, paintedRadii);
     // 그림은 상태 · 알파 · 백버퍼 배율이 바뀐 배지만 다시 굽는다 (진행 값은 배지 그림에 쓰지 않는다)

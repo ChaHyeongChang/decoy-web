@@ -166,8 +166,10 @@ export interface Mark {
   y: number;
 }
 
-export type PointState = 'idle' | 'capturing' | 'blocked' | 'done';
+/** off: 다른 거점이 필요한 수(capturePoint.required)만큼 끝나 꺼진 거점 — 점령 불가 · 게이지 정지 · 알림 없음 */
+export type PointState = 'idle' | 'capturing' | 'blocked' | 'done' | 'off';
 
+/** 거점 하나 (받는 사람과 무관하게 같은 값. 안에 있는 사람 수 · id · 역할 같은 필드를 넣지 않는다 — 괴물 화면 정보 숨김) */
 export interface PointView {
   id: PointId;
   progress: number;
@@ -332,7 +334,8 @@ export type EmblemTier = 0 | 1 | 2 | 3 | 4;
  *          evades 따돌린 추격 · abilityUses 능력 사용 · abilityGood 쓸모 있게 쓴 능력
  *  괴물:   hits 타격 · jails 수감시킨 수 · kills 사망시킨 수 · seeSec 생존자를 시야에 둔 초 · finds 새로 찾은 수 ·
  *          roarFinds 포효로 찾은 수 · blockSec 거점 진행을 멈춘 초 · pointStops 괴물이 가까이 와
- *          끊긴 점령 · pointsLeft 끝까지 남은 거점 · zoneHits 거점 · 탈출구
+ *          끊긴 점령(꺼져서 멈춘 것은 빼고) · pointsLeft 탈출구를 켜는 데 모자란 점령 수(max(0, required − 끝난 수), 0~2 —
+ *          꺼진 거점은 세지 않는다) · zoneHits 끝나지도 꺼지지도 않은 거점 · 켜진 탈출구
  *          안 타격 · kept 탈출 못 한 생존자 · exitStops 끊은 탈출구 열기 · exitHoldSec 탈출구가 켜진 뒤 첫 탈출까지 버틴 초
  */
 export type RatingStatId =

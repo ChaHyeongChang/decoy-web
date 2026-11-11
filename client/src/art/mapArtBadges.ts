@@ -9,6 +9,7 @@ import {
   type ExitState,
   type ExitView,
   type InfoItem,
+  type PointId,
   type PointState,
   type PointView,
 } from '@decoy/shared';
@@ -16,7 +17,7 @@ import { MAP_COLOR, OBJ_COLOR } from './mapArtGeom';
 import { NEON, UI, WARN, blendOver } from './palette';
 
 export interface BadgeAlpha {
-  points: Record<'A' | 'B', number>;
+  points: Record<PointId, number>;
   exits: Record<'N' | 'S', number>;
   prison: number;
 }
@@ -79,7 +80,7 @@ export function exitColor(s: ExitState): number {
 }
 
 /** 거점 배지 알파: 괴물 화면 점령 중 깜빡임이면 0.25, 아니면 보이는 곳 1 / 안 보이는 곳 0.45 */
-export function pointBadgeAlpha(id: 'A' | 'B', alpha: BadgeAlpha, blink: Record<'A' | 'B', boolean>): number {
+export function pointBadgeAlpha(id: PointId, alpha: BadgeAlpha, blink: Record<PointId, boolean>): number {
   return blink[id] ? BADGE.blinkAlpha : alpha.points[id];
 }
 
@@ -109,7 +110,7 @@ export function badgeInfo(
   points: readonly PointView[],
   exits: readonly ExitView[],
   alpha: BadgeAlpha,
-  blink: Record<'A' | 'B', boolean>,
+  blink: Record<PointId, boolean>,
   radii: { point: number | null; exit: number | null },
 ): InfoItem[] {
   const out: InfoItem[] = [];

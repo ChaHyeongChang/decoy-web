@@ -156,8 +156,8 @@ export const TIMER_LOOK: Readonly<Record<TimerMode, { icon: IconId; color: numbe
 };
 
 /** 거점 게이지 상태 (서버 'blocked' = 정지) */
-export type GaugeState = 'idle' | 'capturing' | 'paused' | 'done';
-export const GAUGE_STATES: readonly GaugeState[] = ['idle', 'capturing', 'paused', 'done'];
+export type GaugeState = 'idle' | 'capturing' | 'paused' | 'done' | 'off';
+export const GAUGE_STATES: readonly GaugeState[] = ['idle', 'capturing', 'paused', 'done', 'off'];
 
 export function gaugeState(s: PointState): GaugeState {
   return s === 'blocked' ? 'paused' : s;
@@ -169,6 +169,7 @@ export const GAUGE_ICON: Readonly<Record<GaugeState, IconId | null>> = {
   capturing: 'play',
   paused: 'pause',
   done: 'check',
+  off: 'off',
 };
 
 export function gaugeColor(s: GaugeState): number {

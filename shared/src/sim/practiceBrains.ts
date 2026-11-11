@@ -13,6 +13,7 @@
 import {
   BTN,
   CAPTURE_POINTS,
+  POINT_IDS,
   EXITS,
   MAP_H,
   MAP_W,
@@ -34,6 +35,7 @@ import {
   type MatchInfo,
   type MoverContext,
   type PointId,
+  type PointState,
   type Role,
   type RoleId,
   type Snapshot,
@@ -48,7 +50,6 @@ import { Walker, aimAt, dist, type BotBrain } from './botBrains';
 /** 자유 생존자와 괴물이 함께 다닐 수 있는 칸 (탈출구 닫힘, 감옥 문은 둘 다 지나간다) */
 const OPEN_CTX: MoverContext = { kind: 'monster', imprisoned: false, openExits: { N: false, S: false } };
 
-const POINT_IDS: readonly PointId[] = ['A', 'B'];
 const EXIT_IDS: readonly ExitId[] = ['N', 'S'];
 
 /** 지도 크기 (가져온 값을 지역 상수로: 자주 도는 반복문에서 모듈 바인딩을 매번 읽지 않게) */
@@ -502,7 +503,7 @@ export class PracticeMonsterBrain implements BotBrain {
   private modePressSeq = -1e9;
   private roarIdle: number;
   private campTicks = 0;
-  private readonly pointTicks: Record<PointId, number> = { A: 0, B: 0 };
+  private readonly pointTicks: Record<PointId, number> = { A: 0, B: 0, C: 0 };
   private stepOut: { x: number; y: number; until: number } | null = null;
   private nextWatchAt = 0;
   private readonly dashChance: number;
@@ -773,7 +774,7 @@ export class PracticeMonsterBrain implements BotBrain {
     if (!this.stepOut) {
       for (const id of POINT_IDS) {
         if (this.pointTicks[id] < this.sec(POINT_STAY_MAX)) continue;
-        if (snap.world.points.some((p) => p.id === id && p.state === 'done')) continue;
+        if (snap.world.points.some((p) => p.id === id && !pointOpen(p.state))) continue;
         const c = CAPTURE_POINTS[id];
         const u = unit(me.x - c.x, me.y - c.y);
         const dir = u.x === 0 && u.y === 0 ? { x: 1, y: 0 } : u;
@@ -815,9 +816,9 @@ export class PracticeMonsterBrain implements BotBrain {
     // 할 일이 없으면: 안 끝난 거점을 번갈아 지키거나, 순찰을 몇 구간 돈다
     const exitsOn = snap.world.exits.some((e) => e.state !== 'inactive');
     if (!this.goal && this.patrolLegs <= 0 && !exitsOn) {
-      const undone = snap.world.points.filter((p) => p.state !== 'done').map((p) => p.id);
+      const undone = snap.world.points.filter((p) => pointOpen(p.state)).map((p) => p.id);
       if (undone.length > 0 && this.rng.next() < POINT_PATROL_PROB) {
-        const next = undone.find((id) => id !== this.lastGuarded) ?? undone[0] ?? 'A';
+        const next = nextGuarded(undone, this.lastGuarded);
         this.lastGuarded = next;
         this.pointGoal(next, me, b);
       } else {
@@ -1041,15 +1042,42 @@ interface Danger {
 /** 팀 계획에서 셋이 한 거점에 함께 갈 확률 (아니면 둘 · 하나로 나뉜다) */
 const TEAM_TOGETHER_PROB = 0.5;
 
+const SOLO_ROLES: readonly RoleId[] = ['runner', 'guard', 'scout'];
+
 /**
- * 생존자 팀이 함께 쓰는 계획 (같은 seed면 세 봇이 같은 계획): 먼저 갈 거점과, 혼자 다른 거점에 갈 역할(없으면 셋이 함께)
+ * 생존자 팀이 함께 쓰는 계획 (같은 seed면 세 봇이 같은 계획): 거점을 들를 순서(세 곳을 시드로 섞음 — 앞 두 곳이 먼저 갈 곳,
+ * 셋째는 지켜질 때 갈 곳)와, 혼자 둘째 거점에 갈 역할(없으면 셋이 함께). 역할과 거점을 묶지 않는다 — 괴물 화면에서 자리로
+ * 역할을 짐작할 단서가 생기지 않게 혼자 가는 역할도 셋 중 시드로 고른다(플레이테스트 반영 b)
  */
-function teamPlan(seed: number): { pair: PointId; solo: RoleId | null } {
+export function teamPlan(seed: number): { order: readonly PointId[]; solo: RoleId | null } {
   const r = new Rng((Math.imul(seed | 0, 0x85ebca6b) ^ 0xc2b2ae35) >>> 0);
-  const pair: PointId = r.next() < 0.5 ? 'A' : 'B';
+  const order = [...POINT_IDS];
+  for (let i = order.length - 1; i > 0; i -= 1) {
+    const j = r.int(i + 1);
+    const t = order[i] as PointId;
+    order[i] = order[j] as PointId;
+    order[j] = t;
+  }
   const together = r.next() < TEAM_TOGETHER_PROB;
-  const solo: RoleId = r.next() < 0.5 ? 'runner' : 'scout';
-  return { pair, solo: together ? null : solo };
+  const solo = SOLO_ROLES[r.int(SOLO_ROLES.length)] ?? 'runner';
+  return { order, solo: together ? null : solo };
+}
+
+/** 아직 점령할 수 있는 거점인가 (끝났거나 꺼진 곳은 할 일이 아니다) */
+export function pointOpen(state: PointState): boolean {
+  return state !== 'done' && state !== 'off';
+}
+
+/** 괴물이 할 일 없을 때 번갈아 지킬 다음 거점: 지난번 거점 다음 id (A → B → C → A 순환, 열린 곳만) */
+export function nextGuarded(open: readonly PointId[], last: PointId | null): PointId {
+  const first = open[0] ?? 'A';
+  if (last === null) return first;
+  const at = POINT_IDS.indexOf(last);
+  for (let k = 1; k <= POINT_IDS.length; k += 1) {
+    const id = POINT_IDS[(at + k) % POINT_IDS.length] as PointId;
+    if (open.includes(id)) return id;
+  }
+  return first;
 }
 
 export class PracticeSurvivorBrain implements BotBrain {
@@ -1067,7 +1095,8 @@ export class PracticeSurvivorBrain implements BotBrain {
   private exitChoice: ExitId | null = null;
   private exitSwitchedAt = -1e9;
   private readonly codes: string[] = [];
-  private readonly home: PointId;
+  /** 거점을 들를 순서 (팀 계획, 내 거점이 맨 앞) */
+  private readonly plan: readonly PointId[];
   private trackIdle: number;
   private stuckFrom: { x: number; y: number; tick: number } | null = null;
   private wiggleUntil = 0;
@@ -1081,7 +1110,11 @@ export class PracticeSurvivorBrain implements BotBrain {
   ) {
     this.rng = brainRng(seed, role);
     const plan = teamPlan(seed);
-    this.home = plan.solo === role ? (plan.pair === 'A' ? 'B' : 'A') : plan.pair;
+    const [first, second, third] = plan.order;
+    // 혼자 가는 역할은 둘째 거점부터, 나머지는 첫 거점부터. 셋째는 둘 다 지켜질 때 갈 곳
+    this.plan = (plan.solo === role ? [second, first, third] : [first, second, third]).filter(
+      (id): id is PointId => id !== undefined,
+    );
     this.trackIdle = TRACK_IDLE_MIN + this.rng.next() * TRACK_IDLE_SPAN;
   }
 
@@ -1203,22 +1236,23 @@ export class PracticeSurvivorBrain implements BotBrain {
     // 내 거점 마무리가 거의 다 됐으면 먼저 끝낸다
     const here = this.pointHere(snap, b);
     const finishing = here !== null && here.progress >= FINISH_POINT;
-    const undone = snap.world.points.filter((p) => p.state !== 'done').map((p) => p.id);
+    const open = new Set(snap.world.points.filter((p) => pointOpen(p.state)).map((p) => p.id));
+    // 계획 순서대로 남은 거점 (끝났거나 꺼진 곳은 뺀다)
+    const undone = this.plan.filter((id) => open.has(id));
     if (jailed.length > 0 && !finishing && this.isRescuer(snap, freeMates)) {
       const r = this.rescueTask(snap, b);
       // 감옥 근처가 위험하면 거점이 남아 있는 동안은 점령을 하다가 다시 본다 (모두 감옥 앞에서 기다리지 않게)
       if (r.kind !== 'lurk' || undone.length === 0 || freeMates.length === 0) return r;
     }
     if (undone.length > 0) {
-      let goal: PointId = undone.includes(this.home) ? this.home : (undone[0] ?? this.home);
-      const other = undone.find((p) => p !== goal);
-      if (this.hot(CAPTURE_POINTS[goal], me) && other) {
-        // 둘 다 위험하면 가까운 쪽 근처에서 기다린다
-        if (
-          !this.hot(CAPTURE_POINTS[other], me) ||
-          dist(me, CAPTURE_POINTS[other]) < dist(me, CAPTURE_POINTS[goal])
-        ) {
-          goal = other;
+      let goal: PointId = undone[0] as PointId;
+      if (this.hot(CAPTURE_POINTS[goal], me) && undone.length > 1) {
+        // 지켜지는 거점은 버리고 안전한 다른 거점으로 (계획 순서 앞쪽 먼저). 모두 위험하면 가장 가까운 곳 근처에서 기다린다
+        const safe = undone.find((id) => id !== goal && !this.hot(CAPTURE_POINTS[id], me));
+        if (safe) goal = safe;
+        else {
+          for (const id of undone)
+            if (dist(me, CAPTURE_POINTS[id]) < dist(me, CAPTURE_POINTS[goal])) goal = id;
         }
       }
       const c = CAPTURE_POINTS[goal];
@@ -1238,10 +1272,10 @@ export class PracticeSurvivorBrain implements BotBrain {
     return { kind: 'idle', target: { x: me.x, y: me.y }, tol: 1, held: 0, commit: false };
   }
 
-  /** 지금 서 있는 (안 끝난) 거점 */
+  /** 지금 서 있는 (끝나지도 꺼지지도 않은) 거점 */
   private pointHere(snap: Snapshot, b: Balance): { id: PointId; progress: number } | null {
     for (const p of snap.world.points) {
-      if (p.state === 'done') continue;
+      if (!pointOpen(p.state)) continue;
       if (dist(snap.you.move, CAPTURE_POINTS[p.id]) <= b.capturePoint.radius)
         return { id: p.id, progress: p.progress };
     }

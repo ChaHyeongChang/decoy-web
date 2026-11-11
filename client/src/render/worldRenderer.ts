@@ -16,6 +16,7 @@ import { bakeCostumes } from '../art/costumeBake';
 import Phaser from 'phaser';
 import {
   CAPTURE_POINTS,
+  POINT_IDS,
   EXITS,
   PRISON_CENTER,
   PRISON_RECT,
@@ -34,6 +35,7 @@ import {
   type InfoItem,
   type LayerName,
   type MonsterView,
+  type PointId,
   type Role,
   type RoleId,
   type Snapshot,
@@ -270,7 +272,7 @@ function countKind(items: readonly InfoItem[], kind: InfoItem['kind']): number {
 }
 
 /** 거점 id가 점령 중인가 (프레임마다 조건 함수를 만들지 않게) */
-function capturing(points: readonly { id: string; state: string }[], id: 'A' | 'B'): boolean {
+function capturing(points: readonly { id: string; state: string }[], id: PointId): boolean {
   for (const p of points) if (p.id === id && p.state === 'capturing') return true;
   return false;
 }
@@ -466,8 +468,12 @@ export class WorldRenderer {
     scale: 1,
     alpha: 1,
   };
-  private readonly badgeAlpha: BadgeAlpha = { points: { A: 1, B: 1 }, exits: { N: 1, S: 1 }, prison: 1 };
-  private readonly badgeBlink: Record<'A' | 'B', boolean> = { A: false, B: false };
+  private readonly badgeAlpha: BadgeAlpha = {
+    points: { A: 1, B: 1, C: 1 },
+    exits: { N: 1, S: 1 },
+    prison: 1,
+  };
+  private readonly badgeBlink: Record<PointId, boolean> = { A: false, B: false, C: false };
   /** 부채꼴 채움 · 해치(coneOver)와 가장자리 · 테두리(coneEdge)에 마지막으로 그린 것 */
   private readonly overDrawn: ConeDrawn = { key: null, color: -1, fill: -1 };
   private readonly edgeDrawn: ConeDrawn = { key: null, color: -1, fill: -1 };
@@ -1478,15 +1484,13 @@ export class WorldRenderer {
 
     // 항상 표시 배지 (지금 안 보이는 곳이면 45%)
     const alpha = this.badgeAlpha;
-    alpha.points.A = this.seenAlpha(v, team, CAPTURE_POINTS.A);
-    alpha.points.B = this.seenAlpha(v, team, CAPTURE_POINTS.B);
+    for (const id of POINT_IDS) alpha.points[id] = this.seenAlpha(v, team, CAPTURE_POINTS[id]);
     alpha.exits.N = this.seenAlpha(v, team, EXITS.N.center);
     alpha.exits.S = this.seenAlpha(v, team, EXITS.S.center);
     alpha.prison = this.seenAlpha(v, team, PRISON_CENTER);
     const blinkOn = Math.floor(v.nowMs / 500) % 2 === 0;
     const blink = this.badgeBlink;
-    blink.A = isMonster && blinkOn && capturing(snap.world.points, 'A');
-    blink.B = isMonster && blinkOn && capturing(snap.world.points, 'B');
+    for (const id of POINT_IDS) blink[id] = isMonster && blinkOn && capturing(snap.world.points, id);
     this.badges.draw(snap.world.points, snap.world.exits, alpha, blink);
     this.keypads.draw(snap.world.exits, v.keypadCodes, alpha.exits);
     const all = this.info;

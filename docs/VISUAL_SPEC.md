@@ -949,7 +949,7 @@ PC · 휴대폰이 **같은 구성의 한 화면**이다. 여는 곳: 첫 화면
 | 격자 | `24` | `icons.ICON_GRID` |
 | 선 두께 | `2` | `icons.ICON_STROKE` |
 
-아이콘 목록(35개, `tests/unit/visual-spec.test.ts`가 `ICONS`와 대조):
+아이콘 목록(36개, `tests/unit/visual-spec.test.ts`가 `ICONS`와 대조):
 
 | 묶음 | 아이콘 |
 |---|---|
@@ -957,7 +957,7 @@ PC · 휴대폰이 **같은 구성의 한 화면**이다. 여는 곳: 첫 화면
 | 생존자 능력 · 구조 | `sprint` » · `shove` 방패 + 미는 화살 · `track` 조준경 · `rescue` 열린 자물쇠 |
 | 목표 · 장소 | `prison` 잠긴 자물쇠 · `point` 마름모 · `exit` 문 + 나가는 화살 · `timer` 시계 · `map` 접힌 지도 · `note` 연필 |
 | 상태 | `heart` 체력 · `injured` 금 간 마음 · `dead` × 원 · `escaped` 열린 문 + 나간 방향 · `disconnected` 끊긴 연결 · `warn` 경고 삼각 · `eye` 발각 |
-| 진행 · 준비 | `check` 완료 · `pause` 정지 · `play` 진행 중 · `ready` 준비 완료 · `waiting` 모래시계 |
+| 진행 · 준비 | `check` 완료 · `pause` 정지 · `play` 진행 중 · `off` 꺼짐(금지 원 ⊘ — 다른 두 거점이 끝나 꺼진 거점) · `ready` 준비 완료 · `waiting` 모래시계 |
 | 로비 · 화면 | `crown` 방장 · `bot` 봇 · `link` 링크 복사 · `sliders` 설정 · `fullscreen` 전체 화면 · `back` 뒤로 · `replay` 다시 하기 · `scoreboard` 점수판(터치 버튼) |
 
 ### 10.2 UI 폰트 — Noto Sans KR 서브셋

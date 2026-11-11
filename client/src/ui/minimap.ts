@@ -107,6 +107,7 @@ const MM_POINT: Readonly<Record<PointView['state'], string>> = {
   capturing: FR.mm('point:capturing'),
   blocked: FR.mm('point:blocked'),
   done: FR.mm('point:done'),
+  off: FR.mm('point:off'),
 };
 const MM_EXIT: Readonly<Record<ExitView['state'], string>> = {
   inactive: FR.mm('exit:off'),
