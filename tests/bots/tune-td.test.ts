@@ -113,19 +113,21 @@ function monsterBrain(seed: number): PracticeMonsterBrain {
 }
 
 /**
- * 거점 A 쪽 복도에서 한 명을 가둔 장면: 2초 돌린 뒤(아무도 안 갇힘) 가둔 이벤트, 그 뒤 seconds초 동안 갇힌 수 jailed.
- * 가둔 틱부터의 기록을 돌려준다
+ * 거점 A 쪽 복도에서 가둔 장면: 준비 구간 2초는 아무도 안 갇혀 있고(갇힌 사람이 있으면 새 두뇌의 '가끔 감시'가 첫 틱에 감시를 걸어
+ * 가둔 이벤트의 주사위와 상관없이 감시로 보인다), 그 뒤 가둔 이벤트와 함께 갇힌 수 jailed로 seconds초.
+ * 준비 구간 기록(warm)과 가둔 틱부터의 기록(after)을 돌려준다
  */
-function afterJail(seed: number, jailed: number, seconds: number): Tick[] {
+function afterJail(seed: number, jailed: number, seconds: number): { warm: Tick[]; after: Tick[] } {
   const { snap: base, info } = baseSnap();
   const brain = monsterBrain(seed);
   const me = { x: 13.5, y: 16.5, face: 0 };
-  const warm = 2 * HZ;
-  drive(brain, base, info, me, 100, warm, () => ({ imprisoned: jailed - 1 }));
-  return drive(brain, base, info, me, 100 + warm, seconds * HZ, (k) => ({
+  const warmTicks = 2 * HZ;
+  const warm = drive(brain, base, info, me, 100, warmTicks, () => ({ imprisoned: 0 }));
+  const after = drive(brain, base, info, me, 100 + warmTicks, seconds * HZ, (k) => ({
     imprisoned: jailed,
     events: k === 0 ? [jailedEvent] : [],
   }));
+  return { warm, after };
 }
 
 describe('실전 괴물 봇 통합 조정 d: 감옥 지키기 강도', () => {
@@ -134,7 +136,7 @@ describe('실전 괴물 봇 통합 조정 d: 감옥 지키기 강도', () => {
   it('한 명을 가둔 직후 감옥 감시로 가는 것은 반반쯤이다 (예전: 주사위가 실패해도 곧바로 감시로 — 거의 늘)', () => {
     let watched = 0;
     for (const seed of SEEDS) {
-      const log = afterJail(seed, 1, 8);
+      const log = afterJail(seed, 1, 8).after;
       if (log.some((t) => watching(t.act))) watched += 1;
     }
     const share = watched / SEEDS.length;
@@ -145,7 +147,7 @@ describe('실전 괴물 봇 통합 조정 d: 감옥 지키기 강도', () => {
   it('가둔 직후 감시로 안 갔으면 감시 간격(20초) 동안 감옥 감시로 돌아오지 않고 감옥을 비운다. 간격이 지나도 갇혀 있으면 다시 감시', () => {
     let left = 0;
     for (const seed of SEEDS) {
-      const log = afterJail(seed, 1, WATCH_GAP_MIN + 15);
+      const log = afterJail(seed, 1, WATCH_GAP_MIN + 15).after;
       const first = log.findIndex((t) => watching(t.act));
       if (first >= 0 && first < 8 * HZ) continue; // 곧장 감시로 간 판 (위 시험)
       left += 1;
@@ -163,8 +165,13 @@ describe('실전 괴물 봇 통합 조정 d: 감옥 지키기 강도', () => {
   it('둘째를 가두면(한 명만 더 잡으면 이긴다) 그대로 거의 늘 감옥 감시로 간다', () => {
     let watched = 0;
     for (const seed of SEEDS) {
-      const log = afterJail(seed, 2, 8);
-      if (log.some((t) => watching(t.act))) watched += 1;
+      const { warm, after } = afterJail(seed, 2, 8);
+      // 검사가 헛돌지 않게: 준비 구간에 이미 감시로 가 있었다면 가둔 이벤트의 주사위(0.85)와 상관없이 감시로 보인다
+      expect(
+        warm.some((t) => watching(t.act)),
+        `seed ${seed}: 준비 구간에 감시`,
+      ).toBe(false);
+      if (after.some((t) => watching(t.act))) watched += 1;
     }
     expect(watched / SEEDS.length, `감시로 간 판 ${watched}/${SEEDS.length}`).toBeGreaterThan(0.75);
   });
