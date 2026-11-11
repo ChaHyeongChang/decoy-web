@@ -10,7 +10,7 @@
 //  - M4 점령 알림을 기억해 추적이 끝나면 그 거점부터 (놓친 곳 수색보다 앞)
 //  - M5 서지 않기: 거점 매복 · 감옥 감시에 서 있는 대신 짧게 훑고 거점 둘레 · 감시 자리 사이를 걷는다. 같은 거점을 연달아 고르지 않는다.
 //    추적 · 시작 대기 · 기절이 아니면 한자리에 STAND_LIMIT 넘게 머물지 않는다 (서 있기 감시)
-//  - M6 추적 중 표적이 가까우면 탐색 시야(넓게), 멀면 추적 시야
+//  - M6 추적 중 표적이 가까우면 탐색 시야(넓게), 넓히는 중에 탐색 시야 사거리 밖으로 멀어지면 추적 시야로 되돌림 (다 넓힌 뒤에는 놓칠 때까지)
 //  - M7 놓친 뒤: 마지막 위치 → 달아나던 쪽의 안 보이는 도주 후보 둘 → 그래도 없으면 포효. 가뒀거나 죽었거나(세 번째로 잡힘)
 //    탈출해 사라진 표적은 놓친 것이 아니다 (같은 스냅샷의 'imprisoned' · 'died' · 'escaped' 이벤트로 안다)
 //  - 표적 동점(같은 거리)은 위치 → 속도 → 처음 본 틱으로 가르고, 그래도 같은 생존자들은 하나로 묶어 쫓는다 (누구인지 고르지 않는다)
@@ -97,12 +97,10 @@ const DIRECT_CHASE = 3.5;
 /** 추적 중 표적의 이동을 내다보는 최대 시간 (초) */
 const CHASE_LEAD_MAX = 0.35;
 /**
- * 추적 중 시야 (M6): 표적이 WIDE_NEAR 안이면 탐색 시야(넓게), 탐색 시야 사거리(balance)에서 WIDE_FAR_MARGIN 안쪽을 넘으면 추적 시야.
- * 사이는 그대로 (이력, 타일). 탐색 시야는 사거리 밖을 하드 컷으로 못 보므로(스냅샷에 안 온다), 거두는 거리가 사거리와 같으면 그 갈래에
- * 닿지 않는다 — 사거리보다 여유 있게 안쪽에서 바꿔야 멀어지는 표적을 놓치기 전에 추적 시야로 간다 (전환 0.4초 동안도 보이게)
+ * 추적 중 시야 (M6): 표적이 WIDE_NEAR 안이면 탐색 시야(넓게), 탐색 시야 사거리(balance) 밖이면 추적 시야. 사이는 그대로 (이력, 타일).
+ * 거두는 거리는 chaseVisionBand가 balance에서 읽는다
  */
 const WIDE_NEAR = 3.5;
-const WIDE_FAR_MARGIN = 0.6;
 /** 보호 중인 생존자는 이만큼 먼 것으로 친다 (타일): 다른 표적이 있으면 그쪽 */
 const PROTECTED_PENALTY = 8;
 /** 지금 쫓는 표적을 유지하는 덤 (타일): 비슷하면 표적을 바꾸지 않는다 */
@@ -712,7 +710,7 @@ export class PracticeMonsterBrain implements BotBrain {
     const me = snap.you.move;
     const mon = snap.you.mon;
     const d = dist(me, t);
-    // 시야 (M6): 가까우면 넓게, 탐색 시야 사거리에 가까워지면 멀리. 막 쫓기 시작했으면 지금 모드에서 시작한다
+    // 시야 (M6): 가까우면 넓게, 넓히는 중에 탐색 시야 사거리 밖으로 멀어지면 되돌린다. 막 쫓기 시작했으면 지금 모드에서 시작한다
     if (!this.chasing && mon) this.chaseMode = mon.mode;
     const band = chaseVisionBand(b);
     if (d <= band.near) this.chaseMode = 'search';
@@ -1243,11 +1241,14 @@ function nearestOf(spots: readonly Vec2[], to: Vec2): Vec2 {
 }
 
 /**
- * 추적 중 시야 문턱 (M6, 타일): near 안이면 탐색 시야(넓게), far 밖이면 추적 시야. far는 탐색 시야 사거리(balance)에서 여유만큼 안쪽 —
- * 탐색 시야로 쫓는 표적은 사거리 안에서만 보이므로 far가 사거리 이상이면 닿지 않는다
+ * 추적 중 시야 문턱 (M6, 타일): near 안이면 탐색 시야(넓게), far 밖이면 추적 시야. far는 탐색 시야 사거리(balance) 그대로(여유 0)다.
+ * 탐색 시야는 사거리 밖을 하드 컷으로 못 보므로 far 갈래는 넓히는 동안(추적 → 탐색 0.4초, 사거리가 아직 탐색 시야보다 길다)에만 닿는다:
+ * 넓히는 중에 표적이 탐색 시야 사거리 밖이면 넓히기를 되돌리고, 탐색 시야로 다 바뀐 뒤에는 놓칠 때까지 유지한다.
+ * 사거리 안쪽(예: 사거리 − 0.6 = 4.4)에서 좁히면 놓침은 줄지 않고 좁혔다 다시 넓히기를 1초 안에 오가며 누르는 일이 열 배 가까이 늘며
+ * (생존자 화면에도 괴물 부채꼴이 떨린다) 봇끼리 판 괴물 승률이 약 4점 내려가 쓰지 않는다
  */
 export function chaseVisionBand(b: Balance): { near: number; far: number } {
-  return { near: WIDE_NEAR, far: b.monster.visionModes.search.range - WIDE_FAR_MARGIN };
+  return { near: WIDE_NEAR, far: b.monster.visionModes.search.range };
 }
 
 /**

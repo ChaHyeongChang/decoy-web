@@ -14,6 +14,7 @@ import {
   RESCUE_POINT,
   distToRect,
   lineOfSight,
+  monsterConeShape,
   type GameEvent,
   type InputFrame,
   type MatchInfo,
@@ -103,6 +104,8 @@ interface SynthFrame {
   attackCd?: number;
   dashCd?: number;
   mode?: 'search' | 'hunt';
+  /** 추적 시야 쪽으로 섞인 정도 0(탐색)~1(추적). 없으면 mode에 다 바뀐 상태 (탐색 0 · 추적 1) */
+  blend?: number;
   countdown?: number;
   events?: GameEvent[];
   /** 거점 상태 (없으면 바탕 스냅샷 그대로: 모두 idle) */
@@ -136,6 +139,7 @@ function synth(base: Snapshot, f: SynthFrame): Snapshot {
         windup: 0,
         roarCd: f.roarCd ?? 0,
         mode: f.mode ?? 'hunt',
+        blend: f.blend ?? ((f.mode ?? 'hunt') === 'hunt' ? 1 : 0),
         camp: 0,
       },
     },
@@ -347,10 +351,10 @@ describe('실전 괴물 봇: 추격 (M1 돌진 → 공격, M2 거리 좁히기 �
     }
   });
 
-  it('추적 중 표적이 3.5타일 안이면 탐색 시야(넓게)로 바꾸고, 탐색 시야 사거리 조금 안쪽을 넘어 멀어지면 놓치기 전에 추적 시야로 (M6)', () => {
+  it('추적 중 표적이 3.5타일 안이면 탐색 시야(넓게)로 바꾸고, 넓히는 중에 표적이 탐색 시야 사거리 밖으로 멀어지면 되돌린다. 다 넓힌 뒤에는 놓칠 때까지 그대로 (M6)', () => {
     const { snap: base, info } = baseSnap();
     const searchRange = balance.monster.visionModes.search.range;
-    const modePress = (d: number, mode: 'search' | 'hunt'): boolean => {
+    const modePress = (d: number, mode: 'search' | 'hunt', blend?: number): boolean => {
       const brain = practiceBrain('monster', 3);
       let any = false;
       for (let t = 100; t < 106; t += 1) {
@@ -359,6 +363,7 @@ describe('실전 괴물 봇: 추격 (M1 돌진 → 공격, M2 거리 좁히기 �
             tick: t,
             me: { x: 35.5, y: Y, face: 0 },
             mode,
+            blend,
             attackCd: 1,
             dashCd: 5,
             survivors: [seen('s', 35.5 + d, Y)],
@@ -373,10 +378,21 @@ describe('실전 괴물 봇: 추격 (M1 돌진 → 공격, M2 거리 좁히기 �
     };
     expect(modePress(2.5, 'hunt')).toBe(true);
     expect(modePress(2.5, 'search')).toBe(false);
-    // 실제로 생기는 장면: 탐색 시야(사거리 5.0, 하드 컷)로 쫓는 표적이 사거리 가까이(4.5~4.9) 멀어진다 — 탐색 시야에서는 5.0 밖의
-    // 표적이 스냅샷에 오지 않으므로, 넓은 시야를 거두는 거리가 사거리 안쪽이어야 놓치기 전에 추적 시야로 바꾼다
-    expect(modePress(4.7, 'search')).toBe(true);
-    expect(modePress(searchRange - 0.1, 'search')).toBe(true);
+    // 넓히는 중(추적 → 탐색 0.4초, blend 1 → 0): 사거리가 아직 탐색 시야(5.0)보다 길어 그 밖의 표적이 보인다. 표적이 탐색 시야 사거리
+    // 밖으로 멀어지면 넓히기를 되돌린다 (그대로 두면 다 넓혔을 때 놓친다)
+    for (const blend of [0.4, 0.5, 0.6]) {
+      for (const d of [5.5, 6.5]) {
+        expect(
+          monsterConeShape(balance, blend).range,
+          `blend ${blend}: ${d}타일이 보이는 장면`,
+        ).toBeGreaterThan(d);
+        expect(modePress(d, 'search', blend), `blend ${blend} · ${d}타일`).toBe(true);
+      }
+    }
+    // 다 넓힌 뒤(blend 0)에는 표적이 사거리 가까이(4.7 · 사거리 − 0.1) 가도 놓칠 때까지 그대로 둔다 — 사거리 안쪽(예: 4.4)에서 좁히면
+    // 좁혔다 다시 넓히기를 오가며 누르고(생존자 화면에도 부채꼴이 떨린다) 놓침은 줄지 않는다 (봇끼리 판 괴물 승률 −4점)
+    expect(modePress(4.7, 'search', 0)).toBe(false);
+    expect(modePress(searchRange - 0.1, 'search', 0)).toBe(false);
     expect(modePress(4.7, 'hunt')).toBe(false);
     expect(modePress(6.5, 'hunt')).toBe(false);
     // 사이(4.2타일)에서는 지금 모드를 그대로 둔다 (오가며 누르지 않게)
@@ -384,10 +400,14 @@ describe('실전 괴물 봇: 추격 (M1 돌진 → 공격, M2 거리 좁히기 �
     expect(modePress(4.2, 'search')).toBe(false);
   });
 
-  it('M6 문턱: 넓은 시야를 거두는 거리는 탐색 시야 사거리(balance)보다 여유 있게 안쪽이고, 넓히는 거리보다 바깥 (닿지 않는 갈래가 없게)', () => {
+  it('M6 문턱: 넓은 시야를 거두는 거리는 탐색 시야 사거리(balance) 그대로이고 넓히는 거리보다 바깥 (숫자를 박지 않는다)', () => {
     const band = chaseVisionBand(balance);
-    expect(band.far).toBeLessThan(balance.monster.visionModes.search.range - 0.3);
+    expect(band.far).toBe(balance.monster.visionModes.search.range);
     expect(band.far).toBeGreaterThan(band.near + 0.5);
+    // balance의 탐색 시야 사거리를 바꾸면 따라간다
+    const wider = structuredClone(balance);
+    wider.monster.visionModes.search.range = 6;
+    expect(chaseVisionBand(wider).far).toBe(6);
   });
 });
 
