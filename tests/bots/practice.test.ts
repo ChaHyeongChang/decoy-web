@@ -1,7 +1,7 @@
 // 실전 봇 두뇌 (M13b 2번): 봇 4명 판을 시드 6개로 끝까지.
 // 시간 초과가 아닌 종료 · 양쪽 승리 · 실제 공격 · 수감 · 점령 · 구조 · 탈출, 괴물 봇이 받은 스냅샷에 시야 밖 생존자 0,
 // 틱 비용, 같은 시드는 같은 판, 기기 안 연습 방(BotDriver)에서 틱당 입력 1개
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   PROTOCOL_VERSION,
@@ -248,13 +248,32 @@ describe('실전 봇 두뇌: 봇 4명 판 (시드 6개)', () => {
 
 describe('실전 봇 두뇌: 규칙', () => {
   it('두뇌는 시드 난수만 쓰고 판 상태 모듈을 들이지 않는다 (자기 스냅샷 · MatchInfo · Balance · 공개 지도만)', () => {
-    const src = readFileSync('shared/src/sim/practiceBrains.ts', 'utf8');
-    expect(src).not.toMatch(/Math\.random|Date\.now|performance\.now/);
+    // 두뇌 파일 넷 (진입점 · 공용 지도 · 괴물 · 생존자 — 플레이테스트 반영 c에서 나눔)과 그 밖에 새로 생긴 practice*.ts 모두
+    const dir = 'shared/src/sim';
+    const files = readdirSync(dir).filter((f) => /^practice\w*\.ts$/.test(f));
+    expect(files).toEqual(
+      expect.arrayContaining([
+        'practiceBrains.ts',
+        'practiceMap.ts',
+        'practiceMonster.ts',
+        'practiceSurvivor.ts',
+      ]),
+    );
     // 공용 모듈(지도 · 규칙 수치 · 기하)과 두뇌 도구만. 판 상태(game · state · interest · room · core · truth · systems)는 금지
-    const allowed = ['../index', './botBrains', './pathfind', './predict'];
-    const imports = [...src.matchAll(/from '([^']+)'/g)].map((m) => m[1] ?? '');
-    expect(imports.length).toBeGreaterThan(0);
-    for (const from of imports) expect(allowed).toContain(from);
+    const allowed = [
+      '../index',
+      './botBrains',
+      './pathfind',
+      './predict',
+      ...files.map((f) => `./${f.replace(/\.ts$/, '')}`),
+    ];
+    for (const f of files) {
+      const src = readFileSync(`${dir}/${f}`, 'utf8');
+      expect(src, f).not.toMatch(/Math\.random|Date\.now|performance\.now/);
+      const imports = [...src.matchAll(/from '([^']+)'/g)].map((m) => m[1] ?? '');
+      expect(imports.length, f).toBeGreaterThan(0);
+      for (const from of imports) expect(allowed, f).toContain(from);
+    }
   });
 
   it('순찰 · 감시 · 도주 지점은 모두 바닥이고 서로 닿으며, 감시 자리는 감옥 캠핑 반경 밖이다', () => {
