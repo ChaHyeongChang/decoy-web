@@ -239,8 +239,9 @@ interface WaitPlan {
   ay: number;
   spots: Vec2[];
   idx: number;
-  /** 지금 자리에 머무는 끝 틱 (-1이면 걷는 중) */
+  /** 지금 자리에 머무는 끝 틱 (-1이면 걷는 중)과 마지막으로 머물기를 마친 틱 */
   dwellUntil: number;
+  dwellEnd: number;
   since: number;
   patienceAt: number;
   round: number;
@@ -847,6 +848,7 @@ export class PracticeSurvivorBrain implements BotBrain {
         spots: [],
         idx: 0,
         dwellUntil: -1,
+        dwellEnd: -1e9,
         since: this.now,
         patienceAt: this.now + this.patience(),
         round: 0,
@@ -873,6 +875,7 @@ export class PracticeSurvivorBrain implements BotBrain {
     if (w.spots.length === 0 || moved) {
       w.spots = this.pickWaitSpots(anchor, me, w.prev);
       w.idx = 0;
+      if (w.dwellUntil >= 0) w.dwellEnd = this.now;
       w.dwellUntil = -1;
       w.tx = t?.x ?? Number.NaN;
       w.ty = t?.y ?? Number.NaN;
@@ -883,10 +886,15 @@ export class PracticeSurvivorBrain implements BotBrain {
       if (this.now >= w.dwellUntil) {
         w.idx = (w.idx + 1) % n;
         w.dwellUntil = -1;
+        w.dwellEnd = this.now;
         spot = w.spots[w.idx] ?? spot;
       }
     } else if (dist(me, spot) <= WAIT_TOL) {
-      w.dwellUntil = this.now + this.sec(WAIT_DWELL_MIN + this.waitRng.next() * WAIT_DWELL_SPAN);
+      // 방금 머물기를 마치고 걷지도 않았는데 또 닿아 있으면(다시 고른 자리가 지금 자리) 머물지 않고 다음 자리로 —
+      // 한자리 정지가 WAIT_DWELL 한 번을 넘지 않게
+      const chained = this.now - w.dwellEnd <= 2;
+      const dwell = this.sec(WAIT_DWELL_MIN + this.waitRng.next() * WAIT_DWELL_SPAN);
+      w.dwellUntil = chained ? this.now : this.now + dwell;
     }
     return { kind: 'wait', target: spot, tol: WAIT_TOL, held: 0, commit: false, anchor };
   }

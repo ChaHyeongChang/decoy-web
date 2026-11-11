@@ -586,7 +586,7 @@ describe('생존자 봇: 할 일이 남았으면 쫓기지 않을 때 구역 밖
 describe('생존자 봇: 남은 할 일이 모두 지켜지면 서성이며 기다리다 들어가 본다', () => {
   it('동료 둘이 갇히고 괴물이 구조 지점 남쪽 3.5타일에 서서 구조 지점을 본다 (할 일이 구조뿐): 서 있지 않고 기다리는 자리 여러 곳을 오가며, 기다림 한도 뒤 들어가 본다', () => {
     const spot = { x: RESCUE_POINT.x, y: RESCUE_POINT.y + 3.5 };
-    for (const seed of [1, 2, 3, 4, 5, 6]) {
+    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
       const runner = practiceBrain('runner', seed);
       const inputs: InputFrame[] = [];
       const sim = scene(seed, {
@@ -638,7 +638,8 @@ describe('생존자 봇: 남은 할 일이 모두 지켜지면 서성이며 기�
         if (d) kinds.add(d.probe ? 'probe' : d.kind);
         if (d?.kind === 'wait') cells.add(`${Math.round(d.target.x)},${Math.round(d.target.y)}`);
       }
-      expect(longest, `seed ${seed}`).toBeLessThanOrEqual(STAND_LIMIT);
+      // 기다리는 자리에 머무는 것은 한 번에 0.7초 안쪽 (설계 목표 '1초 넘게 서지 않는다')
+      expect(longest, `seed ${seed}`).toBeLessThanOrEqual(1.0);
       // 서성인다: 기다리는 자리를 여러 곳 오가고, 기다림 한도가 지나면 (혼자라 미끼 차례) 들어가 본다
       expect(kinds.has('wait'), `seed ${seed}`).toBe(true);
       expect(cells.size, `seed ${seed}`).toBeGreaterThanOrEqual(2);
