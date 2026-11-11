@@ -57,10 +57,13 @@ type Ctx = CanvasRenderingContext2D;
 export const HC = {
   /** 실루엣 · 아이콘 우물 (패널보다 어두운 원판) */
   well: 0x060c13,
-  /** 꺼진 아이콘 · 칸 (그래픽, 글자가 아님). 꺼진 거점 게이지의 틀 · 배지 테두리도 이 색 */
+  /**
+   * 꺼진 아이콘 · 칸 (그래픽, 글자가 아님). 꺼진 거점 게이지의 틀(PC 막대 틀 · 터치 줄 판 테두리 — gaugeFrameColor)도 이 색.
+   * ◇ 배지 테두리는 틀이 아니라 상태색(gaugeColor → gaugeOff)이다: 이 색은 패널 위 약 1.9:1이라 ⊘ 칩 · 배지에 쓰면 3:1이 깨진다
+   */
   off: 0x3b4b5c,
   /**
-   * 꺼진 거점 (다른 두 곳이 끝나 점령할 수 없다, 플레이테스트 b): 회색 ⊘ 칩 아이콘 · 칩 테두리 · 줄 게이지 상태 아이콘.
+   * 꺼진 거점 (다른 두 곳이 끝나 점령할 수 없다, 플레이테스트 b): 회색 ◇ 배지 테두리 · ⊘ 칩 아이콘 · 칩 테두리 · 줄 게이지 상태 아이콘.
    * 맵 탈출구 꺼짐색(0x56657a)과 같은 회청색 계열이고, 패널 위 아이콘 3:1이 되게 조금 밝다
    */
   gaugeOff: 0x64748b,
@@ -179,12 +182,17 @@ export const GAUGE_ICON: Readonly<Record<GaugeState, IconId | null>> = {
   off: 'off',
 };
 
-/** 상태색 (칩 아이콘 · 칩 테두리 · 줄 게이지 상태 아이콘): 정지 주황 · 대기 흐림 · 꺼짐 회색 · 그 밖 청록 */
+/**
+ * 상태색 (PC ◇ 배지 테두리 · 칩 아이콘 · 칩 테두리, 터치 줄 게이지 상태 아이콘): 정지 주황 · 대기 흐림 · 꺼짐 회색(HC.gaugeOff) ·
+ * 그 밖 청록
+ */
 export function gaugeColor(s: GaugeState): number {
   return s === 'paused' ? WARN : s === 'idle' ? UI.textDim : s === 'off' ? HC.gaugeOff : NEON;
 }
 
-/** 게이지 틀 색 (PC 막대 · 배지 테두리, 터치 줄 판 테두리): 대기 · 꺼짐은 상태색보다 어둡게 (꺼짐은 HC.off) */
+/**
+ * 게이지 틀 색 (PC 막대 틀, 터치 줄 판 테두리 — ◇ 배지 테두리는 상태색 gaugeColor): 대기 · 꺼짐은 상태색보다 어둡게 (꺼짐은 HC.off)
+ */
 export function gaugeFrameColor(s: GaugeState): number {
   return s === 'idle' ? 0x2c4a5e : s === 'off' ? HC.off : gaugeColor(s);
 }
@@ -1289,8 +1297,9 @@ export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
         ['%', pr - sw / 2],
       ]);
   }
-  // ── 터치 거점 줄 게이지 (a-7, 기준점 = 줄 왼쪽 위): 판(상태색 테두리) · 진행 채움(어두운 면 + 아래 밝은 띠, 가로로 자른다) ·
-  //    상태 아이콘 · 거점 글자. 그림은 줄 위 · 아래 inset 안에만 있어 맞닿은 줄끼리 겹치지 않는다 ──
+  // ── 터치 거점 줄 게이지 (a-7, 기준점 = 줄 왼쪽 위): 판(틀 색 테두리 — gaugeFrameColor, 대기 · 꺼짐은 상태색보다 어둡다) · 진행 채움
+  //    (어두운 면 + 아래 밝은 띠, 가로로 자른다) · 상태 아이콘(상태색 gaugeColor) · 거점 글자. 그림은 줄 위 · 아래 inset 안에만 있어
+  //    맞닿은 줄끼리 겹치지 않는다 ──
   if (touch) {
     const cut = [3, 0, 3, 0] as const;
     /** 판 사각형을 기기 픽셀 격자에 맞춘다 (테두리 한 줄이 두 줄에 번지지 않게): [위, 폭, 높이] */
