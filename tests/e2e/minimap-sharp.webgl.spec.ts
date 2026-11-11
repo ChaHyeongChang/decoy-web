@@ -1,9 +1,11 @@
 // 지도 크게 보기 선명도 — WebGL 텍스처 예산 (남은 문제 정리). 크게 본 지도 바닥을 화면 해상도로 합성하되 열린 동안에도 올린 텍스처
 // 바이트가 예산(높음 32MiB)을 넘지 않는다 — 예산이 먼저다(사용자 요청 '텍스처 예산(32MiB)과 저사양 보호는 유지', DECISIONS 13절).
-// 바닥 폭은 prefsFx.bigMinimapTexels가 정한다: 남은 예산으로 작은 미니맵 합성보다 크게 구울 수 있으면 그만큼, 아니면 따로 굽지 않고
-// 작은 지도 합성을 늘려 쓴다(예전과 같다). 가장 빠듯한 PC 1920×1080 · 배율 2 · 품질 높음은 거점 C(플레이테스트 반영 b — 동적 조각 ·
-// 배지 약 1.1MiB)가 들어온 뒤 닫혀 있어도 약 31MiB라 따로 굽지 않는다(DECISIONS 16절 b). 그래서 배율 2는 예산 · 결정 규칙 · 놓기를 보고,
-// WebGL에서 화면 해상도 바닥을 실제로 굽는 길은 예산이 넉넉한 배율 1 장면이 본다. 닫으면 놓는다 — 크게 본 지도 텍스처('minimap-big')
+// 바닥 폭은 prefsFx.bigMinimapTexels가 정한다: 남은 예산으로 작은 미니맵 합성보다 크게 구울 수 있으면 그만큼, 아니면 작은 지도 합성
+// 사본을 늘려 쓰되(예전과 같다) 그 사본(크게 본 지도 텍스처에 올린다)도 예산에 들어가야 하고, 들어가지 않으면 들어가는 만큼 작게 굽는다.
+// 가장 빠듯한 PC 1920×1080 · 배율 2 · 품질 높음은 거점 C(플레이테스트 반영 b — 동적 조각 · 배지 약 1.1MiB)가 들어온 뒤 닫혀 있어도
+// 약 31MiB라 사본(768×512, 1.5MiB)을 올리면 32MiB를 넘었다(예전 규칙: 열면 34,076,596B) — 이제 들어가는 만큼(약 542px) 굽는다
+// (DECISIONS 13 · 16절 b). 배율 2는 예산(굽는 동안 포함) · 결정 규칙 · 놓기를 보고, 화면 해상도 바닥(작은 지도 합성보다 크게)을 실제로
+// 굽는 길은 예산이 넉넉한 배율 1 장면이 본다. 닫으면 놓는다 — 크게 본 지도 텍스처('minimap-big')
 // 하나만 본다: 굽기를 기다리는 동안(CI 러너에서는 수십 초) 판이 흘러 다른 텍스처가 제 때에 생기고 사라지므로 합계를 열기 전과 견주면
 // 지도와 무관하게 틀린다(전체 검사 194 · 196: 닫은 뒤 합계가 열기 전보다 64~128KiB 많았다 — 지도 텍스처는 4바이트).
 // 선명도 스크린샷 비교는 minimap-sharp.spec.ts(Canvas)
@@ -17,13 +19,15 @@ const MiB = 1024 * 1024;
 const HIGH_BUDGET = 32 * MiB;
 
 interface BigMapResult {
-  /** 연 뒤 정한 바닥 폭 (0 = 따로 굽지 않음) */
+  /** 연 뒤 정한 바닥 폭 (0 = 따로 굽지 않음 — 작은 지도 합성 사본을 늘려 씀) */
   texels: number;
   smallTexW: number;
   needW: number;
   tex: { w: number; h: number };
   closedBytes: number;
   openBytes: number;
+  /** 연 뒤 굽기를 기다리는 동안 잰 텍스처 합계의 최대 */
+  maxOpenBytes: number;
   bigBytesOpen: number;
 }
 
@@ -60,12 +64,22 @@ async function bigMapScene(browser: Browser, dpr: number): Promise<BigMapResult>
   // 바닥 폭은 열 때 정한다 (0 = 작은 지도 합성을 늘려 씀)
   await expect.poll(texels).toBeGreaterThanOrEqual(0);
   const w = await texels();
+  // 굽는 동안에도 예산 안이어야 한다 (굽기 전 바닥은 작은 지도 합성을 정한 폭 이하로 담는다): 기다리는 동안 합계를 잰다
+  let maxOpenBytes = await bytes();
   if (w > 0) {
-    // 화면 해상도 바닥은 한 프레임 4ms씩 10여 프레임에 나눠 굽는다. 이 장면(SwiftShader)은 프레임이 컨테이너에서 1초 안팎,
+    // 정한 폭의 바닥은 한 프레임 4ms씩 10여 프레임에 나눠 굽는다. 이 장면(SwiftShader)은 프레임이 컨테이너에서 1초 안팎,
     // CI 러너에서는 몇 초씩이라 넉넉히 기다린다 (실패하면 그때까지 굽기 걸음 수를 남긴다)
     const t0 = Date.now();
     try {
-      await expect.poll(async () => (await prefs()).minimapBig.sharpReady, { timeout: 120_000 }).toBe(true);
+      await expect
+        .poll(
+          async () => {
+            maxOpenBytes = Math.max(maxOpenBytes, await bytes());
+            return (await prefs()).minimapBig.sharpReady;
+          },
+          { timeout: 120_000 },
+        )
+        .toBe(true);
     } finally {
       const f = await page.evaluate(() => window.__DECOY__!.gfx.features);
       console.log(
@@ -75,12 +89,14 @@ async function bigMapScene(browser: Browser, dpr: number): Promise<BigMapResult>
   }
   const big = (await prefs()).minimapBig;
   const openBytes = await bytes();
+  maxOpenBytes = Math.max(maxOpenBytes, openBytes);
   const bigBytesOpen = await bigBytes();
   console.log(
-    `[minimap-sharp.webgl] 배율 ${dpr}: 바닥 ${big.smallTexW} → ${w > 0 ? `${big.tex.w}×${big.tex.h}` : '따로 굽지 않음(작은 지도 늘려 씀)'} (화면 ${big.needW.toFixed(0)}px), 텍스처 ${(closedBytes / MiB).toFixed(2)} → ${(openBytes / MiB).toFixed(2)}MiB`,
+    `[minimap-sharp.webgl] 배율 ${dpr}: 바닥 ${big.smallTexW} → ${w > 0 ? `${big.tex.w}×${big.tex.h}` : `따로 굽지 않음(작은 지도 ${big.tex.w}×${big.tex.h} 늘려 씀)`} (화면 ${big.needW.toFixed(0)}px), 텍스처 ${(closedBytes / MiB).toFixed(2)} → ${(openBytes / MiB).toFixed(2)}MiB (${openBytes}B, 굽는 동안 최대 ${maxOpenBytes}B)`,
   );
-  // 예산: 열린 동안에도 넘지 않는다
-  expect(openBytes).toBeLessThanOrEqual(HIGH_BUDGET);
+  // 예산: 열린 동안(굽는 동안 포함)에도 넘지 않는다. 어느 길이든 지도 텍스처 바이트 = 바닥 크기
+  expect(maxOpenBytes).toBeLessThanOrEqual(HIGH_BUDGET);
+  expect(bigBytesOpen).toBe(big.tex.w * big.tex.h * 4);
   await page.keyboard.press('Escape');
   await expect.poll(async () => (await prefs()).minimapBig.open).toBe(false);
   expect((await prefs()).minimapBig.tex).toEqual({ w: 1, h: 1 });
@@ -96,30 +112,37 @@ async function bigMapScene(browser: Browser, dpr: number): Promise<BigMapResult>
     tex: big.tex,
     closedBytes,
     openBytes,
+    maxOpenBytes,
     bigBytesOpen,
   };
 }
 
-test('지도 크게 보기 (WebGL PC 1920×1080@2 높음 — 가장 빠듯함): 열린 동안에도 텍스처 32MiB 안, 바닥 폭은 남은 예산으로 정한다(작은 지도보다 크게 못 구우면 따로 굽지 않음), 닫으면 놓음', async ({
+test('지도 크게 보기 (WebGL PC 1920×1080@2 높음 — 가장 빠듯함): 열린 동안(굽는 동안 포함)에도 텍스처 32MiB 안, 바닥 폭은 남은 예산으로 정한다(늘려 쓰는 사본까지 세어 들어가는 만큼), 닫으면 놓음', async ({
   browser,
 }) => {
   test.setTimeout(240_000);
   const r = await bigMapScene(browser, 2);
-  // 결정은 남은 예산 규칙 그대로다: 닫혀 있던 텍스처(지도 바닥 1×1 포함)로 같은 순수 함수를 돌린 값과 같다
+  // 결정은 남은 예산 규칙 그대로다: 닫혀 있던 텍스처(지도 바닥 1×1 포함)로 같은 순수 함수를 돌린 값과 같다 (0 = 열지 않음인데 열렸다)
   const others = r.closedBytes - 4;
-  expect(r.texels).toBe(bigMinimapTexels(r.needW, r.smallTexW, MAP_W / MAP_H, HIGH_BUDGET, others) ?? 0);
-  if (r.texels > 0) {
-    // 구웠다면 작은 지도 합성보다 크고 화면 px를 넘지 않으며, 열린 동안 지도 텍스처 바이트 = 바닥 크기
-    expect(r.tex.w).toBeGreaterThan(r.smallTexW);
+  const d = bigMinimapTexels(r.needW, r.smallTexW, MAP_W / MAP_H, HIGH_BUDGET, others);
+  expect(d).not.toBe(0);
+  expect(r.texels).toBe(d ?? 0);
+  const room = HIGH_BUDGET - MINIMAP_BIG_TEXELS.budgetMargin - others;
+  const copy = r.smallTexW * Math.ceil(r.smallTexW / (MAP_W / MAP_H)) * 4;
+  if (r.texels > r.smallTexW) {
+    // 작은 지도 합성보다 크게 구웠다: 화면 px를 넘지 않는다
+    expect(r.tex.w).toBe(r.texels);
     expect(r.tex.w).toBeLessThanOrEqual(Math.ceil(r.needW));
-    expect(r.bigBytesOpen).toBe(r.tex.w * r.tex.h * 4);
+  } else if (r.texels > 0) {
+    // 늘려 쓰는 사본이 남은 예산에 들어가지 않아 들어가는 만큼 작게 구웠다 (거점 C 뒤 지금 장면 — 약 542px)
+    expect(copy).toBeGreaterThan(room);
+    expect(r.tex.w).toBe(r.texels);
+    expect(r.tex.w).toBeGreaterThanOrEqual(MINIMAP_BIG_TEXELS.minW);
+    expect(r.tex.h).toBe(Math.round((r.tex.w * MAP_H) / MAP_W));
   } else {
-    // 따로 굽지 않았다: 남은 예산으로는 작은 지도 합성보다 큰 바닥이 들어가지 않는다 · 지도 텍스처를 올리지 않았다
-    const room = HIGH_BUDGET - MINIMAP_BIG_TEXELS.budgetMargin - others;
-    expect(Math.floor(Math.sqrt((Math.max(0, room) / 4) * (MAP_W / MAP_H))) - 1).toBeLessThanOrEqual(
-      r.smallTexW,
-    );
-    expect(r.bigBytesOpen).toBeLessThanOrEqual(4);
+    // 따로 굽지 않았다: 작은 지도 합성 사본을 늘려 쓴다 — 그 사본이 남은 예산에 들어간다
+    expect(r.tex.w).toBe(r.smallTexW);
+    expect(copy).toBeLessThanOrEqual(room);
   }
 });
 

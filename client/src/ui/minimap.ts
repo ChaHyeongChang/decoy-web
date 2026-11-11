@@ -424,17 +424,24 @@ export class Minimap {
 
   /**
    * 메인 바닥 합성을 줄여 그린다. count = 바닥 다시 그린 횟수(bakes)에 센다 — 크게 본 지도가 화면 해상도 정적 맵을 다 구워
-   * 바꿔 그릴 때는 세지 않는다(작은 지도와 같은 때에만 다시 그리는지 보는 시험)
+   * 바꿔 그릴 때는 세지 않는다(작은 지도와 같은 때에만 다시 그리는지 보는 시험). maxW = 크게 본 지도 텍스처 폭 상한(텍셀 —
+   * prefsFx.bigMinimapTexels가 정한 폭): 바닥 합성이 그보다 넓으면 그 폭으로 줄여 담는다(텍스처 예산이 모자라 작은 지도 합성보다
+   * 작게 굽는 동안에도 굽기 전 바닥이 예산 안)
    */
-  refreshBase(base: HTMLCanvasElement, count = true): void {
+  refreshBase(base: HTMLCanvasElement, count = true, maxW = Number.POSITIVE_INFINITY): void {
     if (!this.texture) return;
     this.stale = false;
     if (this.resizePending) this.applyScale();
-    // 크게 본 지도: 캔버스를 바닥 합성 크기로 (처음 · 품질이 바뀌어 합성 해상도가 달라졌을 때만) — 그대로 옮겨 그린다
-    if (this.big && this.image && (this.canvas.width !== base.width || this.canvas.height !== base.height)) {
-      resizeCanvasTexture(this.texKey, this.texture, this.canvas, base.width, base.height, false);
-      this.image.setSizeToFrame(this.texture.get());
-      this.image.setScale(this.w / this.canvas.width, this.h / this.canvas.height);
+    // 크게 본 지도: 캔버스를 바닥 합성 크기로 (처음 · 품질이 바뀌어 합성 해상도가 달라졌을 때 · 상한이 바뀌었을 때만) — 그대로 옮겨
+    // 그린다. 상한으로 줄일 때 높이는 그 폭으로 구운 정적 맵과 같은 식(mapArt.staticMapSize)이라 다 구운 뒤 크기가 바뀌지 않는다
+    if (this.big && this.image) {
+      const w = Math.max(1, Math.min(base.width, Math.floor(maxW)));
+      const h = w === base.width ? base.height : Math.max(1, Math.round((w * MAP_H) / MAP_W));
+      if (this.canvas.width !== w || this.canvas.height !== h) {
+        resizeCanvasTexture(this.texKey, this.texture, this.canvas, w, h, false);
+        this.image.setSizeToFrame(this.texture.get());
+        this.image.setScale(this.w / this.canvas.width, this.h / this.canvas.height);
+      }
     }
     this.ctx.imageSmoothingEnabled = true;
     this.ctx.imageSmoothingQuality = 'high';
@@ -446,7 +453,7 @@ export class Minimap {
   /** 바닥을 다시 그린 횟수 (디버그 · 시험: 크게 본 지도가 작은 지도와 같은 때에만 다시 그리는지) */
   bakes = 0;
 
-  /** 바닥 텍스처 크기 (텍셀 — 크게 본 지도는 바닥 합성 크기를 따른다. 디버그 · 텍스처 예산 계산) */
+  /** 바닥 텍스처 크기 (텍셀 — 크게 본 지도는 바닥 합성 크기를 따른다(refreshBase maxW 상한까지). 디버그 · 텍스처 예산 계산) */
   get texSize(): { w: number; h: number } {
     return { w: this.canvas.width, h: this.canvas.height };
   }

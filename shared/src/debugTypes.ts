@@ -218,7 +218,10 @@ export interface MatchPrefsDebug {
     smallBakes: number;
     /** 바닥 텍스처 크기 (텍셀 — 닫혀 있으면 1 × 1) · 작은 미니맵 바닥 합성 폭 */
     tex: { w: number; h: number };
-    /** 화면 해상도 정적 맵을 다 구워 그 바닥을 쓰는 중 (열자마자 몇 프레임은 작은 지도 합성을 늘린다) */
+    /**
+     * 정한 폭(gfx.features.minimapBigTexels — 화면 해상도, 텍스처 예산이 모자라면 그보다 작게)으로 정적 맵을 다 구워 그 바닥을 쓰는 중
+     * (열자마자 몇 프레임은 작은 지도 합성을 그 폭 이하로 담아 늘린다)
+     */
     sharpReady: boolean;
     smallTexW: number;
     /** 그림 폭이 화면에서 차지하는 기기 px (논리 폭 × 백버퍼 배율) */
