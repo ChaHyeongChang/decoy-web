@@ -23,7 +23,7 @@
 | `docs/PLAYTEST_PLAN.md` | 팀원 플레이테스트 피드백 반영 계획: 항목별 원인 · 고칠 방법 · 범위 (a 버그 · 조작 · 화면, b 거점 세 곳 중 두 곳, c 봇 · 손맛) |
 | `docs/FEEDBACK_REVIEW.md` | 왜 이렇게 바뀌었는지 |
 | `docs/reference/` | v1(Unity) 문서. 참고만. 어긋나면 v2 문서가 우선 |
-| `docs/images/concept_*.png` | 생성형 AI로 만든 컨셉 이미지. 분위기 참고만. 괴물 여러 마리 · 거점 3개 · 감지 3단계 · 아이템 상자는 v1 초기 안이라 따르지 않는다 |
+| `docs/images/concept_*.png` | 생성형 AI로 만든 컨셉 이미지. 분위기 참고만. 괴물 여러 마리 · 감지 3단계 · 아이템 상자는 v1 초기 안이라 따르지 않는다(거점은 v2도 셋이지만 규칙은 '세 곳 중 두 곳'이다 — `docs/GAME_DESIGN.md` 7장) |
 | `docs/images/logo_decoy.png` | **게임 로고 원본** (213×213, 원형, 배경 투명). 지우지 않고 파비콘 · 작은 크기에 쓴다. 고해상도 화면 · 앱 아이콘에는 이 원본과 같은 디자인으로 다시 그린 SVG(`docs/images/logo_decoy.svg`)를 쓴다 |
 
 ## 절대 규칙

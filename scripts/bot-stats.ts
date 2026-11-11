@@ -228,7 +228,10 @@ interface MatchStats {
     /** 자유 생존자를 보고 있던 초 */
     seeSec: number;
   };
-  /** 남은 거점이 하나뿐이던 구간 (첫 … 마지막 직전 거점 완료 ~ 마지막 거점 완료 또는 판 끝) */
+  /**
+   * 마지막 점령 구간: 탈출구를 켜는 데 점령이 한 곳만 더 필요하던 구간 (필요한 수 − 1곳 완료 ~ 필요한 수 완료 또는 판 끝).
+   * 거점이 둘이면 남은 한 곳, 세 곳 중 두 곳이면 남은 두 곳 중 아무 데나 (id = 남은 거점 id를 이은 것, 거리는 가까운 쪽)
+   */
   lastPoint: {
     id: string;
     startAt: number;
@@ -418,11 +421,18 @@ class Probe {
     return e.center;
   }
 
-  /** 판 단계: 거점이 남았으면 "거점 k/n", 다 끝났으면 탈출구 상태 */
+  /** 탈출구를 켜는 데 필요한 점령 수 (capturePoint.required — 키가 없던 규칙(거점 둘 모두)이면 거점 수) */
+  private required(): number {
+    const r = (this.game.balance.capturePoint as { required?: number }).required;
+    return typeof r === 'number' ? r : this.game.points.length;
+  }
+
+  /** 판 단계: 필요한 점령이 남았으면 "거점 k/필요한 수", 다 끝났으면 탈출구 상태 */
   private phase(): string {
     const g = this.game;
     const done = g.points.filter((p) => p.done).length;
-    if (done < g.points.length) return `거점 ${done}/${g.points.length}`;
+    const need = this.required();
+    if (done < need) return `거점 ${done}/${need}`;
     if (g.exits.some((e) => e.state === 'open')) return '탈출구 열림';
     return '탈출구 켜짐';
   }
@@ -467,7 +477,8 @@ class Probe {
     const t = g.time;
     const phase = this.phase();
     const jailedNow = g.survivors.filter((s) => s.status === 'imprisoned').length;
-    const undone = g.points.filter((p) => !p.done);
+    // 아직 점령할 수 있는 거점 (끝났거나 꺼진(off) 곳은 뺀다 — 꺼짐은 세 곳 중 두 곳 규칙에서 생긴다)
+    const undone = g.points.filter((p) => !p.done && !(p as { off?: boolean }).off);
     const ph = (this.phases[phase] ??= {
       sec: 0,
       monsterNearUndoneSec: 0,
@@ -581,12 +592,26 @@ class Probe {
       }
       ps.progressEnd = r3(p.progress / b.capturePoint.captureTime);
     }
-    // 남은 거점이 하나뿐인 구간
+    // 마지막 점령 구간: 필요한 점령이 한 곳만 남은 동안 (남은 거점은 하나 또는 그 이상)
+    const doneNow = g.points.filter((p) => p.done).length;
     if (g.points.length >= 2) {
-      const only = undone.length === 1 ? undone[0] : undefined;
+      const lastStage = doneNow === this.required() - 1 && undone.length > 0;
+      // 남은 곳 중 괴물에게 가장 가까운 거점을 대표로 (거점 둘이면 남은 한 곳 그대로)
+      let only: (typeof undone)[number] | undefined;
+      let onlyD = Infinity;
+      if (lastStage) {
+        for (const p of undone) {
+          const c = this.pointCenter(p.id);
+          const d = Math.hypot(m.move.x - c.x, m.move.y - c.y);
+          if (d < onlyD) {
+            onlyD = d;
+            only = p;
+          }
+        }
+      }
       if (only && !this.lastPoint) {
         this.lastPoint = {
-          id: only.id,
+          id: undone.map((p) => p.id).join(''),
           startAt: r1(t),
           endAt: r1(t),
           sec: 0,
@@ -595,22 +620,21 @@ class Probe {
           monsterNearSec: 0,
           capturingSec: 0,
           blockedSec: 0,
-          progressAtStart: r3(only.progress / b.capturePoint.captureTime),
+          progressAtStart: r3(Math.max(...undone.map((p) => p.progress)) / b.capturePoint.captureTime),
           imprisonments: 0,
           monsterAmbushSec: 0,
         };
       } else if (only && this.lastPoint) {
         const lp = this.lastPoint;
-        const c = this.pointCenter(only.id);
-        const dm = Math.hypot(m.move.x - c.x, m.move.y - c.y);
+        const dm = onlyD;
         lp.sec += dt;
         lp.endAt = r1(t);
         if (dm <= b.capturePoint.radius) lp.monsterInRadiusSec += dt;
         if (dm <= NEAR_POINT) lp.monsterNearSec += dt;
-        if (only.capturing) lp.capturingSec += dt;
-        if (only.blocked) lp.blockedSec += dt;
+        if (undone.some((p) => p.capturing)) lp.capturingSec += dt;
+        if (undone.some((p) => p.blocked)) lp.blockedSec += dt;
         if (mStoodFree && dm <= b.capturePoint.radius + 2) lp.monsterAmbushSec += dt;
-      } else if (!only && this.lastPoint && !this.lastPoint.finished && undone.length === 0) {
+      } else if (!only && this.lastPoint && !this.lastPoint.finished && doneNow >= this.required()) {
         this.lastPoint.finished = true;
         this.lastPoint.endAt = r1(t);
       }
@@ -1525,14 +1549,14 @@ function summaryMarkdown(s: Summary, title: string): string {
       .join(' · ')}`,
   );
   L.push('');
-  L.push('마지막 거점 (남은 거점이 하나뿐이던 구간)');
+  L.push('마지막 점령 (탈출구를 켜는 데 한 곳만 더 필요하던 구간 — 거점이 둘이면 남은 한 곳, 세 곳 중 두 곳이면 남은 두 곳 중 아무 데나)');
   L.push('');
   L.push('| 항목 | 값 |');
   L.push('|---|---|');
   const lp = s.lastPoint;
   L.push(`| 그 구간에 들어간 판 | ${lp.reached} / ${s.matches} |`);
   L.push(
-    `| 그중 마지막 거점을 끝내 못 끝낸 판 | **${lp.notFinished}** (${fmt(pct(lp.notFinished, lp.reached))}%) — ${
+    `| 그중 마지막 점령을 끝내 못 끝낸 판 | **${lp.notFinished}** (${fmt(pct(lp.notFinished, lp.reached))}%) — ${
       Object.entries(lp.notFinishedReasons)
         .map(([k, v]) => `${k} ${v}`)
         .join(' · ') || '–'
@@ -1671,12 +1695,12 @@ function compareMarkdown(a: Summary, b: Summary, nameA: string, nameB: string): 
       .join(' · ');
   row('끝났을 때 완료 거점 수', hist(a), hist(b));
   row(
-    '마지막 거점을 못 끝낸 판',
+    '마지막 점령을 못 끝낸 판',
     `${a.lastPoint.notFinished} / ${a.lastPoint.reached}`,
     `${b.lastPoint.notFinished} / ${b.lastPoint.reached}`,
   );
   row(
-    '마지막 거점 구간에서 괴물이 6타일 안',
+    '마지막 점령 구간에서 괴물이 남은 거점 6타일 안',
     `${fmt(a.lastPoint.monsterNearPct)}%`,
     `${fmt(b.lastPoint.monsterNearPct)}%`,
   );
