@@ -195,17 +195,24 @@ describe('거점 게이지 부품 (makeGauges)', () => {
     const G = HUD.gauge;
     const bars = hudSpecs().filter((x) => x.name.startsWith('gbar:'));
     expect(bars.length).toBe(5);
+    // 막대 틀은 가로 3조각 (막대 폭 한 장이면 아틀라스가 커져 지도 크게 보기 바닥의 텍스처 예산이 모자란다 — hudArt 주석)
     for (const b of bars)
-      expect(b.kind === 'frame' && [b.x0, b.y0, b.x1, b.y1]).toEqual([0, 0, G.barW, G.barH]);
+      expect(b.kind === 'kit' && [b.l, b.r, b.t, b.v]).toEqual([
+        G.barH / 2 + 4,
+        G.barH / 2 + 4,
+        G.barH,
+        false,
+      ]);
     const timerL = HUD.timer.x - HUD.timer.w / 2;
     const timerR = HUD.timer.x + HUD.timer.w / 2;
     for (const monster of [false, true]) {
       const r = run(false, monster);
-      // 막대 틀은 9조각이 아니라 한 장 (폭이 늘 barW — 판 중 그리는 그림 3 → 1, 일의 양 예산)
-      expect(r.slices).toEqual([]);
-      const bars = r.sprs
+      expect(r.sprs.filter((x) => x.s.name.startsWith('gbar:'))).toEqual([]);
+      const bars = r.slices
         .filter((x) => x.s.name.startsWith('gbar:'))
-        .map((x) => ({ tag: x.tag, x: x.s.x, w: G.barW }));
+        .map((x) => ({ tag: x.tag, x: x.s.box[0], w: x.s.box[2] }));
+      for (const x of r.slices.filter((x) => x.s.name.startsWith('gbar:')))
+        expect([x.s.box[2], x.s.box[3]]).toEqual([G.barW, G.barH]);
       expect(bars.map((b) => b.tag)).toEqual(['gaugeA', 'gaugeB', 'gaugeC']);
       const [a, b, c] = bars;
       expect(a!.x + a!.w).toBeLessThan(HUD.gaugeB.x);

@@ -321,11 +321,11 @@ describe('거점 게이지 · 타이머 · 상태 표시', () => {
   });
 
   it('꺼진 거점이 구운 그림의 선 색: PC 막대 틀 · 터치 줄 판 테두리는 HC.off(틀 색), ◇ 배지 · 칩 테두리 · 줄 게이지 ⊘ 아이콘은 HC.gaugeOff(상태색 — 패널 위 3:1)', () => {
-    /** 프레임 하나를 그리며 선(stroke)에 쓴 색 (rgba 문자열의 rgb 부분) */
+    /** 그림 하나(고정 그림 · 조각 그림 — PC 막대 틀은 가로 3조각)를 그리며 선(stroke)에 쓴 색 (rgba 문자열의 rgb 부분) */
     const strokesOf = (name: string): Set<string> => {
       const spec = hudSpecs().find((x) => x.name === name);
       expect(spec, name).toBeDefined();
-      if (!spec || spec.kind !== 'frame') return new Set();
+      if (!spec) return new Set();
       const out = new Set<string>();
       const state: Record<string, unknown> = {};
       const rgb = (v: unknown): string => String(v).replace(/,[^,]*\)$/, ')');
@@ -350,7 +350,9 @@ describe('거점 게이지 · 타이머 · 상태 표시', () => {
         },
       );
       try {
-        spec.paint(ctx as unknown as CanvasRenderingContext2D, 1);
+        const c = ctx as unknown as CanvasRenderingContext2D;
+        if (spec.kind === 'frame') spec.paint(c, 1);
+        else spec.paint(c, spec.l + 4 + spec.r, spec.v ? spec.t + 4 + spec.b : spec.t, 1);
       } finally {
         vi.unstubAllGlobals();
       }

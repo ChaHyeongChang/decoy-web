@@ -1150,18 +1150,15 @@ export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
   // ── 위 띠: 게이지 막대 틀 (3조각) · 채움 · 사선 · 배지 · 칩 · 타이머 틀 ──
   const G = h.gauge;
   const gs = G.barH / 2;
-  // 막대 틀: 폭이 늘 G.barW라 가로 3조각 대신 한 장으로 굽는다 — 판 중 그리는 그림이 게이지마다 3 → 1 (거점 셋이라 게이지가 늘어난
-  // 만큼을 덜어 낸다, 일의 양 예산). 기준점 = 막대 왼쪽 위
+  // 막대 틀: 가로 3조각 (가운데는 균일하다). 상태마다 막대 폭 한 장으로 구우면 판 중 그림은 게이지마다 3 → 1이지만 아틀라스가
+  // 배율 1에서 약 74KiB · 배율 2에서 약 380KiB 커져, 지도 크게 보기 바닥이 쓰는 텍스처 예산(prefsFx.bigMinimapTexels)이 모자랐다
+  // (PC 1920×1080 품질 낮음 바닥 879px < 화면 888px — 플레이테스트 b CI). 그림은 같다
   for (const s of touch ? [] : GAUGE_STATES)
-    add({
-      kind: 'frame',
-      name: `gbar:${s}`,
-      x0: 0,
-      y0: 0,
-      x1: G.barW,
-      y1: G.barH,
-      paint: (c, z) => paintHexFrame(c, G.barW, G.barH, z, gs, gaugeFrameColor(s), s === 'done' ? 0.8 : 0),
-    });
+    add(
+      kit(`gbar:${s}`, { l: gs + 4, r: gs + 4, t: G.barH, v: false }, (c, w, h, z) =>
+        paintHexFrame(c, w, h, z, gs, gaugeFrameColor(s), s === 'done' ? 0.8 : 0),
+      ),
+    );
   const fillW = G.barW - 6;
   const fillH = G.barH - 6;
   for (const [n, col] of touch
