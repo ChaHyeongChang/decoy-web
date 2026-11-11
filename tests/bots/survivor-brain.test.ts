@@ -671,7 +671,7 @@ describe('생존자 봇: 가는 길에 괴물이 있으면 돌아간다 (서지 
       { x: 0, y: 0.6 },
       { x: 0, y: -0.6 },
     ];
-    let checked = 0;
+    let asserted = 0;
     for (const me0 of FLEE_SPOTS) {
       for (const t1 of FLEE_SPOTS) {
         const d1 = far(me0, t1);
@@ -694,16 +694,22 @@ describe('생존자 봇: 가는 길에 괴물이 있으면 돌아간다 (서지 
           br.decide(view(130, null, me1), info, balance, 3);
           br.decide(view(131, null, me1), info, balance, 4);
           const st = br.debugState();
-          checked += 1;
-          if (st?.via)
-            expect(far(st.target, me1), `나 (${me1.x}, ${me1.y}) 괴물 (${t1.x}, ${t1.y})`).toBeGreaterThan(
-              1.5,
-            );
+          if (!st) continue;
+          const where = `나 (${me1.x}, ${me1.y}) 괴물 (${t1.x}, ${t1.y}): ${st.kind}${st.via ? ' via' : ''}`;
+          if (st.via) {
+            // 새로 고른 거쳐 갈 곳은 지금 자리가 아니다
+            expect(far(st.target, me1), where).toBeGreaterThan(1.5);
+            asserted += 1;
+          } else if (st.kind !== 'wait') {
+            // 곧장 가면 목표는 지금 자리가 아니다 (목표에 이미 닿은 경우만 빼고) — 닿은 거쳐 갈 곳에 서 버리지 않는다
+            expect(far(st.target, me1) > 0.6 || far(st.anchor, me1) < 1.5, where).toBe(true);
+            asserted += 1;
+          }
         }
       }
     }
-    // 검사가 헛돌지 않게
-    expect(checked).toBeGreaterThan(50);
+    // 검사가 헛돌지 않게: 반복 수가 아니라 실제로 단언한 수 (기다리기는 기다리는 자리에 머무는 것이라 뺀다)
+    expect(asserted).toBeGreaterThan(50);
   });
 });
 
