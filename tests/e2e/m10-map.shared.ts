@@ -541,6 +541,47 @@ export function offChipPixels(before: PointLook, after: PointLook): number {
   return n;
 }
 
+/** 가라앉음 확인 사이에 넘기는 프레임 수: 안개 주기(생존자 50ms)가 60fps에서도 한 번 넘게 돈다 (느린 러너는 프레임마다 돈다) */
+const SETTLE_FRAMES = 6;
+
+/** 두 번 잰 거점 모습이 같은 그림인가 (고리 픽셀 수 · 청록 비율 같음, 칩 픽셀 채널 차 2 이하) */
+function sameLook(a: PointLook, b: PointLook): boolean {
+  if (a.ringPx !== b.ringPx || a.ringCyan !== b.ringCyan || a.chip.length !== b.chip.length) return false;
+  return a.chip.every((p, i) => {
+    const q = b.chip[i];
+    return q !== undefined && p.every((v, k) => Math.abs(v - q[k]!) <= 2);
+  });
+}
+
+/**
+ * 순간이동 뒤 거점 하나의 모습을 장면이 가라앉은 뒤에 잰다 (고정 대기 뒤 한 번 읽기 대신 — PROGRESS '느린 러너 대응'):
+ * 내 그림 자리(getDrawn 'self')가 서버에 놓은 자리에 온 뒤, 프레임을 SETTLE_FRAMES씩 넘기며 잰 고리 · 칩 픽셀이 앞과 같을 때까지.
+ * 장식 시계 · 봇이 멈춘 장면이라 시야 · 안개가 따라오면 프레임마다 같은 그림이다
+ */
+export async function settledPointLook(page: Page, id: PointId, self: Vec2): Promise<PointLook> {
+  await page.waitForFunction(
+    ([x, y]) =>
+      (window.__DECOY__?.getDrawn() ?? []).some(
+        (d) => d.kind === 'self' && d.layer !== 'minimap' && Math.hypot(d.x - x!, d.y - y!) < 0.01,
+      ),
+    [self.x, self.y],
+    { timeout: 15_000 },
+  );
+  const frames = (): Promise<number> => page.evaluate(() => window.__DECOY__?.getAnimState()?.frames ?? 0);
+  let prev = await pointLook(page, id);
+  for (let i = 0; i < 20; i += 1) {
+    await page.waitForFunction(
+      ({ f, n }) => (window.__DECOY__?.getAnimState()?.frames ?? 0) >= f + n,
+      { f: await frames(), n: SETTLE_FRAMES },
+      { timeout: 30_000 },
+    );
+    const cur = await pointLook(page, id);
+    if (sameLook(prev, cur)) return cur;
+    prev = cur;
+  }
+  throw new Error(`거점 ${id} 그림이 가라앉지 않았다 (${SETTLE_FRAMES}프레임씩 20번)`);
+}
+
 /** 꺼진 거점 판정 (exitOpensWhileFrozen의 C): 꺼지기 전 청록 고리 → 꺼진 뒤 회색 끊긴 고리 · ⊘ 칩 · 정보 레이어 off */
 export function expectPointTurnedOff(before: PointLook, after: PointLook): void {
   expect(before.badge?.value).toBe('idle');
@@ -616,8 +657,9 @@ export async function exitOpensWhileFrozen(s: Session): Promise<{
   await send({ kind: 'teleport', target: id('monster'), x: 44.5, y: 12.5, face: 0 });
   await send({ kind: 'teleport', target: id('runner'), x: 21, y: 3.5, face: 0 });
   await send({ kind: 'teleport', target: id('guard'), x: 3, y: 28, face: 0 });
-  await page.waitForTimeout(300);
-  const cBefore = await pointLook(page, 'C');
+  // 꺼지기 전 C: 러너를 C 옆에 옮긴 뒤 시야 · 안개가 따라와 그림이 가라앉을 때 잰다 (고정 대기 뒤 한 번 읽기 금지 — 칩 픽셀은
+  // 꺼진 뒤와 같은 조명에서 찍어야 offChipPixels의 '꺼지기 전 바닥' 기준이 된다)
+  const cBefore = await settledPointLook(page, 'C', { x: 21, y: 3.5 });
   const badge = (tag: string): Promise<string | number | null> =>
     page.evaluate(
       (t) =>
