@@ -1625,8 +1625,10 @@ export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
       c.lineTo(0, 4.5);
       c.lineTo(-4.5, 0);
       c.closePath();
-      c.moveTo(-3.2, -3.2);
-      c.lineTo(3.2, 3.2);
+      // 사선은 마름모 변 위(대각선과 변이 만나는 (±4.5/2, ±4.5/2))에서 끝난다 (맵 배지 · 게이지 ⊘처럼 테두리에서 멈춤).
+      // 원 ⊘처럼 가운데에서 4.5 떨어진 (±3.2, ±3.2)로 잡으면 마름모의 대각선 쪽 폭(4.5/√2 ≈ 3.18)을 넘어 변 밖으로 삐져나온다
+      c.moveTo(-4.5 / 2, -4.5 / 2);
+      c.lineTo(4.5 / 2, 4.5 / 2);
       c.lineWidth = 1.3;
       c.strokeStyle = rgba(OBJ_COLOR.off);
       c.stroke();
