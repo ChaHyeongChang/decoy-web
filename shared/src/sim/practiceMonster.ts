@@ -95,9 +95,13 @@ const COMBO_FACING = 0.5;
 const DIRECT_CHASE = 3.5;
 /** 추적 중 표적의 이동을 내다보는 최대 시간 (초) */
 const CHASE_LEAD_MAX = 0.35;
-/** 추적 중 시야 (M6): 표적이 이 거리 안이면 탐색 시야(넓게), 이 거리 밖이면 추적 시야. 사이는 그대로 (이력, 타일) */
+/**
+ * 추적 중 시야 (M6): 표적이 WIDE_NEAR 안이면 탐색 시야(넓게), 탐색 시야 사거리(balance)에서 WIDE_FAR_MARGIN 안쪽을 넘으면 추적 시야.
+ * 사이는 그대로 (이력, 타일). 탐색 시야는 사거리 밖을 하드 컷으로 못 보므로(스냅샷에 안 온다), 거두는 거리가 사거리와 같으면 그 갈래에
+ * 닿지 않는다 — 사거리보다 여유 있게 안쪽에서 바꿔야 멀어지는 표적을 놓치기 전에 추적 시야로 간다 (전환 0.4초 동안도 보이게)
+ */
 const WIDE_NEAR = 3.5;
-const WIDE_FAR = 5.0;
+const WIDE_FAR_MARGIN = 0.6;
 /** 보호 중인 생존자는 이만큼 먼 것으로 친다 (타일): 다른 표적이 있으면 그쪽 */
 const PROTECTED_PENALTY = 8;
 /** 지금 쫓는 표적을 유지하는 덤 (타일): 비슷하면 표적을 바꾸지 않는다 */
@@ -688,10 +692,11 @@ export class PracticeMonsterBrain implements BotBrain {
     const me = snap.you.move;
     const mon = snap.you.mon;
     const d = dist(me, t);
-    // 시야 (M6): 가까우면 넓게, 멀면 멀리. 막 쫓기 시작했으면 지금 모드에서 시작한다
+    // 시야 (M6): 가까우면 넓게, 탐색 시야 사거리에 가까워지면 멀리. 막 쫓기 시작했으면 지금 모드에서 시작한다
     if (!this.chasing && mon) this.chaseMode = mon.mode;
-    if (d <= WIDE_NEAR) this.chaseMode = 'search';
-    else if (d >= WIDE_FAR) this.chaseMode = 'hunt';
+    const band = chaseVisionBand(b);
+    if (d <= band.near) this.chaseMode = 'search';
+    else if (d >= band.far) this.chaseMode = 'hunt';
     const mode = this.chaseMode;
     if (!mon) return mode;
     // 손 (조정 A): 겨누기 · 누르기 · 준비 중 따라가기는 알아채기 지연만큼 전에 본 모습으로 짐작한 자리로
@@ -1215,6 +1220,14 @@ function nearestOf(spots: readonly Vec2[], to: Vec2): Vec2 {
   let best: Vec2 = spots[0] ?? to;
   for (const s of spots) if (closerThan(to, s, best)) best = s;
   return best;
+}
+
+/**
+ * 추적 중 시야 문턱 (M6, 타일): near 안이면 탐색 시야(넓게), far 밖이면 추적 시야. far는 탐색 시야 사거리(balance)에서 여유만큼 안쪽 —
+ * 탐색 시야로 쫓는 표적은 사거리 안에서만 보이므로 far가 사거리 이상이면 닿지 않는다
+ */
+export function chaseVisionBand(b: Balance): { near: number; far: number } {
+  return { near: WIDE_NEAR, far: b.monster.visionModes.search.range - WIDE_FAR_MARGIN };
 }
 
 /**

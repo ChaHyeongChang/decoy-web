@@ -36,7 +36,7 @@ import {
   type BotBrain,
 } from '@decoy/shared/sim';
 import { fieldFrom, pathDist } from '../../shared/src/sim/practiceMap';
-import { ringSpots, searchSpots } from '../../shared/src/sim/practiceMonster';
+import { chaseVisionBand, ringSpots, searchSpots } from '../../shared/src/sim/practiceMonster';
 import { loadTestBalance, place } from '../helpers/fixtures';
 
 const balance = loadTestBalance();
@@ -346,8 +346,9 @@ describe('실전 괴물 봇: 추격 (M1 돌진 → 공격, M2 거리 좁히기 �
     }
   });
 
-  it('추적 중 표적이 3.5타일 안이면 탐색 시야(넓게)로 바꾸고, 5타일 밖이면 추적 시야로 (M6)', () => {
+  it('추적 중 표적이 3.5타일 안이면 탐색 시야(넓게)로 바꾸고, 탐색 시야 사거리 조금 안쪽을 넘어 멀어지면 놓치기 전에 추적 시야로 (M6)', () => {
     const { snap: base, info } = baseSnap();
+    const searchRange = balance.monster.visionModes.search.range;
     const modePress = (d: number, mode: 'search' | 'hunt'): boolean => {
       const brain = practiceBrain('monster', 3);
       let any = false;
@@ -371,11 +372,21 @@ describe('실전 괴물 봇: 추격 (M1 돌진 → 공격, M2 거리 좁히기 �
     };
     expect(modePress(2.5, 'hunt')).toBe(true);
     expect(modePress(2.5, 'search')).toBe(false);
-    expect(modePress(6.5, 'search')).toBe(true);
+    // 실제로 생기는 장면: 탐색 시야(사거리 5.0, 하드 컷)로 쫓는 표적이 사거리 가까이(4.5~4.9) 멀어진다 — 탐색 시야에서는 5.0 밖의
+    // 표적이 스냅샷에 오지 않으므로, 넓은 시야를 거두는 거리가 사거리 안쪽이어야 놓치기 전에 추적 시야로 바꾼다
+    expect(modePress(4.7, 'search')).toBe(true);
+    expect(modePress(searchRange - 0.1, 'search')).toBe(true);
+    expect(modePress(4.7, 'hunt')).toBe(false);
     expect(modePress(6.5, 'hunt')).toBe(false);
     // 사이(4.2타일)에서는 지금 모드를 그대로 둔다 (오가며 누르지 않게)
     expect(modePress(4.2, 'hunt')).toBe(false);
     expect(modePress(4.2, 'search')).toBe(false);
+  });
+
+  it('M6 문턱: 넓은 시야를 거두는 거리는 탐색 시야 사거리(balance)보다 여유 있게 안쪽이고, 넓히는 거리보다 바깥 (닿지 않는 갈래가 없게)', () => {
+    const band = chaseVisionBand(balance);
+    expect(band.far).toBeLessThan(balance.monster.visionModes.search.range - 0.3);
+    expect(band.far).toBeGreaterThan(band.near + 0.5);
   });
 });
 
