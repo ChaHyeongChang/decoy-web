@@ -849,7 +849,8 @@ export class PracticeSurvivorBrain implements BotBrain {
   /**
    * 기다리기: 남은 할 일이 모두 지켜질 때. 목표 둘레의 기다리는 자리 몇 곳을 오가며 서성인다(한자리에 WAIT_DWELL 안쪽만 머문다).
    * 기다림 한도가 지나면 다른 쪽 자리로 옮기고, 미끼(decoyOrder의 첫 자유 생존자)는 PROBE_TIME 동안 목표로 들어가 본다
-   * (PROBE_ALL_ROUND부터는 모두). enter는 들어갈 때의 할 일
+   * (PROBE_ALL_ROUND부터는 모두). 들어가 보기는 한 번에 한 번 다가가기: 달아나기 시작하면 끝나고, 기다림 한도는 들어가 보기 ·
+   * 도주가 끝난 뒤부터 다시 센다. enter는 들어갈 때의 할 일
    */
   private waitTask(snap: Snapshot, info: MatchInfo, enter: Task): Task {
     const me = snap.you.move;
@@ -876,15 +877,27 @@ export class PracticeSurvivorBrain implements BotBrain {
       };
       this.wait = w;
     }
+    const dt = this.now - w.last;
     w.last = this.now;
     w.infoTick = t?.tick ?? -1;
-    if (this.now >= w.patienceAt) {
+    if (this.fleeing) {
+      // 달아나는 동안은 기다리는 것이 아니다: 기다림 한도를 멈춘다. 들어가 보다 달아나기 시작했으면 그 들어가 보기는 끝이고
+      // 돌아와 기다림 한도를 처음부터 기다린다 — 한 번에 한 번 다가가기 (괴물이 지켜 서 있기만 해도 도주 반경 경계에서
+      // 들어가 보기 ↔ 도주를 0.3초마다 되풀이하지 않게)
+      if (this.now < w.probeUntil) {
+        w.probeUntil = this.now;
+        w.patienceAt = this.now + this.patience();
+      } else w.patienceAt += dt;
+    }
+    // 기다림 한도는 들어가 보는 동안 세지 않는다 (끝난 때부터 다시 센다 — 다음 라운드가 들어가 보기를 늘리지 않게)
+    if (this.now >= w.probeUntil && this.now >= w.patienceAt) {
       w.round += 1;
-      w.patienceAt = this.now + this.patience();
+      const patience = this.patience();
       if (w.spots.length > 0) w.prev = w.spots;
       w.spots = [];
       if (w.round >= PROBE_ALL_ROUND || this.isDecoy(snap, info))
         w.probeUntil = this.now + this.sec(PROBE_TIME);
+      w.patienceAt = Math.max(this.now, w.probeUntil) + patience;
     }
     if (this.now < w.probeUntil) return { ...enter, probe: true };
     const moved = t !== null && !(Math.hypot(t.x - w.tx, t.y - w.ty) <= WAIT_REPLAN_MOVE);
@@ -957,6 +970,9 @@ export class PracticeSurvivorBrain implements BotBrain {
       if (t) {
         const margin = pathDist(fs, t) - FLEE_SPEED_RATIO * dMe;
         if (margin < WAIT_SAFE) score -= 20 + (WAIT_SAFE - margin);
+        // 도주 반경 안(괴물을 본 자리에서 도주가 끝나는 거리 안)은 기다리는 자리가 아니다 — 닿으면 달아나고 도주가 끝나면
+        // 다시 돌아와, 지켜 서 있는 괴물 앞에서 기다리기 ↔ 도주를 되풀이한다
+        if (dist(t, s) < FLEE_DIST + FLEE_HYST) score -= 20;
         if (lineOfSight(t, s)) score -= 4;
       }
       for (const p of avoid) if (dist(p, s) < WAIT_AVOID_RADIUS) score -= WAIT_AVOID_PENALTY;

@@ -3,15 +3,20 @@
 //    탐지 대기 · 지켜짐 기억 · 기다림 차례가 정지가 없을 때와 같다
 //  - 질주 · 밀치기 반응 대기는 갇히면 처음부터 (풀려난 첫 틱에 반응 시간 없이 누르지 않는다)
 //  - 미끼 차례는 연습 방(봇 여부를 아는 방)의 사람 동료를 건너뛴다. 빠른 매칭은 남의 봇 여부를 모르니 순서 그대로
+//  - 미끼가 들어가 보기는 한 번에 한 번 다가가기: 다음 라운드가 다시 걸지 않고(5초 뒤 끝), 달아나기 시작하면 끝난다 —
+//    괴물이 지켜 서 있기만 해도 도주 반경 경계에서 들어가 보기 ↔ 도주를 끝없이 되풀이하던 것
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   BTN,
   CAPTURE_POINTS,
   RESCUE_POINT,
+  emptyInput,
+  type Balance,
   type InputFrame,
   type MatchInfo,
   type RoleId,
   type Snapshot,
+  type Vec2,
 } from '@decoy/shared';
 import {
   PracticeSurvivorBrain,
@@ -257,5 +262,106 @@ describe('생존자 봇: 미끼 차례는 연습 방의 사람 동료를 건너�
     // 3라운드(기다림 한도 셋, 9초 이상)부터는 모두 들어가 본다
     expect(firstProbe(true, true)).toBeGreaterThanOrEqual(9 - 1e-9);
     expect(firstProbe(false, false)).toBeGreaterThanOrEqual(9 - 1e-9);
+  });
+});
+
+// ───────────────────────── 들어가 보기 ─────────────────────────
+
+/** 한자리에 서서 look 쪽을 보기만 한다 (치지 않는다 — 사람 괴물이 감옥 · 거점 앞에서 지키고 서 있는 경우) */
+class WatchMonster implements BotBrain {
+  constructor(
+    private readonly spot: Vec2,
+    private readonly look: Vec2,
+  ) {}
+
+  decide(snap: Snapshot, _info: MatchInfo, _b: Balance, seq: number): InputFrame {
+    const me = snap.you.move;
+    const out: InputFrame = { ...emptyInput(seq), aim: Math.atan2(this.look.y - me.y, this.look.x - me.x) };
+    const d = Math.hypot(this.spot.x - me.x, this.spot.y - me.y);
+    if (d > 0.3) {
+      out.mx = (this.spot.x - me.x) / d;
+      out.my = (this.spot.y - me.y) / d;
+    }
+    return out;
+  }
+}
+
+/** 두뇌 상태 꼬리표: 도주 · 들어가 보기 · 할 일 종류 */
+function tag(brain: PracticeSurvivorBrain): string {
+  const d = brain.debugState();
+  return d ? (d.fleeing ? 'flee' : d.probe ? 'probe' : d.kind) : 'none';
+}
+
+describe('생존자 봇: 미끼가 들어가 보기는 한 번에 한 번 다가가기 (괴물이 서 있기만 해도 떨지 않는다)', () => {
+  it('동료 둘이 갇히고 괴물이 구조 지점 남쪽 3.5타일에 서서 보기만 한다: 들어가 보기 ↔ 도주를 되풀이하지 않고 기다리는 자리로 돌아온다', () => {
+    const spot = { x: RESCUE_POINT.x, y: RESCUE_POINT.y + 3.5 };
+    for (const seed of [1, 2, 3, 4, 5]) {
+      const runner = new PracticeSurvivorBrain('runner', seed);
+      const sim = scene(seed, { p1: new WatchMonster(spot, RESCUE_POINT), p2: runner });
+      const g = sim.game;
+      place(g, 'p1', spot.x, spot.y);
+      place(g, 'p2', 9.5, 25.5);
+      for (const [i, id] of ['p3', 'p4'].entries()) {
+        const s = g.survivorById(id);
+        if (!s) throw new Error('자리 없음');
+        s.status = 'imprisoned';
+        s.move.x = 23.5 + i;
+        s.move.y = 15.5;
+      }
+      const seq: string[] = [];
+      for (let t = 0; t < 30 * HZ && !g.end; t += 1) {
+        sim.step();
+        const now = tag(runner);
+        if (seq[seq.length - 1]?.split('@')[0] !== now) seq.push(`${now}@${(t / HZ).toFixed(1)}`);
+      }
+      const kinds = seq.map((e) => e.split('@')[0]);
+      let flees = 0;
+      let fleeToProbe = 0;
+      for (let i = 1; i < kinds.length; i += 1) {
+        if (kinds[i] === 'flee') flees += 1;
+        if (kinds[i - 1] === 'flee' && kinds[i] === 'probe') fleeToProbe += 1;
+      }
+      const msg = `seed ${seed}: ${seq.join(' ')}`;
+      // 들어가 보기는 있다 (혼자라 미끼 차례)
+      expect(kinds.includes('probe'), msg).toBe(true);
+      // 달아난 뒤 곧바로 다시 들어가지 않는다 (기다리는 자리로 돌아와 다음 기다림 한도를 기다린다)
+      expect(fleeToProbe, msg).toBe(0);
+      // 달아나기는 들어가 볼 때(기다림 한도 3~4초마다 한 번)만 — 30초에 8번 넘지 않는다. 옛 코드는 0.3~0.4초마다
+      // 들어가 보기 ↔ 도주, 들어가 보기만 고치면 도주 반경 안에 고른 기다리는 자리에서 기다리기 ↔ 도주였다
+      expect(flees, msg).toBeLessThanOrEqual(8);
+    }
+  });
+
+  it('괴물이 계속 보이는 지켜진 구조 지점: 들어가 보기는 PROBE_TIME(5초) 뒤 끝나 기다리기로 돌아온다 (다음 라운드가 다시 걸지 않는다)', () => {
+    const { snap, info } = closeUp('runner', 1.0);
+    const base = snap.monster;
+    if (!base) throw new Error('괴물 없음');
+    const survivors = snap.survivors.map((v, i) => ({
+      ...v,
+      status: 'imprisoned' as const,
+      x: 23.5 + i,
+      y: 15.5,
+    }));
+    for (const seed of [1, 2, 3, 9]) {
+      const brain = new PracticeSurvivorBrain('runner', seed);
+      const spans: { from: number; to: number }[] = [];
+      for (let k = 0; k < 30 * HZ; k += 1) {
+        const s: Snapshot = {
+          ...at(snap, 100 + k, { ...base, x: RESCUE_POINT.x, y: RESCUE_POINT.y + 1, windup: 0 }),
+          survivors,
+          you: { ...snap.you, surv: snap.you.surv ? { ...snap.you.surv, spotted: false } : null },
+        };
+        brain.decide(s, info, balance, k + 1);
+        const probe = brain.debugState()?.probe === true;
+        const last = spans[spans.length - 1];
+        if (probe && (!last || last.to >= 0)) spans.push({ from: k, to: -1 });
+        else if (!probe && last && last.to < 0) last.to = k;
+      }
+      const msg = `seed ${seed}: ${spans.map((p) => `${(p.from / HZ).toFixed(2)}~${(p.to / HZ).toFixed(2)}`).join(' ')}`;
+      expect(spans.length, msg).toBeGreaterThanOrEqual(2);
+      for (const p of spans.slice(0, -1)) {
+        expect(p.to - p.from, msg).toBe(Math.round(5 * HZ));
+      }
+    }
   });
 });
