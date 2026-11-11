@@ -51,7 +51,7 @@ import { loadTestBalance, place } from '../helpers/fixtures';
 const balance = loadTestBalance();
 /**
  * 시드 6개: 생존자 승리 셋(1 · 7 · 9)과 괴물 승리 셋(2 · 4 · 10). 플레이테스트 반영 b(거점 세 곳 중 두 곳 · 목표 거점 이력)
- * 규칙 · 두뇌로 1~60 조사에서 생존자 41 · 괴물 19 · 시간 초과 0이었다.
+ * 규칙 · 두뇌로 1~60을 조사하면 생존자가 40판 안팎 · 시간 초과 0이다(괴물 화면 임시 ID가 암호 난수라 시드 한둘은 실행마다 뒤집힌다).
  * 판은 혼돈스러워 규칙 · 길찾기 · 두뇌가 조금만 바뀌어도 시드별 결과가 뒤집힐 수 있어, 한쪽에 하나만 걸지 않게 셋씩 고른다
  * (바뀌면 다시 조사해 셋씩 맞추고 이 주석도 고친다)
  */
@@ -676,7 +676,7 @@ describe('실전 봇: 거점 세 곳 중 두 곳 (플레이테스트 반영 b)',
 
   // 꺼진 거점에 남지 않는 것은 위 손으로 만든 장면 시험이 본다 (봇끼리 판에서는 그 갈래에 거의 닿지 않고, 숨어 기다리기처럼
   // 정상인 서 있기가 꺼진 반경 안에 걸리기도 해 판 전체 수로는 지킬 수 없다)
-  it('봇끼리 판(시드 1~24): 두 곳을 끝낸 판(승패 무관)의 거점 조합이 AB에 묶이지 않고(C가 든 조합도 나온다), 끝난 거점은 언제나 두 곳 이하다', () => {
+  it('봇끼리 판(시드 1~24): 생존자가 이긴 판의 끝난 거점 조합이 AB에 묶이지 않고(C가 든 조합도 나온다), 끝난 거점은 언제나 두 곳 이하다', () => {
     preparePracticeMap();
     const combos = new Set<string>();
     for (let seed = 1; seed <= 24; seed += 1) {
@@ -689,7 +689,7 @@ describe('실전 봇: 거점 세 곳 중 두 곳 (플레이테스트 반영 b)',
       // 끝난 거점은 언제나 두 곳 이하, 셋째는 끝나지 않는다
       const done = g.points.filter((p) => p.done).map((p) => p.id);
       expect(done.length).toBeLessThanOrEqual(balance.capturePoint.required);
-      if (done.length === balance.capturePoint.required) combos.add(done.join(''));
+      if (g.end?.winner === 'survivors') combos.add(done.join(''));
     }
     expect(combos.size).toBeGreaterThanOrEqual(2);
     expect([...combos].some((c) => c.includes('C'))).toBe(true);
