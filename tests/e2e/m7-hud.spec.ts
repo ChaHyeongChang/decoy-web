@@ -2,6 +2,7 @@
 // 거점 진행 숫자(플레이테스트 a-7): 네 화면 모두 자기 스냅샷 진행의 내림 % (괴물 화면도 같은 값)
 import { mkdirSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
+import { STORY_TEXT } from '../../client/src/data/storyText';
 import {
   aimMonsterAt,
   closeAll,
@@ -33,13 +34,10 @@ test('첫 판 조작 안내 · 시작 문구 · Tab 점수판', async ({ browser
   const { players } = await startFourPlayerMatch(browser);
   const runner = players.find((p) => p.role === 'runner')!;
   const monster = players.find((p) => p.role === 'monster')!;
-  // 시작 문구 (생존자: 기록자의 벽글씨, 괴물: 명령)
-  await runner.page.waitForFunction(() =>
-    (window.__DECOY__?.getBanners() ?? []).some((t) => t.includes('비밀번호는 두 장소')),
-  );
-  await monster.page.waitForFunction(() =>
-    (window.__DECOY__?.getBanners() ?? []).some((t) => t.includes('다시 가둬라')),
-  );
+  // 시작 문구 (생존자: 기록자의 벽글씨, 괴물: 명령). 글귀는 문구 원본(storyText)에서 가져온다: 문구가 바뀌어도 옛 글귀를 기다리지 않게
+  const hasBanner = (t: string): boolean => (window.__DECOY__?.getBanners() ?? []).includes(t);
+  await runner.page.waitForFunction(hasBanner, STORY_TEXT.INTRO_WALL.text);
+  await monster.page.waitForFunction(hasBanner, STORY_TEXT.INTRO_MONSTER.text);
   // Tab 점수판은 누르고 있는 동안만
   await runner.page.keyboard.down('Tab');
   await runner.page.waitForTimeout(150);
