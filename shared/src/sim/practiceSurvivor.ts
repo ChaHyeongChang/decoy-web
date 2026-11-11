@@ -11,6 +11,7 @@
 //    반대쪽으로 비키며 방향 오차가 있다. 질주 · 밀치기도 조건이 처음 참이 된 뒤 0.2~0.35초. 분포는 역할과 무관하다.
 //    난수는 행동마다 따로 뽑은 시드 난수 흐름이다(한 행동의 난수가 다른 행동의 순서를 밀지 않게)
 //  - 거점 · 탈출구에서 서는 자리는 역할이 아니라 (판 시드, 장소)로 섞어 정한다 (괴물 화면에서 자리로 역할을 짐작하지 못하게)
+//  - 두뇌 시계는 판이 흐른 시간만 센다: 시작 카운트다운 · 판 정지(괴물 재접속 대기) 동안은 탐지 대기 · 기억 · 기다림이 흐르지 않는다
 import {
   BTN,
   CAPTURE_POINTS,
@@ -180,6 +181,11 @@ const DODGE_SALT = 0x1b873593;
 const ABILITY_SALT = 0x5bd1e995;
 const WAIT_SALT = 0x27d4eb2f;
 const NOTICE_SALT = 0x165667b1;
+/**
+ * 두뇌 시계: 스냅샷 틱 간격이 이보다(초) 길면 판 정지(괴물 재접속 대기 — BotDriver · 서버 봇은 정지 중 두뇌를 부르지 않는데
+ * 스냅샷 틱은 오른다)로 보고 한 틱으로 센다. 평소 간격은 1~2틱(30Hz 틱 · 20Hz 스냅샷)
+ */
+const PAUSE_GAP = 0.5;
 /** 거점에서 서는 자리 (가운데에서 조금씩 비켜, 모두 반경 안). 누가 어느 자리인지는 standSlot (판 시드 · 장소) */
 const POINT_SLOTS: readonly Vec2[] = [
   { x: -0.8, y: 0 },
@@ -225,7 +231,7 @@ interface Danger {
 
 /** 공격 준비 하나에 대한 반응 (본 스냅샷에서 한 번 굴린다) */
 interface Dodge {
-  /** 비키기 시작하는 스냅샷 틱 */
+  /** 비키기 시작하는 틱 (두뇌 시계) */
   at: number;
   skip: boolean;
   wrong: boolean;
@@ -258,7 +264,7 @@ interface WaitPlan {
 
 /** 진단 · 시험용 두뇌 상태 (읽기 전용 사본) */
 export interface SurvivorBrainDebug {
-  /** 두뇌의 지금 (마지막 스냅샷 틱) */
+  /** 두뇌의 지금 (두뇌 시계 — 판 정지가 없으면 마지막 스냅샷 틱) */
   tick: number;
   kind: SurvivorTaskKind;
   anchor: Vec2;
@@ -392,6 +398,10 @@ export class PracticeSurvivorBrain implements BotBrain {
   private readonly walker = new Walker();
   private hz = 30;
   private lastObserved = -1;
+  /**
+   * 두뇌 시계 (틱): 판이 흐른 시간만 센다. 판 정지가 없으면 스냅샷 틱과 같다. 기억한 틱(괴물 본 때 · 탐지 대기 · 기다림 차례 ·
+   * 반응 · 막힘)은 모두 이 시계로 적는다 — 정지가 풀린 첫 스냅샷에서 정지 시간이 한꺼번에 흐른 것으로 보지 않게
+   */
   private now = 0;
   private threat: Threat | null = null;
   /** 괴물 정보(보임 · 탐지 · 포효)를 마지막으로 받은 틱 (판이 흐르기 전 시간은 세지 않는다) */
@@ -513,20 +523,21 @@ export class PracticeSurvivorBrain implements BotBrain {
   private observe(snap: Snapshot): void {
     if (snap.tick === this.lastObserved) return;
     const first = this.lastObserved < 0;
+    const gap = snap.tick - this.lastObserved;
     this.lastObserved = snap.tick;
-    this.now = snap.tick;
+    this.now = first ? snap.tick : this.now + (gap > 0 && gap <= this.sec(PAUSE_GAP) ? gap : 1);
     // 판이 흐르기 전(시작 카운트다운) · 두뇌가 판에 들어오기 전 시간은 '괴물 정보 없음'으로 세지 않는다 (카운트다운이 끝나는 틱부터)
     if (first || snap.world.countdown > 0) {
-      this.lastInfo = Math.max(this.lastInfo, snap.tick + Math.round(snap.world.countdown * this.hz));
+      this.lastInfo = Math.max(this.lastInfo, this.now + Math.round(snap.world.countdown * this.hz));
     }
     const m = snap.monster;
     // 공격 준비 반응: 준비가 새로 보인 스냅샷에서 한 번 굴린다 (난수를 늘 다섯 번 뽑아 흐름이 결과에 따라 밀리지 않게)
     const windup = m ? m.windup : 0;
-    if (windup > 0 && !this.windupSeen) this.dodge = this.rollDodge(snap.tick);
+    if (windup > 0 && !this.windupSeen) this.dodge = this.rollDodge(this.now);
     else if (windup <= 0) this.dodge = null;
     this.windupSeen = windup > 0;
     if (m && !this.monsterSeenPrev)
-      this.noticeAt = snap.tick + uniform(this.noticeRng, NOTICE_DELAY) * this.hz;
+      this.noticeAt = this.now + uniform(this.noticeRng, NOTICE_DELAY) * this.hz;
     this.monsterSeenPrev = m !== null;
     let pos: Vec2 | null = m ? { x: m.x, y: m.y } : null;
     if (!pos) {
@@ -535,8 +546,8 @@ export class PracticeSurvivorBrain implements BotBrain {
       }
     }
     if (pos) {
-      this.threat = { x: pos.x, y: pos.y, tick: snap.tick };
-      this.lastInfo = snap.tick;
+      this.threat = { x: pos.x, y: pos.y, tick: this.now };
+      this.lastInfo = this.now;
     }
     for (const ev of snap.events) {
       if (ev.k === 'text' && ev.code && (ev.id === 'NOTE_FIRST' || ev.id === 'NOTE_SECOND'))
@@ -556,12 +567,12 @@ export class PracticeSurvivorBrain implements BotBrain {
     if (
       m &&
       !curOpen &&
-      snap.tick - this.exitSwitchedAt >= this.sec(EXIT_SWITCH_GAP) &&
+      this.now - this.exitSwitchedAt >= this.sec(EXIT_SWITCH_GAP) &&
       dist(m, EXITS[cur].center) < EXIT_SWITCH_NEAR &&
       dist(m, EXITS[other].center) > EXIT_SWITCH_FAR
     ) {
       this.exitChoice = other;
-      this.exitSwitchedAt = snap.tick;
+      this.exitSwitchedAt = this.now;
     }
   }
 
