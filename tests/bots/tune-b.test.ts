@@ -139,11 +139,13 @@ describe('생존자 봇 (tb): 잡혀 본 · 다친 생존자는 트인 곳보다
     // 역할과 무관: 같은 (수감 횟수, 체력)이면 세 역할이 같은 곳
     for (const list of spots) for (const s of list) expect(s).toEqual(list[0]);
     const open = spots.map((list) => opennessAt(list[0] as Vec2));
-    // 0단계: 가운데 홀 (열린 정도 18). 1단계(수감 1번 · 부상)끼리 같은 곳, 2단계끼리 같은 곳, 단계가 오를수록 덜 트인 곳
+    // 0단계: 가운데 홀 (열린 정도 18). 1단계(수감 1번 · 부상)끼리 같은 곳, 2단계끼리 같은 곳, 단계가 오를수록 더 트인 곳으로 가지 않고
+    // 2단계는 0단계보다 덜 트인 곳. (1단계 가중치 0.5는 이 장면에서 가운데 홀과 같은 곳을 고른다 — 통합 조정에서 0.45 → 0.5)
     expect(open[0]).toBe(18);
     expect(spots[1]?.[0]).toEqual(spots[2]?.[0]);
     expect(spots[3]?.[0]).toEqual(spots[4]?.[0]);
-    expect(open[1]).toBeLessThan(open[0] as number);
-    expect(open[3]).toBeLessThan(open[1] as number);
+    expect(open[1]).toBeLessThanOrEqual(open[0] as number);
+    expect(open[3]).toBeLessThanOrEqual(open[1] as number);
+    expect(open[3]).toBeLessThan(open[0] as number);
   });
 });
