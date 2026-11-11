@@ -38,7 +38,7 @@ const POLL = { intervals: [100, 150, 200], timeout: 20_000 };
 /** 글자 하한 (CSS px, MOBILE_PLAN M12 2번) */
 const MIN_FONT = 12;
 /** 늘 떠 있는 HUD 부품 */
-const PERSISTENT = /^(timer|gaugeA|gaugeB|card\d|minimap)$/;
+const PERSISTENT = /^(timer|gauge[A-C]|card\d|minimap)$/;
 
 /** 터치 기기 (기기 배율 1, 창 크기 지정) */
 function touchDevice(width: number, height: number): DeviceOptions {
@@ -470,7 +470,7 @@ function partBox(l: HudLayout, id: string): { x: number; y: number; w: number; h
   };
 }
 
-test('터치 거점 줄 게이지: 생존자 · 괴물 화면마다 진행 숫자가 자기 스냅샷 진행의 내림 %, 두 줄이 위아래로 맞닿아 예전 링 한 쌍 높이 안이고, 숫자가 바뀌어도 다시 굽지 않는다', async ({
+test('터치 거점 줄 게이지: 생존자 화면은 진행 숫자가 자기 스냅샷 진행의 내림 %(괴물 화면은 숫자 없음), 세 줄이 위아래로 맞닿아 줄 높이 × 거점 수 안이고, 숫자가 바뀌어도 다시 굽지 않는다', async ({
   browser,
 }) => {
   test.setTimeout(150_000);
@@ -492,12 +492,13 @@ test('터치 거점 줄 게이지: 생존자 · 괴물 화면마다 진행 숫�
     await send({ kind: 'teleport', target: capturer, x: 14, y: 16.5 });
     await send({ kind: 'setPoint', point: 'A', progress: 0 });
     await send({ kind: 'setPoint', point: 'B', progress: 0.37 });
-    // 멈춘 진행 (아무도 없는 B): 이 화면 스냅샷 진행(0.37)의 내림 % — 괴물 화면도 숫자를 보인다(PCT_FOR_MONSTER)
+    // 멈춘 진행 (아무도 없는 B): 이 화면 스냅샷 진행(0.37)의 내림 % — 괴물 화면은 숫자가 없다(PCT_FOR_MONSTER, 플레이테스트 b)
+    const mon = role === 'monster';
     const b = await waitPointPct(page, 'B', (q) => q.state === 'idle' && q.want === 37, `${role} B 37`);
-    expect(b.frame, role).toBe('pct:text:o7');
+    expect(b.frame, role).toBe(mon ? '' : 'pct:text:o7');
     still[role] = b.shown;
     const a0 = await waitPointPct(page, 'A', (q) => q.want === 0, `${role} A 0`);
-    expect(a0.frame, role).toBe('pct:dim:o0');
+    expect(a0.frame, role).toBe(mon ? '' : 'pct:dim:o0');
     const l = await hudLayout(page);
     const bakes = Number((await page.evaluate(() => window.__DECOY__?.getHud() ?? {})).bakes);
     // 점령 중: 오르는 숫자가 자기 스냅샷을 따라간다
@@ -507,18 +508,23 @@ test('터치 거점 줄 게이지: 생존자 · 괴물 화면마다 진행 숫�
       await waitPointPct(
         page,
         'A',
-        (q) => q.state === 'capturing' && Number(q.shown) >= Number(start.shown) + k,
+        (q) => q.state === 'capturing' && q.want >= start.want + k,
         `${role} A 점령 중 +${k}`,
       );
-    // 줄 게이지: A가 윗줄 · B가 아랫줄로 맞닿고(겹치지 않고) 두 줄이 예전 링 한 쌍 높이(52 그림 단위) 안
-    const ga = partBox(l, 'gaugeA');
-    const gb = partBox(l, 'gaugeB');
+    // 줄 게이지 (거점 셋): A · B · C가 위에서부터 맞닿고(겹치지 않고) 세 줄이 줄 높이 × 거점 수(78 그림 단위) 안
+    const rows = GAUGE_IDS.map((id) => partBox(l, `gauge${id}`));
     const blockH = TOUCH_PART.gaugeRow.h * GAUGE_IDS.length * TOUCH_UI.art;
-    expect(ga.y + ga.h, role).toBeLessThanOrEqual(gb.y + 0.5);
-    expect(Math.abs(ga.x - gb.x), role).toBeLessThan(1);
-    expect(gb.y + gb.h - ga.y, role).toBeLessThanOrEqual(blockH + 1);
+    expect(rows.length, role).toBe(3);
+    rows.slice(1).forEach((r, i) => {
+      const q = rows[i]!;
+      expect(q.y + q.h, role).toBeLessThanOrEqual(r.y + 0.5);
+      expect(Math.abs(q.x - r.x), role).toBeLessThan(1);
+    });
+    expect(rows[2]!.y + rows[2]!.h - rows[0]!.y, role).toBeLessThanOrEqual(blockH + 1);
     // 폭: 그린 상자에는 프레임 둘레 빈 1텍셀(기기 배율 1 = 1 CSS px)씩이 들어간다
-    expect(Math.max(ga.w, gb.w), role).toBeLessThanOrEqual(TOUCH_PART.gaugeRow.w * TOUCH_UI.art + 2.5);
+    expect(Math.max(...rows.map((r) => r.w)), role).toBeLessThanOrEqual(
+      TOUCH_PART.gaugeRow.w * TOUCH_UI.art + 2.5,
+    );
     // 숫자가 바뀌어도 아틀라스를 다시 굽지 않고, 숫자는 글자 객체가 아니다
     const info = await page.evaluate(() => window.__DECOY__?.getHud() ?? {});
     expect([Number(info.bakes), info.missingFrames], role).toEqual([bakes, '']);

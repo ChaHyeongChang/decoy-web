@@ -56,8 +56,13 @@ type Ctx = CanvasRenderingContext2D;
 export const HC = {
   /** 실루엣 · 아이콘 우물 (패널보다 어두운 원판) */
   well: 0x060c13,
-  /** 꺼진 아이콘 · 칸 (그래픽, 글자가 아님) */
+  /** 꺼진 아이콘 · 칸 (그래픽, 글자가 아님). 꺼진 거점 게이지의 틀 · 배지 테두리도 이 색 */
   off: 0x3b4b5c,
+  /**
+   * 꺼진 거점 (다른 두 곳이 끝나 점령할 수 없다, 플레이테스트 b): 회색 ⊘ 칩 아이콘 · 칩 테두리 · 줄 게이지 상태 아이콘.
+   * 맵 탈출구 꺼짐색(0x56657a)과 같은 회청색 계열이고, 패널 위 아이콘 3:1이 되게 조금 밝다
+   */
+  gaugeOff: 0x64748b,
   /** 꺼진 눈금 */
   tickOff: 0x1d3243,
   /** 키캡 */
@@ -116,6 +121,7 @@ export const HUD_TEXT_PAIRS: readonly ContrastPair[] = [
     min: 4.5,
   },
   { name: '정지 칩 아이콘 / 패널', fg: WARN, bg: UI.panel, min: 3 },
+  { name: '꺼진 거점 칩 아이콘 / 패널', fg: HC.gaugeOff, bg: UI.panel, min: 3 },
   // 거점 진행 숫자 (플레이테스트 a-7): PC는 위 띠 바탕 위, 터치 줄 게이지는 판 · 진행만큼 칠한 어두운 채움 위
   { name: '진행 숫자 정지 / 띠 바탕', fg: WARN, bg: UI.background, min: 4.5 },
   { name: '진행 숫자 · 거점 글자 / 줄 게이지 채움', fg: UI.text, bg: ROW_FILL.neon, min: 4.5 },
@@ -163,7 +169,7 @@ export function gaugeState(s: PointState): GaugeState {
   return s === 'blocked' ? 'paused' : s;
 }
 
-/** 상태 칩 아이콘: 점령 중 ▶ · 정지 ‖ · 완료 ✓ (대기는 칩 없음) */
+/** 상태 칩 아이콘: 점령 중 ▶ · 정지 ‖ · 완료 ✓ · 꺼짐 ⊘ (대기는 칩 없음) */
 export const GAUGE_ICON: Readonly<Record<GaugeState, IconId | null>> = {
   idle: null,
   capturing: 'play',
@@ -172,8 +178,22 @@ export const GAUGE_ICON: Readonly<Record<GaugeState, IconId | null>> = {
   off: 'off',
 };
 
+/** 상태색 (칩 아이콘 · 칩 테두리 · 줄 게이지 상태 아이콘): 정지 주황 · 대기 흐림 · 꺼짐 회색 · 그 밖 청록 */
 export function gaugeColor(s: GaugeState): number {
-  return s === 'paused' ? WARN : s === 'idle' ? UI.textDim : NEON;
+  return s === 'paused' ? WARN : s === 'idle' ? UI.textDim : s === 'off' ? HC.gaugeOff : NEON;
+}
+
+/** 게이지 틀 색 (PC 막대 · 배지 테두리, 터치 줄 판 테두리): 대기 · 꺼짐은 상태색보다 어둡게 (꺼짐은 HC.off) */
+export function gaugeFrameColor(s: GaugeState): number {
+  return s === 'idle' ? 0x2c4a5e : s === 'off' ? HC.off : gaugeColor(s);
+}
+
+/**
+ * 진행을 보이는 상태인가 (채움 · 진행 숫자). 꺼진 거점은 진행이 멈춘 그대로 오지만(서버) 다시 오를 수 없어 채움 · 숫자를 숨긴다 —
+ * 회색 틀 + ⊘ 칩만 (색만으로 구분하지 않기: 대기와는 칩 · 채움으로도 갈린다)
+ */
+export function gaugeShowsProgress(s: GaugeState): boolean {
+  return s !== 'off';
 }
 
 // ── 거점 진행 숫자 (플레이테스트 a-7) ──
@@ -199,10 +219,12 @@ export function pointOf(points: readonly PointView[], id: string): PointView | u
 }
 
 /**
- * 괴물 화면에도 진행 숫자를 보이는가. 서버는 거점 진행을 받는 사람과 무관하게 같은 값으로 보내고(interest.ts worldView) 괴물 HUD도
- * 그 값으로 게이지를 그려 왔으므로 같은 숫자를 보인다. 사람 확인 뒤 괴물에게만 빼려면 이 값 하나를 false로 (HUMAN_CHECKS)
+ * 괴물 화면에도 진행 숫자를 보이는가: 보이지 않는다(플레이테스트 b — 사용자 결정). 점령 속도가 1명 2.5%/초 · 2명 3.75%/초라 1% 단위
+ * 숫자로는 거점 안 사람 수가 바로 읽혀 미끼 판단이 쉬워진다. 서버는 그대로 받는 사람과 무관하게 같은 진행을 보내고(interest.ts
+ * worldView) 괴물 HUD는 그 값으로 게이지 채움만 그린다 — 숫자 그림을 걸지 않는다(hud.ts Pct). 괴물 화면 PC 막대는 빈 숫자 칸
+ * 대신 칩 옆으로 당긴다
  */
-export const PCT_FOR_MONSTER = true;
+export const PCT_FOR_MONSTER = false;
 
 /** 이 화면에 진행 숫자를 보이는가 (생존자는 늘, 괴물은 PCT_FOR_MONSTER) */
 export function pctShown(isMonster: boolean): boolean {
@@ -1119,12 +1141,18 @@ export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
   // ── 위 띠: 게이지 막대 틀 (3조각) · 채움 · 사선 · 배지 · 칩 · 타이머 틀 ──
   const G = h.gauge;
   const gs = G.barH / 2;
+  // 막대 틀: 폭이 늘 G.barW라 가로 3조각 대신 한 장으로 굽는다 — 판 중 그리는 그림이 게이지마다 3 → 1 (거점 셋이라 게이지가 늘어난
+  // 만큼을 덜어 낸다, 일의 양 예산). 기준점 = 막대 왼쪽 위
   for (const s of touch ? [] : GAUGE_STATES)
-    add(
-      kit(`gbar:${s}`, { l: gs + 4, r: gs + 4, t: G.barH, v: false }, (c, w, h, z) =>
-        paintHexFrame(c, w, h, z, gs, s === 'idle' ? 0x2c4a5e : gaugeColor(s), s === 'done' ? 0.8 : 0),
-      ),
-    );
+    add({
+      kind: 'frame',
+      name: `gbar:${s}`,
+      x0: 0,
+      y0: 0,
+      x1: G.barW,
+      y1: G.barH,
+      paint: (c, z) => paintHexFrame(c, G.barW, G.barH, z, gs, gaugeFrameColor(s), s === 'done' ? 0.8 : 0),
+    });
   const fillW = G.barW - 6;
   const fillH = G.barH - 6;
   for (const [n, col] of touch
@@ -1270,7 +1298,7 @@ export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
       return [top, Math.round(G.w * z) / z, Math.round(rowBot * z) / z - top];
     };
     for (const s of GAUGE_STATES) {
-      const col = s === 'idle' ? 0x2c4a5e : gaugeColor(s);
+      const col = gaugeFrameColor(s);
       add({
         kind: 'frame',
         name: `grow:${s}`,

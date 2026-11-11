@@ -492,6 +492,7 @@ export const EDITOR_TEXT = {
   timer: '남은 시간',
   gaugeA: '거점 A',
   gaugeB: '거점 B',
+  gaugeC: '거점 C',
   cards: '팀 카드',
   minimap: '지도',
   move: '이동 스틱',

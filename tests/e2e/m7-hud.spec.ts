@@ -99,14 +99,16 @@ test('역할별 스크린샷 4장 + 미니맵도 같은 정보 규칙', async ({
   const snap = await lastSnapshot(runner.page);
   const runnerMini = await runner.page.evaluate(() => window.__DECOY__?.getDrawnMinimap() ?? []);
   expect(runnerMini.some((d) => d.kind === 'monster')).toBe(snap!.monster !== null);
-  // 거점 진행 숫자: B는 아무도 없어 45%에 멈춰 있고 네 화면(괴물 포함)이 같은 값, A는 러너가 점령 중이라 오르는 값을 따라간다
+  // 거점 진행 숫자: B는 아무도 없어 45%에 멈춰 있고 생존자 세 화면이 같은 값, A는 러너가 점령 중이라 오르는 값을 따라간다.
+  // 괴물 화면은 숫자가 없다(플레이테스트 b — 같은 스냅샷 값으로 게이지 채움만)
   for (const p of players) {
     const b = await waitPointPct(p.page, 'B', (q) => q.state === 'idle', `${p.role} B 멈춘 진행`);
-    expect([b.shown, b.frame], p.role).toEqual([45, 'pct:text:o5']);
+    const mon = p.role === 'monster';
+    expect([b.shown, b.frame], p.role).toEqual(mon ? ['', ''] : [45, 'pct:text:o5']);
     await waitPointPct(
       p.page,
       'A',
-      (q) => q.state === 'capturing' && Number(q.shown) > 0,
+      (q) => q.state === 'capturing' && (mon || Number(q.shown) > 0),
       `${p.role} A 점령 중`,
     );
   }

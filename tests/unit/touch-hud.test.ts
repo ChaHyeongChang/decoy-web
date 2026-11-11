@@ -148,6 +148,19 @@ describe('터치 글자 크기', () => {
   });
 });
 
+/**
+ * 이동 영역이 최소 높이(이동 스틱 그림 + 24px, 화면 높이의 38~38.4%)인 화면 · 역할 (거점 셋 — 플레이테스트 b). 360 안팎 괴물은 오른쪽 칸이
+ * 좁아(포효 · 시야 줄) 타이머를 옮기면 옆 칸 미니맵이 없어져 맵을 가리므로 왼쪽 칸에 타이머 · 게이지 · 카드를 다 둔다. Galaxy S9+ 괴물은
+ * 왼쪽 칸 89px · 오른쪽 칸 45px라 어떻게 놓아도 그렇다. 생존자는 모두 40% 이상
+ */
+const ZONE_MIN = new Set([
+  'Pixel 7 브라우저 괴물',
+  'Galaxy S9+ 괴물',
+  'Galaxy S8 괴물',
+  'iPhone 14 + 노치 안전 영역 괴물',
+  '21:9 괴물',
+]);
+
 describe('터치 HUD 자리 touchHudPlan', () => {
   for (const [name, w, h] of SCREENS)
     for (const monster of [true, false])
@@ -161,7 +174,9 @@ describe('터치 HUD 자리 touchHudPlan', () => {
         const toCss = (r: Box): Box => ({ x: r.x * k, y: r.y * k, w: r.w * k, h: r.h * k });
         const rects = plan.rects.map((r) => ({ id: r.id, css: toCss(r.rect), rect: r.rect }));
         const ids = rects.map((r) => r.id);
-        expect(ids).toEqual(expect.arrayContaining(['timer', 'gaugeA', 'gaugeB', 'card0', 'card1', 'card2']));
+        expect(ids).toEqual(
+          expect.arrayContaining(['timer', 'gaugeA', 'gaugeB', 'gaugeC', 'card0', 'card1', 'card2']),
+        );
         for (const r of rects) {
           // 화면 안
           expect(r.rect.x, `${r.id} 왼쪽`).toBeGreaterThanOrEqual(-1e-6);
@@ -195,9 +210,12 @@ describe('터치 HUD 자리 touchHudPlan', () => {
         targets.push(['move-ghost', ghost]);
         for (const r of rects)
           for (const [id, b] of targets) expect(overlaps(r.css, b), `${r.id} ↔ ${id}`).toBe(false);
-        // 이동 영역은 이동 스틱 그림을 품고, 화면 아래쪽 절반 이상 높이
+        // 이동 영역은 이동 스틱 그림을 품고, 화면 높이의 40% 이상. ZONE_MIN(거점 셋 — 플레이테스트 b)만 이동 영역 최소 높이(이동 스틱
+        // 그림 + 24px): 줄 게이지 셋 · 팀 카드 셋이 왼쪽 칸에 쌓여 이동 영역 위 끝을 밀지만 겹치지는 않는다
         expect(T.zone.y).toBeLessThanOrEqual(ghost.y);
-        expect(T.zone.h).toBeGreaterThanOrEqual(h * 0.4);
+        const tight = ZONE_MIN.has(`${name} ${monster ? '괴물' : '생존자'}`);
+        expect(T.zone.h).toBeGreaterThanOrEqual(tight ? T.moveR * 2 + 24 : h * 0.4);
+        if (tight) expect(T.zone.h).toBeLessThan(h * 0.4);
         // 맨 아래 안내 줄 (가장자리 띠 안)은 어떤 터치 대상과도 겹치지 않는다
         const hint = { x: 0, y: (t.hint.y - t.hint.h / 2) * k, w, h: t.hint.h * k };
         for (const [id, b] of targets)
@@ -217,7 +235,7 @@ describe('터치 HUD 자리 touchHudPlan', () => {
           expect(band.y >= b.y + b.h || !overlaps({ ...band, y: b.y, h: b.h }, b)).toBe(true);
       });
 
-  it('작은 화면 규칙: 오른쪽 칸에 자리가 없으면 미니맵을 숨기고, 왼쪽 칸이 모자라면 거점 게이지를 오른쪽 칸으로', () => {
+  it('작은 화면 규칙: 오른쪽 칸에 자리가 없으면 미니맵을 숨기고, 왼쪽 칸이 모자라면 타이머나 거점 게이지를 오른쪽 칸으로', () => {
     const plan = (w: number, h: number, monster: boolean) => {
       L.applyLayout(L.layoutFor(w, h, true));
       const t = L.HUD.touch!;
@@ -229,9 +247,15 @@ describe('터치 HUD 자리 touchHudPlan', () => {
     // 가장 낮은 휴대폰 괴물: 버튼 무리가 오른쪽 칸을 채워 미니맵 없음, 생존자는 있음
     expect(plan(802, 293, true).minimap).toBeNull();
     expect(plan(802, 293, false).minimap).not.toBeNull();
-    // 좁은 칸 · 낮은 화면: 게이지가 오른쪽 칸(화면 오른쪽 절반)
+    // 좁은 칸 · 낮은 화면 (거점 셋): 괴물은 게이지를 왼쪽 칸에 두고 타이머를 오른쪽 칸(시스템 버튼 아래)으로, 생존자는 오른쪽 칸이
+    // 넉넉해 게이지를 오른쪽 칸으로 (괴물은 옆 칸 미니맵 자리가 원래 없다)
     const s9 = plan(658, 320, true);
-    expect(s9.gauges[0]!.x / L.HUD.touch!.L).toBeGreaterThan(658 / 2);
+    const s9L = L.HUD.touch!.L;
+    expect(s9.gauges[0]!.x / s9L).toBeLessThan(658 / 2);
+    expect(s9.timer.x / s9L).toBeGreaterThan(658 / 2);
+    const s9s = plan(658, 320, false);
+    expect(s9s.gauges[0]!.x / L.HUD.touch!.L).toBeGreaterThan(658 / 2);
+    expect(s9s.timer.x / L.HUD.touch!.L).toBeLessThan(658 / 2);
     // 태블릿 4:3: 위 띠에 모두 (좌우 칸 없음), 미니맵 없음
     L.applyLayout(L.layoutFor(1024, 768, true));
     expect(L.HUD.touch!.mode).toBe('band');
@@ -293,35 +317,7 @@ describe('터치 HUD 자리 touchHudPlan', () => {
 
   // ── 거점 줄 게이지 (플레이테스트 a-7) ──
 
-  /**
-   * 예전 링 게이지 한 쌍(gaugeA ∪ gaugeB)의 사각형 [x, y, w, h] (CSS px). 기준 커밋 57363eb의 layout.ts로 뽑은 값이다
-   * (판과 같은 조정 — 시스템 버튼 세 칸 · 내 팀). 줄 게이지가 같은 자리 · 같은 크기를 쓰는지 대조한다
-   */
-  const OLD_RING_PAIR: Readonly<Record<string, readonly [number, number, number, number]>> = {
-    '863×360 monster': [43.34, 35.12, 74.8, 35.36],
-    '863×360 survivor': [43.34, 35.12, 74.8, 35.36],
-    '740×360 monster': [12.61, 35.12, 74.8, 35.36],
-    '740×360 survivor': [12.61, 35.12, 74.8, 35.36],
-    '750×369 monster': [11.73, 35.12, 74.8, 35.36],
-    '750×369 survivor': [11.73, 35.12, 74.8, 35.36],
-    '750×300 monster': [37.6, 35.12, 74.8, 35.36],
-    '750×300 survivor': [637.6, 64, 74.8, 35.36],
-    '658×320 monster': [576.21, 64, 74.8, 35.36],
-    '658×320 survivor': [576.21, 64, 74.8, 35.36],
-    '640×360 monster': [7.09, 6, 74.8, 35.36],
-    '640×360 survivor': [7.09, 6, 74.8, 35.36],
-    '667×375 monster': [8.23, 6, 74.8, 35.36],
-    '667×375 survivor': [8.23, 6, 74.8, 35.36],
-    '844×390 monster': [27.33, 35.12, 74.8, 35.36],
-    '844×390 survivor': [27.33, 35.12, 74.8, 35.36],
-    '802×293 monster': [94.24, 6, 74.8, 35.36],
-    '802×293 survivor': [94.24, 6, 74.8, 35.36],
-    '1024×768 monster': [375.34, 4.32, 74.8, 35.36],
-    '1024×768 survivor': [375.34, 4.32, 74.8, 35.36],
-    '1280×800 monster': [6.67, 6, 74.8, 35.36],
-    '1280×800 survivor': [6.67, 6, 74.8, 35.36],
-  };
-  /** 줄 게이지를 보는 화면 격자: 아이폰 14 Chrome(750×369 · 주소창 750×300) · 안드로이드 360 높이 · 16:9 · 태블릿 */
+  /** 줄 게이지를 보는 화면 격자: 아이폰 14 Chrome(750×369 · 주소창 750×300) · 안드로이드 360 높이 · 16:9 · 낮은 화면 · 태블릿 */
   const GAUGE_GRID: [number, number][] = [
     [863, 360],
     [740, 360],
@@ -334,7 +330,51 @@ describe('터치 HUD 자리 touchHudPlan', () => {
     [802, 293],
     [1024, 768],
     [1280, 800],
+    [640, 320],
+    [568, 320],
+    [758, 277],
+    [915, 412],
   ];
+  /**
+   * 거점 셋(플레이테스트 b)의 줄 게이지 자리 (판과 같은 조정, CSS px): [쌓기 | 가로 한 줄, 첫 줄 x · y, 타이머 틀 왼쪽 위 x · y].
+   * 세 줄은 두 줄보다 17.7px 높아 360 안팎 휴대폰 왼쪽 칸에 타이머 · 게이지 · 카드가 다 들어가면 이동 영역이 최소가 된다:
+   * 생존자는 타이머를 오른쪽 칸 미니맵 아래로(④), 괴물은 오른쪽 칸이 좁아(포효 줄) 타이머를 옮기면 옆 칸 미니맵이 없어지므로 왼쪽 칸에
+   * 다 두고 이동 영역을 최소로(②). 낮은 16:9 · 태블릿은 위 띠에 가로 한 줄(⑤ · 태블릿은 PC처럼 A · B · 타이머 · C), 낮은 넓은 화면은
+   * 왼쪽 칸 두 열(⑥ — 타이머 + 게이지 | 팀 카드), 가장 낮은 휴대폰은 괴물 ④(타이머가 오른쪽 칸 남는 자리 가운데) · 생존자 ③(게이지가
+   * 오른쪽 칸). 바꾸면 이 표를 고친다 (자리가 바뀌는 것을 모르고 넘기지 않게)
+   */
+  const GAUGE_SPOT: Readonly<Record<string, readonly ['stack' | 'run', number, number, number, number]>> = {
+    '863×360 monster': ['stack', 43.34, 35.12, 30.74, 6],
+    '863×360 survivor': ['stack', 43.34, 6, 732.21, 184.61],
+    '740×360 monster': ['stack', 12.61, 35.12, 6, 6],
+    '740×360 survivor': ['stack', 12.61, 6, 646.02, 143.64],
+    '750×369 monster': ['stack', 11.73, 35.12, 6, 6],
+    '750×369 survivor': ['stack', 11.73, 6, 657.76, 143.47],
+    '750×300 monster': ['stack', 37.6, 6, 625, 66.44],
+    '750×300 survivor': ['stack', 637.6, 64, 25, 6],
+    '658×320 monster': ['stack', 7.14, 6, 575.08, 74.94],
+    '658×320 survivor': ['stack', 576.21, 64, 6, 6],
+    '640×360 monster': ['stack', 7.09, 6, 269.97, 1.44],
+    '640×360 survivor': ['stack', 7.09, 6, 269.97, 1.44],
+    '667×375 monster': ['stack', 8.23, 6, 283.52, 1.44],
+    '667×375 survivor': ['stack', 8.23, 6, 283.52, 1.44],
+    '844×390 monster': ['stack', 27.33, 35.12, 14.73, 6],
+    '844×390 survivor': ['stack', 27.33, 35.12, 14.73, 6],
+    '802×293 monster': ['stack', 12.84, 35.12, 12.24, 6],
+    '802×293 survivor': ['stack', 12.84, 35.12, 12.24, 6],
+    '1024×768 monster': ['run', 294.54, 13.16, 462.14, 10.44],
+    '1024×768 survivor': ['run', 294.54, 13.16, 462.14, 10.44],
+    '1280×800 monster': ['stack', 6.67, 6, 590.13, 4.44],
+    '1280×800 survivor': ['stack', 6.67, 6, 590.13, 4.44],
+    '640×320 monster': ['run', 6, 4.16, 269.94, 1.44],
+    '640×320 survivor': ['run', 6, 4.16, 269.94, 1.44],
+    '568×320 monster': ['run', 6, 5.83, 485.98, 74.94],
+    '568×320 survivor': ['run', 6, 5.83, 485.98, 121.94],
+    '758×277 monster': ['stack', 7.82, 35.12, 7.22, 6],
+    '758×277 survivor': ['stack', 7.82, 35.12, 7.22, 6],
+    '915×412 monster': ['stack', 36.82, 35.12, 24.22, 6],
+    '915×412 survivor': ['stack', 36.82, 35.12, 24.22, 6],
+  };
   /** 판과 같은 배치 (main.ts applyMatchLayout: 시스템 버튼 세 칸 · 내 팀) */
   const matchPlan = (w: number, h: number, team: 'monster' | 'survivor', rows?: number) => {
     const l = L.layoutFor(w, h, true, { sysSlots: L.SYS_SLOTS_MENU, team });
@@ -342,28 +382,41 @@ describe('터치 HUD 자리 touchHudPlan', () => {
     return { l, t, plan: t[team], k: 1 / t.L };
   };
 
-  it('거점 줄 게이지: 거점 수만큼의 줄이 예전 링 게이지 한 쌍과 같은 사각형을 빈틈없이 채운다 (화면 격자 × 두 역할)', () => {
-    expect(L.GAUGE_IDS).toEqual(['A', 'B']);
+  it('거점 줄 게이지 세 줄: 화면마다 정한 자리 — 세로로 쌓으면 맞닿고, 가로 한 줄이면 같은 높이 · 틈 6px로 왼쪽부터 A · B · C (화면 격자 × 두 역할)', () => {
+    expect(L.GAUGE_IDS).toEqual(['A', 'B', 'C']);
     expect(L.TOUCH_PART.gaugeRow).toEqual({ w: 110, h: 26 });
+    const rowW = 110 * L.TOUCH_UI.art;
+    const rowH = 26 * L.TOUCH_UI.art;
     let checked = 0;
     for (const [w, h] of GAUGE_GRID)
       for (const team of ['monster', 'survivor'] as const) {
         const label = `${w}×${h} ${team}`;
         const { plan, k } = matchPlan(w, h, team);
-        const old = OLD_RING_PAIR[label];
-        expect(old, label).toBeDefined();
-        if (!old) continue;
+        const want = GAUGE_SPOT[label];
+        expect(want, label).toBeDefined();
+        if (!want) continue;
+        const [kind, x0, y0, tx, ty] = want;
         const rows = plan.gauges.map((r) => ({ x: r.x * k, y: r.y * k, w: r.w * k, h: r.h * k }));
-        expect(rows.length, label).toBe(L.GAUGE_IDS.length);
-        const rowH = old[3] / rows.length;
+        expect(rows.length, label).toBe(3);
+        expect(rows[0]!.x, `${label} 첫 줄 x`).toBeCloseTo(x0, 1);
+        expect(rows[0]!.y, `${label} 첫 줄 y`).toBeCloseTo(y0, 1);
+        expect((plan.timer.x - plan.timer.w / 2) * k, `${label} 타이머 x`).toBeCloseTo(tx, 1);
+        expect((plan.timer.y - plan.timer.h / 2) * k, `${label} 타이머 y`).toBeCloseTo(ty, 1);
         rows.forEach((r, i) => {
-          // 줄마다: 예전 한 쌍의 폭 그대로, 높이는 줄 수로 나눈 값, 위에서부터 맞닿게
-          expect(r.x, `${label} 줄 ${i} x`).toBeCloseTo(old[0], 1);
-          expect(r.w, `${label} 줄 ${i} 폭`).toBeCloseTo(old[2], 1);
-          expect(r.h, `${label} 줄 ${i} 높이`).toBeCloseTo(rowH, 2);
-          expect(r.y, `${label} 줄 ${i} y`).toBeCloseTo(old[1] + i * rowH, 1);
+          expect(r.w, `${label} 줄 ${i} 폭`).toBeCloseTo(rowW, 6);
+          expect(r.h, `${label} 줄 ${i} 높이`).toBeCloseTo(rowH, 6);
+          if (i === 0) return;
+          const q = rows[i - 1]!;
+          if (kind === 'stack') {
+            expect(r.x, `${label} 줄 ${i} x`).toBeCloseTo(q.x, 6);
+            expect(r.y, `${label} 줄 ${i} y (맞닿음)`).toBeCloseTo(q.y + q.h, 6);
+          } else {
+            expect(r.y, `${label} 줄 ${i} y`).toBeCloseTo(q.y, 6);
+            // 틈 6 (태블릿은 A · B와 C 사이에 타이머)
+            expect(r.x, `${label} 줄 ${i} x`).toBeGreaterThanOrEqual(q.x + q.w + L.TOUCH_UI.gap - 1e-6);
+          }
         });
-        // 늘 떠 있는 부품 목록의 gaugeA · gaugeB가 같은 줄 사각형이다 (이동 영역 · 조작 배치 편집이 피하는 자리)
+        // 늘 떠 있는 부품 목록의 gaugeA · gaugeB · gaugeC가 같은 줄 사각형이다 (이동 영역 · 조작 배치 편집이 피하는 자리)
         L.GAUGE_IDS.forEach((id, i) => {
           const rect = plan.rects.find((r) => r.id === `gauge${id}`)?.rect;
           expect(rect, `${label} gauge${id}`).toEqual(plan.gauges[i]);
@@ -371,6 +424,11 @@ describe('터치 HUD 자리 touchHudPlan', () => {
         checked += 1;
       }
     expect(checked).toBe(GAUGE_GRID.length * 2);
+    // 태블릿 4:3 위 띠는 PC처럼 A · B · 타이머 · C
+    const tab = matchPlan(1024, 768, 'monster').plan;
+    const timerL = tab.timer.x - tab.timer.w / 2;
+    expect(tab.gauges[1]!.x + tab.gauges[1]!.w).toBeLessThan(timerL);
+    expect(tab.gauges[2]!.x).toBeGreaterThan(tab.timer.x + tab.timer.w / 2);
   });
 
   it('거점 줄 게이지는 다른 HUD 부품 · 맵 · 터치 버튼 · 스틱과 겹치지 않는다 (화면 격자 × 두 역할, 판과 같은 조정)', () => {
@@ -422,7 +480,7 @@ describe('터치 HUD 자리 touchHudPlan', () => {
     expect(pairs).toBeGreaterThan(150);
   });
 
-  it('줄 수를 인자로 받는다: 한 줄 · 세 줄이면 같은 폭 · 같은 줄 높이로 위에서부터 쌓이고, 기본값은 거점 수', () => {
+  it('줄 수를 인자로 받는다: 한 줄 · 두 줄 · 네 줄도 같은 폭 · 같은 줄 높이로 쌓거나(왼쪽 · 오른쪽 칸) 가로 한 줄(위 띠), 기본값은 거점 수', () => {
     for (const [w, h] of [
       [844, 390],
       [802, 293],
@@ -432,7 +490,7 @@ describe('터치 HUD 자리 touchHudPlan', () => {
       const l = L.layoutFor(w, h, true);
       const base = L.touchHudPlan(l)!;
       expect(L.touchHudPlan(l, L.GAUGE_IDS.length)).toEqual(base);
-      for (const n of [1, 3]) {
+      for (const n of [1, 2, 4]) {
         const t = L.touchHudPlan(l, n)!;
         for (const team of ['monster', 'survivor'] as const) {
           const rows = t[team].gauges;
@@ -440,13 +498,20 @@ describe('터치 HUD 자리 touchHudPlan', () => {
           expect(rows.length, `${w}×${h} ${n}줄`).toBe(n);
           expect(first.w).toBeCloseTo(base[team].gauges[0]!.w, 6);
           expect(first.h).toBeCloseTo(base[team].gauges[0]!.h, 6);
+          const run = t.mode === 'band';
           rows.forEach((r, i) => {
-            expect([r.x, r.w, r.h]).toEqual([first.x, first.w, first.h]);
-            expect(r.y).toBeCloseTo(first.y + i * first.h, 6);
+            expect([r.w, r.h]).toEqual([first.w, first.h]);
+            if (run) {
+              expect(r.y).toBe(first.y);
+              if (i > 0) expect(r.x).toBeGreaterThan(rows[i - 1]!.x + r.w);
+            } else {
+              expect(r.x).toBe(first.x);
+              expect(r.y).toBeCloseTo(first.y + i * first.h, 6);
+            }
           });
           // 부품 목록에도 줄 수만큼 (이름은 거점 목록에서, 목록보다 많으면 차례 번호)
           const ids = t[team].rects.filter((r) => /^gauge/.test(r.id)).map((r) => r.id);
-          expect(ids).toEqual(['gaugeA', 'gaugeB', 'gauge2'].slice(0, n));
+          expect(ids).toEqual(['gaugeA', 'gaugeB', 'gaugeC', 'gauge3'].slice(0, n));
         }
       }
     }
@@ -501,11 +566,15 @@ describe('판 중 창이 낮아지면 엄지 버튼이 덮는 HUD 부품 hudCove
         expect(covered(w, h, h, monster), `${name} ${monster}`).toEqual([]);
   });
 
-  it('전체 화면이 꺼지거나 도구 막대가 나와 낮아지면 미니맵이 덮인다 (괴물 915×412 → 356 · 330, 863×360 → 304, 생존자 802×293 → 250)', () => {
+  it('전체 화면이 꺼지거나 도구 막대가 나와 낮아지면 덮이는 것은 미니맵뿐 (괴물 915×412 → 356 · 330, 863×360 → 304, 생존자 802×293 → 250, 아이폰 14 주소창 750×369 → 300 두 역할)', () => {
     expect(covered(915, 412, 356, true)).toEqual(['minimap']);
     expect(covered(915, 412, 330, true)).toEqual(['minimap']);
-    expect(covered(863, 360, 304, true)).toEqual(['minimap']);
     expect(covered(802, 293, 250, false)).toEqual(['minimap']);
+    expect(covered(863, 360, 304, true)).toEqual(['minimap']);
+    // 아이폰 14 Chrome: 주소창이 나와도 덮이는 것은 미니맵뿐 (거점 셋 — 생존자는 타이머가 오른쪽 칸 미니맵 아래라 덮이지 않는다)
+    expect(covered(750, 369, 300, true)).toEqual(['minimap']);
+    expect(covered(750, 369, 300, false)).toEqual(['minimap']);
+    expect(covered(863, 360, 304, false)).toEqual(['minimap']);
     // 조금 낮아진 정도면 그대로 (자리 여유 8px 안)
     expect(covered(915, 412, 405, true)).toEqual([]);
   });

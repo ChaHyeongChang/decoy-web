@@ -26,7 +26,7 @@ import { waitForTouchTarget } from './touch';
 const QUERY = '/?debug=1&renderer=canvas';
 const POLL = { intervals: [100, 150, 200], timeout: 20_000 };
 /** 늘 떠 있는 HUD 부품 (m12-screen과 같다) */
-const PERSISTENT = /^(timer|gaugeA|gaugeB|card\d|minimap)$/;
+const PERSISTENT = /^(timer|gauge[A-C]|card\d|minimap)$/;
 /** 펼친 표에 있어야 하는 이름표 */
 const PANEL_LABELS = ['FPS', '프레임', '작업', '그리기', '핑', '서버 틱', '예측', '품질', '제한', 'DPR'];
 

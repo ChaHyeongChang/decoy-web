@@ -1,6 +1,7 @@
 // 판 화면 HUD (M10c, VISUAL_SPEC 8장). 맵과 겹치지 않게 위 · 아래 띠와 왼쪽 여백에 둔다 (DECISIONS D3). 위치는 layout.ts HUD.
-//  위 띠: 거점 A · B 게이지(깎은 육각 막대 · 진행 숫자 % · 점령 중 흐르는 사선 · 정지 주황 + ‖ 칩 · 완료 ✓ 칩)와 타이머 틀(고정폭 숫자,
-//         1분 미만 = 빨강 + 경고 아이콘, 최후의 30초 = 주황 + 문 아이콘). 괴물 화면은 점령 중 게이지가 깜빡인다
+//  위 띠: 왼쪽부터 거점 A · B 게이지 · 타이머 틀 · 거점 C 게이지(깎은 육각 막대 · 진행 숫자 % · 점령 중 흐르는 사선 · 정지 주황 + ‖ 칩 ·
+//         완료 ✓ 칩 · 꺼짐 회색 + ⊘ 칩, 채움 · 숫자 없음)와 타이머(고정폭 숫자, 1분 미만 = 빨강 + 경고 아이콘, 최후의 30초 = 주황 + 문
+//         아이콘). 괴물 화면은 점령 중 게이지가 깜빡이고 진행 숫자가 없다(hudArt.PCT_FOR_MONSTER)
 //  왼쪽: 생존자 화면 = 팀 카드(역할 실루엣 + 능력 쿨타임 눈금 링, 역할 이름, '나', 플레이어 이름, 상태 아이콘 + 글자, 체력 칸, 수감 눈금)
 //        괴물 화면 = 익명 카드(공통 흰 토큰 + 상태 아이콘 + 글자 + 수감 눈금. 순서 · 역할 · 이름 없음 — 지금 규칙 그대로)
 //  아래 띠: 행동 칸(아이콘 타일 + 쿨타임 눈금 링 + 가운데 남은 초 + 이름 + 키캡). 수감 · 관전 · 괴물 대기 중에는 안내 줄
@@ -26,6 +27,7 @@ import {
   TIMER_LOOK,
   actionSlots,
   slotIconFrame,
+  gaugeShowsProgress,
   gaugeState,
   litTicks,
   pctFrames,
@@ -43,7 +45,16 @@ import {
 import { Digits, fitText, setText, type HudKit, type Slice, type Spr } from './hudKit';
 import { fontGeneration } from './fonts';
 import { HudGate } from './hudGate';
-import { GAUGE_IDS, HUD, RENDER_SCALE, TOUCH_PART, VIEW_W, type Rect, type TouchHudPlan } from './layout';
+import {
+  GAUGE_IDS,
+  HUD,
+  RENDER_SCALE,
+  TOUCH_PART,
+  VIEW_W,
+  type GaugeSpot,
+  type Rect,
+  type TouchHudPlan,
+} from './layout';
 import type { CrispText } from './text';
 
 /** HUD 깊이: 패널 40 · 그림 41 · 글자 42 */
@@ -137,9 +148,15 @@ class Pct {
     this.ones = kit.spr(D_ART + 0.4);
   }
 
-  /** 기준점 (x, y): PC = 숫자 칸 오른쪽 끝 · 세로 가운데, 터치 = 줄 왼쪽 위 */
+  /** 기준점 (x, y): PC = 숫자 칸 오른쪽 끝 · 세로 가운데, 터치 = 줄 왼쪽 위. 꺼진 거점은 숫자를 숨긴다 (gaugeShowsProgress) */
   set(p: PointView, s: GaugeState, x: number, y: number): void {
     if (!this.on) return;
+    if (!gaugeShowsProgress(s)) {
+      this.value = null;
+      this.tens.show(false);
+      this.ones.show(false);
+      return;
+    }
     const n = pointPercent(p);
     const f = pctFrames(n, pctTone(s, n));
     this.value = n;
@@ -158,9 +175,13 @@ class Pct {
   }
 }
 
-/** 거점 게이지: ◇ 배지 + 상태 칩 + 진행 숫자 + 육각 막대 (side 1 = 배지가 왼쪽(A), −1 = 오른쪽(B), 채움은 배지 쪽에서) */
+/**
+ * PC 거점 게이지: ◇ 배지 + 상태 칩 + 진행 숫자 + 육각 막대 (자리 = layout.HUD.gauges — side 1 = 배지가 왼쪽(A · B), −1 = 오른쪽(C),
+ * 채움은 배지 쪽에서). 진행 숫자를 보이지 않는 화면(괴물)은 막대를 칩 옆으로 당겨 빈 칸이 게이지 안쪽 끝(타이머 쪽)에 남는다
+ */
 class Gauge {
-  private readonly frame: Slice;
+  /** 막대 틀 (한 장 — 폭이 늘 HUD.gauge.barW) */
+  private readonly frame: Spr;
   private readonly dia: Spr;
   readonly chip: Spr;
   private readonly fill: Spr;
@@ -172,25 +193,32 @@ class Gauge {
   private readonly chipX: number;
   /** 숫자 칸 오른쪽 끝 (두 게이지 모두 칸 안 오른쪽 맞춤 — 숫자가 바뀌어도 '%' 자리가 그대로다) */
   private readonly pctX: number;
+  private readonly side: 1 | -1;
+  /** 세로 가운데 y */
+  private readonly y: number;
+  /** 거점 id */
+  readonly id: string;
   state: GaugeState = 'idle';
 
   constructor(
     private readonly kit: HudKit,
-    /** 거점 id (스냅샷 world.points에서 이 id로 값을 찾는다 — hudArt.pointOf) */
-    readonly id: string,
-    private readonly side: 1 | -1,
+    /** 자리 · 거점 id (스냅샷 world.points에서 이 id로 값을 찾는다 — hudArt.pointOf) */
+    o: GaugeSpot,
     showPct: boolean,
   ) {
     const G = HUD.gauge;
-    const o = side === 1 ? HUD.gaugeA : HUD.gaugeB;
+    const side = o.side;
+    this.id = o.id;
+    this.side = side;
+    this.y = o.y;
     this.diaX = o.x + side * (G.dia / 2);
     this.chipX = o.x + side * (G.dia + G.gap + G.chip / 2);
-    // 칩 다음에 숫자 칸, 그다음 막대 (배지 쪽에서 안쪽으로)
+    // 칩 다음에 숫자 칸, 그다음 막대 (배지 쪽에서 안쪽으로). 숫자를 보이지 않으면 숫자 칸 없이 막대
     const cell = G.dia + G.gap + G.chip + G.pctGap;
     this.pctX = side === 1 ? o.x + cell + G.pctW : o.x - cell;
-    const inner = o.x + side * (cell + G.pctW + G.pctGap);
+    const inner = o.x + side * (cell + (showPct ? G.pctW + G.pctGap : 0));
     this.bar = { x: side === 1 ? inner : inner - G.barW, y: o.y - G.barH / 2 };
-    this.frame = kit.slice(D_PANEL);
+    this.frame = kit.spr(D_PANEL);
     this.fill = kit.spr(D_ART);
     this.stripe = kit.spr(D_ART + 0.2);
     this.dia = kit.spr(D_ART);
@@ -199,7 +227,7 @@ class Gauge {
     this.letter = kit
       .text(this.diaX, o.y, HUD.font.gaugeLetter, UI.text, D_TEXT, true)
       .setOrigin(0.5, 0.5)
-      .setText(id);
+      .setText(o.id);
   }
 
   /** 사선 구간 (점령 중 · 보일 때, 논리 px). null = 사선 없음. 스냅샷마다 update가 정하고 animate가 매 프레임 흘린다 */
@@ -215,16 +243,16 @@ class Gauge {
     const s = gaugeState(p.state);
     this.state = s;
     this.blinkable = blinkable;
-    const y = HUD.gaugeA.y;
-    this.frame.set(`gbar:${s}`, this.bar.x, this.bar.y, G.barW, G.barH);
+    const y = this.y;
+    this.frame.set(`gbar:${s}`, this.bar.x, this.bar.y);
     this.dia.set(`dia:${s}`, this.diaX, y);
     this.chip.set(GAUGE_ICON[s] ? `chip:${s}` : '', this.chipX, y);
     this.pct.set(p, s, this.pctX, y);
-    // 채움: 안쪽 3px, 배지 쪽에서 진행만큼
+    // 채움: 안쪽 3px, 배지 쪽에서 진행만큼 (꺼진 거점은 채움 없이 회색 틀)
     const fw = G.barW - 6;
     const fx = this.bar.x + 3;
     const fy = this.bar.y + 3;
-    const prog = Math.max(0, Math.min(1, p.progress));
+    const prog = gaugeShowsProgress(s) ? Math.max(0, Math.min(1, p.progress)) : 0;
     const a = this.side === 1 ? 0 : fw * (1 - prog);
     const b = this.side === 1 ? fw * prog : fw;
     if (prog > 0) this.fill.set(s === 'paused' ? 'gfill:warn' : 'gfill:neon', fx, fy).crop(a, b);
@@ -250,7 +278,7 @@ class Gauge {
     const alpha = this.blinkable && blinkOff ? 0.3 : 1;
     if (alpha === this.alpha) return;
     this.alpha = alpha;
-    this.frame.setAlpha(alpha);
+    this.frame.img.setAlpha(alpha);
     this.fill.img.setAlpha(alpha);
     this.stripe.img.setAlpha(alpha);
     this.dia.img.setAlpha(alpha);
@@ -278,10 +306,10 @@ class RowGauge {
     private readonly kit: HudKit,
     /** 거점 id (스냅샷 world.points에서 이 id로 값을 찾는다 — hudArt.pointOf) */
     readonly id: string,
-    /** 줄 차례 (0 = 맨 윗줄) */
+    /** 줄 차례 (GAUGE_IDS 차례 = rows 차례) */
     private readonly index: number,
-    /** 맨 윗줄 사각형 (논리 px): 덩어리 왼쪽 위 · 한 줄 크기 */
-    private readonly first: Rect,
+    /** 모든 줄의 사각형 (논리 px, TouchHudPlan.gauges — 세로로 쌓였거나 위 띠에 가로로 늘어놓았다) */
+    private readonly rows: readonly Rect[],
     showPct: boolean,
   ) {
     this.plate = kit.spr(D_PANEL);
@@ -301,14 +329,25 @@ class RowGauge {
     const s = gaugeState(p.state);
     this.state = s;
     this.blinkable = blinkable;
-    const r = this.first;
-    // 줄 위치: 덩어리 위 끝과 줄 간격을 기기 픽셀 정수로 (배율이 바뀌면 이 함수가 다시 불린다 — HudGate)
+    const rows = this.rows;
+    const r = rows[this.index];
+    if (!r) return;
+    // 줄 위치: 세로로 맞닿아 쌓인 줄은 그 덩어리 맨 윗줄 위 끝과 줄 간격을 기기 픽셀 정수로 — 줄마다 같은 그림, 맞닿은 줄끼리 그림이
+    // 겹치지 않는다 (배율이 바뀌면 이 함수가 다시 불린다 — HudGate). 가로로 늘어놓은 줄은 제자리
     const z = this.kit.dev;
+    let k = 0;
+    for (let i = this.index; i > 0; i -= 1) {
+      const u = rows[i - 1];
+      const v = rows[i];
+      if (!u || !v || Math.abs(u.x - v.x) > 1e-6 || Math.abs(u.y + u.h - v.y) > 1e-6) break;
+      k += 1;
+    }
+    const top = rows[this.index - k] ?? r;
     const x = r.x;
-    const y = (Math.round(r.y * z) + this.index * Math.round(r.h * z)) / z;
+    const y = (Math.round(top.y * z) + k * Math.round(r.h * z)) / z;
     this.plate.set(`grow:${s}`, x, y);
-    // 진행은 상태와 따로 보인다 (PC 막대와 같이: 아무도 없어 멈춘 진행도 남아 보인다)
-    const prog = s === 'done' ? 1 : Math.max(0, Math.min(1, p.progress));
+    // 진행은 상태와 따로 보인다 (PC 막대와 같이: 아무도 없어 멈춘 진행도 남아 보인다). 꺼진 거점은 채움 · 숫자 없이 회색 판 + ⊘
+    const prog = !gaugeShowsProgress(s) ? 0 : s === 'done' ? 1 : Math.max(0, Math.min(1, p.progress));
     if (prog > 0) this.fill.set(s === 'paused' ? 'growfill:warn' : 'growfill:neon', x, y).crop(0, r.w * prog);
     else this.fill.show(false);
     this.letter.set(`gltr:${this.id}`, x, y);
@@ -327,6 +366,36 @@ class RowGauge {
     this.chip.img.setAlpha(alpha);
     this.pct.setAlpha(alpha);
   }
+}
+
+/** 거점 게이지 하나 (PC 막대 · 터치 줄): 디버그 · 시험이 읽는 값 */
+export interface GaugePart {
+  readonly id: string;
+  /** 지금 상태 (스냅샷 거점 상태 — blocked = paused) */
+  readonly state: GaugeState;
+  /** 상태 칩 · 아이콘 그림 */
+  readonly chip: Spr;
+  /** 진행 숫자 */
+  readonly pct: { readonly value: number | null; readonly frame: string };
+  /** 스냅샷 값 (새 스냅샷 · 글꼴 · 배율이 바뀐 프레임에만) */
+  update(p: PointView | undefined, blinkable: boolean): void;
+  /** 매 프레임: 흐르는 사선 · 깜빡임 */
+  animate(blinkOff: boolean): void;
+}
+
+/**
+ * 거점 게이지를 만든다: 자리 차례는 GAUGE_IDS(거점 수만큼), 값은 스냅샷 world.points에서 id로 찾는다(Hud.drawTop). 터치는 줄 게이지
+ * (plan.gauges — 세로로 쌓거나 위 띠에 가로로), PC는 위 띠 A · B · 타이머 · C(layout.HUD.gauges). 진행 숫자는 생존자 화면만(pctShown) —
+ * 괴물 화면은 받는 값과 무관하게 숫자 그림을 걸지 않는다
+ */
+export function makeGauges(kit: HudKit, isMonster: boolean, plan: TouchHudPlan | null): GaugePart[] {
+  const showPct = pctShown(isMonster);
+  if (plan)
+    return plan.gauges.map((_, i) => {
+      const id = GAUGE_IDS[i] ?? String(i);
+      return kit.named(`gauge${id}`, () => new RowGauge(kit, id, i, plan.gauges, showPct));
+    });
+  return HUD.gauges.map((o) => kit.named(`gauge${o.id}`, () => new Gauge(kit, o, showPct)));
 }
 
 interface CardParts {
@@ -352,7 +421,7 @@ export class Hud {
   private readonly isMonster: boolean;
   /** 터치 배치의 자리 (PC는 null) */
   private readonly plan: TouchHudPlan | null;
-  private readonly gauges: (Gauge | RowGauge)[];
+  private readonly gauges: GaugePart[];
   private readonly timerFrame: Slice;
   private readonly timerIcon: Spr;
   private readonly timerLabel: CrispText;
@@ -389,18 +458,7 @@ export class Hud {
     this.plan = t ? (this.isMonster ? t.monster : t.survivor) : null;
     const plan = this.plan;
     const F = HUD.font;
-    // 거점 게이지: 줄 · 자리 순서는 GAUGE_IDS, 값은 스냅샷 world.points에서 id로 찾는다(drawTop). 터치는 거점 수만큼 줄 게이지, PC는 타이머 양옆 둘
-    const showPct = pctShown(this.isMonster);
-    const first = plan?.gauges[0];
-    this.gauges =
-      plan && first
-        ? plan.gauges.map((_, i) => {
-            const id = GAUGE_IDS[i] ?? String(i);
-            return kit.named(`gauge${id}`, () => new RowGauge(kit, id, i, first, showPct));
-          })
-        : GAUGE_IDS.slice(0, 2).map((id, i) =>
-            kit.named(`gauge${id}`, () => new Gauge(kit, id, i === 0 ? 1 : -1, showPct)),
-          );
+    this.gauges = makeGauges(kit, this.isMonster, plan);
     [this.timerFrame, this.timerIcon, this.timerLabel, this.digits] = kit.named('timer', () => [
       kit.slice(D_PANEL),
       kit.spr(D_ART),

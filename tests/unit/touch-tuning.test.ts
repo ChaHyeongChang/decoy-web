@@ -296,7 +296,8 @@ describe('조이스틱 크기 (stickScale) · 시스템 버튼 칸 (sysSlots)', 
 });
 
 describe('좌우 반전 (mirror)', () => {
-  it('HUD 부품이 화면 가운데로 뒤집힌다 (거점 줄 게이지는 A가 윗줄 그대로, 팀 카드 순서도 왼쪽부터)', () => {
+  it('HUD 부품이 화면 가운데로 뒤집힌다 (거점 줄 게이지는 읽는 차례 A · B · C 그대로 — 쌓으면 A가 윗줄, 가로 한 줄이면 A가 왼쪽. 팀 카드 순서도 왼쪽부터)', () => {
+    let runs = 0;
     for (const [name, w, h] of SCREENS) {
       const a = L.touchHudPlan(L.layoutFor(w, h, true, { sysSlots: 3 }))!;
       const lb = L.layoutFor(w, h, true, { sysSlots: 3, mirror: true });
@@ -307,14 +308,27 @@ describe('좌우 반전 (mirror)', () => {
         const q = b[role];
         expect(q.timer.x, name).toBeCloseTo(W - p.timer.x, 6);
         expect(q.timer.y, name).toBeCloseTo(p.timer.y, 6);
-        // 거점 줄 게이지 (플레이테스트 a-7): 줄마다 제자리에서 좌우로만 뒤집힌다 — A가 늘 윗줄이라 줄을 맞바꾸지 않는다
+        // 거점 줄 게이지: 뒤집은 자리들의 모음은 그대로 뒤집힌 것이고, 거점은 읽는 차례(위 → 아래, 왼쪽 → 오른쪽)로 다시 나눈다 —
+        // 세로로 쌓으면 줄마다 제자리에서 좌우로만(A가 늘 윗줄), 위 띠에 가로로 늘어놓으면 A가 늘 왼쪽 (플레이테스트 b)
         expect(q.gauges.length).toBe(p.gauges.length);
-        expect(q.gauges.length).toBeGreaterThanOrEqual(2);
+        expect(q.gauges.length).toBe(3);
+        const key = (g: { x: number; y: number }): string => `${g.x.toFixed(4)},${g.y.toFixed(4)}`;
+        expect(q.gauges.map(key).sort(), name).toEqual(
+          p.gauges.map((o) => key({ x: W - o.x - o.w, y: o.y })).sort(),
+        );
+        const stacked = p.gauges.every((o) => Math.abs(o.x - p.gauges[0]!.x) < 1e-6);
+        if (!stacked) runs += 1;
         q.gauges.forEach((g, i) => {
           const o = p.gauges[i]!;
-          expect(g.x, `${name} 줄 ${i}`).toBeCloseTo(W - o.x - o.w, 6);
-          expect([g.y, g.w, g.h]).toEqual([o.y, o.w, o.h]);
-          if (i > 0) expect(g.y).toBeGreaterThan(q.gauges[i - 1]!.y);
+          expect([g.w, g.h]).toEqual([o.w, o.h]);
+          if (stacked) expect(g.x, `${name} 줄 ${i}`).toBeCloseTo(W - o.x - o.w, 6);
+          if (i === 0) return;
+          const prev = q.gauges[i - 1]!;
+          // 읽는 차례
+          expect(
+            g.y > prev.y + 1e-6 || (Math.abs(g.y - prev.y) < 1e-6 && g.x > prev.x),
+            `${name} 줄 ${i}`,
+          ).toBe(true);
         });
         const gridW = p.cards.cols * p.cards.w + (p.cards.cols - 1) * p.cards.gap;
         expect(q.cards.x, name).toBeCloseTo(W - p.cards.x - gridW, 6);
@@ -323,7 +337,8 @@ describe('좌우 반전 (mirror)', () => {
         // 사각형 목록: 같은 id가 뒤집힌 자리
         for (const r of p.rects) {
           const m = q.rects.find((x) => x.id === r.id)!;
-          if (r.id.startsWith('card')) continue;
+          // 팀 카드 · 거점 줄 게이지는 순서를 지켜 다시 나눈다 (위에서 본다)
+          if (r.id.startsWith('card') || r.id.startsWith('gauge')) continue;
           expect(m.rect.x, `${name} ${r.id}`).toBeCloseTo(W - r.rect.x - r.rect.w, 6);
           expect(m.rect.w).toBeCloseTo(r.rect.w, 6);
         }
@@ -335,5 +350,7 @@ describe('좌우 반전 (mirror)', () => {
       expect(b.score.sysBottom).toBe(a.score.sysBottom);
       expect(b.score.sysRight).toBeCloseTo(W - a.score.sysLeft, 6);
     }
+    // 가로 한 줄 배치(낮은 16:9 · 태블릿 위 띠)도 본다
+    expect(runs).toBeGreaterThan(0);
   });
 });
