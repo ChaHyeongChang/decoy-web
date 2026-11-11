@@ -48,6 +48,8 @@ import {
 } from '../gfx/state';
 import { TEXTURE_BUDGET } from '../gfx/presets';
 import { haptics } from '../haptics';
+import { snapshotJuice, type JuicePlan } from '../juice';
+import { NEAR_MISS, labelSlot, nearMissStrike, type Body } from '../nearMiss';
 import { InputLog, InputSampler } from '../input';
 import { matchMenu, toggleMatchMenu } from '../matchMenu';
 import { onPrefsChange, pref, shakeScaleOf, type PrefKey } from '../prefs';
@@ -78,7 +80,7 @@ import { Banners, type BannerLine } from '../ui/banners';
 import { CountdownTracker } from '../ui/countdownView';
 import { Hud } from '../ui/hud';
 import type { Tone } from '../ui/hudArt';
-import { HudKit, type Slice } from '../ui/hudKit';
+import { HudKit, hexColor, type Slice } from '../ui/hudKit';
 import {
   CAM,
   CAM_ZOOM,
@@ -102,7 +104,7 @@ import { EdgeMarkers, edgeMetrics } from '../ui/edgeMarkers';
 import { edgeTargets, placeEdges, type EdgeMarker, type EdgeTarget } from '../render/offscreen';
 import { Scoreboard, TutorialOverlay } from '../ui/overlays';
 import { PERF_CHIP, PerfChip, perfChipPlace, perfChipText, type CssRect } from '../ui/perfChip';
-import { PROBE_DEPTH, drawProbeText } from '../ui/text';
+import { PROBE_DEPTH, drawProbeText, type CrispText } from '../ui/text';
 import { TouchControls, type TouchView } from '../ui/touchControls';
 import { frameDeltaMs, frameTimeOf, staleEventLimitMs, trackFrameMs } from './staleEvents';
 
@@ -377,6 +379,17 @@ export class GameScene extends Phaser.Scene {
   private nextAdaptWindowAt = 0;
   /** 지금 처리하는 스냅샷이 서버에서 만들어진 뒤 지난 시간 (ms, 진동: 오래된 일은 울리지 않는다) */
   private eventAgeMs = 0;
+  /** 손맛 (플레이테스트 반영 c): 지금 처리하는 스냅샷의 계획 (onEvent가 구조자 배너를 고른다) · 지난 스냅샷의 내 상태 · 팀원 상태 */
+  private juiceNow: JuicePlan | null = null;
+  private prevSelfStatus: SurvivorStatus | null = null;
+  private readonly prevTeam = new Map<string, SurvivorStatus>();
+  private teamKnown = false;
+  /** 아슬아슬 회피: 횟수(디버그) · 마지막 시각 · 글자 방향 · 글자 (처음 쓸 때 한 번 만든다) · 이웃 몸 그릇 */
+  private nearMisses = 0;
+  private grazeAt = -1e9;
+  private grazeDir: number | null = null;
+  private grazeText: CrispText | null = null;
+  private readonly grazeOthers: Body[] = [];
   /** 터치 화면에 넘기는 값 (프레임마다 새로 만들지 않는다) */
   private readonly touchView: TouchView = { slots: [] };
   /** 괴물 재접속 대기 줄 (남은 초가 바뀔 때만 새로) */
@@ -563,7 +576,7 @@ export class GameScene extends Phaser.Scene {
   /** 디버그 · 테스트: 지금 보이는 연출 */
   get effects(): Record<string, number | boolean> {
     if (!this.screenFx || !this.world) return {};
-    return { ...this.screenFx.state, ...this.world.fx };
+    return { ...this.screenFx.state, ...this.world.fx, nearMisses: this.nearMisses };
   }
 
   create(): void {
@@ -578,6 +591,14 @@ export class GameScene extends Phaser.Scene {
     CAM.y = 0;
     this.world = new WorldRenderer(this, FOG_ENABLED);
     this.shakeOverride = null;
+    this.juiceNow = null;
+    this.prevSelfStatus = null;
+    this.prevTeam.clear();
+    this.teamKnown = false;
+    this.nearMisses = 0;
+    this.grazeAt = -1e9;
+    this.grazeDir = null;
+    this.grazeText = null;
     this.makeCameraFrame();
     this.aimHold.reset();
     this.myBlend = 0;
@@ -704,9 +725,15 @@ export class GameScene extends Phaser.Scene {
       this.noteSelfReconcile(performance.now());
       // 진동 (터치 기기): 발각 꺼짐 → 켜짐 전환만 울린다(판단은 haptics, 지난 일은 그 시간으로 거른다)
       if (device.touch) haptics.spotted(e.snap.you.surv?.spotted === true, age);
+      // 손맛: 이 스냅샷의 소리 · 진동 · 흔들림 · 화면 효과 · 배너를 한 번에 정한다 (지난 일이면 내지 않는다, juice.ts)
+      const juice = stale ? null : this.planJuice(e.snap);
+      this.juiceNow = juice?.plan ?? null;
       for (const ev of e.snap.events) {
         if (!stale || isKeptNote(ev)) this.onEvent(ev);
       }
+      this.juiceNow = null;
+      if (juice) this.applyJuice(juice.plan, juice.graze);
+      this.noteTeam(e.snap);
       const now = performance.now();
       this.roarPings = this.roarPings.filter((p) => p.until > now);
     });
@@ -837,6 +864,7 @@ export class GameScene extends Phaser.Scene {
     const on = pref('reduceFlash');
     this.flashReduced = on;
     if (this.screenFx) this.screenFx.reduceFlash = on;
+    if (this.hud) this.hud.reduceFlash = on;
     if (this.director) this.director.noDip = on;
   }
 
@@ -1292,7 +1320,104 @@ export class GameScene extends Phaser.Scene {
     };
   }
 
-  /** 서버 이벤트 → 배너 · 메모 · 효과 · 소리 */
+  /**
+   * 손맛 계획 (플레이테스트 반영 c): 이 스냅샷의 이벤트 · 내 스냅샷 · 지난 스냅샷 팀원 상태만 쓴다. graze = 아슬아슬 회피면 내 자리에서 본
+   * 타격 방향 (nearMiss.ts — 그 스냅샷의 내 서버 자리, 예측 자리 아님)
+   */
+  private planJuice(snap: Snapshot): { plan: JuicePlan; graze: number | null } {
+    const b = this.app.balance;
+    const surv = snap.you.surv;
+    const me = snap.you.move;
+    const strike = b
+      ? nearMissStrike({
+          role: snap.you.role,
+          status: surv?.status ?? null,
+          protectLeft: surv?.protectLeft ?? 0,
+          me,
+          events: snap.events,
+          range: b.monster.attack.range,
+          arcDeg: b.monster.attack.arc,
+          bodyR: b.survivor.radius,
+        })
+      : null;
+    const mon = snap.you.role === 'monster';
+    const plan = snapshotJuice({
+      role: snap.you.role,
+      events: snap.events,
+      status: surv?.status ?? null,
+      prevStatus: this.prevSelfStatus,
+      team: mon ? [] : snap.survivors,
+      prevTeam: this.teamKnown && !mon ? this.prevTeam : null,
+      nearMiss: strike !== null,
+    });
+    return { plan, graze: strike ? Math.atan2(strike.y - me.y, strike.x - me.x) : null };
+  }
+
+  /** 손맛 계획을 건다: 소리 · 흔들림 · 화면 효과 · 익명 칸 펄스 · 배너 · 진동(터치) · 아슬아슬 회피 */
+  private applyJuice(plan: JuicePlan, graze: number | null): void {
+    const now = performance.now();
+    for (const s of plan.sounds) sfx.play(s.name, s.vol);
+    for (const k of plan.shakes) this.director?.shake.add(k.kind, now, k.dir);
+    if (plan.hitFlash) this.screenFx.hit(now);
+    if (plan.imprisonFade) this.screenFx.imprison(now);
+    if (plan.rescueRim) this.screenFx.rescue(now);
+    if (plan.anonPulse) this.hud.pulseAnon(now);
+    for (const b of plan.banners) this.banners.push(b.text, b.sec, b.tone, b.icon, now);
+    if (plan.haptic && device.touch) haptics.play(plan.haptic, this.eventAgeMs);
+    if (graze !== null) {
+      this.world.graze(graze, now);
+      this.grazeAt = now;
+      this.grazeDir = null;
+      this.nearMisses += 1;
+    }
+  }
+
+  /** 다음 스냅샷의 손맛 비교용: 내 상태 · 팀원 상태 (오래된 스냅샷도 센다) */
+  private noteTeam(snap: Snapshot): void {
+    this.prevSelfStatus = snap.you.surv?.status ?? null;
+    this.prevTeam.clear();
+    for (const s of snap.survivors) this.prevTeam.set(s.id, s.status);
+    this.teamKnown = true;
+  }
+
+  /**
+   * "아슬아슬" 글자 (내 화면만, NEAR_MISS.labelMs): 내 몸 옆 이웃 몸(특히 바로 옆 괴물)을 비킨 자리에 띄워 위로 떠오르며 사라진다.
+   * 일시 배너 대기열은 쓰지 않는다(밀려 늦게 뜬다). 글자는 처음 쓸 때 한 번 만들고, 그 밖의 프레임은 숨긴 채 아무것도 하지 않는다
+   */
+  private updateGrazeLabel(now: number): void {
+    const e = now - this.grazeAt;
+    const b = this.app.balance;
+    if (!(e >= 0 && e < NEAR_MISS.labelMs) || !b) {
+      if (this.grazeText?.visible) this.grazeText.setVisible(false);
+      return;
+    }
+    let self: DrawnEntity | null = null;
+    const others = this.grazeOthers;
+    others.length = 0;
+    const sR = b.survivor.radius;
+    for (const d of this.drawn) {
+      if (d.kind === 'self') self = d;
+      else others.push({ x: d.x, y: d.y, r: d.kind === 'monster' ? b.monster.radius : sR });
+    }
+    if (!self) return;
+    const t =
+      this.grazeText ??
+      (this.grazeText = this.kit
+        .text(0, 0, HUD.font.small, UI.white, 36.5, true)
+        .setOrigin(0.5, 0.5)
+        .setStroke(hexColor(UI.background), 4)
+        .setText(UI_TEXT.nearMiss));
+    const a = labelSlot(self, sR, others, this.grazeDir);
+    this.grazeDir = a;
+    const d = NEAR_MISS.labelDist * sR;
+    const p = tileToScreen(self.x + Math.cos(a) * d, self.y + Math.sin(a) * d);
+    const k = e / NEAR_MISS.labelMs;
+    t.setPosition(p.x, p.y - NEAR_MISS.risePx * k)
+      .setAlpha(k < 0.6 ? 1 : (1 - k) / 0.4)
+      .setVisible(true);
+  }
+
+  /** 서버 이벤트 → 배너 · 메모 · 효과 · 소리 (판 순간의 소리 · 진동 · 흔들림 · 화면 효과는 손맛 계획 — applyJuice) */
   private onEvent(ev: GameEvent): void {
     const now = performance.now();
     const isMonster = this.app.match?.role === 'monster';
@@ -1303,28 +1428,6 @@ export class GameScene extends Phaser.Scene {
         // 괴물 본인은 누른 순간 이미 들었다 (즉시 피드백). 예측하지 못한 경우만 여기서 (WindupShow.snapshot이 가린다)
         if (!isMonster || this.windupUnheard) sfx.play('windup', isMonster ? 1 : 0.8);
         return;
-      case 'attackHit':
-        if (isMonster && ev.hits > 0) {
-          sfx.play('hit', 0.7);
-          this.director?.shake.add('strike', now);
-        }
-        return;
-      case 'stunned':
-        if (isMonster) this.director?.shake.add('stunMe', now);
-        return;
-      case 'hit':
-        if (ev.you) {
-          this.director?.shake.add('hitMe', now);
-          this.screenFx.hit(now);
-          sfx.play('hit', 1);
-          if (device.touch) haptics.hit(this.eventAgeMs);
-        } else {
-          sfx.play('hit', 0.4);
-        }
-        return;
-      case 'imprisoned':
-        if (ev.you) this.screenFx.imprison(now);
-        return;
       case 'text': {
         takeCode(this.keypadCodes, ev);
         if (ev.id === 'ALERT_CAPTURE_START') sfx.play('captureStart');
@@ -1333,7 +1436,11 @@ export class GameScene extends Phaser.Scene {
         else if (ev.id === 'ALERT_ROAR') sfx.play('roar', 0.9);
         if (ev.id === 'ALERT_LAST_30') return; // 지속형 배너로 따로 그린다
         const params = { point: ev.point, exit: ev.exit ? EXIT_NAMES[ev.exit] : undefined, code: ev.code };
-        const text = formatText(ev.id, params);
+        // 내가 감옥 문을 열었으면 '감옥 문이 열렸다.' 대신 '문을 열었다.' (같은 스냅샷의 rescued{you:true})
+        const text =
+          ev.id === 'ALERT_RESCUED' && this.juiceNow?.rescuer
+            ? UI_TEXT.rescuedByMe
+            : formatText(ev.id, params);
         const sec = STORY_TEXT[ev.id].seconds ?? 2;
         if (ev.id === 'NOTE_FIRST' || ev.id === 'NOTE_SECOND' || ev.id.startsWith('INTRO')) {
           this.banners.pushNote(text, sec);
@@ -1537,6 +1644,8 @@ export class GameScene extends Phaser.Scene {
     if (res.dash) {
       app.predictor.predictAction(frame.seq, applyDashStart(balance));
       this.localDashAt = now;
+      // 돌진 소리: 괴물 본인은 누른 순간 (생존자는 서버가 괴물이 보일 때만 보낸 dash 이벤트 — juice.ts)
+      sfx.play('dash');
     }
   }
 
@@ -1899,6 +2008,7 @@ export class GameScene extends Phaser.Scene {
       delta,
     );
     this.drawn = this.world.drawn;
+    this.updateGrazeLabel(now);
     this.screenFx.update(now, snap.you.role === 'monster' && (app.predictor?.state?.stun ?? 0) > 0);
     this.kit.sync();
     // 미니맵 바닥: 안개 그림이 바뀐 다음 프레임에 줄여 그린다 (없거나 숨었으면 읽지 않는다. 다시 보이면 그 프레임에 한 번)

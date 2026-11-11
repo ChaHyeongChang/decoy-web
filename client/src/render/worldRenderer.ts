@@ -64,8 +64,11 @@ import {
   DashTrail,
   DustField,
   FX_LIMITS,
+  FX_PRESETS,
   FxSystem,
+  STRIKE_FEEL,
   pickDissolveTarget,
+  strikePunch,
   type DustEye,
   type DustMote,
   type LiveGhost,
@@ -494,6 +497,10 @@ export class WorldRenderer {
   private shoveAt = -1e9;
   private scanAt = -1e9;
   private strikeAt = -1e9;
+  /** 괴물 화면: 마지막 타격의 맞은 수 (명중 펀치 · 자세 유지, 생존자 화면은 0) */
+  private strikeHits = 0;
+  /** 아슬아슬 회피 효과가 끝나는 시각 (performance.now, 그동안 효과를 내 몸에 붙인다) */
+  private grazeUntil = -1e9;
   private roarAt = -1e9;
   /** 이번 프레임 시각 (monsterPose가 읽는다) */
   private poseNowMs = 0;
@@ -704,6 +711,9 @@ export class WorldRenderer {
       case 'attackHit':
         if (isMonster) this.lastStrike = { x: ev.x, y: ev.y, dir: ev.dir, hits: ev.hits, at: nowMs };
         this.strikeAt = nowMs;
+        // 괴물 화면 명중: 몸 배율 펀치 · 타격 자세 더 유지 (맞은 수의 함수뿐, 괴물 자신의 몸에만 — fx.STRIKE_FEEL)
+        this.strikeHits = isMonster ? ev.hits : 0;
+        // 호: 빗나감은 양쪽 화면 옅고 가는 선, 명중은 괴물 화면 굵고 따뜻한 흰색 · 생존자 화면 보통 (모양으로도 갈린다)
         if (balance)
           this.fxs.slash(
             ev.x,
@@ -714,6 +724,7 @@ export class WorldRenderer {
             tS,
             isMonster ? null : 'monster',
             !isMonster,
+            ev.hits === 0 ? 'slashMiss' : isMonster ? 'slashHit' : 'slash',
           );
         return;
       case 'ability': {
@@ -756,6 +767,18 @@ export class WorldRenderer {
   private lastBalance: Balance | null = null;
   private lastRole: Role | null = null;
   private lastMe: Vec2 | null = null;
+
+  /**
+   * 아슬아슬 회피 (내 화면만 — GameScene이 nearMiss.ts로 판단해 부른다): 내 몸의 dir 쪽(타격이 온 쪽) 옆면에 흰 이중 호 0.3초.
+   * 그동안 효과를 내 몸 자리에 붙인다 (drawCharacters)
+   */
+  graze(dir: number, nowMs: number): void {
+    const me = this.lastMe;
+    const balance = this.lastBalance;
+    if (!me || !balance) return;
+    this.fxs.graze(me.x, me.y, balance.survivor.radius, dir, gfxNow() / 1000);
+    this.grazeUntil = nowMs + FX_PRESETS.graze.life * 1000;
+  }
 
   private buildFog(): FogLayer {
     const renderer: RendererKind = this.scene.game.renderer.type === Phaser.WEBGL ? 'webgl' : 'canvas';
@@ -1717,7 +1740,11 @@ export class WorldRenderer {
     self: boolean,
   ): void {
     const prev = this.lastStatus.get(id);
-    if (prev && prev.status === 'free' && status === 'imprisoned') {
+    if (prev && prev.status === 'imprisoned' && status === 'free' && !isMonster) {
+      // 풀려남 (생존자 화면만): 풀려난 자리에서 청록 고리. 괴물 화면에는 풀려난 생존자 자리에 아무것도 그리지 않는다
+      const t0 = this.statusFlip(v, id, self);
+      this.fxs.ring('release', x, y, sR * 2.4, (clockMs - (realMs - t0)) / 1000, null, false);
+    } else if (prev && prev.status === 'free' && status === 'imprisoned') {
       const t0 = this.statusFlip(v, id, self);
       this.fxs.dissolve(prev.x, prev.y, sR, (clockMs - (realMs - t0)) / 1000, null, isMonster);
       this.fades.set(id, { kind: 'appear', t0, x, y, face });
@@ -2134,6 +2161,7 @@ export class WorldRenderer {
           tp.reach = (mine?.rescue ?? 0) > 0;
           drawTeamSurvivor(rig, tp, sR);
           const s = snap.you.surv;
+          if (realMs < this.grazeUntil) this.fxs.anchor('graze', body.x, body.y);
           if (s && s.hp < balance.survivor.maxHp && s.status === 'free')
             drawInjury(this.attachG, body.x, body.y, v.me.face, sR);
           if (role === 'runner' && s && s.abilityActive > 0 && g.stepping > 0.3)
@@ -2248,7 +2276,9 @@ export class WorldRenderer {
     f.stunned = stunned;
     f.dashing = dashing;
     f.windup = windup;
-    f.strike = now - this.strikeAt >= 0 && now - this.strikeAt < NEW_POSE_MS.strike;
+    f.strike =
+      now - this.strikeAt >= 0 &&
+      now - this.strikeAt < NEW_POSE_MS.strike + (this.strikeHits > 0 ? STRIKE_FEEL.holdMs : 0);
     f.roar = now - this.roarAt >= 0 && now - this.roarAt < NEW_POSE_MS.roar;
     f.moving = moving;
     f.cloak = cloak;
@@ -2290,7 +2320,7 @@ export class WorldRenderer {
     p.stretch = dashing && !isNew ? dashStretch(0, 1) * 0.6 : 0;
     p.eyes = stunned ? 'stun' : blink ? 'blink' : 'open';
     p.glow = this.preset.tier !== 'low';
-    p.scale = 1 + 0.012 * Math.sin(tS * 2.4);
+    p.scale = (1 + 0.012 * Math.sin(tS * 2.4)) * (this.strikeHits > 0 ? strikePunch(now - this.strikeAt) : 1);
     p.alpha = 1;
     return p;
   }

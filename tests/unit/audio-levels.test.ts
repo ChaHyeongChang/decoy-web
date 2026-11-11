@@ -2,7 +2,7 @@
 // 묶음, UI 소리(ui)는 UI 묶음으로 간다. setLevels는 AudioContext를 만들기 전에도 받고(만들 때 건다), 만든 뒤에는 바로 건다
 // (setTargetAtTime). 음소거 = 모두 0이고 그동안 소리 노드를 만들지 않는다. 기본값은 예전 소리 그대로(전체 0.32 · 묶음 1)
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LEVEL_TAU_S, Sfx, busGains } from '../../client/src/audio';
+import { LEVEL_TAU_S, SFX_LIMIT, Sfx, busGains } from '../../client/src/audio';
 import { PREF_DEFAULTS, audioLevelsOf } from '../../client/src/prefs';
 
 /** 이득 노드 · 소리 노드 하나 (연결 · 이득 · 예약 기록) */
@@ -272,6 +272,54 @@ describe('소리 묶음 이득', () => {
     sfx.play('hit');
     expect(c.started.length).toBe(0);
     sfx.ui('tap');
+    expect(c.started.length).toBeGreaterThan(0);
+  });
+
+  it('손맛 소리 (플레이테스트 반영 c): 빗나감 · 쿵 · 철창 · 구조 · 경고 · 돌진 · 아슬아슬이 이름대로 기록되고 소리 노드를 만든다', () => {
+    const { sfx, ctx, unlock } = setup();
+    unlock();
+    const c = ctx()!;
+    const names = ['swing', 'thud', 'jail', 'rescue', 'alarm', 'dash', 'graze'] as const;
+    for (const n of names) {
+      const before = c.started.length;
+      sfx.play(n);
+      expect(c.started.length, n).toBeGreaterThan(before);
+    }
+    expect(sfx.log.map((e) => e.name)).toEqual([...names]);
+  });
+
+  it('소리 합 (P14): 압축기가 있으면 효과음 묶음 → 압축기 → 전체 이득, UI 묶음은 그대로 전체로 (없는 환경은 예전 그대로)', () => {
+    let made: (FakeCtx & { comp: FakeNode | null }) | null = null;
+    const sfx = new Sfx(() => {
+      const c = new FakeCtx() as FakeCtx & {
+        comp: FakeNode | null;
+        createDynamicsCompressor: () => FakeNode;
+      };
+      c.comp = null;
+      c.createDynamicsCompressor = () => {
+        const n = new FakeNode('comp', c) as FakeNode & Record<string, { value: number }>;
+        for (const k of ['threshold', 'knee', 'ratio', 'attack', 'release']) n[k] = { value: 0 };
+        c.comp = n;
+        return n;
+      };
+      made = c;
+      return c as unknown as AudioContext;
+    });
+    const target = new EventTarget();
+    sfx.attachUnlock(target);
+    target.dispatchEvent(new Event('keydown'));
+    const c = made as unknown as FakeCtx & { comp: (FakeNode & Record<string, { value: number }>) | null };
+    const [m, s, u] = buses(c);
+    expect(c.comp).not.toBeNull();
+    expect(s.out).toEqual([c.comp]);
+    expect(c.comp!.out).toEqual([m]);
+    expect(u.out).toEqual([m]);
+    expect(m.out).toEqual([c.destination]);
+    expect(c.comp!['threshold']!.value).toBe(SFX_LIMIT.threshold);
+    expect(c.comp!['ratio']!.value).toBe(SFX_LIMIT.ratio);
+    // 소리 하나는 거의 그대로 (문턱이 0dB 가까이)
+    expect(SFX_LIMIT.threshold).toBeGreaterThanOrEqual(-3);
+    sfx.play('jail');
     expect(c.started.length).toBeGreaterThan(0);
   });
 

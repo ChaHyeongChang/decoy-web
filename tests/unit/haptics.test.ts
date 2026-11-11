@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   HAPTIC_MAX_AGE_MS,
+  HAPTIC_PATTERNS,
   HIT_PATTERN,
   Haptics,
   SPOTTED_PATTERN,
@@ -10,6 +11,7 @@ import {
   parseHapticsSetting,
   spottedRose,
   type HapticEnv,
+  type HapticKind,
 } from '../../client/src/haptics';
 
 const OK: HapticEnv = { enabled: true, activated: true, visible: true, clockOk: true };
@@ -57,6 +59,18 @@ describe('진동 판단 (순수)', () => {
 });
 
 describe('진동 (Haptics)', () => {
+  it('판 순간 패턴 (플레이테스트 반영 c): 종류마다 그 패턴 한 번, 오래된 일 · 끈 설정은 0번', () => {
+    const { h, calls } = device();
+    for (const k of Object.keys(HAPTIC_PATTERNS) as HapticKind[]) h.play(k, 0);
+    expect(calls).toEqual(Object.values(HAPTIC_PATTERNS).map((p) => [...p]));
+    expect(HAPTIC_PATTERNS.hit).toEqual(HIT_PATTERN);
+    calls.length = 0;
+    h.play('jailed', HAPTIC_MAX_AGE_MS + 1);
+    h.setEnabled(false);
+    h.play('rescue', 0);
+    expect(calls).toEqual([]);
+  });
+
   it('피격 한 번 = 한 번 울림, 오래된 피격은 0번', () => {
     const { h, calls } = device();
     h.hit(0);

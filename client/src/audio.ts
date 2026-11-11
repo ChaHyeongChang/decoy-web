@@ -4,8 +4,23 @@
 // 설정 화면 통합: 소리 묶음 — 전체 이득(MASTER_GAIN × 전체 음량) 아래에 효과음 묶음 · UI 묶음 이득을 둔다(소리 = 전체 × 묶음).
 // 판 효과음(play)은 효과음 묶음, 설정 화면 단추 소리(ui)는 UI 묶음으로 간다. 음량은 AudioContext를 만들기 전에 바꿔도
 // 기억했다가 만들 때 건다. 음소거 = 모두 0 (그동안은 소리 노드도 만들지 않는다)
+// 플레이테스트 반영 c 손맛: 빗나감 · 명중 확인 · 수감 · 구조 · 돌진 · 아슬아슬 소리를 더하고, 한 스냅샷에 여러 소리가 겹쳐도 합이 커지지
+// 않게 효과음 묶음과 전체 이득 사이에 압축기(SFX_LIMIT) 하나를 둔다 (없는 환경은 예전 그대로 바로 잇는다)
 
-export type SfxName = 'windup' | 'hit' | 'captureStart' | 'captureDone' | 'doorOpen' | 'roar';
+export type SfxName =
+  | 'windup'
+  | 'hit'
+  | 'captureStart'
+  | 'captureDone'
+  | 'doorOpen'
+  | 'roar'
+  | 'swing'
+  | 'thud'
+  | 'jail'
+  | 'rescue'
+  | 'alarm'
+  | 'dash'
+  | 'graze';
 /** 판 시작 카운트다운 소리 (플레이테스트 a-8): 숫자 3 · 2 · 1마다 'count', "시작!"에 'go' (Sfx.count) */
 export type CountSfxName = 'count' | 'go';
 /** 포효 결과 소리의 기록 이름 (roarResult만 남긴다 — play로는 낼 수 없다): 드러난 자리마다 'roarFound' 한 줄, 0명이면 'roarEmpty' 한 줄 */
@@ -20,6 +35,11 @@ export interface SfxLevels {
 }
 
 const MASTER_GAIN = 0.32;
+/**
+ * 소리 합 압축기 (효과음 묶음 → 이것 → 전체 이득): 문턱(dB) · 무릎(dB) · 비율 · 걸림 · 풀림(초). 소리 하나의 최고값(전체 이득 앞
+ * 약 1.0 아래)은 거의 그대로 두고 겹친 합만 누른다 — 문턱을 0dB 가까이 두어 브라우저가 자동으로 올리는 몫도 0.6dB 안팎이다
+ */
+export const SFX_LIMIT = { threshold: -1, knee: 1, ratio: 12, attack: 0.003, release: 0.15 } as const;
 /** 같은 소리가 너무 촘촘히 겹치지 않게 (ms) */
 const MIN_GAP_MS = 60;
 /** 음량을 바꿀 때 이득이 따라가는 시간 상수 (초): 딸깍 소리 없이 바로 (약 50ms면 다 바뀐다) */
@@ -131,7 +151,18 @@ export class Sfx {
       master.connect(ctx.destination);
       const sfxBus = ctx.createGain();
       sfxBus.gain.value = g.sfx;
-      sfxBus.connect(master);
+      let into: AudioNode = master;
+      if (typeof ctx.createDynamicsCompressor === 'function') {
+        const c = ctx.createDynamicsCompressor();
+        c.threshold.value = SFX_LIMIT.threshold;
+        c.knee.value = SFX_LIMIT.knee;
+        c.ratio.value = SFX_LIMIT.ratio;
+        c.attack.value = SFX_LIMIT.attack;
+        c.release.value = SFX_LIMIT.release;
+        c.connect(master);
+        into = c;
+      }
+      sfxBus.connect(into);
       const uiBus = ctx.createGain();
       uiBus.gain.value = g.ui;
       uiBus.connect(master);
@@ -270,6 +301,46 @@ export class Sfx {
         // 포효: 떨리는 낮은 톱니파 + 거친 잡음
         this.tone(out, 'sawtooth', t, 0.85, 75, 55, 0.4, 600, 18);
         this.burst(out, t, 0.7, 0.3, 350);
+        break;
+      case 'swing':
+        // 허공을 가르는 바람 (타격마다 결과와 무관하게 같은 소리): 잡음 0.12초 + 내려가는 사인 0.1초
+        this.burst(out, t, 0.12, 0.3, 3200);
+        this.tone(out, 'sine', t, 0.1, 520, 240, 0.16);
+        break;
+      case 'thud':
+        // 명중 확인 (괴물): 낮은 쿵 한 겹 — 짧은 딸깍 + 아주 낮게 떨어지는 사인 (타격음 hit 위에 겹친다)
+        this.burst(out, t, 0.04, 0.35, 700);
+        this.tone(out, 'sine', t, 0.22, 85, 38, 0.75);
+        break;
+      case 'jail':
+        // 철창: 금속성 두 번 + 낮은 쿵 (약 0.35초)
+        this.tone(out, 'square', t, 0.09, 1250, 1190, 0.09, 4200);
+        this.tone(out, 'triangle', t, 0.12, 1880, 1820, 0.07);
+        this.tone(out, 'square', t + 0.13, 0.11, 1050, 1000, 0.09, 4200);
+        this.tone(out, 'triangle', t + 0.13, 0.14, 1580, 1530, 0.07);
+        this.tone(out, 'sine', t + 0.02, 0.33, 120, 48, 0.55);
+        break;
+      case 'rescue':
+        // 구조 완료: 세 음 화음 0.35초 + 올라가는 꼬리
+        this.tone(out, 'triangle', t, 0.35, 523, 523, 0.16);
+        this.tone(out, 'triangle', t, 0.35, 659, 659, 0.16);
+        this.tone(out, 'triangle', t, 0.35, 784, 784, 0.16);
+        this.tone(out, 'sine', t + 0.18, 0.28, 784, 1175, 0.16);
+        break;
+      case 'alarm':
+        // 구조 경고 (괴물 화면): 올라가는 두 음 (점령 시작의 내려가는 두 음과 반대)
+        this.tone(out, 'square', t, 0.1, 740, 740, 0.15, 2600);
+        this.tone(out, 'square', t + 0.14, 0.16, 988, 988, 0.15, 2600);
+        break;
+      case 'dash':
+        // 돌진: 잡음 0.2초 + 올라가는 톱니
+        this.burst(out, t, 0.2, 0.3, 1400);
+        this.tone(out, 'sawtooth', t, 0.18, 110, 300, 0.14, 1100);
+        break;
+      case 'graze':
+        // 아슬아슬: 짧게 올라가는 휙 (삼각파 900 → 1500Hz 70ms + 높은 잡음 60ms) — 타격음의 낮은 쿵과 반대 음색
+        this.tone(out, 'triangle', t, 0.07, 900, 1500, 0.2);
+        this.burst(out, t, 0.06, 0.16, 7000);
         break;
       default:
         break;
