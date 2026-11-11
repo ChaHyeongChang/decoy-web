@@ -629,7 +629,7 @@ export class PracticeSurvivorBrain implements BotBrain {
       // 감옥 근처가 막히면(지켜짐 · 가는 길에 괴물) 거점이 남아 있고 자유 동료가 있는 동안은 점령을 하다가 다시 본다
       // (모두 감옥 앞에서 기다리지 않게)
       const enter = this.rescueEnter(snap, b);
-      const go = this.approach(enter, me, this.rescueBrave(snap, b));
+      const go = this.approach(enter, me, this.rescueInZone(snap, b));
       if (go) return go;
       if (undone.length === 0 || freeMates.length === 0) return this.waitTask(snap, enter);
     }
@@ -661,7 +661,7 @@ export class PracticeSurvivorBrain implements BotBrain {
     }
     if (jailed.length > 0) {
       const enter = this.rescueEnter(snap, b);
-      return this.approach(enter, me, this.rescueBrave(snap, b)) ?? this.waitTask(snap, enter);
+      return this.approach(enter, me, this.rescueInZone(snap, b)) ?? this.waitTask(snap, enter);
     }
     return { kind: 'idle', target: { x: me.x, y: me.y }, tol: 1, held: 0, commit: false, anchor: me };
   }
@@ -687,10 +687,13 @@ export class PracticeSurvivorBrain implements BotBrain {
     return mine <= others + RESCUE_SLACK;
   }
 
-  /** 막혀도 구조하러 들어가는가: 구조 구역 안이거나 밀치기가 준비된 가드 */
-  private rescueBrave(snap: Snapshot, b: Balance): boolean {
-    const inZone = dist(snap.you.move, RESCUE_POINT) <= b.prison.rescueRadius - 0.2;
-    return inZone || (this.role === 'guard' && (snap.you.surv?.abilityCd ?? 1) <= 0);
+  /**
+   * 막혀도 구조를 이어 가는가: 이미 구조 구역 안. 역할과 무관하다 (예전에는 밀치기가 준비된 가드만 지켜지는 구조 지점에 들어가
+   * 괴물 화면에서 '지켜지는 감옥으로 걸어오는 흰 사람 = 가드'라는 단서였다 — 들어가 보기는 미끼 순서(decoyOrder)가 맡는다.
+   * 없애도 봇끼리 300판 괴물 승률 48.0% → 47.0%, novice 수감 2.70 → 2.74)
+   */
+  private rescueInZone(snap: Snapshot, b: Balance): boolean {
+    return dist(snap.you.move, RESCUE_POINT) <= b.prison.rescueRadius - 0.2;
   }
 
   private rescueEnter(snap: Snapshot, b: Balance): Task {

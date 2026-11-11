@@ -397,6 +397,35 @@ describe('생존자 봇: 거점 · 탈출구 자리와 미끼 순서는 역할�
     expect(new Set(bySeed.values()).size).toBe(2);
   });
 
+  it('지켜지는 구조 지점에 들어갈지는 역할과 무관하다 (밀치기가 준비된 가드도 다른 역할처럼 기다린다)', () => {
+    const kinds = ROLES.map((role) => {
+      const { snap, info } = closeUp(role, 1.0);
+      const base = snap.monster;
+      if (!base) throw new Error('괴물 없음');
+      // 동료 둘은 갇혔고(할 일이 구조뿐), 괴물은 구조 지점 남쪽 2타일에서 보였다가 안 보인다. 능력은 모두 준비됨
+      const survivors = snap.survivors.map((v, i) => ({
+        ...v,
+        status: 'imprisoned' as const,
+        x: 23.5 + i,
+        y: 15.5,
+      }));
+      const view = (tick: number, monster: Snapshot['monster']): Snapshot => ({
+        ...at(snap, tick, monster, 0),
+        survivors,
+      });
+      const brain = new PracticeSurvivorBrain(role, 9);
+      brain.decide(
+        view(100, { ...base, x: RESCUE_POINT.x, y: RESCUE_POINT.y + 2, windup: 0 }),
+        info,
+        balance,
+        1,
+      );
+      brain.decide(view(101, null), info, balance, 2);
+      return brain.debugState()?.kind ?? null;
+    });
+    expect(kinds).toEqual(['wait', 'wait', 'wait']);
+  });
+
   it('미끼 순서: 시드에 따라 세 역할 모두 첫 미끼가 된다', () => {
     const firsts = new Set<RoleId>();
     for (let seed = 1; seed <= 60; seed += 1) {
