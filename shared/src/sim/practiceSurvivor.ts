@@ -12,6 +12,8 @@
 //    난수는 행동마다 따로 뽑은 시드 난수 흐름이다(한 행동의 난수가 다른 행동의 순서를 밀지 않게)
 //  - 거점 · 탈출구에서 서는 자리는 역할이 아니라 (판 시드, 장소)로 섞어 정한다 (괴물 화면에서 자리로 역할을 짐작하지 못하게)
 //  - 두뇌 시계는 판이 흐른 시간만 센다: 시작 카운트다운 · 판 정지(괴물 재접속 대기) 동안은 탐지 대기 · 기억 · 기다림이 흐르지 않는다
+//  - 조심 (통합 조정 tb): 다음에 잡히면 사망이면 조금 더 멀리서 달아나기 시작하고, 잡혀 본 · 다친 생존자일수록 트인 가운데 홀보다
+//    벽 · 방 쪽으로 달아나 괴물 시야를 끊는다. 수감 횟수 · 체력으로만 정한다 (역할과 무관)
 import {
   BTN,
   CAPTURE_POINTS,
@@ -62,6 +64,11 @@ import {
 const FLEE_DIST = 6.5;
 /** 부상(체력 1)이면 도주 거리에 더한다 (타일) */
 const FLEE_INJURED_BONUS = 1.0;
+/**
+ * 다음에 잡히면 사망(수감 횟수가 한도)이면 도주 거리에 더한다 (타일). 역할과 무관하다 — 수감 횟수로 정한다.
+ * 괴물 승리의 절반 가까이가 '사망 2명'이라 마지막 목숨만 조심시킨다 (모두를 조심시키면 점령이 늦어 괴물 승률이 오히려 오른다 — 생존자 갈래 4.4)
+ */
+const LAST_LIFE_FLEE_BONUS = 1.5;
 /** 이미 달아나는 중이면 이만큼 더 멀어질 때까지 계속 (타일) */
 const FLEE_HYST = 1.5;
 /** 괴물이 안 보인 뒤에도 이만큼(초) 계속 달아난다 */
@@ -82,6 +89,14 @@ const FLEE_HIDDEN_BONUS = 2.5;
 const FLEE_MIN_SPOT = 2.5;
 /** 도주 · 기다리는 자리 점수: 열린 정도(이웃 후보 수) 가중치. 구석으로 몰리지 않게 */
 const OPEN_WEIGHT = 0.6;
+/**
+ * 조심 단계(cautionLevel: 수감 횟수 + 부상, 0~2)별 도주 지점의 열린 정도 가중치. 잡혀 본 · 다친 생존자일수록 트인 가운데 홀
+ * (열린 정도 15~18)보다 벽 · 방 쪽 도주 지점을 골라 괴물 시야를 끊는다. 0단계는 OPEN_WEIGHT 그대로.
+ * 역할과 무관하다 (수감 횟수 · 체력으로만 정한다). 모두(0단계까지)를 낮추면 봇끼리 괴물 승률은 크게 내려가지만 처음 하는
+ * 사람 흉내(novice)의 판당 수감이 요구(2.5 이상) 밑으로 떨어진다 (0.3: 2.84 → 1.72, 0.5: 2.45 — novice가 가두는 것은 대부분
+ * 처음 잡히는 생존자다). 그래서 잡혀 본 · 다친 단계만 낮춘다 (플레이테스트 반영 c 통합 조정 tb)
+ */
+const FLEE_OPEN_WEIGHT_BY_CAUTION: readonly number[] = [OPEN_WEIGHT, 0.45, 0.3];
 /** 함께 달아나는 동료가 이 거리(타일) 안이면 갈라진다 (한 번 휘두르기에 둘이 맞지 않게) */
 const SPLIT_RADIUS = 3;
 /** 갈라지기: ID 순서로 한쪽은 왼쪽, 한쪽은 오른쪽 도주 지점에 주는 점수 */
@@ -277,6 +292,8 @@ export interface SurvivorBrainDebug {
   anchor: Vec2;
   target: Vec2;
   fleeing: boolean;
+  /** 달아나는 중이면 고른 도주 지점 (곧장 반대쪽으로 비킬 때는 그 전에 고른 곳) */
+  fleeSpot: Vec2 | null;
   via: boolean;
   probe: boolean;
 }
@@ -390,6 +407,16 @@ export function pickPoint(
   return hot[pick] && held ? cur : pick;
 }
 
+/** 다음에 잡히면 사망인가 (수감 횟수가 한도) */
+function lastLife(imprisonCount: number | null, b: Balance): boolean {
+  return imprisonCount !== null && imprisonCount >= b.survivor.maxImprisonments;
+}
+
+/** 조심 단계 0~2: 수감 횟수 + 부상(체력이 최대보다 적음). 역할과 무관하다 */
+export function cautionLevel(imprisonCount: number, hp: number, b: Balance): number {
+  return Math.min(2, Math.max(0, imprisonCount) + (hp < b.survivor.maxHp ? 1 : 0));
+}
+
 /** [lo, hi] 균등 난수 */
 function uniform(r: Rng, range: readonly [number, number]): number {
   return range[0] + r.next() * (range[1] - range[0]);
@@ -487,6 +514,7 @@ export class PracticeSurvivorBrain implements BotBrain {
       anchor: { x: t.anchor.x, y: t.anchor.y },
       target: { x: t.target.x, y: t.target.y },
       fleeing: this.fleeing,
+      fleeSpot: this.fleeing && this.fleeSpot ? { x: this.fleeSpot.x, y: this.fleeSpot.y } : null,
       via: t.via === true,
       probe: t.probe === true,
     };
@@ -1053,7 +1081,10 @@ export class PracticeSurvivorBrain implements BotBrain {
     }
     // 밀치기가 준비된 가드도 다른 생존자처럼 달아난다 (예전에는 2.4타일까지 버텼다 — 밀치기 반응 지연이 생긴 뒤로는 버티면 맞고,
     // 괴물 화면에서 '다가가도 안 도망가는 흰 사람 = 가드'라는 움직임 단서였다). 밀치기는 쫓아온 괴물이 사거리에 들면 누른다
-    let radius = FLEE_DIST + (surv.hp < b.survivor.maxHp ? FLEE_INJURED_BONUS : 0);
+    let radius =
+      FLEE_DIST +
+      (surv.hp < b.survivor.maxHp ? FLEE_INJURED_BONUS : 0) +
+      (lastLife(surv.imprisonCount, b) ? LAST_LIFE_FLEE_BONUS : 0);
     if (this.fleeing) radius += FLEE_HYST;
     const age = this.now - t.tick;
     let threatened = false;
@@ -1111,14 +1142,18 @@ export class PracticeSurvivorBrain implements BotBrain {
       if (dir) return { mx: dir.x, my: dir.y, arrived: false };
     }
     const split = this.splitSide(snap);
+    // 잡혀 본 · 다친 생존자일수록 트인 곳보다 벽 · 방 쪽으로 (시야 끊기). 수감 횟수 · 체력으로만 정한다 (역할과 무관)
+    const surv = snap.you.surv;
+    const open =
+      FLEE_OPEN_WEIGHT_BY_CAUTION[surv ? cautionLevel(surv.imprisonCount, surv.hp, b) : 0] ?? OPEN_WEIGHT;
     if (!this.fleeSpot || this.now >= this.fleeReplanAt) {
-      this.fleeSpot = this.chooseFleeSpot(me, dg, split);
+      this.fleeSpot = this.chooseFleeSpot(me, dg, split, open);
       this.fleeReplanAt = this.now + FLEE_REPLAN_TICKS;
     }
     const w = this.walker.toward(snap, this.fleeSpot, 0.6);
     if (w.arrived) {
       // 닿았는데 아직 위험하면 지금 자리를 빼고 새로 고른다
-      this.fleeSpot = this.chooseFleeSpot(me, dg, split, this.fleeSpot);
+      this.fleeSpot = this.chooseFleeSpot(me, dg, split, open, this.fleeSpot);
       this.fleeReplanAt = this.now + FLEE_REPLAN_TICKS;
       return this.walker.toward(snap, this.fleeSpot, 0.6);
     }
@@ -1144,7 +1179,13 @@ export class PracticeSurvivorBrain implements BotBrain {
   }
 
   /** 괴물보다 먼저(괴물이 10% 빠름을 감안) 닿고, 괴물에게서 멀고 안 보이는 도주 후보. split이면 그쪽 옆으로 */
-  private chooseFleeSpot(me: Vec2, dg: Danger, split: number, exclude: Vec2 | null = null): Vec2 {
+  private chooseFleeSpot(
+    me: Vec2,
+    dg: Danger,
+    split: number,
+    openWeight: number,
+    exclude: Vec2 | null = null,
+  ): Vec2 {
     const ax = me.x - dg.x;
     const ay = me.y - dg.y;
     let best: Vec2 | null = null;
@@ -1158,7 +1199,7 @@ export class PracticeSurvivorBrain implements BotBrain {
       if (!Number.isFinite(dMe) || dMe < FLEE_MIN_SPOT) continue;
       const dMon = pathDist(f, dg);
       let score =
-        dMon - FLEE_SPEED_RATIO * dMe + FLEE_FAR_WEIGHT * Math.min(dMon, 20) + OPEN_WEIGHT * opennessOf(k);
+        dMon - FLEE_SPEED_RATIO * dMe + FLEE_FAR_WEIGHT * Math.min(dMon, 20) + openWeight * opennessOf(k);
       if (!lineOfSight(dg, s)) score += FLEE_HIDDEN_BONUS;
       if (split !== 0) {
         // 괴물 → 나 방향의 왼쪽(외적 > 0)이면 +1
