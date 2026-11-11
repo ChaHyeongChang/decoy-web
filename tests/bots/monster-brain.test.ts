@@ -10,6 +10,7 @@ import {
   CAPTURE_POINTS,
   POINT_IDS,
   PRISON_RECT,
+  PRISON_SLOTS,
   RESCUE_POINT,
   distToRect,
   lineOfSight,
@@ -760,6 +761,61 @@ describe('실전 괴물 봇: 알림 · 핑 · 거점 · 감시 행동 하나씩 
         expect(farAt, `seed ${seed}: 그다음 먼 핑`).toBeGreaterThan(nearAt);
       }
     }
+  });
+
+  it('포효 핑: 감옥 안(수감자가 있을 수 있는 2×2 바닥)의 핑만 거르고, 감옥 문 칸 · 문 앞에 선 생존자(구조하러 온)의 핑은 따라간다 (M3)', () => {
+    const { snap: base, info } = baseSnap();
+    const jailed: GameEvent = { k: 'imprisoned', you: false };
+    // 따라갈 핑: 문 칸 (24, 17.6) · 철창 바로 아래 (24, 18.25) — 둘 다 구조 구역(구조 지점에서 1.2) 안, 자유 생존자만 설 수 있다.
+    // 거를 핑: 수감 자리 셋 · 문에 붙은 수감자 (24, 16.7)
+    const cases: ReadonlyArray<readonly [Vec2, boolean]> = [
+      [{ x: 24, y: 17.6 }, true],
+      [{ x: 24, y: 18.25 }, true],
+      ...PRISON_SLOTS.map((p) => [p, false] as const),
+      [{ x: 24, y: 16.7 }, false],
+    ];
+    let watchedFirst = 0;
+    let leftFirst = 0;
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
+      for (const [ping, follow] of cases) {
+        expect(
+          dist(ping, RESCUE_POINT) <= balance.prison.rescueRadius,
+          `(${ping.x}, ${ping.y}) 구조 구역`,
+        ).toBe(follow);
+        const brain = monsterBrain(seed);
+        const me = { x: 34, y: 18.5, face: Math.PI };
+        // 한 명을 막 가뒀다: 감옥 감시로 가거나, 감시를 감시 간격만큼 미루고 다른 할 일로 (주사위 반반 — 시드마다 둘 다 나온다)
+        const pre = drive(brain, base, info, me, 100, 10, (k) => ({
+          imprisoned: 1,
+          roarCd: 25,
+          events: k === 0 ? [jailed] : [],
+        }));
+        if (pre.some((t) => t.act.endsWith(':watch'))) watchedFirst += 1;
+        else leftFirst += 1;
+        const log = drive(
+          brain,
+          base,
+          info,
+          me,
+          110,
+          4 * HZ,
+          (k) => ({ imprisoned: 1, roarCd: 25, events: k === 0 ? [{ k: 'roarPings', pts: [ping] }] : [] }),
+          (t) => t.act === 'look:roar',
+        );
+        const at = `seed ${seed} 핑 (${ping.x}, ${ping.y})`;
+        if (follow) {
+          expect(log[0]?.act, at).toBe('go:roar');
+          const last = log[log.length - 1];
+          expect(last?.act, `${at}: 핑 자리에 닿아 둘러본다`).toBe('look:roar');
+          expect(dist(last?.at ?? me, ping), at).toBeLessThan(0.65);
+        } else {
+          expect(log.filter((t) => t.act.endsWith(':roar')).length, at).toBe(0);
+        }
+      }
+    }
+    // 검사가 헛돌지 않게: 감시 중에 받은 핑 · 감시를 미룬 뒤 받은 핑 둘 다 봤다
+    expect(watchedFirst, '감시 중').toBeGreaterThan(0);
+    expect(leftFirst, '감시를 미룬 뒤').toBeGreaterThan(0);
   });
 
   it('알림으로 온 거점을 훑었는데 아무도 없으면 곧 포효한다 (오래 못 봤을 때보다 훨씬 일찍, M3)', () => {

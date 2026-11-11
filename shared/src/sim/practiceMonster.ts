@@ -162,6 +162,16 @@ const ROAR_WANT_TIME = 1.0;
 const PING_MEMORY = 10;
 const PING_TIME = 6;
 const PING_LOOK = 1.0;
+/**
+ * 감옥 안 바닥 (철창 한 칸 안쪽 2×2): 수감자가 있을 수 있는 곳. 갇힌 생존자는 감옥 문 칸을 못 지나가므로(map.ts blocksMove) 이 밖의
+ * 포효 핑(문 칸 · 문 앞)은 자유 생존자다
+ */
+const PRISON_INNER = {
+  x0: PRISON_RECT.x0 + 1,
+  y0: PRISON_RECT.y0 + 1,
+  x1: PRISON_RECT.x1 - 1,
+  y1: PRISON_RECT.y1 - 1,
+} as const;
 /** 점령 알림을 기억하는 시간 (초, M4): 추적이 끝났을 때 이 안이면 그 거점부터 */
 const ALERT_MEMORY = 18;
 /** 알림 거점으로 가는 중 다른 거점 알림이 오면: 진행이 이만큼(0~1) 더 많거나, 비슷하면 길이 이만큼(타일) 더 가까울 때만 바꾼다 */
@@ -539,9 +549,13 @@ export class PracticeMonsterBrain implements BotBrain {
     this.campTicks = snap.world.imprisoned > 0 && inCamp ? this.campTicks + elapsed : 0;
   }
 
-  /** 포효 핑: 감옥 안(수감자)은 빼고, 가까운 것부터 차례로 들를 순서로 기억한다 (좌표 순으로 동점을 가른다 — 배열 순서와 무관) */
+  /**
+   * 포효 핑: 감옥 안 바닥(수감자 자리)의 핑은 빼고, 가까운 것부터 차례로 들를 순서로 기억한다 (좌표 순으로 동점을 가른다 — 배열 순서와
+   * 무관). 감옥 문 칸 · 문 앞은 자유 생존자만 설 수 있으니(구조하러 온 생존자) 따라간다. 감옥 안에 들어간 자유 생존자는 수감자와
+   * 가를 수 없어 함께 빠진다
+   */
   private takePings(pts: readonly Vec2[], me: Vec2): void {
-    const left = pts.filter((p) => distToRect(p, PRISON_RECT) > 0.3).map((p) => snapToFloor(p));
+    const left = pts.filter((p) => distToRect(p, PRISON_INNER) > 0).map((p) => snapToFloor(p));
     const order: Vec2[] = [];
     let from: Vec2 = me;
     while (left.length > 0) {
