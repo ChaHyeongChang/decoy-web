@@ -51,7 +51,9 @@ import {
   snapToFloor,
   STUCK_MOVE,
   STUCK_TICKS,
+  H,
   W,
+  walkable,
   walkableAt,
 } from './practiceMap';
 
@@ -73,6 +75,20 @@ const LAST_LIFE_FLEE_BONUS = 1.5;
 const FLEE_HYST = 1.5;
 /** 괴물이 안 보인 뒤에도 이만큼(초) 계속 달아난다 */
 const FLEE_MEMORY = 2.0;
+/**
+ * 들어가면 · 가는 길에 곧 달아나게 되는 자리 (fleeZone · fleeRoute): 서 있는 괴물(같은 자리에서 FLEE_ZONE_STAND초 넘게 보인)을
+ * 이만큼(초) 안에 봤고 목표 · 그리 가는 길이 그 괴물에게서 내 도주 반경 안이면 막힘으로 본다. 기억은 danger()가 안 보이게 된
+ * 괴물을 아직 거기 있다고 보는 시간(FLEE_MEMORY)과 같다 — 괴물이 그대로면 그 목표에 닿기 전에 달아나고, 도주가 끝나면 다시
+ * 들어가 구조 ↔ 도주를 0.7초마다 끝없이 되풀이했다(지켜짐 반경 5와 도주 반경 6.5 사이 띠). 그 목표를 기다리는 중이면 새 괴물
+ * 정보가 없는 동안 막힘이 이어진다(approach의 sticky). 움직이는 괴물은 자리가 곧 바뀌어 이 예측이 맞지 않고 다가가다 달아나는
+ * 것은 도주가 맡는다 — 끝없는 되풀이는 괴물이 서 있을 때만 생긴다 (서 있지 않아도 막으면 봇끼리 600판 판 길이 2:16 → 2:23,
+ * novice 판당 수감 2.68 → 2.55로 다가가기가 너무 줄었다).
+ * '서 있다'는 같은 자리(DETOUR_THREAT_MOVE 안)에서 처음 본 때부터 마지막으로 본 때까지 FLEE_ZONE_STAND초 이상 (사이에 안 보인 틈은
+ * GUARD_MEMORY까지). 괴물 봇이 감시 자리에 머무는 1.2~2초 · 밀치기 기절 1.5초는 잠깐 멈춤이라 넣지 않는다 — 사람이 감옥을 지키고
+ * 서 있는 경우만 (1초로 하면 봇끼리 600판 괴물 승률 34.5% → 28.2%, 2.5초 31.5%)
+ */
+const FLEE_ZONE_MEMORY = FLEE_MEMORY;
+const FLEE_ZONE_STAND = 2.5;
 /** 괴물은 안 보이는데 내가 발각 중이면, 이만큼(초) 안에 본 괴물 위치에서 달아난다 */
 const SPOTTED_MEMORY = 3.0;
 /** 이보다 가까우면(타일) 길찾기 대신 곧장 반대쪽으로 */
@@ -282,6 +298,10 @@ interface WaitPlan {
   /** 마지막으로 기다린 틱과 그때 괴물 정보의 틱 (새 정보가 없으면 '가는 길' 막힘을 그대로 본다) */
   last: number;
   infoTick: number;
+  /** 기다리다 달아났다 (도주가 끝나면 지금 자리에서 가는 길을 다시 본다) */
+  fled: boolean;
+  /** 가다가 · 머물다 달아나게 된 기다리는 자리 (이 괴물 자리에 대해 피한다 — 괴물이 옮기면 잊는다) */
+  burned: Vec2[];
 }
 
 /** 진단 · 시험용 두뇌 상태 (읽기 전용 사본) */
@@ -412,6 +432,75 @@ function lastLife(imprisonCount: number | null, b: Balance): boolean {
   return imprisonCount !== null && imprisonCount >= b.survivor.maxImprisonments;
 }
 
+/** 도주를 시작하는 반경 (타일, 이력 빼고): 기본 + 부상 덤 + 마지막 목숨 덤. 체력 · 수감 횟수로만 정한다 (역할과 무관) */
+export function fleeStartRadius(hp: number, imprisonCount: number | null, b: Balance): number {
+  return (
+    FLEE_DIST +
+    (hp < b.survivor.maxHp ? FLEE_INJURED_BONUS : 0) +
+    (lastLife(imprisonCount, b) ? LAST_LIFE_FLEE_BONUS : 0)
+  );
+}
+
+/** routeNear: 걷는 몸이 칸 가운데에서 비켜 지나는 만큼 (타일) */
+const ROUTE_MARGIN = 0.5;
+/** routeNear: 길 거리 필드의 같은 길이(Float32 반올림) 여유 */
+const ROUTE_TIE = 0.05;
+/** routeNear 탐색용 칸 표시(세대 번호로 지운다)와 쌓기. 모듈 공용 — 두뇌는 한 스레드에서 차례로 돈다 */
+const ROUTE_SEEN = new Uint32Array(W * H);
+const ROUTE_STACK = new Int32Array(W * H);
+let routeGen = 0;
+
+/**
+ * from → 고정 지점 길(그 지점에서 잰 길 거리 필드 f의 가장 짧은 길 — 같은 길이인 갈래는 모두)이 t에서 직선 r 안을 지나는가.
+ * 걷는 길이 어느 갈래로 갈지 모르니 모두 본다 (칸 가운데에서 몸이 비켜 지나는 만큼 ROUTE_MARGIN 넓게).
+ * 지금 자리가 이미 r 안이면 지금보다 t에 더 가까워질 때만 지난다고 본다 (안에서 고르면 모든 길이 걸려 고를 수 없게 되지 않게)
+ */
+function routeNear(f: Float32Array, from: Vec2, t: Vec2, r: number): boolean {
+  const i0 = Math.floor(from.x);
+  const j0 = Math.floor(from.y);
+  if (!walkable(i0, j0)) return false;
+  const k0 = j0 * W + i0;
+  const d0 = f[k0] ?? Infinity;
+  if (!Number.isFinite(d0)) return false;
+  const lim = Math.min(r + ROUTE_MARGIN, dist(from, t) - 0.5);
+  if (lim <= 0) return false;
+  routeGen = (routeGen + 1) >>> 0;
+  if (routeGen === 0) {
+    ROUTE_SEEN.fill(0);
+    routeGen = 1;
+  }
+  const gen = routeGen;
+  let top = 0;
+  ROUTE_STACK[top++] = k0;
+  ROUTE_SEEN[k0] = gen;
+  while (top > 0) {
+    const k = ROUTE_STACK[--top] ?? 0;
+    const i = k % W;
+    const j = (k - i) / W;
+    if (Math.hypot(i + 0.5 - t.x, j + 0.5 - t.y) < lim) return true;
+    const fk = f[k] ?? Infinity;
+    if (fk <= 0) continue;
+    for (let dy = -1; dy <= 1; dy += 1) {
+      for (let dx = -1; dx <= 1; dx += 1) {
+        if (dx === 0 && dy === 0) continue;
+        const ni = i + dx;
+        const nj = j + dy;
+        if (!walkable(ni, nj)) continue;
+        // 대각선은 양옆이 모두 열려 있을 때만 (길찾기와 같은 규칙)
+        if (dx !== 0 && dy !== 0 && (!walkable(i + dx, j) || !walkable(i, j + dy))) continue;
+        const n = nj * W + ni;
+        if (ROUTE_SEEN[n] === gen) continue;
+        // 가장 짧은 길 위의 다음 칸만 (그 칸에서 남은 길 + 한 걸음 = 지금 칸에서 남은 길)
+        const step = dx !== 0 && dy !== 0 ? Math.SQRT2 : 1;
+        if ((f[n] ?? Infinity) + step > fk + ROUTE_TIE) continue;
+        ROUTE_SEEN[n] = gen;
+        ROUTE_STACK[top++] = n;
+      }
+    }
+  }
+  return false;
+}
+
 /** 조심 단계 0~2: 수감 횟수 + 부상(체력이 최대보다 적음). 역할과 무관하다 */
 export function cautionLevel(imprisonCount: number, hp: number, b: Balance): number {
   return Math.min(2, Math.max(0, imprisonCount) + (hp < b.survivor.maxHp ? 1 : 0));
@@ -438,6 +527,8 @@ export class PracticeSurvivorBrain implements BotBrain {
    */
   private now = 0;
   private threat: Threat | null = null;
+  /** 괴물을 지금 자리 근처(DETOUR_THREAT_MOVE 안)에서 처음 본 자리 · 틱 (서 있는 괴물 — standing) */
+  private standAt: Threat = { x: Number.NaN, y: Number.NaN, tick: 0 };
   /** 괴물 정보(보임 · 탐지 · 포효)를 마지막으로 받은 틱 (판이 흐르기 전 시간은 세지 않는다) */
   private lastInfo = 0;
   private fleeing = false;
@@ -484,6 +575,12 @@ export class PracticeSurvivorBrain implements BotBrain {
   private noticeAt = 0;
   /** 이번 틱 할 일 (진단용) */
   private lastTask: Task | null = null;
+  /** 이번 틱 내 도주 시작 반경 (fleeStartRadius — 체력 · 수감 횟수) */
+  private fleeR = FLEE_DIST;
+  /** fleeRoute 결과 (목표 칸별: 그때 내 칸 · 괴물 칸 · 반경) */
+  private readonly routeCache = new Map<number, { me: number; t: number; r: number; res: boolean }>();
+  /** 거점별 내가 서는 자리 (판 시드 · 장소로 정해진다 — standSlot) */
+  private readonly pointStands: Readonly<Record<PointId, Vec2>>;
 
   constructor(
     private readonly role: RoleId,
@@ -498,6 +595,12 @@ export class PracticeSurvivorBrain implements BotBrain {
     this.decoys = decoyOrder(seed);
     this.splits = splitOrder(seed);
     this.trackIdle = TRACK_IDLE_MIN + this.rng.next() * TRACK_IDLE_SPAN;
+    const stand = (id: PointId): Vec2 => {
+      const c = CAPTURE_POINTS[id];
+      const o = POINT_SLOTS[standSlot(seed, id, role)] ?? { x: 0, y: 0 };
+      return snapToFloor({ x: c.x + o.x, y: c.y + o.y });
+    };
+    this.pointStands = { A: stand('A'), B: stand('B'), C: stand('C') };
   }
 
   private sec(s: number): number {
@@ -533,6 +636,7 @@ export class PracticeSurvivorBrain implements BotBrain {
     }
     const me = snap.you.move;
     const out: InputFrame = { seq, mx: 0, my: 0, aim: Number.NaN, held: 0, pressed: 0 };
+    this.fleeR = fleeStartRadius(surv.hp, surv.imprisonCount, b);
     const task = this.task(snap, info, b);
     this.lastTask = task;
     const danger = this.danger(snap, b, task);
@@ -586,6 +690,13 @@ export class PracticeSurvivorBrain implements BotBrain {
       }
     }
     if (pos) {
+      // 서 있는 괴물: 같은 자리(DETOUR_THREAT_MOVE 안)에서 본 첫 틱을 기억한다 (사이에 안 보인 틈이 GUARD_MEMORY를 넘으면 새로)
+      const prev = this.threat;
+      const same =
+        prev !== null &&
+        this.now - prev.tick <= this.sec(GUARD_MEMORY) &&
+        Math.hypot(pos.x - this.standAt.x, pos.y - this.standAt.y) <= DETOUR_THREAT_MOVE;
+      if (!same) this.standAt = { x: pos.x, y: pos.y, tick: this.now };
       this.threat = { x: pos.x, y: pos.y, tick: this.now };
       this.lastInfo = this.now;
     }
@@ -648,6 +759,50 @@ export class PracticeSurvivorBrain implements BotBrain {
     return dist(t, anchor) < GUARD_RADIUS + (waiting ? GUARD_HYST : 0);
   }
 
+  /** 괴물이 서 있었다: 마지막으로 본 자리 근처(DETOUR_THREAT_MOVE 안)에서 FLEE_ZONE_STAND초 넘게 보였다 */
+  private stood(t: Threat): boolean {
+    return t.tick - this.standAt.tick >= this.sec(FLEE_ZONE_STAND);
+  }
+
+  /** 최근(FLEE_ZONE_MEMORY) 본 괴물이 서 있다 */
+  private standingThreat(t: Threat): boolean {
+    return this.now - t.tick <= this.sec(FLEE_ZONE_MEMORY) && this.stood(t);
+  }
+
+  /**
+   * 들어가면 곧 달아나게 되는 목표: 최근(FLEE_ZONE_MEMORY) 본 서 있는 괴물에게서 서는 자리 p까지 직선 · 길 거리가 모두 내 도주 반경 안
+   * (danger()가 달아나기 시작하는 조건과 같다 — 괴물이 그대로면 p에 닿기 전에 달아난다). 그 목표를 기다리는 중이면 반경에
+   * 이력을 더한다 (guarded와 같이 — 괴물이 경계를 오갈 때 기다리기 ↔ 들어가기가 흔들리지 않게)
+   */
+  private fleeZone(anchor: Vec2, p: Vec2): boolean {
+    const t = this.threat;
+    if (!t || !this.standingThreat(t)) return false;
+    const w = this.wait;
+    const waiting = w !== null && w.ax === anchor.x && w.ay === anchor.y && this.now - w.last <= 3;
+    const r = this.fleeR + (waiting ? GUARD_HYST : 0);
+    return dist(t, p) < r && pathDist(fieldFrom(p), t) < r;
+  }
+
+  /**
+   * 가다가 곧 달아나게 되는 목표: 최근(FLEE_ZONE_MEMORY) 본 서 있는 괴물에게서 내 도주 반경 안을 지나는 길(routeNear)로만 갈 수 있다.
+   * 같은 (목표 · 내 칸 · 괴물 칸 · 반경)이면 다시 찾지 않는다
+   */
+  private fleeRoute(anchor: Vec2, p: Vec2, me: Vec2): boolean {
+    const t = this.threat;
+    if (!t || !this.standingThreat(t)) return false;
+    const w = this.wait;
+    const waiting = w !== null && w.ax === anchor.x && w.ay === anchor.y && this.now - w.last <= 3;
+    const r = this.fleeR + (waiting ? GUARD_HYST : 0);
+    const key = Math.floor(p.y) * W + Math.floor(p.x);
+    const meCell = Math.floor(me.y) * W + Math.floor(me.x);
+    const tCell = Math.floor(t.y) * W + Math.floor(t.x);
+    const c = this.routeCache.get(key);
+    if (c && c.me === meCell && c.t === tCell && c.r === r) return c.res;
+    const res = routeNear(fieldFrom(p), me, t, r);
+    this.routeCache.set(key, { me: meCell, t: tCell, r, res });
+    return res;
+  }
+
   /** 가는 길에 괴물: 최근(ROUTE_MEMORY) 본 괴물이 내 근처(ROUTE_DANGER)에서 목표 쪽(나보다 목표에 가까운 곳)에 있었다 */
   private routeDanger(anchor: Vec2, me: Vec2): boolean {
     const t = this.threat;
@@ -690,7 +845,12 @@ export class PracticeSurvivorBrain implements BotBrain {
       // 모두 위험하면 가장 가까운 곳: 지켜지면 그 둘레에서 서성이며 기다리고, 가는 길만 위험하면 돌아간다
       for (const id of undone) {
         const c = CAPTURE_POINTS[id];
-        this.hotNow[id] = this.guarded(c) || this.routeDanger(c, me);
+        const stand = this.pointStands[id];
+        this.hotNow[id] =
+          this.guarded(c) ||
+          this.fleeZone(c, stand) ||
+          this.routeDanger(c, me) ||
+          this.fleeRoute(c, stand, me);
         this.nearNow[id] = dist(me, c);
       }
       const held = this.now - this.pointGoalAt < this.sec(GOAL_KEEP);
@@ -700,10 +860,9 @@ export class PracticeSurvivorBrain implements BotBrain {
         this.pointGoalAt = this.now;
       }
       const c = CAPTURE_POINTS[goal];
-      const o = POINT_SLOTS[standSlot(this.seed, goal, this.role)] ?? { x: 0, y: 0 };
       const enter: Task = {
         kind: 'capture',
-        target: snapToFloor({ x: c.x + o.x, y: c.y + o.y }),
+        target: this.pointStands[goal],
         tol: 0.4,
         held: 0,
         commit: false,
@@ -806,14 +965,15 @@ export class PracticeSurvivorBrain implements BotBrain {
 
   /**
    * 목표로 가는 할 일, 막혔으면 null (부르는 쪽이 다른 할 일 · 기다리기를 고른다).
-   * 막힘 = 지켜짐(guarded) 또는 가는 길에 괴물(routeDanger)인데 돌아갈 곳(거쳐 갈 곳)이 없음. 이미 그 목표를 기다리는 중이고
+   * 막힘 = 지켜짐(guarded), 들어가면 곧 달아나게 됨(fleeZone), 곧장 가는 길에 곧 달아나게 됨(fleeRoute), 또는 가는 길에
+   * 괴물(routeDanger)인데 돌아갈 곳(거쳐 갈 곳)이 없음. 이미 그 목표를 기다리는 중이고
    * 새 괴물 정보가 없으면 계속 막힘으로 본다 (기다리는 자리를 오가며 내 자리가 바뀔 때 '가는 길' 판정이 깜빡이지 않게).
    * inside(구역 안 · 들어가기로 함)면 그대로 들어간다
    */
   private approach(enter: Task, me: Vec2, inside: boolean): Task | null {
     if (inside) return enter;
     const a = enter.anchor;
-    if (this.guarded(a)) return null;
+    if (this.guarded(a) || this.fleeZone(a, enter.target)) return null;
     const t = this.threat;
     if (!t || !this.routeDanger(a, me)) {
       const w = this.wait;
@@ -825,7 +985,7 @@ export class PracticeSurvivorBrain implements BotBrain {
         this.now - w.last <= 3 &&
         w.infoTick === t.tick &&
         this.now - t.tick <= this.sec(ROUTE_MEMORY);
-      return sticky ? null : enter;
+      return sticky || this.fleeRoute(a, enter.target, me) ? null : enter;
     }
     const via = this.detour(a, me, t);
     if (via === 'go') return enter;
@@ -938,6 +1098,8 @@ export class PracticeSurvivorBrain implements BotBrain {
         ty: Number.NaN,
         last: this.now,
         infoTick: -1,
+        fled: false,
+        burned: [],
       };
       this.wait = w;
     }
@@ -952,6 +1114,10 @@ export class PracticeSurvivorBrain implements BotBrain {
         w.probeUntil = this.now;
         w.patienceAt = this.now + this.patience();
       } else w.patienceAt += dt;
+      // 기다리는 자리로 가다(머물다) 달아나기 시작했다: 미리 본 길(routeNear)이 빗나갔다 — 그 자리는 이 괴물 자리에 대해 피한다
+      const lt = this.lastTask;
+      if (!w.fled && lt && lt.kind === 'wait' && !lt.probe) w.burned.push(lt.target);
+      w.fled = true;
     }
     // 기다림 한도는 들어가 보는 동안 세지 않는다 (끝난 때부터 다시 센다 — 다음 라운드가 들어가 보기를 늘리지 않게)
     if (this.now >= w.probeUntil && this.now >= w.patienceAt) {
@@ -965,22 +1131,27 @@ export class PracticeSurvivorBrain implements BotBrain {
     }
     if (this.now < w.probeUntil) return { ...enter, probe: true };
     const moved = t !== null && !(Math.hypot(t.x - w.tx, t.y - w.ty) <= WAIT_REPLAN_MOVE);
-    if (w.spots.length === 0 || moved) {
-      w.spots = this.pickWaitSpots(anchor, me, w.prev);
-      w.idx = 0;
-      if (w.dwellUntil >= 0) w.dwellEnd = this.now;
-      w.dwellUntil = -1;
-      w.tx = t?.x ?? Number.NaN;
-      w.ty = t?.y ?? Number.NaN;
-    }
-    const n = w.spots.length;
-    let spot = w.spots[w.idx % n] ?? me;
+    // 도주가 끝났으면 지금 자리에서 가던 자리까지 길을 다시 본다: 그 길이 도주 반경을 지나면 가다가 또 달아나고, 도주가 끝나면
+    // 다시 그리 가 기다리기 ↔ 도주를 되풀이한다 (괴물이 서 있기만 해도) — 지금 자리에서 다시 고른다
+    const back = !this.fleeing && w.fled;
+    if (back) w.fled = false;
+    const cur = w.spots[w.idx % Math.max(1, w.spots.length)];
+    const stale =
+      back && cur !== undefined && (w.burned.some((q) => dist(q, cur) < 1) || this.legNear(cur, me));
+    if (moved) w.burned = [];
+    if (w.spots.length === 0 || moved || stale) this.repickWait(w, anchor, me);
+    let spot = w.spots[w.idx % w.spots.length] ?? me;
     if (w.dwellUntil >= 0) {
       if (this.now >= w.dwellUntil) {
-        w.idx = (w.idx + 1) % n;
+        w.idx = (w.idx + 1) % w.spots.length;
         w.dwellUntil = -1;
         w.dwellEnd = this.now;
         spot = w.spots[w.idx] ?? spot;
+        // 다음 자리로 가는 길이 도주 반경을 지나면(괴물이 기다리는 자리 사이에 섰다) 지금 자리에서 다시 고른다
+        if (this.legNear(spot, me)) {
+          this.repickWait(w, anchor, me);
+          spot = w.spots[w.idx] ?? spot;
+        }
       }
     } else if (dist(me, spot) <= WAIT_TOL) {
       // 방금 머물기를 마치고 걷지도 않았는데 또 닿아 있으면(다시 고른 자리가 지금 자리) 머물지 않고 다음 자리로 —
@@ -990,6 +1161,26 @@ export class PracticeSurvivorBrain implements BotBrain {
       w.dwellUntil = chained ? this.now : this.now + dwell;
     }
     return { kind: 'wait', target: spot, tol: WAIT_TOL, held: 0, commit: false, anchor };
+  }
+
+  /** 기다리는 자리를 지금 자리에서 다시 고른다 (머물던 중이면 머물기를 마친 것으로) */
+  private repickWait(w: WaitPlan, anchor: Vec2, me: Vec2): void {
+    const t = this.threat;
+    w.spots = this.pickWaitSpots(anchor, me, w.prev, w.burned);
+    w.idx = 0;
+    if (w.dwellUntil >= 0) w.dwellEnd = this.now;
+    w.dwellUntil = -1;
+    w.tx = t?.x ?? Number.NaN;
+    w.ty = t?.y ?? Number.NaN;
+  }
+
+  /**
+   * 지금 자리 → 기다리는 자리 s 길이 서 있던 괴물을 본 자리에서 내 도주 반경 안을 지나는가 (괴물이 그대로면 가다가 달아나게 된다.
+   * 움직이던 괴물은 그 자리에 없을 테니 보지 않는다 — fleeZone과 같은 원리)
+   */
+  private legNear(s: Vec2, me: Vec2): boolean {
+    const t = this.threat;
+    return t !== null && this.stood(t) && routeNear(fieldFrom(s), me, t, this.fleeR);
   }
 
   private patience(): number {
@@ -1017,9 +1208,16 @@ export class PracticeSurvivorBrain implements BotBrain {
    * 기다리는 자리 WAIT_SPOT_COUNT곳: 도주 후보 중 목표에서 길 거리 WAIT_DIST쯤 · 괴물보다 먼저 닿는 곳 · 괴물에게서 안 보이는 곳 ·
    * 내게서 가까운 곳 · 앞 라운드 자리에서 먼 곳(다른 쪽에서 접근). 첫 자리에서 WAIT_HOP_MIN ~ WAIT_HOP_MAX 길 거리인 곳을 더한다
    */
-  private pickWaitSpots(anchor: Vec2, me: Vec2, avoid: readonly Vec2[]): Vec2[] {
+  private pickWaitSpots(
+    anchor: Vec2,
+    me: Vec2,
+    avoid: readonly Vec2[],
+    burned: readonly Vec2[] = [],
+  ): Vec2[] {
     const fa = fieldFrom(anchor);
     const t = this.threat;
+    // 가는 길은 서 있던 괴물에 대해서만 본다 (legNear와 같다)
+    const routes = t !== null && this.stood(t);
     const scores: number[] = [];
     let first = -1;
     for (let k = 0; k < FLEE_SPOTS.length; k += 1) {
@@ -1035,9 +1233,16 @@ export class PracticeSurvivorBrain implements BotBrain {
         const margin = pathDist(fs, t) - FLEE_SPEED_RATIO * dMe;
         if (margin < WAIT_SAFE) score -= 20 + (WAIT_SAFE - margin);
         // 도주 반경 안(괴물을 본 자리에서 도주가 끝나는 거리 안)은 기다리는 자리가 아니다 — 닿으면 달아나고 도주가 끝나면
-        // 다시 돌아와, 지켜 서 있는 괴물 앞에서 기다리기 ↔ 도주를 되풀이한다
-        if (dist(t, s) < FLEE_DIST + FLEE_HYST) score -= 20;
+        // 다시 돌아와, 지켜 서 있는 괴물 앞에서 기다리기 ↔ 도주를 되풀이한다. 반경은 그 봇의 것(부상 · 마지막 목숨 덤 포함),
+        // 서 있던 괴물이면 그리 가는 길이 도주 반경을 지나는 자리도 같다 (가다가 달아나고, 도주가 끝나면 다시 그리 간다). 달아나는
+        // 중이면 길은 도주가 끝난 자리에서 다시 본다 (waitTask — 지금 자리에서 고르면 도주 반경 경계라 거의 모든 길이 걸린다)
+        if (
+          dist(t, s) < this.fleeR + FLEE_HYST ||
+          (routes && !this.fleeing && routeNear(fs, me, t, this.fleeR))
+        )
+          score -= 20;
         if (lineOfSight(t, s)) score -= 4;
+        for (const q of burned) if (dist(q, s) < 1) score -= 20;
       }
       for (const p of avoid) if (dist(p, s) < WAIT_AVOID_RADIUS) score -= WAIT_AVOID_PENALTY;
       scores[k] = score;
@@ -1049,13 +1254,21 @@ export class PracticeSurvivorBrain implements BotBrain {
     const f0 = fieldFrom(s0);
     while (out.length < WAIT_SPOT_COUNT) {
       let pick = -1;
+      let pickScore = -Infinity;
+      const from = out[out.length - 1] ?? s0;
       for (let k = 0; k < FLEE_SPOTS.length; k += 1) {
         const s = FLEE_SPOTS[k];
         if (!s || out.includes(s)) continue;
         const hop = pathDist(f0, s);
         if (hop < WAIT_HOP_MIN || hop > WAIT_HOP_MAX) continue;
         if (out.some((q) => dist(q, s) < WAIT_HOP_MIN)) continue;
-        if (pick < 0 || (scores[k] ?? -Infinity) > (scores[pick] ?? -Infinity)) pick = k;
+        // 앞 자리에서 이 자리로 가는 길도 도주 반경을 지나지 않는 곳 (자리끼리 오가다 달아나지 않게)
+        const score =
+          (scores[k] ?? -Infinity) - (t && routes && routeNear(fieldFrom(s), from, t, this.fleeR) ? 20 : 0);
+        if (pick < 0 || score > pickScore) {
+          pick = k;
+          pickScore = score;
+        }
       }
       const s = FLEE_SPOTS[pick];
       if (!s) break;
@@ -1083,10 +1296,7 @@ export class PracticeSurvivorBrain implements BotBrain {
     }
     // 밀치기가 준비된 가드도 다른 생존자처럼 달아난다 (예전에는 2.4타일까지 버텼다 — 밀치기 반응 지연이 생긴 뒤로는 버티면 맞고,
     // 괴물 화면에서 '다가가도 안 도망가는 흰 사람 = 가드'라는 움직임 단서였다). 밀치기는 쫓아온 괴물이 사거리에 들면 누른다
-    let radius =
-      FLEE_DIST +
-      (surv.hp < b.survivor.maxHp ? FLEE_INJURED_BONUS : 0) +
-      (lastLife(surv.imprisonCount, b) ? LAST_LIFE_FLEE_BONUS : 0);
+    let radius = fleeStartRadius(surv.hp, surv.imprisonCount, b);
     if (this.fleeing) radius += FLEE_HYST;
     const age = this.now - t.tick;
     let threatened = false;
