@@ -182,6 +182,40 @@ describe('거점 세 곳 중 두 곳 (플레이테스트 반영 b, GAME_DESIGN 7
     expect(texts(game.drainOutbox('p1'), 'ALERT_CAPTURE_START')).toHaveLength(0);
   });
 
+  // 둘째가 끝나는 바로 그 틱에 다른 생존자가 남은 곳에 처음 들어선다. 남은 곳이 배열에서 둘째보다 앞이든 뒤든
+  // (예: C가 둘째로 끝나며 A가 꺼짐 ↔ A가 둘째로 끝나며 C가 꺼짐) 꺼지는 곳은 그 틱에 진행 · 기여 초 · 점령 시작 알림이 없다
+  for (const [first, second] of ORDERS) {
+    const third = POINT_IDS.find((id) => id !== first && id !== second)!;
+    it(`${first} 끝 → ${second}가 둘째로 끝나는 틱에 ${third}에 들어서도 꺼지는 ${third}는 아무 신호가 없다 (배열 차례와 무관)`, () => {
+      const { game, d } = parked();
+      finish(game, d, first);
+      pt(game, second).progress = game.balance.capturePoint.captureTime - game.dt / 2;
+      const s = CAPTURE_POINTS[second];
+      const t = CAPTURE_POINTS[third];
+      place(game, 'p3', s.x, s.y);
+      place(game, 'p2', t.x, t.y); // 이 틱에 처음 들어선다
+      game.drainOutbox('p1');
+      const before = game.survivorById('p2')!.stats.captureSeconds;
+      d.run(1);
+      expect(pt(game, second).done).toBe(true);
+      expect(pt(game, third).off).toBe(true);
+      expect(pt(game, third).progress).toBe(0);
+      expect(pt(game, third).capturing || pt(game, third).blocked).toBe(false);
+      expect(game.survivorById('p2')!.stats.captureSeconds).toBe(before);
+      const m = game.drainOutbox('p1');
+      expect(m.map((e) => (e.k === 'text' ? `${e.id}:${e.point ?? ''}` : e.k))).toEqual([
+        `ALERT_CAPTURE_START:${second}`,
+        `ALERT_CAPTURE_DONE:${second}`,
+        'ALERT_EXITS_ON:',
+      ]);
+      const facts = computeVisibility(game);
+      const aliases = new AliasBook();
+      aliases.update(facts.monsterSees);
+      const snap = buildSnapshot(game, 'p1', 0, facts, aliases)!;
+      expect(snap.world.points.find((p) => p.id === third)).toEqual({ id: third, progress: 0, state: 'off' });
+    });
+  }
+
   it('같은 틱에 셋이 다 차면 배열 순서(A · B)가 먼저 끝나고 C는 꺼진다 — 완료 알림 둘 · 메모 한 장씩 · 탈출구 알림 하나', () => {
     const game = readyGame();
     const d = new Driver(game);
