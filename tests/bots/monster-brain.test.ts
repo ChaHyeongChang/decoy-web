@@ -1128,15 +1128,18 @@ describe('실전 괴물 봇: 시간 · 결정성', () => {
   });
 
   /**
-   * 봇끼리 판: 괴물 두뇌가 받는 임시 ID를 다른 값으로 바꾸고 배열 순서를 뒤집어도 판이 지문까지 같다.
+   * 봇끼리 판: 괴물 두뇌가 받는 임시 ID를 다른 값으로 바꾸고, 배열 순서나 임시 ID의 크기 순서를 뒤집어도 판이 지문까지 같다.
    * 같은 임시 ID는 판 내내 같은 새 값이고, 새 임시 ID(시야에 다시 들어옴)는 새 값을 받는다. 바꿔 끼우는 값 · 순서는 시험이
-   * 실제 자리로 정해(두뇌에는 안 간다) 두 판이 서로 반대 순서를 받게 한다.
+   * 실제 자리로 정한다(두뇌에는 안 간다): 임시 ID는 `접두사-순위-번호`(순위는 실제 자리 p2 < p3 < p4, 뒤집으면 9 - 순위)이고
+   * 배열은 임시 ID가 아니라 실제 순위로 늘어놓는다. 그래서 두 축이 따로 바뀐다 — 기준 판과 견주어 배열 순서만 뒤집은 판,
+   * 임시 ID 크기 순서만 뒤집은 판 (예전 시험은 ID 안에 실제 자리를 그대로 넣고 ID로 정렬해, 두 판의 ID 크기 순서가 같았다 —
+   * '동점이면 작은 임시 ID'처럼 ID 값으로 가르는 두뇌도 통과했다).
    * 동점은 시험이 만든다 (판 흐름의 우연에 기대지 않게): 괴물에게 자유 생존자가 둘 이상 보이기 시작하면 그들에게 새 임시 ID를 주고
    * MERGE_SNAPS 스냅샷 동안 실제 번호(p2 < p3 < p4)가 가장 앞선 생존자 자리에 함께 둔다 — 두뇌에는 같은 때 처음 보인 · 같은 자리 ·
    * 같은 속도의 생존자 여럿으로 보인다 (b 최종 시드 36에서 구조로 함께 풀려난 둘이 (24.594, 18.493)에 겹친 것과 같은 꼴).
-   * 두 판에 같은 변환을 하므로(실제 자리로 정한다) 다른 것은 배열 순서 · 임시 ID 값뿐이다. b 최종 두뇌로는 이 시험이 실패한다
+   * 세 판에 같은 변환을 하므로(실제 자리로 정한다) 다른 것은 배열 순서 · 임시 ID 값뿐이다. b 최종 두뇌로는 이 시험이 실패한다
    */
-  it('같은 시드는 임시 ID 값 · 배열 순서가 달라도 같은 판 (괴물에게 보이는 생존자 둘 이상을 같은 자리에 겹쳐도)', () => {
+  it('같은 시드는 임시 ID 값 · ID 크기 순서 · 배열 순서가 달라도 같은 판 (괴물에게 보이는 생존자 둘 이상을 같은 자리에 겹쳐도)', () => {
     preparePracticeMap();
     const MERGE_SNAPS = 12;
     const MERGE_GAP = 10 * HZ;
@@ -1144,7 +1147,14 @@ describe('실전 괴물 봇: 시간 · 결정성', () => {
     const tiesBySeed: number[] = [];
     for (const seed of [36, 1, 2]) {
       const tiesOf: number[] = [];
-      const play = (prefix: string, desc: boolean): string => {
+      /** 실제 자리의 순위 (p2 < p3 < p4, 모르는 자리는 맨 뒤) */
+      const REAL = ['p2', 'p3', 'p4'];
+      const rankOf = (real: string): number => {
+        const i = REAL.indexOf(real);
+        return i < 0 ? REAL.length : i;
+      };
+      /** desc: 배열을 실제 순위 거꾸로 · invert: 임시 ID의 크기 순서를 실제 순위 거꾸로 */
+      const play = (prefix: string, desc: boolean, invert: boolean): string => {
         const setup = SimMatch.roles();
         let ties = 0;
         const holder: { sim: SimMatch | null } = { sim: null };
@@ -1158,15 +1168,15 @@ describe('실전 괴물 봇: 시간 · 결정성', () => {
         const rename = (alias: string, real: string): string => {
           const k = (seq.get(real) ?? 0) + 1;
           seq.set(real, k);
-          const id = `${prefix}-${real}-${k}`;
+          const rank = rankOf(real);
+          const id = `${prefix}-${invert ? 9 - rank : rank}-${k}`;
           fresh.set(alias, id);
           return id;
         };
         const transform = (snap: Snapshot): SurvivorView[] => {
           // 시험만 아는 실제 자리 (두뇌에는 새 임시 ID만 간다)
           const book = (holder.sim as unknown as { aliases: AliasBook } | null)?.aliases;
-          const realOf = (alias: string): string =>
-            ['p2', 'p3', 'p4'].find((id) => book?.get(id) === alias) ?? 'p?';
+          const realOf = (alias: string): string => REAL.find((id) => book?.get(id) === alias) ?? 'p?';
           const rows = snap.survivors.map((s) => ({ s, real: realOf(s.id) }));
           const free = rows.filter((r) => r.s.status === 'free');
           if (!merge && merges < MERGES && free.length >= 2 && snap.tick - mergeEnd >= MERGE_GAP) {
@@ -1180,9 +1190,11 @@ describe('실전 괴물 봇: 시간 · 결정성', () => {
           const at = cur ? free.find((r) => r.real === cur.anchor)?.s : undefined;
           const list = rows.map(({ s, real }) => {
             const id = fresh.get(s.id) ?? rename(s.id, real);
-            return at && cur?.members.has(real) && s.status === 'free'
-              ? { ...s, id, x: at.x, y: at.y, face: at.face }
-              : { ...s, id };
+            const v: SurvivorView =
+              at && cur?.members.has(real) && s.status === 'free'
+                ? { ...s, id, x: at.x, y: at.y, face: at.face }
+                : { ...s, id };
+            return { v, rank: rankOf(real) };
           });
           if (cur) {
             cur.left -= 1;
@@ -1191,12 +1203,13 @@ describe('실전 괴물 봇: 시간 · 결정성', () => {
               mergeEnd = snap.tick;
             }
           }
-          const shown = list.filter((v) => v.status === 'free');
+          const shown = list.map((e) => e.v).filter((v) => v.status === 'free');
           for (let i = 0; i < shown.length; i += 1)
             for (let j = i + 1; j < shown.length; j += 1)
               if (shown[i]?.x === shown[j]?.x && shown[i]?.y === shown[j]?.y) ties += 1;
-          list.sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0) * (desc ? -1 : 1));
-          return list;
+          // 배열 순서는 임시 ID가 아니라 실제 순위로 (ID 크기 순서와 따로 바뀌게)
+          list.sort((x, y) => (x.rank - y.rank) * (desc ? -1 : 1));
+          return list.map((e) => e.v);
         };
         const wrapped: BotBrain = {
           decide: (snap, info, b, n) => {
@@ -1221,7 +1234,9 @@ describe('실전 괴물 봇: 시간 · 결정성', () => {
           pos: [...g.players.values()].map((p) => [Math.round(p.move.x * 1000), Math.round(p.move.y * 1000)]),
         });
       };
-      expect(play('k', true), `seed ${seed}`).toBe(play('q', false));
+      const base = play('q', false, false);
+      expect(play('k', true, false), `seed ${seed}: 배열 순서만 뒤집은 판`).toBe(base);
+      expect(play('r', false, true), `seed ${seed}: 임시 ID 크기 순서만 뒤집은 판`).toBe(base);
       tiesBySeed.push(tiesOf[0] ?? 0);
     }
     // 검사가 헛돌지 않게: 같은 자리에 겹친 생존자를 괴물이 실제로 봤다 (시드마다)
