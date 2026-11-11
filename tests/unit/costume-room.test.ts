@@ -1,7 +1,13 @@
 // 의상을 방이 보낸다 (GAME_DESIGN 12.5, 정보 숨김): 판 시작 명단에만 — 생존자 명단에 생존자끼리 의상 · 괴물 의상, 괴물 명단은 자기
 // 의상뿐. 로비 · 결과 메시지에는 아무에게도 의상 칸이 없다. 받은 값은 거르고(모르는 값 = 기본), 판 중에는 바꾸지 않는다
 import { describe, expect, it } from 'vitest';
-import type { ClientMessage, CostumeChoice, Role, ServerMessage } from '@decoy/shared';
+import {
+  PROTOCOL_VERSION,
+  type ClientMessage,
+  type CostumeChoice,
+  type Role,
+  type ServerMessage,
+} from '@decoy/shared';
 import { RoomManager, type Room, type Seat } from '@decoy/shared/sim';
 import { FakeConn } from '../helpers/fakeConn';
 import { loadTestBalance } from '../helpers/fixtures';
@@ -21,6 +27,7 @@ const COSTUME_KEY = /"costume"\s*:/;
 function joinMsg(room: string | null, costume?: unknown): Extract<ClientMessage, { t: 'join' }> {
   return {
     t: 'join',
+    proto: PROTOCOL_VERSION,
     room,
     create: room === null,
     name: '',

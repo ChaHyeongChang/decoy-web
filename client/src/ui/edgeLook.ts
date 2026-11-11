@@ -12,7 +12,7 @@ export interface EdgeLook {
   color: number;
   /** 배지 안 그림 프레임 */
   inner: string;
-  /** 배지 안 글자 (거점 A/B) */
+  /** 배지 안 글자 (거점 id A/B/C) */
   label: string;
   labelColor: number;
   /** 깜빡임 (괴물 화면 점령 알림) */

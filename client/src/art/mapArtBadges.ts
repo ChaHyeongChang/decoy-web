@@ -9,6 +9,7 @@ import {
   type ExitState,
   type ExitView,
   type InfoItem,
+  type PointId,
   type PointState,
   type PointView,
 } from '@decoy/shared';
@@ -16,7 +17,7 @@ import { MAP_COLOR, OBJ_COLOR } from './mapArtGeom';
 import { NEON, UI, WARN, blendOver } from './palette';
 
 export interface BadgeAlpha {
-  points: Record<'A' | 'B', number>;
+  points: Record<PointId, number>;
   exits: Record<'N' | 'S', number>;
   prison: number;
 }
@@ -57,20 +58,22 @@ export const PRISON_LOCK = {
 /** 감옥 배지 색 (감옥 철창과 같은 빨강. 괴물 몸 #EF4444와 같은 값은 맵에 쓰지 않는다) */
 export const PRISON_COLOR = MAP_COLOR.bar;
 
-export type PointIcon = 'play' | 'pause' | 'check';
+export type PointIcon = 'play' | 'pause' | 'check' | 'off';
 
-/** 거점 상태 색 (색만으로 구분하지 않게 아이콘과 같이 쓴다) */
+/** 거점 상태 색 (색만으로 구분하지 않게 아이콘과 같이 쓴다). 꺼짐 = 탈출구 비활성과 같은 회색 */
 export function pointColor(s: PointState): number {
   if (s === 'blocked') return WARN;
   if (s === 'idle') return UI.textDim;
+  if (s === 'off') return OBJ_COLOR.off;
   return NEON;
 }
 
-/** 거점 상태 아이콘: 점령 중 ▶ · 정지 ‖ · 완료 ✓ · 대기 없음 */
+/** 거점 상태 아이콘: 점령 중 ▶ · 정지 ‖ · 완료 ✓ · 꺼짐 ⊘ · 대기 없음 */
 export function pointIcon(s: PointState): PointIcon | null {
   if (s === 'capturing') return 'play';
   if (s === 'blocked') return 'pause';
   if (s === 'done') return 'check';
+  if (s === 'off') return 'off';
   return null;
 }
 
@@ -79,7 +82,7 @@ export function exitColor(s: ExitState): number {
 }
 
 /** 거점 배지 알파: 괴물 화면 점령 중 깜빡임이면 0.25, 아니면 보이는 곳 1 / 안 보이는 곳 0.45 */
-export function pointBadgeAlpha(id: 'A' | 'B', alpha: BadgeAlpha, blink: Record<'A' | 'B', boolean>): number {
+export function pointBadgeAlpha(id: PointId, alpha: BadgeAlpha, blink: Record<PointId, boolean>): number {
   return blink[id] ? BADGE.blinkAlpha : alpha.points[id];
 }
 
@@ -102,14 +105,15 @@ function item(
 }
 
 /**
- * 배지 정보 레이어: 거점 배지 2 · 탈출구 배지 2 · 감옥 배지 1 + 진행(거점 2, 탈출구는 progress가 null이 아닐 때만).
- * 좌표는 판정 중심(타일), r = 판정 반경(바닥에 실제로 그린 값), value = 상태, color · alpha = 그린 주 색 · 알파
+ * 배지 정보 레이어: 거점 배지 3 · 탈출구 배지 2 · 감옥 배지 1 + 진행(거점 3, 탈출구는 progress가 null이 아닐 때만).
+ * 좌표는 판정 중심(타일), r = 판정 반경(바닥에 실제로 그린 값), value = 상태, color · alpha = 그린 주 색 · 알파.
+ * 꺼진 거점의 진행은 서버가 보낸 멈춘 값 그대로이고 색만 회색이다 (바닥 고리는 진행을 그리지 않는다)
  */
 export function badgeInfo(
   points: readonly PointView[],
   exits: readonly ExitView[],
   alpha: BadgeAlpha,
-  blink: Record<'A' | 'B', boolean>,
+  blink: Record<PointId, boolean>,
   radii: { point: number | null; exit: number | null },
 ): InfoItem[] {
   const out: InfoItem[] = [];
@@ -125,7 +129,7 @@ export function badgeInfo(
         c.y,
         radii.point,
         Math.max(0, Math.min(1, p.progress)),
-        p.state === 'blocked' ? WARN : NEON,
+        p.state === 'blocked' ? WARN : p.state === 'off' ? OBJ_COLOR.off : NEON,
         1,
       ),
     );

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
-import type { ClientMessage, ServerMessage } from '@decoy/shared';
+import { PROTOCOL_VERSION, type ClientMessage, type ServerMessage } from '@decoy/shared';
 import { WAITING_HUMANS_ONLY } from '@decoy/shared/sim';
 import { startServer, type RunningServer } from '../helpers/serverProcess';
 
@@ -40,7 +40,7 @@ async function quickPlayer(name: string): Promise<Player> {
   await new Promise((r) => ws.on('open', r));
   const send = (msg: ClientMessage): void => ws.send(JSON.stringify(msg));
   const pinger = setInterval(() => send({ t: 'ping', c: Date.now() }), 1000);
-  send({ t: 'quick', name });
+  send({ t: 'quick', proto: PROTOCOL_VERSION, name });
   return {
     inbox,
     send,

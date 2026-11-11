@@ -93,6 +93,11 @@ export interface CapturePointState {
   id: PointId;
   progress: number;
   done: boolean;
+  /**
+   * 꺼짐: 다른 거점이 필요한 수(capturePoint.required)만큼 끝나는 틱에 켜진다(capture.ts complete). 점령 불가 · 게이지 정지(진행 값은
+   * 멈춘 그대로) · 점령 기여 초 · 점령 시작 알림 · 지키기 경고 없음
+   */
+  off: boolean;
   /** 이번 틱 상태 */
   capturing: boolean;
   blocked: boolean;

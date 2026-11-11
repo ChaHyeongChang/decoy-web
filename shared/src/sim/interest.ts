@@ -104,7 +104,7 @@ function monsterSelf(game: Game, m: MonsterState): MonsterSelf {
   else if (campActive && reached(m.move.camp, b.prison.campWarnAt)) camp = 1;
   let blockWarn: MonsterSelf['blockWarn'] = null;
   for (const p of game.points) {
-    if (!p.done && reached(m.pointCamp[p.id], b.prison.campWarnAt)) blockWarn = p.id;
+    if (!p.done && !p.off && reached(m.pointCamp[p.id], b.prison.campWarnAt)) blockWarn = p.id;
   }
   return {
     attackCd: round(m.attackCd),
@@ -211,7 +211,7 @@ function worldView(game: Game, forMonster: boolean): WorldView {
   const points: PointView[] = game.points.map((p) => ({
     id: p.id,
     progress: round(p.progress / game.balance.capturePoint.captureTime, 4),
-    state: p.done ? 'done' : p.blocked ? 'blocked' : p.capturing ? 'capturing' : 'idle',
+    state: p.done ? 'done' : p.off ? 'off' : p.blocked ? 'blocked' : p.capturing ? 'capturing' : 'idle',
   }));
   const exits: ExitView[] = game.exits.map((e) => ({
     id: e.id,

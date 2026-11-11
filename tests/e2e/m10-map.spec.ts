@@ -17,6 +17,8 @@ import {
   darkAndLit,
   exitOpensWhileFrozen,
   expectKeypadDrawn,
+  expectPointTurnedOff,
+  offChipPixels,
   expectBodiesOverBadges,
   expectDarkAndLit,
   expectNoMapGraphics,
@@ -67,6 +69,7 @@ test('배지는 캐릭터를 덮지 않고, 거점 정지는 주황 + 일시정�
   expect(info.filter((i) => i.kind === 'badge').map((i) => i.tag)).toEqual([
     'point-A',
     'point-B',
+    'point-C',
     'exit-N',
     'exit-S',
     'prison',
@@ -86,6 +89,12 @@ test('배지는 캐릭터를 덮지 않고, 거점 정지는 주황 + 일시정�
   expect(door.after[1]).toBeGreaterThanOrEqual(door.before[1] * 1.5);
   // 같은 장면의 문 왼쪽 자물쇠 판 (플레이테스트 a-9): 열린 판 숫자가 실제로 그려졌고, 바뀔 때만 굽는다
   expectKeypadDrawn(door.keypad);
+  // 같은 장면의 남은 거점 C (플레이테스트 반영 b): 두 곳이 끝난 틱에 꺼져 회색 끊긴 고리 · ⊘ 칩 · 정보 레이어 off
+  const c = door.pointC;
+  console.log(
+    `[m10-map] 꺼진 거점 C: ${JSON.stringify({ before: { ...c.before, chip: c.before.chip.length }, after: { ...c.after, chip: offChipPixels(c.before, c.after) } })}`,
+  );
+  expectPointTurnedOff(door.pointC.before, door.pointC.after);
   expect(s.problems).toEqual([]);
   await s.context.close();
 });

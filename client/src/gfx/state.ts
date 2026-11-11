@@ -81,6 +81,17 @@ export function getFpsOverride(): number | null {
   return fpsOverride;
 }
 
+let textureBudgetOverride: number | null = null;
+
+/** 크게 본 지도 바닥이 쓰는 텍스처 예산(바이트)을 덮어쓴다 — 디버그 injectTextureBudget(예산이 모자란 길 시험) / null이면 품질 예산 */
+export function setTextureBudgetOverride(bytes: number | null): void {
+  textureBudgetOverride = bytes;
+}
+
+export function getTextureBudgetOverride(): number | null {
+  return textureBudgetOverride;
+}
+
 let followOff = false;
 
 /** 내 빛 따라가기를 끈다 (디버그 훅 · 측정: Δ = 0 — 안개 주기 자리에 고정된 예전 그림과 견준다) */

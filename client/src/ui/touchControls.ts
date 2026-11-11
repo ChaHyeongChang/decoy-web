@@ -359,7 +359,7 @@ export function controlBoxes(L: TouchLayout): ControlBoxes {
 export interface HudPreview {
   layout: LayoutInfo;
   plan: TouchHud | null;
-  /** 늘 떠 있는 부품 (timer · gaugeA · gaugeB · card0~2 · minimap) */
+  /** 늘 떠 있는 부품 (timer · gaugeA · gaugeB · gaugeC · card0~2 · minimap) */
   rects: { id: string; box: Box }[];
   /** 맵 창 안 미니맵 틀 (따라가는 카메라에서 옆 칸에 자리가 없을 때, 없으면 null) */
   inset: Box | null;

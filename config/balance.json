@@ -1,5 +1,5 @@
 {
-  "_comment": "DECOY v2 밸런스 수치. 거리 단위는 타일(1타일=32px), 시간 단위는 초, 각도는 도. 이 파일만 고쳐도 게임 수치가 바뀌어야 한다. 바꾸면 docs/GAME_DESIGN.md 변경 이력에 적는다. players·survivors·count 값은 맵·역할 구조에 묶여 있어 바꾸지 않는다.",
+  "_comment": "DECOY v2 밸런스 수치. 거리 단위는 타일(1타일=32px), 시간 단위는 초, 각도는 도. 이 파일만 고쳐도 게임 수치가 바뀌어야 한다. 바꾸면 docs/GAME_DESIGN.md 변경 이력에 적는다. players·survivors·count·capturePoint.required 값은 맵·역할 구조에 묶여 있어 바꾸지 않는다(capturePoint.count 2 → 3 · required 2는 플레이테스트 반영 b의 규칙 변경 — 거점 세 곳 중 두 곳, GAME_DESIGN 7장).",
 
   "match": {
     "players": 4,
@@ -57,7 +57,8 @@
   },
 
   "capturePoint": {
-    "count": 2,
+    "count": 3,
+    "required": 2,
     "radius": 2.5,
     "captureTime": 40,
     "groupMultiplier": 1.5,

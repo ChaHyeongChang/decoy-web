@@ -11,6 +11,7 @@ import {
   type Page,
 } from '@playwright/test';
 import type { InputFrame, InputLogEntry, Role, Snapshot, TestCommand } from '@decoy/shared';
+import { pctShown } from '../../client/src/ui/hudArt';
 
 /**
  * 헤드리스 컨테이너에는 GPU가 없어 WebGL(SwiftShader) 탭 4개가 1~3FPS밖에 안 나온다.
@@ -543,16 +544,19 @@ export interface PointPct {
   shown: number | string;
   /** 기대값: 자기 스냅샷 진행의 내림 정수 %, 완료만 100, 완료 전 99까지 (VISUAL_SPEC 8.3) */
   want: number;
+  /** 이 화면이 숫자를 보이는가 (괴물 화면은 아니다 — hudArt.pctShown · PCT_FOR_MONSTER, 플레이테스트 b) */
+  visible: boolean;
   /** 스냅샷 거점 상태 · HUD 게이지 상태 · 숫자 일의 자리 프레임 */
   state: string;
   gauge: string;
   frame: string;
 }
 
-export async function pointPct(page: Page, id: 'A' | 'B'): Promise<PointPct> {
-  return page.evaluate((id) => {
+export async function pointPct(page: Page, id: 'A' | 'B' | 'C'): Promise<PointPct> {
+  const p = await page.evaluate((id) => {
     const h = window.__DECOY__?.getHud() ?? {};
-    const p = window.__DECOY__?.getLastSnapshot()?.world.points.find((q) => q.id === id);
+    const snap = window.__DECOY__?.getLastSnapshot();
+    const p = snap?.world.points.find((q) => q.id === id);
     const want = !p
       ? -1
       : p.state === 'done'
@@ -567,14 +571,23 @@ export async function pointPct(page: Page, id: 'A' | 'B'): Promise<PointPct> {
       state: p?.state ?? '',
       gauge: String(h[`point${id}`] ?? ''),
       frame: String(h[`point${id}PctFrame`] ?? ''),
+      monster: snap?.you.role === 'monster',
     };
   }, id);
+  const { monster, ...rest } = p;
+  // 꺼진 거점(off)은 어느 화면도 숫자를 보이지 않는다
+  return { ...rest, visible: pctShown(monster) && p.state !== 'off' };
+}
+
+/** 화면 숫자가 스냅샷과 맞는가: 보이는 화면은 내림 %, 보이지 않는 화면(괴물 · 꺼진 거점)은 숫자 · 숫자 그림 없음 */
+export function pctMatches(p: PointPct): boolean {
+  return p.visible ? p.shown === p.want : p.shown === '' && p.frame === '';
 }
 
 /** 화면 숫자가 자기 스냅샷 진행과 맞을 때까지 기다려 그 값을 돌려준다 (새 스냅샷이 온 프레임과 HUD가 다시 계산한 프레임 사이는 건너뛴다) */
 export async function waitPointPct(
   page: Page,
-  id: 'A' | 'B',
+  id: 'A' | 'B' | 'C',
   ok: (p: PointPct) => boolean,
   label: string,
   timeout = 20_000,
@@ -586,7 +599,7 @@ export async function waitPointPct(
         const p = await pointPct(page, id);
         last = p;
         // 실패하면 마지막으로 읽은 값이 메시지에 남는다
-        return p.shown === p.want && ok(p) ? 'ok' : JSON.stringify(p);
+        return pctMatches(p) && ok(p) ? 'ok' : JSON.stringify(p);
       },
       { message: label, intervals: [50, 100], timeout },
     )
@@ -598,7 +611,7 @@ export async function waitPointPct(
 /** 조건이 맞으면 그 값, 시간 안에 맞지 않으면 null (다시 시도하는 장면용) */
 export async function tryPointPct(
   page: Page,
-  id: 'A' | 'B',
+  id: 'A' | 'B' | 'C',
   ok: (p: PointPct) => boolean,
   timeout: number,
 ): Promise<PointPct | null> {

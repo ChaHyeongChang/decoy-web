@@ -176,6 +176,14 @@ describe('지도 크게 보기 바닥 해상도 (bigMinimapTexels)', () => {
   const MiB = 1024 * 1024;
   const A = MAP_W / MAP_H;
   const bytesOf = (w: number): number => w * Math.round(w / A) * 4;
+  /** 늘려 쓰는 길이 크게 본 지도 텍스처에 올리는 작은 지도 합성 사본 (높이는 올림 — 실제 합성 높이 이하) */
+  const copyOf = (base: number): number => base * Math.ceil(base / A) * 4;
+  /**
+   * 지도가 열린 동안 크게 본 지도 텍스처('minimap-big') 바이트 — 판 장면 · Minimap.refreshBase가 하는 그대로: null = 사본을 늘려 씀,
+   * 0 = 열지 않음, 작은 합성보다 크게 구우면 굽는 동안 사본 → 다 구운 뒤 그 폭, 작게 구우면 굽는 동안에도 그 폭으로 줄여 담는다
+   */
+  const openBytesOf = (d: number | null, base: number): number =>
+    d === null ? copyOf(base) : d === 0 ? 0 : d > base ? Math.max(copyOf(base), bytesOf(d)) : bytesOf(d);
 
   it('화면 기기 px에 맞춘다 (컨테이너 실측 장면): PC 낮음 · 태블릿 · 휴대폰 낮음은 기기 px 그대로, 휴대폰 높음 · 중간은 작은 지도 합성 그대로(null)', () => {
     // PC 1920×1080 낮음: 그림 888px, 작은 합성 384, 나머지 텍스처 5.55MiB / 예산 8MiB
@@ -183,12 +191,12 @@ describe('지도 크게 보기 바닥 해상도 (bigMinimapTexels)', () => {
     // 태블릿 높음 1061px · 휴대폰 915×412 낮음 476px
     expect(bigMinimapTexels(1061, 768, A, TEXTURE_BUDGET.high, 24.76 * MiB)).toBe(1061);
     expect(bigMinimapTexels(476, 384, A, TEXTURE_BUDGET.low, 4.38 * MiB)).toBe(476);
-    // 휴대폰 800×360 높음 658px < 작은 합성 768: 작은 지도 합성을 그대로 (예전과 같다)
+    // 휴대폰 800×360 높음 658px < 작은 합성 768: 작은 지도 합성을 그대로 (예전과 같다 — 사본 1.5MiB가 예산에 들어간다)
     expect(bigMinimapTexels(658, 768, A, TEXTURE_BUDGET.high, 15.74 * MiB)).toBeNull();
     expect(bigMinimapTexels(570, 576, A, TEXTURE_BUDGET.medium, 11.47 * MiB)).toBeNull();
   });
 
-  it('텍스처 예산을 넘지 않는다: PC 1920×1080@2 높음(나머지 29.43MiB)은 남은 만큼만(작은 합성 768보다는 크게), 남은 것이 없으면 null', () => {
+  it('텍스처 예산을 넘지 않는다: PC 1920×1080@2 높음(나머지 29.43MiB)은 남은 만큼만(작은 합성 768보다는 크게), 남은 것이 없으면 0(열지 않음)', () => {
     const w = bigMinimapTexels(1776, 768, A, TEXTURE_BUDGET.high, 29.43 * MiB);
     expect(w).not.toBeNull();
     expect(w!).toBeGreaterThan(768);
@@ -196,28 +204,92 @@ describe('지도 크게 보기 바닥 해상도 (bigMinimapTexels)', () => {
     expect(29.43 * MiB + bytesOf(w!)).toBeLessThanOrEqual(
       TEXTURE_BUDGET.high - MINIMAP_BIG_TEXELS.budgetMargin,
     );
-    expect(bigMinimapTexels(1776, 768, A, TEXTURE_BUDGET.high, 31.9 * MiB)).toBeNull();
-    expect(bigMinimapTexels(888, 384, A, TEXTURE_BUDGET.low, 9 * MiB)).toBeNull();
+    // 예전에는 여기서 null(늘려 씀)이었다 — 사본 1.5MiB(높음) · 0.375MiB(낮음)를 올려 예산을 넘었다
+    expect(bigMinimapTexels(1776, 768, A, TEXTURE_BUDGET.high, 31.9 * MiB)).toBe(0);
+    expect(bigMinimapTexels(888, 384, A, TEXTURE_BUDGET.low, 9 * MiB)).toBe(0);
   });
 
-  it('어떤 값이든: null이거나, 작은 합성보다 크고 필요한 기기 px · 상한 이하이며 예산 − 여유 안', () => {
+  it('늘려 쓰는 사본도 예산에 들어가지 않으면 들어가는 만큼만 굽는다: PC 1920×1080@2 높음 거점 C 뒤(닫혀 있을 때 31.00MiB) 542px', () => {
+    // E2E minimap-sharp.webgl 배율 2 실측: 닫혀 있을 때 합계 32,503,736B (지도 텍스처 1×1 = 4B 포함), 예전 규칙으로 열면 34,076,596B
+    const others = 32_503_736 - 4;
+    const budget = TEXTURE_BUDGET.high;
+    expect(others + copyOf(768)).toBeGreaterThan(budget);
+    const w = bigMinimapTexels(1776, 768, A, budget, others);
+    expect(w).toBe(542);
+    expect(others + bytesOf(542)).toBeLessThanOrEqual(budget - MINIMAP_BIG_TEXELS.budgetMargin);
+    // 한 칸 더 크면 넘는다 (들어가는 만큼)
+    expect(others + 544 * Math.ceil(544 / A) * 4).toBeGreaterThan(budget - MINIMAP_BIG_TEXELS.budgetMargin);
+    // 휴대폰 높음처럼 그림이 작은 합성보다 작아도(658 < 768) 사본이 들어가지 않으면 그림 폭 그대로 굽는다
+    const tight = budget - MINIMAP_BIG_TEXELS.budgetMargin - 1.3 * MiB;
+    expect(bigMinimapTexels(658, 768, A, budget, tight)).toBe(658);
+    // 사본이 들어가면 그대로 늘려 쓴다 (예전과 같다)
+    expect(
+      bigMinimapTexels(658, 768, A, budget, budget - MINIMAP_BIG_TEXELS.budgetMargin - copyOf(768)),
+    ).toBeNull();
+  });
+
+  it(`들어가는 폭이 하한(${MINIMAP_BIG_TEXELS.minW}텍셀, 그림이 그보다 작으면 그림 폭)보다 작으면 0 — 열지 않는다`, () => {
+    const budget = TEXTURE_BUDGET.low;
+    const roomFor = (w: number): number => budget - MINIMAP_BIG_TEXELS.budgetMargin - bytesOf(w) - 4 * w;
+    // 하한 바로 위 · 아래
+    expect(bigMinimapTexels(888, 384, A, budget, roomFor(MINIMAP_BIG_TEXELS.minW + 2))).toBe(
+      MINIMAP_BIG_TEXELS.minW + 1,
+    );
+    expect(bigMinimapTexels(888, 384, A, budget, roomFor(MINIMAP_BIG_TEXELS.minW - 2))).toBe(0);
+    // 그림이 하한보다 작으면 그림 폭이 들어가면 된다 (화면 해상도 그대로)
+    expect(bigMinimapTexels(100, 384, A, budget, roomFor(110))).toBe(100);
+    expect(bigMinimapTexels(100, 384, A, budget, roomFor(90))).toBe(0);
+  });
+
+  it('어떤 값이든 (무작위 2000): 지도가 열린 동안 텍스처 합계 ≤ 예산 − 여유 — 늘려 쓰는 길(사본) · 작게 굽는 길까지', () => {
     let seed = 7;
     const rnd = (): number => {
       seed = (seed * 1103515245 + 12345) % 2147483648;
       return seed / 2147483648;
     };
+    const seen = { stretch: 0, sharp: 0, smaller: 0, none: 0 };
     for (let i = 0; i < 2000; i += 1) {
       const need = rnd() * 3000;
       const base = 256 + Math.floor(rnd() * 600);
       const budget = rnd() < 0.5 ? TEXTURE_BUDGET.low : TEXTURE_BUDGET.high;
       const others = rnd() * budget;
-      const w = bigMinimapTexels(need, base, A, budget, others);
-      if (w === null) continue;
-      expect(w).toBeGreaterThan(base);
-      expect(w).toBeLessThanOrEqual(Math.ceil(need));
-      expect(w).toBeLessThanOrEqual(MINIMAP_BIG_TEXELS.maxW);
-      expect(others + bytesOf(w)).toBeLessThanOrEqual(budget - MINIMAP_BIG_TEXELS.budgetMargin);
+      const room = budget - MINIMAP_BIG_TEXELS.budgetMargin - others;
+      const d = bigMinimapTexels(need, base, A, budget, others);
+      const at = `need ${need.toFixed(1)} base ${base} budget ${budget} others ${others.toFixed(0)} → ${String(d)}`;
+      // 불변식: 열린 동안(굽는 동안 포함) 지도 텍스처는 남은 예산 안 — 다른 텍스처가 예산 − 여유 안이면 합계도 그 안이다
+      // (다른 텍스처만으로 이미 넘었으면 지도는 아무것도 올리지 않는다)
+      expect(openBytesOf(d, base), at).toBeLessThanOrEqual(Math.max(0, room));
+      if (room >= 0)
+        expect(others + openBytesOf(d, base), at).toBeLessThanOrEqual(
+          budget - MINIMAP_BIG_TEXELS.budgetMargin,
+        );
+      if (d === null) {
+        // 늘려 쓴다: 사본이 들어가고, 작은 합성보다 크게는 필요 없거나 들어가지 않는다
+        seen.stretch += 1;
+        expect(
+          Math.ceil(need) <= base || others + bytesOf(base + 2) > budget - MINIMAP_BIG_TEXELS.budgetMargin,
+          at,
+        ).toBe(true);
+      } else if (d === 0) {
+        // 열지 않는다: 사본도, 하한 폭도 들어가지 않는다
+        seen.none += 1;
+        expect(copyOf(base), at).toBeGreaterThan(room);
+        const floor = Math.max(1, Math.min(MINIMAP_BIG_TEXELS.minW, Math.ceil(need)));
+        expect(((floor + 1) ** 2 / A) * 4, at).toBeGreaterThan(room);
+      } else {
+        expect(d, at).toBeLessThanOrEqual(Math.ceil(need));
+        expect(d, at).toBeLessThanOrEqual(MINIMAP_BIG_TEXELS.maxW);
+        if (d > base) seen.sharp += 1;
+        else {
+          // 작은 합성보다 작게 굽는 것은 사본이 들어가지 않을 때만, 하한 이상
+          seen.smaller += 1;
+          expect(copyOf(base), at).toBeGreaterThan(room);
+          expect(d, at).toBeGreaterThanOrEqual(Math.min(MINIMAP_BIG_TEXELS.minW, Math.ceil(need)));
+        }
+      }
     }
+    // 네 길을 모두 지난다
+    expect(Math.min(seen.stretch, seen.sharp, seen.smaller, seen.none)).toBeGreaterThan(20);
     expect(bigMinimapTexels(0, 384, A, TEXTURE_BUDGET.high, 0)).toBeNull();
     expect(bigMinimapTexels(Number.NaN, 384, A, TEXTURE_BUDGET.high, 0)).toBeNull();
   });
@@ -262,6 +334,12 @@ describe('PC 판 중 메뉴 버튼 자리', () => {
       [800, 600],
       [1280, 540],
       [640, 360],
+      // 중간 크기 창 · 위 여백 52px 미만 (아래 시험)
+      [800, 520],
+      [750, 480],
+      [720, 450],
+      [854, 520],
+      [900, 560],
     ];
     for (const [ww, wh] of sizes) {
       const c = canvasOf(ww, wh);
@@ -296,6 +374,28 @@ describe('PC 판 중 메뉴 버튼 자리', () => {
     const s800 = menuButtonPlace(canvasOf(800, 600), SIZE, KEEP);
     expect(s800.scale).toBe(1);
     expect(s800.top + SIZE.h).toBeLessThanOrEqual(75);
+  });
+
+  it('중간 크기 창(폭 700~960, 캔버스 위 여백 52px 미만): 위 띠에 두면 거점 A 게이지 왼쪽 끝까지로 줄인다 — 0.71배 이상 (거점 셋: A가 왼쪽(259)에 붙어 예전 1배이던 창도 줄어든다, 받아들인 값을 고정)', () => {
+    // 버튼이 위 띠와 세로로 겹치므로(위 여백 < 버튼 높이 + 8) 가로 폭 = A 게이지 왼쪽 끝 − 간격 − 버튼 왼쪽 끝. 맵 옆(팀 카드 위)은 더 좁다
+    const want: [number, number, number][] = [
+      [800, 520, 0.822],
+      [750, 480, 0.774],
+      [720, 450, 0.74],
+      [854, 520, 0.884],
+      [900, 560, 0.927],
+      // 가장 작은 값: 폭 700 (글자 약 10.8px)
+      [700, 419, 0.717],
+    ];
+    for (const [ww, wh, scale] of want) {
+      const c = canvasOf(ww, wh);
+      expect(c.top, `${ww}×${wh} 위 여백`).toBeLessThan(SIZE.h + 2 * MENU_BUTTON.gapCss);
+      const p = menuButtonPlace(c, SIZE, KEEP);
+      expect(p.scale, `${ww}×${wh}`).toBeCloseTo(scale, 3);
+      const room = c.left + KEEP.gaugeLeft * c.k - MENU_BUTTON.gapCss - p.left;
+      expect(SIZE.w * p.scale, `${ww}×${wh} 게이지 왼쪽까지`).toBeLessThanOrEqual(room + 1e-6);
+      expect(SIZE.w * (p.scale + 0.002), `${ww}×${wh} 들어가는 만큼`).toBeGreaterThan(room);
+    }
   });
 
   it('크기를 아직 모르면(0) 기본 높이로 계산하고 배율은 하한 아래로 내려가지 않는다', () => {

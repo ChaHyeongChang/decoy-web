@@ -1,12 +1,15 @@
 // M10b 맵 · 오브젝트 E2E 공용 (m10-map.spec.ts = Canvas 낮음, m10-map.webgl.spec.ts = WebGL 높음).
 // 봇 방 탭 하나로 장면을 놓고 스크린샷 픽셀을 잰다. 대비는 WCAG 상대휘도, 색 차이는 CIE76 ΔE(Lab).
+import { readFileSync } from 'node:fs';
 import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import {
   CAPTURE_POINTS,
   MAP_H,
   MAP_W,
   tileAt,
+  validateBalance,
   type InfoItem,
+  type PointId,
   type TestCommand,
   type Vec2,
 } from '@decoy/shared';
@@ -472,6 +475,128 @@ export function expectBodiesOverBadges(r: Record<string, BodyOverBadge>): void {
   }
 }
 
+/**
+ * 거점 하나의 바닥 고리 · 배지 칩 픽셀 (플레이테스트 반영 b — 꺼진 거점): 판정 원 위(반지름 ±1px) 픽셀 중 청록(대기 · 점령의
+ * 고리 #2FA3B8 · 청록 눈금 — 빛 · 안개를 곱해도 초록 · 파랑이 빨강보다 30 넘게 크다) 비율, 상태 칩 자리 픽셀(같은 자리 순서),
+ * 정보 레이어 배지
+ */
+export interface PointLook {
+  badge: InfoItem | undefined;
+  ringPx: number;
+  ringCyan: number;
+  chip: Rgb[];
+}
+
+/** 거점 판정 반경 (balance.json) — 바닥 고리 픽셀을 잴 때 */
+const POINT_R = validateBalance(JSON.parse(readFileSync('config/balance.json', 'utf8'))).capturePoint.radius;
+
+export async function pointLook(page: Page, id: PointId): Promise<PointLook> {
+  const c = CAPTURE_POINTS[id];
+  const r = POINT_R;
+  const center = await page.evaluate(([x, y]) => window.__DECOY__?.tileToClient(x!, y!), [c.x, c.y]);
+  const edge = await page.evaluate(([x, y]) => window.__DECOY__?.tileToClient(x!, y!), [c.x + r, c.y]);
+  if (!center || !edge) throw new Error('tileToClient 없음');
+  const rad = edge.x - center.x;
+  const ring: Rect = {
+    x: Math.floor(center.x - rad - 2),
+    y: Math.floor(center.y - rad - 2),
+    w: Math.ceil(2 * rad + 4),
+    h: Math.ceil(2 * rad + 4),
+  };
+  const cx = c.x + BADGE.chipDx;
+  const cy = c.y + BADGE.pointDy;
+  const h = BADGE.chipHalf + 0.05;
+  const chip = await tileRect(page, cx - h, cy - h, cx + h, cy + h);
+  const px = await grab(page, { ring, chip });
+  const on: Rgb[] = [];
+  const ringPx = px.ring ?? [];
+  for (let j = 0; j < ring.h; j += 1)
+    for (let i = 0; i < ring.w; i += 1) {
+      const d = Math.hypot(ring.x + i + 0.5 - center.x, ring.y + j + 0.5 - center.y);
+      const p = ringPx[j * ring.w + i];
+      if (p && Math.abs(d - rad) <= 1) on.push(p);
+    }
+  const badge = (await page.evaluate(() => window.__DECOY__?.getInfoLayer() ?? [])).find(
+    (i) => i.kind === 'badge' && i.tag === `point-${id}`,
+  );
+  return {
+    badge,
+    ringPx: on.length,
+    ringCyan: on.filter(([pr, pg, pb]) => pg - pr > 30 && pb - pr > 30).length / Math.max(1, on.length),
+    chip: px.chip ?? [],
+  };
+}
+
+/**
+ * 칩 자리에 새로 그려진 꺼짐 회색 픽셀 수: 꺼진 뒤 픽셀이 OBJ_COLOR.off(배지 알파로 미리 섞은 색)에 가깝고, 꺼지기 전(칩 없음 —
+ * 바닥) 같은 자리와 뚜렷이 다르다 (어두운 바닥이 섞은 회색과 비슷해 색만으로 세면 바닥까지 센다)
+ */
+export function offChipPixels(before: PointLook, after: PointLook): number {
+  const [gr, gg, gb] = hexRgb(dimmed(OBJ_COLOR.off, after.badge?.alpha ?? 1));
+  let n = 0;
+  after.chip.forEach(([r, g, b], i) => {
+    const [br, bg, bb] = before.chip[i] ?? [r, g, b];
+    if (Math.hypot(r - gr, g - gg, b - gb) < 20 && Math.hypot(r - br, g - bg, b - bb) > 20) n += 1;
+  });
+  return n;
+}
+
+/** 가라앉음 확인 사이에 넘기는 프레임 수: 안개 주기(생존자 50ms)가 60fps에서도 한 번 넘게 돈다 (느린 러너는 프레임마다 돈다) */
+const SETTLE_FRAMES = 6;
+
+/** 두 번 잰 거점 모습이 같은 그림인가 (고리 픽셀 수 · 청록 비율 같음, 칩 픽셀 채널 차 2 이하) */
+function sameLook(a: PointLook, b: PointLook): boolean {
+  if (a.ringPx !== b.ringPx || a.ringCyan !== b.ringCyan || a.chip.length !== b.chip.length) return false;
+  return a.chip.every((p, i) => {
+    const q = b.chip[i];
+    return q !== undefined && p.every((v, k) => Math.abs(v - q[k]!) <= 2);
+  });
+}
+
+/**
+ * 순간이동 뒤 거점 하나의 모습을 장면이 가라앉은 뒤에 잰다 (고정 대기 뒤 한 번 읽기 대신 — PROGRESS '느린 러너 대응'):
+ * 내 그림 자리(getDrawn 'self')가 서버에 놓은 자리에 온 뒤, 프레임을 SETTLE_FRAMES씩 넘기며 잰 고리 · 칩 픽셀이 앞과 같을 때까지.
+ * 장식 시계 · 봇이 멈춘 장면이라 시야 · 안개가 따라오면 프레임마다 같은 그림이다
+ */
+export async function settledPointLook(page: Page, id: PointId, self: Vec2): Promise<PointLook> {
+  await page.waitForFunction(
+    ([x, y]) =>
+      (window.__DECOY__?.getDrawn() ?? []).some(
+        (d) => d.kind === 'self' && d.layer !== 'minimap' && Math.hypot(d.x - x!, d.y - y!) < 0.01,
+      ),
+    [self.x, self.y],
+    { timeout: 15_000 },
+  );
+  const frames = (): Promise<number> => page.evaluate(() => window.__DECOY__?.getAnimState()?.frames ?? 0);
+  let prev = await pointLook(page, id);
+  for (let i = 0; i < 20; i += 1) {
+    await page.waitForFunction(
+      ({ f, n }) => (window.__DECOY__?.getAnimState()?.frames ?? 0) >= f + n,
+      { f: await frames(), n: SETTLE_FRAMES },
+      { timeout: 30_000 },
+    );
+    const cur = await pointLook(page, id);
+    if (sameLook(prev, cur)) return cur;
+    prev = cur;
+  }
+  throw new Error(`거점 ${id} 그림이 가라앉지 않았다 (${SETTLE_FRAMES}프레임씩 20번)`);
+}
+
+/** 꺼진 거점 판정 (exitOpensWhileFrozen의 C): 꺼지기 전 청록 고리 → 꺼진 뒤 회색 끊긴 고리 · ⊘ 칩 · 정보 레이어 off */
+export function expectPointTurnedOff(before: PointLook, after: PointLook): void {
+  expect(before.badge?.value).toBe('idle');
+  expect(after.badge?.value).toBe('off');
+  expect(after.badge?.color).toBe(OBJ_COLOR.off);
+  // 빈 통과가 아님: 고리 픽셀을 실제로 잰다, 꺼지기 전에는 청록 고리
+  expect(before.ringPx).toBeGreaterThan(100);
+  expect(before.ringCyan, `꺼지기 전 청록 고리 비율 ${before.ringCyan}`).toBeGreaterThan(0.5);
+  // 꺼진 뒤: 고리에 청록이 없다 (회색 끊긴 원), 칩에 꺼짐 회색 ⊘
+  expect(after.ringCyan, `꺼진 뒤 청록 고리 비율 ${after.ringCyan}`).toBeLessThan(0.05);
+  expect(after.chip.length).toBe(before.chip.length);
+  const gray = offChipPixels(before, after);
+  expect(gray, `꺼짐 칩 회색 픽셀 ${gray}`).toBeGreaterThanOrEqual(8);
+}
+
 /** 북쪽 탈출구 자물쇠 판 (플레이테스트 a-9, render/keypad.ts) — exitOpensWhileFrozen이 함께 잰다 */
 export interface DoorKeypad {
   /** 정보 레이어 'keypad-N' 값 (예 'open:0740') */
@@ -519,14 +644,22 @@ async function keypadLit(page: Page): Promise<number[]> {
  * 같은 장면에서 문 왼쪽 자물쇠 판(a-9)이 실제 렌더러로 그려졌는지(정보 값 · 숫자 칸 픽셀)와 바뀔 때만 굽는지(굽기 누계)도 잰다:
  * WebGL에서는 캔버스 텍스처 올리기 · 칸 나누기 경로를 거친다(Canvas 렌더러는 캔버스를 바로 그린다)
  */
-export async function exitOpensWhileFrozen(
-  s: Session,
-): Promise<{ before: Rgb; after: Rgb; state: string | number | null; keypad: DoorKeypad }> {
+export async function exitOpensWhileFrozen(s: Session): Promise<{
+  before: Rgb;
+  after: Rgb;
+  state: string | number | null;
+  keypad: DoorKeypad;
+  /** 거점 C: 두 거점(A · B)이 끝나기 전 · 끝나 꺼진 뒤 (플레이테스트 반영 b) */
+  pointC: { before: PointLook; after: PointLook };
+}> {
   const { page, send, id } = s;
   await page.evaluate(() => window.__DECOY__?.freezeClock(4321));
   await send({ kind: 'teleport', target: id('monster'), x: 44.5, y: 12.5, face: 0 });
   await send({ kind: 'teleport', target: id('runner'), x: 21, y: 3.5, face: 0 });
   await send({ kind: 'teleport', target: id('guard'), x: 3, y: 28, face: 0 });
+  // 꺼지기 전 C: 러너를 C 옆에 옮긴 뒤 시야 · 안개가 따라와 그림이 가라앉을 때 잰다 (고정 대기 뒤 한 번 읽기 금지 — 칩 픽셀은
+  // 꺼진 뒤와 같은 조명에서 찍어야 offChipPixels의 '꺼지기 전 바닥' 기준이 된다)
+  const cBefore = await settledPointLook(page, 'C', { x: 21, y: 3.5 });
   const badge = (tag: string): Promise<string | number | null> =>
     page.evaluate(
       (t) =>
@@ -545,10 +678,13 @@ export async function exitOpensWhileFrozen(
   }
   await send({ kind: 'teleport', target: id('scout'), x: 45, y: 28, face: 0 });
   await expect.poll(() => badge('exit-N'), { timeout: 8000 }).toBe('active');
+  // 남은 거점 C는 그 틱에 꺼진다 (점령 불가 · 회색 끊긴 고리 · ⊘ 칩)
+  await expect.poll(() => badge('point-C'), { timeout: 8000 }).toBe('off');
   const door = await tileRect(page, 23.8, 0.3, 24.2, 0.5);
   const mean = async (): Promise<Rgb> => meanRgb((await grab(page, { door })).door!);
   const noBanner = (): Promise<number> => page.evaluate(() => window.__DECOY__?.getBanners().length ?? 0);
   await expect.poll(noBanner, { timeout: 15_000 }).toBe(0);
+  const cAfter = await pointLook(page, 'C');
   const before = await mean();
   const c0 = await keypadCounters(page);
   // 개방은 두 사람이 판정 원 안에 있을 때 (가드 · 스카우트 봇)
@@ -578,7 +714,7 @@ export async function exitOpensWhileFrozen(
     bakesSteady: c2.bakes - c1.bakes,
     framesSteady: c2.frames - c1.frames,
   };
-  return { before, after, state: await badge('exit-N'), keypad };
+  return { before, after, state: await badge('exit-N'), keypad, pointC: { before: cBefore, after: cAfter } };
 }
 
 /**

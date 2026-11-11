@@ -1,7 +1,7 @@
 // HUD (M10c, VISUAL_SPEC 8장): 행동 칸 값(M11 터치 버튼과 공유) · 거점 게이지 · 타이머 · 팀 카드 · 상태 표시(색만으로 구분하지 않기) ·
 // 글자 대비 · 9조각 배치 · 아틀라스 목록 · 조작 안내 줄 나누기 · 거점 진행 숫자(플레이테스트 a-7: 값 · 프레임 · 숫자 칸)
 import { readFileSync } from 'node:fs';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { validateBalance } from '../../shared/src/balance';
 import { createMoveState } from '../../shared/src/movement';
 import { RESCUE_POINT } from '../../shared/src/map';
@@ -11,6 +11,7 @@ import { TEXT_PAIRS, UI, WARN, WARN_TEXT, contrastRatio } from '../../client/src
 import {
   GAUGE_ICON,
   GAUGE_STATES,
+  HC,
   HUD_TEXT_PAIRS,
   PCT_CELL,
   PCT_FOR_MONSTER,
@@ -21,6 +22,9 @@ import {
   TONE,
   actionSlots,
   fmtTime,
+  gaugeColor,
+  gaugeFrameColor,
+  gaugeShowsProgress,
   gaugeState,
   hudSpecs,
   litTicks,
@@ -32,6 +36,7 @@ import {
   pctWidth,
   pointOf,
   pointPercent,
+  rgba,
   sliceSpans,
   statusKey,
   teamCards,
@@ -44,6 +49,7 @@ import {
   GAUGE_IDS,
   GAUGE_ROW,
   HUD,
+  HUD_BAND,
   MAP_RECT,
   TOUCH_UI,
   VIEW_W,
@@ -284,12 +290,88 @@ describe('행동 칸 actionSlots (순수 함수, M11 터치 버튼과 공유)', 
 });
 
 describe('거점 게이지 · 타이머 · 상태 표시', () => {
-  it('거점 상태: 서버 blocked = 정지, 점령 중 · 정지 · 완료는 서로 다른 칩 아이콘 (색만으로 구분하지 않기)', () => {
+  it('거점 상태: 서버 blocked = 정지, 점령 중 · 정지 · 완료 · 꺼짐은 서로 다른 칩 아이콘 (색만으로 구분하지 않기)', () => {
     expect(gaugeState('blocked')).toBe('paused');
     expect(gaugeState('capturing')).toBe('capturing');
-    const icons = (['capturing', 'paused', 'done'] as const).map((s) => GAUGE_ICON[s]);
-    expect(icons).toEqual(['play', 'pause', 'check']);
+    expect(gaugeState('off')).toBe('off');
+    const icons = (['capturing', 'paused', 'done', 'off'] as const).map((s) => GAUGE_ICON[s]);
+    expect(icons).toEqual(['play', 'pause', 'check', 'off']);
+    expect(new Set(icons).size).toBe(icons.length);
     expect(GAUGE_ICON.idle).toBeNull();
+  });
+
+  it('꺼진 거점 (플레이테스트 b): 회색(대기 · 점령 중 · 정지 · 완료와 다른 색) + ⊘ 칩, 채움 · 진행 숫자 없음 — 아이콘은 패널 위 3:1', () => {
+    const others = (['idle', 'capturing', 'paused', 'done'] as const).map(gaugeColor);
+    expect(gaugeColor('off')).toBe(HC.gaugeOff);
+    expect(others).not.toContain(gaugeColor('off'));
+    // 틀(PC 막대 · 터치 줄 판)은 꺼진 칸 색, 다른 상태의 틀과 다르다 (◇ 배지 테두리는 틀이 아니라 상태색 — 아래 시험)
+    expect(gaugeFrameColor('off')).toBe(HC.off);
+    expect((['idle', 'capturing', 'paused', 'done'] as const).map(gaugeFrameColor)).not.toContain(HC.off);
+    // 진행을 보이지 않는 것은 꺼짐뿐 (멈춘 진행 · 0%는 그대로 보인다)
+    expect(GAUGE_STATES.filter((st) => !gaugeShowsProgress(st))).toEqual(['off']);
+    expect(contrastRatio(HC.gaugeOff, UI.panel)).toBeGreaterThanOrEqual(3);
+    expect(HUD_TEXT_PAIRS.some((p) => p.fg === HC.gaugeOff && p.bg === UI.panel && p.min === 3)).toBe(true);
+    // ⊘ 아이콘 · 꺼진 틀 프레임이 PC · 터치 아틀라스에 있다
+    for (const touch of [false, true]) {
+      if (touch) applyLayout(layoutFor(750, 369, true));
+      const names = new Set(hudSpecs().map((x) => x.name));
+      const want = touch ? ['grow:off', 'gicon:off'] : ['gbar:off', 'dia:off', 'chip:off'];
+      for (const n of want) expect(names.has(n), `${touch} ${n}`).toBe(true);
+    }
+  });
+
+  it('꺼진 거점이 구운 그림의 선 색: PC 막대 틀 · 터치 줄 판 테두리는 HC.off(틀 색), ◇ 배지 · 칩 테두리 · 줄 게이지 ⊘ 아이콘은 HC.gaugeOff(상태색 — 패널 위 3:1)', () => {
+    /** 그림 하나(고정 그림 · 조각 그림 — PC 막대 틀은 가로 3조각)를 그리며 선(stroke)에 쓴 색 (rgba 문자열의 rgb 부분) */
+    const strokesOf = (name: string): Set<string> => {
+      const spec = hudSpecs().find((x) => x.name === name);
+      expect(spec, name).toBeDefined();
+      if (!spec) return new Set();
+      const out = new Set<string>();
+      const state: Record<string, unknown> = {};
+      const rgb = (v: unknown): string => String(v).replace(/,[^,]*\)$/, ')');
+      const call = (t: Record<string, unknown>, p: string | symbol): unknown => {
+        if (p === 'stroke') return () => out.add(rgb(t.strokeStyle));
+        if (p === 'measureText') return () => ({ width: 10 });
+        if (p === 'createLinearGradient' || p === 'createRadialGradient')
+          return () => ({ addColorStop: (): void => undefined });
+        return (): void => undefined;
+      };
+      const ctx = new Proxy(state, {
+        get: (t, p) => (typeof p === 'string' && p in t ? t[p] : call(t, p)),
+        set: (t, p, v) => {
+          t[p as string] = v;
+          return true;
+        },
+      });
+      vi.stubGlobal(
+        'Path2D',
+        class {
+          constructor(readonly d?: string) {}
+        },
+      );
+      try {
+        const c = ctx as unknown as CanvasRenderingContext2D;
+        if (spec.kind === 'frame') spec.paint(c, 1);
+        else spec.paint(c, spec.l + 4 + spec.r, spec.v ? spec.t + 4 + spec.b : spec.t, 1);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+      return out;
+    };
+    const hex = (c: number): string => rgba(c).replace(/,[^,]*\)$/, ')');
+    // PC
+    expect([...strokesOf('dia:off')]).toEqual([hex(HC.gaugeOff)]);
+    expect(strokesOf('chip:off').has(hex(HC.gaugeOff))).toBe(true);
+    expect(strokesOf('gbar:off').has(hex(HC.off))).toBe(true);
+    expect(strokesOf('gbar:off').has(hex(HC.gaugeOff))).toBe(false);
+    // 다른 상태의 ◇ 배지 테두리도 상태색 (대기 = 흐린 글자색)
+    expect([...strokesOf('dia:idle')]).toEqual([hex(gaugeColor('idle'))]);
+    // 터치 줄 게이지
+    applyLayout(layoutFor(750, 369, true));
+    expect(strokesOf('grow:off').has(hex(HC.off))).toBe(true);
+    expect(strokesOf('grow:off').has(hex(HC.gaugeOff))).toBe(false);
+    // 줄 게이지 ⊘ 상태 아이콘(따로 굽는 프레임)은 상태색 — 틀 색(HC.off)이면 패널 위 약 1.9:1
+    expect([...strokesOf('gicon:off')]).toEqual([hex(HC.gaugeOff)]);
   });
 
   it('타이머: 최후의 30초 > 1분 미만 > 보통, 모드마다 아이콘도 다르다', () => {
@@ -406,31 +488,33 @@ describe('거점 진행 숫자 (플레이테스트 a-7)', () => {
   });
 
   it('게이지는 거점 값을 순서 번호가 아니라 id로 찾는다 — 스냅샷 순서가 게이지 순서(GAUGE_IDS)와 달라도 줄마다 제 거점 값', () => {
+    expect(GAUGE_IDS).toEqual(['A', 'B', 'C']);
     const a: PointView = { id: 'A', progress: 0.12, state: 'capturing' };
     const b: PointView = { id: 'B', progress: 0.87, state: 'blocked' };
-    // 마일스톤 b의 셋째 거점(지금 PointId에 없다)이 앞에 끼어도
-    const c = { id: 'C', progress: 0.5, state: 'idle' } as unknown as PointView;
+    const c: PointView = { id: 'C', progress: 0.5, state: 'off' };
     for (const points of [
-      [a, b],
-      [b, a],
+      [a, b, c],
       [c, b, a],
       [b, c, a],
+      [c, a, b],
     ]) {
       const shown = GAUGE_IDS.map((id) => {
         const p = pointOf(points, id);
         return p ? `${p.id}:${pointPercent(p)}` : '';
       });
-      expect(shown, points.map((p) => p.id).join('')).toEqual(['A:12', 'B:87']);
+      expect(shown, points.map((p) => p.id).join('')).toEqual(['A:12', 'B:87', 'C:50']);
     }
+    // 거점이 빠진 스냅샷이면 그 줄만 비고 다른 거점 값으로 채우지 않는다
+    expect(GAUGE_IDS.map((id) => pointOf([b, a], id)?.id ?? '')).toEqual(['A', 'B', '']);
     // 스냅샷에 없는 거점은 그리지 않는다 (순서 번호로 짝지으면 다른 거점 값이 나온다)
     expect(pointOf([b], 'A')).toBeUndefined();
     expect(pointOf([], 'B')).toBeUndefined();
   });
 
-  it('괴물 화면에도 같은 숫자를 보인다 — 빼는 스위치는 상수 하나 (PCT_FOR_MONSTER)', () => {
-    expect(PCT_FOR_MONSTER).toBe(true);
+  it('괴물 화면에는 진행 숫자를 보이지 않는다 (플레이테스트 b — 1% 단위로 거점 안 사람 수가 읽힌다), 생존자 화면은 그대로', () => {
+    expect(PCT_FOR_MONSTER).toBe(false);
     expect(pctShown(false)).toBe(true);
-    expect(pctShown(true)).toBe(PCT_FOR_MONSTER);
+    expect(pctShown(true)).toBe(false);
   });
 
   it('숫자 색: 정지 = 주황, 0% = 흐린 글자, 그 밖 = 본문 (상태는 칩 아이콘이 가른다)', () => {
@@ -449,6 +533,8 @@ describe('거점 진행 숫자 (플레이테스트 a-7)', () => {
     const out: { label: string; frames: readonly [string, string] }[] = [];
     for (const s of GAUGE_STATES)
       for (let n = 0; n <= 100; n += 1) {
+        // 꺼진 거점은 숫자를 보이지 않는다
+        if (!gaugeShowsProgress(s)) continue;
         // 완료는 100뿐이고 100은 완료뿐이다 (pointPercent)
         if ((s === 'done') !== (n === 100)) continue;
         out.push({ label: `${s} ${n}`, frames: pctFrames(n, pctTone(s, n)) });
@@ -503,7 +589,7 @@ describe('거점 진행 숫자 (플레이테스트 a-7)', () => {
   it("숫자 칸 (PC): 게이지 전체 폭 288 그대로, 배지 · 칩 · 숫자 칸 · 막대가 겹치지 않고 '100%'가 칸에 들어간다", () => {
     const G = HUD.gauge;
     expect(G.w).toBe(288);
-    expect([HUD.gaugeA.x, HUD.gaugeB.x]).toEqual([580, 1340]);
+    expect([HUD.gaugeA.x, HUD.gaugeB.x, HUD.gaugeC.x]).toEqual([278, 580, 1340]);
     // 배지 쪽 끝에서 안쪽으로: 배지 · 칩 · 숫자 칸 · 막대
     const chip0 = G.dia + G.gap;
     const pct0 = chip0 + G.chip + G.pctGap;
@@ -547,8 +633,9 @@ describe('거점 진행 숫자 (플레이테스트 a-7)', () => {
     expect(num[1]).toBeLessThanOrEqual(G.w);
     const specs = hudSpecs();
     const row = specs.filter((x) => /^(grow|growfill|gicon|gltr|pct):/.test(x.name));
-    // 판 4(상태) + 채움 2 + 상태 아이콘 3 + 거점 글자(거점 수) + 숫자 40
-    expect(row.length).toBe(4 + 2 + 3 + GAUGE_IDS.length + 40);
+    // 판 5(상태 — 꺼짐 포함) + 채움 2 + 상태 아이콘 4(▶ ‖ ✓ ⊘) + 거점 글자(거점 수) + 숫자 40
+    expect(GAUGE_STATES.length).toBe(5);
+    expect(row.length).toBe(5 + 2 + 4 + GAUGE_IDS.length + 40);
     for (const id of GAUGE_IDS) expect(row.some((x) => x.name === `gltr:${id}`)).toBe(true);
     for (const sp of row) {
       if (sp.kind !== 'frame') throw new Error(`${sp.name}: 고정 크기 그림이 아니다`);
@@ -648,9 +735,15 @@ describe('9조각 · 아틀라스 · 배치', () => {
 
   it('늘 떠 있는 HUD 자리는 맵 사각형과 겹치지 않는다 (위 띠 · 왼쪽 카드 · 아래 띠 · 미니맵)', () => {
     const G = HUD.gauge;
+    /** 게이지 사각형 (배지 쪽 바깥 끝에서 안쪽으로 전체 폭) */
+    const gaugeRect = (o: { x: number; y: number; side: 1 | -1 }): [number, number, number, number] => [
+      o.side === 1 ? o.x : o.x - G.w,
+      o.y - G.dia / 2,
+      G.w,
+      G.dia,
+    ];
     const rects: [string, number, number, number, number][] = [
-      ['게이지 A', HUD.gaugeA.x, HUD.gaugeA.y - G.dia / 2, G.w, G.dia],
-      ['게이지 B', HUD.gaugeB.x - G.w, HUD.gaugeB.y - G.dia / 2, G.w, G.dia],
+      ...HUD.gauges.map((o): [string, number, number, number, number] => [`게이지 ${o.id}`, ...gaugeRect(o)]),
       ['타이머', HUD.timer.x - HUD.timer.w / 2, HUD.timer.y - HUD.timer.h / 2, HUD.timer.w, HUD.timer.h],
       [
         '카드',
@@ -667,8 +760,22 @@ describe('9조각 · 아틀라스 · 배치', () => {
       const apart = x + w <= m.x || m.x + m.w <= x || y + h <= m.y || m.y + m.h <= y;
       expect(apart, name).toBe(true);
     }
-    // 위 띠 오른쪽(선명도 탐침 자리 x 1490~)은 비운다
-    expect(HUD.gaugeB.x).toBeLessThan(1490);
+    // 위 띠 (플레이테스트 b): 왼쪽부터 A · B · 타이머 · C, 배지는 바깥(타이머 반대쪽). 위 띠 안이고 서로 · 타이머와 겹치지 않는다
+    expect(HUD.gauges.map((o) => o.id)).toEqual(['A', 'B', 'C']);
+    expect(HUD.gauges.map((o) => o.side)).toEqual([1, 1, -1]);
+    const top = rects.slice(0, 4).map(([, x, y, w, h]) => ({ x, y, w, h }));
+    const xs = top.map((r) => r.x);
+    expect(xs[0]! + G.w).toBeLessThan(xs[1]!);
+    expect(xs[1]! + G.w).toBeLessThan(HUD.timer.x - HUD.timer.w / 2);
+    expect(HUD.timer.x + HUD.timer.w / 2).toBeLessThan(xs[2]!);
+    for (const r of top) {
+      expect(r.y).toBeGreaterThanOrEqual(0);
+      expect(r.y + r.h).toBeLessThanOrEqual(HUD_BAND);
+    }
+    // 위 띠 오른쪽(선명도 탐침 자리 x 1490~)은 비운다 — 가장 오른쪽 게이지(C)의 오른쪽 끝
+    expect(Math.max(...top.map((r) => r.x + r.w))).toBeLessThan(1490);
+    // 왼쪽은 판 중 메뉴 버튼 자리: 1920×1080 실제 버튼(14 + 119 + 간격 4)보다 오른쪽에서 시작 (작은 창은 matchMenuButton이 줄인다)
+    expect(HUD.gaugeA.x - G.dia / 2).toBeGreaterThan(14 + 119 + 4);
   });
 });
 

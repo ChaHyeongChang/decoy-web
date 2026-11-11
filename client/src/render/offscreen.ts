@@ -3,7 +3,7 @@
 // 포효 표시), 스냅샷의 세계 상태(거점 · 탈출구 상태, 팀원 상태), 고정 맵 좌표(거점 · 감옥 · 탈출구 자리). 그래서 메인 화면 ·
 // 미니맵보다 많은 정보가 나올 수 없다. 출처가 drawn에서 사라진 프레임에 화살표도 바로 사라진다(여운 없음).
 //  - 생존자 화면: 팀원(자유), 수감된 팀원이 있으면 감옥 구조 자리, 공유 시야로 보이는 괴물, 스카우트 탐지, 포효한 괴물 자리,
-//    끝나지 않은 거점(상태별), 활성 · 열린 탈출구. 관전 중이면 내 자리도(수감 중일 때)
+//    끝나지도 꺼지지도 않은 거점(상태별), 활성 · 열린 탈출구. 관전 중이면 내 자리도(수감 중일 때)
 //  - 괴물 화면: 점령 중인 거점(깜빡임)과 포효로 드러난 자리(흰색 · 역할 없음)만. 생존자 엔티티 화살표는 없다.
 //    포효 핑 화살표만 크게(EDGE_ART.pingScale배) 그린다 — 대상 · 자리 · 수명은 그대로이고 핑마다 같은 배율이다
 import {
@@ -60,7 +60,11 @@ export const EDGE_PRIO: Readonly<Record<EdgeKind, number>> = {
   point: 7,
 };
 
-/** 한 번에 보이는 화살표 상한 */
+/**
+ * 한 번에 보이는 화살표 상한. 생존자 화면에서 한꺼번에 나올 수 있는 최대 = 괴물 · 탐지 · 포효 각 1 + 팀원 · 감옥 · 나 합쳐 2
+ * (감옥은 수감된 팀원이 있어야 나오므로 자유 팀원은 그때 하나뿐, 나는 수감 중일 때만이라 감옥과 같이 나오지 않는다) + 거점 3
+ * (탈출구가 켜지면 거점은 끝남 둘 · 꺼짐 하나라 거점 0 + 탈출구 2) = 8이라 거점 화살표가 잘리지 않는다 (offscreen.test 전수 확인)
+ */
 export const EDGE_MAX = 8;
 
 export interface EdgeInput {
@@ -154,7 +158,8 @@ export function edgeTargets(i: EdgeInput, out: EdgeTarget[]): EdgeTarget[] {
     push('exit', e.id, c.x, c.y, null, e.state);
   }
   for (const p of i.points) {
-    if (p.state === 'done') continue;
+    // 끝난 거점 · 꺼진 거점(다른 거점들이 끝나 점령할 수 없음)은 갈 곳이 아니다
+    if (p.state === 'done' || p.state === 'off') continue;
     const c = CAPTURE_POINTS[p.id];
     push('point', p.id, c.x, c.y, null, p.state);
   }

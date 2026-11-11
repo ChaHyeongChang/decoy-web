@@ -88,7 +88,10 @@ export interface Balance {
     campWarnAt: number;
   };
   capturePoint: {
+    /** 맵의 거점 수 (A · B · C) */
     count: number;
+    /** 탈출구를 켜는 데 필요한 점령 수. 이만큼 끝나는 틱에 남은 거점은 꺼진다(off) — 비밀번호가 두 조각이라 2 */
+    required: number;
     radius: number;
     captureTime: number;
     groupMultiplier: number;
@@ -203,6 +206,7 @@ const SCHEMA: Shape = {
   },
   capturePoint: {
     count: 'int',
+    required: 'int',
     radius: 'pos',
     captureTime: 'pos',
     groupMultiplier: 'pos',
@@ -273,7 +277,8 @@ function check(value: unknown, shape: Shape, path: string, errors: string[]): vo
 const STRUCTURAL: ReadonlyArray<[string, (b: Balance) => boolean]> = [
   ['match.players는 4여야 합니다', (b) => b.match.players === 4],
   ['match.survivors는 3이어야 합니다', (b) => b.match.survivors === 3],
-  ['capturePoint.count는 2여야 합니다 (맵 구조)', (b) => b.capturePoint.count === 2],
+  ['capturePoint.count는 3이어야 합니다 (맵 구조)', (b) => b.capturePoint.count === 3],
+  ['capturePoint.required는 2여야 합니다 (비밀번호 두 조각)', (b) => b.capturePoint.required === 2],
   ['exit.count는 2여야 합니다 (맵 구조)', (b) => b.exit.count === 2],
   ['exit.requiredSurvivors는 1~3이어야 합니다', (b) => b.exit.requiredSurvivors <= 3],
   ['roles.runner.skill은 sprint', (b) => b.roles.runner.skill === 'sprint'],

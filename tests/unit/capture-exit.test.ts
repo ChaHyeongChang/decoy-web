@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { GameEvent, Snapshot } from '@decoy/shared';
-import { AliasBook, buildSnapshot, computeVisibility } from '@decoy/shared/sim';
+import { CAPTURE_POINTS, POINT_IDS, type GameEvent, type PointId, type Snapshot } from '@decoy/shared';
+import { AliasBook, buildSnapshot, computeVisibility, type Game } from '@decoy/shared/sim';
 import { Driver, place, readyGame } from '../helpers/fixtures';
 
 function farMonster(game: ReturnType<typeof readyGame>): void {
@@ -85,8 +85,167 @@ describe('거점 점령 (GAME_DESIGN 7장)', () => {
   });
 });
 
+describe('거점 세 곳 중 두 곳 (플레이테스트 반영 b, GAME_DESIGN 7장)', () => {
+  const pt = (game: Game, id: PointId) => game.points.find((p) => p.id === id)!;
+  const texts = (ev: GameEvent[], id: string) => ev.filter((e) => e.k === 'text' && e.id === id);
+  /** id 거점을 p2 혼자 한 틱 남기고 끝낸다. 끝나는 그 틱까지 한 틱씩 돌려, 끝난 틱의 상태를 본다 */
+  function finish(game: Game, d: Driver, id: PointId): void {
+    pt(game, id).progress = game.balance.capturePoint.captureTime - game.dt * 2;
+    const c = CAPTURE_POINTS[id];
+    place(game, 'p2', c.x, c.y);
+    for (let i = 0; i < 10 && !pt(game, id).done; i += 1) d.run(1);
+    expect(pt(game, id).done).toBe(true);
+  }
+  function parked(): { game: Game; d: Driver } {
+    const game = readyGame();
+    const d = new Driver(game);
+    farMonster(game);
+    place(game, 'p3', 30, 18.5);
+    place(game, 'p4', 30, 19.5);
+    return { game, d };
+  }
+
+  it('거점은 A · B · C 셋이고 스냅샷 순서(배열)는 id 순서 그대로다', () => {
+    const game = readyGame();
+    expect(game.points.map((p) => p.id)).toEqual([...POINT_IDS]);
+    expect(POINT_IDS).toEqual(['A', 'B', 'C']);
+    expect(game.points.every((p) => !p.done && !p.off)).toBe(true);
+  });
+
+  const ORDERS: [PointId, PointId][] = [
+    ['A', 'B'],
+    ['B', 'A'],
+    ['A', 'C'],
+    ['C', 'A'],
+    ['B', 'C'],
+    ['C', 'B'],
+  ];
+  for (const [first, second] of ORDERS) {
+    const third = POINT_IDS.find((id) => id !== first && id !== second)!;
+    it(`${first} → ${second}: 둘째가 끝나는 그 틱에 탈출구 둘이 켜지고 ${third}는 꺼진다, 메모는 점령 순서대로 두 장`, () => {
+      const { game, d } = parked();
+      finish(game, d, first);
+      expect(game.exits.every((e) => e.state === 'inactive')).toBe(true);
+      expect(game.points.some((p) => p.off)).toBe(false);
+      const s1 = game.drainOutbox('p2');
+      expect(texts(s1, 'NOTE_FIRST').map((e) => (e.k === 'text' ? e.code : null))).toEqual([game.codes[0]]);
+      expect(texts(s1, 'ALERT_EXITS_ON')).toHaveLength(0);
+
+      finish(game, d, second);
+      // 끝난 틱 그대로: 남은 곳은 꺼지고 탈출구가 켜진다
+      expect(pt(game, third).off).toBe(true);
+      expect(pt(game, third).done).toBe(false);
+      expect(pt(game, first).off || pt(game, second).off).toBe(false);
+      expect(game.exits.every((e) => e.state === 'active')).toBe(true);
+      expect(game.capturedCount).toBe(2);
+      const s2 = game.drainOutbox('p2');
+      expect(texts(s2, 'NOTE_SECOND').map((e) => (e.k === 'text' ? e.code : null))).toEqual([game.codes[1]]);
+      expect(texts(s2, 'NOTE_FIRST')).toHaveLength(0);
+      expect(texts(s2, 'ALERT_EXITS_ON')).toHaveLength(1);
+      const m = game.drainOutbox('p1');
+      expect(texts(m, 'ALERT_CAPTURE_DONE').map((e) => (e.k === 'text' ? e.point : null))).toEqual([
+        first,
+        second,
+      ]);
+      expect(texts(m, 'ALERT_EXITS_ON')).toHaveLength(1);
+      expect(JSON.stringify(m)).not.toContain('NOTE_');
+    });
+  }
+
+  it('꺼진 거점: 생존자가 서 있어도 진행 · 점령 기여 초 · 점령 시작 알림 · 정지가 없고, 괴물이 오래 서 있어도 지키기 경고가 없다', () => {
+    const { game, d } = parked();
+    pt(game, 'C').progress = 10;
+    finish(game, d, 'A');
+    finish(game, d, 'B');
+    expect(pt(game, 'C').off).toBe(true);
+    game.drainOutbox('p1');
+    const before = game.survivorById('p4')!.stats.captureSeconds;
+    // 생존자 둘과 괴물이 함께 꺼진 C 안에 9초 (괴물 지키기 경고 문턱 · 정지 유예 5초를 넘긴다)
+    place(game, 'p4', 24, 7);
+    place(game, 'p3', 23.5, 7.5);
+    place(game, 'p1', 25, 7);
+    const aliases = new AliasBook();
+    let warned = 0;
+    for (let i = 0; i < d.seconds(9); i += 1) {
+      d.run(1);
+      const c = pt(game, 'C');
+      expect(c.capturing || c.blocked).toBe(false);
+      const facts = computeVisibility(game);
+      aliases.update(facts.monsterSees);
+      const snap = buildSnapshot(game, 'p1', 0, facts, aliases)!;
+      if (snap.you.mon?.blockWarn) warned += 1;
+      expect(snap.world.points.find((p) => p.id === 'C')).toEqual({ id: 'C', progress: 0.25, state: 'off' });
+    }
+    expect(warned).toBe(0);
+    expect(pt(game, 'C').progress).toBe(10);
+    expect(game.survivorById('p4')!.stats.captureSeconds).toBe(before);
+    expect(texts(game.drainOutbox('p1'), 'ALERT_CAPTURE_START')).toHaveLength(0);
+  });
+
+  // 둘째가 끝나는 바로 그 틱에 다른 생존자가 남은 곳에 처음 들어선다. 남은 곳이 배열에서 둘째보다 앞이든 뒤든
+  // (예: C가 둘째로 끝나며 A가 꺼짐 ↔ A가 둘째로 끝나며 C가 꺼짐) 꺼지는 곳은 그 틱에 진행 · 기여 초 · 점령 시작 알림이 없다
+  for (const [first, second] of ORDERS) {
+    const third = POINT_IDS.find((id) => id !== first && id !== second)!;
+    it(`${first} 끝 → ${second}가 둘째로 끝나는 틱에 ${third}에 들어서도 꺼지는 ${third}는 아무 신호가 없다 (배열 차례와 무관)`, () => {
+      const { game, d } = parked();
+      finish(game, d, first);
+      pt(game, second).progress = game.balance.capturePoint.captureTime - game.dt / 2;
+      const s = CAPTURE_POINTS[second];
+      const t = CAPTURE_POINTS[third];
+      place(game, 'p3', s.x, s.y);
+      place(game, 'p2', t.x, t.y); // 이 틱에 처음 들어선다
+      game.drainOutbox('p1');
+      const before = game.survivorById('p2')!.stats.captureSeconds;
+      d.run(1);
+      expect(pt(game, second).done).toBe(true);
+      expect(pt(game, third).off).toBe(true);
+      expect(pt(game, third).progress).toBe(0);
+      expect(pt(game, third).capturing || pt(game, third).blocked).toBe(false);
+      expect(game.survivorById('p2')!.stats.captureSeconds).toBe(before);
+      const m = game.drainOutbox('p1');
+      expect(m.map((e) => (e.k === 'text' ? `${e.id}:${e.point ?? ''}` : e.k))).toEqual([
+        `ALERT_CAPTURE_START:${second}`,
+        `ALERT_CAPTURE_DONE:${second}`,
+        'ALERT_EXITS_ON:',
+      ]);
+      const facts = computeVisibility(game);
+      const aliases = new AliasBook();
+      aliases.update(facts.monsterSees);
+      const snap = buildSnapshot(game, 'p1', 0, facts, aliases)!;
+      expect(snap.world.points.find((p) => p.id === third)).toEqual({ id: third, progress: 0, state: 'off' });
+    });
+  }
+
+  it('같은 틱에 셋이 다 차면 배열 순서(A · B)가 먼저 끝나고 C는 꺼진다 — 완료 알림 둘 · 메모 한 장씩 · 탈출구 알림 하나', () => {
+    const game = readyGame();
+    const d = new Driver(game);
+    farMonster(game);
+    for (const p of game.points) p.progress = game.balance.capturePoint.captureTime - game.dt / 2;
+    place(game, 'p2', 8, 16);
+    place(game, 'p3', 40, 16);
+    place(game, 'p4', 24, 7);
+    d.run(1);
+    expect(game.points.map((p) => [p.id, p.done, p.off])).toEqual([
+      ['A', true, false],
+      ['B', true, false],
+      ['C', false, true],
+    ]);
+    const s = game.drainOutbox('p4');
+    expect(texts(s, 'NOTE_FIRST')).toHaveLength(1);
+    expect(texts(s, 'NOTE_SECOND')).toHaveLength(1);
+    expect(texts(s, 'ALERT_CAPTURE_DONE')).toHaveLength(2);
+    expect(texts(s, 'ALERT_EXITS_ON')).toHaveLength(1);
+    // 그 뒤로도 C는 끝나지 않는다 (셋째 메모는 없다)
+    d.run(d.seconds(45));
+    expect(pt(game, 'C').done).toBe(false);
+    expect(game.capturedCount).toBe(2);
+    expect(texts(game.drainOutbox('p4'), 'NOTE_SECOND')).toHaveLength(0);
+  });
+});
+
 describe('탈출구 (GAME_DESIGN 8장)', () => {
-  function bothDone() {
+  /** 세 곳 중 두 곳(A · B)을 끝내 탈출구를 켠다 — C는 꺼진다 */
+  function exitsOn() {
     const game = readyGame();
     for (const p of game.points) {
       p.progress = game.balance.capturePoint.captureTime - game.dt;
@@ -97,23 +256,24 @@ describe('탈출구 (GAME_DESIGN 8장)', () => {
     farMonster(game);
     const d = new Driver(game);
     d.run(2);
+    expect(game.points.find((p) => p.id === 'C')!.off).toBe(true);
     return { game, d };
   }
 
-  it('두 거점을 모두 점령하기 전에는 비활성, 점령하면 활성', () => {
+  it('거점 세 곳 중 두 곳을 점령하기 전에는 비활성, 점령하면 활성', () => {
     const game = readyGame();
     expect(game.exits.every((e) => e.state === 'inactive')).toBe(true);
-    const r = bothDone();
+    const r = exitsOn();
     expect(r.game.exits.every((e) => e.state === 'active')).toBe(true);
   });
 
   it('두 명이 함께 3초 머물러야 열리고, 한 명이 나가면 0으로 돌아간다', () => {
-    const { game, d } = bothDone();
+    const { game, d } = exitsOn();
     place(game, 'p2', 23.5, 2.5);
     place(game, 'p3', 24.5, 2.5);
     d.run(d.seconds(2));
     expect(game.exits[0]!.progress).toBeGreaterThan(1.9);
-    place(game, 'p3', 24.5, 6);
+    place(game, 'p3', 24.5, 4.5);
     d.run(1);
     expect(game.exits[0]!.progress).toBe(0);
     place(game, 'p3', 24.5, 2.5);
@@ -123,14 +283,14 @@ describe('탈출구 (GAME_DESIGN 8장)', () => {
   });
 
   it('혼자서는 열리지 않는다', () => {
-    const { game, d } = bothDone();
+    const { game, d } = exitsOn();
     place(game, 'p2', 24, 2.5);
     d.run(d.seconds(5));
     expect(game.exits[0]!.state).toBe('active');
   });
 
   it('괴물이 있어도 개방은 멈추지 않는다', () => {
-    const { game, d } = bothDone();
+    const { game, d } = exitsOn();
     place(game, 'p2', 23.5, 2.5);
     place(game, 'p3', 24.5, 2.5);
     place(game, 'p1', 26, 2.5);
@@ -139,7 +299,7 @@ describe('탈출구 (GAME_DESIGN 8장)', () => {
   });
 
   it('열린 문 칸으로 걸어 들어가면 탈출, 괴물은 문을 지나갈 수 없다', () => {
-    const { game, d } = bothDone();
+    const { game, d } = exitsOn();
     place(game, 'p2', 23.5, 2.5);
     place(game, 'p3', 24.5, 2.5);
     d.run(d.seconds(3) + 1);

@@ -236,3 +236,50 @@ describe('정보 차단 (shared/src/sim/interest.ts)', () => {
     expect(snaps(game).out.get('p2')!.monster).not.toBeNull();
   });
 });
+
+describe('거점 세 곳 · 꺼진 거점의 정보 범위 (플레이테스트 반영 b)', () => {
+  it('world.points는 괴물 · 생존자 모두 같은 값(A · B · C 순서, id · 진행 · 상태만)이다 — 꺼진 거점도', () => {
+    const game = newGame();
+    place(game, 'p1', 45, 28);
+    place(game, 'p2', 8, 16);
+    place(game, 'p3', 40, 16);
+    place(game, 'p4', 30, 25);
+    const look = (): void => {
+      const { out } = snaps(game);
+      const m = out.get('p1')!.world.points;
+      expect(m.map((p) => p.id)).toEqual(['A', 'B', 'C']);
+      for (const p of m) expect(Object.keys(p).sort()).toEqual(['id', 'progress', 'state']);
+      for (const id of ['p2', 'p3', 'p4']) expect(out.get(id)!.world.points).toEqual(m);
+    };
+    look();
+    game.points[0]!.done = true;
+    game.points[1]!.done = true;
+    game.points[2]!.off = true;
+    game.points[2]!.progress = 12;
+    look();
+    expect(snaps(game).out.get('p1')!.world.points[2]).toEqual({ id: 'C', progress: 0.3, state: 'off' });
+  });
+
+  it('괴물 시야 밖 생존자가 꺼진 거점 안에 서 있어도 괴물 스냅샷은 다른 곳에 있을 때와 같다 (꺼지지 않았으면 달라진다)', () => {
+    const monsterView = (where: { x: number; y: number }, off: boolean): string => {
+      const game = newGame();
+      // 괴물은 남동쪽 구석에서 동쪽을 본다 (C · 대조 자리 모두 시야 밖)
+      place(game, 'p1', 45, 28, 0);
+      place(game, 'p2', 8, 20);
+      place(game, 'p3', 40, 22);
+      place(game, 'p4', where.x, where.y);
+      if (off) {
+        game.points[0]!.done = true;
+        game.points[1]!.done = true;
+        game.points[2]!.off = true;
+      }
+      for (let i = 0; i < 30; i += 1) game.step();
+      const snap = snaps(game).out.get('p1')!;
+      expect(snap.survivors).toHaveLength(0);
+      return JSON.stringify(snap);
+    };
+    expect(monsterView({ x: 24, y: 7 }, true)).toBe(monsterView({ x: 30, y: 25 }, true));
+    // 대조: 꺼지지 않은 C에 서 있으면 점령이 돌아 괴물 화면 값이 달라진다 (시험이 차이를 볼 수 있다는 것)
+    expect(monsterView({ x: 24, y: 7 }, false)).not.toBe(monsterView({ x: 30, y: 25 }, false));
+  });
+});

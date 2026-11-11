@@ -13,6 +13,7 @@ import {
 } from '../index';
 import type { Game } from './game';
 import type { VisibilityFacts } from './interest';
+import { pointsShort } from './systems/capture';
 import { survivorsSeeMonster } from './systems/combat';
 
 /** 따돌림: 이만큼(초) 넘게 발각되어 쫓긴 추격이 */
@@ -172,8 +173,10 @@ export class MatchRecorder {
       }
       this.capturingFor.set(p.id, 0);
       const c = CAPTURE_POINTS[p.id];
+      // 꺼진 거점(다른 두 곳이 끝나 꺼짐)은 괴물이 끊은 점령이 아니다
       if (
         !p.done &&
+        !p.off &&
         ran >= POINT_STOP_MIN_SEC &&
         Math.hypot(m.move.x - c.x, m.move.y - c.y) <= PRESSURE_TILES
       ) {
@@ -326,7 +329,7 @@ export class MatchRecorder {
         roarFinds: mon.roarFinds,
         blockSec: r1(mon.blockSec),
         pointStops: mon.pointStops,
-        pointsLeft: game.points.filter((p) => !p.done).length,
+        pointsLeft: pointsShort(game),
         zoneHits: mon.zoneHits,
         kept: game.survivors.length - escaped,
         exitStops: mon.exitStops,
@@ -346,7 +349,7 @@ export class MatchRecorder {
 function inObjectiveZone(game: Game, pos: { x: number; y: number }): boolean {
   const b = game.balance;
   for (const p of game.points) {
-    if (p.done) continue;
+    if (p.done || p.off) continue;
     const c = CAPTURE_POINTS[p.id];
     if (Math.hypot(pos.x - c.x, pos.y - c.y) <= b.capturePoint.radius) return true;
   }

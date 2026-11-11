@@ -166,8 +166,10 @@ export interface Mark {
   y: number;
 }
 
-export type PointState = 'idle' | 'capturing' | 'blocked' | 'done';
+/** off: 다른 거점이 필요한 수(capturePoint.required)만큼 끝나 꺼진 거점 — 점령 불가 · 게이지 정지 · 알림 없음 */
+export type PointState = 'idle' | 'capturing' | 'blocked' | 'done' | 'off';
 
+/** 거점 하나 (받는 사람과 무관하게 같은 값. 안에 있는 사람 수 · id · 역할 같은 필드를 넣지 않는다 — 괴물 화면 정보 숨김) */
 export interface PointView {
   id: PointId;
   progress: number;
@@ -332,7 +334,8 @@ export type EmblemTier = 0 | 1 | 2 | 3 | 4;
  *          evades 따돌린 추격 · abilityUses 능력 사용 · abilityGood 쓸모 있게 쓴 능력
  *  괴물:   hits 타격 · jails 수감시킨 수 · kills 사망시킨 수 · seeSec 생존자를 시야에 둔 초 · finds 새로 찾은 수 ·
  *          roarFinds 포효로 찾은 수 · blockSec 거점 진행을 멈춘 초 · pointStops 괴물이 가까이 와
- *          끊긴 점령 · pointsLeft 끝까지 남은 거점 · zoneHits 거점 · 탈출구
+ *          끊긴 점령(꺼져서 멈춘 것은 빼고) · pointsLeft 탈출구를 켜는 데 모자란 점령 수(max(0, required − 끝난 수), 0~2 —
+ *          꺼진 거점은 세지 않는다) · zoneHits 끝나지도 꺼지지도 않은 거점 · 켜진 탈출구
  *          안 타격 · kept 탈출 못 한 생존자 · exitStops 끊은 탈출구 열기 · exitHoldSec 탈출구가 켜진 뒤 첫 탈출까지 버틴 초
  */
 export type RatingStatId =
@@ -408,6 +411,13 @@ export interface CostumeChoice {
 
 // ───────────────────────── 메시지 ─────────────────────────
 
+/**
+ * 프로토콜 버전 (docs/DEPLOY.md 7장). 옛 화면과 맞지 않는 배포(맵 · 이동 · 스냅샷 · 메시지 뜻 · balance 키 삭제 · 개명)마다 1씩 올린다.
+ * 화면은 join · quick에 싣고, 서버(ServerCore.connect)는 없거나 다르면 자리에 묶지 않고 'update-required'로 거절한다(기기 안 연습은 통과).
+ * 1: 플레이테스트 반영 b (거점 C · 옮긴 기둥 · PointState 'off')
+ */
+export const PROTOCOL_VERSION = 1;
+
 export type TestCommand =
   | { kind: 'teleport'; target: string; x: number; y: number; face?: number }
   | { kind: 'setSurvivor'; target: string; hp?: number; status?: SurvivorStatus; imprisonCount?: number }
@@ -421,6 +431,8 @@ export type TestCommand =
 export type ClientMessage =
   | {
       t: 'join';
+      /** 화면의 PROTOCOL_VERSION. 서버와 다르거나 없으면(옛 화면) 'update-required'로 거절된다 (docs/DEPLOY.md 7장) */
+      proto: number;
       room: string | null;
       create: boolean;
       name: string;
@@ -448,8 +460,8 @@ export type ClientMessage =
   | { t: 'rematch'; account?: string }
   /** 판 밖(로비 · 대기 · 결과)에서 옷장으로 바꾼 의상 (메타 c). 판 중에는 무시 — 판 시작 명단과 구운 그림이 판 끝까지 같게 */
   | { t: 'costume'; costume: CostumeChoice }
-  /** 빠른 매칭 대기열에 들어간다 (M13c). 대기 중이거나 판이 없는 빠른 매칭 방에 넣거나 새로 만든다 */
-  | { t: 'quick'; name: string; costume?: CostumeChoice; account?: string }
+  /** 빠른 매칭 대기열에 들어간다 (M13c). 대기 중이거나 판이 없는 빠른 매칭 방에 넣거나 새로 만든다. proto: join과 같다 */
+  | { t: 'quick'; proto: number; name: string; costume?: CostumeChoice; account?: string }
   /**
    * 방에서 나간다 (M13b): 결과 화면 "홈으로" · 대기 취소. 로비 · 결과 단계에서는 자리를 지우고, 판 중에는 끊김과 같다
    * (M13c에서 판 중 나가기는 유예 없이 바로 판정). 연결은 방에서 풀려 다른 방에 들어갈 수 있다
@@ -465,7 +477,9 @@ export type ErrorCode =
   | 'not-allowed'
   | 'replaced'
   /** 빠른 매칭 대기열에서 빠졌다 (자동 시작 순간 3초 넘게 소식이 없던 자리, M13c) */
-  | 'queue-dropped';
+  | 'queue-dropped'
+  /** join · quick의 proto가 없거나 서버 PROTOCOL_VERSION과 다르다 (옛 화면, docs/DEPLOY.md 7장). 자리에 묶이지 않았다 — 새로고침 안내 */
+  | 'update-required';
 
 export type ServerMessage =
   | {

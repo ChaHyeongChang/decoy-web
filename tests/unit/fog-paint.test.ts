@@ -552,6 +552,16 @@ class LogPen implements FogPen {
     for (let i = 0; i < n; i += 1) pts.push([xy[start + i * 2] ?? NaN, xy[start + i * 2 + 1] ?? NaN]);
     this.calls.push(['fillPoly', pts, color, alpha]);
   }
+  fillPolysFlat(
+    xy: readonly number[],
+    start: number,
+    count: number,
+    n: number,
+    color: number,
+    alpha: number,
+  ): void {
+    this.calls.push(['fillPolys', xy.slice(start, start + count * n * 2), count, n, color, alpha]);
+  }
   line(...a: number[]): void {
     this.calls.push(['line', ...a]);
   }
@@ -582,6 +592,9 @@ class BoundsPen implements FogPen {
   fillPolyFlat(xy: readonly number[], start: number, n: number): void {
     for (let i = 0; i < n; i += 1) this.grow(xy[start + i * 2] ?? NaN, xy[start + i * 2 + 1] ?? NaN, 0);
   }
+  fillPolysFlat(xy: readonly number[], start: number, count: number, n: number): void {
+    this.fillPolyFlat(xy, start, count * n);
+  }
   line(x0: number, y0: number, x1: number, y1: number, w: number): void {
     this.grow(x0, y0, w / 2 / LOGICAL_K);
     this.grow(x1, y1, w / 2 / LOGICAL_K);
@@ -598,13 +611,14 @@ describe('기록 펜 (PenRecord): 안개 주기마다 기록해 바뀐 조각만
   const pts: PointView[] = [
     { id: 'A', progress: 0.37, state: 'capturing' },
     { id: 'B', progress: 0.5, state: 'blocked' },
+    { id: 'C', progress: 0.2, state: 'off' },
   ];
   const exits: ExitView[] = [
     { id: 'N', state: 'active', progress: 0.4 },
     { id: 'S', state: 'open', progress: null },
   ];
 
-  it('재생하면 직접 그린 것과 같은 호출 · 같은 순서 (원 · 원호 · 다각형 · 선 다섯 가지 모두)', () => {
+  it('재생하면 직접 그린 것과 같은 호출 · 같은 순서 (원 · 원호 · 다각형 · 여러 다각형 · 선 여섯 가지 모두)', () => {
     const direct = new LogPen();
     const rec = new PenRecord();
     paintPoints(direct, pts, b, 1234);
@@ -617,7 +631,7 @@ describe('기록 펜 (PenRecord): 안개 주기마다 기록해 바뀐 조각만
     rec.replay(replayed);
     expect(replayed.calls).toEqual(direct.calls);
     expect(new Set(direct.calls.map((c) => c[0]))).toEqual(
-      new Set(['fillCircle', 'strokeCircle', 'strokeArc', 'fillPoly', 'line']),
+      new Set(['fillCircle', 'strokeCircle', 'strokeArc', 'fillPoly', 'fillPolys', 'line']),
     );
     // 기록을 다시 기록해도 같다
     const again = new PenRecord();
@@ -684,6 +698,15 @@ describe('기록 펜 (PenRecord): 안개 주기마다 기록해 바뀐 조각만
     const f = new PenRecord();
     paintPoints(f, [{ id: 'A', progress: 0.2, state: 'capturing' }], b, 400);
     expect(e.sameAs(f.ops)).toBe(false);
+    // 꺼짐: 시각과 무관한 그림 (꺼진 뒤 한 번만 다시 올린다), 같은 진행의 대기와 다르다
+    const g = new PenRecord();
+    const h = new PenRecord();
+    paintPoints(g, [{ id: 'C', progress: 0.2, state: 'off' }], b, 100);
+    paintPoints(h, [{ id: 'C', progress: 0.2, state: 'off' }], b, 900);
+    expect(g.sameAs(h.ops)).toBe(true);
+    const idleC = new PenRecord();
+    paintPoints(idleC, [{ id: 'C', progress: 0.2, state: 'idle' }], b, 100);
+    expect(g.sameAs(idleC.ops)).toBe(false);
     expect(a.sameAs(a.ops.slice(0, -1))).toBe(false);
     a.reset();
     expect(a.ops).toEqual([]);
@@ -691,12 +714,12 @@ describe('기록 펜 (PenRecord): 안개 주기마다 기록해 바뀐 조각만
 });
 
 describe('조각 범위: 거점 · 탈출구 하나가 어떤 상태에서든 그리는 것이 조각 캔버스 안이다', () => {
-  it('거점 A · B: 대기 · 점령 중(스캔 여러 각도) · 정지 · 완료', () => {
+  it('거점 A · B · C: 대기 · 점령 중(스캔 여러 각도) · 정지 · 완료 · 꺼짐', () => {
     const r = b.capturePoint.radius;
-    for (const id of ['A', 'B'] as const) {
+    for (const id of ['A', 'B', 'C'] as const) {
       const box = pointPaintBounds(id, r);
       const pen = new BoundsPen();
-      for (const state of ['idle', 'capturing', 'blocked', 'done'] as const)
+      for (const state of ['idle', 'capturing', 'blocked', 'done', 'off'] as const)
         for (const now of [0, 300, 700, 1200, 1900, 2399])
           for (const progress of [0, 0.5, 1]) paintPoints(pen, [{ id, progress, state }], b, now);
       expect(inside(pen.ext, box)).toBe(true);

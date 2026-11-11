@@ -28,7 +28,7 @@ import {
 import { newGame } from '../helpers/fixtures';
 
 /** 기대 해시. 규칙 · 판정을 일부러 바꿨을 때만 GAME_DESIGN 변경 이력과 함께 갱신한다 */
-const GOLDEN_HASH = 'd33103266fb02be647c3ef1dd7a38f03415de67fd2521dff78ddf1c49a37eb79';
+const GOLDEN_HASH = '7beff4b9752912443e490a1457edcbfac08497ff587ae8a962103b9c48d60117';
 const SEED = 20261008;
 /** 총 틱 수 (30Hz, 32초). 판은 913틱쯤 괴물 승리(3명 동시 수감)로 끝난다 */
 const TOTAL_TICKS = 960;
@@ -325,7 +325,7 @@ function serialize(game: Game): string {
           roarRevealLeft: r6(p.roarRevealLeft),
           roar: [r6(p.roarX), r6(p.roarY)],
           trackedLeft: r6(p.trackedLeft),
-          pointCamp: [r6(p.pointCamp.A), r6(p.pointCamp.B)],
+          pointCamp: [r6(p.pointCamp.A), r6(p.pointCamp.B), r6(p.pointCamp.C)],
         };
       }
       return {
@@ -355,6 +355,7 @@ function serialize(game: Game): string {
       id: p.id,
       progress: r6(p.progress),
       done: p.done,
+      off: p.off,
       capturing: p.capturing,
       blocked: p.blocked,
     })),

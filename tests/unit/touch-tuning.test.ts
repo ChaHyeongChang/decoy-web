@@ -244,6 +244,89 @@ describe('UI 크기 (uiScale)', () => {
   });
 });
 
+describe('키운 UI 크기 · 조이스틱 크기: 엄지 버튼 무리 위 최소 간격 (MIN_GAP)', () => {
+  /** 두 사각형 사이 간격 (CSS px): 가로 · 세로 틈 중 큰 쪽 (겹치면 0) */
+  const sep = (a: Box, b: Box): number =>
+    Math.max(b.x - (a.x + a.w), a.x - (b.x + b.w), b.y - (a.y + a.h), a.y - (b.y + b.h), 0);
+  /**
+   * 판과 같은 조정(시스템 버튼 세 칸)으로 받은 배치: 적용한 조정 값, 그리고 역할마다 늘 떠 있는 HUD 부품과 오른쪽 아래 엄지 버튼
+   * 무리(조준 스틱 · 버튼 — 시스템 버튼 제외) 사이 가장 좁은 간격 (CSS px)
+   */
+  const nearest = (
+    w: number,
+    h: number,
+    tuning: Partial<L.LayoutTuning>,
+  ): { T: L.LayoutTuning; gaps: { team: 'monster' | 'survivor'; d: number; at: string }[] } => {
+    const l = L.layoutFor(w, h, true, { ...tuning, sysSlots: L.SYS_SLOTS_MENU });
+    const T = L.tuningOf(l);
+    const t = L.touchHudPlan(l)!;
+    const k = 1 / t.L;
+    const gaps = (['monster', 'survivor'] as const).map((team) => {
+      const plan = t[team];
+      const rects = plan.rects.map((r) => ({
+        id: r.id,
+        css: { x: r.rect.x * k, y: r.rect.y * k, w: r.rect.w * k, h: r.rect.h * k },
+      }));
+      const TL = touchLayout(
+        w,
+        h,
+        { l: 0, r: 0, t: 0, b: 0 },
+        team === 'monster',
+        true,
+        rects.map((r) => r.css),
+        { stickScale: T.stickScale, menu: true, sysRows: plan.sysRows },
+      );
+      const thumbs: [string, Box][] = TL.aim ? [['aim', TL.aim]] : [];
+      for (const [id, b] of Object.entries(TL.buttons))
+        if (b && id !== 'scoreboard' && id !== 'menu' && id !== 'fullscreen') thumbs.push([id, b]);
+      let best = { d: Infinity, at: '' };
+      for (const r of rects)
+        for (const [id, b] of thumbs) {
+          const d = sep(r.css, b);
+          if (d < best.d) best = { d, at: `${r.id} ↔ ${id}` };
+        }
+      return { team, ...best };
+    });
+    return { T, gaps };
+  };
+
+  it('흔한 휴대폰 괴물(750×340 · 760×330 · 732×331 UI 1.2~1.5, 863×360 UI 1.5, 540×300 조이스틱 1.2): 키운 값을 그대로 쓰며 오른쪽 칸 게이지 · 타이머를 엄지 버튼에 붙이지 않고, 크기를 줄여 최소 간격을 지킨다', () => {
+    for (const [w, h, tuning] of [
+      [750, 340, { uiScale: 1.2 }],
+      [750, 340, { uiScale: 1.5 }],
+      [760, 330, { uiScale: 1.2 }],
+      [732, 331, { uiScale: 1.2 }],
+      [863, 360, { uiScale: 1.5 }],
+      [540, 300, { stickScale: 1.2 }],
+    ] as const) {
+      const { T, gaps } = nearest(w, h, tuning);
+      const label = `${w}×${h} ${JSON.stringify(tuning)} → UI ${T.uiScale} · 조이스틱 ${T.stickScale}`;
+      for (const g of gaps)
+        expect(g.d, `${label} ${g.team} ${g.at}`).toBeGreaterThanOrEqual(L.MIN_GAP - 0.01);
+      // 들어가지 않는 만큼은 줄였다 (그대로 받지 않는다)
+      const ui = 'uiScale' in tuning ? tuning.uiScale : 1;
+      const st = 'stickScale' in tuning ? tuning.stickScale : 1;
+      expect(T.uiScale < ui || T.stickScale < st, label).toBe(true);
+    }
+  });
+
+  it('화면 격자(높이 270~560) × UI 크기 1.2 · 조이스틱 1.2 · 둘 다: 1보다 큰 값을 적용한 배치는 두 역할 모두 HUD 부품이 엄지 버튼 무리와 MIN_GAP 이상 떨어진다 (기본 크기는 낮은 넓은 휴대폰 괴물이 간격 안으로 들어갈 수 있다 — 줄일 크기가 없다)', () => {
+    let grown = 0;
+    for (let h = 270; h <= 560; h += 10)
+      for (let w = Math.ceil(h * 1.3); w <= Math.min(1200, h * 2.7); w += 17)
+        for (const tuning of [{ uiScale: 1.2 }, { stickScale: 1.2 }, { uiScale: 1.2, stickScale: 1.2 }]) {
+          const { T, gaps } = nearest(w, h, tuning);
+          if (T.uiScale <= 1 && T.stickScale <= 1) continue;
+          grown += 1;
+          const label = `${w}×${h} ${JSON.stringify(tuning)} → UI ${T.uiScale} · 조이스틱 ${T.stickScale}`;
+          for (const g of gaps)
+            expect(g.d, `${label} ${g.team} ${g.at}`).toBeGreaterThanOrEqual(L.MIN_GAP - 0.01);
+        }
+    // 대부분 실제로 키운다 (시험이 비지 않게)
+    expect(grown).toBeGreaterThan(1500);
+  });
+});
+
 describe('조이스틱 크기 (stickScale) · 시스템 버튼 칸 (sysSlots)', () => {
   it('stickScale은 이동 · 조준 스틱 반지름만 바꾸고 버튼은 그대로', () => {
     for (const h of [293, 360, 412, 640]) {
@@ -296,7 +379,8 @@ describe('조이스틱 크기 (stickScale) · 시스템 버튼 칸 (sysSlots)', 
 });
 
 describe('좌우 반전 (mirror)', () => {
-  it('HUD 부품이 화면 가운데로 뒤집힌다 (거점 줄 게이지는 A가 윗줄 그대로, 팀 카드 순서도 왼쪽부터)', () => {
+  it('HUD 부품이 화면 가운데로 뒤집힌다 (거점 줄 게이지는 읽는 차례 A · B · C 그대로 — 쌓으면 A가 윗줄, 가로 한 줄이면 A가 왼쪽. 팀 카드 순서도 왼쪽부터)', () => {
+    let runs = 0;
     for (const [name, w, h] of SCREENS) {
       const a = L.touchHudPlan(L.layoutFor(w, h, true, { sysSlots: 3 }))!;
       const lb = L.layoutFor(w, h, true, { sysSlots: 3, mirror: true });
@@ -307,14 +391,27 @@ describe('좌우 반전 (mirror)', () => {
         const q = b[role];
         expect(q.timer.x, name).toBeCloseTo(W - p.timer.x, 6);
         expect(q.timer.y, name).toBeCloseTo(p.timer.y, 6);
-        // 거점 줄 게이지 (플레이테스트 a-7): 줄마다 제자리에서 좌우로만 뒤집힌다 — A가 늘 윗줄이라 줄을 맞바꾸지 않는다
+        // 거점 줄 게이지: 뒤집은 자리들의 모음은 그대로 뒤집힌 것이고, 거점은 읽는 차례(위 → 아래, 왼쪽 → 오른쪽)로 다시 나눈다 —
+        // 세로로 쌓으면 줄마다 제자리에서 좌우로만(A가 늘 윗줄), 위 띠에 가로로 늘어놓으면 A가 늘 왼쪽 (플레이테스트 b)
         expect(q.gauges.length).toBe(p.gauges.length);
-        expect(q.gauges.length).toBeGreaterThanOrEqual(2);
+        expect(q.gauges.length).toBe(3);
+        const key = (g: { x: number; y: number }): string => `${g.x.toFixed(4)},${g.y.toFixed(4)}`;
+        expect(q.gauges.map(key).sort(), name).toEqual(
+          p.gauges.map((o) => key({ x: W - o.x - o.w, y: o.y })).sort(),
+        );
+        const stacked = p.gauges.every((o) => Math.abs(o.x - p.gauges[0]!.x) < 1e-6);
+        if (!stacked) runs += 1;
         q.gauges.forEach((g, i) => {
           const o = p.gauges[i]!;
-          expect(g.x, `${name} 줄 ${i}`).toBeCloseTo(W - o.x - o.w, 6);
-          expect([g.y, g.w, g.h]).toEqual([o.y, o.w, o.h]);
-          if (i > 0) expect(g.y).toBeGreaterThan(q.gauges[i - 1]!.y);
+          expect([g.w, g.h]).toEqual([o.w, o.h]);
+          if (stacked) expect(g.x, `${name} 줄 ${i}`).toBeCloseTo(W - o.x - o.w, 6);
+          if (i === 0) return;
+          const prev = q.gauges[i - 1]!;
+          // 읽는 차례
+          expect(
+            g.y > prev.y + 1e-6 || (Math.abs(g.y - prev.y) < 1e-6 && g.x > prev.x),
+            `${name} 줄 ${i}`,
+          ).toBe(true);
         });
         const gridW = p.cards.cols * p.cards.w + (p.cards.cols - 1) * p.cards.gap;
         expect(q.cards.x, name).toBeCloseTo(W - p.cards.x - gridW, 6);
@@ -323,7 +420,8 @@ describe('좌우 반전 (mirror)', () => {
         // 사각형 목록: 같은 id가 뒤집힌 자리
         for (const r of p.rects) {
           const m = q.rects.find((x) => x.id === r.id)!;
-          if (r.id.startsWith('card')) continue;
+          // 팀 카드 · 거점 줄 게이지는 순서를 지켜 다시 나눈다 (위에서 본다)
+          if (r.id.startsWith('card') || r.id.startsWith('gauge')) continue;
           expect(m.rect.x, `${name} ${r.id}`).toBeCloseTo(W - r.rect.x - r.rect.w, 6);
           expect(m.rect.w).toBeCloseTo(r.rect.w, 6);
         }
@@ -335,5 +433,7 @@ describe('좌우 반전 (mirror)', () => {
       expect(b.score.sysBottom).toBe(a.score.sysBottom);
       expect(b.score.sysRight).toBeCloseTo(W - a.score.sysLeft, 6);
     }
+    // 가로 한 줄 배치(낮은 16:9 · 태블릿 위 띠)도 본다
+    expect(runs).toBeGreaterThan(0);
   });
 });

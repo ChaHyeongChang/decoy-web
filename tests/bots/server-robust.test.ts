@@ -2,7 +2,7 @@
 import { connect } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
-import type { ServerMessage } from '@decoy/shared';
+import { PROTOCOL_VERSION, type ServerMessage } from '@decoy/shared';
 import { startServer, type RunningServer } from '../helpers/serverProcess';
 
 let server: RunningServer;
@@ -56,6 +56,7 @@ describe('서버 견고성', () => {
     ws.send(
       JSON.stringify({
         t: 'join',
+        proto: PROTOCOL_VERSION,
         room: null,
         create: true,
         name: 'x',
@@ -89,6 +90,7 @@ async function soloBotsRoom(port: number): Promise<ServerMessage[]> {
   ws.send(
     JSON.stringify({
       t: 'join',
+      proto: PROTOCOL_VERSION,
       room: null,
       create: true,
       name: 'x',

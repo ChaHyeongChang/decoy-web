@@ -1,6 +1,6 @@
 // 봇 시나리오 "전체 판": 봇 4명으로 생존자 승리 1회, 괴물 승리 1회를 끝까지 (BUILD_PLAN M5)
 import { describe, expect, it } from 'vitest';
-import type { Snapshot } from '@decoy/shared';
+import type { PointId, Snapshot } from '@decoy/shared';
 import {
   GoAndHoldBrain,
   HunterBrain,
@@ -15,7 +15,7 @@ import { loadTestBalance } from '../helpers/fixtures';
 
 const balance = loadTestBalance();
 const pointDone =
-  (id: 'A' | 'B') =>
+  (id: PointId) =>
   (s: Snapshot): boolean =>
     s.world.points.some((p) => p.id === id && p.state === 'done');
 const exitOpen = (s: Snapshot): boolean => s.world.exits.some((e) => e.id === 'N' && e.state === 'open');
@@ -59,8 +59,12 @@ describe('봇 시나리오: 전체 판', () => {
     expect(r.escaped).toBe(3);
     expect(r.grade).toBe('full');
     expect(r.ending).toBe('END_ALL');
-    // 두 거점 모두 2명이 함께 점령 (약 27초씩)
-    expect(g.points.every((p) => p.done)).toBe(true);
+    // 세 곳 중 두 곳(A · B)을 2명이 함께 점령 (약 27초씩), 남은 C는 꺼졌다
+    expect(g.points.map((p) => [p.id, p.done, p.off])).toEqual([
+      ['A', true, false],
+      ['B', true, false],
+      ['C', false, true],
+    ]);
     expect(g.survivorById('p2')!.stats.captureSeconds).toBeGreaterThan(50);
     // 판 길이 기록
     expect(r.durationSec).toBeGreaterThan(55);

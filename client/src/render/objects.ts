@@ -1,20 +1,23 @@
 // 거점 · 탈출구 · 감옥 배지 (M10b): 바닥 문양 + 라벨. 캐릭터보다 아래 레이어에 그린다(정보 우선 R15: 배지가 캐릭터를 덮지 않음).
 // 맵 구조가 늘 어둡게 보이므로 배지를 안개 위에서 내렸다. 항상 표시 규칙(지금 안 보이는 곳 45%, 괴물 화면 점령 중 깜빡임)은 그대로다.
-//  - 거점: 패드 위쪽 가장자리의 마름모 + A/B 글자 + 상태 칩(점령 중 ▶ · 정지 ‖ 주황 · 완료 ✓). 가운데(단말 · 서 있는 사람)를 비운다
+//  - 거점: 패드 위쪽 가장자리의 마름모 + A/B/C 글자 + 상태 칩(점령 중 ▶ · 정지 ‖ 주황 · 완료 ✓ · 꺼짐 ⊘ 회색). 가운데(단말 · 서 있는
+//    사람)를 비운다
 //  - 탈출구: 문 오른쪽 문틀의 표지판 + 달리는 사람 (비활성 회색 · 활성 초록). 문짝 · 미닫이 연출을 가리지 않는다
 //  - 감옥: 남쪽 문 칸의 자물쇠 (수감자가 서는 안쪽을 덮지 않는다)
 // 알파는 어두운 바닥 위 합성과 같은 색으로 미리 섞어 불투명하게 그린다(dimmed): 선이 겹친 곳이 진해지지 않는다.
-// 배지 다섯 장을 한 아틀라스 캔버스(기기 픽셀 1:1)의 칸마다 구워 이미지로 보이고, 상태 · 알파 · 백버퍼 배율이 바뀐 배지만
+// 배지 여섯 장을 한 아틀라스 캔버스(기기 픽셀 1:1)의 칸마다 구워 이미지로 보이고, 상태 · 알파 · 백버퍼 배율이 바뀐 배지만
 // 다시 굽는다(프레임마다 다시 테셀레이션하는 Graphics를 쓰지 않는다: gfx.features.badgeGfxCmds = 0). 텍스처가 하나라 휴대폰
 // MobilePipeline에서도 배지 그리기가 한 번이다 (렌더링 최적화 2).
 // 정보 레이어(info)는 art/mapArtBadges.ts badgeInfo로 만들고, 품질과 상관없이 같다.
 import type Phaser from 'phaser';
 import {
   CAPTURE_POINTS,
+  POINT_IDS,
   TILE_PX,
   type ExitState,
   type ExitView,
   type InfoItem,
+  type PointId,
   type PointState,
   type PointView,
 } from '@decoy/shared';
@@ -190,6 +193,22 @@ export function paintPointBadge(
   } else if (icon === 'pause') {
     c.fillRect(cx - s * 0.48, y - s * 0.5, s * 0.32, s);
     c.fillRect(cx + s * 0.16, y - s * 0.5, s * 0.32, s);
+  } else if (icon === 'off') {
+    // 꺼짐 ⊘ (icons.ts off와 같은 모양: 원 + 왼쪽 위 → 오른쪽 아래 사선)
+    c.beginPath();
+    c.arc(cx, y, s * 0.56, 0, Math.PI * 2);
+    c.lineWidth = 1.6;
+    c.stroke();
+    strokePts(
+      c,
+      [
+        [cx - s * 0.4, y - s * 0.4],
+        [cx + s * 0.4, y + s * 0.4],
+      ],
+      false,
+      1.6,
+      dimmed(color, a),
+    );
   } else {
     strokePts(
       c,
@@ -255,23 +274,30 @@ export function paintLockBadge(c: BadgeCtx, x: number, y: number, a: number): vo
   c.fillRect(x - 1.2, y + h * 0.04, 2.4, h * 0.16);
 }
 
-/** 배지 다섯 장 (아틀라스 칸 순서 = 프레임 이름) */
-export type BadgeId = 'point-A' | 'point-B' | 'exit-N' | 'exit-S' | 'prison';
-export const BADGE_IDS: readonly BadgeId[] = ['point-A', 'point-B', 'exit-N', 'exit-S', 'prison'];
+/** 배지 여섯 장 (아틀라스 칸 순서 = 프레임 이름) */
+export type BadgeId = 'point-A' | 'point-B' | 'point-C' | 'exit-N' | 'exit-S' | 'prison';
+export const BADGE_IDS: readonly BadgeId[] = ['point-A', 'point-B', 'point-C', 'exit-N', 'exit-S', 'prison'];
 const BADGE_KIND: Readonly<Record<BadgeId, keyof typeof BADGE_BOX>> = {
   'point-A': 'point',
   'point-B': 'point',
+  'point-C': 'point',
   'exit-N': 'exit',
   'exit-S': 'exit',
   prison: 'lock',
 };
-const POINT_BADGE: Readonly<Record<'A' | 'B', BadgeId>> = { A: 'point-A', B: 'point-B' };
+const POINT_BADGE: Readonly<Record<PointId, BadgeId>> = { A: 'point-A', B: 'point-B', C: 'point-C' };
+const BADGE_POINT: Readonly<Partial<Record<BadgeId, PointId>>> = {
+  'point-A': 'A',
+  'point-B': 'B',
+  'point-C': 'C',
+};
 const EXIT_BADGE: Readonly<Record<'N' | 'S', BadgeId>> = { N: 'exit-N', S: 'exit-S' };
 
 /** 배지 기준점 (월드 px): 거점 = 패드 위쪽 가장자리, 탈출구 = 문 옆 표지판, 감옥 = 남쪽 문 칸 */
 function badgeAnchor(id: BadgeId): Pt {
-  if (id === 'point-A' || id === 'point-B') {
-    const c = CAPTURE_POINTS[id === 'point-A' ? 'A' : 'B'];
+  const point = BADGE_POINT[id];
+  if (point !== undefined) {
+    const c = CAPTURE_POINTS[point];
     return [c.x * T, (c.y + BADGE.pointDy) * T];
   }
   if (id === 'exit-N' || id === 'exit-S') {
@@ -284,6 +310,7 @@ function badgeAnchor(id: BadgeId): Pt {
 const BADGE_AT: Readonly<Record<BadgeId, Pt>> = {
   'point-A': badgeAnchor('point-A'),
   'point-B': badgeAnchor('point-B'),
+  'point-C': badgeAnchor('point-C'),
   'exit-N': badgeAnchor('exit-N'),
   'exit-S': badgeAnchor('exit-S'),
   prison: badgeAnchor('prison'),
@@ -333,7 +360,7 @@ export interface BadgeAtlasLayout {
 const SLOT_GAP = 2;
 
 /**
- * 배지 아틀라스 배치 (배율 zoom): 다섯 칸을 한 줄로. 칸 크기 = 그 배지가 어떤 소수 자리에서든 차지할 수 있는 가장 큰
+ * 배지 아틀라스 배치 (배율 zoom): 여섯 칸을 한 줄로. 칸 크기 = 그 배지가 어떤 소수 자리에서든 차지할 수 있는 가장 큰
  * 사각형(굽는 범위 × 기기 배율, 올림 + 1)이라 배지가 늘 칸 안에 들어간다. 칸 사이 · 가장자리는 투명 테
  */
 export function layoutBadgeAtlas(zoom: number): BadgeAtlasLayout {
@@ -353,9 +380,15 @@ export function layoutBadgeAtlas(zoom: number): BadgeAtlasLayout {
 }
 
 /** 상태 코드 (서명용 수) */
-const POINT_CODE: Readonly<Record<PointState, number>> = { idle: 0, capturing: 1, blocked: 2, done: 3 };
+const POINT_CODE: Readonly<Record<PointState, number>> = {
+  idle: 0,
+  capturing: 1,
+  blocked: 2,
+  done: 3,
+  off: 4,
+};
 const EXIT_CODE: Readonly<Record<ExitState, number>> = { inactive: 0, active: 1, open: 2 };
-const POINT_STATES: readonly PointState[] = ['idle', 'capturing', 'blocked', 'done'];
+const POINT_STATES: readonly PointState[] = ['idle', 'capturing', 'blocked', 'done', 'off'];
 const EXIT_STATES: readonly ExitState[] = ['inactive', 'active', 'open'];
 
 /** 배지 한 장의 마지막으로 구운 서명 (배율 · 상태 코드 · 알파: 문자열 대신 수) */
@@ -366,7 +399,7 @@ interface BadgeSig {
 }
 
 /**
- * 배지 다섯 장을 한 캔버스(아틀라스)에 굽고 이미지 다섯 개가 그 프레임을 그린다 (렌더링 최적화 2): 텍스처가 하나라
+ * 배지 여섯 장을 한 캔버스(아틀라스)에 굽고 이미지 여섯 개가 그 프레임을 그린다 (렌더링 최적화 2): 텍스처가 하나라
  * 텍스처 단위가 하나뿐인 휴대폰 MobilePipeline에서도 배지 그리기가 한 번이다(예전: 배지마다 텍스처 → 그리기 다섯 번).
  * 배지는 굽을 때마다 새로 만든 작업 캔버스(예전 배지 캔버스와 같은 크기 · 같은 변환)에 그린 뒤 제 칸에 정수 자리로 1:1
  * 복사한다. 크롬은 2D 캔버스의 래스터 방식(가속 여부)을 쓰임새 이력(다른 캔버스에 그려짐 · 지운 뒤 다시 씀 · 텍스처
@@ -455,7 +488,7 @@ export class Badges {
   private readonly atlas: BadgeAtlas;
   private readonly images = new Map<BadgeId, Phaser.GameObjects.Image>();
   private readonly sigs: Record<BadgeId, BadgeSig>;
-  private readonly labels = new Map<'A' | 'B', CrispText>();
+  private readonly labels = new Map<PointId, CrispText>();
   private last: InfoItem[] = [];
 
   constructor(
@@ -467,10 +500,17 @@ export class Badges {
     container.add(this.box);
     this.atlas = new BadgeAtlas(scene);
     const sig = (): BadgeSig => ({ zoom: NaN, code: -1, alpha: NaN });
-    this.sigs = { 'point-A': sig(), 'point-B': sig(), 'exit-N': sig(), 'exit-S': sig(), prison: sig() };
-    // A · B 글자는 맵 컨테이너(0.93배) 밖 화면 좌표에 둔다(글자 텍셀 = 화면 픽셀). 캐릭터를 덮지 않게 맵 컨테이너 바로 아래로 내린다
+    this.sigs = {
+      'point-A': sig(),
+      'point-B': sig(),
+      'point-C': sig(),
+      'exit-N': sig(),
+      'exit-S': sig(),
+      prison: sig(),
+    };
+    // A · B · C 글자는 맵 컨테이너(0.93배) 밖 화면 좌표에 둔다(글자 텍셀 = 화면 픽셀). 캐릭터를 덮지 않게 맵 컨테이너 바로 아래로 내린다
     // (안개 레이어보다는 위: 시야 밖에서도 45%로 보인다)
-    for (const id of ['A', 'B'] as const) {
+    for (const id of POINT_IDS) {
       const c = CAPTURE_POINTS[id];
       const p = tileToScreen(c.x, c.y + BADGE.pointDy);
       const t = makeText(scene, p.x, p.y, id, {
@@ -490,7 +530,7 @@ export class Badges {
     });
   }
 
-  /** 카메라 창만큼 옮겨진 월드에 맞춰 A · B 글자를 옮긴다 (글자는 맵 컨테이너 밖 화면 좌표에 있다) */
+  /** 카메라 창만큼 옮겨진 월드에 맞춰 A · B · C 글자를 옮긴다 (글자는 맵 컨테이너 밖 화면 좌표에 있다) */
   follow(dx: number, dy: number): void {
     for (const [id, t] of this.labels) {
       const c = CAPTURE_POINTS[id];
@@ -544,7 +584,7 @@ export class Badges {
     points: readonly PointView[],
     exits: readonly ExitView[],
     alpha: BadgeAlpha,
-    blink: Record<'A' | 'B', boolean>,
+    blink: Record<PointId, boolean>,
   ): void {
     this.last = badgeInfo(points, exits, alpha, blink, paintedRadii);
     // 그림은 상태 · 알파 · 백버퍼 배율이 바뀐 배지만 다시 굽는다 (진행 값은 배지 그림에 쓰지 않는다)

@@ -126,7 +126,8 @@ export const MIN_GAP = 8;
 /**
  * 터치 HUD (CSS px). 그림(HUD 아틀라스) 1단위 = art CSS px, 글자는 CSS px로 정한다(보조 12 · 주요 14 이상, 화면 높이와 상관없이).
  * - edge · gap: 칸 안 여백 · 부품 사이
- * - band: 16:9 화면 위 · 아래 띠 최소 높이(타이머 한 줄), bandStack: 좌우 칸이 없는 화면(태블릿 4:3)의 띠
+ * - band: 16:9 화면 위 · 아래 띠 최소 높이(타이머 한 줄), bandStack: 좌우 칸이 없는 화면(태블릿 4:3)의 띠 (한 줄에 다 들어가지
+ *   않는 좁은 창은 두 줄 — bandTwoRows)
  * - minSide: 좌우 칸 최소 폭(팀 카드 한 줄). 2:1 이상이어도 이보다 좁으면 16:9 배치를 쓴다
  * - zoneTop: 이동 스틱 그림 위로 남기는 이동 영역, hintH: 맨 아래 안내 줄 높이(가장자리 띠 24px 안 — 터치 대상이 없다)
  * - minimapMin: 미니맵을 보일 최소 폭(자리가 없으면 숨긴다 — 판 화면 전체가 늘 보여 같은 정보다)
@@ -371,10 +372,66 @@ export function thumbReserve(
 }
 
 /**
- * 터치 화면 (CSS px)의 맵 크기 · 띠 · 배치 방식. ui = UI 크기 배율: 띠 · 칸 최소 크기(그림 단위 부품이 들어갈 자리)도 같이
- * 키운다 (맵이 그만큼 작아진다 — 보이는 타일 수는 같다)
+ * 위 띠(좌우 칸이 없는 화면 — 태블릿 4:3 등) 한 줄 배치 (CSS px, touchShape · planCss 공통): 띠 가운데 높이에 맨 왼쪽 팀 카드 한 줄,
+ * 가운데 타이머, 거점 줄 게이지 가로 한 줄. 게이지 후보 ① PC와 같은 차례(앞쪽 절반은 타이머 왼쪽, 나머지는 오른쪽 — A · B · 타이머 · C)
+ * ② 타이머 왼쪽에 모두 ③ 오른쪽에 모두 — 팀 카드와 오른쪽 위 시스템 버튼(띠까지 내려온다) 사이에 들어가는 첫 후보(fits). 셋 줄을
+ * 세로로 쌓으면 띠 44보다 높다. 들어가는 후보가 없으면 fits = false, gauges = ① (좁은 창 — 띠를 두 줄로: touchShape · bandTwoRows)
  */
-function touchShape(w: number, h: number, ui = 1): { kind: LayoutKind; band: number; mode: TouchHudMode } {
+function bandRow(
+  W: number,
+  band: number,
+  ui: number,
+  sys: { sysLeft: number; sysBottom: number },
+  n: number,
+): { timer: Box & { label: boolean }; cards: Box; gauges: Box[]; fits: boolean } {
+  const U = TOUCH_UI;
+  const P = TOUCH_PART;
+  const a = U.art * ui;
+  const rowW = P.gaugeRow.w * a;
+  const rowH = P.gaugeRow.h * a;
+  const runW = (k: number): number => k * rowW + Math.max(0, k - 1) * U.gap;
+  const runAt = (x: number, y: number, k: number): Box[] =>
+    Array.from({ length: k }, (_, i) => ({ x: x + i * (rowW + U.gap), y, w: rowW, h: rowH }));
+  const cy = band / 2;
+  const timerW = TIMER_CSS.label * ui;
+  const timerH = P.timer.h * a;
+  const timer = { x: W / 2 - timerW / 2, y: cy - timerH / 2, w: timerW, h: timerH, label: true };
+  const cardH = P.card.h * a;
+  const cards = { x: U.edge, y: cy - cardH / 2, w: 3 * P.card.w * a + 2 * U.gap, h: cardH };
+  const y = cy - rowH / 2;
+  const lo = cards.x + cards.w + U.gap * 2;
+  const hi = sys.sysBottom > y ? sys.sysLeft - U.gap : W - U.edge;
+  const l0 = timer.x - U.gap * 2;
+  const r0 = timer.x + timer.w + U.gap * 2;
+  const half = Math.ceil(n / 2);
+  const cands = [
+    [...runAt(l0 - runW(half), y, half), ...runAt(r0, y, n - half)],
+    runAt(l0 - runW(n), y, n),
+    runAt(r0, y, n),
+  ];
+  const fit = cands.find((c) => c.every((b) => b.x >= lo - 0.01 && b.x + b.w <= hi + 0.01));
+  return { timer, cards, gauges: fit ?? cands[0]!, fits: fit !== undefined };
+}
+
+/**
+ * 위 띠 두 줄 높이 (CSS px, UI 크기 1): 윗줄 팀 카드 · 타이머, 아랫줄 거점 줄 게이지 (위 · 아래 여백 TOUCH_UI.edge, 줄 사이 gap).
+ * 한 줄에 들어가지 않는 좁은 창(bandRow fits = false)의 띠 (그림 단위 부분은 UI 크기만큼 커진다 — bandTwoRows)
+ */
+function bandTwoRows(ui: number): number {
+  const a = TOUCH_UI.art * ui;
+  return TOUCH_UI.edge * 2 + TOUCH_UI.gap + (TOUCH_PART.card.h + TOUCH_PART.gaugeRow.h) * a;
+}
+
+/**
+ * 터치 화면 (CSS px)의 맵 크기 · 띠 · 배치 방식. ui = UI 크기 배율: 띠 · 칸 최소 크기(그림 단위 부품이 들어갈 자리)도 같이
+ * 키운다 (맵이 그만큼 작아진다 — 보이는 타일 수는 같다). sysSlots = 오른쪽 위 시스템 버튼 칸 수 (위 띠 한 줄이 그 왼쪽에 들어가는가)
+ */
+function touchShape(
+  w: number,
+  h: number,
+  ui = 1,
+  sysSlots: number = DEFAULT_TUNING.sysSlots,
+): { kind: LayoutKind; band: number; mode: TouchHudMode } {
   const U = TOUCH_UI;
   const minSide = U.minSide * ui;
   const ratio = MAP_DRAW_W / MAP_DRAW_H;
@@ -385,7 +442,16 @@ function touchShape(w: number, h: number, ui = 1): { kind: LayoutKind; band: num
   const fitSide = Math.max(0, (h * ratio - w + 2 * minSide) / (2 * ratio));
   const column = Math.max(U.band * ui, fitMap, fitSide);
   if (column <= U.bandStack * ui) return { kind: 'touchNarrow', band: column, mode: 'column' };
-  return { kind: 'touchNarrow', band: Math.max(U.bandStack * ui, fitMap), mode: 'band' };
+  const band = Math.max(U.bandStack * ui, fitMap);
+  // 위 띠 한 줄(팀 카드 · 타이머 · 게이지 셋)이 시스템 버튼 왼쪽에 들어가지 않으면(UI 크기 1 · 판 중 시스템 버튼 세 칸에서 폭 약 944 미만 — iPad 가로 Split View 1/2 등,
+  // 거점 셋) 띠를 두 줄 높이로 키운다. 그만큼 띠를 키우면 좌우 칸이 팀 카드 폭 이상 생기는 화면은 좌우 칸 배치(띠 column)가 맵이 크다.
+  // 폭은 1px 덜 보고 잰다: 판 화면 논리 폭은 정수로 반올림해 planCss가 보는 폭이 0.5 CSS px 안에서 다르다(넓을수록 들어간다)
+  const sys = thumbReserve(w - 1, h, true, { sysSlots });
+  if (bandRow(w - 1, band, ui, sys, GAUGE_IDS.length).fits)
+    return { kind: 'touchNarrow', band, mode: 'band' };
+  const two = Math.max(bandTwoRows(ui), fitMap);
+  if (column <= two) return { kind: 'touchNarrow', band: column, mode: 'column' };
+  return { kind: 'touchNarrow', band: two, mode: 'band' };
 }
 
 /**
@@ -394,11 +460,11 @@ function touchShape(w: number, h: number, ui = 1): { kind: LayoutKind; band: num
  * - touchWide(2:1 이상, 좌우 칸 ≥ TOUCH_UI.minSide): 논리 높이 = 맵 높이(띠 0), 논리 폭 = 높이 × 화면비. 상한을 두지 않고
  *   더 넓은 화면은 좌우 칸이 넓어진다(빈 여백 · 레터박스 없음, DECISIONS)
  * - touchNarrow: 위 · 아래 띠(CSS 26px 이상, 좌우 칸이 팀 카드 폭이 되게)를 남기고 논리 크기를 키워 맵을 줄인다.
- *   맵(3:2)보다 좁은 화면(태블릿 4:3 등)은 띠를 키워 HUD를 위 띠로 모은다
+ *   맵(3:2)보다 좁은 화면(태블릿 4:3 등)은 띠를 키워 HUD를 위 띠로 모은다(한 줄에 다 들어가지 않으면 두 줄 높이 — touchShape)
  * uiScale = 그림 1단위의 논리 px = TOUCH_UI.art × UI 크기 × (논리 px / CSS px)
  * tuning(터치만) = 조이스틱 크기 · UI 크기 · 좌우 반전 · 시스템 버튼 칸 수. 없거나 기본값이면 예전 배치 그대로(tuning 칸 없음).
- * UI 크기 · 조이스틱 크기가 1보다 크면 HUD가 맵 · 서로 · 엄지 자리와 겹치지 않고 점수판이 화면 폭에 들어가는 만큼만 키운다
- * (0.05씩 줄여 본다 — 적용한 값이 tuning에 남는다)
+ * UI 크기 · 조이스틱 크기가 1보다 크면 HUD가 맵 · 서로 · 엄지 자리와 겹치지 않고 오른쪽 아래 엄지 버튼 무리와 최소 간격(MIN_GAP)
+ * 이상 떨어지고 점수판이 화면 폭에 들어가는 만큼만 키운다 (0.05씩 줄여 본다 — 적용한 값이 tuning에 남는다, touchHudFits)
  */
 export function layoutFor(
   screenW: number,
@@ -411,7 +477,7 @@ export function layoutFor(
   const h = Math.max(1, Math.min(screenW, screenH));
   const T = cleanTuning(tuning);
   const build = (ui: number, stickScale: number): LayoutInfo => {
-    const shape = touchShape(w, h, ui);
+    const shape = touchShape(w, h, ui, T.sysSlots);
     const cssMapH = h - shape.band * 2;
     // 논리 px / CSS px: 맵 높이(논리 MAP_DRAW_H)가 CSS cssMapH가 되게
     const L = MAP_DRAW_H / cssMapH;
@@ -564,7 +630,11 @@ export interface Rect {
 export interface TouchHudPlan {
   /** 타이머 틀 가운데 · 폭 · 높이, '최후' 글자를 쓸 자리가 있는가 */
   timer: { x: number; y: number; w: number; h: number; label: boolean };
-  /** 거점 줄 게이지: 줄마다 사각형 (위에서부터 world.points 순서 — A · B …, 서로 맞닿는다) */
+  /**
+   * 거점 줄 게이지: 줄마다 사각형 (GAUGE_IDS 차례 = 읽는 차례 — 위 → 아래, 왼쪽 → 오른쪽). 세로로 쌓으면 서로 맞닿고, 위 띠에
+   * 가로로 늘어놓으면 같은 높이에 틈을 두고 (태블릿 띠는 PC처럼 타이머 양옆, 한 줄에 다 들어가지 않는 좁은 창은 팀 카드 · 타이머
+   * 아랫줄 — touchShape가 띠를 두 줄 높이로 키운다)
+   */
   gauges: Rect[];
   /** 팀 카드 격자: 첫 카드 왼쪽 위, 한 장 크기, 열 수, 간격 */
   cards: { x: number; y: number; w: number; h: number; cols: number; gap: number };
@@ -640,30 +710,44 @@ function planCss(
   const r = thumbReserve(W, H, monster, T, map.x + map.w);
   const cardW = P.card.w * a;
   const cardH = P.card.h * a;
-  // 거점 줄 게이지 덩어리: 폭 = 한 줄 폭, 높이 = 줄 높이 × 줄 수 (두 줄 = 예전 링 한 쌍 110 × 52)
+  // 거점 줄 게이지 (한 줄 rowW × rowH): 세로로 쌓으면(stack) 높이 g = 줄 높이 × 줄 수, 가로로 늘어놓으면(run) 줄 사이 U.gap
   const rowH = P.gaugeRow.h * a;
-  const g = rowH * gaugeRows;
-  const pairW = P.gaugeRow.w * a;
+  const rowW = P.gaugeRow.w * a;
+  const n = gaugeRows;
+  const g = rowH * n;
+  const runW = (k: number): number => k * rowW + Math.max(0, k - 1) * U.gap;
   const timerH = P.timer.h * a;
   const grid = (cols: number): { w: number; h: number } => {
     const rows = Math.ceil(3 / cols);
     return { w: cols * cardW + (cols - 1) * U.gap, h: rows * cardH + (rows - 1) * U.gap };
   };
-  const pairAt = (x: number, y: number, n: number = gaugeRows): Box[] =>
-    Array.from({ length: n }, (_, i) => ({ x, y: y + i * rowH, w: pairW, h: rowH }));
+  /** 세로로 쌓은 줄 (맨 윗줄 왼쪽 위 x, y — 줄끼리 맞닿는다) */
+  const stackAt = (x: number, y: number): Box[] =>
+    Array.from({ length: n }, (_, i) => ({ x, y: y + i * rowH, w: rowW, h: rowH }));
+  /** 가로로 늘어놓은 줄 k개 (왼쪽 끝 x) */
+  const runAt = (x: number, y: number, k: number): Box[] =>
+    Array.from({ length: k }, (_, i) => ({ x: x + i * (rowW + U.gap), y, w: rowW, h: rowH }));
 
   if (mode === 'band') {
-    // 위 띠에 모두: 가운데 타이머, 그 왼쪽 거점 줄 게이지, 맨 왼쪽 팀 카드 한 줄. 미니맵은 자리가 없어 숨긴다
-    const cy = band / 2;
-    const timerW = timerCss.label;
-    const timer = { x: W / 2 - timerW / 2, y: cy - timerH / 2, w: timerW, h: timerH, label: true };
-    const gr = grid(3);
-    const cards = { x: U.edge, y: cy - gr.h / 2, w: gr.w, h: gr.h, cols: 3, cw: cardW, ch: cardH };
-    // 카드 줄과 닿으면 게이지를 타이머 오른쪽으로
-    const leftX = timer.x - U.gap * 2 - pairW;
-    const gx = leftX >= cards.x + cards.w + U.gap * 2 ? leftX : timer.x + timer.w + U.gap * 2;
-    const gauges = pairAt(gx, cy - g / 2);
-    return { timer, gauges, cards, minimap: null, inset: insetCss(map, r, a) };
+    // 위 띠에 모두: 가운데 타이머, 맨 왼쪽 팀 카드 한 줄, 거점 줄 게이지는 가로 한 줄(bandRow). 미니맵은 자리가 없어 숨긴다
+    const row = bandRow(W, band, T.uiScale, r, n);
+    const cards = { ...row.cards, cols: 3, cw: cardW, ch: cardH };
+    const inset = insetCss(map, r, a);
+    if (row.fits || band < bandTwoRows(T.uiScale) - 0.01)
+      return { timer: row.timer, gauges: row.gauges, cards, minimap: null, inset };
+    // 한 줄에 들어가지 않는 좁은 창(touchShape가 띠를 두 줄 높이로 키웠다): 윗줄 팀 카드 · 타이머, 아랫줄 거점 줄 게이지 — 타이머 아래
+    // 가운데, 시스템 버튼에 닿으면 그 왼쪽으로. 두 줄 덩어리는 띠 가운데
+    const top = (band - (cardH + U.gap + rowH)) / 2;
+    const y = top + cardH + U.gap;
+    const hi = r.sysBottom > y ? r.sysLeft - U.gap : W - U.edge;
+    const x = Math.max(U.edge, Math.min(W / 2 - runW(n) / 2, hi - runW(n)));
+    return {
+      timer: { ...row.timer, y: top + (cardH - timerH) / 2 },
+      gauges: runAt(x, y, n),
+      cards: { ...cards, y: top },
+      minimap: null,
+      inset,
+    };
   }
 
   const cw = mapLeft;
@@ -672,7 +756,6 @@ function planCss(
   const rightTop = r.sysBottom + MIN_GAP;
   const rightLimit = r.clusterTop - MIN_GAP;
   const cols = clamp(Math.floor((colW + U.gap) / (cardW + U.gap)), 1, 3);
-  const gr = grid(cols);
   const wide = mode === 'wide';
   const timerW = Math.min(colW, timerCss.label);
   const label = !wide || timerW >= timerCss.label;
@@ -694,50 +777,150 @@ function planCss(
   );
   const timerTop = wide ? timerAt(center(timerWidth), U.edge) : timerAt(bandX, band / 2 - timerH / 2);
   const top = wide ? U.edge + timerH + U.gap : U.edge;
+  /** 게이지 다음 팀 카드 위 끝 (게이지 아래 끝 + 간격) */
+  const below = (y: number): number => y + U.gap + 2;
 
-  // 후보 (앞에서부터): ① 타이머 옆에 게이지(넓은 칸) ② 왼쪽 칸에 게이지 · 카드 ③ 게이지는 오른쪽 칸(시스템 버튼 아래)
+  // 후보 (이 차례로 넣는다 — 고르는 규칙은 아래 pick). 거점 셋(플레이테스트 b)이라 세로로 쌓은 게이지가 두 줄보다 17.7 CSS px
+  // 높아 360 안팎 휴대폰 왼쪽 칸에 타이머 · 게이지 · 카드가 다 들어가지 않는다 → ④ · ⑤ · ⑥을 더했다:
+  //  ① 타이머 옆에 게이지(넓은 칸) ⑥ 왼쪽 칸 두 열: 타이머 + 게이지 | 팀 카드 한 열(①보다 낮으면 먼저) ② 왼쪽 칸에 타이머 · 게이지 · 카드
+  //  ④ 타이머는 오른쪽 칸(시스템 버튼 아래), 왼쪽 칸에 게이지 · 카드 (넓은 화면) ⑤ 게이지를 위 띠에 가로로 (16:9)
+  //  ③ 게이지는 오른쪽 칸(시스템 버튼 아래)
+  // 게이지는 되도록 왼쪽 칸이다: 오른쪽 칸 부품은 판 중 창이 낮아지면(주소창) 엄지 버튼에 덮일 수 있다(미니맵만 옮길 수 있다)
   type Cand = {
     timer: Box & { label: boolean };
-    pair: { x: number; y: number };
+    gauges: Box[];
     cardsY: number;
+    /** 팀 카드 격자 왼쪽 끝 · 열 수 (없으면 칸 가운데 · 칸 폭만큼) */
+    cardsAt?: { x: number; cols: number };
+    /** 오른쪽 칸 미니맵 자리 위 끝 */
     rightY: number;
+    /** 오른쪽 칸에 둔 부품의 아래 끝 (없으면 null) */
+    right: number | null;
+    /** 타이머가 오른쪽 칸이다 (자리는 미니맵을 정한 뒤 — 아래) */
+    timerRight?: true;
   };
   const cands: Cand[] = [];
   // 타이머 + 게이지 한 줄 (가운데 맞춤). 자리가 모자라면 '최후' 글자 없이 (색 + 문 아이콘이 같은 뜻)
-  for (const tw of wide ? [timerWidth, timerCss.plain] : []) {
-    if (colW < tw + U.gap + pairW || cands.length > 0) continue;
-    const x0 = center(tw + U.gap + pairW);
-    cands.push({
-      timer: { x: x0, y: U.edge + (g - timerH) / 2, w: tw, h: timerH, label: tw >= timerCss.label },
-      pair: { x: x0 + tw + U.gap, y: U.edge },
-      cardsY: U.edge + g + U.gap + 2,
+  const tws = wide ? [timerWidth, timerCss.plain].filter((tw) => colW >= tw + U.gap + rowW) : [];
+  const tw = tws[0];
+  if (tw !== undefined) {
+    const x0 = center(tw + U.gap + rowW);
+    const t = { x: x0, y: U.edge + (g - timerH) / 2, w: tw, h: timerH, label: tw >= timerCss.label };
+    const c1: Cand = {
+      timer: t,
+      gauges: stackAt(x0 + tw + U.gap, U.edge),
+      cardsY: below(U.edge + g),
       rightY: rightTop,
-    });
+      right: null,
+    };
+    // ⑥ 두 열: 바깥 열 타이머 + 게이지, 맵 쪽 열 팀 카드 한 열. ①보다 낮으면(카드가 두 열 이하) 먼저 — 왼쪽 칸 아래 끝이 높을수록
+    // 이동 영역이 넓고, 판 중 창이 낮아져도(도구 막대) 카드가 이동 영역에 덜 닿는다
+    const tw6 = tws.find((w) => colW >= Math.max(w, rowW) + U.gap + cardW);
+    if (tw6 !== undefined) {
+      const c0 = Math.max(tw6, rowW);
+      const x6 = center(c0 + U.gap + cardW);
+      const c6: Cand = {
+        timer: { x: x6 + (c0 - tw6) / 2, y: U.edge, w: tw6, h: timerH, label: tw6 >= timerCss.label },
+        gauges: stackAt(x6 + (c0 - rowW) / 2, U.edge + timerH + U.gap),
+        cardsY: U.edge,
+        cardsAt: { x: x6 + c0 + U.gap, cols: 1 },
+        rightY: rightTop,
+        right: null,
+      };
+      const low1 = c1.cardsY + grid(cols).h;
+      const low6 = Math.max(U.edge + timerH + U.gap + g, U.edge + grid(1).h);
+      cands.push(...(low6 < low1 ? [c6, c1] : [c1, c6]));
+    } else cands.push(c1);
   }
   cands.push({
     timer: timerTop,
-    pair: { x: center(pairW), y: top },
-    cardsY: top + g + U.gap + 2,
+    gauges: stackAt(center(rowW), top),
+    cardsY: below(top + g),
     rightY: rightTop,
+    right: null,
   });
+  if (wide)
+    cands.push({
+      timer: timerAt(rightCenter(timerWidth), rightTop),
+      gauges: stackAt(center(rowW), U.edge),
+      cardsY: below(U.edge + g),
+      rightY: rightTop,
+      right: rightTop + timerH,
+      timerRight: true,
+    });
+  else {
+    // ⑤ 위 띠 왼쪽부터 가로로, 타이머는 그 오른쪽(가운데보다 오른쪽이 되면 옮긴다, 모자라면 '최후' 글자 없이). 시스템 버튼에 닿으면
+    // 타이머는 오른쪽 칸(시스템 버튼 아래 — 칸 폭만큼)
+    const y = band / 2 - rowH / 2;
+    const tx = Math.max(timerTop.x, U.edge + runW(n) + U.gap * 2);
+    const tw5 = [timerWidth, timerCss.plain].find((w) => tx + w <= r.sysLeft - U.gap + 0.01);
+    const tr = Math.min(colW, timerWidth);
+    const t5 =
+      tw5 !== undefined
+        ? { ...timerTop, x: tx, w: tw5, label: tw5 >= timerCss.label }
+        : { x: rightCenter(tr), y: rightTop, w: tr, h: timerH, label: tr >= timerCss.label };
+    if (y >= 0)
+      cands.push({
+        timer: t5,
+        gauges: runAt(U.edge, y, n),
+        cardsY: below(y + rowH),
+        rightY: rightTop,
+        right: tw5 !== undefined ? null : rightTop + timerH,
+        ...(tw5 !== undefined ? {} : { timerRight: true as const }),
+      });
+  }
   cands.push({
     timer: timerTop,
-    pair: { x: rightCenter(pairW), y: rightTop },
+    gauges: stackAt(rightCenter(rowW), rightTop),
     cardsY: top,
     rightY: rightTop + g + U.gap,
+    right: rightTop + g,
   });
-  // 넘치는 양: 왼쪽 칸은 이동 영역이 조금 줄어드는 것, 오른쪽 칸은 버튼과 겹치는 것이라 훨씬 무겁게 친다
-  const over = (c: Cand): number =>
-    Math.max(0, c.cardsY + gr.h - leftLimit) +
-    (c.pair.x < W / 2 ? 0 : Math.max(0, c.pair.y + g - rightLimit) * 100);
-  const pick = cands.find((c) => over(c) === 0) ?? [...cands].sort((p, q) => over(p) - over(q))[0]!;
-  const timerBox = pick.timer;
-  const gauges = pairAt(pick.pair.x, pick.pair.y);
-  const cards = { x: center(gr.w), y: pick.cardsY, w: gr.w, h: gr.h, cols, cw: cardW, ch: cardH };
-  // 미니맵: 오른쪽 칸 남는 자리 (3:2 + 제목 · 틀). 최소 폭보다 좁으면 숨긴다
+  // 넘치는 양: 왼쪽 칸은 이동 영역이 조금 줄어드는 것. 오른쪽 칸은 엄지 버튼 무리 위 최소 간격(MIN_GAP) 안으로 들어가는 것(왼쪽 칸과
+  // 같은 무게)과 버튼 위 끝 아래로 내려가 겹치는 것(훨씬 무겁게). 간격 안으로 몇 px 들어가는 것까지 100배로 치면 낮은 넓은 휴대폰
+  // 괴물(658×291 등)이 왼쪽 칸에 다 쌓아 팀 카드 둘이 이동 스틱 그림을 덮었다(검토 반영). 간격 안으로 들어간 배치는 기본 크기에서만
+  // 쓴다 — 키운 크기는 touchHudFits가 버튼 무리와의 간격을 보고 크기를 줄인다
+  const cardsH = (c: Cand): number => grid(c.cardsAt?.cols ?? cols).h;
+  const leftOver = (c: Cand): number => Math.max(0, c.cardsY + cardsH(c) - leftLimit);
+  const rightOver = (c: Cand): number => (c.right === null ? 0 : Math.max(0, c.right - rightLimit));
+  /** 오른쪽 칸 부품이 버튼 위 끝 아래로 내려간 양 (겹침) · 최소 간격 안으로만 들어간 양 (rightOver = 둘의 합) */
+  const rightHit = (c: Cand): number => (c.right === null ? 0 : Math.max(0, c.right - r.clusterTop));
+  const rightGap = (c: Cand): number => rightOver(c) - rightHit(c);
+  const over = (c: Cand): number => leftOver(c) + rightGap(c) + rightHit(c) * 100;
+  // 옆 칸 미니맵 폭: 오른쪽 칸 남는 자리 (3:2 + 제목 · 틀, 오른쪽 칸 타이머 자리는 아래에 남긴다)
   const mm = P.minimap;
-  const avail = rightLimit - pick.rightY - (mm.title + mm.pad) * a;
-  const mmW = Math.min(colW - mm.pad * 2 * a, (avail * MAP_W) / MAP_H);
+  const sideMinimapW = (c: Cand): number =>
+    Math.min(
+      colW - mm.pad * 2 * a,
+      ((rightLimit - c.rightY - (c.timerRight ? timerH + U.gap : 0) - (mm.title + mm.pad) * a) * MAP_W) /
+        MAP_H,
+    );
+  const keepsMinimap = (c: Cand): boolean => sideMinimapW(c) >= U.minimapMin;
+  // 이동 영역만 최소(이동 스틱 그림 + 24px)로 줄고 겹치지는 않는다: 왼쪽 칸이 MIN_GAP 안에서만 넘친다 (moveZone)
+  const fitsTight = (c: Cand): boolean => rightOver(c) === 0 && leftOver(c) <= MIN_GAP;
+  // 고르기 (각 단계에서 앞 후보부터): 1) 넘치지 않고 옆 칸 미니맵이 남는 후보 2) 이동 영역만 최소로 줄고(겹치지 않는다) 옆 칸 미니맵이
+  // 남는 후보 3) 넘치지 않는 후보 4) 이동 영역만 최소로 줄어드는 후보 5) 덜 넘치는 후보. 옆 칸 미니맵이 없으면 맵 창 안 구석에 두어 맵을 가린다
+  // (플레이테스트 a-5) — 거점 셋이라 360 안팎 휴대폰 괴물(엄지 버튼 무리가 높아 오른쪽 칸이 좁다)은 왼쪽 칸에 타이머 · 게이지 · 카드를
+  // 다 두고 이동 영역을 최소로 줄여 옆 칸 미니맵을 지킨다
+  const pick =
+    cands.find((c) => over(c) === 0 && keepsMinimap(c)) ??
+    cands.find((c) => fitsTight(c) && keepsMinimap(c)) ??
+    cands.find((c) => over(c) === 0) ??
+    cands.find(fitsTight) ??
+    [...cands].sort((p, q) => over(p) - over(q))[0]!;
+  const cc = pick.cardsAt?.cols ?? cols;
+  const gr = grid(cc);
+  const cards = {
+    x: pick.cardsAt?.x ?? center(gr.w),
+    y: pick.cardsY,
+    w: gr.w,
+    h: gr.h,
+    cols: cc,
+    cw: cardW,
+    ch: cardH,
+  };
+  // 미니맵: 오른쪽 칸 남는 자리. 최소 폭보다 좁으면 숨긴다(맵 창 안 미니맵 — insetCss)
+  const mmW = sideMinimapW(pick);
   const minimap =
     mmW >= U.minimapMin
       ? {
@@ -747,9 +930,19 @@ function planCss(
           h: (mmW * MAP_H) / MAP_W,
         }
       : null;
+  // 오른쪽 칸 타이머: 판 중 창이 낮아지면(주소창 · 도구 막대) 그림은 줄고 시스템 버튼 · 엄지 버튼은 그대로라 칸 위 · 아래 끝이 덮인다
+  // (옮길 수 있는 것은 미니맵뿐 — hudCovered). 미니맵이 있으면 그 아래, 없으면 남는 자리 가운데
+  const timer = pick.timerRight
+    ? {
+        ...pick.timer,
+        y: minimap
+          ? minimap.y + minimap.h + mm.pad * a + U.gap
+          : Math.max(rightTop, (rightTop + rightLimit - timerH) / 2),
+      }
+    : pick.timer;
   return {
-    timer: timerBox,
-    gauges,
+    timer,
+    gauges: pick.gauges,
     cards,
     minimap,
     inset: minimap ? null : insetCss(map, r, a),
@@ -887,7 +1080,10 @@ function touchGeom(l: LayoutInfo): {
 
 /**
  * UI 크기를 키운 배치가 들어가는가 (layoutFor가 UI 크기를 고를 때): 두 역할 모두 늘 떠 있는 부품이 화면 안이고 맵 · 서로 · 엄지
- * 자리(버튼 무리 · 시스템 버튼 칸 · 이동 스틱 그림 위 이동 영역)와 겹치지 않고, 점수판이 화면 폭에 들어간다
+ * 자리(시스템 버튼 칸 · 이동 스틱 그림 위 이동 영역)와 겹치지 않고, 오른쪽 아래 버튼 무리와는 최소 간격(MIN_GAP) 이상 떨어지고,
+ * 점수판이 화면 폭에 들어간다. 버튼 무리 간격: 기본 크기의 고르기(planCss)는 넘칠 때 오른쪽 칸 부품이 간격 안으로 몇 px 들어가는
+ * 것을 왼쪽 칸 넘침과 같은 무게로 쳐서(낮은 넓은 휴대폰 괴물) 겹침만 보면 키운 크기를 그대로 쓰며 게이지 · 타이머를 버튼에 붙였다
+ * — 키운 크기는 크기를 줄여 간격을 지킨다(판 중 창이 조금 낮아져도 버튼에 덮이지 않게, 검토 반영)
  */
 function touchHudFits(l: LayoutInfo): boolean {
   const U = TOUCH_UI;
@@ -902,7 +1098,8 @@ function touchHudFits(l: LayoutInfo): boolean {
     for (const [i, b] of boxes.entries()) {
       if (b.x < -0.01 || b.y < -0.01 || b.x + b.w > W + 0.01 || b.y + b.h > H + 0.01) return false;
       if (overlapsCss(b, g.mapCss) || overlapsCss(b, sys)) return false;
-      if (r.cluster.some((c) => overlapsCss(b, c))) return false;
+      const near = { x: b.x - MIN_GAP, y: b.y - MIN_GAP, w: b.w + MIN_GAP * 2, h: b.h + MIN_GAP * 2 };
+      if (r.cluster.some((c) => overlapsCss(near, c))) return false;
       if (b.x < W * MOVE_ZONE_RATIO && b.y + b.h > r.moveTop - U.zoneTop + 0.01) return false;
       for (const o of boxes.slice(i + 1)) if (overlapsCss(b, o)) return false;
     }
@@ -913,7 +1110,8 @@ function touchHudFits(l: LayoutInfo): boolean {
 /**
  * 터치 HUD 배치 (순수). 화면(CSS) 기준으로 정하고 논리 px로 돌려준다. 늘 떠 있는 부품은 맵 사각형 · 엄지 영역
  * (오른쪽 아래 버튼 무리 · 오른쪽 위 시스템 버튼 · 이동 스틱 그림)과 겹치지 않는다(tests/unit/touch-hud.test.ts).
- * 좌우 반전(tuning.mirror)이면 다 정한 뒤 좌우로 뒤집는다 (거점 줄 게이지는 A가 늘 윗줄이라 줄 순서는 그대로)
+ * 좌우 반전(tuning.mirror)이면 다 정한 뒤 좌우로 뒤집는다. 거점 줄 게이지는 뒤집은 자리를 읽는 차례(위 → 아래, 왼쪽 → 오른쪽)로
+ * 다시 나눠 A · B · C 차례를 지킨다 — 세로로 쌓으면 A가 늘 윗줄, 가로 한 줄이면 A가 늘 왼쪽(팀 카드 순서와 같이)
  * gaugeRows = 거점 줄 게이지 줄 수 (기본 = 거점 수)
  */
 export function touchHudPlan(l: LayoutInfo, gaugeRows: number = GAUGE_IDS.length): TouchHud | null {
@@ -926,7 +1124,7 @@ export function touchHudPlan(l: LayoutInfo, gaugeRows: number = GAUGE_IDS.length
   const flip = (b: Box): Box => (T.mirror ? { ...b, x: W - b.x - b.w } : b);
   const plan = (monster: boolean): TouchHudPlan => {
     const p = planCss(W, H, mode, band, mapLeft, monster, mapCss, T, gaugeRows);
-    const gauges = p.gauges.map(flip);
+    const gauges = T.mirror ? p.gauges.map(flip).sort((u, v) => u.y - v.y || u.x - v.x) : p.gauges;
     const c = p.cards;
     const gridW = c.cols * c.cw + (c.cols - 1) * U.gap;
     const cards = { ...c, x: flip({ x: c.x, y: c.y, w: gridW, h: c.h }).x };
@@ -1055,6 +1253,32 @@ const GAUGE_W = GAUGE.dia + GAUGE.gap + GAUGE.chip + GAUGE.pctGap + GAUGE.pctW +
 /** 진행 숫자 글자 크기 (그림 단위): PC 17 논리 px, 터치 보조 글자(CSS 12px — UI 크기를 키우면 같이 커진다) */
 const PCT_FONT = { pc: 17, touch: TOUCH_UI.font.small / TOUCH_UI.art } as const;
 const TIMER_W = 156;
+/** PC 위 띠: 게이지끼리 · 타이머와 게이지 사이 틈 */
+const GAUGE_SPACE = 14;
+
+/** PC 위 띠 거점 게이지 한 개의 자리: x = 배지 쪽 바깥 끝(side 1 = 왼쪽 끝, −1 = 오른쪽 끝), y = 가운데 */
+export interface GaugeSpot {
+  id: string;
+  x: number;
+  y: number;
+  /** 1 = 배지가 왼쪽(채움도 왼쪽에서), −1 = 배지가 오른쪽 */
+  side: 1 | -1;
+}
+
+/**
+ * PC 위 띠 거점 게이지 자리 (GAUGE_IDS 차례, 플레이테스트 b — 거점 셋): 앞쪽 절반(올림)은 타이머 왼쪽, 나머지는 오른쪽이라 왼쪽부터
+ * A · B · 타이머 · C. 배지는 바깥(타이머 반대쪽). 크기는 그대로(전체 폭 288)이고 A가 B의 왼쪽(278)에 붙는다 — 왼쪽 판 중 메뉴 버튼은
+ * A 왼쪽 끝까지 쓰고(matchMenuButton gaugeLeft), 오른쪽 x 1490 이후(선명도 탐침 자리)는 비운다 (tests/unit/hud.test.ts)
+ */
+function pcGaugeSpots(viewW: number, y: number): GaugeSpot[] {
+  const left = Math.ceil(GAUGE_IDS.length / 2);
+  const step = GAUGE_W + GAUGE_SPACE;
+  return GAUGE_IDS.map((id, i) =>
+    i < left
+      ? { id, x: viewW / 2 - TIMER_W / 2 - (left - i) * step, y, side: 1 }
+      : { id, x: viewW / 2 + TIMER_W / 2 + (i - left + 1) * step, y, side: -1 },
+  );
+}
 
 function hudFor(l: LayoutInfo) {
   const side = l.mapX;
@@ -1063,6 +1287,8 @@ function hudFor(l: LayoutInfo) {
   const s = l.uiScale;
   const tileY = TILE_PX * MAP_SCALE;
   const P = TOUCH_PART;
+  const spots = pcGaugeSpots(l.viewW, band / 2);
+  const spot = (id: string): GaugeSpot => spots.find((g) => g.id === id) ?? spots[0]!;
   return {
     /** 그림 배율 (그림 단위 → 논리 px, PC 1) */
     s,
@@ -1075,7 +1301,7 @@ function hudFor(l: LayoutInfo) {
       ? { x: touch.survivor.timer.x, y: touch.survivor.timer.y, w: touch.survivor.timer.w, h: P.timer.h }
       : { x: l.viewW / 2, y: band / 2, w: TIMER_W, h: 44 },
     /**
-     * 거점 게이지: 배지 ◇ · 상태 칩 · 진행 숫자 칸 · 막대. A는 타이머 왼쪽, B는 오른쪽에 좌우 대칭(배지가 바깥).
+     * 거점 게이지: 배지 ◇ · 상태 칩 · 진행 숫자 칸 · 막대. PC는 왼쪽부터 A · B · 타이머 · C(gauges), 배지가 바깥.
      * 터치는 줄 게이지(TOUCH_PART.gaugeRow · GAUGE_ROW): w = 한 줄 폭, rowH = 줄 높이, letterFont = 거점 글자(주요 글자 CSS 14px)
      */
     gauge: touch
@@ -1087,9 +1313,12 @@ function hudFor(l: LayoutInfo) {
           letterFont: TOUCH_UI.font.main / TOUCH_UI.art,
         }
       : { ...GAUGE, w: GAUGE_W, rowH: 0, pctFont: PCT_FONT.pc, letterFont: 0 },
-    /** 배지 쪽 바깥 끝 x (A = 왼쪽 끝, B = 오른쪽 끝) */
-    gaugeA: { x: l.viewW / 2 - TIMER_W / 2 - 14 - GAUGE_W, y: band / 2 },
-    gaugeB: { x: l.viewW / 2 + TIMER_W / 2 + 14 + GAUGE_W, y: band / 2 },
+    /** PC 위 띠 거점 게이지 자리 (GAUGE_IDS 차례 — pcGaugeSpots). x = 배지 쪽 바깥 끝 */
+    gauges: spots,
+    /** 거점마다 자리 (A · B = 왼쪽 끝, C = 오른쪽 끝) */
+    gaugeA: spot('A'),
+    gaugeB: spot('B'),
+    gaugeC: spot('C'),
     /** 왼쪽 팀 카드 (생존자 화면 h, 괴물 화면 익명 카드 hAnon) */
     leftCards: { x: 14, y: band + 14, w: side - 28, h: 124, hAnon: 96, gap: 10 },
     /** 미니맵 그림 자리 (틀은 바깥으로 pad, 위로 제목 줄 title) */

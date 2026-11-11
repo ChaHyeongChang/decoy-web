@@ -92,11 +92,12 @@ function nameOf(id: ControlId): string {
   return id === 'move' ? EDITOR_TEXT.move : LOOK[id].label;
 }
 
-/** HUD 미리보기 이름표 (팀 카드 · 거점 게이지는 첫 칸에만) */
+/** HUD 미리보기 이름표 (팀 카드는 첫 칸에만, 거점 게이지는 줄마다) */
 const HUD_LABEL: Readonly<Record<string, string>> = {
   timer: EDITOR_TEXT.timer,
   gaugeA: EDITOR_TEXT.gaugeA,
   gaugeB: EDITOR_TEXT.gaugeB,
+  gaugeC: EDITOR_TEXT.gaugeC,
   card0: EDITOR_TEXT.cards,
   minimap: EDITOR_TEXT.minimap,
 };

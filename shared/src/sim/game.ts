@@ -3,6 +3,7 @@
 import {
   BTN,
   MONSTER_SPAWN,
+  POINT_IDS,
   PRISON_CENTER,
   PRISON_SLOTS,
   Rng,
@@ -79,26 +80,17 @@ export class Game {
   readonly players = new Map<string, GamePlayer>();
   readonly survivors: SurvivorState[] = [];
   readonly monster: MonsterState;
-  readonly points: CapturePointState[] = [
-    {
-      id: 'A',
-      progress: 0,
-      done: false,
-      capturing: false,
-      blocked: false,
-      lastAlertAt: -1e9,
-      wasCapturing: false,
-    },
-    {
-      id: 'B',
-      progress: 0,
-      done: false,
-      capturing: false,
-      blocked: false,
-      lastAlertAt: -1e9,
-      wasCapturing: false,
-    },
-  ];
+  /** 거점 상태 (POINT_IDS 순서 A · B · C 고정 — 같은 틱에 여럿이 끝나면 이 순서로 센다) */
+  readonly points: CapturePointState[] = POINT_IDS.map((id) => ({
+    id,
+    progress: 0,
+    done: false,
+    off: false,
+    capturing: false,
+    blocked: false,
+    lastAlertAt: -1e9,
+    wasCapturing: false,
+  }));
   readonly exits: ExitRuntime[] = [
     { id: 'N', state: 'inactive', progress: 0 },
     { id: 'S', state: 'inactive', progress: 0 },
@@ -171,7 +163,7 @@ export class Game {
           roarX: 0,
           roarY: 0,
           trackedLeft: 0,
-          pointCamp: { A: 0, B: 0 },
+          pointCamp: { A: 0, B: 0, C: 0 },
         };
         this.players.set(p.id, monster);
       } else {

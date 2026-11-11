@@ -127,6 +127,46 @@ describe('판 기록: 괴물 수치', () => {
     expect(statsOf(rec, game, 'p2').captureSec).toBeGreaterThan(1.4);
   });
 
+  it('세 곳 중 두 곳: 모자란 점령 수 2 → 1 → 0, 둘째 완료로 꺼진 셋째는 끊긴 점령이 아니고, 꺼진 뒤에는 점령 기여 초가 오르지 않으며 그 안 타격은 저지 타격이 아니다 (플레이테스트 반영 b)', () => {
+    const game = readyGame();
+    const d = new Driver(game);
+    const rec = new MatchRecorder(game);
+    const ct = game.balance.capturePoint.captureTime;
+    const c = CAPTURE_POINTS.C;
+    // 괴물은 C에서 6타일(끊긴 점령 거리 8 안, 반경 밖), 스카우트가 C를 점령 중
+    place(game, 'p1', c.x, c.y + 6, Math.PI / 2);
+    place(game, 'p4', c.x, c.y);
+    place(game, 'p2', 8, 22);
+    place(game, 'p3', 40, 22);
+    drive(game, d, rec, d.seconds(1.5));
+    expect(game.points[2]!.capturing).toBe(true);
+    expect(statsOf(rec, game, 'p1').pointsLeft).toBe(2);
+    // A를 끝낸다
+    game.points[0]!.progress = ct - game.dt * 2;
+    place(game, 'p2', 8, 16);
+    drive(game, d, rec, 4);
+    expect(game.points[0]!.done).toBe(true);
+    expect(statsOf(rec, game, 'p1').pointsLeft).toBe(1);
+    // B를 끝낸다 → 점령 중이던 C가 꺼진다 (괴물이 8타일 안이지만 괴물이 끊은 것이 아니다)
+    game.points[1]!.progress = ct - game.dt * 2;
+    place(game, 'p3', 40, 16);
+    drive(game, d, rec, 4);
+    expect(game.points[1]!.done).toBe(true);
+    expect(game.points[2]!.off).toBe(true);
+    const capAtOff = statsOf(rec, game, 'p4').captureSec;
+    drive(game, d, rec, d.seconds(2));
+    let m = statsOf(rec, game, 'p1');
+    expect(m.pointsLeft).toBe(0);
+    expect(m.pointStops).toBe(0);
+    expect(statsOf(rec, game, 'p4').captureSec).toBe(capAtOff);
+    // 꺼진 C 안에서 스카우트를 때린다 (탈출구 근처가 아니다)
+    place(game, 'p1', c.x - 1, c.y, 0);
+    drive(game, d, rec, d.seconds(1.5), { p1: [0, 0, { pressed: BTN.ATTACK, aim: 0 }] });
+    m = statsOf(rec, game, 'p1');
+    expect(m.hits).toBeGreaterThanOrEqual(1);
+    expect(m.zoneHits).toBe(0);
+  });
+
   it('포효로 찾기: 발동 순간 반경 10 안 자유 · 수감 생존자 수', () => {
     const game = readyGame();
     const d = new Driver(game);
@@ -234,7 +274,10 @@ describe('판 기록: 생존자 수치', () => {
     const d = new Driver(game);
     const rec = new MatchRecorder(game);
     place(game, 'p1', 45, 28, 0);
-    for (const p of game.points) p.done = true;
+    // 세 곳 중 두 곳(A · B)이 끝나 C는 꺼졌고 탈출구가 켜진 판
+    game.points[0]!.done = true;
+    game.points[1]!.done = true;
+    game.points[2]!.off = true;
     for (const e of game.exits) e.state = 'active';
     const n = EXITS.N.center;
     place(game, 'p2', n.x - 0.4, n.y + 0.3);

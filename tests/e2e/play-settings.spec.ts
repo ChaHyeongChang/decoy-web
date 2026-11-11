@@ -8,7 +8,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { BTN, type DrawnEntity, type MatchPrefsDebug } from '@decoy/shared';
 import { HELP_TEXT } from '../../client/src/data/storyText';
-import { MAP_RECT } from '../../client/src/ui/layout';
+import { HUD, MAP_RECT } from '../../client/src/ui/layout';
 import {
   PHONE_LANDSCAPE,
   aimMonsterAt,
@@ -151,11 +151,13 @@ test('PC 판 중 메뉴: 위 띠 왼쪽 버튼 · Esc로 열고 닫고, 여는 �
     return { x: r.left, y: r.top, k: r.height / 1080 };
   });
   console.log(`[play-settings] 메뉴 버튼 ${JSON.stringify(btn)} (캔버스 ${JSON.stringify(canvas)})`);
-  // 위 띠(64) 안 · 거점 A 게이지(x 292) 왼쪽 · 선명도 탐침 자리(x 1490 이후) 밖, 44px 이상
+  // 위 띠(64) 안 · 가장 왼쪽 거점 게이지(A — 거점 셋이라 x 278, 배지 반쪽 여유까지) 왼쪽 · 선명도 탐침 자리(x 1490 이후) 밖, 44px 이상
   expect(btn.h).toBeGreaterThanOrEqual(44);
   expect(btn.y).toBeGreaterThanOrEqual(canvas.y - 0.5);
   expect(btn.y + btn.h).toBeLessThanOrEqual(canvas.y + 64 * canvas.k + 0.5);
-  expect(btn.x + btn.w).toBeLessThanOrEqual(canvas.x + 292 * canvas.k);
+  const gaugeLeft =
+    Math.min(...HUD.gauges.map((g) => (g.side === 1 ? g.x : g.x - HUD.gauge.w))) - HUD.gauge.dia / 2;
+  expect(btn.x + btn.w).toBeLessThanOrEqual(canvas.x + gaugeLeft * canvas.k);
   await expect(page.getByTestId('match-menu')).toContainText('설정');
   await expect(page.getByTestId('match-menu')).toContainText(HELP_TEXT.menuKey);
 

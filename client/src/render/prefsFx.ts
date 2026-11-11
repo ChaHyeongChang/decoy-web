@@ -90,15 +90,22 @@ export const MINIMAP_BIG = {
 /**
  * 크게 본 지도 바닥 해상도 (지도 크게 보기가 흐리던 것 고침): 그림이 화면에서 차지하는 기기 px에 맞춰 바닥을 따로 합성한다.
  * budgetMargin = 텍스처 예산에서 남겨 두는 여유(바이트 — 판 중 잠깐 생기는 작은 텍스처 몫), maxW = 폭 상한(텍셀 — 굽기 · 합성 ·
- * 올리기 비용의 상한), stepMs = 그 해상도 정적 맵을 판 중에 나눠 굽는 한 프레임 예산(ms — 다 구울 때까지는 작은 지도 합성을 늘린다)
+ * 올리기 비용의 상한), stepMs = 그 해상도 정적 맵을 판 중에 나눠 굽는 한 프레임 예산(ms — 다 구울 때까지는 작은 지도 합성을 늘린다),
+ * minW = 예산이 모자라 작은 지도 합성보다 작게 구울 때의 하한(텍셀 — 이보다 작으면 크게 보기를 열지 않는다, bigMinimapTexels)
  */
-export const MINIMAP_BIG_TEXELS = { budgetMargin: 256 * 1024, maxW: 2048, stepMs: 4 } as const;
+export const MINIMAP_BIG_TEXELS = { budgetMargin: 256 * 1024, maxW: 2048, stepMs: 4, minW: 128 } as const;
 
 /**
  * 크게 본 지도 바닥 폭 (텍셀). needW = 그림 폭이 화면에서 차지하는 기기 px(논리 폭 × 백버퍼 배율), baseW = 작은 미니맵 합성 폭,
  * aspect = 맵 가로 / 세로, budget = 이 품질의 텍스처 예산, others = 크게 본 지도를 뺀 지금 텍스처 바이트.
- * 바닥 텍스처(폭 × 폭 / aspect × 4바이트)가 others와 합쳐 budget − 여유를 넘지 않는 만큼만 키운다. 결과가 작은 미니맵 합성 폭
- * 이하면 null — 작은 지도 합성을 그대로 늘려 쓴다(예전과 같다: 휴대폰 높음 · 중간은 이미 기기 px 이상)
+ * 지도가 열린 동안 크게 본 지도 텍스처('minimap-big')가 others와 합쳐 budget − 여유를 넘지 않게 정한다. 늘려 쓰는 길도 그 텍스처에
+ * 작은 지도 합성 사본(baseW × baseW / aspect)을 올리므로 같이 센다 (예전에는 세지 않아 PC 1920×1080@2 높음이 거점 C 뒤 열면 넘었다):
+ *  - 남은 예산으로 작은 미니맵 합성보다 크게 구울 수 있으면 그 폭(needW · maxW 이하) — 굽는 동안 올리는 사본은 그보다 작다
+ *  - 아니면 사본이 들어가면 null — 작은 지도 합성을 그대로 늘려 쓴다(예전과 같다: 휴대폰 높음 · 중간은 이미 기기 px 이상)
+ *  - 사본도 들어가지 않으면 들어가는 폭(작은 합성보다 작다)으로 굽는다 — 같은 기록 · 빛이라 정보는 같고 해상도만 낮다. 굽는 동안에도
+ *    텍스처는 그 폭으로 줄여 담는다(Minimap.refreshBase maxW)
+ *  - 그 폭이 minW(그림이 그보다 작으면 needW)보다 작으면 0 — 크게 보기를 열지 않는다(작은 지도는 그대로). 그보다 작은 바닥(한 타일
+ *    2.7텍셀 미만)은 벽 · 길을 알아볼 수 없어 작은 지도를 흐리게 키운 것밖에 안 되고, 늘려 쓰는 사본은 예산을 넘는다
  */
 export function bigMinimapTexels(
   needW: number,
@@ -107,12 +114,15 @@ export function bigMinimapTexels(
   budget: number,
   others: number,
 ): number | null {
-  if (!(needW > 0) || !(aspect > 0)) return null;
+  if (!(aspect > 0)) return null;
+  const need = needW > 0 ? Math.ceil(needW) : 0;
   const room = budget - MINIMAP_BIG_TEXELS.budgetMargin - others;
   const fit = room > 0 ? Math.floor(Math.sqrt((room / 4) * aspect)) : 0;
   // 높이 반올림이 바이트를 넘기지 않게 한 칸 여유
-  const w = Math.min(Math.ceil(needW), fit - 1, MINIMAP_BIG_TEXELS.maxW);
-  return w > baseW ? w : null;
+  const w = Math.min(need, fit - 1, MINIMAP_BIG_TEXELS.maxW);
+  if (w > baseW) return w;
+  if (baseW * Math.ceil(baseW / aspect) * 4 <= room) return null;
+  return w >= Math.max(1, Math.min(MINIMAP_BIG_TEXELS.minW, need)) ? w : 0;
 }
 
 export interface PlaceRect {

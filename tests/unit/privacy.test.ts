@@ -154,7 +154,13 @@ function accountMessageFields(): string[] {
 
 describe('보내는 항목 대응표 (privacyData.ts ↔ ClientMessage)', () => {
   it('ClientMessage의 모든 필드가 대응표(로그인한 화면만 보내는 칸은 ACCOUNT_DATA)에 있고, 대응표에 없는 필드를 적지 않았다', () => {
-    const { fields } = clientMessageFields();
+    const { fields: all } = clientMessageFields();
+    // 메시지 형식 칸(PROTOCOL_FIELDS)의 프로토콜 버전(proto)은 join · quick에만 있다 — 그 밖의 칸은 모두 대응표에 있어야 한다
+    const protocol = all.filter((f) =>
+      (PROTOCOL_FIELDS as readonly string[]).includes(f.split('.')[1] ?? ''),
+    );
+    expect(protocol.sort()).toEqual(['join.proto', 'quick.proto']);
+    const fields = all.filter((f) => !protocol.includes(f));
     const sent: string[] = Object.values(SENT_DATA).flatMap((d) => [...d.fields]);
     // 계정 표시 tag(join · quick · rematch의 account)는 로그인한 경우에만 보내 '로그인한 경우에만' 표(ACCOUNT_DATA)에 적는다
     const account = accountMessageFields();
@@ -171,7 +177,7 @@ describe('보내는 항목 대응표 (privacyData.ts ↔ ClientMessage)', () => 
       'ClientMessage에 없는 필드',
     ).toEqual([]);
     expect(new Set(mapped).size).toBe(mapped.length);
-    expect(PROTOCOL_FIELDS).toEqual(['t']);
+    expect(PROTOCOL_FIELDS).toEqual(['t', 'proto']);
   });
 
   it('검사가 실제로 잡는다: 입력 프레임은 하위 필드로 펼친다', () => {
@@ -569,6 +575,7 @@ describe('처리방침 문서', () => {
   // 수정 검토: 대기 · 결과 화면의 나가기는 그 자리를 바로 지우고, 사람이 남지 않은 방은 방째 바로 지운다(RoomManager.dropIfAbandoned).
   // 문서가 '모두 나가면 60초가 지난 뒤'만 적어 가장 흔한 경로와 달랐다. 코드와 문서 한쪽만 바뀌어도 실패한다
   it('서버 보관 사실이 코드와 같다: 대기 · 결과 화면에서 나가면 그 자리 · 빈 방을 바로 지운다', async () => {
+    const { PROTOCOL_VERSION } = await import('@decoy/shared');
     const { ServerCore } = await import('@decoy/shared/sim');
     const { FakeConn } = await import('../helpers/fakeConn');
     const { loadTestBalance } = await import('../helpers/fixtures');
@@ -576,6 +583,7 @@ describe('처리방침 문서', () => {
     const join = (name: string, room: string | null) =>
       JSON.stringify({
         t: 'join',
+        proto: PROTOCOL_VERSION,
         room,
         create: room === null,
         name,

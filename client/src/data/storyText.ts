@@ -10,7 +10,10 @@ export interface TextEntry {
 }
 
 export const STORY_TEXT: Record<TextId, TextEntry> = {
-  INTRO_WALL: { text: '탈출구의 비밀번호는 두 장소에 나뉘어 있다. 문은 혼자서는 열리지 않는다.', seconds: 4 },
+  INTRO_WALL: {
+    text: '비밀번호는 세 곳에 새겨져 있다. 두 곳이면 충분하다. 문은 혼자서는 열리지 않는다.',
+    seconds: 4,
+  },
   INTRO_MONSTER: { text: '감옥을 빠져나간 자들을 다시 가둬라.', seconds: 3 },
   NOTE_FIRST: {
     text: '숫자를 새겼다. 저것은 앞만 본다. 등 뒤로 돌아라. — 비밀번호 앞자리 {code} · 문에 입력된다',
@@ -196,6 +199,8 @@ export const UI_TEXT = {
   // ── 새 버전 (M13d) ──
   updateAvailable: '새 버전이 있어요',
   updateReload: '새로고침',
+  /** 프로토콜 관문 거절 (docs/DEPLOY.md 7장). 서버가 보내는 문구(UPDATE_REQUIRED_MESSAGE, shared/src/sim/core.ts)와 같다 */
+  updateRequired: '새 버전이 나왔어요. 새로고침해 주세요',
   // ── 처리방침 (M15) ──
   privacy: '개인정보 처리방침',
 } as const;
@@ -207,7 +212,7 @@ export const CONTROLS: Record<'monster' | 'survivor', string[]> = {
     'Space  고유 능력',
     'E (누르고 있기)  감옥 문 앞에서 구조',
     'Tab (누르고 있기)  점수판 · 상태',
-    '거점 A · B를 점령하고, 두 사람이 함께 탈출구에 3초 서 있으면 문이 열린다',
+    '거점 A · B · C 중 두 곳을 점령하고, 둘이 함께 탈출구에 3초 서 있으면 문이 열린다',
   ],
   monster: [
     'WASD  이동 · 마우스  조준',
@@ -225,7 +230,7 @@ export const CONTROLS_TOUCH: Record<'monster' | 'survivor', string[]> = {
     '능력 버튼  고유 능력',
     '구조 버튼 (누르고 있기)  감옥 문 앞에서 구조',
     '점수판 버튼  점수판 · 상태',
-    '거점 A · B를 점령하고, 두 사람이 함께 탈출구에 3초 서 있으면 문이 열린다',
+    '거점 A · B · C 중 두 곳을 점령하고, 둘이 함께 탈출구에 3초 서 있으면 문이 열린다',
   ],
   monster: [
     '왼쪽 스틱  이동 · 오른쪽 스틱  조준',
@@ -492,6 +497,7 @@ export const EDITOR_TEXT = {
   timer: '남은 시간',
   gaugeA: '거점 A',
   gaugeB: '거점 B',
+  gaugeC: '거점 C',
   cards: '팀 카드',
   minimap: '지도',
   move: '이동 스틱',

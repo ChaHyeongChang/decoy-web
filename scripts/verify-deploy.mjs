@@ -18,6 +18,14 @@ import { brotliDecompressSync, gunzipSync } from 'node:zlib';
 import WebSocket from 'ws';
 
 const PORT_IN_CONTAINER = 3000;
+/** 프로토콜 버전 (docs/DEPLOY.md 7장): 화면처럼 join에 싣는다 — 없으면 서버가 'update-required'로 거절한다. 원본은 shared/src/types.ts */
+const PROTOCOL_VERSION = Number(
+  /export const PROTOCOL_VERSION = (\d+);/.exec(
+    readFileSync(new URL('../shared/src/types.ts', import.meta.url), 'utf8'),
+  )?.[1],
+);
+if (!Number.isInteger(PROTOCOL_VERSION))
+  throw new Error('shared/src/types.ts에서 PROTOCOL_VERSION을 읽지 못했습니다');
 /** assetlinks 확인용 가짜 값 (M14): 형식만 맞는 패키지 이름 · 지문 두 개 (실제 서명 키와 무관) */
 const FAKE_PACKAGE = 'com.example.decoyverify';
 const FAKE_FINGERPRINTS = [
@@ -84,6 +92,7 @@ function wsWelcome(url) {
       ws.send(
         JSON.stringify({
           t: 'join',
+          proto: PROTOCOL_VERSION,
           room: null,
           create: true,
           name: '검사',
@@ -95,6 +104,12 @@ function wsWelcome(url) {
     );
     ws.on('message', (d) => {
       const m = JSON.parse(d.toString());
+      if (m.t === 'error') {
+        clearTimeout(timer);
+        ws.close();
+        reject(new Error(`WebSocket 입장 거절: ${m.code} ${m.message}`));
+        return;
+      }
       if (m.t === 'welcome') {
         clearTimeout(timer);
         ws.close();

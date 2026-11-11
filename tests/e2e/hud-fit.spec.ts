@@ -1,5 +1,5 @@
-// 작은 화면 HUD 겹침 없음 (남은 문제 정리): 작은 PC 창(960×540 · 1024×576 · 800×600 · 640×360)과 큰 창(1280×720), 휴대폰 가로
-// (800×360 · 915×412)에서 괴물 · 생존자 화면 모두 늘 떠 있는 HUD 부품(타이머 · 거점 게이지 · 팀 카드 · 미니맵 · 행동 칸 · 안내 줄),
+// 작은 화면 HUD 겹침 없음 (남은 문제 정리): 작은 PC 창(960×540 · 1024×576 · 800×600 · 800×520 · 640×360)과 큰 창(1280×720), 휴대폰 가로
+// (800×360 · 915×412) · 좁은 태블릿 창(820×590 — 위 띠 두 줄)에서 괴물 · 생존자 화면 모두 늘 떠 있는 HUD 부품(타이머 · 거점 게이지 · 팀 카드 · 미니맵 · 행동 칸 · 안내 줄),
 // PC 판 중 메뉴 버튼, FPS · 핑 칩, 터치 버튼(설정 · 점수판 · 엄지 버튼 · 스틱)이 서로 겹치지 않고 화면 안이다.
 // 예전에는 PC 메뉴 버튼(44 CSS px)이 위 띠(960×540에서 32px)보다 커 팀 카드 위 테두리에 약 5px(800×600은 11px, 맵 왼쪽 끝 ·
 // FPS 칩까지) 걸쳤다. 터치 HUD와 터치 대상의 겹침 · 글자 크기는 m12-screen이 더 많은 기기에서 본다
@@ -39,6 +39,9 @@ const CASES: { name: string; dev: BrowserContextOptions; touch: boolean }[] = [
   { name: 'PC 1280×720', dev: PC(1280, 720), touch: false },
   { name: '휴대폰 800×360', dev: PHONE(800, 360), touch: true },
   { name: '휴대폰 915×412', dev: PHONE(915, 412), touch: true },
+  // 거점 셋 검토 반영: 좌우 칸 없는 좁은 태블릿 창(위 띠 한 줄에 다 들어가지 않아 두 줄 띠) · 위 여백이 버튼보다 낮은 중간 PC 창
+  { name: '태블릿 Split View 820×590', dev: PHONE(820, 590), touch: true },
+  { name: 'PC 800×520', dev: PC(800, 520), touch: false },
 ];
 
 /** 잠깐 뜨는 덮개 (배너 · 메모 · 조작 안내 · 점수판)는 겹침에서 뺀다 — 맵 위에 탈출구 · 감옥을 비켜 뜬다(VISUAL_SPEC 8.1) */
@@ -85,7 +88,8 @@ async function hudBoxes(
       .poll(async () => (await page.evaluate(() => window.__DECOY__!.getMatchPrefs()))?.menuButton?.visible)
       .toBe(true);
   // 거점 진행 숫자 (플레이테스트 a-7): 게이지마다 자기 스냅샷 진행의 내림 %이고, 글자 객체가 아니라 아틀라스 그림이다
-  for (const id of ['A', 'B'] as const)
+  // (괴물 화면은 숫자 없음 — 플레이테스트 b)
+  for (const id of ['A', 'B', 'C'] as const)
     await waitPointPct(page, id, () => true, `${c.name} ${role} 거점 ${id}`);
   expect(await hudPctTexts(page)).toEqual([]);
   // 칩 글자 · 자리가 한 번 더 갱신될 때까지 (초당 2번)

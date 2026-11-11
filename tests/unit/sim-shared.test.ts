@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { build } from 'esbuild';
 import { ESLint } from 'eslint';
-import type { ClientMessage, ServerMessage } from '@decoy/shared';
+import { PROTOCOL_VERSION, type ClientMessage, type ServerMessage } from '@decoy/shared';
 import {
   MAX_CATCHUP_TICKS,
   ServerCore,
@@ -116,7 +116,16 @@ function newCore(clock: { t: number }): ServerCore {
 
 const raw = (msg: ClientMessage): string => JSON.stringify(msg);
 const join = (room: string | null, token: string | null = null): string =>
-  raw({ t: 'join', room, create: room === null, name: '시험', token, altTokens: [], bots: false });
+  raw({
+    t: 'join',
+    proto: PROTOCOL_VERSION,
+    room,
+    create: room === null,
+    name: '시험',
+    token,
+    altTokens: [],
+    bots: false,
+  });
 
 describe('ServerCore 연결 처리', () => {
   it('join 전에는 ping에 바로 pong (서버 시각), 그 밖의 메시지는 무시', () => {

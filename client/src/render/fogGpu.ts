@@ -465,7 +465,7 @@ function sameRect(a: TileRect, b: TileRect): boolean {
 }
 
 /** 조각 열쇠 (안개 주기마다 문자열을 만들지 않게 미리) */
-const POINT_KEY: Readonly<Record<PointId, string>> = { A: 'point-A', B: 'point-B' };
+const POINT_KEY: Readonly<Record<PointId, string>> = { A: 'point-A', B: 'point-B', C: 'point-C' };
 const EXIT_KEY: Readonly<Record<ExitId, string>> = { N: 'exit-N', S: 'exit-S' };
 
 /** 조각 그리기에 넘기는 한 개짜리 목록 (paintPoints · paintExits는 목록을 받는다. 붙잡지 않으므로 고쳐 쓴다) */

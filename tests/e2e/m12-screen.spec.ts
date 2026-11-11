@@ -41,7 +41,7 @@ const POLL = { intervals: [100, 150, 200], timeout: 20_000 };
 /** 터치 HUD 글자 하한 (CSS px, MOBILE_PLAN M12 2번) */
 const MIN_FONT = 12;
 /** 늘 떠 있는 HUD 부품 (이동 영역과도 겹치지 않는다). 그 밖(배너 · 메모)은 잠깐 뜨는 덮개라 보이는 버튼 · 스틱과만 본다 */
-const PERSISTENT = /^(timer|gaugeA|gaugeB|card\d|minimap|hint)$/;
+const PERSISTENT = /^(timer|gauge[A-C]|card\d|minimap|hint)$/;
 
 /** 16:9 휴대폰 (터치, 기기 배율 1) */
 function touchDevice(width: number, height: number): DeviceOptions {
@@ -231,7 +231,7 @@ test('글자 · 겹침: 휴대폰 높이 293 · 320 · 360 · 16:9 두 가지에
     const { layout } = await checkScreen(page, label);
     expect(layout.layout, label).toBe(c.kind);
     const ids = new Set(layout.items.map((i) => i.id));
-    for (const id of ['timer', 'gaugeA', 'gaugeB', 'card0', 'card1', 'card2'])
+    for (const id of ['timer', 'gaugeA', 'gaugeB', 'gaugeC', 'card0', 'card1', 'card2'])
       expect(ids.has(id), `${label} ${id}`).toBe(true);
     const fonts = layout.items.filter((i) => i.kind === 'text').map((i) => i.fontPx ?? 0);
     report.push(

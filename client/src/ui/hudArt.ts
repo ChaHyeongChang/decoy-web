@@ -45,6 +45,7 @@ import {
   blendOver,
   type ContrastPair,
 } from '../art/palette';
+import { OBJ_COLOR } from '../art/mapArtGeom';
 import { UI_FONT } from './fonts';
 import { GAUGE_IDS, GAUGE_ROW, HUD, type HudLayoutSpec } from './layout';
 
@@ -56,8 +57,16 @@ type Ctx = CanvasRenderingContext2D;
 export const HC = {
   /** 실루엣 · 아이콘 우물 (패널보다 어두운 원판) */
   well: 0x060c13,
-  /** 꺼진 아이콘 · 칸 (그래픽, 글자가 아님) */
+  /**
+   * 꺼진 아이콘 · 칸 (그래픽, 글자가 아님). 꺼진 거점 게이지의 틀(PC 막대 틀 · 터치 줄 판 테두리 — gaugeFrameColor)도 이 색.
+   * ◇ 배지 테두리는 틀이 아니라 상태색(gaugeColor → gaugeOff)이다: 이 색은 패널 위 약 1.9:1이라 ⊘ 칩 · 배지에 쓰면 3:1이 깨진다
+   */
   off: 0x3b4b5c,
+  /**
+   * 꺼진 거점 (다른 두 곳이 끝나 점령할 수 없다, 플레이테스트 b): 회색 ◇ 배지 테두리 · ⊘ 칩 아이콘 · 칩 테두리 · 줄 게이지 상태 아이콘.
+   * 맵 탈출구 꺼짐색(0x56657a)과 같은 회청색 계열이고, 패널 위 아이콘 3:1이 되게 조금 밝다
+   */
+  gaugeOff: 0x64748b,
   /** 꺼진 눈금 */
   tickOff: 0x1d3243,
   /** 키캡 */
@@ -116,6 +125,7 @@ export const HUD_TEXT_PAIRS: readonly ContrastPair[] = [
     min: 4.5,
   },
   { name: '정지 칩 아이콘 / 패널', fg: WARN, bg: UI.panel, min: 3 },
+  { name: '꺼진 거점 칩 아이콘 / 패널', fg: HC.gaugeOff, bg: UI.panel, min: 3 },
   // 거점 진행 숫자 (플레이테스트 a-7): PC는 위 띠 바탕 위, 터치 줄 게이지는 판 · 진행만큼 칠한 어두운 채움 위
   { name: '진행 숫자 정지 / 띠 바탕', fg: WARN, bg: UI.background, min: 4.5 },
   { name: '진행 숫자 · 거점 글자 / 줄 게이지 채움', fg: UI.text, bg: ROW_FILL.neon, min: 4.5 },
@@ -156,23 +166,43 @@ export const TIMER_LOOK: Readonly<Record<TimerMode, { icon: IconId; color: numbe
 };
 
 /** 거점 게이지 상태 (서버 'blocked' = 정지) */
-export type GaugeState = 'idle' | 'capturing' | 'paused' | 'done';
-export const GAUGE_STATES: readonly GaugeState[] = ['idle', 'capturing', 'paused', 'done'];
+export type GaugeState = 'idle' | 'capturing' | 'paused' | 'done' | 'off';
+export const GAUGE_STATES: readonly GaugeState[] = ['idle', 'capturing', 'paused', 'done', 'off'];
 
 export function gaugeState(s: PointState): GaugeState {
   return s === 'blocked' ? 'paused' : s;
 }
 
-/** 상태 칩 아이콘: 점령 중 ▶ · 정지 ‖ · 완료 ✓ (대기는 칩 없음) */
+/** 상태 칩 아이콘: 점령 중 ▶ · 정지 ‖ · 완료 ✓ · 꺼짐 ⊘ (대기는 칩 없음) */
 export const GAUGE_ICON: Readonly<Record<GaugeState, IconId | null>> = {
   idle: null,
   capturing: 'play',
   paused: 'pause',
   done: 'check',
+  off: 'off',
 };
 
+/**
+ * 상태색 (PC ◇ 배지 테두리 · 칩 아이콘 · 칩 테두리, 터치 줄 게이지 상태 아이콘): 정지 주황 · 대기 흐림 · 꺼짐 회색(HC.gaugeOff) ·
+ * 그 밖 청록
+ */
 export function gaugeColor(s: GaugeState): number {
-  return s === 'paused' ? WARN : s === 'idle' ? UI.textDim : NEON;
+  return s === 'paused' ? WARN : s === 'idle' ? UI.textDim : s === 'off' ? HC.gaugeOff : NEON;
+}
+
+/**
+ * 게이지 틀 색 (PC 막대 틀, 터치 줄 판 테두리 — ◇ 배지 테두리는 상태색 gaugeColor): 대기 · 꺼짐은 상태색보다 어둡게 (꺼짐은 HC.off)
+ */
+export function gaugeFrameColor(s: GaugeState): number {
+  return s === 'idle' ? 0x2c4a5e : s === 'off' ? HC.off : gaugeColor(s);
+}
+
+/**
+ * 진행을 보이는 상태인가 (채움 · 진행 숫자). 꺼진 거점은 진행이 멈춘 그대로 오지만(서버) 다시 오를 수 없어 채움 · 숫자를 숨긴다 —
+ * 회색 틀 + ⊘ 칩만 (색만으로 구분하지 않기: 대기와는 칩 · 채움으로도 갈린다)
+ */
+export function gaugeShowsProgress(s: GaugeState): boolean {
+  return s !== 'off';
 }
 
 // ── 거점 진행 숫자 (플레이테스트 a-7) ──
@@ -198,10 +228,12 @@ export function pointOf(points: readonly PointView[], id: string): PointView | u
 }
 
 /**
- * 괴물 화면에도 진행 숫자를 보이는가. 서버는 거점 진행을 받는 사람과 무관하게 같은 값으로 보내고(interest.ts worldView) 괴물 HUD도
- * 그 값으로 게이지를 그려 왔으므로 같은 숫자를 보인다. 사람 확인 뒤 괴물에게만 빼려면 이 값 하나를 false로 (HUMAN_CHECKS)
+ * 괴물 화면에도 진행 숫자를 보이는가: 보이지 않는다(플레이테스트 b — 사용자 결정). 점령 속도가 1명 2.5%/초 · 2명 3.75%/초라 1% 단위
+ * 숫자로는 거점 안 사람 수가 바로 읽혀 미끼 판단이 쉬워진다. 서버는 그대로 받는 사람과 무관하게 같은 진행을 보내고(interest.ts
+ * worldView) 괴물 HUD는 그 값으로 게이지 채움만 그린다 — 숫자 그림을 걸지 않는다(hud.ts Pct). 괴물 화면 PC 막대는 빈 숫자 칸
+ * 대신 칩 옆으로 당긴다
  */
-export const PCT_FOR_MONSTER = true;
+export const PCT_FOR_MONSTER = false;
 
 /** 이 화면에 진행 숫자를 보이는가 (생존자는 늘, 괴물은 PCT_FOR_MONSTER) */
 export function pctShown(isMonster: boolean): boolean {
@@ -1118,10 +1150,13 @@ export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
   // ── 위 띠: 게이지 막대 틀 (3조각) · 채움 · 사선 · 배지 · 칩 · 타이머 틀 ──
   const G = h.gauge;
   const gs = G.barH / 2;
+  // 막대 틀: 가로 3조각 (가운데는 균일하다). 상태마다 막대 폭 한 장으로 구우면 판 중 그림은 게이지마다 3 → 1이지만 아틀라스가
+  // 배율 1에서 약 74KiB · 배율 2에서 약 380KiB 커져, 지도 크게 보기 바닥이 쓰는 텍스처 예산(prefsFx.bigMinimapTexels)이 모자랐다
+  // (PC 1920×1080 품질 낮음 바닥 879px < 화면 888px — 플레이테스트 b CI). 그림은 같다
   for (const s of touch ? [] : GAUGE_STATES)
     add(
       kit(`gbar:${s}`, { l: gs + 4, r: gs + 4, t: G.barH, v: false }, (c, w, h, z) =>
-        paintHexFrame(c, w, h, z, gs, s === 'idle' ? 0x2c4a5e : gaugeColor(s), s === 'done' ? 0.8 : 0),
+        paintHexFrame(c, w, h, z, gs, gaugeFrameColor(s), s === 'done' ? 0.8 : 0),
       ),
     );
   const fillW = G.barW - 6;
@@ -1259,8 +1294,9 @@ export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
         ['%', pr - sw / 2],
       ]);
   }
-  // ── 터치 거점 줄 게이지 (a-7, 기준점 = 줄 왼쪽 위): 판(상태색 테두리) · 진행 채움(어두운 면 + 아래 밝은 띠, 가로로 자른다) ·
-  //    상태 아이콘 · 거점 글자. 그림은 줄 위 · 아래 inset 안에만 있어 맞닿은 줄끼리 겹치지 않는다 ──
+  // ── 터치 거점 줄 게이지 (a-7, 기준점 = 줄 왼쪽 위): 판(틀 색 테두리 — gaugeFrameColor, 대기 · 꺼짐은 상태색보다 어둡다) · 진행 채움
+  //    (어두운 면 + 아래 밝은 띠, 가로로 자른다) · 상태 아이콘(상태색 gaugeColor) · 거점 글자. 그림은 줄 위 · 아래 inset 안에만 있어
+  //    맞닿은 줄끼리 겹치지 않는다 ──
   if (touch) {
     const cut = [3, 0, 3, 0] as const;
     /** 판 사각형을 기기 픽셀 격자에 맞춘다 (테두리 한 줄이 두 줄에 번지지 않게): [위, 폭, 높이] */
@@ -1269,7 +1305,7 @@ export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
       return [top, Math.round(G.w * z) / z, Math.round(rowBot * z) / z - top];
     };
     for (const s of GAUGE_STATES) {
-      const col = s === 'idle' ? 0x2c4a5e : gaugeColor(s);
+      const col = gaugeFrameColor(s);
       add({
         kind: 'frame',
         name: `grow:${s}`,
@@ -1577,6 +1613,24 @@ export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
   diamond('point:capturing', 4.5, NEON, OUTLINE);
   diamond('point:blocked', 4.5, WARN, OUTLINE);
   diamond('point:done', 3.6, NEON_DIM, NEON);
+  // 꺼진 거점: 속 빈 회색 마름모 + 사선 (금지 ⊘ — 맵 배지 · 바닥 고리와 같은 회색, 대기의 청록 빈 마름모와 모양도 다르다)
+  add(
+    square(FR.mm('point:off'), 4.5 + 1.5, (c) => {
+      c.beginPath();
+      c.moveTo(0, -4.5);
+      c.lineTo(4.5, 0);
+      c.lineTo(0, 4.5);
+      c.lineTo(-4.5, 0);
+      c.closePath();
+      // 사선은 마름모 변 위(대각선과 변이 만나는 (±4.5/2, ±4.5/2))에서 끝난다 (맵 배지 · 게이지 ⊘처럼 테두리에서 멈춤).
+      // 원 ⊘처럼 가운데에서 4.5 떨어진 (±3.2, ±3.2)로 잡으면 마름모의 대각선 쪽 폭(4.5/√2 ≈ 3.18)을 넘어 변 밖으로 삐져나온다
+      c.moveTo(-4.5 / 2, -4.5 / 2);
+      c.lineTo(4.5 / 2, 4.5 / 2);
+      c.lineWidth = 1.3;
+      c.strokeStyle = rgba(OBJ_COLOR.off);
+      c.stroke();
+    }),
+  );
   // 관전 중인 동료 고리 (청록, 나 고리 · 흰색과 다른 색 + 굵기)
   add(
     square(FR.mm('watch'), 9.5, (c) => {

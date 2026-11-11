@@ -206,6 +206,8 @@ export interface MatchPrefsDebug {
   /** 지도 크게 보기 */
   minimapBig: {
     open: boolean;
+    /** 크게 본 지도를 그리는가 (만들어져 있고 숨기지 않았다 — 닫혀 있거나 아직 안 만들었으면 false) */
+    shown: boolean;
     /** 틀 사각형 (논리 px, 닫혀 있으면 null) */
     frame: { x: number; y: number; w: number; h: number } | null;
     /** 지도 그림 사각형 (논리 px, 틀 · 제목 안쪽, 닫혀 있으면 null) */
@@ -218,7 +220,10 @@ export interface MatchPrefsDebug {
     smallBakes: number;
     /** 바닥 텍스처 크기 (텍셀 — 닫혀 있으면 1 × 1) · 작은 미니맵 바닥 합성 폭 */
     tex: { w: number; h: number };
-    /** 화면 해상도 정적 맵을 다 구워 그 바닥을 쓰는 중 (열자마자 몇 프레임은 작은 지도 합성을 늘린다) */
+    /**
+     * 정한 폭(gfx.features.minimapBigTexels — 화면 해상도, 텍스처 예산이 모자라면 그보다 작게)으로 정적 맵을 다 구워 그 바닥을 쓰는 중
+     * (열자마자 몇 프레임은 작은 지도 합성을 그 폭 이하로 담아 늘린다)
+     */
     sharpReady: boolean;
     smallTexW: number;
     /** 그림 폭이 화면에서 차지하는 기기 px (논리 폭 × 백버퍼 배율) */
@@ -372,6 +377,8 @@ export interface DecoyDebug {
   freezeClock(ms: number | null): void;
   /** 품질 자동 하향 판단에 쓸 FPS를 덮어쓴다 / null이면 실제 측정값. 렌더링 최적화부터는 프레임 시간(작업 시간 포함)도 1000/fps로 본다 */
   injectFps(fps: number | null): void;
+  /** 크게 본 지도 바닥이 쓰는 텍스처 예산(바이트)을 덮어쓴다 / null이면 품질 예산 (예산이 모자란 길 시험) */
+  injectTextureBudget(bytes: number | null): void;
   /** 프레임 측정 요약 (렌더링 최적화). 판 장면 · 게임이 없으면 null */
   getFrameStats(): FrameStatsInfo | null;
   /** 프레임 독립성 시험용 연출 상태 (판 장면이 없으면 null) */
