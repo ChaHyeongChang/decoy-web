@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CAPTURE_POINTS,
   EXITS,
+  POINT_IDS,
   RESCUE_POINT,
   type DrawnEntity,
   type ExitView,
@@ -23,6 +24,7 @@ import {
   type EdgeTarget,
   type ViewPx,
 } from '../../client/src/render/offscreen';
+import { loadTestBalance } from '../helpers/fixtures';
 
 const ent = (id: string, kind: DrawnEntity['kind'], x: number, y: number, tag?: string): DrawnEntity => ({
   id,
@@ -37,6 +39,7 @@ const ent = (id: string, kind: DrawnEntity['kind'], x: number, y: number, tag?: 
 const POINTS_IDLE: PointView[] = [
   { id: 'A', progress: 0, state: 'idle' },
   { id: 'B', progress: 0, state: 'idle' },
+  { id: 'C', progress: 0, state: 'idle' },
 ];
 const EXITS_OFF: ExitView[] = [
   { id: 'N', state: 'inactive', progress: null },
@@ -78,16 +81,71 @@ describe('edgeTargets 정보 규칙', () => {
         points: [
           { id: 'A', progress: 0.3, state: 'capturing' },
           { id: 'B', progress: 1, state: 'done' },
+          { id: 'C', progress: 0.1, state: 'idle' },
         ],
       }),
       out,
     );
     expect(kinds(out)).toEqual(
-      ['monster:monster', 'point:A', 'roar:roar', 'teammate:g', 'teammate:s', 'track:track'].sort(),
+      [
+        'monster:monster',
+        'point:A',
+        'point:C',
+        'roar:roar',
+        'teammate:g',
+        'teammate:s',
+        'track:track',
+      ].sort(),
     );
     const g = out.find((x) => x.id === 'g');
     expect(g?.role).toBe('guard');
     expect(out.find((x) => x.kind === 'point')).toMatchObject({ tx: CAPTURE_POINTS.A.x, state: 'capturing' });
+    // C는 C 자리 (북쪽 교차로)
+    expect(out.find((x) => x.id === 'C')).toMatchObject({
+      tx: CAPTURE_POINTS.C.x,
+      ty: CAPTURE_POINTS.C.y,
+      state: 'idle',
+    });
+  });
+
+  it('꺼진 거점(다른 두 곳이 끝나 점령할 수 없음)은 화살표가 없다 — 생존자 화면 · 괴물 화면 모두, 탈출구 화살표는 그대로', () => {
+    const out: EdgeTarget[] = [];
+    const ended: PointView[] = [
+      { id: 'A', progress: 1, state: 'done' },
+      { id: 'B', progress: 0.42, state: 'off' },
+      { id: 'C', progress: 1, state: 'done' },
+    ];
+    const exitsOn: ExitView[] = [
+      { id: 'N', state: 'active', progress: 0 },
+      { id: 'S', state: 'active', progress: 0 },
+    ];
+    edgeTargets(input({ points: ended, exits: exitsOn }), out);
+    expect(out.some((x) => x.kind === 'point')).toBe(false);
+    expect(kinds(out)).toEqual(['exit:N', 'exit:S']);
+    // 꺼진 거점 안에 생존자가 서 있어도 괴물 화면에 아무 화살표가 없다 (꺼진 거점은 점령 중이 되지 않는다)
+    edgeTargets(
+      input({
+        role: 'monster',
+        selfId: 'm',
+        myStatus: null,
+        followId: 'm',
+        drawn: [ent('m', 'self', 10, 10)],
+        points: ended,
+        exits: exitsOn.map((e) => ({ ...e, progress: null })),
+      }),
+      out,
+    );
+    expect(out).toEqual([]);
+    // 셋 중 어느 것이 꺼져도 같다
+    for (const offId of ['A', 'B', 'C'] as const) {
+      const pts: PointView[] = (['A', 'B', 'C'] as const).map((id) => ({
+        id,
+        progress: id === offId ? 0.3 : 1,
+        state: id === offId ? 'off' : 'done',
+      }));
+      edgeTargets(input({ points: pts, exits: exitsOn }), out);
+      expect(out.filter((x) => x.kind === 'point')).toEqual([]);
+    }
   });
 
   it('생존자 화면: 괴물이 그려지지 않았으면(공유 시야 밖) 괴물 화살표도 없다', () => {
@@ -104,7 +162,7 @@ describe('edgeTargets 정보 규칙', () => {
       statusOf: (id) => status[id] ?? null,
     });
     edgeTargets(base, out);
-    expect(kinds(out)).toEqual(['point:A', 'point:B', 'prison:prison']);
+    expect(kinds(out)).toEqual(['point:A', 'point:B', 'point:C', 'prison:prison']);
     expect(out.find((x) => x.kind === 'prison')).toMatchObject({ tx: RESCUE_POINT.x, ty: RESCUE_POINT.y });
     // 나도 수감 중이면 구조 화살표 없음
     edgeTargets({ ...base, myStatus: 'imprisoned' }, out);
@@ -171,6 +229,93 @@ describe('edgeTargets 정보 규칙', () => {
     for (const t of out) {
       expect(t.role).toBeNull();
       expect(['r', 'g', 's']).not.toContain(t.id);
+    }
+  });
+
+  it('상한 EDGE_MAX는 규칙상 한꺼번에 나올 수 있는 대상 수 이상이다 — 거점 세 곳이 다 나오는 최악에도 거점 화살표가 잘리지 않는다 (상태 전수)', () => {
+    const bal = loadTestBalance();
+    expect(POINT_IDS.length).toBe(bal.capturePoint.count);
+    const required = bal.capturePoint.required;
+    // 규칙에 맞는 거점 · 탈출구 상태 (끝난 수 < required면 꺼짐 · 켜진 탈출구 없음, = required면 남은 곳은 꺼짐 + 탈출구 켜짐)
+    const PS: PointView['state'][] = ['idle', 'capturing', 'blocked', 'done', 'off'];
+    const worlds: { points: PointView[]; exits: ExitView[] }[] = [];
+    const ES: ExitView['state'][] = ['active', 'open'];
+    for (let k = 0; k < PS.length ** POINT_IDS.length; k += 1) {
+      const points = POINT_IDS.map((id, i): PointView => {
+        const st = PS[Math.floor(k / PS.length ** i) % PS.length]!;
+        return { id, progress: st === 'done' ? 1 : 0.5, state: st };
+      });
+      const done = points.filter((p) => p.state === 'done').length;
+      const off = points.filter((p) => p.state === 'off').length;
+      if (done < required && off === 0) worlds.push({ points, exits: EXITS_OFF });
+      if (done === required && off === points.length - required)
+        for (const n of ES)
+          for (const sx of ES)
+            worlds.push({
+              points,
+              exits: [
+                { id: 'N', state: n, progress: 0 },
+                { id: 'S', state: sx, progress: 0 },
+              ],
+            });
+    }
+    expect(worlds.length).toBeGreaterThan(50);
+    const SS: SurvivorStatus[] = ['free', 'imprisoned', 'dead', 'escaped'];
+    const out: EdgeTarget[] = [];
+    let max = 0;
+    let worst: EdgeTarget[] = [];
+    let cases = 0;
+    for (const me of SS)
+      for (const follow of me === 'free' ? ['r'] : ['r', 'g', 's'])
+        for (const gs of SS)
+          for (const ss of SS)
+            for (let extra = 0; extra < 8; extra += 1) {
+              const status: Record<string, SurvivorStatus> = { r: me, g: gs, s: ss };
+              const drawn: DrawnEntity[] = [
+                ent('r', 'self', 23.5, 15.5),
+                ent('g', 'survivor', 40, 20),
+                ent('s', 'survivor', 2, 2),
+              ];
+              if (extra & 1) drawn.push(ent('monster', 'monster', 30, 30));
+              if (extra & 2) drawn.push(ent('mark-track', 'mark', 31, 30, 'track'));
+              if (extra & 4) drawn.push(ent('mark-roarSelf', 'mark', 33, 28, 'roarSelf'));
+              for (const w of worlds) {
+                edgeTargets(
+                  input({
+                    myStatus: me,
+                    followId: follow,
+                    drawn,
+                    statusOf: (id) => status[id] ?? null,
+                    points: w.points,
+                    exits: w.exits,
+                  }),
+                  out,
+                );
+                cases += 1;
+                if (out.length > max) {
+                  max = out.length;
+                  worst = out.slice();
+                }
+              }
+            }
+    expect(cases).toBeGreaterThan(10_000);
+    expect(max).toBeLessThanOrEqual(EDGE_MAX);
+    // 최악은 거점 세 곳이 모두 나오는 경우다 (괴물 · 탐지 · 포효 + 팀원 · 감옥 2 + 거점 3)
+    expect(worst.filter((t) => t.kind === 'point').map((t) => t.id)).toEqual([...POINT_IDS]);
+    // 그 최악을 모두 창 밖에 두어도 거점 화살표 셋이 다 놓인다 (우선순위 꼴찌인 거점이 잘리지 않는다)
+    const far: ViewPx = { view: { x: 46, y: 30.5, w: 1.5, h: 1 }, rect: { x: 0, y: 0, w: 960, h: 640 } };
+    const placed: EdgeMarker[] = [];
+    placeEdges(worst, far, { inset: 30, r: 14, gap: 4, avoid: [], bodyR: 12 }, [], placed);
+    expect(placed).toHaveLength(worst.length);
+    expect(placed.filter((m) => m.kind === 'point')).toHaveLength(POINT_IDS.length);
+    // 괴물 화면: 포효 핑(생존자 셋까지) + 점령 중 거점(셋까지)
+    const pings = ['r', 'g', 's'].map((id, n) => ent(`ping-${id}`, 'mark', 5 + n * 10, 5, 'roarPing'));
+    for (const w of worlds) {
+      edgeTargets(
+        input({ role: 'monster', selfId: 'm', myStatus: null, followId: 'm', drawn: pings, ...w }),
+        out,
+      );
+      expect(out.length).toBeLessThanOrEqual(EDGE_MAX);
     }
   });
 

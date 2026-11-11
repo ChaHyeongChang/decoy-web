@@ -84,6 +84,10 @@ describe('프레임 이름 표 · 기억 = 옛 템플릿', () => {
         for (const on of [true, false]) expect(FR.sil(s, on)).toBe(OLD_FR.sil(s, on));
       for (const k of [
         'point',
+        'point:capturing',
+        'point:blocked',
+        'point:done',
+        'point:off',
         'prison',
         'exit',
         'track',

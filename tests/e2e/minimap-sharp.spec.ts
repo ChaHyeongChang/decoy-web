@@ -61,8 +61,7 @@ async function shotBig(page: Page): Promise<Shot> {
   ];
   const marks = [
     ...drawn.map((d) => at(d.x, d.y)),
-    at(CAPTURE_POINTS.A.x, CAPTURE_POINTS.A.y),
-    at(CAPTURE_POINTS.B.x, CAPTURE_POINTS.B.y),
+    ...Object.values(CAPTURE_POINTS).map((c) => at(c.x, c.y)),
     at(EXITS.N.center.x, EXITS.N.center.y),
     at(EXITS.S.center.x, EXITS.S.center.y),
     at(PRISON_CENTER.x, PRISON_CENTER.y),

@@ -45,6 +45,7 @@ import {
   blendOver,
   type ContrastPair,
 } from '../art/palette';
+import { OBJ_COLOR } from '../art/mapArtGeom';
 import { UI_FONT } from './fonts';
 import { GAUGE_IDS, GAUGE_ROW, HUD, type HudLayoutSpec } from './layout';
 
@@ -1578,6 +1579,22 @@ export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
   diamond('point:capturing', 4.5, NEON, OUTLINE);
   diamond('point:blocked', 4.5, WARN, OUTLINE);
   diamond('point:done', 3.6, NEON_DIM, NEON);
+  // 꺼진 거점: 속 빈 회색 마름모 + 사선 (금지 ⊘ — 맵 배지 · 바닥 고리와 같은 회색, 대기의 청록 빈 마름모와 모양도 다르다)
+  add(
+    square(FR.mm('point:off'), 4.5 + 1.5, (c) => {
+      c.beginPath();
+      c.moveTo(0, -4.5);
+      c.lineTo(4.5, 0);
+      c.lineTo(0, 4.5);
+      c.lineTo(-4.5, 0);
+      c.closePath();
+      c.moveTo(-3.2, -3.2);
+      c.lineTo(3.2, 3.2);
+      c.lineWidth = 1.3;
+      c.strokeStyle = rgba(OBJ_COLOR.off);
+      c.stroke();
+    }),
+  );
   // 관전 중인 동료 고리 (청록, 나 고리 · 흰색과 다른 색 + 굵기)
   add(
     square(FR.mm('watch'), 9.5, (c) => {

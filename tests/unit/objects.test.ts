@@ -1,9 +1,19 @@
 // 배지 (M10b, render/objects.ts Badges · art/mapArtBadges.ts): 정보 레이어 항목, 캐릭터 아래 레이어, 상태 색 + 아이콘.
 // Badges는 Phaser 객체 · DOM 캔버스를 쓰므로 장면 · 캔버스 · 글자 모듈을 가짜로 바꿔 생성 순서 · 정보 레이어 · 굽기를 본다.
-// 렌더링 최적화 2: 배지 다섯 장을 아틀라스 한 장에 굽는다. 예전(배지마다 캔버스 한 장) 굽기 계산을 오라클로 두고
+// 렌더링 최적화 2: 배지 여섯 장(거점 A · B · C, 탈출구 N · S, 감옥)을 아틀라스 한 장에 굽는다. 예전(배지마다 캔버스 한 장) 굽기 계산을 오라클로 두고
 // 프레임 크기 · 변환 · 이미지 자리 · 그린 것이 같은지 본다.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { CAPTURE_POINTS, EXITS, PRISON_CENTER, TILE_PX, type ExitView, type PointView } from '@decoy/shared';
+import {
+  CAPTURE_POINTS,
+  EXITS,
+  POINT_IDS,
+  PRISON_CENTER,
+  TILE_PX,
+  tileAt,
+  type ExitView,
+  type PointId,
+  type PointView,
+} from '@decoy/shared';
 import {
   BADGE,
   PRISON_COLOR,
@@ -38,6 +48,7 @@ interface FakeText {
   alpha: number;
   setOrigin(): FakeText;
   setAlpha(a: number): FakeText;
+  setPosition(x: number, y: number): FakeText;
 }
 
 const made: FakeText[] = [];
@@ -54,23 +65,29 @@ vi.mock('../../client/src/ui/text', () => ({
         t.alpha = a;
         return t;
       },
+      setPosition: (px: number, py: number) => {
+        t.x = px;
+        t.y = py;
+        return t;
+      },
     };
     made.push(t);
     return t;
   },
 }));
 
-const ALL_SEEN: BadgeAlpha = { points: { A: 1, B: 1 }, exits: { N: 1, S: 1 }, prison: 1 };
-const NO_BLINK = { A: false, B: false };
+const ALL_SEEN: BadgeAlpha = { points: { A: 1, B: 1, C: 1 }, exits: { N: 1, S: 1 }, prison: 1 };
+const NO_BLINK: Record<PointId, boolean> = { A: false, B: false, C: false };
 const RADII = { point: 2.5, exit: 1.5 };
 
 describe('배지 정보 레이어 (badgeInfo)', () => {
   const points: PointView[] = [
     { id: 'A', progress: 0.25, state: 'blocked' },
     { id: 'B', progress: 1, state: 'done' },
+    { id: 'C', progress: 0.4, state: 'capturing' },
   ];
 
-  it('거점 배지 2 · 탈출구 배지 2 · 감옥 배지 1 + 거점 진행 2 + (생존자 화면) 탈출구 진행', () => {
+  it('거점 배지 3 · 탈출구 배지 2 · 감옥 배지 1 + 거점 진행 3 + (생존자 화면) 탈출구 진행', () => {
     const exits: ExitView[] = [
       { id: 'N', state: 'active', progress: 0.4 },
       { id: 'S', state: 'inactive', progress: 0 },
@@ -79,6 +96,7 @@ describe('배지 정보 레이어 (badgeInfo)', () => {
     expect(info.filter((i) => i.kind === 'badge').map((i) => i.tag)).toEqual([
       'point-A',
       'point-B',
+      'point-C',
       'exit-N',
       'exit-S',
       'prison',
@@ -86,9 +104,17 @@ describe('배지 정보 레이어 (badgeInfo)', () => {
     expect(info.filter((i) => i.kind === 'progress').map((i) => [i.tag, i.value])).toEqual([
       ['point-A', 0.25],
       ['point-B', 1],
+      ['point-C', 0.4],
       ['exit-N', 0.4],
       ['exit-S', 0],
     ]);
+    // C는 C 자리 (북쪽 교차로)
+    expect(info.find((i) => i.kind === 'badge' && i.tag === 'point-C')).toMatchObject({
+      x: CAPTURE_POINTS.C.x,
+      y: CAPTURE_POINTS.C.y,
+      value: 'capturing',
+      color: NEON,
+    });
     const a = info.find((i) => i.kind === 'badge' && i.tag === 'point-A');
     expect(a).toMatchObject({
       x: CAPTURE_POINTS.A.x,
@@ -125,16 +151,20 @@ describe('배지 정보 레이어 (badgeInfo)', () => {
       { id: 'S', state: 'open', progress: null },
     ];
     const info = badgeInfo(points, exits, ALL_SEEN, NO_BLINK, RADII);
-    expect(info.filter((i) => i.kind === 'progress').map((i) => i.tag)).toEqual(['point-A', 'point-B']);
-    expect(info.filter((i) => i.kind === 'badge').length).toBe(5);
+    expect(info.filter((i) => i.kind === 'progress').map((i) => i.tag)).toEqual([
+      'point-A',
+      'point-B',
+      'point-C',
+    ]);
+    expect(info.filter((i) => i.kind === 'badge').length).toBe(6);
   });
 
   it('알파 규칙: 안 보이는 곳 45%, 괴물 화면 점령 중 깜빡임 0.25 (진행 값 · 색은 그대로)', () => {
     const exits: ExitView[] = [{ id: 'N', state: 'inactive', progress: null }];
     const capturing: PointView[] = [{ id: 'A', progress: 0.5, state: 'capturing' }];
-    const dim: BadgeAlpha = { points: { A: 0.45, B: 1 }, exits: { N: 0.45, S: 1 }, prison: 0.45 };
+    const dim: BadgeAlpha = { points: { A: 0.45, B: 1, C: 1 }, exits: { N: 0.45, S: 1 }, prison: 0.45 };
     const seen = badgeInfo(capturing, exits, dim, NO_BLINK, RADII);
-    const blink = badgeInfo(capturing, exits, dim, { A: true, B: false }, RADII);
+    const blink = badgeInfo(capturing, exits, dim, { A: true, B: false, C: false }, RADII);
     const alphaOf = (list: typeof seen, tag: string): number | undefined =>
       list.find((i) => i.kind === 'badge' && i.tag === tag)?.alpha;
     expect(alphaOf(seen, 'point-A')).toBe(0.45);
@@ -156,6 +186,80 @@ describe('배지 정보 레이어 (badgeInfo)', () => {
     // 예약 색: 역할 4색은 배지에 쓰지 않는다
     for (const c of [exitColor('active'), exitColor('inactive'), PRISON_COLOR, pointColor('idle')])
       expect(Object.values(ROLE)).not.toContain(c);
+  });
+
+  it('꺼진 거점 배지: 정보 레이어 값 off · 회색(탈출구 비활성과 같은 색) · ⊘ 칩 — 대기 · 완료와 색 말고 모양(칩 아이콘)도 다르다', () => {
+    // 아무 두 곳이 끝나 셋째가 꺼진 장면 (A · C 완료, B 꺼짐 — 진행은 서버가 보낸 멈춘 값 그대로)
+    const pts: PointView[] = [
+      { id: 'A', progress: 1, state: 'done' },
+      { id: 'B', progress: 0.35, state: 'off' },
+      { id: 'C', progress: 1, state: 'done' },
+    ];
+    const info = badgeInfo(pts, [], ALL_SEEN, NO_BLINK, RADII);
+    const b = info.find((i) => i.kind === 'badge' && i.tag === 'point-B');
+    expect(b).toMatchObject({
+      x: CAPTURE_POINTS.B.x,
+      y: CAPTURE_POINTS.B.y,
+      value: 'off',
+      color: OBJ_COLOR.off,
+    });
+    expect(info.find((i) => i.kind === 'progress' && i.tag === 'point-B')).toMatchObject({
+      value: 0.35,
+      color: OBJ_COLOR.off,
+    });
+    expect(pointColor('off')).toBe(OBJ_COLOR.off);
+    expect(pointColor('off')).toBe(exitColor('inactive'));
+    for (const s of ['idle', 'capturing', 'blocked', 'done'] as const) {
+      expect(pointColor('off')).not.toBe(pointColor(s));
+      expect(pointIcon('off')).not.toBe(pointIcon(s));
+    }
+    expect(pointIcon('off')).toBe('off');
+    expect(Object.values(ROLE)).not.toContain(pointColor('off'));
+    // 칩 그림: ⊘ = 원 + 사선 (완료 ✓보다 획 하나 더), 칩 판 말고는 모두 회색, 칩 안
+    const T0 = TILE_PX;
+    const paint = (icon: 'off' | 'check', color: number): RecCtx => {
+      const c = new RecCtx({ width: 200, height: 200 });
+      c.save();
+      paintPointBadge(c as never, 100, 100, color, icon, 1);
+      return c;
+    };
+    const off = paint('off', pointColor('off')).bakes[0]!.draws;
+    const check = paint('check', pointColor('done')).bakes[0]!.draws;
+    expect(off.length).toBe(check.length + 1);
+    const css = (n: number): string => `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, 1)`;
+    // 마름모 · 꼭짓점 눈금(0.7배로 흐리게) · ⊘ 원 · 사선
+    const strokes = off.filter((d) => d.fn === 'stroke');
+    expect(strokes.map((d) => d.style)).toEqual([
+      css(OBJ_COLOR.off),
+      css(dimmed(OBJ_COLOR.off, 0.7)),
+      css(OBJ_COLOR.off),
+      css(OBJ_COLOR.off),
+    ]);
+    const cx = 100 + BADGE.chipDx * T0;
+    const half = BADGE.chipHalf * T0;
+    for (const d of strokes.slice(2))
+      for (const [x, y] of d.pts) {
+        expect(Math.abs(x - cx)).toBeLessThanOrEqual(half);
+        expect(Math.abs(y - 100)).toBeLessThanOrEqual(half);
+      }
+    // 사선은 왼쪽 위 → 오른쪽 아래 (icons.ts off와 같은 방향)
+    const [[x0, y0], [x1, y1]] = strokes[3]!.pts as [[number, number], [number, number]];
+    expect(x1 - x0).toBeGreaterThan(0);
+    expect(y1 - y0).toBeGreaterThan(0);
+  });
+
+  it('거점 배지 자리(마름모 · 글자 · 칩)는 세 거점 모두 바닥 칸 위다 (새 거점 C 포함)', () => {
+    for (const id of POINT_IDS) {
+      const c = CAPTURE_POINTS[id];
+      const y = c.y + BADGE.pointDy;
+      const xs = [c.x - BADGE.pointHalf - 5 / TILE_PX, c.x, c.x + BADGE.chipDx + BADGE.chipHalf];
+      const ys = [y - BADGE.pointHalf, y, y + BADGE.pointHalf];
+      for (const x of xs)
+        for (const yy of ys)
+          expect(tileAt(Math.floor(x), Math.floor(yy)), `${id} (${x}, ${yy})`).toBe('floor');
+    }
+    // C 글자 자리: 중심 (24, 7)에서 1.62타일 위
+    expect(CAPTURE_POINTS.C.y + BADGE.pointDy).toBeCloseTo(5.38, 6);
   });
 
   it('미리 섞은 불투명 색: 알파 1이면 원래 색, 0이면 어두운 바닥색', () => {
@@ -481,12 +585,12 @@ function oldBake(at: readonly [number, number], box: (typeof BADGE_BOX)['point']
   };
 }
 
-/** 예전 배지 다섯 장 (그린 순서) */
+/** 예전 배지 (배지마다 캔버스 한 장, 그린 순서) */
 function oldBadges(
   points: PointView[],
   exits: ExitView[],
   alpha: BadgeAlpha,
-  blink: Record<'A' | 'B', boolean>,
+  blink: Record<PointId, boolean>,
 ) {
   const out: {
     id: string;
@@ -533,7 +637,7 @@ describe('Badges (캐릭터 아래 레이어, 바뀔 때만 구운 아틀라스 
     gfxState.zoom = 1;
   });
 
-  it('배지 상자를 맵 컨테이너에 넣고(캐릭터보다 먼저), A · B 글자를 맵 컨테이너 바로 아래로 내린다', async () => {
+  it('배지 상자를 맵 컨테이너에 넣고(캐릭터보다 먼저), A · B · C 글자를 맵 컨테이너 바로 아래로 내린다', async () => {
     const { Badges } = await import('../../client/src/render/objects');
     const { scene, box, moveBelow } = fakeScene();
     const container = { add: vi.fn() };
@@ -541,8 +645,8 @@ describe('Badges (캐릭터 아래 레이어, 바뀔 때만 구운 아틀라스 
     // 상자 하나만 넣는다 (그 뒤에 캐릭터 레이어가 들어온다: 늘 캐릭터 아래)
     expect(container.add.mock.calls.length).toBe(1);
     expect(container.add.mock.calls[0]?.[0] === box).toBe(true);
-    expect(made.map((t) => t.text)).toEqual(['A', 'B']);
-    expect(moveBelow.mock.calls.length).toBe(2);
+    expect(made.map((t) => t.text)).toEqual(['A', 'B', 'C']);
+    expect(moveBelow.mock.calls.length).toBe(3);
     moveBelow.mock.calls.forEach((call, n) => {
       expect(call[0] === made[n]).toBe(true);
       expect(call[1] === container).toBe(true);
@@ -550,41 +654,61 @@ describe('Badges (캐릭터 아래 레이어, 바뀔 때만 구운 아틀라스 
     // 글자 자리: 패드 위쪽 가장자리 (가운데 단말 · 서 있는 캐릭터와 겹치지 않음)
     const pa = tileToScreen(CAPTURE_POINTS.A.x, CAPTURE_POINTS.A.y + BADGE.pointDy);
     expect([made[0]?.x, made[0]?.y]).toEqual([pa.x, pa.y]);
+    // C 글자는 C 패드 위쪽 가장자리 (북쪽 교차로)
+    const pc = tileToScreen(CAPTURE_POINTS.C.x, CAPTURE_POINTS.C.y + BADGE.pointDy);
+    expect([made[2]?.x, made[2]?.y]).toEqual([pc.x, pc.y]);
+    // 카메라를 따라 옮겨도 각자 자리 (C 글자가 다른 거점 자리로 가지 않는다)
+    badges.follow(-30, -12);
+    const k = TILE_PX * MAP_SCALE;
+    for (const [n, id] of POINT_IDS.entries()) {
+      const c = CAPTURE_POINTS[id];
+      expect(made[n]?.x).toBeCloseTo(MAP_X - 30 + c.x * k, 6);
+      expect(made[n]?.y).toBeCloseTo(MAP_Y - 12 + (c.y + BADGE.pointDy) * k, 6);
+    }
     expect(badges.info()).toEqual([]);
   });
 
   for (const zoom of [1, 2, 1.5, 2.625, 3]) {
-    it(`배율 ${zoom}: 배지 5개를 아틀라스 한 장의 겹치지 않는 칸에 굽고, 예전(배지마다 캔버스)과 같은 크기 · 변환 · 이미지 자리 · 그림이다`, async () => {
+    it(`배율 ${zoom}: 배지 6개를 아틀라스 한 장의 겹치지 않는 칸에 굽고, 예전(배지마다 캔버스)과 같은 크기 · 변환 · 이미지 자리 · 그림이다`, async () => {
       const { Badges } = await import('../../client/src/render/objects');
       const { scene, box, images, ctxs, frames, uploads } = fakeScene();
       gfxState.zoom = zoom;
       const badges = new Badges(scene as never, { add: vi.fn() } as never);
+      // C는 꺼짐 (꺼짐 ⊘ 칩도 예전 굽기 계산과 같은 칸 · 같은 그림, 잘리지 않음)
       const points: PointView[] = [
         { id: 'A', progress: 0.5, state: 'capturing' },
         { id: 'B', progress: 0.2, state: 'done' },
+        { id: 'C', progress: 0.3, state: 'off' },
       ];
       const exits: ExitView[] = [
         { id: 'N', state: 'inactive', progress: null },
         { id: 'S', state: 'active', progress: null },
       ];
-      const alpha: BadgeAlpha = { points: { A: 1, B: 0.45 }, exits: { N: 0.45, S: 1 }, prison: 1 };
-      const blink = { A: true, B: false };
+      const alpha: BadgeAlpha = { points: { A: 1, B: 0.45, C: 0.45 }, exits: { N: 0.45, S: 1 }, prison: 1 };
+      const blink = { A: true, B: false, C: false };
       badges.draw(points, exits, alpha, blink);
       expect(badges.info()).toEqual(badgeInfo(points, exits, alpha, blink, RADII));
-      expect(made.map((t) => t.alpha)).toEqual([BADGE.blinkAlpha, 0.45]);
-      // 텍스처(아틀라스 캔버스) 한 장 + 굽기마다 새 작업 캔버스, 이미지 다섯 개 (프레임만 다르다), 한 번만 올린다
-      expect(ctxs.length).toBe(6);
+      expect(made.map((t) => t.alpha)).toEqual([BADGE.blinkAlpha, 0.45, 0.45]);
+      // 텍스처(아틀라스 캔버스) 한 장 + 굽기마다 새 작업 캔버스, 이미지 여섯 개 (프레임만 다르다), 한 번만 올린다
+      expect(ctxs.length).toBe(7);
       const atlas = ctxs[0]!;
       const works = ctxs.slice(1);
-      expect(images.length).toBe(5);
-      expect(box.list.length).toBe(5);
+      expect(images.length).toBe(6);
+      expect(box.list.length).toBe(6);
       expect(new Set(images.map((i) => i.key)).size).toBe(1);
-      expect(images.map((i) => i.frame)).toEqual(['point-A', 'point-B', 'exit-N', 'exit-S', 'prison']);
+      expect(images.map((i) => i.frame)).toEqual([
+        'point-A',
+        'point-B',
+        'point-C',
+        'exit-N',
+        'exit-S',
+        'prison',
+      ]);
       expect(uploads()).toBe(1);
       expect(gfxState.features.badgeGfxCmds).toBe(0);
       // 아틀라스에는 그리지 않고 복사만 한다 (정수 자리, 변환 없음)
       expect(atlas.bakes).toEqual([]);
-      expect(atlas.copies.length).toBe(5);
+      expect(atlas.copies.length).toBe(6);
       for (const w of works) expect(w.bakes.length).toBe(1);
       const old = oldBadges(points, exits, alpha, blink);
       const rects: FakeFrame[] = [];
@@ -666,9 +790,10 @@ describe('Badges (캐릭터 아래 레이어, 바뀔 때만 구운 아틀라스 
       { id: 'N', state: 'inactive', progress: null },
       { id: 'S', state: 'inactive', progress: null },
     ];
-    const pts = (p: number, s: PointView['state']): PointView[] => [
+    const pts = (p: number, s: PointView['state'], c: PointView['state'] = 'idle'): PointView[] => [
       { id: 'A', progress: p, state: s },
       { id: 'B', progress: 0, state: 'idle' },
+      { id: 'C', progress: 0.4, state: c },
     ];
     let total = 0;
     const baked = (): string[] => {
@@ -677,7 +802,7 @@ describe('Badges (캐릭터 아래 레이어, 바뀔 때만 구운 아틀라스 
       return out;
     };
     badges.draw(pts(0.1, 'capturing'), exits, ALL_SEEN, NO_BLINK);
-    expect(baked()).toEqual(['point-A', 'point-B', 'exit-N', 'exit-S', 'prison']);
+    expect(baked()).toEqual(['point-A', 'point-B', 'point-C', 'exit-N', 'exit-S', 'prison']);
     expect(uploads()).toBe(1);
     expect(subs()).toBe(0);
     badges.draw(pts(0.6, 'capturing'), exits, ALL_SEEN, NO_BLINK);
@@ -707,13 +832,21 @@ describe('Badges (캐릭터 아래 레이어, 바뀔 때만 구운 아틀라스 
       {
         A: true,
         B: false,
+        C: false,
       },
     );
     expect(baked()).toEqual(['point-A']);
     // 배율이 바뀌면 칸을 다시 나누고 모두 다시 굽는다
     gfxState.zoom = 2;
     badges.draw(pts(0.6, 'blocked'), exits, ALL_SEEN, NO_BLINK);
-    expect(baked()).toEqual(['point-A', 'point-B', 'exit-N', 'exit-S', 'prison']);
+    expect(baked()).toEqual(['point-A', 'point-B', 'point-C', 'exit-N', 'exit-S', 'prison']);
+    // C가 꺼지면 C 칸만 다시 굽고 그 칸만 올린다 (C 그림이 B 칸에 가지 않는다), 꺼진 채로는 다시 굽지 않는다
+    const subsBefore = subs();
+    badges.draw(pts(0.6, 'blocked', 'off'), exits, ALL_SEEN, NO_BLINK);
+    expect(baked()).toEqual(['point-C']);
+    expect(subs()).toBe(subsBefore + 1);
+    badges.draw(pts(0.6, 'blocked', 'off'), exits, ALL_SEEN, NO_BLINK);
+    expect(baked()).toEqual([]);
     // 아틀라스 한 장 + 굽기마다 작업 캔버스 하나 (굽지 않은 프레임에는 만들지 않는다)
     expect(ctxs.length).toBe(1 + total);
     expect(images.every((i) => i.visible)).toBe(true);

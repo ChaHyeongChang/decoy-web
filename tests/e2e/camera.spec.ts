@@ -4,7 +4,7 @@
 //  - 화면 밖 화살표 정보 규칙: 생존자 화면은 메인 그림 · 고정 자리에서만, 괴물 화면은 점령 알림 · 포효 자리만(생존자 id 없음)
 //  - 관전: PC 키 · 카드 클릭, 터치 카드 탭, 탈출 뒤 자동 관전
 import { expect, test, type Page } from '@playwright/test';
-import type { CameraDebug } from '@decoy/shared';
+import { CAPTURE_POINTS, EXITS, RESCUE_POINT, type CameraDebug } from '@decoy/shared';
 import {
   PHONE_LANDSCAPE,
   createRoom,
@@ -157,13 +157,11 @@ async function markersAndDrawn(page: Page): Promise<{
   });
 }
 
-/** 고정 맵 자리 (거점 · 탈출구 · 감옥 구조 자리) */
+/** 고정 맵 자리 (거점 · 탈출구 · 감옥 구조 자리) — 맵 정의에서 만든다 (거점이 늘어도 빠지지 않게) */
 const FIXED: Readonly<Record<string, [number, number]>> = {
-  A: [8, 16],
-  B: [40, 16],
-  N: [24, 1.5],
-  S: [24, 30.5],
-  prison: [24, 18.5],
+  ...Object.fromEntries(Object.entries(CAPTURE_POINTS).map(([id, c]) => [id, [c.x, c.y]])),
+  ...Object.fromEntries(Object.entries(EXITS).map(([id, e]) => [id, [e.center.x, e.center.y]])),
+  prison: [RESCUE_POINT.x, RESCUE_POINT.y],
 };
 
 test('따라가기: 창이 내 캐릭터를 따라가고 맵 밖을 보이지 않는다, 먼 이동은 잘라 옮긴다', async ({
@@ -216,14 +214,23 @@ test('화면 밖 화살표 (생존자): 창 밖 팀원 · 보이는 괴물 · �
   const s = await startBotRoom(browser, QUERY, 'runner');
   const { page } = s;
   const you = (await page.evaluate(() => window.__DECOY__!.you)) ?? '';
-  // 러너는 거점 A 방. 가드는 거점 B, 그 시야 안에 괴물(공유 시야), 스카우트는 북쪽
+  // 러너는 거점 A 방. 가드는 거점 B, 그 시야 안에 괴물(공유 시야), 스카우트는 북쪽 (거점 C 둘레 밖 — C 점령을 시작하지 않게)
   await s.send({ kind: 'teleport', target: s.id('guard'), x: 40.5, y: 15.2, face: Math.PI });
   await s.send({ kind: 'teleport', target: s.id('monster'), x: 37.6, y: 18.4, face: -0.6 });
-  await s.send({ kind: 'teleport', target: s.id('scout'), x: 25.5, y: 4.5, face: 0.3 });
+  await s.send({ kind: 'teleport', target: s.id('scout'), x: 30.5, y: 2.5, face: 0.3 });
   await teleportSelf(s, you, 9.5, 17, 0);
   await expect
     .poll(async () => (await markersAndDrawn(page)).markers.map((m) => m.kind).sort(), { timeout: 15_000 })
     .toEqual(expect.arrayContaining(['monster', 'point', 'teammate', 'teammate']));
+  // 창 밖 거점은 둘 다 (B 점령 중 · 북쪽 교차로 C 대기), 창 안 A는 없음 — 거점 셋이 각자 고정 자리로
+  await expect
+    .poll(async () =>
+      (await markersAndDrawn(page)).markers
+        .filter((m) => m.kind === 'point')
+        .map((m) => m.id)
+        .sort(),
+    )
+    .toEqual(['B', 'C']);
   for (let i = 0; i < 6; i += 1) {
     const { markers, drawn, view } = await markersAndDrawn(page);
     for (const m of markers) {
