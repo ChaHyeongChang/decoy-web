@@ -24,6 +24,8 @@ import { ambientRgb } from '../../client/src/render/fogMath';
 import * as camera from '../../client/src/render/camera';
 import * as prefsFx from '../../client/src/render/prefsFx';
 import * as controlLayout from '../../client/src/controlLayout';
+import * as depthGeom from '../../client/src/art/depthGeom';
+import * as depth from '../../client/src/gfx/depth';
 import * as prefs from '../../client/src/prefs';
 import * as matchMenuButton from '../../client/src/ui/matchMenuButton';
 import * as perfChip from '../../client/src/ui/perfChip';
@@ -64,6 +66,8 @@ const MODULES: Readonly<Record<string, { file: string; mod: object }>> = {
   perfChip: { file: 'client/src/ui/perfChip.ts', mod: perfChip },
   matchMenuButton: { file: 'client/src/ui/matchMenuButton.ts', mod: matchMenuButton },
   controlLayout: { file: 'client/src/controlLayout.ts', mod: controlLayout },
+  depthGeom: { file: 'client/src/art/depthGeom.ts', mod: depthGeom },
+  depth: { file: 'client/src/gfx/depth.ts', mod: depth },
 };
 
 /** 0.1 고정 값 표에 반드시 있어야 하는 상수 (0장 ② · ③ · ⑥, 안개 하한) */

@@ -370,6 +370,38 @@ export interface ControlLayoutInfo {
   selected?: string | null;
 }
 
+/** 입체감 레이어 상태 (client render/depthLayer.ts, VISUAL_SPEC 14장) */
+export interface DepthDebugInfo {
+  /** 지금 그리는가 (설정 켬 + WebGL + 품질 높음 · 중간) */
+  on: boolean;
+  /** 시안 (끄면 null) */
+  look: 'a' | 'b' | 'c' | null;
+  /** 이번 프레임에 그린 띄운 벽 칸 · 기둥 덩어리 수 */
+  cells: number;
+  pillars: number;
+  /** 반투명으로 그린 칸 · 기둥 수 (그린 캐릭터 몸 때문 · 거점 · 탈출구 판정 원 때문) */
+  fadedBody: number;
+  fadedObjective: number;
+  /** 반투명 칸 (타일 칸, 기둥은 덩어리 왼쪽 위) */
+  faded: { i: number; j: number }[];
+  /** 그린 벽 등 · 그중 내 시야 빛을 받는 등 */
+  lamps: number;
+  lampsLit: number;
+  /** 빛을 다시 잰 안개 주기 수 · 이번 빛의 시야 수 */
+  lightCycle: number;
+  eyes: number;
+  /** 이번 프레임 삼각형 수 */
+  tris: number;
+  /** 빛을 받은 옆면 칸 수 */
+  litFaces: number;
+  /** 자기 빛 (거점 · 감옥 · 탈출구) 이미지 수 */
+  halos: number;
+  /** 후처리 입체감 (등불 · 가라앉히기 · 붉은 기운)이 구조 레이어에 걸렸는가 */
+  grade: boolean;
+  /** 캐릭터 비스듬 그림자를 그리는가 */
+  cast: boolean;
+}
+
 export interface DecoyDebug {
   /** 그래픽 상태 (M10) */
   readonly gfx: Readonly<GfxDebugInfo>;
@@ -451,6 +483,8 @@ export interface DecoyDebug {
   getBanners(): string[];
   /** 지금 보이는 연출 (피격 플래시 · 수감 페이드 · 채도 감소 · 기절 별 · 돌진 잔상 · 공격 범위) */
   getEffects(): Record<string, number | boolean>;
+  /** 입체감 레이어 상태 (판 장면이 없으면 null) */
+  getDepth(): DepthDebugInfo | null;
   /** 재생 요청한 효과음 이름 (최근 50개) */
   getSounds(): string[];
   /** 오디오가 열렸는가 (첫 사용자 입력 뒤) */

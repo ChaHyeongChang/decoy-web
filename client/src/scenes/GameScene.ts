@@ -9,6 +9,7 @@ import {
   TILE_PX,
   type AnimDebug,
   type CameraDebug,
+  type DepthDebugInfo,
   type DrawnEntity,
   type SurvivorView,
   type FxTarget,
@@ -575,6 +576,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   /** 디버그 · 테스트: 지금 보이는 연출 */
+  /** 입체감 레이어 상태 (디버그 getDepth) */
+  get depthDebug(): DepthDebugInfo | null {
+    return this.world ? this.world.depthDebug : null;
+  }
+
   get effects(): Record<string, number | boolean> {
     if (!this.screenFx || !this.world) return {};
     return { ...this.screenFx.state, ...this.world.fx, nearMisses: this.nearMisses };

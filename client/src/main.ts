@@ -7,6 +7,8 @@ import { sfx } from './audio';
 import { canOfferFullscreen, device, enterFullscreen, initDevice, onDeviceChange } from './device';
 import { matchTuning } from './controlLayout';
 import { initCharStyle, onCharStyleChange } from './gfx/charStyle';
+import { activeDepthLook, initDepthUrl } from './gfx/depth';
+import { loadDepth } from './render/depthLoader';
 import { Pacer, loadFrameLimit, pacingHooks, patchTimeStep, targetHzFor } from './gfx/framePacing';
 import { sessionFrameStats } from './gfx/frameStats';
 import type { QualityPreset, QualityTier, RendererKind } from './gfx/presets';
@@ -76,6 +78,7 @@ const gameRoot = document.getElementById('game-root') ?? document.body;
 const app = new App(params, uiRoot);
 // 캐릭터 스타일: ?chars(시험 · 촬영용)는 이번 접속에만, 아니면 저장값 · 기존 (gfx/charStyle.ts)
 initCharStyle(params.chars);
+initDepthUrl(params.depth, params.depthLook);
 
 // 프레임 페이싱 상태 (아래 '프레임 페이싱'에서 Phaser 루프에 끼운다). 품질을 정할 때 시작 목표 FPS를 읽으므로 먼저 만든다.
 // ?fpsLimit(시험용)는 이번 접속에만, 아니면 로비에서 고른 저장값
@@ -613,6 +616,8 @@ function schedulePrebake(): void {
     app.hub.prefetch();
     app.settings.prefetch();
     app.prefetchPractice();
+    // 입체감 조각: 그릴 수 있는 렌더러 · 품질 · 설정일 때만 (낮음 · Canvas는 받지 않는다)
+    if (activeDepthLook(gfxState.quality, gfxState.renderer)) void loadDepth();
     if (!game.isBooted) return;
     // 터치: 판 배치(논리 크기 → 배율 · HUD 서명)로 굽는다. 아니면 첫 판 시작 때 맵 · 캐릭터 · HUD를 모두 다시 굽는다
     if (device.touch) applyMatchLayout();

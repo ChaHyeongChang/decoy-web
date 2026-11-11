@@ -35,6 +35,11 @@ export interface Prefs {
   reduceFlash: boolean;
   /** 화면: 판 중 FPS · 핑 작은 칩 (?debug=1 오버레이와 별개) */
   perfChip: boolean;
+  /**
+   * 그래픽: 입체감 (벽 높이 · 그림자 · 등불 · 비네트, VISUAL_SPEC 14장). 품질 높음 · 중간의 WebGL에서만 보인다(낮음 · Canvas는 늘 끔).
+   * 그래픽 탭의 새 설정이라 예전 키가 없어 이 저장소에 둔다
+   */
+  depth3d: boolean;
   /** 소리: 전체 · 효과음 · UI 음량 (%) */
   volMaster: number;
   volSfx: number;
@@ -56,6 +61,7 @@ export const PREF_DEFAULTS: Readonly<Prefs> = Object.freeze({
   reduceShake: false,
   reduceFlash: false,
   perfChip: false,
+  depth3d: true,
   volMaster: 100,
   volSfx: 100,
   volUi: 60,
@@ -89,6 +95,7 @@ export function cleanPref<K extends PrefKey>(key: K, v: unknown): Prefs[K] | nul
     case 'reduceShake':
     case 'reduceFlash':
     case 'perfChip':
+    case 'depth3d':
     case 'muted':
       return typeof v === 'boolean' ? out(v) : null;
     case 'volMaster':

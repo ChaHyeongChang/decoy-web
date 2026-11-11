@@ -65,6 +65,10 @@ const CAP = BEFORE_M10 + 88 * 1024;
 // 전체 +6KiB
 // c(봇 · 손맛): 손맛 연출 · 소리 · 진동 · 아슬아슬(첫 묶음) · 봇 두뇌(연습 조각 localServer) — PR #34 병합에서 첫 로딩 +6KiB · 전체 +14KiB.
 // 최종 빌드 첫 로딩 335,020B(+3.6KiB) · 전체 410,340B(+9.8KiB). 다음 작업은 MILESTONE을 c 병합 값으로 옮기고 예산을 정한다
+// 입체감(VISUAL_SPEC 14장, DECISIONS 17절 '번들 예산'): 기준을 PR #35 병합(첫 로딩 335,020B · 전체 410,340B)으로 옮기고 첫 로딩 +3KiB ·
+// 전체 +10KiB. 그리는 코드 · 맵 계산은 나눠 받는 조각 'depthChunk'(gzip 약 6.1KiB — 품질 높음 · 중간 WebGL에서 쉬는 시간에 받는다),
+// 첫 묶음에는 설정 · 주소 해석 · 받는 쪽 · 후처리 셰이더 줄 · 캐릭터 비스듬 그림자만. 상한까지 첫 로딩 약 9KiB · 전체 약 17KiB를
+// 다음 3D 작업 자리로 남긴다(3D는 상한부터 다시 정해야 할 가능성이 크다 — 구성 표 먼저)
 /** 첫 로딩 JS 상한: M10 전 전체 번들 크기 (첫 화면에 받는 JS가 비주얼 리마스터 전 전체보다 크지 않게) */
 const INITIAL_CAP = BEFORE_M10;
 /** 첫 묶음(첫 화면) 조각 파일 이름 앞부분 */
@@ -81,12 +85,13 @@ const LAZY_CHUNKS = [
   'wardrobe',
   'account',
   'accountText',
+  'depthChunk',
 ];
 const MILESTONE = {
-  name: '플레이테스트 반영 c',
-  baseName: 'PR #34 병합',
-  base: { total: 400_273, initial: 331_340 },
-  budget: { total: 14 * 1024, initial: 6 * 1024 },
+  name: '입체감',
+  baseName: 'PR #35 병합',
+  base: { total: 410_340, initial: 335_020 },
+  budget: { total: 10 * 1024, initial: 3 * 1024 },
 };
 
 test(

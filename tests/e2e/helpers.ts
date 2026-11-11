@@ -159,7 +159,12 @@ export const PREFETCH_CHUNKS = [
   'accountText',
 ] as const;
 
-export async function waitPrefetched(page: Page, timeout = 30_000): Promise<void> {
+export async function waitPrefetched(
+  page: Page,
+  timeout = 30_000,
+  /** 더 기다릴 조각 (예: WebGL 높음 · 중간의 입체감 조각 'depthChunk') */
+  extra: readonly string[] = [],
+): Promise<void> {
   await expect
     .poll(
       () =>
@@ -172,7 +177,7 @@ export async function waitPrefetched(page: Page, timeout = 30_000): Promise<void
             }
             return names.filter((n) => !got.has(n));
           },
-          [...PREFETCH_CHUNKS],
+          [...PREFETCH_CHUNKS, ...extra],
         ),
       { timeout, message: '미리 받는 조각을 다 받을 때까지 (오프라인으로 바꾸기 전)' },
     )

@@ -206,7 +206,9 @@ async function startPractice(
   );
   await context.addInitScript(installVirtualClock, { seed: SEED, hz });
   await page.routeWebSocket(/\/ws$/, (ws) => ws.close({ code: 1011, reason: 'blocked' }));
-  await page.goto(`/?debug=hook&renderer=webgl${query}`);
+  // 입체감은 끈다: 빛 지도 셰이더 화소의 밝기 비를 잰다 — 입체감 등불(내 몸 화면 자리 중심 감쇠)이 같은 바닥 점의 밝기를 걸음마다
+  // 바꿔 비에 섞인다. 입체감 켬의 정보 · 대비는 depth.webgl · tests/unit/depth.test.ts가 본다 (DECISIONS 17절 '시험')
+  await page.goto(`/?debug=hook&renderer=webgl&depth=0${query}`);
   await expect(page.getByTestId('practice')).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.__DECOY__?.fonts.ready === true)).toBe(true);
   await waitPrefetched(page);

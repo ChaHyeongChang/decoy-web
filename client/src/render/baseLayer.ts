@@ -92,6 +92,11 @@ export interface FogLayer {
   stepBigMini(budgetMs: number): boolean;
   /** 크게 본 지도 바닥을 쓸 수 있는가 (다 구웠다) */
   readonly bigMiniReady: boolean;
+  /**
+   * 빛 지도 곱하기 앞의 공개 동적 그릇 (GPU 경로, 입체감 자기 빛 — render/depthLayer.ts): 여기 넣은 그림은 시설 발광처럼 어둠 속에서
+   * 하한만큼 약해진다. Canvas 합성은 null (한 장에 굽는다 — 입체감은 Canvas에서 그리지 않는다)
+   */
+  readonly underLight: Phaser.GameObjects.Container | null;
   /** 측정: 마지막 합성(begin~commit)에 걸린 시간 (ms) */
   readonly lastCommitMs: number;
   /** 마지막 commit에서 그림이 바뀌었는가 (바뀌지 않았으면 미니맵도 다시 그릴 필요가 없다) */
@@ -255,6 +260,7 @@ export class CanvasFog implements FogLayer {
   readonly mode = 'canvas' as const;
   readonly shader = false;
   readonly selfFollow = false;
+  readonly underLight = null;
   private readonly base: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
   /**

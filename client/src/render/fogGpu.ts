@@ -510,6 +510,11 @@ export class GpuFog implements FogLayer {
   private chunkFull = false;
   /** 공개 동적 레이어: 거점 · 탈출구 조각 (빛 지도 · 시야 채움보다 아래) */
   private readonly dynBox: Phaser.GameObjects.Container;
+
+  /** 빛 지도 곱하기 앞 그릇 = 공개 동적 레이어 (입체감 자기 빛을 맨 앞에 넣는다 — 거점 · 탈출구 조각 아래) */
+  get underLight(): Phaser.GameObjects.Container {
+    return this.dynBox;
+  }
   private readonly patches = new Map<string, DynPatch>();
   /** 시야 채움 (빛 지도 격자, 다각형마다 한 장): 안개 주기마다 견줘 바뀐 장만 다시 그려 올린다 */
   private readonly tintBox: Phaser.GameObjects.Container;

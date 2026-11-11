@@ -1,0 +1,482 @@
+{
+  "createdAt": "2026-11-11T20:30:40.999Z",
+  "shots": [
+    {
+      "file": "iphone14-844x390/a-monster.png",
+      "device": "iphone14-844x390",
+      "variant": "a",
+      "scene": "monster",
+      "depth": {
+        "on": true,
+        "look": "a",
+        "cells": 0,
+        "pillars": 2,
+        "fadedBody": 1,
+        "fadedObjective": 0,
+        "faded": [
+          {
+            "i": 23,
+            "j": 10
+          }
+        ],
+        "lamps": 3,
+        "lampsLit": 0,
+        "lightCycle": 13,
+        "eyes": 2,
+        "tris": 298,
+        "litFaces": 5,
+        "halos": 6,
+        "grade": true,
+        "cast": true
+      }
+    },
+    {
+      "file": "iphone14-844x390/a-survivor.png",
+      "device": "iphone14-844x390",
+      "variant": "a",
+      "scene": "survivor",
+      "depth": {
+        "on": true,
+        "look": "a",
+        "cells": 0,
+        "pillars": 2,
+        "fadedBody": 1,
+        "fadedObjective": 0,
+        "faded": [
+          {
+            "i": 28,
+            "j": 8
+          }
+        ],
+        "lamps": 0,
+        "lampsLit": 0,
+        "lightCycle": 3,
+        "eyes": 3,
+        "tris": 362,
+        "litFaces": 21,
+        "halos": 6,
+        "grade": true,
+        "cast": true
+      }
+    },
+    {
+      "file": "iphone14-844x390/b-monster.png",
+      "device": "iphone14-844x390",
+      "variant": "b",
+      "scene": "monster",
+      "depth": {
+        "on": true,
+        "look": "b",
+        "cells": 0,
+        "pillars": 2,
+        "fadedBody": 1,
+        "fadedObjective": 0,
+        "faded": [
+          {
+            "i": 23,
+            "j": 10
+          }
+        ],
+        "lamps": 3,
+        "lampsLit": 0,
+        "lightCycle": 16,
+        "eyes": 2,
+        "tris": 298,
+        "litFaces": 5,
+        "halos": 6,
+        "grade": true,
+        "cast": true
+      }
+    },
+    {
+      "file": "iphone14-844x390/b-survivor.png",
+      "device": "iphone14-844x390",
+      "variant": "b",
+      "scene": "survivor",
+      "depth": {
+        "on": true,
+        "look": "b",
+        "cells": 0,
+        "pillars": 2,
+        "fadedBody": 2,
+        "fadedObjective": 1,
+        "faded": [
+          {
+            "i": 27,
+            "j": 8
+          },
+          {
+            "i": 28,
+            "j": 8
+          },
+          {
+            "i": 23,
+            "j": 10
+          }
+        ],
+        "lamps": 0,
+        "lampsLit": 0,
+        "lightCycle": 3,
+        "eyes": 3,
+        "tris": 366,
+        "litFaces": 21,
+        "halos": 6,
+        "grade": true,
+        "cast": true
+      }
+    },
+    {
+      "file": "iphone14-844x390/c-monster.png",
+      "device": "iphone14-844x390",
+      "variant": "c",
+      "scene": "monster",
+      "depth": {
+        "on": true,
+        "look": "c",
+        "cells": 0,
+        "pillars": 2,
+        "fadedBody": 1,
+        "fadedObjective": 0,
+        "faded": [
+          {
+            "i": 23,
+            "j": 10
+          }
+        ],
+        "lamps": 3,
+        "lampsLit": 0,
+        "lightCycle": 17,
+        "eyes": 2,
+        "tris": 298,
+        "litFaces": 5,
+        "halos": 6,
+        "grade": true,
+        "cast": true
+      }
+    },
+    {
+      "file": "iphone14-844x390/c-survivor.png",
+      "device": "iphone14-844x390",
+      "variant": "c",
+      "scene": "survivor",
+      "depth": {
+        "on": true,
+        "look": "c",
+        "cells": 0,
+        "pillars": 2,
+        "fadedBody": 2,
+        "fadedObjective": 1,
+        "faded": [
+          {
+            "i": 27,
+            "j": 8
+          },
+          {
+            "i": 28,
+            "j": 8
+          },
+          {
+            "i": 23,
+            "j": 10
+          }
+        ],
+        "lamps": 0,
+        "lampsLit": 0,
+        "lightCycle": 2,
+        "eyes": 3,
+        "tris": 366,
+        "litFaces": 21,
+        "halos": 6,
+        "grade": true,
+        "cast": true
+      }
+    },
+    {
+      "file": "iphone14-844x390/off-monster.png",
+      "device": "iphone14-844x390",
+      "variant": "off",
+      "scene": "monster",
+      "depth": {
+        "on": false,
+        "look": null,
+        "cells": 0,
+        "pillars": 0,
+        "fadedBody": 0,
+        "fadedObjective": 0,
+        "faded": [],
+        "lamps": 0,
+        "lampsLit": 0,
+        "lightCycle": 15,
+        "eyes": 2,
+        "tris": 0,
+        "litFaces": 0,
+        "halos": 6,
+        "grade": false,
+        "cast": false
+      }
+    },
+    {
+      "file": "iphone14-844x390/off-survivor.png",
+      "device": "iphone14-844x390",
+      "variant": "off",
+      "scene": "survivor",
+      "depth": {
+        "on": false,
+        "look": null,
+        "cells": 0,
+        "pillars": 0,
+        "fadedBody": 0,
+        "fadedObjective": 0,
+        "faded": [],
+        "lamps": 0,
+        "lampsLit": 0,
+        "lightCycle": 2,
+        "eyes": 3,
+        "tris": 0,
+        "litFaces": 0,
+        "halos": 6,
+        "grade": false,
+        "cast": false
+      }
+    },
+    {
+      "file": "pc-1920x1080/a-monster.png",
+      "device": "pc-1920x1080",
+      "variant": "a",
+      "scene": "monster",
+      "depth": {
+        "on": true,
+        "look": "a",
+        "cells": 0,
+        "pillars": 2,
+        "fadedBody": 1,
+        "fadedObjective": 0,
+        "faded": [
+          {
+            "i": 23,
+            "j": 10
+          }
+        ],
+        "lamps": 3,
+        "lampsLit": 0,
+        "lightCycle": 13,
+        "eyes": 2,
+        "tris": 298,
+        "litFaces": 5,
+        "halos": 6,
+        "grade": true,
+        "cast": true
+      }
+    },
+    {
+      "file": "pc-1920x1080/a-survivor.png",
+      "device": "pc-1920x1080",
+      "variant": "a",
+      "scene": "survivor",
+      "depth": {
+        "on": true,
+        "look": "a",
+        "cells": 0,
+        "pillars": 2,
+        "fadedBody": 1,
+        "fadedObjective": 0,
+        "faded": [
+          {
+            "i": 28,
+            "j": 8
+          }
+        ],
+        "lamps": 0,
+        "lampsLit": 0,
+        "lightCycle": 3,
+        "eyes": 3,
+        "tris": 338,
+        "litFaces": 21,
+        "halos": 6,
+        "grade": true,
+        "cast": true
+      }
+    },
+    {
+      "file": "pc-1920x1080/b-monster.png",
+      "device": "pc-1920x1080",
+      "variant": "b",
+      "scene": "monster",
+      "depth": {
+        "on": true,
+        "look": "b",
+        "cells": 0,
+        "pillars": 2,
+        "fadedBody": 1,
+        "fadedObjective": 0,
+        "faded": [
+          {
+            "i": 23,
+            "j": 10
+          }
+        ],
+        "lamps": 3,
+        "lampsLit": 0,
+        "lightCycle": 10,
+        "eyes": 2,
+        "tris": 298,
+        "litFaces": 5,
+        "halos": 6,
+        "grade": true,
+        "cast": true
+      }
+    },
+    {
+      "file": "pc-1920x1080/b-survivor.png",
+      "device": "pc-1920x1080",
+      "variant": "b",
+      "scene": "survivor",
+      "depth": {
+        "on": true,
+        "look": "b",
+        "cells": 0,
+        "pillars": 2,
+        "fadedBody": 2,
+        "fadedObjective": 1,
+        "faded": [
+          {
+            "i": 27,
+            "j": 8
+          },
+          {
+            "i": 28,
+            "j": 8
+          },
+          {
+            "i": 23,
+            "j": 10
+          }
+        ],
+        "lamps": 0,
+        "lampsLit": 0,
+        "lightCycle": 3,
+        "eyes": 3,
+        "tris": 366,
+        "litFaces": 21,
+        "halos": 6,
+        "grade": true,
+        "cast": true
+      }
+    },
+    {
+      "file": "pc-1920x1080/c-monster.png",
+      "device": "pc-1920x1080",
+      "variant": "c",
+      "scene": "monster",
+      "depth": {
+        "on": true,
+        "look": "c",
+        "cells": 0,
+        "pillars": 2,
+        "fadedBody": 1,
+        "fadedObjective": 0,
+        "faded": [
+          {
+            "i": 23,
+            "j": 10
+          }
+        ],
+        "lamps": 3,
+        "lampsLit": 0,
+        "lightCycle": 14,
+        "eyes": 2,
+        "tris": 298,
+        "litFaces": 5,
+        "halos": 6,
+        "grade": true,
+        "cast": true
+      }
+    },
+    {
+      "file": "pc-1920x1080/c-survivor.png",
+      "device": "pc-1920x1080",
+      "variant": "c",
+      "scene": "survivor",
+      "depth": {
+        "on": true,
+        "look": "c",
+        "cells": 0,
+        "pillars": 2,
+        "fadedBody": 2,
+        "fadedObjective": 1,
+        "faded": [
+          {
+            "i": 27,
+            "j": 8
+          },
+          {
+            "i": 28,
+            "j": 8
+          },
+          {
+            "i": 23,
+            "j": 10
+          }
+        ],
+        "lamps": 0,
+        "lampsLit": 0,
+        "lightCycle": 3,
+        "eyes": 3,
+        "tris": 366,
+        "litFaces": 21,
+        "halos": 6,
+        "grade": true,
+        "cast": true
+      }
+    },
+    {
+      "file": "pc-1920x1080/off-monster.png",
+      "device": "pc-1920x1080",
+      "variant": "off",
+      "scene": "monster",
+      "depth": {
+        "on": false,
+        "look": null,
+        "cells": 0,
+        "pillars": 0,
+        "fadedBody": 0,
+        "fadedObjective": 0,
+        "faded": [],
+        "lamps": 0,
+        "lampsLit": 0,
+        "lightCycle": 14,
+        "eyes": 2,
+        "tris": 0,
+        "litFaces": 0,
+        "halos": 6,
+        "grade": false,
+        "cast": false
+      }
+    },
+    {
+      "file": "pc-1920x1080/off-survivor.png",
+      "device": "pc-1920x1080",
+      "variant": "off",
+      "scene": "survivor",
+      "depth": {
+        "on": false,
+        "look": null,
+        "cells": 0,
+        "pillars": 0,
+        "fadedBody": 0,
+        "fadedObjective": 0,
+        "faded": [],
+        "lamps": 0,
+        "lampsLit": 0,
+        "lightCycle": 3,
+        "eyes": 3,
+        "tris": 0,
+        "litFaces": 0,
+        "halos": 6,
+        "grade": false,
+        "cast": false
+      }
+    }
+  ],
+  "problems": []
+}

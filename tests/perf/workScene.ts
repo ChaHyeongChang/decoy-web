@@ -3,7 +3,7 @@
 // 하며 센다. 최적화 전 빌드에도 있는 디버그 훅(injectFps · transport · fonts)만 쓴다
 import type { Browser, Page } from '@playwright/test';
 import { installVirtualClock } from '../helpers/virtualClock';
-import { watchConsole } from '../e2e/helpers';
+import { waitPrefetched, watchConsole } from '../e2e/helpers';
 import { installWorkCounts, perFrame, type WorkCounts } from './workCounts';
 
 export interface WorkScene {
@@ -185,6 +185,8 @@ export async function measureWork(browser: Browser, sc: WorkScene): Promise<Work
     await page.goto(`/?debug=hook&quality=${sc.quality}${renderer}${scale}${chars}`);
     await page.getByTestId('practice').waitFor({ state: 'visible' });
     await page.waitForFunction(() => window.__DECOY__?.fonts.ready === true, null, { timeout: 30_000 });
+    // WebGL 높음 · 중간은 입체감 조각(기본 켬)을 받은 뒤 끊는다: 오프라인이면 조각을 못 받아 입체감 없이 그려져 일의 양에 빠진다
+    if (sc.project === 'webgl' && sc.quality !== 'low') await waitPrefetched(page, 30_000, ['depthChunk']);
     await context.setOffline(true);
     await page.waitForTimeout(300);
     await page.evaluate(async (t) => {

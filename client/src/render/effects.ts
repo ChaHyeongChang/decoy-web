@@ -14,6 +14,7 @@ import type { QualityPreset } from '../gfx/presets';
 import { gfxState } from '../gfx/state';
 import { MAP_RECT, VIEW_H, VIEW_W } from '../ui/layout';
 import { POST, vignetteAt } from '../art/fx';
+import { DEPTH_SINK } from '../gfx/depth';
 import { createCanvasTexture, removeCanvasTexture } from './fogPaint';
 import { FOG_EDGE_PIPELINE, FOG_FOLLOW_PIPELINE } from './fogGpu';
 import { RESCUE_RIM, hitFlashLevel, imprisonFadeLevel } from './prefsFx';
@@ -132,6 +133,12 @@ export class ScreenEffects {
 
 const WORLD_GRADE = 'DecoyWorldGrade';
 
+/**
+ * 구조 레이어 후처리 셰이더: 색보정(채도 · 그늘 색) + 비네트 + 입체감(uDepth > 0일 때만, VISUAL_SPEC 14장).
+ * 입체감: 내 캐릭터 화면 자리(uLantern.xy, 논리 px)에서 멀수록 어둡게(등불 감쇠, 시야 반경 안쪽 uLantern.z → 바깥 uLantern.w에서
+ * uLanternMin), 가운데 따뜻한 빛(uWarm), 어두운 화소를 더 가라앉히기(uCrush — 밝은 화소 · 테두리는 그대로라 어둠 속 구조 대비는
+ * 오른다), 괴물 화면 붉은 기운(uRed). 모두 '어둡게 · 색을 기울이게'만 해서 시야 밖을 밝히지 않는다. 캐릭터 · 정보에는 걸리지 않는다(R2)
+ */
 const WORLD_GRADE_FRAG = `
 #define SHADER_NAME DECOY_WORLD_GRADE_FS
 precision mediump float;
@@ -139,6 +146,13 @@ uniform sampler2D uMainSampler;
 uniform vec2 uHalf;
 uniform float uVignette;
 uniform float uGrade;
+uniform float uDepth;
+uniform vec2 uView;
+uniform vec4 uLantern;
+uniform float uLanternMin;
+uniform vec3 uWarm;
+uniform float uCrush;
+uniform float uRed;
 varying vec2 outTexCoord;
 void main ()
 {
@@ -152,14 +166,57 @@ void main ()
     vec2 n = (outTexCoord - vec2(0.5)) / uHalf;
     float t = clamp((length(n) - ${POST.vignetteStart.toFixed(3)}) / ${(POST.vignetteEnd - POST.vignetteStart).toFixed(4)}, 0.0, 1.0);
     float v = uVignette * t * t * (3.0 - 2.0 * t);
+    if (uDepth > 0.5)
+    {
+        vec2 px = vec2(outTexCoord.x, 1.0 - outTexCoord.y) * uView;
+        float lt = smoothstep(uLantern.z, uLantern.w, distance(px, uLantern.xy));
+        float sink = 1.0 - uCrush * (1.0 - smoothstep(${DEPTH_SINK.lo.toFixed(3)}, ${DEPTH_SINK.hi.toFixed(3)}, L));
+        straight *= mix(1.0, uLanternMin, lt) * sink;
+        straight *= mix(vec3(1.0), uWarm, 1.0 - lt);
+        float redK = uRed * (1.0 - smoothstep(0.0, 0.35, L));
+        straight *= vec3(1.0, 1.0 - 0.45 * redK, 1.0 - 0.4 * redK);
+        straight = mix(straight, straight * vec3(1.0, 0.55, 0.55), v * uRed * 2.0);
+    }
     gl_FragColor = vec4(clamp(straight, 0.0, 1.0) * (1.0 - v) * c.a, c.a);
 }
 `;
 
-/** 구조 레이어 후처리 파이프라인 (WebGL 전용): 색보정 + 비네트 한 번에 */
+/** 입체감 후처리 값 (WorldPostFx.setDepth — 프레임마다). on = 거짓이면 셰이더가 입체감 줄을 건너뛴다 */
+export interface DepthGrade {
+  on: boolean;
+  /** 내 캐릭터 화면 자리 (논리 px, 화면 VIEW 좌표) · 등불 감쇠 시작 · 끝 반경 (논리 px) */
+  x: number;
+  y: number;
+  r0: number;
+  r1: number;
+  lanternMin: number;
+  /** 등불 가운데 색 배율 (1, 1, 1 = 없음, 1 이하 — 밝히지 않는다) */
+  warm: readonly [number, number, number];
+  crush: number;
+  /** 괴물 화면 붉은 기운 (생존자 화면 0) */
+  red: number;
+  /** 품질 높음 셰이더 비네트 세기 (입체감이 켜져 있으면 이 값, 꺼져 있으면 POST.vignetteMax) */
+  vignette: number;
+}
+
+/** 구조 레이어 후처리 파이프라인 (WebGL 전용): 색보정 + 비네트 (+ 입체감) 한 번에 */
 class WorldGradePipeline extends Phaser.Renderer.WebGL.Pipelines.PostFXPipeline {
   vignette = 0;
   grade = 0;
+  /** 셰이더 비네트를 켰는가 (품질 높음) — 입체감 비네트 세기는 이때만 쓴다 */
+  shaderVignette = false;
+  readonly depth: DepthGrade = {
+    on: false,
+    x: 0,
+    y: 0,
+    r0: 1,
+    r1: 2,
+    lanternMin: 1,
+    warm: [1, 1, 1],
+    crush: 0,
+    red: 0,
+    vignette: 0,
+  };
 
   constructor(game: Phaser.Game) {
     super({ game, name: WORLD_GRADE, fragShader: WORLD_GRADE_FRAG });
@@ -169,8 +226,17 @@ class WorldGradePipeline extends Phaser.Renderer.WebGL.Pipelines.PostFXPipeline 
     // 컨테이너 마지막 그림(빛 지도)의 곱하기 섞기가 남아 있으면 결과가 화면 바탕에 곱해진다 → 보통 섞기로 되돌린다
     this.renderer.setBlendMode(Phaser.BlendModes.NORMAL, true);
     this.set2f('uHalf', MAP_RECT.w / 2 / VIEW_W, MAP_RECT.h / 2 / VIEW_H);
-    this.set1f('uVignette', this.vignette);
+    const d = this.depth;
+    const vig = this.shaderVignette ? (d.on ? d.vignette : this.vignette) : 0;
+    this.set1f('uVignette', vig);
     this.set1f('uGrade', this.grade);
+    this.set1f('uDepth', d.on ? 1 : 0);
+    this.set2f('uView', VIEW_W, VIEW_H);
+    this.set4f('uLantern', d.x, d.y, d.r0, d.r1);
+    this.set1f('uLanternMin', d.lanternMin);
+    this.set3f('uWarm', d.warm[0], d.warm[1], d.warm[2]);
+    this.set1f('uCrush', d.crush);
+    this.set1f('uRed', d.red);
     this.bindAndDraw(target);
   }
 }
@@ -184,6 +250,40 @@ export class WorldPostFx {
   private overlay: Phaser.GameObjects.Image | null = null;
   private overlayKey: string | null = null;
   private piped = false;
+  /** 걸린 후처리 파이프라인 (입체감 값을 프레임마다 쓴다, 없으면 null — Canvas · 낮음) */
+  private pipe: WorldGradePipeline | null = null;
+  /** 입체감 값 (파이프라인이 없을 때도 마지막 값을 들고 있다: 디버그) */
+  private depthOn = false;
+
+  /**
+   * 입체감 후처리 값 (프레임마다, 바뀐 값만 셰이더에 올라간다 — WebGLShader가 지난 값과 견준다). 파이프라인이 없으면(Canvas ·
+   * 낮음) 아무것도 하지 않는다. 걸린 곳은 구조 레이어뿐이다(collectFxTargets가 'depth'로 센다)
+   */
+  setDepth(g: DepthGrade | null): void {
+    const p = this.pipe;
+    this.depthOn = g !== null && g.on && p !== null;
+    if (!p) return;
+    const d = p.depth;
+    if (!g || !g.on) {
+      d.on = false;
+      return;
+    }
+    d.on = true;
+    d.x = g.x;
+    d.y = g.y;
+    d.r0 = g.r0;
+    d.r1 = g.r1;
+    d.lanternMin = g.lanternMin;
+    d.warm = g.warm;
+    d.crush = g.crush;
+    d.red = g.red;
+    d.vignette = g.vignette;
+  }
+
+  /** 입체감 후처리가 지금 걸려 있는가 */
+  get depth(): boolean {
+    return this.depthOn;
+  }
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -207,7 +307,9 @@ export class WorldPostFx {
       const pipe = (Array.isArray(p) ? p[0] : p) as WorldGradePipeline | undefined;
       if (pipe) {
         pipe.vignette = shaderVignette ? POST.vignetteMax : 0;
+        pipe.shaderVignette = shaderVignette;
         pipe.grade = grade ? 1 : 0;
+        this.pipe = pipe;
         this.piped = true;
         if (shaderVignette) {
           vignette = 'postfx';
@@ -298,6 +400,8 @@ export class WorldPostFx {
       this.root.resetPostPipeline();
       this.piped = false;
     }
+    this.pipe = null;
+    this.depthOn = false;
     this.overlay?.destroy();
     this.overlay = null;
     if (this.overlayKey) removeCanvasTexture(this.scene.textures, this.overlayKey);
@@ -369,6 +473,7 @@ function fxOf(o: object): string[] {
       if (p instanceof WorldGradePipeline) {
         if (p.vignette > 0) out.push('vignette');
         if (p.grade > 0) out.push('colorGrade');
+        if (p.depth.on) out.push('depth');
       } else if (pipeName(p) !== 'FxPipeline') out.push(pipeName(p));
     }
   if ('pipeline' in o && o.pipeline) {

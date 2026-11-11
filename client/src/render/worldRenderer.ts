@@ -30,6 +30,7 @@ import {
   survivorVisionPolygon,
   survivorVisionRadius,
   type Balance,
+  type DepthDebugInfo,
   type DrawnEntity,
   type GameEvent,
   type InfoItem,
@@ -98,13 +99,19 @@ import {
   drawStunStars,
   drawTeamSurvivor,
   drawTrackMark,
+  castShadowOn,
+  setCastShadow,
   type BodyDisk,
   type CharacterLayers,
   type MonsterPose,
   type TeamSurvivorPose,
 } from './characters';
 import type { PingPulse } from './prefsFx';
-import { STUN_VEIL, WorldPostFx } from './effects';
+import { STUN_VEIL, WorldPostFx, type DepthGrade } from './effects';
+import type { DepthLayer } from './depthLayer';
+import type { DepthLook, Disk, LightEye } from '../art/depthGeom';
+import { activeDepthLook } from '../gfx/depth';
+import { depthModule, loadDepth } from './depthLoader';
 import { ALPHA, FOG } from './colors';
 import { chunkAtlasFor, createFogLayer, fogArtParams, stepFogArt, type FogLayer } from './baseLayer';
 import type { ViewRect } from './camera';
@@ -335,6 +342,48 @@ export class WorldRenderer {
   private readonly scene: Phaser.Scene;
   private preset: QualityPreset;
   private readonly post: WorldPostFx;
+  /**
+   * 입체감 레이어 (구조 레이어 안 — 캐릭터 · 정보는 늘 그 위, VISUAL_SPEC 14장). 나눠 받는 조각 'depth'가 온 뒤 처음 쓸 때 만든다
+   * (그 전에는 null — 입체감 없이 그린다)
+   */
+  private depthLayer: DepthLayer | null = null;
+  /** 지금 그리는 입체감 시안 (끄면 null: 설정 끔 · Canvas · 품질 낮음) */
+  private depthLook: DepthLook | null = null;
+  /** 입체감 빛을 잴 시야 (안개 주기의 눈에서 — 받은 정보만) · 그릇 */
+  private readonly lightEyes: {
+    poly: readonly Vec2[];
+    x: number;
+    y: number;
+    r: number;
+    inner: number;
+    hard: boolean;
+  }[] = [];
+  private readonly lightEyePool: {
+    poly: readonly Vec2[];
+    x: number;
+    y: number;
+    r: number;
+    inner: number;
+    hard: boolean;
+  }[] = [];
+  /** 입체감 반투명을 정할 몸 원 (이번 프레임에 그린 캐릭터만) · 그릇 */
+  private readonly depthBodies: { x: number; y: number; r: number }[] = [];
+  private readonly depthBodyPool: { x: number; y: number; r: number }[] = [];
+  /** 거점 · 탈출구 판정 원 (balance 반지름 — 같은 balance면 다시 만들지 않는다) */
+  private objectives: { of: Balance; disks: Disk[] } | null = null;
+  /** 입체감 후처리 값 (프레임마다 고쳐 쓴다) */
+  private readonly grade: DepthGrade = {
+    on: false,
+    x: 0,
+    y: 0,
+    r0: 1,
+    r1: 2,
+    lanternMin: 1,
+    warm: [1, 1, 1],
+    crush: 0,
+    red: 0,
+    vignette: 0,
+  };
   /** 괴물 화면: 자기 시야(부채꼴 ∪ 근접 원) 테두리 선분 (안개와 같은 주기로 계산) */
   private outline: [Vec2, Vec2][] = [];
   /** outline을 만든 다각형 (부채꼴 · 근접 원). 같은 참조면 다시 계산하지 않는다 */
@@ -662,6 +711,9 @@ export class WorldRenderer {
     scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       off();
       this.post.clear();
+      this.depthLayer?.destroy();
+      this.depthLayer = null;
+      setCastShadow(null);
       this.fog.destroy();
       this.resetRigs();
     });
@@ -785,6 +837,146 @@ export class WorldRenderer {
     this.grazeUntil = nowMs + FX_PRESETS.graze.life * 1000;
   }
 
+  /**
+   * 입체감 시안을 지금 설정 · 렌더러 · 품질로 (바뀌면 레이어를 켜고 끈다). 캐릭터 비스듬 그림자도 같은 값. 조각이 아직 없으면 받기를
+   * 시작하고 이번 프레임은 끔으로 그린다. 레이어는 처음 쓸 때 구조 레이어 맨 위(빛 지도 · 테두리 리프트 뒤)에 만들고 구운 비네트
+   * 오버레이만 그 위로 되돌린다
+   */
+  private updateDepthLook(): void {
+    const id = this.webgl && this.useFog ? activeDepthLook(this.preset.tier, 'webgl') : null;
+    const mod = id ? depthModule() : null;
+    if (id && !mod) void loadDepth();
+    const look = id && mod ? mod.DEPTH_LOOKS[id] : null;
+    if (look && mod && !this.depthLayer) {
+      this.depthLayer = new mod.DepthLayer(this.scene, this.fogRoot, ambientRgb(FOG.ambient, FOG.tint));
+      this.depthLayer.attachHalos(this.fog.underLight);
+      this.post.raise();
+    }
+    if (look !== this.depthLook) {
+      this.depthLook = look;
+      this.depthLayer?.setLook(look);
+    }
+    setCastShadow(look);
+  }
+
+  /**
+   * 안개 주기: 이번 주기 시야(this.eyes — 생존자 화면 = 팀 시야, 괴물 화면 = 자기 부채꼴 · 근접 원)를 입체감 빛으로 넘긴다.
+   * 생존자 눈은 부드러운 가장자리(반경 r − 흐림 띠 ~ r), 괴물 눈(역할 null)은 딱 자른 빛 — 빛 지도와 같은 식
+   */
+  private relightDepth(): void {
+    const out = this.lightEyes;
+    out.length = 0;
+    for (const e of this.eyes) {
+      let le = this.lightEyePool[out.length];
+      if (!le) {
+        le = { poly: e.poly, x: 0, y: 0, r: 0, inner: 0, hard: false };
+        this.lightEyePool.push(le);
+      }
+      le.poly = e.poly;
+      le.x = e.center.x;
+      le.y = e.center.y;
+      le.r = e.r;
+      le.inner = e.radius;
+      le.hard = e.role === null;
+      out.push(le);
+    }
+    this.depthLayer?.relight(out as readonly LightEye[]);
+  }
+
+  /** 거점 · 탈출구 판정 원 (반투명 판정, balance 반지름) */
+  private objectiveDisksFor(balance: Balance, mod: NonNullable<ReturnType<typeof depthModule>>): Disk[] {
+    const o = this.objectives;
+    if (o && o.of === balance) return o.disks;
+    const disks = mod.objectiveDisks(balance.capturePoint.radius, balance.exit.radius);
+    this.objectives = { of: balance, disks };
+    return disks;
+  }
+
+  /**
+   * 입체감 한 프레임 (캐릭터를 다 그린 뒤): 이번 프레임에 그린 몸 원으로 반투명 칸을 정해 벽 · 기둥을 그리고, 자기 빛 색, 후처리 값.
+   * 몸 원은 그린 캐릭터만(받은 정보) — 생존자 화면의 괴물은 보일 때만 스냅샷에 있다
+   */
+  private drawDepth(v: FrameView, isMonster: boolean, coneRange: number | null, tS: number): void {
+    const look = this.depthLook;
+    const layer = this.depthLayer;
+    const mod = depthModule();
+    if (!look || !layer || !mod) {
+      this.post.setDepth(null);
+      if (layer) {
+        layer.debug.grade = false;
+        layer.debug.cast = castShadowOn();
+      }
+      return;
+    }
+    const dbg = layer.debug;
+    const bodies = this.depthBodies;
+    bodies.length = 0;
+    const push = (x: number, y: number, r: number): void => {
+      let d = this.depthBodyPool[bodies.length];
+      if (!d) {
+        d = { x, y, r };
+        this.depthBodyPool.push(d);
+      }
+      d.x = x;
+      d.y = y;
+      d.r = r;
+      bodies.push(d);
+    };
+    for (const d of this.disks) push(d.x, d.y, d.r);
+    if (!isMonster && v.monster) push(v.monster.x, v.monster.y, v.balance.monster.radius);
+    layer.draw(v.view, bodies, this.objectiveDisksFor(v.balance, mod), tS);
+    layer.updateHalos(v.snap.world.points, v.snap.world.exits);
+    // 후처리: 내 몸 화면 자리 중심 등불 (없으면 창 가운데), 시야 반경 기준 감쇠
+    const g = this.grade;
+    const k = TILE_PX * WORLD_SCALE;
+    const me = v.meBody ?? v.me;
+    const cx = me ? me.x : v.view.x + v.view.w / 2;
+    const cy = me ? me.y : v.view.y + v.view.h / 2;
+    const R = isMonster
+      ? (coneRange ?? v.balance.monster.visionModes.search.range)
+      : v.role === 'monster'
+        ? 6
+        : survivorVisionRadius(v.balance, v.role);
+    g.on = true;
+    g.x = MAP_X + (cx - v.view.x) * k;
+    g.y = MAP_Y + (cy - v.view.y) * k;
+    g.r0 = R * mod.DEPTH.lanternIn * k;
+    g.r1 = R * mod.DEPTH.lanternOut * k;
+    g.lanternMin = look.lanternMin;
+    g.warm = mod.lanternWarm(look, isMonster);
+    g.crush = look.crush;
+    g.red = isMonster ? look.monsterRed : 0;
+    g.vignette = look.vignette;
+    this.post.setDepth(g);
+    dbg.grade = this.post.depth;
+    dbg.cast = castShadowOn();
+  }
+
+  /** 입체감 상태 (디버그 getDepth: 복사 — 조각이 아직 없거나 한 번도 켜지 않았으면 끔 상태) */
+  get depthDebug(): DepthDebugInfo {
+    const d = this.depthLayer?.debug;
+    if (!d)
+      return {
+        on: false,
+        look: null,
+        cells: 0,
+        pillars: 0,
+        fadedBody: 0,
+        fadedObjective: 0,
+        faded: [],
+        lamps: 0,
+        lampsLit: 0,
+        lightCycle: 0,
+        eyes: 0,
+        tris: 0,
+        litFaces: 0,
+        halos: 0,
+        grade: this.post.depth,
+        cast: castShadowOn(),
+      };
+    return { ...d, faded: d.faded.map((f) => ({ ...f })) };
+  }
+
   private buildFog(): FogLayer {
     const renderer: RendererKind = this.scene.game.renderer.type === Phaser.WEBGL ? 'webgl' : 'canvas';
     const p = fogArtParams(renderer);
@@ -837,6 +1029,8 @@ export class WorldRenderer {
     this.fog.destroy();
     this.preset = this.currentPreset();
     this.fog = this.buildFog();
+    this.depthLayer?.raise();
+    this.depthLayer?.attachHalos(this.fog.underLight);
     this.post.apply(this.preset, this.fog.shader);
     this.post.raise();
     this.post.follow(this.fogRoot.x, this.fogRoot.y);
@@ -1099,6 +1293,7 @@ export class WorldRenderer {
     if (rebaking) this.rebuildFog();
     // 카메라: 월드(안개 레이어 · 캐릭터 컨테이너)를 보이는 창만큼 옮긴다. 창이 합성한 영역 밖이면 안개 주기를 앞당긴다
     this.applyView(v.view);
+    this.updateDepthLook();
     const fogStale = this.fog.setView(v.view);
     const half = this.preset.halfFrameAnims;
     // 장식 시계 (품질 낮음은 프레임 절반 = 15Hz로 끊는다)
@@ -1189,6 +1384,7 @@ export class WorldRenderer {
       b.commit();
       this.baseRefreshed = b.changed;
       this.drawRims();
+      this.relightDepth();
     }
     this.applyFollow(v, isMonster);
 
@@ -1526,6 +1722,7 @@ export class WorldRenderer {
     for (const item of this.badges.info()) all.push(item);
     for (const item of this.keypads.info()) all.push(item);
     for (const item of info) all.push(item);
+    this.drawDepth(v, isMonster, myShape ? myShape.range : null, tS);
     this.post.measure();
     gfxState.features.charGfxArcs = this.gfxCount.arcs;
     gfxState.features.charGfxFills = this.gfxCount.fills;

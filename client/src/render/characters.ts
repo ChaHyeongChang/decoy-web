@@ -109,6 +109,42 @@ const glyphAt = { x: 0, y: 0 };
 /** 기절 별 꼭짓점 10개 (strokePoints · fillPoints가 바로 명령으로 옮겨 적는다) */
 const starPts: Phaser.Math.Vector2[] = Array.from({ length: 10 }, () => new Phaser.Math.Vector2());
 
+/**
+ * 입체감 캐릭터 비스듬 그림자 (VISUAL_SPEC 14장 — worldRenderer가 프레임마다 정한다, on = 거짓이면 그리지 않는다). 같은 그림자 그림을
+ * 몸 반지름 × (dx, dy)만큼 동 · 남으로 옮겨 알파 alpha로 한 장 더 깐다. 위치 · 몸 반지름만의 함수라 괴물 화면 생존자 셋이 똑같다
+ * (역할 · 체력 · 능력 인자 없음 — 0장 ③). 접지 그림자(몸 둘레 대비 링, R3)는 그대로 둔다
+ */
+const cast = { on: false, dx: 0, dy: 0, alpha: 0 };
+
+export function setCastShadow(look: { castDx: number; castDy: number; castAlpha: number } | null): void {
+  cast.on = look !== null;
+  cast.dx = look ? look.castDx : 0;
+  cast.dy = look ? look.castDy : 0;
+  cast.alpha = look ? look.castAlpha : 0;
+}
+
+/** 지금 비스듬 그림자를 그리는가 (디버그) */
+export function castShadowOn(): boolean {
+  return cast.on;
+}
+
+/** 비스듬 그림자 한 장 (끄면 숨긴다). r = 몸 반지름 (타일) */
+function putCast(
+  img: Phaser.GameObjects.Image,
+  frame: string,
+  px: number,
+  py: number,
+  r: number,
+  s: number,
+  alpha: number,
+): void {
+  if (!cast.on) {
+    if (img.visible) img.setVisible(false);
+    return;
+  }
+  put(img, frame, px + cast.dx * r * T, py + cast.dy * r * T, 0, s * 1.06, s * 0.92, alpha * cast.alpha);
+}
+
 /** 그림자 · 몸 · 부착 표시를 담는 레이어 (월드 컨테이너 안, 이 순서로) */
 export interface CharacterLayers {
   shadows: Phaser.GameObjects.Container;
@@ -176,6 +212,8 @@ export class Rig {
 
 /** 생존자 그림 묶음 */
 export class SurvivorRig extends Rig {
+  /** 입체감 비스듬 그림자 (접지 그림자 아래) */
+  readonly cast: Phaser.GameObjects.Image;
   readonly shadow: Phaser.GameObjects.Image;
   readonly ring: Phaser.GameObjects.Image;
   readonly footA: Phaser.GameObjects.Image;
@@ -199,6 +237,7 @@ export class SurvivorRig extends Rig {
     readonly style: CharStyle = 'classic',
   ) {
     super(scene, key);
+    this.cast = this.make(layers.shadows, 'shadow-survivor');
     this.shadow = this.make(layers.shadows, 'shadow-survivor');
     this.ring = this.make(layers.ground, 'ring-self');
     this.footA = this.make(layers.bodies, 'foot-hidden');
@@ -230,6 +269,7 @@ function placeSurvivor(
   const s = scale / rig.tpw;
   const sx = s * (1 + squash * ANIM.squashAmt);
   const sy = s * (1 - squash * ANIM.squashAmt);
+  putCast(rig.cast, 'shadow-survivor', px, py, r * scale, s, alpha);
   put(rig.shadow, 'shadow-survivor', px, py, 0, s, s, alpha);
   if (rig.style === 'new') {
     rig.footA.setVisible(false);
@@ -432,6 +472,8 @@ function attachments(
 
 /** 괴물 그림 묶음 */
 export class MonsterRig extends Rig {
+  /** 입체감 비스듬 그림자 (접지 그림자 아래) */
+  readonly cast: Phaser.GameObjects.Image;
   readonly shadow: Phaser.GameObjects.Image;
   readonly clawA: Phaser.GameObjects.Image;
   readonly clawB: Phaser.GameObjects.Image;
@@ -449,6 +491,7 @@ export class MonsterRig extends Rig {
     readonly style: CharStyle = 'classic',
   ) {
     super(scene, key);
+    this.cast = this.make(layers.shadows, 'shadow-monster');
     this.shadow = this.make(layers.shadows, 'shadow-monster');
     this.body = this.make(layers.bodies, 'monster-idle-0');
     this.clawA = this.make(layers.bodies, 'claw');
@@ -484,6 +527,7 @@ export function drawMonsterRig(rig: MonsterRig, p: MonsterPose, bodyR: number): 
   const c = Math.cos(p.aim);
   const sn = Math.sin(p.aim);
   const rp = bodyR * T * p.scale;
+  putCast(rig.cast, 'shadow-monster', px, py, bodyR * p.scale, s, p.alpha);
   put(rig.shadow, 'shadow-monster', px, py, 0, s, s, p.alpha);
   put(rig.body, p.frame, px, py, p.aim, sx, sy, p.alpha);
   if (rig.style === 'new') {

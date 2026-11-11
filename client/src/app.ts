@@ -28,6 +28,7 @@ import { device } from './device';
 import { isFrameLimit, type FrameLimit } from './gfx/framePacing';
 import type { QualityTier } from './gfx/presets';
 import { parseCharStyle, type CharStyle } from './gfx/charStyle';
+import { parseDepthLook, parseDepthParam, type DepthLookId } from './gfx/depth';
 import { parseQuality } from './gfx/quality';
 import { haptics } from './haptics';
 import {
@@ -127,6 +128,13 @@ export interface AppParams {
    * 자기 화면의 확대만 풀리고 판정 · 정보와 무관해 ?camSnap처럼 배포 주소에서도 받는다). 없거나 그 밖의 값이면 true(막는다)
    */
   zoomGuard: boolean;
+  /**
+   * ?depth=0|1: 이번 접속의 입체감 끄기/켜기 (시험 · 촬영용, 저장하지 않음 — 설정보다 우선). 그 밖에는 null(설정을 따른다).
+   * 품질 낮음 · Canvas 렌더러에서는 켜도 그리지 않는다(gfx/depth.ts)
+   */
+  depth: boolean | null;
+  /** ?depthLook=a|b|c: 입체감 시안 (시안 비교 촬영용, 저장하지 않음). 그 밖에는 null(고른 시안) */
+  depthLook: DepthLookId | null;
 }
 
 /** ?cam 값 해석: 1~6 사이 수만 (소수 허용), 그 밖에는 null */
@@ -165,6 +173,8 @@ export function readParams(search: string): AppParams {
     camSnap: p.get('camSnap') !== '0',
     countdown: p.get('countdown') === '1',
     zoomGuard: p.get('zoomguard') !== '0',
+    depth: parseDepthParam(p.get('depth')),
+    depthLook: parseDepthLook(p.get('depthLook')),
   };
 }
 
