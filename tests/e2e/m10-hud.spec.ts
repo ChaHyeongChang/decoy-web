@@ -1,7 +1,8 @@
 // M10c HUD (Canvas · 소프트웨어 합성): 늘 떠 있는 HUD는 맵 사각형과 겹치지 않음, Tab 점수판이 열리면 첫 판 조작 안내가 닫힘,
 // 괴물 화면 카드 · 점수판에 이름 · 역할 없음(익명 규칙 그대로), 거점 정지 · 완료 상태 칩(디버그 값 + 픽셀),
 // 가만히 있으면 HUD 텍스처를 다시 굽지 않음(배율이 바뀔 때만), HUD에 Graphics 없음, 콘솔 0,
-// 거점 진행 숫자(플레이테스트 a-7): 괴물 · 생존자 화면이 자기 스냅샷 진행의 내림 %로 같은 값, 숫자가 바뀌어도 굽기 · 글자 그리기 없음
+// 거점 진행 숫자(플레이테스트 a-7): 생존자 화면은 자기 스냅샷 진행의 내림 %, 괴물 화면은 숫자 없음(플레이테스트 b), 숫자가 바뀌어도
+// 굽기 · 글자 그리기 없음. 꺼진 거점(플레이테스트 b): 두 곳이 끝나면 남은 C가 회색 ⊘ 칩 · 숫자 없음
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { HUD, MAP_RECT } from '../../client/src/ui/layout';
@@ -160,8 +161,13 @@ test('괴물 HUD는 익명 · 거점 정지 · 완료 상태 칩 (디버그 값 
     polling: 100,
   });
   const G = HUD.gauge;
-  const chipA = { x: HUD.gaugeA.x + G.dia + G.gap, y: HUD.gaugeA.y - G.chip / 2 };
-  const chipB = { x: HUD.gaugeB.x - G.dia - G.gap - G.chip, y: HUD.gaugeB.y - G.chip / 2 };
+  // 칩 왼쪽 위: 배지 쪽 바깥 끝에서 배지 · 틈 다음 (side 1 = 배지가 왼쪽 — 거점 셋이라 A · B 모두, C는 −1)
+  const chipAt = (o: { x: number; y: number; side: 1 | -1 }): { x: number; y: number } => ({
+    x: o.side === 1 ? o.x + G.dia + G.gap : o.x - G.dia - G.gap - G.chip,
+    y: o.y - G.chip / 2,
+  });
+  const chipA = chipAt(HUD.gaugeA);
+  const chipB = chipAt(HUD.gaugeB);
   let paused: ({ info: HudInfo } & ChipPixels) | null = null;
   for (let attempt = 1; attempt <= 3 && !paused; attempt += 1) {
     await sendTest(host, { kind: 'teleport', target: monster.id, x: 44.5, y: 12.5, face: 0 });
@@ -202,6 +208,22 @@ test('괴물 HUD는 익명 · 거점 정지 · 완료 상태 칩 (디버그 값 
   expect(paused?.orange ?? 0).toBeGreaterThanOrEqual(12);
   expect(paused?.orangeMid ?? 99).toBeLessThanOrEqual(Math.floor((paused?.orange ?? 0) / 6));
   expect(paused?.cyanA ?? 0).toBeGreaterThanOrEqual(12);
+  // 꺼진 거점 (플레이테스트 b): B도 끝나면 남은 C가 꺼진다 — 회색 ⊘ 칩, 진행 숫자 없음 (괴물 화면도 같은 상태)
+  await sendTest(host, { kind: 'teleport', target: monster.id, x: 44.5, y: 12.5, face: 0 });
+  await sendTest(host, { kind: 'setPoint', point: 'B', progress: 1 });
+  for (const page of [runner.page, host])
+    await page.waitForFunction(
+      () => {
+        const h = window.__DECOY__?.getHud();
+        return h?.pointB === 'done' && h.pointC === 'off';
+      },
+      null,
+      { polling: 100, timeout: 10_000 },
+    );
+  for (const page of [runner.page, host]) {
+    const h = await hud(page);
+    expect([h.pointC, h.pointCChip, h.pointCPct, h.pointCPctFrame]).toEqual(['off', 'chip:off', '', '']);
+  }
   // 상태가 바뀌어도(점령 완료 · 정지 · 부상) 프레임만 바꾼다
   const last = await hud(runner.page);
   expect(last.bakes).toBe(bakes);
@@ -215,7 +237,7 @@ async function redraws(page: Page): Promise<number> {
   return page.evaluate(() => window.__DECOY__?.textAudit().redraws ?? -1);
 }
 
-test('거점 진행 숫자: 괴물 · 생존자 화면이 같은 값(자기 스냅샷 진행의 내림 %) · 정지 주황 · 완료 100 · 숫자가 바뀌어도 다시 굽지 않고 글자를 그리지 않는다', async ({
+test('거점 진행 숫자: 생존자 화면은 자기 스냅샷 진행의 내림 % · 정지 주황 · 완료 100, 괴물 화면은 같은 상태에 숫자 없음(플레이테스트 b) · 숫자가 바뀌어도 다시 굽지 않고 글자를 그리지 않는다', async ({
   browser,
 }) => {
   test.setTimeout(150_000);
@@ -225,9 +247,10 @@ test('거점 진행 숫자: 괴물 · 생존자 화면이 같은 값(자기 스�
   const guard = players.find((p) => p.role === 'guard')!;
   const scout = players.find((p) => p.role === 'scout')!;
   const host = monster.page;
+  // mon = 괴물 화면 (진행 숫자를 보이지 않는다 — hudArt.PCT_FOR_MONSTER, 숫자 · 숫자 그림 '')
   const screens = [
-    { name: '괴물', page: monster.page },
-    { name: '러너', page: runner.page },
+    { name: '괴물', page: monster.page, mon: true },
+    { name: '러너', page: runner.page, mon: false },
   ];
   // 괴물은 붙잡아 두고, 생존자는 모두 거점 밖으로 (러너 = A 옆 바닥)
   await sendTest(host, { kind: 'freeze', target: monster.id, frozen: true });
@@ -244,14 +267,14 @@ test('거점 진행 숫자: 괴물 · 생존자 화면이 같은 값(자기 스�
   }
   const bakes0 = await Promise.all(screens.map(async (s) => Number((await hud(s.page)).bakes)));
 
-  // ① 멈춘 진행: B 0.4(아무도 없음 → 대기, 진행은 남는다) · A 0 → 두 화면 모두 B 40 · A 흐린 0
+  // ① 멈춘 진행: B 0.4(아무도 없음 → 대기, 진행은 남는다) · A 0 → 러너 화면 B 40 · A 흐린 0, 괴물 화면은 숫자 없음
   await sendTest(host, { kind: 'setPoint', point: 'A', progress: 0 });
   await sendTest(host, { kind: 'setPoint', point: 'B', progress: 0.4 });
   for (const s of screens) {
     const b = await waitPointPct(s.page, 'B', (p) => p.want === 40 && p.state === 'idle', `${s.name} B 40`);
-    expect(b.frame, s.name).toBe('pct:text:o0');
+    expect([b.visible, b.frame], s.name).toEqual(s.mon ? [false, ''] : [true, 'pct:text:o0']);
     const a = await waitPointPct(s.page, 'A', (p) => p.want === 0, `${s.name} A 0`);
-    expect(a.frame, s.name).toBe('pct:dim:o0');
+    expect(a.frame, s.name).toBe(s.mon ? '' : 'pct:dim:o0');
   }
 
   // ② 점령 중: 러너가 A에 들어가 1명 속도(1%당 0.4초)로 오르는 동안 두 화면 모두 자기 스냅샷의 내림 %다.
@@ -288,16 +311,16 @@ test('거점 진행 숫자: 괴물 · 생존자 화면이 같은 값(자기 스�
   );
   // 숫자가 6번 넘게 바뀐 것은 위 +2 · +4 · +6 기다림이 보장한다
   expect(capRedraws).toBeLessThanOrEqual(idleRedraws + 2);
-  // 괴물 화면도 점령 중 자기 스냅샷의 내림 % (깜빡이지만 값은 같다)
+  // 괴물 화면: 점령 중 진행이 올라도(자기 스냅샷) 숫자 · 숫자 그림이 없다 — 게이지 상태는 같다
   const now = (await pointPct(monster.page, 'A')).want;
   for (let k = 1; k <= 2; k += 1) {
     const p = await waitPointPct(
       monster.page,
       'A',
-      (q) => q.state === 'capturing' && Number(q.shown) >= now + k,
+      (q) => q.state === 'capturing' && q.want >= now + k,
       `괴물 A 점령 중 +${k}`,
     );
-    expect([p.gauge, p.frame.startsWith('pct:text:o')]).toEqual(['capturing', true]);
+    expect([p.gauge, p.shown, p.frame]).toEqual(['capturing', '', '']);
   }
   for (const s of screens) expect(await hudPctTexts(s.page), s.name).toEqual([]);
 
@@ -308,8 +331,9 @@ test('거점 진행 숫자: 괴물 · 생존자 화면이 같은 값(자기 스�
     stopped.push(
       await waitPointPct(s.page, 'A', (p) => p.state === 'idle' && p.gauge === 'idle', `${s.name} A 멈춤`),
     );
-  expect(stopped[0]!.shown).toBe(stopped[1]!.shown);
-  expect(Number(stopped[0]!.shown)).toBeGreaterThanOrEqual(startN + 6);
+  expect(stopped[0]!.want).toBe(stopped[1]!.want);
+  expect(stopped[0]!.shown).toBe('');
+  expect(Number(stopped[1]!.shown)).toBeGreaterThanOrEqual(startN + 6);
 
   // ④ 정지: 러너가 A에 있고 괴물이 들어가면(유예 5초 안) 진행이 멈추고 숫자가 주황 — 두 화면 같은 값.
   //    유예가 지나 점령이 다시 오르면(느린 러너) 괴물을 내보냈다가 다시 들여보낸다
@@ -326,17 +350,20 @@ test('거점 진행 숫자: 괴물 · 생존자 화면이 같은 값(자기 스�
     if (paused.length < 2) await sendTest(host, { kind: 'teleport', target: monster.id, x: 44.5, y: 12.5 });
   }
   expect(paused.length, 'A 정지가 두 화면에 보였다').toBe(2);
-  expect(paused[0]!.shown).toBe(paused[1]!.shown);
-  for (const p of paused) expect(p.frame).toMatch(/^pct:warn:o\d$/);
+  expect(paused[0]!.want).toBe(paused[1]!.want);
+  expect([paused[0]!.shown, paused[0]!.frame]).toEqual(['', '']);
+  expect(paused[1]!.frame).toMatch(/^pct:warn:o\d$/);
 
   // ⑤ 완료: 괴물이 나가고 진행을 1로 → ✓ 와 함께 100 (완료 전에는 99까지)
   await sendTest(host, { kind: 'teleport', target: monster.id, x: 44.5, y: 12.5, face: 0 });
   await sendTest(host, { kind: 'setPoint', point: 'A', progress: 1 });
   for (const s of screens) {
     const done = await waitPointPct(s.page, 'A', (p) => p.state === 'done', `${s.name} A 완료`);
-    expect([done.shown, done.gauge, done.frame], s.name).toEqual([100, 'done', 'pct:text:100']);
+    expect([done.shown, done.gauge, done.frame], s.name).toEqual(
+      s.mon ? ['', 'done', ''] : [100, 'done', 'pct:text:100'],
+    );
     // B는 그대로 40
-    expect((await pointPct(s.page, 'B')).shown, s.name).toBe(40);
+    expect((await pointPct(s.page, 'B')).shown, s.name).toBe(s.mon ? '' : 40);
   }
 
   // 숫자가 몇 번 바뀌어도 · 상태가 바뀌어도 아틀라스를 다시 굽지 않고, 아틀라스에 없는 프레임도 없다

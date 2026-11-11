@@ -33,7 +33,7 @@ import {
 const POLL = { intervals: [100, 150, 200], timeout: 20_000 };
 const SHOTS = 'artifacts/screens';
 /** 늘 떠 있는 HUD 부품 가운데 미니맵이 아닌 것 */
-const OTHER_HUD = /^(timer|gaugeA|gaugeB|card\d)$/;
+const OTHER_HUD = /^(timer|gauge[A-C]|card\d)$/;
 
 type Rect = { x: number; y: number; w: number; h: number };
 

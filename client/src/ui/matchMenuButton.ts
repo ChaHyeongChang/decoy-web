@@ -36,7 +36,8 @@ export interface MenuButtonFit {
 
 /**
  * 버튼 자리와 배율 (창 CSS px). size = 줄이기 전 버튼 크기(CSS px). 팀 카드 · 맵 사각형 · 거점 A 게이지와 gapCss 넘게 떨어지게 둔다:
- *  ① 맵 위 끝보다 위(위 띠 + 캔버스 위 여백)면 게이지 왼쪽까지 넓게, ② 맵 왼쪽 옆이면 팀 카드 위 끝까지 — 둘 중 덜 줄이는 쪽.
+ *  ① 맵 위 끝보다 위(위 띠 + 캔버스 위 여백)면 게이지 왼쪽까지 넓게(캔버스 위 여백에 다 들어가면 줄이지 않는다), ② 맵 왼쪽 옆이면
+ *  팀 카드 위 끝까지 — 둘 중 덜 줄이는 쪽.
  * 세로는 띠 가운데(예전 자리)를 바라고, 띠가 버튼보다 낮은데 캔버스 위 여백(레터박스)에 다 들어가면 그 가운데에 놓는다.
  * 큰 창(1280×720 이상)은 줄이지 않아 예전과 같다. 작은 창(960×540 등)은 들어가는 만큼 줄인다 — 예전에는 44px 그대로 팀 카드 위
  * 테두리에 걸쳤다(960×540 약 5px, 800×600은 맵 왼쪽 끝 · FPS 칩까지)
@@ -53,7 +54,12 @@ export function menuButtonPlace(
   const h = size.h > 0 ? size.h : MENU_BUTTON.heightCss;
   const mapTop = canvas.top + keep.band * k;
   const cardTop = canvas.top + keep.cardTop * k;
-  const above = Math.min(1, (mapTop - g) / h, (canvas.left + keep.gaugeLeft * k - g - left) / w);
+  // 띠가 버튼보다 낮고 캔버스 위 여백(레터박스)에 줄이지 않고 다 들어가면 그 가운데에 놓여(아래) 위 띠 HUD(거점 게이지)와 세로로
+  // 겹치지 않는다 — 게이지 왼쪽 끝으로 줄이지 않는다 (거점 셋: A가 278로 왼쪽에 붙어 800×600에서 줄던 것)
+  const inMargin = keep.band * k < h && canvas.top >= h + 2 * g;
+  const above = inMargin
+    ? 1
+    : Math.min(1, (mapTop - g) / h, (canvas.left + keep.gaugeLeft * k - g - left) / w);
   const beside = Math.min(1, (cardTop - g) / h, (canvas.left + keep.mapLeft * k - g - left) / w);
   const useAbove = above >= beside;
   const scale = Math.max(MENU_BUTTON.minScale, Math.floor((useAbove ? above : beside) * 1000) / 1000);

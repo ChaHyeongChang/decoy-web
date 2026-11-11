@@ -17,7 +17,7 @@ const QUERY = '/?debug=hook&renderer=canvas';
 const SHOTS = 'artifacts/screens';
 const POLL = { intervals: [100, 150, 200], timeout: 20_000 };
 /** 늘 떠 있는 HUD 부품 (m12-screen과 같다) */
-const PERSISTENT = /^(timer|gaugeA|gaugeB|card\d|minimap)$/;
+const PERSISTENT = /^(timer|gauge[A-C]|card\d|minimap)$/;
 
 type Rect = { x: number; y: number; w: number; h: number };
 
@@ -180,7 +180,7 @@ test('끌어 옮기기: 안전 영역 밖 · 다른 조작 · HUD 위에는 못 
     ['ability', 'fullscreen', 'menu', 'move', 'rescue', 'scoreboard'].sort(),
   );
   // HUD 미리보기: 타이머 · 게이지 · 팀 카드 (이름표)
-  for (const id of ['timer', 'gaugeA', 'gaugeB', 'card0', 'card1', 'card2'])
+  for (const id of ['timer', 'gaugeA', 'gaugeB', 'gaugeC', 'card0', 'card1', 'card2'])
     expect(
       L0.hud.some((b) => b.id === id),
       id,
@@ -201,8 +201,9 @@ test('끌어 옮기기: 안전 영역 밖 · 다른 조작 · HUD 위에는 못 
   await expect(page.getByTestId('le-msg')).toBeHidden();
   await page.screenshot({ path: `${SHOTS}/layout-editor-800x360.png` });
 
-  // 2) 화면 오른쪽 끝 · 아래 끝 밖으로 끌어도 범위 안 (가장자리 띠 + 6px)
-  await dragTo(page, mid(a1), { x: 799, y: 200 }, async () => {
+  // 2) 화면 오른쪽 끝 · 아래 끝 밖으로 끌어도 범위 안 (가장자리 띠 + 6px). 거점 셋(플레이테스트 b)이라 이 화면 생존자는 타이머가
+  //    오른쪽 칸 미니맵 아래(y 약 164~187)라 그보다 아래로 끈다
+  await dragTo(page, mid(a1), { x: 799, y: 232 }, async () => {
     await expect(page.getByTestId('le-msg')).toContainText(EDITOR_TEXT.blocked);
   });
   const L2 = await controlLayout(page);
@@ -357,9 +358,15 @@ test('좌우 반전 (괴물): 편집 화면 · 연습 판 모두 이동 영역 �
   expect(mid(ctl(E1, 'attack')).x).toBeLessThan(400);
   expect(ctl(E1, 'scoreboard').x).toBeLessThan(ctl(E0, 'scoreboard').x);
   expect(E1.zone.x).toBeGreaterThan(400);
-  // HUD 미리보기도 뒤집힌다 (타이머 · 팀 카드가 오른쪽)
+  // HUD 미리보기도 뒤집힌다 (팀 카드 · 거점 게이지가 오른쪽, 타이머는 뒤집기 전 자리의 거울 — 거점 셋이라 이 화면 괴물은 타이머가
+  // 시스템 버튼 아래 칸이다)
+  const card0 = E1.hud.find((b) => b.id === 'card0')!;
+  const gaugeA = E1.hud.find((b) => b.id === 'gaugeA')!;
+  expect(mid(card0).x).toBeGreaterThan(400);
+  expect(mid(gaugeA).x).toBeGreaterThan(400);
   const timer = E1.hud.find((b) => b.id === 'timer')!;
-  expect(mid(timer).x).toBeGreaterThan(400);
+  const timer0 = E0.hud.find((b) => b.id === 'timer')!;
+  expect(Math.abs(mid(timer).x - (800 - mid(timer0).x))).toBeLessThan(2);
   expect(editorProblems(E1)).toEqual([]);
   await page.screenshot({ path: `${SHOTS}/layout-editor-800x360-mirror.png` });
   await press(page.getByTestId('le-save'));
@@ -374,8 +381,11 @@ test('좌우 반전 (괴물): 편집 화면 · 연습 판 모두 이동 영역 �
   expect(centerOf(targets.find((t) => t.id === 'aim-stick')!).x).toBeLessThan(400);
   expect(targets.find((t) => t.id === 'scoreboard')!.x).toBeLessThan(400);
   const hud = await hudLayout(page);
-  const ht = hud.items.find((i) => i.id === 'timer')!;
-  expect(ht.x + ht.w / 2).toBeGreaterThan(400);
+  // 팀 카드 · 거점 게이지가 오른쪽 칸 (거점 셋이라 이 화면 괴물 타이머는 시스템 버튼 아래 칸 — 반전이면 왼쪽)
+  for (const id of ['card0', 'gaugeA']) {
+    const it = hud.items.find((i) => i.id === id)!;
+    expect(it.x + it.w / 2, id).toBeGreaterThan(400);
+  }
   expect(hudOverlaps(hud, targets)).toEqual([]);
   expect(touchLayoutProblems(await measureTouchLayout(page))).toEqual([]);
   expect(problems).toEqual([]);

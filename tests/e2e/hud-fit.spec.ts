@@ -85,7 +85,8 @@ async function hudBoxes(
       .poll(async () => (await page.evaluate(() => window.__DECOY__!.getMatchPrefs()))?.menuButton?.visible)
       .toBe(true);
   // 거점 진행 숫자 (플레이테스트 a-7): 게이지마다 자기 스냅샷 진행의 내림 %이고, 글자 객체가 아니라 아틀라스 그림이다
-  for (const id of ['A', 'B'] as const)
+  // (괴물 화면은 숫자 없음 — 플레이테스트 b)
+  for (const id of ['A', 'B', 'C'] as const)
     await waitPointPct(page, id, () => true, `${c.name} ${role} 거점 ${id}`);
   expect(await hudPctTexts(page)).toEqual([]);
   // 칩 글자 · 자리가 한 번 더 갱신될 때까지 (초당 2번)
