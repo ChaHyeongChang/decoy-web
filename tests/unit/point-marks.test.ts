@@ -229,6 +229,51 @@ describe('미니맵 거점 표시 (거점 세 곳 · 꺼짐)', () => {
     expect(idle?.kind).toBe('frame');
   });
 
+  it('꺼진 거점 그림(point:off)의 사선은 마름모 안에서 끝난다 — 두 끝이 마름모 변 위(맵 배지 · 게이지 ⊘처럼 테두리에서 멈춤), 밖으로 삐져나오지 않는다', () => {
+    const spec = hudSpecs().find((s) => s.name === FR.mm('point:off'));
+    if (spec?.kind !== 'frame') throw new Error('point:off 그림 없음');
+    // 기록 펜 (경로 부분만): moveTo마다 새 조각
+    const subs: { x: number; y: number }[][] = [];
+    let lineWidth = 0;
+    const pen = {
+      set lineWidth(w: number) {
+        lineWidth = w;
+      },
+      strokeStyle: '',
+      beginPath: (): void => undefined,
+      closePath: (): void => undefined,
+      moveTo: (x: number, y: number): void => {
+        subs.push([{ x, y }]);
+      },
+      lineTo: (x: number, y: number): void => {
+        subs[subs.length - 1]?.push({ x, y });
+      },
+      stroke: (): void => undefined,
+    };
+    spec.paint(pen as unknown as CanvasRenderingContext2D, 1);
+    expect(subs).toHaveLength(2);
+    const [outline, slash] = subs as [{ x: number; y: number }[], { x: number; y: number }[]];
+    // 테두리: 꼭짓점이 축 위에 있는 마름모 |x| + |y| = R
+    const taxi = (p: { x: number; y: number }): number => Math.abs(p.x) + Math.abs(p.y);
+    expect(outline).toHaveLength(4);
+    const R = Math.max(...outline.map(taxi));
+    for (const p of outline) {
+      expect(taxi(p)).toBeCloseTo(R, 9);
+      expect(p.x === 0 || p.y === 0).toBe(true);
+    }
+    // 사선: 가운데를 지나는 왼위 → 오른아래 대각선, 두 끝이 마름모 안(변 위)
+    expect(slash).toHaveLength(2);
+    for (const p of slash) {
+      expect(taxi(p), `사선 끝 (${p.x}, ${p.y})가 마름모 |x| + |y| ≤ ${R} 밖`).toBeLessThanOrEqual(R + 1e-9);
+      expect(taxi(p)).toBeCloseTo(R, 9);
+      expect(p.x).toBeCloseTo(p.y, 9);
+    }
+    expect(slash[0]!.x).toBeLessThan(0);
+    expect(slash[1]!.x).toBeGreaterThan(0);
+    // 선 굵기까지 그림 칸 안
+    expect(R + lineWidth / 2).toBeLessThanOrEqual(spec.x1);
+  });
+
   it('괴물 화면 미니맵도 같은 세계 상태면 같은 거점 그림 · 자리다 (꺼짐 · 점령 상태는 받는 사람과 무관한 공개 정보)', async () => {
     const world: PointView[] = [
       { id: 'A', progress: 1, state: 'done' },
