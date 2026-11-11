@@ -143,6 +143,14 @@ async function teleport(page: Page, target: string, x: number, y: number, face: 
   );
 }
 
+/** 묶기 (순간이동은 묶임을 푸므로 그 뒤에 보낸다) */
+async function freeze(page: Page, target: string): Promise<void> {
+  await page.evaluate(
+    (id) => window.__DECOY__?.sendTest({ kind: 'freeze', target: id, frozen: true }),
+    target,
+  );
+}
+
 function playerOf(truth: TruthFrame | null, pred: (p: TruthFrame['players'][number]) => boolean) {
   const p = truth?.players.find(pred);
   if (!p) throw new Error('플레이어 없음');
@@ -309,31 +317,60 @@ const num = (v: number | boolean | undefined): number => (typeof v === 'number' 
 
 /** 넓게 트인 곳 (오른쪽 방, 타일 좌표): 질주자를 여기 두고 괴물을 남쪽에 놓는다 (돌진 길이 벽에 막히지 않게) */
 const OPEN_SPOT = { x: 40.5, y: 12.5 };
+/**
+ * 부채꼴 색 구간에 괴물 봇을 묶어 두는 자리 (오른쪽 방). 반지름 3.6 안이 모두 바닥이라(기둥 (43–44, 15–16) 바깥) 괴물이 어느 쪽을
+ * 보든 3타일 앞 · 등 뒤 3타일에 질주자를 놓을 수 있고 사이를 가리는 벽이 없다
+ */
+const CONE_SPOT = { x: 39, y: 15.5 };
+/** 질주자를 괴물 앞 · 뒤에 놓는 거리: 가까운 시야(1.5)보다 멀고 두 시야 모드 사거리(5 · 9) 안 */
+const CONE_DIST = 3;
+/** 다른 생존자 봇 둘을 묶어 두는 자리 (왼쪽 위 방): 괴물 · 거점 · 감옥에서 멀어 괴물 시야에 들지 않고 점령도 하지 않는다 */
+const PARK_SPOTS = [
+  { x: 3.5, y: 2.5 },
+  { x: 5.5, y: 2.5 },
+] as const;
 
 /**
- * 생존자(질주자): 걷기 · 팀원 보간 · 질주. 괴물 대기(5초)가 끝나면 나를 트인 곳으로 옮기고 괴물 봇을 3타일 남쪽에 묶어 두고
- * 나를 보게 · 등지게 번갈아 돌려 부채꼴 색이 노랑 ↔ 빨강으로 몇 번 바뀌게 한 뒤, 4.3타일 남쪽에 풀어 놓는다
- * (돌진 거리 안: 봇이 돌진 · 공격 → 피격 · 수감)
+ * 생존자(질주자): 걷기 · 팀원 보간 · 질주. 괴물 대기(5초)가 끝나면 괴물 봇을 트인 곳에 묶고 다른 생존자 봇 둘은 멀리 묶은 뒤,
+ * 나를 괴물이 보는 쪽 3타일 앞 · 등 뒤 3타일에 번갈아 옮겨 부채꼴 색이 노랑 ↔ 빨강으로 몇 번 바뀌게 한다. 그 뒤 나를 트인 곳으로
+ * 옮기고 괴물을 4.3타일 남쪽에 풀어 놓는다 (돌진 거리 안: 봇이 돌진 · 공격 → 피격 · 수감).
+ * 부채꼴 색이 봇 동선에 기대지 않게 한다:
+ *  - 다른 생존자 봇은 시드 난수로 고른 거점으로 간다(플레이테스트 반영 b). 괴물 곁 거점 B에 있으면 괴물이 어느 쪽을 보든 누군가를
+ *    봐 부채꼴이 내내 빨갛다 → 괴물 시야 밖에 묶는다
+ *  - 묶인 괴물 봇도 조준은 순찰 다음 자리로 돌린다(practiceBrains 괴물 봇 decide). 순간이동으로 나를 보게 돌려도 곧 그쪽으로 다시
+ *    돌아서므로 괴물을 돌리지 않는다. 묶은 뒤 0.4초(반 바퀴 = 540°/초로 0.33초) 기다려 조준이 멈춘 다음 그 방향 기준으로 나를 옮긴다
  */
 function runnerScript(): () => ReadonlyMap<number, Action> {
   return () => {
-    const place =
-      (dist: number, facing: 'me' | 'away', frozen: boolean): Action =>
+    const hold: Action = async (page, truth) => {
+      const mates = truth?.players.filter((p) => p.role !== 'runner' && p.role !== 'monster') ?? [];
+      expect(mates.length, '다른 생존자 봇 둘').toBe(PARK_SPOTS.length);
+      for (const [i, p] of mates.entries()) {
+        const spot = PARK_SPOTS[i] ?? PARK_SPOTS[0];
+        await teleport(page, p.id, spot.x, spot.y, Math.PI / 2);
+        await freeze(page, p.id);
+      }
+      const mon = playerOf(truth, (p) => p.role === 'monster');
+      await teleport(page, mon.id, CONE_SPOT.x, CONE_SPOT.y, -Math.PI / 2);
+      await freeze(page, mon.id);
+    };
+    /** 묶인 괴물이 지금 보는 쪽 앞(seen) · 등 뒤(unseen)에 나를 놓는다 (괴물 쪽을 보게) */
+    const meAt =
+      (side: 'front' | 'back'): Action =>
       async (page, truth) => {
         const mon = playerOf(truth, (p) => p.role === 'monster');
-        await teleport(
-          page,
-          mon.id,
-          OPEN_SPOT.x,
-          OPEN_SPOT.y + dist,
-          facing === 'me' ? -Math.PI / 2 : Math.PI / 2,
-        );
-        if (frozen)
-          await page.evaluate(
-            (id) => window.__DECOY__?.sendTest({ kind: 'freeze', target: id, frozen: true }),
-            mon.id,
-          );
+        const me = playerOf(truth, (p) => p.role === 'runner');
+        const k = side === 'front' ? CONE_DIST : -CONE_DIST;
+        const x = mon.x + Math.cos(mon.face) * k;
+        const y = mon.y + Math.sin(mon.face) * k;
+        await teleport(page, me.id, x, y, Math.atan2(mon.y - y, mon.x - x));
       };
+    const release: Action = async (page, truth) => {
+      const me = playerOf(truth, (p) => p.role === 'runner');
+      const mon = playerOf(truth, (p) => p.role === 'monster');
+      await teleport(page, me.id, OPEN_SPOT.x, OPEN_SPOT.y, -Math.PI / 2);
+      await teleport(page, mon.id, OPEN_SPOT.x, OPEN_SPOT.y + 4.3, -Math.PI / 2);
+    };
     const a = new Map<number, Action>();
     a.set(0, keyDown('KeyD'));
     a.set(12, keyDown('KeyS'));
@@ -341,18 +378,13 @@ function runnerScript(): () => ReadonlyMap<number, Action> {
     a.set(40, all(keyUp('KeyS'), keyDown('KeyA')));
     a.set(62, all(keyUp('KeyA'), keyDown('KeyW')));
     a.set(84, keyPress('Space'));
-    a.set(
-      104,
-      all(keyUp('KeyW'), async (page, truth) => {
-        const me = playerOf(truth, (p) => p.role === 'runner');
-        await teleport(page, me.id, OPEN_SPOT.x, OPEN_SPOT.y, -Math.PI / 2);
-      }),
-    );
-    a.set(108, place(3, 'me', true));
-    a.set(114, place(3, 'away', true));
-    a.set(124, place(3, 'me', true));
-    a.set(128, place(3, 'away', true));
-    a.set(136, place(4.3, 'me', false));
+    a.set(100, hold);
+    a.set(104, keyUp('KeyW'));
+    a.set(108, meAt('front'));
+    a.set(114, meAt('back'));
+    a.set(124, meAt('front'));
+    a.set(128, meAt('back'));
+    a.set(136, release);
     return a;
   };
 }
