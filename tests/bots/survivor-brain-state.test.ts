@@ -1,6 +1,7 @@
 // 실전 생존자 봇 두뇌 (플레이테스트 반영 c 검토 반영): 두뇌가 기억하는 상태가 끝날 때를 지킨다
 //  - 두뇌 시계는 판이 흐른 시간만 센다: 판 정지(괴물 재접속 대기) 동안 두뇌를 부르지 않아 스냅샷 틱이 건너뛰어도
 //    탐지 대기 · 지켜짐 기억 · 기다림 차례가 정지가 없을 때와 같다
+//  - 질주 · 밀치기 반응 대기는 갇히면 처음부터 (풀려난 첫 틱에 반응 시간 없이 누르지 않는다)
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   BTN,
@@ -167,6 +168,41 @@ describe('생존자 봇: 판 정지(괴물 재접속 대기)로 틱이 건너뛰
         role,
       ).toBe(true);
       expect(run(20 * HZ), role).toEqual(plain);
+    }
+  });
+});
+
+// ───────────────────────── 질주 · 밀치기 반응 대기 ─────────────────────────
+
+describe('생존자 봇: 질주 · 밀치기 반응 대기는 갇히면 처음부터', () => {
+  it('조건이 참인 채로 갇혔다 풀려나도(감옥 앞 괴물) 풀려난 뒤 0.2초 넘게 기다려 누른다', () => {
+    const cases: [RoleId, number][] = [
+      ['guard', 1.4],
+      ['runner', 2.5],
+    ];
+    for (const [role, gap] of cases) {
+      for (const seed of [1, 2, 3, 4, 5]) {
+        const { snap, info } = closeUp(role, gap);
+        const base = snap.monster;
+        if (!base) throw new Error('괴물 없음');
+        const brain = new PracticeSurvivorBrain(role, seed);
+        const view = (tick: number, status: 'free' | 'imprisoned'): Snapshot => ({
+          ...at(snap, tick, { ...base, windup: 0 }),
+          you: { ...snap.you, surv: snap.you.surv ? { ...snap.you.surv, abilityCd: 0, status } : null },
+        });
+        // 조건이 참이 된 뒤 누르기 전(2틱)에 갇힌다 → 10초 갇힘 → 풀려남 (괴물은 그대로 사거리 안)
+        for (let k = 0; k < 2; k += 1) {
+          const out = brain.decide(view(100 + k, 'free'), info, balance, 1 + k);
+          expect(out.pressed & BTN.ABILITY, `${role} seed ${seed} 갇히기 전`).toBe(0);
+        }
+        for (let k = 0; k < 10 * HZ; k += 1) brain.decide(view(102 + k, 'imprisoned'), info, balance, 3 + k);
+        let press = -1;
+        for (let k = 0; k < HZ && press < 0; k += 1) {
+          const out = brain.decide(view(102 + 10 * HZ + k, 'free'), info, balance, 1000 + k);
+          if ((out.pressed & BTN.ABILITY) !== 0) press = k;
+        }
+        expect(press, `${role} seed ${seed}`).toBeGreaterThanOrEqual(Math.round(0.2 * HZ));
+      }
     }
   });
 });

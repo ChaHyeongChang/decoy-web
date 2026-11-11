@@ -489,6 +489,8 @@ export class PracticeSurvivorBrain implements BotBrain {
     const surv = snap.you.surv;
     if (!surv || surv.status !== 'free') {
       this.lastTask = null;
+      // 질주 · 밀치기 반응 대기는 처음부터 (갇히기 직전에 잰 대기가 남으면 풀려난 첫 틱에 반응 시간 없이 누른다)
+      this.abilitySince = -1;
       return emptyInput(seq);
     }
     const me = snap.you.move;
