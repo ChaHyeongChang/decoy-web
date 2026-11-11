@@ -7,7 +7,14 @@
 //  - 빛 속 먼지는 자기 팀 시야(판정 다각형) 안에서만 보이고, 시계(gfxNow)와 시드 고정 해시로만 움직인다
 //  - 품질은 개수만 바꾼다(FX_LIMITS). 정보(범위 · 링 · 마커)는 이 모듈이 그리지 않는다
 // 난수는 시드 고정(mulberry32, @decoy/shared Rng). Math.random()을 쓰지 않는다.
-import { Rng, angleDiff, circleIntersectsSector, pointInPolygon, type Vec2 } from '@decoy/shared';
+import {
+  Rng,
+  angleDiff,
+  circleIntersectsSector,
+  pointInPolygon,
+  type SurvivorStatus,
+  type Vec2,
+} from '@decoy/shared';
 import type { QualityTier } from '../gfx/presets';
 import { fillCircleFan, fillCirclePen, penArc, strokeCirclePen, type FanPen, type PathPen } from './shapes';
 
@@ -25,7 +32,18 @@ export const FX_LIMITS = {
   footDust: { high: true, medium: true, low: false } as Readonly<Record<QualityTier, boolean>>,
 } as const;
 
-export type FxKind = 'spark' | 'dissolve' | 'footDust' | 'shockwave' | 'shutter' | 'slash' | 'impact';
+export type FxKind =
+  | 'spark'
+  | 'dissolve'
+  | 'footDust'
+  | 'shockwave'
+  | 'shutter'
+  | 'slash'
+  | 'impact'
+  | 'slashHit'
+  | 'slashMiss'
+  | 'graze'
+  | 'release';
 
 export interface FxPreset {
   /** 수명 (초) */
@@ -47,7 +65,54 @@ export const FX_PRESETS: Readonly<Record<FxKind, FxPreset>> = {
   shutter: { life: 0.3, alpha: 0.8, count: 1, decor: false },
   slash: { life: 0.12, alpha: 0.95, count: 1, decor: false },
   impact: { life: 0.3, alpha: 0.7, count: 1, decor: false },
+  // 플레이테스트 반영 c 손맛: 괴물 화면 명중 호(굵고 따뜻한 흰색) · 빗나간 호(옅고 가는 선, 양쪽 화면) · 아슬아슬 회피(내 몸 타격 쪽
+  // 옆면의 흰 이중 호, 내 화면만) · 풀려남(수감 → 자유, 생존자 화면 청록 고리)
+  slashHit: { life: 0.18, alpha: 1, count: 1, decor: false },
+  slashMiss: { life: 0.2, alpha: 0.5, count: 1, decor: false },
+  graze: { life: 0.3, alpha: 0.9, count: 1, decor: false },
+  release: { life: 0.35, alpha: 0.8, count: 1, decor: false },
 };
+
+/** 베기 호 굵기 (논리 px): 바깥 호 · 안쪽 호 (0 = 안쪽 없음) — 명중 · 빗나감은 색 말고 굵기 · 겹수로도 갈린다 (0장 ④) */
+const SLASH_W: Readonly<Record<'slash' | 'slashHit' | 'slashMiss', readonly [number, number]>> = {
+  slash: [3.5, 1.5],
+  slashHit: [5, 2],
+  slashMiss: [1.5, 0],
+};
+
+/**
+ * 괴물 화면 명중 손맛 (그림 값, 판정 · 정보와 무관 — 맞은 수의 함수뿐): 몸 배율 펀치(1 → 1 + punch → 1, punchMs) · 타격 자세를
+ * holdMs 더 유지 · 둘 이상 맞으면 킥에 strike 흔들림을 더한다. 맞은 생존자 몸에는 아무것도 붙이지 않는다 (0장 ③ 흰색 위장)
+ */
+export const STRIKE_FEEL = { punch: 0.08, punchMs: 100, holdMs: 70 } as const;
+
+/** 명중 펀치 배율 (타격 뒤 elapsedMs): 1 → 1 + punch → 1 (반 사인), 그 밖은 1 */
+export function strikePunch(elapsedMs: number): number {
+  const k = elapsedMs / STRIKE_FEEL.punchMs;
+  return k >= 0 && k < 1 ? 1 + STRIKE_FEEL.punch * Math.sin(Math.PI * k) : 1;
+}
+
+// 손맛 그림 고르기 (worldRenderer가 부르는 순수 판단 — 괴물 화면 정보 숨김, VISUAL_SPEC 0장 ③을 단위 시험이 직접 본다)
+
+/** 타격 호 종류: 빗나감(맞은 수 0)은 양쪽 화면 옅고 가는 호, 명중은 괴물 화면 굵고 따뜻한 흰 호 · 생존자 화면 보통 호 (맞은 수 · 화면 쪽만의 함수) */
+export function strikeArcKind(hits: number, isMonster: boolean): 'slash' | 'slashHit' | 'slashMiss' {
+  if (hits === 0) return 'slashMiss';
+  return isMonster ? 'slashHit' : 'slash';
+}
+
+/** 명중 몸 펀치 · 타격 자세 유지에 쓰는 맞은 수: 괴물 화면은 맞은 수 그대로(괴물 자신의 몸에만), 생존자 화면은 늘 0 */
+export function strikeFeelHits(hits: number, isMonster: boolean): number {
+  return isMonster ? hits : 0;
+}
+
+/** 풀려남 청록 고리: 생존자 화면의 수감 → 자유 전환에만. 괴물 화면에는 풀려난 생존자 자리에 아무것도 그리지 않는다 */
+export function releaseRingAllowed(
+  prev: SurvivorStatus | undefined,
+  next: SurvivorStatus,
+  isMonster: boolean,
+): boolean {
+  return !isMonster && prev === 'imprisoned' && next === 'free';
+}
 
 /** 빛 속 먼지 (장식): 알파 · 크기 · 칸 크기 · 수명 주기 */
 export const DUST = {
@@ -70,6 +135,10 @@ export const FX_COLOR = {
   shutter: 0xdcfce7,
   slash: 0xffffff,
   impact: 0xfde68a,
+  slashHit: 0xfff4d6,
+  slashMiss: 0xffffff,
+  graze: 0xffffff,
+  release: 0x22d3ee,
 } as const;
 
 /**
@@ -215,9 +284,9 @@ export class FxSystem {
     }
   }
 
-  /** 퍼지는 고리 (밀치기 충격파 · 탐지 셔터 · 기절 충격) */
+  /** 퍼지는 고리 (밀치기 충격파 · 탐지 셔터 · 기절 충격 · 풀려남) */
   ring(
-    kind: 'shockwave' | 'shutter' | 'impact',
+    kind: 'shockwave' | 'shutter' | 'impact' | 'release',
     x: number,
     y: number,
     r1: number,
@@ -231,7 +300,7 @@ export class FxSystem {
     this.push(f);
   }
 
-  /** 괴물 타격 베기 호 (120ms): 공격 방향 · 각도 · 거리 */
+  /** 괴물 타격 베기 호: 공격 방향 · 각도 · 거리. kind = 보통(생존자 화면 명중) · 명중(괴물 화면) · 빗나감 */
   slash(
     x: number,
     y: number,
@@ -241,13 +310,35 @@ export class FxSystem {
     nowS: number,
     src: string | null,
     opp: boolean,
+    kind: 'slash' | 'slashHit' | 'slashMiss' = 'slash',
   ): void {
-    const f = this.base('slash', x, y, nowS, src, opp);
+    const f = this.base(kind, x, y, nowS, src, opp);
     f.dir = dir;
     f.arc = arc;
     f.r1 = range;
-    f.color = FX_COLOR.slash;
+    f.color = FX_COLOR[kind];
     this.push(f);
+  }
+
+  /**
+   * 아슬아슬 회피 (내 화면, 0.3초): 내 몸(x, y, 몸 반지름 bodyR)의 dir 쪽(타격이 온 쪽) 옆면을 흰 이중 호가 접선 방향으로 스치고
+   * 지나간다. 피격 불꽃(몸 밖 방사형 · 주황)과 모양이 다르고 빨강을 쓰지 않는다. 몸을 따라가게 anchor로 옮긴다
+   */
+  graze(x: number, y: number, bodyR: number, dir: number, nowS: number): void {
+    const f = this.base('graze', x, y, nowS, null, false);
+    f.dir = dir;
+    f.r1 = bodyR;
+    f.color = FX_COLOR.graze;
+    this.push(f);
+  }
+
+  /** 살아 있는 kind 효과의 자리를 옮긴다 (몸에 붙은 효과 — 그 효과가 있는 동안만 부른다) */
+  anchor(kind: FxKind, x: number, y: number): void {
+    for (const f of this.list)
+      if (f.kind === kind) {
+        f.x = x;
+        f.y = y;
+      }
   }
 
   /** 수명이 끝난 효과와, 출처가 이번 스냅샷에서 사라진 상대 효과를 없앤다 */
@@ -318,7 +409,8 @@ export class FxSystem {
         }
         case 'shockwave':
         case 'shutter':
-        case 'impact': {
+        case 'impact':
+        case 'release': {
           const e = 1 - (1 - (1 - lk)) ** 2; // 빠르게 퍼지고 천천히 멎는다
           const r = (f.kind === 'shutter' ? f.r1 * (1 - 0.65 * e) : f.r1 * (0.15 + 0.85 * e)) * k;
           pen.lineStyle(f.kind === 'shutter' ? 2.5 : 3 * lk + 1, f.color, f.alpha * lk);
@@ -329,23 +421,44 @@ export class FxSystem {
           }
           break;
         }
-        case 'slash': {
-          // 공격 방향 호를 한쪽에서 다른 쪽으로 쓸고 지나가는 흰 초승달
+        case 'slash':
+        case 'slashHit':
+        case 'slashMiss': {
+          // 공격 방향 호를 한쪽에서 다른 쪽으로 쓸고 지나가는 초승달 (명중은 굵게, 빗나감은 가는 한 줄)
+          const [w0, w1] = SLASH_W[f.kind];
           const half = f.arc / 2;
           const sweep = Math.min(1, t / (f.life * 0.6));
           const a0 = f.dir - half;
           const a1 = f.dir - half + f.arc * sweep;
           const r = f.r1 * k;
-          pen.lineStyle(3.5, f.color, f.alpha * lk);
+          pen.lineStyle(w0, f.color, f.alpha * lk);
           pen.beginPath();
           penArc(pen, x, y, r * 0.92, a0, a1);
           pen.strokePath();
-          if (a1 > a0 + 0.12) {
-            pen.lineStyle(1.5, f.color, f.alpha * 0.6 * lk);
+          if (w1 > 0 && a1 > a0 + 0.12) {
+            pen.lineStyle(w1, f.color, f.alpha * 0.6 * lk);
             pen.beginPath();
             penArc(pen, x, y, r * 0.74, a0 + 0.12, a1);
             pen.strokePath();
           }
+          break;
+        }
+        case 'graze': {
+          // 몸 둘레 타격 쪽 옆면: 두 겹 호의 보이는 조각이 접선 방향으로 스치고 지나간다 (앞쪽 끝이 먼저, 꼬리가 따라온다)
+          // 반지름은 몸 그림(외곽선 · 링 포함 약 1.6r) 밖 — 캐릭터 아래 레이어라 몸에 가리지 않게
+          const p = t / f.life;
+          const head = f.dir - 1 + 2 * Math.min(1, p * 1.6);
+          const tail = f.dir - 1 + 2 * Math.max(0, p * 1.6 - 0.6);
+          if (head <= tail) break;
+          const r = f.r1 * k;
+          pen.lineStyle(2.5, f.color, f.alpha * lk);
+          pen.beginPath();
+          penArc(pen, x, y, r * 1.95, tail, head);
+          pen.strokePath();
+          pen.lineStyle(1.5, f.color, f.alpha * 0.7 * lk);
+          pen.beginPath();
+          penArc(pen, x, y, r * 2.4, tail + 0.15, head);
+          pen.strokePath();
           break;
         }
         default:

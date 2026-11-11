@@ -45,6 +45,8 @@ import {
 import { Digits, fitText, setText, type HudKit, type Slice, type Spr } from './hudKit';
 import { fontGeneration } from './fonts';
 import { HudGate } from './hudGate';
+import { newAnonCells } from '../juice';
+import { hitFlashLevel } from '../render/prefsFx';
 import {
   GAUGE_IDS,
   HUD,
@@ -59,6 +61,8 @@ import type { CrispText } from './text';
 
 /** HUD 깊이: 패널 40 · 그림 41 · 글자 42 */
 const D_PANEL = 40;
+/** 괴물 화면 익명 칸 펄스 길이 (ms, 수감 · 구조 완료 때 새로 생긴 칸만). 번쩍임 줄이기면 0.35배 · 60ms 상승 (prefsFx.hitFlashLevel) */
+export const ANON_PULSE_MS = 300;
 const D_ART = 41;
 const D_TEXT = 42;
 /** 점령 중 사선 흐름 속도 (논리 px / 초) */
@@ -416,6 +420,8 @@ interface CardParts {
   abText: CrispText;
   jailText: CrispText;
   jail: Spr[];
+  /** 익명 칸 펄스 (괴물 화면, 카드 위 흰 테두리) */
+  pulse: Slice;
 }
 
 export class Hud {
@@ -446,6 +452,15 @@ export class Hud {
   private toast: { text: string; until: number } | null = null;
   /** 다시 계산할 프레임인가 (스냅샷 · 짧은 안내 · 글꼴 세대 · 아틀라스 · 백버퍼 배율) */
   private readonly gate = new HudGate();
+  /** 괴물 화면 익명 칸 펄스: 지난 목록(제자리 그릇) · 다음 목록에서 새 칸을 고를 시각 · 칸마다 펄스 시작 · 펄스 중 */
+  private readonly anonPrev: AnonStatus[] = [];
+  private pulseWanted: number | null = null;
+  private readonly pulseAt = [-1e9, -1e9, -1e9];
+  private pulsing = false;
+  /** 펄스한 칸 수 (디버그 누계) */
+  private pulses = 0;
+  /** 번쩍임 줄이기 (판 장면이 설정을 따라 바꾼다) */
+  reduceFlash = false;
 
   constructor(
     private readonly kit: HudKit,
@@ -486,6 +501,7 @@ export class Hud {
           abText: kit.text(c.x + 30, 0, F.small, UI.textDim, D_TEXT),
           jailText: kit.text(0, 0, F.small, UI.textDim, D_TEXT).setOrigin(this.isMonster ? 0 : 1, 0),
           jail: [kit.spr(D_ART), kit.spr(D_ART)],
+          pulse: kit.slice(D_PANEL + 0.5),
         })),
       );
     }
@@ -510,6 +526,11 @@ export class Hud {
     }));
   }
 
+  /** 괴물 화면: 다음에 그리는 익명 목록에서 새로 생긴 칸을 펄스한다 (수감 · 구조 완료 이벤트를 받은 스냅샷) */
+  pulseAnon(nowMs: number): void {
+    if (this.isMonster) this.pulseWanted = nowMs;
+  }
+
   /** 짧은 안내 (예: 밀치기 범위 밖): 능력 칸 이름 자리에 잠깐 */
   flash(text: string, ms: number, nowMs: number): void {
     this.toast = { text, until: nowMs + ms };
@@ -523,8 +544,11 @@ export class Hud {
     const toast = this.toast && nowMs < this.toast.until ? this.toast.text : '';
     if (this.gate.fresh(snap, toast, fontGeneration(), this.kit.key, RENDER_SCALE)) {
       this.drawTop(snap);
-      if (this.isMonster) this.drawAnon(snap.world.statusList ?? []);
-      else this.drawTeam(snap);
+      if (this.isMonster) {
+        const list = snap.world.statusList ?? [];
+        this.drawAnon(list);
+        this.notePulse(list);
+      } else this.drawTeam(snap);
       const hint = this.persistentHint(snap);
       this.drawHint(hint);
       this.lastSlots = actionSlots(snap, this.balance, snap.you.role);
@@ -534,6 +558,45 @@ export class Hud {
     }
     const blinkOff = Math.floor(nowMs / 500) % 2 === 1;
     for (const g of this.gauges) g.animate(blinkOff);
+    if (this.pulsing) this.animatePulse(nowMs);
+  }
+
+  /** 익명 칸 펄스: 카드 자리에 흰 테두리를 알파로 한 번 (자리는 카드 그대로 — 칸이 옮겨 가는 것은 그리지 않는다) */
+  private animatePulse(nowMs: number): void {
+    let any = false;
+    this.cards.forEach((p, i) => {
+      const k = hitFlashLevel(nowMs - (this.pulseAt[i] ?? -1e9), ANON_PULSE_MS, this.reduceFlash);
+      if (k <= 0 || !p.panel.shown) {
+        p.pulse.show(false);
+        return;
+      }
+      any = true;
+      const b = p.panel.bounds;
+      p.pulse.set('card:pulse', b.x, b.y, b.w, b.h).setAlpha(Math.round(k * 50) / 50);
+    });
+    this.pulsing = any;
+  }
+
+  /** 익명 목록을 그린 뒤: 펄스를 기다리면 새 칸을 고르고, 지난 목록 그릇을 제자리에서 고친다 */
+  private notePulse(list: readonly AnonStatus[]): void {
+    if (this.pulseWanted !== null) {
+      for (const i of newAnonCells(this.anonPrev, list))
+        if (i < this.pulseAt.length) {
+          this.pulseAt[i] = this.pulseWanted;
+          this.pulses += 1;
+        }
+      this.pulseWanted = null;
+      this.pulsing = true;
+    }
+    const prev = this.anonPrev;
+    list.forEach((a, i) => {
+      const q = prev[i];
+      if (q) {
+        q.state = a.state;
+        q.imprisonCount = a.imprisonCount;
+      } else prev.push({ state: a.state, imprisonCount: a.imprisonCount });
+    });
+    prev.length = list.length;
   }
 
   private persistentHint(snap: Snapshot): { text: string; icon: string } | null {
@@ -777,6 +840,7 @@ export class Hud {
 
   private hideCard(p: CardParts): void {
     p.panel.show(false);
+    p.pulse.show(false);
     p.tag.show(false);
     p.hr.show(false);
     p.ring.show(false);
@@ -907,6 +971,7 @@ export class Hud {
     }
     return {
       ...points,
+      anonPulses: this.pulses,
       timer: this.timerMode,
       timerText: this.digits.text,
       timerFontGen: this.digits.measuredGen,

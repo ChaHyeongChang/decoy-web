@@ -45,8 +45,14 @@ export class LocalTransport implements Transport {
 
   constructor(options: LocalOptions) {
     const seed = options.seed ?? Math.floor(Math.random() * 2 ** 31);
-    // 한 방의 봇은 같은 시드를 쓴다 (생존자 봇의 계획 — 어느 거점을 혼자 · 함께 — 이 시드에서 나와 서로 맞물린다)
-    const driver = new BotDriver((info) => practiceBrain(info.role, seed), PRACTICE_BALANCE);
+    // 한 판의 봇은 같은 시드를 쓴다 (생존자 봇의 계획 — 어느 거점을 혼자 · 함께 — 이 시드에서 나와 서로 맞물린다).
+    // 판마다 판 수를 섞는다(빠른 매칭 quickBots와 같은 방식): '다시 하기'는 같은 방에서 다음 판을 시작하므로, 섞지 않으면 서는
+    // 자리 · 혼자 갈 역할 · 미끼 · 갈라지기 순서가 판마다 같아 첫 판에 본 역할을 다음 판부터 자리로 짐작한다(괴물 화면 정보 숨김).
+    // matchCount는 'match'를 보내기 전에 1이 오르므로 첫 판은 주어진 시드 그대로다(?seed= 재현)
+    const driver = new BotDriver(
+      (info, _seat, room) => practiceBrain(info.role, (seed + (room.matchCount - 1) * 7919) | 0),
+      PRACTICE_BALANCE,
+    );
     this.core = new ServerCore(
       {
         balance: PRACTICE_BALANCE,

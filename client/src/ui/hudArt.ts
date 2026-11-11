@@ -1041,6 +1041,19 @@ export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
       paintPlate(c, w, h, z, { ...PANEL, edge: NEON, edgeA: 1, edgeW: 2, accent: NEON, accentA: 1 }),
     ),
   );
+  // 괴물 화면 익명 칸 펄스 (플레이테스트 반영 c): 속이 빈 흰 테두리만 — 카드 위에 겹쳐 알파로 한 번 밝아졌다 사라진다
+  add(
+    kit('card:pulse', { l: 18, r: 12, t: 16 }, (c, w, h, z) =>
+      paintPlate(c, w, h, z, {
+        fill: PANEL.fill,
+        alpha: 0,
+        edge: UI.white,
+        edgeA: 1,
+        edgeW: 2,
+        cut: PANEL.cut,
+      }),
+    ),
+  );
   for (const r of ['runner', 'guard', 'scout'] as const)
     add(
       kit(`card:${r}`, { l: 18, r: 12, t: 16 }, (c, w, h, z) =>
@@ -1727,12 +1740,8 @@ export function hudSpecs(h: HudLayoutSpec = HUD): AtlasSpec[] {
 
   // ── 배너 리본 (3조각): 지속 배너 높이 · 알림 줄 높이 ──
   const B = h.banner;
-  for (const [tone, rh] of [
-    ['danger', B.h],
-    ['warn', B.h],
-    ['info', B.rowH],
-    ['warn', B.rowH],
-  ] as const) {
+  for (const [tone, row] of BANNER_RIBBONS) {
+    const rh = row ? B.rowH : B.h;
     const notch = Math.round(rh * 0.28);
     add(
       kit(`rb:${tone}:${rh}`, { l: notch + 3 + rh + 10, r: notch + 6, t: rh, v: false }, (c, w, hh, z) =>
@@ -1754,6 +1763,18 @@ export const TONE: Readonly<Record<Tone, { bg: number; text: number }>> = {
   info: { bg: INFO_BANNER, text: UI.white },
 };
 
+/**
+ * 배너 리본 (톤, 알림 줄인가): 지속 배너(위험 · 경고)와 알림 줄(정보 · 경고 · 위험 — 위험 알림 줄은 손맛 '내가 붙잡힘',
+ * 플레이테스트 반영 c). 없는 조합의 알림은 리본이 빠진다(missingFrames)
+ */
+export const BANNER_RIBBONS: readonly (readonly [Tone, boolean])[] = [
+  ['danger', false],
+  ['warn', false],
+  ['info', true],
+  ['warn', true],
+  ['danger', true],
+];
+
 /** 배너 아이콘 (톤 글자색으로 굽는다) */
 export const BANNER_ICONS: readonly (readonly [IconId, number])[] = [
   ['eye', UI.white],
@@ -1768,6 +1789,8 @@ export const BANNER_ICONS: readonly (readonly [IconId, number])[] = [
   ['point', WARN_TEXT],
   ['roar', WARN_TEXT],
   ['roar', UI.white],
+  // 손맛 배너 (플레이테스트 반영 c): 내 수감(위험 톤) · 괴물이 가둠(정보 톤)
+  ['prison', UI.white],
 ];
 
 // ───────────────────────── 조작 안내 줄 (조작 안내 · 점수판) ─────────────────────────

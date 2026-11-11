@@ -15,6 +15,13 @@
 //   --out FILE      판별 수치 + 요약 JSON
 //   --md FILE       요약 마크다운 표
 //   --quiet         판마다 한 줄 출력을 끈다
+//   --monster bot|novice|mid  괴물 자리 두뇌 (기본 bot = 실전 괴물 봇). novice · mid 는 사람 흉내 대역(tests/helpers/humanMonster.ts,
+//                   이 도구가 든 리포의 것 — --repo 와 무관하게 같은 잣대) — '처음 괴물을 해 보는 사람이 몇 번 가두나'(플레이테스트 반영 c)
+//   --aliases seeded|crypto   괴물에게 가는 생존자 임시 ID (기본 seeded). 실제 방은 암호 난수(shared/src/sim/random.ts)라 같은 seed 도
+//                   임시 ID 값 · 순서가 실행마다 다르다. seeded 는 이 프로세스의 crypto.getRandomValues 를 판마다 (seed, --alias-salt)로
+//                   다시 시작하는 시드 난수로 바꿔, 두뇌가 임시 ID 에 기대는 코드여도(b 이전 코드 포함) 같은 명령은 같은 결과를 낸다
+//   --alias-salt N  seeded 임시 ID 난수의 소금 (기본 0). 소금만 바꿔 돌린 두 결과를 --diff 로 견주면 두뇌가 임시 ID 에 기대는지 본다
+//   --diff A B      두 결과 JSON 에서 판 지문(fingerprint)이 다른 seed 를 적는다 (결정성 확인)
 //
 // 이 도구는 판정에 끼어들지 않는다: 게임 상태를 읽기만 하고(관찰자), 봇에게는 실제 방과 똑같이 자기 스냅샷만 간다.
 // 거점 · 탈출구 수와 이름은 하드코딩하지 않고 game.points · game.exits 에서 읽는다(거점 3개 · 새 탈출구 상태가 생겨도 그대로 돈다).
@@ -25,6 +32,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type * as SharedNs from '../shared/src/index';
 import type * as SimNs from '../shared/src/sim/index';
+import { MID, NOVICE, humanMonster } from '../tests/helpers/humanMonster';
 
 type Shared = typeof SharedNs;
 type Sim = typeof SimNs;
@@ -56,6 +64,10 @@ interface Args {
   md: string | null;
   quiet: boolean;
   compare: [string, string] | null;
+  monster: 'bot' | 'novice' | 'mid';
+  aliases: 'seeded' | 'crypto';
+  aliasSalt: number;
+  diff: [string, string] | null;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -70,6 +82,10 @@ function parseArgs(argv: string[]): Args {
     md: null,
     quiet: false,
     compare: null,
+    monster: 'bot',
+    aliases: 'seeded',
+    aliasSalt: 0,
+    diff: null,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const k = argv[i];
@@ -92,6 +108,16 @@ function parseArgs(argv: string[]): Args {
     else if (k === '--md') a.md = resolve(v());
     else if (k === '--quiet') a.quiet = true;
     else if (k === '--compare') a.compare = [resolve(v()), resolve(v())];
+    else if (k === '--diff') a.diff = [resolve(v()), resolve(v())];
+    else if (k === '--monster') {
+      const m = v();
+      if (m !== 'bot' && m !== 'novice' && m !== 'mid') throw new Error('--monster 는 bot · novice · mid');
+      a.monster = m;
+    } else if (k === '--aliases') {
+      const m = v();
+      if (m !== 'seeded' && m !== 'crypto') throw new Error('--aliases 는 seeded 또는 crypto');
+      a.aliases = m;
+    } else if (k === '--alias-salt') a.aliasSalt = Number(v());
     else throw new Error(`모르는 인자: ${k}`);
   }
   return a;
@@ -154,6 +180,17 @@ interface SurvivorStats {
    */
   idleLurkSec: number;
   idleLurkBy: Record<string, number>;
+  /**
+   * 두뇌가 고른 할 일 종류가 바뀐 횟수 (자유 상태에서, 도주는 'flee'로 친다) · 그중 1초 안에 바로 앞 종류로 되돌아간 횟수(흔들림).
+   * 두뇌에 debugState()가 있을 때만 센다 (플레이테스트 반영 c 이전 두뇌는 0)
+   */
+  taskSwitches?: number;
+  taskFlips?: number;
+  /** 쫓기지 않을 때 서 있던 시간, 두뇌가 고른 할 일 종류별 (초) */
+  idleByTask?: Record<string, number>;
+  /** 쫓기지 않을 때 연속으로 서 있던 구간 중 1초 넘는 구간 수 · 가장 긴 구간 (초) */
+  idleRunsOver1s?: number;
+  idleRunMaxSec?: number;
 }
 
 interface PointStats {
@@ -275,8 +312,11 @@ interface Episode {
   lurk: string | null;
 }
 
-/** 두뇌가 지금 기다리기(lurk) 중이면 그 목표 좌표 (진단용, 없으면 null) */
-type LurkPeek = (id: string, tick: number) => Vec2 | null;
+/**
+ * 두뇌의 이번 틱 할 일 (진단용): 종류(도주 중이면 'flee')와 기다리는 목표 좌표(기다리기 · 옛 lurk일 때만).
+ * 모르면 null — 옛 두뇌(debugState 없음)는 lurk 필드로 기다리기만 안다
+ */
+type TaskPeek = (id: string, tick: number) => { kind: string | null; waitAnchor: Vec2 | null } | null;
 
 const r1 = (v: number): number => Math.round(v * 10) / 10;
 const r2 = (v: number): number => Math.round(v * 100) / 100;
@@ -295,6 +335,11 @@ class Probe {
       prevAbilityCd: number;
       prevRescues: number;
       ep: Episode | null;
+      /** 할 일 종류 흔들림 세기: 지금 · 바로 앞 종류와 바뀐 틱, 쫓기지 않고 서 있던 연속 틱 */
+      kind: string | null;
+      prevKind: string | null;
+      kindAt: number;
+      idleRun: number;
     }
   >();
   private readonly points = new Map<string, PointStats>();
@@ -339,7 +384,7 @@ class Probe {
   constructor(
     private readonly game: Game,
     private readonly sh: Shared,
-    private readonly peekLurk: LurkPeek,
+    private readonly peekTask: TaskPeek,
   ) {
     this.dt = game.dt;
     for (const s of game.survivors) {
@@ -369,7 +414,16 @@ class Probe {
           idleWhileMateJailedSec: 0,
           idleLurkSec: 0,
           idleLurkBy: {},
+          taskSwitches: 0,
+          taskFlips: 0,
+          idleByTask: {},
+          idleRunsOver1s: 0,
+          idleRunMaxSec: 0,
         },
+        kind: null,
+        prevKind: null,
+        kindAt: 0,
+        idleRun: 0,
         prevX: s.move.x,
         prevY: s.move.y,
         prevStatus: s.status,
@@ -703,6 +757,20 @@ class Probe {
       const noInput = !input || Math.hypot(input.mx, input.my) < 1e-6;
       if (s.status === 'imprisoned' && prevStatus === 'imprisoned') st.jailedSec += dt;
       // 자유로 지낸 틱만 (이번 틱에 풀려나거나 잡힌 틱은 순간이동이 섞여 뺀다)
+      const peek = s.status === 'free' ? this.peekTask(s.id, g.tick) : null;
+      if (peek?.kind) {
+        if (tr.kind !== null && peek.kind !== tr.kind) {
+          st.taskSwitches = (st.taskSwitches ?? 0) + 1;
+          if (peek.kind === tr.prevKind && g.tick - tr.kindAt <= Math.round(1 / dt))
+            st.taskFlips = (st.taskFlips ?? 0) + 1;
+          tr.prevKind = tr.kind;
+          tr.kindAt = g.tick;
+        }
+        tr.kind = peek.kind;
+      } else if (s.status !== 'free') {
+        tr.kind = null;
+        tr.prevKind = null;
+      }
       if (s.status === 'free' && prevStatus === 'free') {
         st.freeSec += dt;
         ph.freeBotSec += dt;
@@ -730,10 +798,17 @@ class Probe {
         if (moved) st.movingSec += dt;
         idleNow = !moved && !inPoint && !inExit && !rescuing;
         if (idleNow) {
-          const anchor = this.peekLurk(s.id, g.tick);
+          const anchor = peek?.waitAnchor ?? null;
           lurk = anchor ? this.landmark(anchor) : null;
           if (chased) st.idleChasedSec += dt;
           else {
+            // 할 일 종류별 · 1초 넘는 구간은 판이 흐른 뒤만 (시작 카운트다운 동안은 봇이 입력을 보내지 않는다 — 판 시각 0)
+            if (t > 0) {
+              const k = peek?.kind ?? '모름';
+              const byTask = (st.idleByTask ??= {});
+              byTask[k] = (byTask[k] ?? 0) + dt;
+              tr.idleRun += 1;
+            }
             st.idleSec += dt;
             ph.idleBotSec += dt;
             if (noInput) st.idleNoInputSec += dt;
@@ -747,6 +822,7 @@ class Probe {
           }
         }
       }
+      if (!(idleNow && !chased) && tr.idleRun > 0) this.closeIdleRun(st, tr);
       // 서 있던 구간 (쫓김과 무관하게 이어진 구간, 길이 EPISODE_MIN_SEC 이상만 적는다)
       if (idleNow) {
         tr.ep ??= {
@@ -774,6 +850,14 @@ class Probe {
     if (seesFree) this.mon.seeSec += dt;
   }
 
+  /** 쫓기지 않고 서 있던 연속 구간을 닫는다 (1초 넘는 구간 수 · 가장 긴 구간) */
+  private closeIdleRun(st: SurvivorStats, tr: { idleRun: number }): void {
+    const sec = tr.idleRun * this.dt;
+    if (sec > 1 + 1e-9) st.idleRunsOver1s = (st.idleRunsOver1s ?? 0) + 1;
+    st.idleRunMaxSec = Math.max(st.idleRunMaxSec ?? 0, sec);
+    tr.idleRun = 0;
+  }
+
   private closeEpisode(st: SurvivorStats, ep: Episode): void {
     const dur = ep.ticks * this.dt;
     if (dur < EPISODE_MIN_SEC) return;
@@ -798,6 +882,7 @@ class Probe {
     for (const tr of this.surv.values()) {
       if (tr.ep) this.closeEpisode(tr.s, tr.ep);
       tr.ep = null;
+      if (tr.idleRun > 0) this.closeIdleRun(tr.s, tr);
     }
     const round = (o: Record<string, number>): Record<string, number> =>
       Object.fromEntries(
@@ -822,6 +907,8 @@ class Probe {
       idleWhileMateJailedSec: r1(s.idleWhileMateJailedSec),
       idleLurkSec: r1(s.idleLurkSec),
       idleLurkBy: round(s.idleLurkBy),
+      idleByTask: round(s.idleByTask ?? {}),
+      idleRunMaxSec: r1(s.idleRunMaxSec ?? 0),
     }));
     const points = [...this.points.values()].map((p) => ({
       ...p,
@@ -936,18 +1023,79 @@ interface Ctx {
   sh: Shared;
   sim: Sim;
   balance: Balance;
+  monster: Args['monster'];
+}
+
+/** 괴물 자리 두뇌: 실전 봇 또는 사람 흉내 대역 */
+function monsterBrain(ctx: Ctx, seed: number): SimNs.BotBrain {
+  if (ctx.monster === 'bot') return ctx.sim.practiceBrain('monster', seed);
+  return humanMonster(ctx.monster === 'novice' ? NOVICE : MID, seed);
+}
+
+function brainFor(ctx: Ctx, role: SharedNs.Role, seed: number): SimNs.BotBrain {
+  return role === 'monster' ? monsterBrain(ctx, seed) : ctx.sim.practiceBrain(role, seed);
+}
+
+// ───────────────────────── 임시 ID 난수 (--aliases seeded) ─────────────────────────
+let aliasState = 0;
+let aliasSeeded = false;
+
+/** 이 프로세스의 crypto.getRandomValues 를 시드 난수로 바꾼다 (도구 안에서만 — 자리 토큰 · 임시 ID 가 시드 난수가 된다) */
+function installSeededAliases(): void {
+  const c = globalThis.crypto as Crypto & { getRandomValues: (a: ArrayBufferView) => ArrayBufferView };
+  Object.defineProperty(c, 'getRandomValues', {
+    configurable: true,
+    writable: true,
+    value: <T extends ArrayBufferView | null>(arr: T): T => {
+      if (!arr) return arr;
+      const u8 = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
+      for (let i = 0; i < u8.length; i += 1) {
+        // mulberry32
+        aliasState = (aliasState + 0x6d2b79f5) >>> 0;
+        let t = aliasState;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        u8[i] = ((t ^ (t >>> 14)) >>> 0) & 255;
+      }
+      return arr;
+    },
+  });
+  aliasSeeded = true;
+}
+
+/** 판마다 임시 ID 난수를 (seed, 소금)으로 다시 시작한다: 판 결과가 앞 판들 · 판 순서와 무관해진다 */
+function resetAliases(seed: number, salt: number): void {
+  if (!aliasSeeded) return;
+  aliasState = (Math.imul(seed | 0, 0x9e3779b1) ^ Math.imul(salt | 0, 0x85ebca6b) ^ 0x5bd1e995) >>> 0;
 }
 
 /** 감싼 두뇌의 원본 (진단용 lurk 엿보기) */
 const INNER = new Map<string, SimNs.BotBrain>();
 
-const peekLurk: LurkPeek = (id, tick) => {
+const peekTask: TaskPeek = (id, tick) => {
   const brain = INNER.get(id) as unknown as
-    { lurk?: { ax?: unknown; ay?: unknown; until?: unknown } | null } | undefined;
-  const l = brain?.lurk;
+    | {
+        debugState?: () => unknown;
+        lurk?: { ax?: unknown; ay?: unknown; until?: unknown } | null;
+      }
+    | undefined;
+  if (!brain) return null;
+  // 플레이테스트 반영 c 두뇌: 읽기 전용 debugState() (할 일 종류 · 장소 · 도주 중)
+  if (typeof brain.debugState === 'function') {
+    const d = brain.debugState() as {
+      kind?: unknown;
+      anchor?: { x?: unknown; y?: unknown };
+      fleeing?: unknown;
+    } | null;
+    if (!d || typeof d.kind !== 'string') return null;
+    const a = d.anchor;
+    const anchor = a && typeof a.x === 'number' && typeof a.y === 'number' ? { x: a.x, y: a.y } : null;
+    return { kind: d.fleeing === true ? 'flee' : d.kind, waitAnchor: d.kind === 'wait' ? anchor : null };
+  }
+  // 옛 두뇌: 비공개 필드 lurk — 기다리는 동안 until(다시 고를 틱)은 늘 두뇌의 지금(= 마지막 스냅샷 틱, 판 틱보다 1~2 작다)보다 크다
+  const l = brain.lurk;
   if (!l || typeof l.ax !== 'number' || typeof l.ay !== 'number' || typeof l.until !== 'number') return null;
-  // 기다리는 동안 until(다시 고를 틱)은 늘 두뇌의 지금(= 마지막 스냅샷 틱, 판 틱보다 1~2 작다)보다 크다
-  return l.until >= tick - 2 ? { x: l.ax, y: l.ay } : null;
+  return l.until >= tick - 2 ? { kind: null, waitAnchor: { x: l.ax, y: l.ay } } : null;
 };
 
 /** 두뇌를 감싸 이번 틱에 낸 입력을 적어 둔다 (결정은 그대로) */
@@ -967,15 +1115,13 @@ function tap(inner: SimNs.BotBrain, id: string, inputs: Map<string, InputFrame |
  * (p1 괴물 · p2 러너 · p3 가드 · p4 스카우트). 틱마다 Room.tick → BotDriver.beforeStep(자기 스냅샷 + predictSelf) → game.step →
  * 스냅샷 틱에 받는 사람별 스냅샷. 방 seed 와 두뇌 seed 는 기기 안 연습(client/src/localServer.ts)처럼 같은 값
  */
-function runRoom(ctx: Ctx, seed: number): MatchStats {
+function runRoom(ctx: Ctx, seed: number, salt: number): MatchStats {
   const { sh, sim, balance } = ctx;
+  resetAliases(seed, salt);
   const t0 = performance.now();
   const inputs = new Map<string, InputFrame | null>();
   INNER.clear();
-  const driver = new sim.BotDriver(
-    (info) => tap(sim.practiceBrain(info.role, seed), info.you, inputs),
-    balance,
-  );
+  const driver = new sim.BotDriver((info) => tap(brainFor(ctx, info.role, seed), info.you, inputs), balance);
   const room = new sim.Room(
     `${sh.PRACTICE_ROOM_PREFIX}STAT`,
     { balance, seed, testHooks: false, practice: true },
@@ -990,7 +1136,7 @@ function runRoom(ctx: Ctx, seed: number): MatchStats {
   if (bots.length !== balance.match.players)
     throw new Error(`봇 자리 ${bots.length}개 (기대 ${balance.match.players})`);
   const recorder = new sim.MatchRecorder(game);
-  const probe = new Probe(game, sh, peekLurk);
+  const probe = new Probe(game, sh, peekTask);
   const tickMs = 1000 / balance.network.serverTickHz;
   const limit = Math.ceil((balance.match.timeLimit + balance.match.lastSurvivorGrace + 5) / game.dt);
   let now = 0;
@@ -1017,19 +1163,20 @@ function runRoom(ctx: Ctx, seed: number): MatchStats {
 }
 
 /** SimMatch 흐름 (tests/bots/practice.test.ts playMatch · scripts/meta-calibrate.ts 와 같다) */
-function runSim(ctx: Ctx, seed: number): MatchStats {
+function runSim(ctx: Ctx, seed: number, salt: number): MatchStats {
   const { sh, sim, balance } = ctx;
+  resetAliases(seed, salt);
   const t0 = performance.now();
   const inputs = new Map<string, InputFrame | null>();
   INNER.clear();
   const setup = sim.SimMatch.roles();
   const brains = new Map<string, SimNs.BotBrain>(
-    setup.map((p) => [p.id, tap(sim.practiceBrain(p.role, seed), p.id, inputs)]),
+    setup.map((p) => [p.id, tap(brainFor(ctx, p.role, seed), p.id, inputs)]),
   );
   const match = new sim.SimMatch(setup, balance, brains, seed);
   const game = match.game;
   match.recorder = new sim.MatchRecorder(game);
-  const probe = new Probe(game, sh, peekLurk);
+  const probe = new Probe(game, sh, peekTask);
   const limit = Math.ceil((balance.match.timeLimit + balance.match.lastSurvivorGrace + 5) / game.dt);
   let ticks = 0;
   while (!game.end && ticks < limit) {
@@ -1108,6 +1255,10 @@ interface Summary {
   escapedAvg: number;
   killedAvg: number;
   imprisonmentsAvg: number;
+  /** 판당 수감 중앙값 · 수감 0번인 판 · 2번 이상인 판 (사람 흉내 괴물로 '처음 하는 사람이 두세 번'을 볼 때) */
+  imprisonmentsMedian?: number;
+  imprisonmentsZero?: number;
+  imprisonmentsTwoPlus?: number;
   imprisonmentsByRole: Record<string, number>;
   rescuesAvg: number;
   attack: {
@@ -1129,6 +1280,9 @@ interface Summary {
       monsterInRadiusAvg: number;
       monsterNearAvg: number;
       blockedAvg: number;
+      /** 끝난 판에서: 처음 점령이 시작된 때부터 완료까지 (초) · 그중 실제로 점령되던 초 */
+      spanMean?: number;
+      capturingMean?: number;
     }
   >;
   pointsDoneHist: Record<string, number>;
@@ -1147,6 +1301,16 @@ interface Summary {
     /** 서 있던 시간 중 '위험한 목표 근처에서 기다리기(lurk)' 비율 (%)과 목표별 봇 1명 · 판당 초 */
     lurkPct: number;
     lurkBy: Record<string, number>;
+    /**
+     * 할 일 종류 전환 · 1초 안에 되돌아간 전환(흔들림) · 쫓기지 않을 때 1초 넘게 선 구간 (봇 1명 · 판당), 그런 구간 중 가장 긴 것
+     * (초, 모든 봇·판의 최대 · p90), 서 있던 시간의 할 일 종류별 (봇 1명 · 판당 초). 두뇌에 debugState()가 있을 때만
+     */
+    taskSwitchesPerBot?: number;
+    taskFlipsPerBot?: number;
+    runsOver1sPerBot?: number;
+    runMaxSec?: number;
+    runMaxP90Sec?: number;
+    byTask?: Record<string, number>;
     byRole: Record<string, { idleSec: number; idleChasedSec: number; freeSec: number; pctOfFree: number }>;
     byPhase: Record<string, number>;
   };
@@ -1248,6 +1412,8 @@ function summarize(ms: MatchStats[]): Summary {
       monsterInRadiusAvg: r1(mean(ps.map((p) => p.monsterInRadiusSec))),
       monsterNearAvg: r1(mean(ps.map((p) => p.monsterNearSec))),
       blockedAvg: r1(mean(ps.map((p) => p.blockedSec))),
+      spanMean: r1(mean(done.map((p) => (p.doneAt ?? 0) - (p.firstCaptureAt ?? 0)))),
+      capturingMean: r1(mean(done.map((p) => p.capturingSec))),
     };
   }
   const pointsDoneHist: Record<string, number> = {};
@@ -1278,6 +1444,11 @@ function summarize(ms: MatchStats[]): Summary {
   for (const s of allSurv)
     for (const [k, v] of Object.entries(s.idleLurkBy ?? {})) lurkBy[k] = (lurkBy[k] ?? 0) + v;
   for (const k of Object.keys(lurkBy)) lurkBy[k] = r1((lurkBy[k] ?? 0) / Math.max(1, allSurv.length));
+  const idleByTask: Record<string, number> = {};
+  for (const s of allSurv)
+    for (const [k, v] of Object.entries(s.idleByTask ?? {})) idleByTask[k] = (idleByTask[k] ?? 0) + v;
+  for (const k of Object.keys(idleByTask))
+    idleByTask[k] = r1((idleByTask[k] ?? 0) / Math.max(1, allSurv.length));
   const standWhere: Record<string, number> = {};
   for (const m of ms)
     for (const [k, v] of Object.entries(m.monster.standWhere)) standWhere[k] = (standWhere[k] ?? 0) + v;
@@ -1353,6 +1524,12 @@ function summarize(ms: MatchStats[]): Summary {
     escapedAvg: r2(mean(ms.map((m) => m.escaped))),
     killedAvg: r2(mean(ms.map((m) => m.killed))),
     imprisonmentsAvg: r2(mean(ms.map((m) => m.imprisonments))),
+    imprisonmentsMedian: quantile(
+      ms.map((m) => m.imprisonments),
+      0.5,
+    ),
+    imprisonmentsZero: ms.filter((m) => m.imprisonments === 0).length,
+    imprisonmentsTwoPlus: ms.filter((m) => m.imprisonments >= 2).length,
     imprisonmentsByRole,
     rescuesAvg: r2(mean(ms.map((m) => m.rescues))),
     attack,
@@ -1386,6 +1563,17 @@ function summarize(ms: MatchStats[]): Summary {
       whileMateJailedPct: pct(sum(allSurv.map((s) => s.idleWhileMateJailedSec)), idleTotal),
       lurkPct: pct(sum(allSurv.map((s) => s.idleLurkSec ?? 0)), idleTotal),
       lurkBy,
+      taskSwitchesPerBot: r2(mean(allSurv.map((s) => s.taskSwitches ?? 0))),
+      taskFlipsPerBot: r2(mean(allSurv.map((s) => s.taskFlips ?? 0))),
+      runsOver1sPerBot: r2(mean(allSurv.map((s) => s.idleRunsOver1s ?? 0))),
+      runMaxSec: r1(Math.max(0, ...allSurv.map((s) => s.idleRunMaxSec ?? 0))),
+      runMaxP90Sec: r1(
+        quantile(
+          allSurv.map((s) => s.idleRunMaxSec ?? 0),
+          0.9,
+        ),
+      ),
+      byTask: idleByTask,
       byRole: idleByRole,
       byPhase: idleByPhase,
     },
@@ -1488,6 +1676,9 @@ function summaryMarkdown(s: Summary, title: string): string {
       .map(([k, v]) => `${ROLE_KO[k] ?? k} ${fmt(v, 2)}`)
       .join(' · ')}) |`,
   );
+  L.push(
+    `| 판당 수감 중앙값 · 0번인 판 · 2번 이상인 판 | ${fmt(s.imprisonmentsMedian ?? NaN, 1)} · ${s.imprisonmentsZero ?? '–'} · ${s.imprisonmentsTwoPlus ?? '–'} |`,
+  );
   L.push(`| 판당 구조 횟수 | ${fmt(s.rescuesAvg, 2)} |`);
   L.push(
     `| 괴물 공격: 시도 · 휘두름 · 명중 · 명중률 | ${s.attack.starts} · ${s.attack.strikes} · ${s.attack.strikesHit} · **${fmt(s.attack.hitRatePct)}%** (판당 휘두름 ${fmt(s.attack.perMatchStrikes)}, 맞은 사람 수 ${s.attack.hitsLanded}) |`,
@@ -1534,12 +1725,12 @@ function summaryMarkdown(s: Summary, title: string): string {
   L.push('거점');
   L.push('');
   L.push(
-    '| 거점 | 점령 완료 판 | 먼저 끝난 판 | 완료 시각 평균 · 중앙값 | 괴물이 반경 안 (판당 초) | 괴물이 6타일 안 (판당 초) | 막힘 (판당 초) |',
+    '| 거점 | 점령 완료 판 | 먼저 끝난 판 | 완료 시각 평균 · 중앙값 | 점령 시작~완료 (끝난 판 평균) | 그중 점령되던 초 | 괴물이 반경 안 (판당 초) | 괴물이 6타일 안 (판당 초) | 막힘 (판당 초) |',
   );
-  L.push('|---|---|---|---|---|---|---|');
+  L.push('|---|---|---|---|---|---|---|---|---|');
   for (const [id, p] of Object.entries(s.points))
     L.push(
-      `| ${id} | ${p.doneCount} (${fmt(p.donePct)}%) | ${p.firstCount} | ${mmss(p.doneAtMean)} · ${mmss(p.doneAtMedian)} | ${fmt(p.monsterInRadiusAvg)} | ${fmt(p.monsterNearAvg)} | ${fmt(p.blockedAvg)} |`,
+      `| ${id} | ${p.doneCount} (${fmt(p.donePct)}%) | ${p.firstCount} | ${mmss(p.doneAtMean)} · ${mmss(p.doneAtMedian)} | ${p.spanMean === undefined ? '–' : mmss(p.spanMean)} | ${p.capturingMean === undefined ? '–' : fmt(p.capturingMean)} | ${fmt(p.monsterInRadiusAvg)} | ${fmt(p.monsterNearAvg)} | ${fmt(p.blockedAvg)} |`,
     );
   L.push('');
   L.push(
@@ -1623,7 +1814,25 @@ function summaryMarkdown(s: Summary, title: string): string {
   );
   L.push('');
   L.push(
-    `서 있던 시간 중 '위험한 목표 근처에서 기다리기(lurk)' 비율 ${fmt(s.idle.lurkPct)}% — 목표별 (봇 1명 · 판당 초): ${
+    `할 일 종류 전환 (봇 1명 · 판당, 도주 = flee): ${fmt(s.idle.taskSwitchesPerBot ?? NaN, 2)}번, 그중 1초 안에 되돌아감 ${fmt(
+      s.idle.taskFlipsPerBot ?? NaN,
+      2,
+    )}번 · 쫓기지 않을 때 1초 넘게 선 구간 ${fmt(s.idle.runsOver1sPerBot ?? NaN, 2)}개 (가장 긴 구간: 봇·판 최대 ${fmt(
+      s.idle.runMaxSec ?? NaN,
+    )}초 · p90 ${fmt(s.idle.runMaxP90Sec ?? NaN)}초)`,
+  );
+  L.push('');
+  L.push(
+    `서 있던 시간의 할 일 종류 (봇 1명 · 판당 초): ${
+      Object.entries(s.idle.byTask ?? {})
+        .sort((a, b) => b[1] - a[1])
+        .map(([k, v]) => `${k} ${fmt(v)}`)
+        .join(' · ') || '–'
+    }`,
+  );
+  L.push('');
+  L.push(
+    `서 있던 시간 중 '위험한 목표 근처에서 기다리기(lurk · wait)' 비율 ${fmt(s.idle.lurkPct)}% — 목표별 (봇 1명 · 판당 초): ${
       Object.entries(s.idle.lurkBy)
         .sort((a, b) => b[1] - a[1])
         .map(([k, v]) => `${k} ${fmt(v)}`)
@@ -1678,6 +1887,11 @@ function compareMarkdown(a: Summary, b: Summary, nameA: string, nameB: string): 
   row('판 길이 7~10분인 판', `${a.in7to10min}`, `${b.in7to10min}`);
   row('시간 초과', `${a.timeouts}`, `${b.timeouts}`);
   row('판당 수감', fmt(a.imprisonmentsAvg, 2), fmt(b.imprisonmentsAvg, 2));
+  const jail = (x: Summary): string =>
+    x.imprisonmentsMedian === undefined
+      ? '–'
+      : `${fmt(x.imprisonmentsMedian, 1)} · ${x.imprisonmentsZero ?? '–'} · ${x.imprisonmentsTwoPlus ?? '–'}`;
+  row('판당 수감 중앙값 · 0번인 판 · 2번 이상인 판', jail(a), jail(b));
   row('판당 구조', fmt(a.rescuesAvg, 2), fmt(b.rescuesAvg, 2));
   row('명중률', `${fmt(a.attack.hitRatePct)}%`, `${fmt(b.attack.hitRatePct)}%`);
   const ids = [...new Set([...Object.keys(a.points), ...Object.keys(b.points)])].sort();
@@ -1689,6 +1903,11 @@ function compareMarkdown(a: Summary, b: Summary, nameA: string, nameB: string): 
       pa ? `${pa.doneCount} (${pa.firstCount})` : '–',
       pb ? `${pb.doneCount} (${pb.firstCount})` : '–',
     );
+    const times = (p: Summary['points'][string] | undefined): string =>
+      p && p.spanMean !== undefined
+        ? `완료 ${mmss(p.doneAtMean)} · 시작~완료 ${mmss(p.spanMean)} · 점령 ${fmt(p.capturingMean ?? NaN)}초`
+        : '–';
+    row(`거점 ${id} 시각 (끝난 판 평균)`, times(pa), times(pb));
   }
   const hist = (s: Summary): string =>
     Object.entries(s.pointsDoneHist)
@@ -1725,6 +1944,17 @@ function compareMarkdown(a: Summary, b: Summary, nameA: string, nameB: string): 
     `${fmt(a.idle.perBotSec)}초 (${fmt(a.idle.perBotPctOfFree)}%)`,
     `${fmt(b.idle.perBotSec)}초 (${fmt(b.idle.perBotPctOfFree)}%)`,
   );
+  const runs = (x: Summary): string =>
+    x.idle.runsOver1sPerBot === undefined
+      ? '–'
+      : `${fmt(x.idle.runsOver1sPerBot, 2)}개 · 최대 ${fmt(x.idle.runMaxSec ?? NaN)}초 · p90 ${fmt(x.idle.runMaxP90Sec ?? NaN)}초`;
+  row('쫓기지 않을 때 1초 넘게 선 구간 (봇 1명 · 판당) · 가장 긴 구간', runs(a), runs(b));
+  const switches = (x: Summary): string =>
+    x.idle.taskSwitchesPerBot === undefined ||
+    (x.idle.taskSwitchesPerBot === 0 && x.idle.byTask === undefined)
+      ? '–'
+      : `${fmt(x.idle.taskSwitchesPerBot, 1)}번 (1초 안에 되돌아감 ${fmt(x.idle.taskFlipsPerBot ?? NaN, 1)})`;
+  row('할 일 종류 전환 (봇 1명 · 판당)', switches(a), switches(b));
   row('괴물 봇 서 있던 시간', `${fmt(a.monster.standFreeAvg)}초`, `${fmt(b.monster.standFreeAvg)}초`);
   row('괴물이 감옥 반경 안', `${fmt(a.monster.prisonRadiusAvg)}초`, `${fmt(b.monster.prisonRadiusAvg)}초`);
   L.push('');
@@ -1754,6 +1984,23 @@ function writeText(path: string, text: string): void {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  if (args.diff) {
+    const [fa, fb] = args.diff;
+    const a = JSON.parse(readFileSync(fa, 'utf8')) as { matches: MatchStats[] };
+    const b = JSON.parse(readFileSync(fb, 'utf8')) as { matches: MatchStats[] };
+    const bySeed = new Map(b.matches.map((m) => [m.seed, m]));
+    const diff: string[] = [];
+    let same = 0;
+    for (const m of a.matches) {
+      const o = bySeed.get(m.seed);
+      if (!o) continue;
+      if (o.fingerprint === m.fingerprint) same += 1;
+      else
+        diff.push(`${m.seed}(${m.endLabel} ${mmss(m.durationSec)} → ${o.endLabel} ${mmss(o.durationSec)})`);
+    }
+    console.log(`같은 판 ${same} · 다른 판 ${diff.length}${diff.length ? `: ${diff.join(', ')}` : ''}`);
+    return;
+  }
   if (args.compare) {
     const [fa, fb] = args.compare;
     const a = JSON.parse(readFileSync(fa, 'utf8')) as { summary: Summary; meta: { gitHead: string } };
@@ -1767,7 +2014,8 @@ async function main(): Promise<void> {
   const sim = (await import(pathToFileURL(join(args.repo, 'shared/src/sim/index.ts')).href)) as Sim;
   const balancePath = args.balance ?? join(args.repo, 'config/balance.json');
   const balance = sh.validateBalance(JSON.parse(readFileSync(balancePath, 'utf8')));
-  const ctx: Ctx = { sh, sim, balance };
+  const ctx: Ctx = { sh, sim, balance, monster: args.monster };
+  if (args.aliases === 'seeded') installSeededAliases();
   const seeds = args.seeds ?? Array.from({ length: args.matches }, (_, i) => args.seed + i);
   const prep0 = performance.now();
   sim.preparePracticeMap();
@@ -1775,7 +2023,7 @@ async function main(): Promise<void> {
   const started = performance.now();
   const matches: MatchStats[] = [];
   for (const seed of seeds) {
-    const m = args.flow === 'room' ? runRoom(ctx, seed) : runSim(ctx, seed);
+    const m = args.flow === 'room' ? runRoom(ctx, seed, args.aliasSalt) : runSim(ctx, seed, args.aliasSalt);
     matches.push(m);
     if (!args.quiet) {
       const idle = r1(mean(m.survivors.map((s) => s.idleSec)));
@@ -1794,6 +2042,9 @@ async function main(): Promise<void> {
     gitHead: git.head,
     gitDirtyFiles: git.dirty,
     flow: args.flow,
+    monster: args.monster,
+    aliases: args.aliases,
+    aliasSalt: args.aliasSalt,
     seeds,
     balancePath,
     balanceHash: sh.balanceHash(balance),

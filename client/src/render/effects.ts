@@ -1,6 +1,8 @@
 // 화면 연출 (VISUAL_SPEC 6.2 · 7.2) 중 화면 좌표로 그리는 것과 월드 후처리 (M10b)
 //  - 피격: 화면 가장자리 붉은 플래시 0.2초 (맞은 생존자). 번쩍임 줄이기(설정)면 옅게 · 서서히 (prefsFx.hitFlashLevel)
-//  - 수감: 감옥으로 페이드 0.5초 (갇힌 생존자, 검정에서 밝아짐)
+//  - 수감: 감옥으로 페이드 0.5초 (갇힌 생존자, 검정에서 밝아짐). 검정은 IMPRISON_RISE_MS에 걸쳐 오른다 — 같은 스냅샷 피격의 붉은
+//    가장자리(깊이 52)가 암전(55)에 덮이기 전에 먼저 읽히게 (플레이테스트 반영 c 손맛)
+//  - 구조 완료: 화면 가장자리 안쪽 가는 청록 선 0.3초 (생존자 화면). 번쩍임 줄이기면 피격 가장자리와 같은 방식(0.35배 · 60ms 상승)
 //  - 기절: 괴물 화면 채도 감소 (기절 동안). 맵(구조 레이어) 바로 위 · 배지와 캐릭터 아래의 막(WorldRenderer.stunVeil)이라
 //    캐릭터 · 노출 링 · 범위 · 마커를 덮지 않는다. 두 렌더러가 같은 방식(보통 섞기 회색 막)이다
 //  - 후처리 (WorldPostFx): 비네트 · 색보정은 구조 레이어(fogRoot: 바닥 · 벽 · 시설 발광)에만 건다.
@@ -14,10 +16,9 @@ import { MAP_RECT, VIEW_H, VIEW_W } from '../ui/layout';
 import { POST, vignetteAt } from '../art/fx';
 import { createCanvasTexture, removeCanvasTexture } from './fogPaint';
 import { FOG_EDGE_PIPELINE, FOG_FOLLOW_PIPELINE } from './fogGpu';
-import { hitFlashLevel } from './prefsFx';
+import { RESCUE_RIM, hitFlashLevel, imprisonFadeLevel } from './prefsFx';
 
 export const HIT_FLASH_MS = 200;
-export const IMPRISON_FADE_MS = 500;
 const EDGE_RED = 0xdc2626;
 const EDGE_BANDS = 7;
 const EDGE_BAND_PX = 11;
@@ -27,6 +28,8 @@ export interface ScreenEffectState {
   hitFlash: number;
   /** 수감 페이드 검정 알파 0~1 */
   fade: number;
+  /** 구조 완료 청록 가장자리 세기 0~1 */
+  rescueRim: number;
   /** 채도 감소 중 */
   desaturate: boolean;
 }
@@ -44,13 +47,16 @@ export interface VeilLike {
 
 export class ScreenEffects {
   private readonly edge: Phaser.GameObjects.Graphics;
+  private readonly rim: Phaser.GameObjects.Graphics;
   private readonly fadeRect: Phaser.GameObjects.Rectangle;
   private hitAt = -1e9;
   private fadeAt = -1e9;
+  private rescueAt = -1e9;
   private lastEdgeAlpha = -1;
+  private lastRimAlpha = 0;
   /** 번쩍임 줄이기 (설정 화면 '화면' 탭): 피격 가장자리를 옅게 · 서서히 (판 장면이 설정을 따라 바꾼다) */
   reduceFlash = false;
-  state: ScreenEffectState = { hitFlash: 0, fade: 0, desaturate: false };
+  state: ScreenEffectState = { hitFlash: 0, fade: 0, rescueRim: 0, desaturate: false };
 
   /** veil = 맵 바로 위 · 배지와 캐릭터 아래의 채도 감소 막 */
   constructor(
@@ -58,6 +64,8 @@ export class ScreenEffects {
     private readonly veil: VeilLike,
   ) {
     this.edge = scene.add.graphics().setDepth(52);
+    // 비워 둔다: 새 Graphics는 기본 스타일 명령을 들고 있어 비어 있어도 프레임마다 그린다
+    this.rim = scene.add.graphics().setDepth(52).clear();
     this.fadeRect = scene.add
       .rectangle(0, 0, VIEW_W, VIEW_H, 0x000000)
       .setOrigin(0, 0)
@@ -72,6 +80,10 @@ export class ScreenEffects {
 
   imprison(nowMs: number): void {
     this.fadeAt = nowMs;
+  }
+
+  rescue(nowMs: number): void {
+    this.rescueAt = nowMs;
   }
 
   update(nowMs: number, desaturate: boolean): void {
@@ -91,16 +103,28 @@ export class ScreenEffects {
         }
       }
     }
-    // 수감: 검정에서 0.5초에 걸쳐 밝아진다 (서버가 위치를 감옥으로 옮긴 바로 그 화면부터)
-    const fk = Math.max(0, 1 - (nowMs - this.fadeAt) / IMPRISON_FADE_MS);
+    // 구조 완료: 가장자리 안쪽 가는 청록 선 (세기가 바뀐 프레임에만 다시 그린다)
+    const rk = hitFlashLevel(nowMs - this.rescueAt, RESCUE_RIM.ms, this.reduceFlash);
+    const rimAlpha = Math.round(rk * 50) / 50;
+    if (rimAlpha !== this.lastRimAlpha) {
+      this.lastRimAlpha = rimAlpha;
+      this.rim.clear();
+      if (rimAlpha > 0) {
+        const R = RESCUE_RIM;
+        this.rim.lineStyle(R.width, R.color, R.alpha * rimAlpha);
+        this.rim.strokeRect(R.inset, R.inset, VIEW_W - R.inset * 2, VIEW_H - R.inset * 2);
+      }
+    }
+    // 수감: 검정이 IMPRISON_RISE_MS에 오른 뒤 0.5초에 걸쳐 밝아진다 (서버가 위치를 감옥으로 옮긴 바로 그 화면부터)
+    const fk = imprisonFadeLevel(nowMs - this.fadeAt);
     this.fadeRect.setVisible(fk > 0).setAlpha(fk);
     this.veil.setVisible(desaturate);
-    this.state = { hitFlash: hk, fade: fk, desaturate };
+    this.state = { hitFlash: hk, fade: fk, rescueRim: rk, desaturate };
   }
 
   /** 화면 효과 레이어의 표시 객체 (후처리 검사의 레이어 이름 'screen') */
   owns(obj: Phaser.GameObjects.GameObject): boolean {
-    return obj === this.edge || obj === this.fadeRect;
+    return obj === this.edge || obj === this.rim || obj === this.fadeRect;
   }
 }
 
