@@ -164,6 +164,7 @@ decoy-web/
   - **Canvas 합성**: 정적 맵 + 공개 동적 레이어(거점 · 탈출구 링, 시야 원) + 빛 지도를 Canvas2D 한 장에 `multiply`로 합성한다. Canvas 렌더러와 품질 낮음. 비용이 픽셀 수에 비례하므로 합성 캔버스 배율은 품질 상한을 따른다
   - **GPU 합성**: 정적 맵 텍스처는 목표 해상도로 한 번만 올리고, 작은 빛 텍스처만 갱신해 곱한다. WebGL의 품질 중간 · 높음. 높음은 가장자리 셰이더를 더한다(어둡게만 — 판정 밖을 밝히지 않음)
   - 두 경로의 밝기 차는 ±3 이내(E2E). 미니맵도 같은 방식
+- **공개 동적 레이어 펜** (`client/src/render/fogPaint.ts` `FogPen`): 거점 · 탈출구 그림은 기록 펜(`PenRecord` — 숫자 배열 명령)에 안개 주기마다 기록하고, 지난번과 같으면 다시 그리지도 올리지도 않으며, 다르면 캔버스 펜(`CanvasPen`)에 재생한다(GPU 조각 · 미니맵 · Canvas 합성. 따라가는 카메라의 Canvas 영역 합성은 창 둘레 타일 사각형으로 잘라 재생). **같은 색 눈금 칸은 한 경로로** (플레이테스트 반영 b, DECISIONS 16절): `fillPolysFlat`(기록 명령 `OP_FILL_POLYS`)이 서로 겹치지 않는 다각형 여러 개를 한 경로 · 한 번 채우기로 칠한다 — 거점 고리는 꺼진 칸 24개 · 다 켜진 칸이 각각 한 번이고 차오르는 칸 하나만 따로다. 칸끼리 겹치지 않아 칸마다 채운 것과 그림이 같다. 자르기가 있는 재생은 영역 밖에 통째로 있는 칸을 빼고(칸마다 기록하던 때 건너뛰던 것과 같은 칸) 이어진 칸끼리 한 경로로 채운다. 거점이 셋이 되어 늘어난 칠하기 · 경로를 덜어 일의 양 예산(7장)의 화면 밖 칠하기가 세 장면 모두 옛 기준값보다 45~51% 적다(`tests/unit/fog-cycle.test.ts`). 꺼진 거점(`off`)은 시각과 무관한 그림(회색 끊긴 원, VISUAL_SPEC 5.1)이라 GPU 조각을 꺼진 순간 한 번만 올린다(`tests/unit/fog-gpu-mini.test.ts`)
 - **렌더 해상도** = 표시 CSS 크기 × min(기기 픽셀 배율, 품질 단계 상한, 픽셀 수 상한) (`client/src/render/resolution.ts`). 논리 좌표 1920×1080은 카메라 zoom으로 유지하고, 캔버스는 기기 픽셀 격자에 맞춰 놓는다. 글자 텍스처 해상도 = zoom. 창 크기 · 기기 픽셀 배율이 바뀌면(모니터 이동 · 브라우저 확대) 다시 맞춘다. `?scale`(0.25~1)은 이 해상도에 곱한다
 - 갱신 주기: 빛 지도는 생존자 화면 20Hz, 괴물 화면 30Hz로 다시 그린다(DECISIONS "화면"). 그 사이는 위치만 따라 이동
 - 조건을 만족하지 않는 대상은 **그리지 않는다** (알파 0이 아니라 아예 생성하지 않거나 visible=false). 애초에 서버가 보내지 않는다
@@ -176,7 +177,7 @@ decoy-web/
 1. 배경 `#0B1622`
 2. **월드**(`fogRoot`): 바닥 · 벽 · 시설 발광 · 거점 · 탈출구 영역 · 시야 채움 → 안개(빛 지도 곱하기. 시야 밖은 검정이 아니라 밝기 하한이라 어둡게 남는다, VISUAL_SPEC 3.2). 색은 VISUAL_SPEC 2.3 · 2.4
 3. 기절 회색 막 (괴물 화면, 기절 중)
-4. 바닥 정보: 항상 표시 배지 · A/B 글자 (캐릭터 **아래**, VISUAL_SPEC R1)
+4. 바닥 정보: 항상 표시 배지 · A/B/C 글자 (캐릭터 **아래**, VISUAL_SPEC R1)
 5. 부채꼴 채움 (생존자 화면 노랑/빨강, 괴물 화면 노랑. 안개와 곱하지 않는다, DECISIONS D4) · 공격 준비 채움
 6. **엔티티**: 그림자 · 이벤트 효과 · 범위 선 · 마커 · 캐릭터 (안개 · 후처리 없음)
 7. **장면 위**: 발각 테두리 · 미니맵 · HUD · 배너 · 조작 안내 · 점수판
@@ -189,7 +190,8 @@ decoy-web/
 - `?debug=1` 오버레이 (`client/src/ui/debugOverlay.ts`, 배포 빌드에서도 뜬다): FPS · 목표 · 화면 주사율 · 프레임 제한, 프레임 간격(평균 · p95 · 늦은 프레임 % — 간격 ≥ 목표 주기 + 반 vsync · 넘김 % — rAF 시각부터 그리기를 마칠 때까지가 한 vsync보다 긴 프레임) · 작업 시간(평균 · p95 · 안개 주기 프레임 p95), 그리기 호출(WebGL 호출 수 · Canvas는 그린 객체 수, 이 오버레이를 켰을 때만 센다), 핑 · 서버 틱 · 스냅샷, 예측 오차 · 대기 입력, 품질 · 자동 조정, DPR · 백버퍼, 렌더러 · 입력 방식 · 밸런스 해시. 칩을 눌러 접고 펼친다(터치 기기는 접은 채, PC는 펼친 채 시작, 저장하지 않음). 칩만 입력을 받고 판 입력으로 보내지 않는다. 터치 기기의 칩은 맵 왼쪽 위(판 HUD · 터치 대상과 겹치지 않음, `tests/e2e/debug-overlay.spec.ts`)
 - M10 그래픽 검사 훅: `gfx`(렌더 해상도 · 품질 · 안개 방식 · 프레임 제한 · 화면 주사율 · 목표 FPS · 내림 · 올림 횟수), `freezeClock`(장식 애니메이션 시계 고정), `injectFps`(품질 자동 하향 시험), `probeText`(선명도 탐침).
 - 렌더링 최적화 훅: `getFrameStats()`(최근 1초 FPS · 프레임 간격 · 작업 시간 평균 · p95 · 그리기 호출 · 건너뛴 rAF, `gfx/frameStats.ts`), `getAnimState()`(보간 · 연출 · 걷기 상태, 60 · 120Hz 프레임 독립성 E2E가 같은 시각끼리 견준다), `setFrameLimit(limit)`(프레임 제한 'auto' · '60' · '120' · 'half' 바꾸기, 저장은 로비 설정만), `setFogFollowDisabled(off)`(내 빛 따라가기 끄기 — 같은 빌드에서 예전 그림과 화소 비교). 진단 주소 `?camSnap=0`은 따라가는 카메라 창을 기기 픽셀 격자에 맞추지 않는다(저장하지 않음). 캐릭터 리디자인: `setCharStyle(style)`(캐릭터 스타일 'classic' · 'new' 바꾸기, 저장하지 않음 — 판 중이면 다음 프레임에 그림을 다시 굽는다), `gfx.charStyle`. 주소 `?chars=new|classic`은 이번 접속만. 타입은 `shared/src/debugTypes.ts`. 리마스터 전후 비교 촬영은 `npm run shots:remaster`(`scripts/remaster-shots.mjs`)
-- 플레이테스트 반영 a(DECISIONS 16절): 진단 주소 `?zoomguard=0`(`app.ts` `readParams` → `AppParams.zoomGuard`)은 화면 확대 막기(뿌리 `touch-action` · 문서 리스너)만 끄고 감지 · 확대 안내는 둔다(실기기에서 안내 · 복구를 일부러 보기, 저장하지 않음, `?camSnap=0`과 같이 배포 주소에서도 받는다). **판 시작 카운트다운**: 시험 훅이 켜진 방(`--test-hooks` 서버, `?debug` 연습)은 카운트다운이 0이다(기존 시험은 판 시작 직후를 가정한다) — 서버 방은 로비에서 시험 명령 `{ kind: 'startCountdown', seconds }`(다음 판 하나), 연습은 주소 `?countdown=1`(수치 `match.startCountdown`), 단위 시험은 `RoomConfig.startCountdown`으로 켠다. 디버그 훅에 더한 값: `getHud()`의 `countdown`('3' · '2' · '1' · '시작!', 없으면 '') · `point{A,B}Pct` · `point{A,B}PctFrame`(거점 진행 숫자 · 그 아틀라스 프레임), `getSounds()`의 `count` · `go` · `roarFound`(드러난 자리마다) · `roarEmpty`, `getCamera().markers[]`의 `scale`(배지 배율) · `halo`(포효 핑 고리 배율 · 알파) · `chev`(셰브론 기준점)와 `pingRings`(미니맵 고리 small · big), `getControlLayout().hud.minimapInset`(맵 창 안 미니맵의 **지금** 자리 — 조작 배치에서 옮겼으면 옮긴 자리), 정보 레이어 종류 `keypad`(값 '모드:네 칸', 예 'typing:07__'), `gfx.features.keypadBakes`(자물쇠 판 굽기 누계)
+- 플레이테스트 반영 a(DECISIONS 16절): 진단 주소 `?zoomguard=0`(`app.ts` `readParams` → `AppParams.zoomGuard`)은 화면 확대 막기(뿌리 `touch-action` · 문서 리스너)만 끄고 감지 · 확대 안내는 둔다(실기기에서 안내 · 복구를 일부러 보기, 저장하지 않음, `?camSnap=0`과 같이 배포 주소에서도 받는다). **판 시작 카운트다운**: 시험 훅이 켜진 방(`--test-hooks` 서버, `?debug` 연습)은 카운트다운이 0이다(기존 시험은 판 시작 직후를 가정한다) — 서버 방은 로비에서 시험 명령 `{ kind: 'startCountdown', seconds }`(다음 판 하나), 연습은 주소 `?countdown=1`(수치 `match.startCountdown`), 단위 시험은 `RoomConfig.startCountdown`으로 켠다. 디버그 훅에 더한 값: `getHud()`의 `countdown`('3' · '2' · '1' · '시작!', 없으면 '') · `point{A,B,C}Pct` · `point{A,B,C}PctFrame`(거점 진행 숫자 · 그 아틀라스 프레임), `getSounds()`의 `count` · `go` · `roarFound`(드러난 자리마다) · `roarEmpty`, `getCamera().markers[]`의 `scale`(배지 배율) · `halo`(포효 핑 고리 배율 · 알파) · `chev`(셰브론 기준점)와 `pingRings`(미니맵 고리 small · big), `getControlLayout().hud.minimapInset`(맵 창 안 미니맵의 **지금** 자리 — 조작 배치에서 옮겼으면 옮긴 자리), 정보 레이어 종류 `keypad`(값 '모드:네 칸', 예 'typing:07__'), `gfx.features.keypadBakes`(자물쇠 판 굽기 누계)
+- 플레이테스트 반영 b(DECISIONS 16절): `getHud()`의 거점 키는 게이지마다 생긴다(`GAUGE_IDS` 차례 — `pointC` · `pointCChip` · `pointCPct` · `pointCPctFrame`이 더해졌다). 거점 상태 값에 'off'(꺼짐), 칩 프레임에 'chip:off' · 'gicon:off'가 더해졌고, 괴물 화면의 `point*Pct`는 늘 ''(진행 숫자 없음)이다. 정보 레이어 거점 배지 · 진행 항목은 셋(tag `point-C` 포함, 꺼진 거점은 value 'off'), `getHudLayout()`의 부품 이름에 `gaugeC`. 시험 명령 `setPoint`는 C도 받는다(`point: 'C'`)
 - 서버 `--seed` 옵션으로 무작위 요소 고정
 - 봇: `server/bots.ts`가 실제 WebSocket 클라이언트로 접속해 정해진 행동(순찰, 따라가기, 거점 머물기, 구조)을 한다
 
@@ -197,7 +199,7 @@ decoy-web/
 
 | 층 | 무엇을 | 예 |
 |---|---|---|
-| 단위 (Vitest) | 규칙과 수치 | 점령 40초/27초, 수감 2회 후 사망, 3명 동시 수감 시 괴물 승리, 탈출구 2인 3초, 돌진 벽 정지, 캠핑 감속, 보호 4초 피격 무효, 시야 다각형 · 부채꼴 판정 |
+| 단위 (Vitest) | 규칙과 수치 | 점령 40초/27초, 세 곳 중 두 곳(둘째 완료 틱에 셋째 꺼짐), 수감 2회 후 사망, 3명 동시 수감 시 괴물 승리, 탈출구 2인 3초, 돌진 벽 정지, 캠핑 감속, 보호 4초 피격 무효, 시야 다각형 · 부채꼴 판정 |
 | 봇 시나리오 | 서버 규칙 통합 | "유인": 괴물 봇이 러너 봇을 쫓는 동안 다른 봇이 거점 A 완료 / "구조": 두 명 수감 → 한 번에 해방 / "전체 판": 봇 4명으로 한 판 끝까지 |
 | E2E (Playwright) | 브라우저 4개 동기화와 정보 차단 | 4 컨텍스트로 방 입장 → 시작 → 각자 이동 → 서로의 위치가 허용된 범위에서 일치 / 괴물 컨텍스트 스냅샷에 숨은 생존자 없음 / 역할별 스크린샷 저장 |
 | 지연 | 100ms · 200ms | 내 캐릭터 입력 반응이 즉시인지(예측), 보정 튐이 작은지, 판정 결과가 네 클라이언트에서 같은지 |
@@ -215,9 +217,10 @@ decoy-web/
 | 포효 표시 (a-3) | 화살표 + 창 안 핑 = 미니맵 = 소리 = 알림 = 서버가 보낸 수, 같은 위상의 펄스 고리, 0명, 번쩍임 줄이기, 밀린 알림, 생존자 화면 불변 | `tests/unit/roar-feedback.test.ts` · `tests/e2e/roar-feedback.spec.ts` |
 | 공격 준비 표시 · 첫 움직임 (a-4 · a-10) | 지연 때도 누른 입력 틱에 준비가 보이고 타격 결과까지 잇는지, 약수 목표의 첫 움직임 | 단위: `windup-show`(상태 전이) · `windup-lag`(실제 `Game` · `LagQueue` 위 가상 시계 지연 · 올라가는 길 끊김, `tests/helpers/lagSim.ts`) · `sync` · `frame-pacing`. E2E `m8-effects`(왕복 200ms 쿨타임 끝 무렵 · 대기 · 거절) · `smooth-motion`(144Hz · 제한 60 최악 위상, 120Hz · 제한 60 작업 모형) |
 | 괴물 미니맵 자리 (a-5) | 맵 안 미니맵이 위 가운데를 가리지 않는지, 생존자 · 태블릿 · PC 자리 불변 | 단위 `minimap-place.test.ts`(격자 3,472가지 불변식 · 상한 · 축소 하한 · 이동 영역 · 옮길 자리 · 지도 칸 · 저장 호환). E2E `minimap-place.spec.ts` · `layout-editor`(지도 옮기기) · `m12-screen` |
-| 거점 진행 숫자 (a-7) | 숫자 = 자기 스냅샷 진행의 내림 %, 괴물 · 생존자 같은 값, 판 중 글자 그리기 0 | 단위 `hud.test.ts` · `interest.test.ts`. E2E `m10-hud`(두 화면 같은 값 · 정지 · 완료 100 · 다시 굽지 않음) · `m12-hud`(터치 줄 게이지) · `m7-hud` · `hud-fit` |
+| 거점 진행 숫자 (a-7) | 숫자 = 자기 스냅샷 진행의 내림 %, 생존자 화면만(괴물 화면은 받는 값과 무관하게 숫자 그림을 걸지 않는다 — 플레이테스트 b), 판 중 글자 그리기 0 | 단위 `hud.test.ts` · `hud-gauges.test.ts`(괴물 화면 숫자 그림 0 · 생존자 화면은 같은 값에서 숫자, PC · 터치) · `interest.test.ts`(서버 값은 두 화면이 같다). E2E `m10-hud`(생존자 화면 값 · 괴물 화면 숫자 없음 · 정지 · 완료 100 · 다시 굽지 않음) · `m12-hud`(터치 줄 게이지 세 줄) · `m7-hud` · `hud-fit` |
 | 판 시작 카운트다운 (a-8) | 모두 정지 · 끝난 뒤의 판이 카운트다운 없는 판과 같음 · 화면 차례 | 단위 `countdown.test.ts`(`Game` 90틱 불변 + 3000틱 동일성, 방이 넘기는 값, 스냅샷 값이 받는 사람과 무관, 괴물 끊김, 재접속, 봇 입력 0, 예측 보정 0) · `countdown-view.test.ts`(숫자 · 소리 차례, 지연 지터에서 되올라가지 않음, `dropPressed`). E2E `countdown.spec.ts`: 서버 방 4명 · 휴대폰 스틱 이어받기 · 낮은 화면 겹침 · 연습 `?countdown=1` · 새로고침 · 괴물 끊김 |
 | 탈출구 자물쇠 판 (a-9) | 판이 한 자리씩 → 열림 · 지워짐, 괴물 화면은 빈 판, 바뀔 때만 굽기 | 단위 `keypad.test.ts` · `capture-exit.test.ts`(정보 범위 잠금). E2E `keypad.spec.ts`(정보 레이어 `keypad` · 픽셀, 844×300 겹침 0) · `m10-map` · `m10-map.webgl`(멈춘 시계 탈출구 열림 장면에서 판 숫자 칸 · `keypadBakes`) |
+| 거점 세 곳 중 두 곳 (b) | 둘째 완료 틱에 탈출구가 켜지고 셋째가 꺼지는지, 꺼진 곳은 아무 반응이 없는지, 정보 범위 · 판 기록 · 봇 배정, 꺼진 거점 그림 · HUD 자리 | 단위: `capture-exit`(완료 순서 여섯 · 꺼진 곳 무반응 · 같은 틱 완료) · `interest`(꺼진 거점의 정보 범위) · `meta-record`(모자란 점령 수 · 끊긴 점령) · `rules-golden` · `balance`, 봇 `practice`(거점 순서를 시드로 섞고 역할과 묶지 않음) · `fullmatch`. 화면: `objects` · `map-art` · `fog-cycle` · `fog-gpu-mini`(꺼진 거점 그림 · 눈금 한 경로 · 조각 한 번 올리기) · `point-marks`(미니맵 · 화살표 글자) · `offscreen`(꺼진 거점 화살표 없음 · `EDGE_MAX` 8 상태 전수) · `hud` · `hud-gauges` · `touch-hud`(줄 게이지 세 줄 자리 `GAUGE_SPOT`) · `match-prefs`(메뉴 버튼 경계). E2E `m5-match`(A · C로 탈출구, 두 화면 B 꺼짐 같은 값) · `m10-map` · `m10-map.webgl`(꺼진 거점 C 그림 · 정보 레이어) · `m10-hud` · `m12-hud` · `layout-editor` |
 | 판정 불변 골든 (Vitest) | 그래픽 · 모바일 작업(M10~) 중 규칙 · 판정 · 정보 차단이 그대로인지 | 고정 시드 + 스크립트 입력(이동 · 조준 · 공격 · 돌진 · 포효 · 능력 · 구조 · 시야 전환) 960틱 → 60틱마다 게임 상태 해시 (`tests/unit/rules-golden.test.ts`). 바뀌면 GAME_DESIGN 변경 이력과 함께 갱신 |
 
 E2E 스크린샷은 `artifacts/`에 저장하고, 사람이 볼 수 있게 마지막 보고에 경로를 적는다.
