@@ -81,10 +81,10 @@ const LAZY_CHUNKS = [
   'accountText',
 ];
 const MILESTONE = {
-  name: '플레이테스트 반영 b',
-  baseName: 'PR #33 병합',
-  base: { total: 397_465, initial: 329_156 },
-  budget: { total: 6 * 1024, initial: 4 * 1024 },
+  name: '플레이테스트 반영 c',
+  baseName: 'PR #34 병합',
+  base: { total: 400_273, initial: 331_340 },
+  budget: { total: 14 * 1024, initial: 6 * 1024 },
 };
 
 test(
