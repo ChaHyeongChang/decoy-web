@@ -34,7 +34,7 @@ import {
   type BotBrain,
   type Game,
 } from '@decoy/shared/sim';
-import { decoyOrder, standSlot } from '../../shared/src/sim/practiceSurvivor';
+import { decoyOrder, splitOrder, standSlot } from '../../shared/src/sim/practiceSurvivor';
 import { NOVICE, humanMonster } from '../helpers/humanMonster';
 import { loadTestBalance, place } from '../helpers/fixtures';
 
@@ -337,6 +337,60 @@ describe('생존자 봇: 거점 · 탈출구 자리와 미끼 순서는 역할�
       }
     }
     for (const r of ROLES) expect(targets.get(r)?.size ?? 0).toBeGreaterThan(1);
+  });
+
+  it('달아나기 시작하는 거리는 역할과 무관하다 (괴물이 6.2타일에 보이면 셋 다 달아나고, 6.8타일이면 셋 다 하던 일을 한다)', () => {
+    for (const gap of [6.2, 6.8]) {
+      const fled = ROLES.map((role) => {
+        const { snap, info } = closeUp(role, 1.0);
+        const base = snap.monster;
+        if (!base) throw new Error('괴물 없음');
+        const monster = { ...base, x: snap.you.move.x + gap, windup: 0 };
+        const brain = new PracticeSurvivorBrain(role, 5);
+        // 괴물이 나를 보고 있지는 않다 (발각이면 거리와 무관하게 달아난다)
+        const s = at(snap, snap.tick + 1, monster);
+        const surv = s.you.surv ? { ...s.you.surv, spotted: false } : null;
+        brain.decide({ ...s, you: { ...s.you, surv } }, info, balance, 1);
+        return brain.debugState()?.fleeing ?? null;
+      });
+      expect(fled, `괴물 ${gap}타일`).toEqual(ROLES.map(() => gap < 6.5));
+    }
+  });
+
+  it('함께 달아나는 둘이 갈라지는 쪽은 역할이 아니라 판 시드로 정한다 (자리 ID 순서가 아니다)', () => {
+    // 러너 · 가드가 나란히 서 있고 괴물이 1.5타일 동쪽: 러너가 왼쪽(반시계)으로 비스듬히 가는지 오른쪽으로 가는지
+    const side = (seed: number): number => {
+      const sim = scene(seed);
+      const g = sim.game;
+      place(g, 'p2', 30.5, 24.5);
+      place(g, 'p3', 30.5, 25.5);
+      place(g, 'p4', 4.5, 28.5);
+      place(g, 'p1', 32, 25, Math.PI);
+      for (const s of g.survivors) s.abilityCd = 30;
+      refreshSnapshots(sim);
+      const snap = sim.lastSnap.get('p2');
+      const info = sim.infos.get('p2');
+      if (!snap?.monster || !info) throw new Error('스냅샷 없음');
+      const out = new PracticeSurvivorBrain('runner', seed).decide(
+        at(snap, snap.tick, { ...snap.monster, windup: 0 }),
+        info,
+        balance,
+        1,
+      );
+      // 괴물 → 나 방향과 이동 방향의 외적 부호 (+면 왼쪽)
+      const ax = snap.you.move.x - snap.monster.x;
+      const ay = snap.you.move.y - snap.monster.y;
+      return Math.sign(ax * out.my - ay * out.mx);
+    };
+    const bySeed = new Map<number, number>();
+    for (let seed = 1; seed <= 12; seed += 1) {
+      const order = splitOrder(seed);
+      expect([...order].sort()).toEqual([...ROLES].sort());
+      const want = order.indexOf('runner') < order.indexOf('guard') ? 1 : -1;
+      bySeed.set(seed, side(seed));
+      expect(side(seed), `seed ${seed}`).toBe(want);
+    }
+    expect(new Set(bySeed.values()).size).toBe(2);
   });
 
   it('미끼 순서: 시드에 따라 세 역할 모두 첫 미끼가 된다', () => {

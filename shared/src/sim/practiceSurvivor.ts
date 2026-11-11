@@ -54,8 +54,11 @@ import {
 
 // ───────────────────────── 생존자 ─────────────────────────
 
-/** 괴물이 이 거리(타일) 안에 보이면 달아난다 (역할별) */
-const FLEE_DIST: Readonly<Record<RoleId, number>> = { runner: 6.5, guard: 6.0, scout: 7.0 };
+/**
+ * 괴물이 이 거리(타일) 안에 보이면 달아난다. 역할과 무관하다 (예전 러너 6.5 · 가드 6.0 · 스카우트 7.0은 괴물 화면에서 '몇 타일에서
+ * 달아나기 시작하나'로 역할을 가리는 단서였다 — 하나로 맞춰도 봇끼리 300판 괴물 승률 45.7% → 45.0%, novice 수감 2.59 → 2.65)
+ */
+const FLEE_DIST = 6.5;
 /** 부상(체력 1)이면 도주 거리에 더한다 (타일) */
 const FLEE_INJURED_BONUS = 1.0;
 /** 이미 달아나는 중이면 이만큼 더 멀어질 때까지 계속 (타일) */
@@ -334,6 +337,14 @@ export function decoyOrder(seed: number): readonly RoleId[] {
 }
 
 /**
+ * 갈라지기 순서 (팀 공용, 판 시드로 섞음): 가까이 함께 달아나는 둘 중 앞 순서가 왼쪽으로 간다. 예전에는 자리 ID 순서였는데 봇 자리
+ * ID가 역할 순서(러너 · 가드 · 스카우트)로 붙어 '왼쪽으로 갈라지는 쪽 = 러너' 같은 단서가 됐다
+ */
+export function splitOrder(seed: number): readonly RoleId[] {
+  return shuffledRoles(new Rng((Math.imul(seed | 0, 0x7feb352d) ^ 0x846ca68b) >>> 0));
+}
+
+/**
  * 점령할 거점 고르기. undone은 계획 순서로 남은 거점(비어 있지 않다), hot · near는 거점별 위험 · 내게서 거리, cur는 지금 목표,
  * held는 지금 목표를 고른 지 GOAL_KEEP초 안인가.
  * 규칙: 계획 첫 곳이 위험하면 계획 순서 앞쪽의 안전한 곳, 모두 위험하면 가장 가까운 곳(그 근처에서 기다린다).
@@ -392,8 +403,9 @@ export class PracticeSurvivorBrain implements BotBrain {
   private readonly codes: string[] = [];
   /** 거점을 들를 순서 (팀 계획, 내 거점이 맨 앞) */
   private readonly plan: readonly PointId[];
-  /** 미끼 순서 (팀 계획) */
+  /** 미끼 순서 · 갈라지기 순서 (팀 계획) */
   private readonly decoys: readonly RoleId[];
+  private readonly splits: readonly RoleId[];
   private trackIdle: number;
   private stuckFrom: { x: number; y: number; tick: number } | null = null;
   private wiggleUntil = 0;
@@ -434,6 +446,7 @@ export class PracticeSurvivorBrain implements BotBrain {
     this.noticeRng = brainRng(seed ^ NOTICE_SALT, role);
     this.plan = survivorPlan(seed, role);
     this.decoys = decoyOrder(seed);
+    this.splits = splitOrder(seed);
     this.trackIdle = TRACK_IDLE_MIN + this.rng.next() * TRACK_IDLE_SPAN;
   }
 
@@ -957,7 +970,7 @@ export class PracticeSurvivorBrain implements BotBrain {
     }
     // 밀치기가 준비된 가드도 다른 생존자처럼 달아난다 (예전에는 2.4타일까지 버텼다 — 밀치기 반응 지연이 생긴 뒤로는 버티면 맞고,
     // 괴물 화면에서 '다가가도 안 도망가는 흰 사람 = 가드'라는 움직임 단서였다). 밀치기는 쫓아온 괴물이 사거리에 들면 누른다
-    let radius = FLEE_DIST[this.role] + (surv.hp < b.survivor.maxHp ? FLEE_INJURED_BONUS : 0);
+    let radius = FLEE_DIST + (surv.hp < b.survivor.maxHp ? FLEE_INJURED_BONUS : 0);
     if (this.fleeing) radius += FLEE_HYST;
     const age = this.now - t.tick;
     let threatened = false;
@@ -1030,8 +1043,8 @@ export class PracticeSurvivorBrain implements BotBrain {
   }
 
   /**
-   * 가까이 있는 자유 동료와 갈라질 쪽: 내 ID가 작으면 왼쪽(+1), 크면 오른쪽(-1), 가까운 동료가 없으면 0.
-   * 두 봇이 같은 ID 쌍을 보므로 서로 반대쪽을 고른다
+   * 가까이 있는 자유 동료와 갈라질 쪽: 갈라지기 순서(splitOrder, 판 시드)에서 내가 앞이면 왼쪽(+1), 뒤면 오른쪽(-1), 가까운 동료가
+   * 없으면 0. 두 봇이 같은 순서 · 같은 역할 쌍을 보므로 서로 반대쪽을 고른다. 동료 역할을 모르면 자리 ID 순서
    */
   private splitSide(snap: Snapshot): number {
     const me = snap.you.move;
@@ -1041,7 +1054,10 @@ export class PracticeSurvivorBrain implements BotBrain {
       if (!mate || dist(s, me) < dist(mate, me)) mate = s;
     }
     if (!mate) return 0;
-    return snap.you.id < mate.id ? 1 : -1;
+    const mine = this.splits.indexOf(this.role);
+    const theirs = mate.role ? this.splits.indexOf(mate.role) : -1;
+    if (theirs < 0 || theirs === mine) return snap.you.id < mate.id ? 1 : -1;
+    return mine < theirs ? 1 : -1;
   }
 
   /** 괴물보다 먼저(괴물이 10% 빠름을 감안) 닿고, 괴물에게서 멀고 안 보이는 도주 후보. split이면 그쪽 옆으로 */
