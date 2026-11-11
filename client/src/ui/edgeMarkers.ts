@@ -4,7 +4,7 @@
 // 그림 고르기(색만으로 구분하지 않기)는 순수 모듈 edgeLook.ts에 있다.
 // 괴물 화면의 포효 핑은 흰 공통 문양(역할 없음)이고, 이 화살표만 크게(EDGE_ART.pingScale배) + 흰 펄스 고리(월드 핑과 같은
 // 박자, prefsFx.pingPulse)를 그린다 — 대상 · 자리 · 수명은 그대로이고 핑마다 같은 그림이다
-import type { OffscreenMarkerDebug } from '@decoy/shared';
+import { POINT_IDS, type OffscreenMarkerDebug } from '@decoy/shared';
 import { UI } from '../art/palette';
 import { EDGE_ART, FR } from './hudArt';
 import { EDGE_HALO, chevBack, edgeLook, haloScale } from './edgeLook';
@@ -19,6 +19,13 @@ const DEPTH = { halo: 38.45, badge: 38.5, icon: 38.6, text: 38.7 } as const;
 /** 몸과 겹친 화살표 · 깜빡임 꺼진 위상의 알파 */
 const FADED_ALPHA = 0.35;
 const BLINK_MS = 500;
+
+/** 거점 글자 하나 (id = 화살표 그림의 label, on = 이번 프레임에 보였는가) */
+interface Label {
+  id: string;
+  t: CrispText;
+  on: boolean;
+}
 
 interface Item {
   badge: Spr;
@@ -35,19 +42,28 @@ export class EdgeMarkers {
   private readonly shown: { m: EdgeMarker; item: Item }[] = [];
 
   /**
-   * 거점 글자 A · B (거점 화살표는 둘뿐이라 글자도 둘을 만들 때 한 번 만들어 둔다: 풀 칸마다 글자를 바꿔 쓰면 글자
-   * 캔버스를 프레임마다 다시 그리고 크기를 바꾼다)
+   * 거점 글자 (거점마다 화살표는 하나뿐이라 글자도 거점 수만큼 만들 때 한 번 만들어 둔다: 풀 칸마다 글자를 바꿔 쓰면 글자
+   * 캔버스를 프레임마다 다시 그리고 크기를 바꾼다). POINT_IDS 순서
    */
-  private readonly labels: Readonly<Record<'A' | 'B', CrispText>>;
+  private readonly labels: readonly Label[];
 
   constructor(private readonly kit: HudKit) {
-    const make = (ch: string): CrispText =>
-      kit.named('edge', () => {
+    this.labels = POINT_IDS.map((id) => ({
+      id,
+      t: kit.named('edge', () => {
         const t = kit.text(0, 0, Math.round(12 * HUD.s), UI.text, DEPTH.text, true).setOrigin(0.5, 0.5);
-        setText(t, ch);
+        setText(t, id);
         return t.setVisible(false);
-      });
-    this.labels = { A: make('A'), B: make('B') };
+      }),
+      on: false,
+    }));
+  }
+
+  /** 화살표 그림의 글자에 맞는 거점 글자 (없으면 undefined) */
+  private label(text: string): Label | undefined {
+    if (text === '') return undefined;
+    for (const l of this.labels) if (l.id === text) return l;
+    return undefined;
   }
 
   private item(i: number): Item {
@@ -79,8 +95,7 @@ export class EdgeMarkers {
     this.shown.length = 0;
     const blinkOff = Math.floor(nowMs / BLINK_MS) % 2 === 1;
     const z = this.kit.dev;
-    let showA = false;
-    let showB = false;
+    for (const l of this.labels) l.on = false;
     for (const m of markers) {
       const it = this.item(this.used);
       this.used += 1;
@@ -106,19 +121,18 @@ export class EdgeMarkers {
         it.halo.set(EDGE_HALO, m.x, m.y).show(true);
         it.halo.img.setScale(haloScale(pulse.t) / z).setAlpha(pulse.alpha * (m.faded ? FADED_ALPHA : 1));
       } else it.halo.show(false);
-      if (look.label === 'A' || look.label === 'B') {
-        const t = this.labels[look.label];
-        setText(t, look.label, look.labelColor);
-        t.setPosition(m.x, m.y + 0.5 * HUD.s)
+      const label = this.label(look.label);
+      if (label) {
+        setText(label.t, look.label, look.labelColor);
+        label.t
+          .setPosition(m.x, m.y + 0.5 * HUD.s)
           .setAlpha(alpha)
           .setVisible(true);
-        if (look.label === 'A') showA = true;
-        else showB = true;
+        label.on = true;
       }
       this.shown.push({ m, item: it });
     }
-    if (!showA) this.labels.A.setVisible(false);
-    if (!showB) this.labels.B.setVisible(false);
+    for (const l of this.labels) if (!l.on) l.t.setVisible(false);
     for (let i = this.used; i < this.items.length; i += 1) this.hideItem(this.items[i]);
   }
 
@@ -134,8 +148,7 @@ export class EdgeMarkers {
     this.used = 0;
     this.shown.length = 0;
     for (const it of this.items) this.hideItem(it);
-    this.labels.A.setVisible(false);
-    this.labels.B.setVisible(false);
+    for (const l of this.labels) l.t.setVisible(false);
   }
 
   /** 디버그 · 시험: 실제로 보이는 화살표 (그림의 자리 · 회전을 읽는다) */

@@ -3,8 +3,8 @@
 // 테두리 리프트)이 없다. 읽으면 마지막 commit 그림과 같다. GpuFog는 Phaser 객체 · DOM 캔버스를 쓰므로 Phaser · 정적 맵 ·
 // 캔버스를 가짜로 바꿔, 캔버스마다 받은 그리기 호출(그때의 합성 방식 포함)을 기록해 본다.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { TILE_PX, type Vec2 } from '@decoy/shared';
-import { gfxState } from '../../client/src/gfx/state';
+import { TILE_PX, type PointView, type Vec2 } from '@decoy/shared';
+import { freezeGfxClock, gfxState } from '../../client/src/gfx/state';
 import { loadTestBalance } from '../helpers/fixtures';
 
 interface Call {
@@ -340,6 +340,41 @@ describe('GPU 안개 조각 · 시야 채움: 바뀔 때만 다시 그려 올린
     // 모두 같은 주기에는 화면 · 미니맵도 그대로
     step(0.2);
     expect(fog.changed).toBe(false);
+  });
+
+  it('거점 셋은 조각 셋(A · B · C 각자): 셋째가 꺼진 주기에 그 조각만 한 번 올리고, 꺼진 채로는 장식 시계가 흘러도 다시 올리지 않는다', async () => {
+    const { fog } = await makeFog();
+    const bal = loadTestBalance();
+    const step = (points: PointView[], now: number): void => {
+      freezeGfxClock(now);
+      fog.begin();
+      fog.drawPoints(points, bal);
+      fog.commit();
+    };
+    try {
+      const idle: PointView[] = (['A', 'B', 'C'] as const).map((id) => ({ id, state: 'idle', progress: 0 }));
+      step(idle, 1000);
+      // 조각 캔버스는 거점마다 하나 (C가 다른 거점 조각에 그려지지 않는다)
+      const patchCanvases = h.canvases.length;
+      step(idle, 1000);
+      expect(h.canvases.length).toBe(patchCanvases);
+      const u0 = uploads();
+      // A · C 완료, B 꺼짐 (서버가 같은 틱에 보낸다): 조각 셋이 바뀌어 세 번
+      const ended: PointView[] = [
+        { id: 'A', state: 'done', progress: 1 },
+        { id: 'B', state: 'off', progress: 0.3 },
+        { id: 'C', state: 'done', progress: 1 },
+      ];
+      step(ended, 1500);
+      expect(uploads()).toBe(u0 + 3);
+      // 꺼짐 · 완료는 시각과 무관한 그림: 시계가 흘러도 다시 올리지 않는다
+      for (const now of [2000, 4321, 98765]) step(ended, now);
+      expect(uploads()).toBe(u0 + 3);
+      expect(fog.changed).toBe(false);
+      expect(h.canvases.length).toBe(patchCanvases);
+    } finally {
+      freezeGfxClock(null);
+    }
   });
 
   it('Canvas 한 장 합성(CanvasFog)도 기록 두 장을 맞바꿔 견준다: 바뀐 주기에만 합성한다 (X → Y → Y → X → X)', async () => {

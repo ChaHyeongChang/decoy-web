@@ -51,6 +51,18 @@ export interface FogPen {
    * 기록 펜을 재생할 때 꼭짓점 객체를 다시 만들지 않으려고 쓴다 (렌더링 최적화 2)
    */
   fillPolyFlat(xy: readonly number[], start: number, n: number, color: number, alpha: number): void;
+  /**
+   * 서로 겹치지 않는 다각형 count개(꼭짓점 n개씩, 평평한 배열 xy[start..start + 2·n·count))를 한 경로로 한 번에 채운다.
+   * 겹치지 않으므로 하나씩 fillPolyFlat한 것과 같은 그림이고 경로 · 칠하기 명령만 준다 (거점 눈금 24칸 — 플레이테스트 반영 b)
+   */
+  fillPolysFlat(
+    xy: readonly number[],
+    start: number,
+    count: number,
+    n: number,
+    color: number,
+    alpha: number,
+  ): void;
   /** 선분 (두께는 논리 px) */
   line(x0: number, y0: number, x1: number, y1: number, width: number, color: number, alpha: number): void;
 }
@@ -163,6 +175,28 @@ export class CanvasPen implements FogPen {
     c.fill();
   }
 
+  fillPolysFlat(
+    xy: readonly number[],
+    start: number,
+    count: number,
+    n: number,
+    color: number,
+    alpha: number,
+  ): void {
+    if (n < 3 || count < 1) return;
+    const c = this.c;
+    const k = this.k;
+    c.beginPath();
+    for (let q = 0; q < count; q += 1) {
+      const s = start + q * n * 2;
+      c.moveTo((xy[s] ?? 0) * k, (xy[s + 1] ?? 0) * k);
+      for (let i = 1; i < n; i += 1) c.lineTo((xy[s + i * 2] ?? 0) * k, (xy[s + i * 2 + 1] ?? 0) * k);
+      c.closePath();
+    }
+    c.fillStyle = rgba(color, alpha);
+    c.fill();
+  }
+
   line(x0: number, y0: number, x1: number, y1: number, width: number, color: number, alpha: number): void {
     const c = this.c;
     c.beginPath();
@@ -181,6 +215,7 @@ const OP_STROKE_CIRCLE = 1;
 const OP_STROKE_ARC = 2;
 const OP_FILL_POLY = 3;
 const OP_LINE = 4;
+const OP_FILL_POLYS = 5;
 
 /** 타일 좌표 사각형 (PenRecord.replay 자르기) */
 export interface TileClip {
@@ -226,6 +261,21 @@ function skipOutside(o: readonly number[], i: number, clip: TileClip): number {
       if (y > y1) y1 = y;
     }
     step = 4 + n * 2;
+  } else if (op === OP_FILL_POLYS) {
+    const m = (o[i + 1] ?? 0) * (o[i + 2] ?? 0);
+    x0 = Infinity;
+    y0 = Infinity;
+    x1 = -Infinity;
+    y1 = -Infinity;
+    for (let j = i + 3; j < i + 3 + m * 2; j += 2) {
+      const x = o[j] ?? 0;
+      const y = o[j + 1] ?? 0;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+    step = 5 + m * 2;
   } else {
     const ax = o[i + 1] ?? 0;
     const ay = o[i + 2] ?? 0;
@@ -238,6 +288,48 @@ function skipOutside(o: readonly number[], i: number, clip: TileClip): number {
     step = 8;
   }
   return x1 < clip.x0 || x0 > clip.x1 || y1 < clip.y0 || y0 > clip.y1 ? step : 0;
+}
+
+/** 꼭짓점 n개 다각형(o[s..s + 2n))이 자르기 사각형 밖에 통째로 있는가 (skipOutside의 다각형 판단과 같다) */
+function polyOutside(o: readonly number[], s: number, n: number, clip: TileClip): boolean {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (let j = s; j < s + n * 2; j += 2) {
+    const x = o[j] ?? 0;
+    const y = o[j + 1] ?? 0;
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
+  }
+  return x1 < clip.x0 || x0 > clip.x1 || y1 < clip.y0 || y0 > clip.y1;
+}
+
+/**
+ * 자르기가 있는 재생의 여러 다각형 채우기: 자르기 밖에 통째로 있는 다각형은 빼고(다각형마다 따로 기록하던 때 건너뛰던 것과
+ * 같은 다각형), 이어진 다각형끼리 한 경로로 채운다 — 거점 고리가 영역에 반쯤 걸쳐도 보이는 눈금만 그린다
+ */
+function replayPolysClipped(
+  pen: FogPen,
+  o: readonly number[],
+  first: number,
+  count: number,
+  n: number,
+  color: number,
+  alpha: number,
+  clip: TileClip,
+): void {
+  let run = 0;
+  for (let q = 0; q <= count; q += 1) {
+    if (q < count && !polyOutside(o, first + q * n * 2, n, clip)) {
+      run += 1;
+      continue;
+    }
+    if (run > 0) pen.fillPolysFlat(o, first + (q - run) * n * 2, run, n, color, alpha);
+    run = 0;
+  }
 }
 
 /**
@@ -345,6 +437,26 @@ export class PenRecord implements FogPen {
     this.n = n;
   }
 
+  fillPolysFlat(
+    xy: readonly number[],
+    start: number,
+    count: number,
+    verts: number,
+    color: number,
+    alpha: number,
+  ): void {
+    if (verts < 3 || count < 1) return;
+    const o = this.buf;
+    let n = this.n;
+    o[n++] = OP_FILL_POLYS;
+    o[n++] = count;
+    o[n++] = verts;
+    for (let i = start; i < start + count * verts * 2; i += 1) o[n++] = xy[i] ?? 0;
+    o[n++] = color;
+    o[n++] = alpha;
+    this.n = n;
+  }
+
   line(x0: number, y0: number, x1: number, y1: number, width: number, color: number, alpha: number): void {
     const o = this.buf;
     let n = this.n;
@@ -439,6 +551,13 @@ export class PenRecord implements FogPen {
         const n = o[i + 1] ?? 0;
         pen.fillPolyFlat(o, i + 2, n, o[i + 2 + n * 2] ?? 0, o[i + 3 + n * 2] ?? 0);
         i += 4 + n * 2;
+      } else if (op === OP_FILL_POLYS) {
+        const count = o[i + 1] ?? 0;
+        const v = o[i + 2] ?? 0;
+        const end = i + 3 + count * v * 2;
+        if (clip) replayPolysClipped(pen, o, i + 3, count, v, o[end] ?? 0, o[end + 1] ?? 0, clip);
+        else pen.fillPolysFlat(o, i + 3, count, v, o[end] ?? 0, o[end + 1] ?? 0);
+        i += 5 + count * v * 2;
       } else {
         pen.line(
           o[i + 1] ?? 0,
@@ -483,10 +602,13 @@ export function litTicks(progress: number, done: boolean, ticks = OBJ.ticks): nu
   return done ? ticks : clamp01(progress) * ticks;
 }
 
-/** 거점 하나의 고정 도형: 판정 반경 r에서의 눈금 24칸 사각형 띠 (자리 · 반경이 같으면 같은 수) */
+/**
+ * 거점 하나의 고정 도형: 판정 반경 r에서의 눈금 24칸 사각형 띠 (자리 · 반경이 같으면 같은 수). 칸 i의 네 꼭짓점이
+ * flat[8i .. 8i + 8) (x0, y0, …, x3, y3) — 펜이 한 경로로 여러 칸을 채운다(fillPolysFlat)
+ */
 interface PointGeom {
   readonly r: number;
-  readonly ticks: readonly (readonly Vec2[])[];
+  readonly flat: readonly number[];
 }
 
 const pointGeoms = new Map<PointId, PointGeom>();
@@ -500,13 +622,13 @@ function pointGeom(id: PointId, r: number): PointGeom {
   if (had && had.r === r) return had;
   const { x: cx, y: cy } = CAPTURE_POINTS[id];
   const slot = TAU / OBJ.ticks;
-  const ticks: Vec2[][] = [];
+  const flat: number[] = [];
   for (let i = 0; i < OBJ.ticks; i += 1) {
     const a0 = TOP + slot * (i + (1 - OBJ.tickArc) / 2);
     const a1 = a0 + slot * OBJ.tickArc;
-    ticks.push(arcQuad(cx, cy, r - OBJ.tickIn, r - OBJ.tickOut, a0, a1));
+    for (const q of arcQuad(cx, cy, r - OBJ.tickIn, r - OBJ.tickOut, a0, a1)) flat.push(q.x, q.y);
   }
-  const g = { r, ticks };
+  const g = { r, flat };
   pointGeoms.set(id, g);
   return g;
 }
@@ -519,9 +641,26 @@ const SCAN_TRI: [Vec2, Vec2, Vec2] = [
 ];
 
 /**
+ * 꺼진 거점 (다른 거점이 필요한 수만큼 끝나 점령할 수 없다): 회색 패드 · 회색 끊긴 판정 원, 눈금 · 진행 · 스캔 · 번짐 없음.
+ * 대기(청록 실선 원 + 눈금 24칸)와 색 말고 모양도 다르다. 판정 반경은 그대로 그린다. 시각과 무관한 그림이라 GPU 조각은
+ * 꺼진 뒤 한 번만 다시 올린다
+ */
+function paintOffPoint(pen: FogPen, cx: number, cy: number, r: number): void {
+  const C = OBJ_COLOR;
+  pen.fillCircle(cx, cy, r, C.off, 0.07);
+  pen.strokeCircle(cx, cy, r - OBJ.tickIn - 0.12, 1, C.off, 0.45);
+  const slot = TAU / OBJ.offDashes;
+  for (let i = 0; i < OBJ.offDashes; i += 1) {
+    const a0 = TOP + slot * (i + (1 - OBJ.offDashArc) / 2);
+    pen.strokeArc(cx, cy, r, 0, a0, a0 + slot * OBJ.offDashArc, 2, C.off, 0.95);
+  }
+}
+
+/**
  * 거점 (공개 정보: 양쪽 화면). 판정 반경 원형 패드 + 바깥 24칸 눈금 링.
  * 진행 = 눈금이 위에서부터 시계 방향으로 청록 점등, 점령 중 = 회전 스캔선, 정지 = 주황 눈금(배지에 일시정지 아이콘),
- * 완료 = 전체 점등 + 패드 밝아짐(배지에 체크). 상태마다 색 말고 모양도 다르다 (스캔 · 아이콘)
+ * 완료 = 전체 점등 + 패드 밝아짐(배지에 체크), 꺼짐 = 회색 끊긴 원 · 눈금 없음(배지에 ⊘, paintOffPoint).
+ * 상태마다 색 말고 모양도 다르다 (스캔 · 눈금 · 끊긴 원 · 아이콘)
  */
 export function paintPoints(
   pen: FogPen,
@@ -535,6 +674,10 @@ export function paintPoints(
   for (const p of points) {
     const { x: cx, y: cy } = CAPTURE_POINTS[p.id];
     const st = p.state;
+    if (st === 'off') {
+      paintOffPoint(pen, cx, cy, r);
+      continue;
+    }
     const done = st === 'done';
     const accent = st === 'blocked' ? C.warn : C.neon;
     // 패드: 반투명 판 (아래 정적 무늬가 비친다) + 안쪽 고리
@@ -546,16 +689,16 @@ export function paintPoints(
     // 판정 경계 (바깥 원): 번짐 + 선
     pen.strokeCircle(cx, cy, r, 6, C.neon, 0.07);
     pen.strokeCircle(cx, cy, r, 2, done ? C.neon : C.ring, 0.95);
-    // 눈금 24칸 (띠 도형은 거점 · 반경마다 한 번 계산해 둔 것)
+    // 눈금 24칸 (띠 도형은 거점 · 반경마다 한 번 계산해 둔 것). 칸끼리 겹치지 않아 같은 색 칸은 한 경로로 채운다:
+    // 꺼진 칸 24 → 다 켜진 칸 → 차오르는 칸 하나(밝기 = 진행의 소수 부분). 칸마다 따로 채우던 것과 같은 그림이다
+    // (거점이 셋이 되어 늘어난 칠하기를 줄인다 — 플레이테스트 반영 b)
     const lit = litTicks(p.progress, done);
-    const ticks = pointGeom(p.id, r).ticks;
-    for (let i = 0; i < ticks.length; i += 1) {
-      const q = ticks[i];
-      if (!q) continue;
-      pen.fillPoly(q, C.tickOff, 1);
-      const on = clamp01(lit - i);
-      if (on > 0) pen.fillPoly(q, accent, on);
-    }
+    const flat = pointGeom(p.id, r).flat;
+    pen.fillPolysFlat(flat, 0, OBJ.ticks, 4, C.tickOff, 1);
+    const full = Math.min(OBJ.ticks, Math.floor(lit));
+    if (full > 0) pen.fillPolysFlat(flat, 0, full, 4, accent, 1);
+    const part = clamp01(lit - full);
+    if (full < OBJ.ticks && part > 0) pen.fillPolyFlat(flat, full * 8, 4, accent, part);
     // 점령 중: 회전 스캔선 (꼬리가 옅어지는 부채꼴 조각들)
     if (st === 'capturing') {
       const a = TOP + TAU * ((((now % OBJ.scanMs) + OBJ.scanMs) % OBJ.scanMs) / OBJ.scanMs);

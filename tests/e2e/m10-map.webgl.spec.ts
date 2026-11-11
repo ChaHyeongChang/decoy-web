@@ -14,6 +14,8 @@ import {
   darkAndLit,
   exitOpensWhileFrozen,
   expectKeypadDrawn,
+  expectPointTurnedOff,
+  offChipPixels,
   expectBodiesOverBadges,
   expectDarkAndLit,
   expectNoMapGraphics,
@@ -80,6 +82,12 @@ test('시야 밖 구조 대비 2.5:1 · 시간 불변 · 시야 안 바닥 밝�
   expect(door.after[1]).toBeGreaterThanOrEqual(door.before[1] * 1.5);
   // 같은 장면의 문 왼쪽 자물쇠 판 (플레이테스트 a-9): 열린 판 숫자가 실제로 그려졌고, 바뀔 때만 굽는다
   expectKeypadDrawn(door.keypad);
+  // 같은 장면의 남은 거점 C (플레이테스트 반영 b): 두 곳이 끝난 틱에 꺼져 회색 끊긴 고리 · ⊘ 칩 · 정보 레이어 off
+  const c = door.pointC;
+  console.log(
+    `[m10-map.webgl] 꺼진 거점 C: ${JSON.stringify({ before: { ...c.before, chip: c.before.chip.length }, after: { ...c.after, chip: offChipPixels(c.before, c.after) } })}`,
+  );
+  expectPointTurnedOff(door.pointC.before, door.pointC.after);
   expect((await s.page.evaluate(() => window.__DECOY__!.gfx)).downgrades).toBe(0);
   expect(s.problems).toEqual([]);
   await s.context.close();

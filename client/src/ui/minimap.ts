@@ -22,6 +22,7 @@ import {
   EXITS,
   MAP_H,
   MAP_W,
+  POINT_IDS,
   PRISON_CENTER,
   type DrawnEntity,
   type ExitView,
@@ -124,7 +125,7 @@ export class Minimap {
   private readonly at: Place | null;
   /** 처음 자리가 맵 창 안인가 (layout minimapInset) */
   private readonly homeInset: boolean;
-  /** 거점 A · B, 탈출구 N · S 그림 (상태별 프레임) */
+  /** 거점 (POINT_IDS 순서), 탈출구 N · S 그림 (상태별 프레임) */
   private readonly pointMarks: Spr[] = [];
   private readonly exitMarks: Spr[] = [];
   /** 보이는 창 사각형 (확대 화면: 선 사각형 하나 — 9조각 8장보다 그리기가 적다) · 관전 중인 동료 고리 */
@@ -235,7 +236,7 @@ export class Minimap {
         c.push(sp);
         return sp;
       };
-      for (const id of ['A', 'B'] as const)
+      for (const id of POINT_IDS)
         this.pointMarks.push(mark(MM_POINT.idle, CAPTURE_POINTS[id].x, CAPTURE_POINTS[id].y));
       this.prisonMark = mark(FR.mm('prison'), PRISON_CENTER.x, PRISON_CENTER.y);
       for (const id of ['N', 'S'] as const)
@@ -524,10 +525,11 @@ export class Minimap {
     this.watching = watching;
     if (!this.shown) return;
     for (const p of points) {
-      const sp = this.pointMarks[p.id === 'A' ? 0 : 1];
-      // 괴물 화면 · 생존자 화면 모두: 점령 중은 깜빡이며 채워진 다이아 (상단 게이지와 같은 깜빡임)
+      // 표시는 id로 찾는다 (스냅샷 배열의 순서 · 개수를 가정하지 않는다)
+      const sp = this.pointMarks[POINT_IDS.indexOf(p.id)];
+      // 괴물 화면 · 생존자 화면 모두: 점령 중은 깜빡이며 채워진 다이아 (상단 게이지와 같은 깜빡임). 꺼짐은 회색 빈 다이아 + 사선
       const f = p.state === 'capturing' && blinkOff ? MM_POINT.idle : MM_POINT[p.state];
-      const c = p.id === 'A' ? CAPTURE_POINTS.A : CAPTURE_POINTS.B;
+      const c = CAPTURE_POINTS[p.id];
       sp?.set(f, this.px(c.x), this.py(c.y));
     }
     for (const e of exits) {

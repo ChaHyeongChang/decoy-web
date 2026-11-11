@@ -426,27 +426,33 @@ describe('동적 오브젝트 (fogPaint): 판정 반경을 그대로 그린다',
     const pts: PointView[] = [
       { id: 'A', progress: 0.5, state: 'blocked' },
       { id: 'B', progress: 1, state: 'done' },
+      { id: 'C', progress: 0.25, state: 'idle' },
     ];
     const pen = new RecPen();
     paintPoints(pen, pts, b, 1000);
     expect(paintedRadii.point).toBe(b.capturePoint.radius);
     const rings = pen.calls.filter((c) => c.op === 'strokeCircle' && c.alpha >= 0.9);
-    expect(rings.map((c) => c.r)).toEqual([b.capturePoint.radius, b.capturePoint.radius]);
+    expect(rings.map((c) => c.r)).toEqual([
+      b.capturePoint.radius,
+      b.capturePoint.radius,
+      b.capturePoint.radius,
+    ]);
     expect(rings.map((c) => [c.x, c.y])).toEqual([
       [CAPTURE_POINTS.A.x, CAPTURE_POINTS.A.y],
       [CAPTURE_POINTS.B.x, CAPTURE_POINTS.B.y],
+      [CAPTURE_POINTS.C.x, CAPTURE_POINTS.C.y],
     ]);
     const ticks = (color: number): number =>
       pen.calls.filter((c) => c.op === 'fillPoly' && c.color === color).length;
-    expect(ticks(OBJ_COLOR.tickOff)).toBe(OBJ.ticks * 2);
+    expect(ticks(OBJ_COLOR.tickOff)).toBe(OBJ.ticks * 3);
     expect(ticks(WARN)).toBe(OBJ.ticks / 2);
-    expect(ticks(OBJ_COLOR.neon)).toBe(OBJ.ticks);
+    // B 완료 24칸 + C 대기 진행 0.25 = 6칸
+    expect(ticks(OBJ_COLOR.neon)).toBe(OBJ.ticks + OBJ.ticks / 4);
     // 눈금은 판정 원 안쪽
+    const centers = Object.values(CAPTURE_POINTS);
     for (const c of pen.calls.filter((k) => k.op === 'fillPoly' && k.color === OBJ_COLOR.tickOff))
       for (const p of c.poly ?? [])
-        expect(Math.min(dist(p, CAPTURE_POINTS.A), dist(p, CAPTURE_POINTS.B))).toBeLessThan(
-          b.capturePoint.radius,
-        );
+        expect(Math.min(...centers.map((q) => dist(p, q)))).toBeLessThan(b.capturePoint.radius);
     expect(litTicks(0.5, false)).toBe(12);
     expect(litTicks(0.3, true)).toBe(OBJ.ticks);
   });
@@ -464,6 +470,40 @@ describe('동적 오브젝트 (fogPaint): 판정 반경을 그대로 그린다',
     const later = new RecPen();
     paintPoints(later, [{ id: 'A', progress: 0.2, state: 'capturing' }], b, 1100);
     expect(later.calls).not.toEqual(cap1.calls);
+  });
+
+  it('꺼진 거점: 회색 끊긴 판정 원(반지름 = capturePoint.radius) · 눈금 · 진행 · 스캔 · 청록 없음 — 대기와 색 말고 모양도 다르고, 시각과 무관', () => {
+    const r = b.capturePoint.radius;
+    for (const id of ['A', 'B', 'C'] as const) {
+      const c = CAPTURE_POINTS[id];
+      const off = new RecPen();
+      paintPoints(off, [{ id, progress: 0.6, state: 'off' }], b, 1000);
+      expect(paintedRadii.point).toBe(r);
+      // 청록 · 주황 · 꺼진 눈금 색이 하나도 없고 회색만 (진행 0.6이어도 눈금을 켜지 않는다)
+      for (const k of off.calls) expect(k.color, k.op).toBe(OBJ_COLOR.off);
+      expect(off.calls.some((k) => k.op === 'fillPoly' || k.op === 'line')).toBe(false);
+      // 판정 원 = 같은 반지름의 끊긴 원호 OBJ.offDashes개 (둘레의 offDashArc만큼, 서로 겹치지 않고 고르게)
+      const arcs = off.calls.filter((k) => k.op === 'strokeArc');
+      expect(arcs).toHaveLength(OBJ.offDashes);
+      let covered = 0;
+      for (const a of arcs) {
+        expect([a.x, a.y, a.r, a.inset]).toEqual([c.x, c.y, r, 0]);
+        covered += (a.to ?? 0) - (a.from ?? 0);
+      }
+      expect(covered / (Math.PI * 2)).toBeCloseTo(OBJ.offDashArc, 6);
+      for (let i = 1; i < arcs.length; i += 1) expect(arcs[i]!.from!).toBeGreaterThan(arcs[i - 1]!.to!);
+      // 실선 판정 원(대기 · 완료의 strokeCircle r)이 없다
+      expect(off.calls.some((k) => k.op === 'strokeCircle' && k.r === r)).toBe(false);
+      // 시각과 무관 (GPU 조각을 다시 올리지 않는다)
+      const later = new RecPen();
+      paintPoints(later, [{ id, progress: 0.6, state: 'off' }], b, 98765);
+      expect(later.calls).toEqual(off.calls);
+      // 같은 진행의 대기와 다른 그림
+      const idle = new RecPen();
+      paintPoints(idle, [{ id, progress: 0.6, state: 'idle' }], b, 1000);
+      expect(idle.calls.some((k) => k.op === 'strokeArc')).toBe(false);
+      expect(idle.calls.filter((k) => k.op === 'fillPoly').length).toBeGreaterThanOrEqual(OBJ.ticks);
+    }
   });
 
   it('탈출구: 판정 원 반지름 = exit.radius, 바닥 쪽 원호만 (끝점이 문 칸 경계), 괴물 화면(progress null)은 개방 게이지 없음', () => {
@@ -736,6 +776,9 @@ interface Call {
   y?: number;
   r?: number;
   inset?: number;
+  /** 원호 시작 · 끝 각 (strokeArc) */
+  from?: number;
+  to?: number;
   color: number;
   alpha: number;
   poly?: Vec2[];
@@ -754,13 +797,13 @@ class RecPen implements FogPen {
     y: number,
     r: number,
     inset: number,
-    _f: number,
-    _t: number,
+    from: number,
+    to: number,
     _w: number,
     color: number,
     alpha: number,
   ): void {
-    this.calls.push({ op: 'strokeArc', x, y, r, inset, color, alpha });
+    this.calls.push({ op: 'strokeArc', x, y, r, inset, from, to, color, alpha });
   }
   fillPoly(poly: readonly Vec2[], color: number, alpha: number): void {
     this.calls.push({ op: 'fillPoly', color, alpha, poly: poly.map((p) => ({ ...p })) });
@@ -770,6 +813,17 @@ class RecPen implements FogPen {
     for (let i = 0; i < n; i += 1)
       poly.push({ x: xy[start + i * 2] ?? NaN, y: xy[start + i * 2 + 1] ?? NaN });
     this.fillPoly(poly, color, alpha);
+  }
+  // 한 경로로 채운 여러 다각형도 다각형마다 하나로 센다 (같은 그림)
+  fillPolysFlat(
+    xy: readonly number[],
+    start: number,
+    count: number,
+    n: number,
+    color: number,
+    alpha: number,
+  ): void {
+    for (let q = 0; q < count; q += 1) this.fillPolyFlat(xy, start + q * n * 2, n, color, alpha);
   }
   line(x0: number, y0: number, _x1: number, _y1: number, _w: number, color: number, alpha: number): void {
     this.calls.push({ op: 'line', x: x0, y: y0, color, alpha });

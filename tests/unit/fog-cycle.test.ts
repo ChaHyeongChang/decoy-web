@@ -1,6 +1,8 @@
 // 렌더링 최적화 2 (G2, 안개 주기): 안개 주기마다 돌던 그림 함수를 할당 없이 다시 쓴 것이 예전 함수와 같은 그림인지 본다.
 // 예전 함수는 이 파일에 그대로 베껴 두고(오라클) 여러 입력에서 펜 호출 · 기록 · 범위가 같은지 견준다.
-//  - paintPoints: 눈금 24칸 띠를 (거점, 반경)마다 한 번 계산, 스캔선 조각은 하나를 고쳐 쓴다
+//  - paintPoints: 눈금 24칸 띠를 (거점, 반경)마다 한 번 계산, 스캔선 조각은 하나를 고쳐 쓴다.
+//    플레이테스트 반영 b: 같은 색 눈금 칸을 한 경로로 채운다(fillPolysFlat — 거점이 셋이 되어 늘어난 칠하기를 줄임). 오라클은
+//    그 순서(꺼진 칸 24 → 다 켜진 칸 → 차오르는 칸)로 고쳤고, 칸마다 따로 채우던 예전 그림과 같은 다각형 · 색 · 알파인지는 따로 본다
 //  - paintExits: 셰브론 · 상태등 · 띠 · 게이지 칸 · 빛 번짐을 (탈출구, 반경)마다 한 번 계산, 미닫이 틈은 고쳐 쓴다
 //  - pointPaintBounds · exitPaintBounds: (자리, 반경)마다 한 번 계산해 같은 객체
 //  - PenRecord.replay: 다각형을 꼭짓점 객체로 되살리지 않고 평평한 배열로 넘긴다(fillPolyFlat)
@@ -87,6 +89,30 @@ function arcQuad(cx: number, cy: number, r0: number, r1: number, a0: number, a1:
   ];
 }
 
+/** 눈금 24칸 사각형 띠 (예전 식 그대로, 부를 때마다 새로) */
+function oldTickQuads(cx: number, cy: number, r: number): Vec2[][] {
+  const slot = TAU / OBJ.ticks;
+  const out: Vec2[][] = [];
+  for (let i = 0; i < OBJ.ticks; i += 1) {
+    const a0 = TOP + slot * (i + (1 - OBJ.tickArc) / 2);
+    const a1 = a0 + slot * OBJ.tickArc;
+    out.push(arcQuad(cx, cy, r - OBJ.tickIn, r - OBJ.tickOut, a0, a1));
+  }
+  return out;
+}
+
+/** 플레이테스트 반영 b 전의 눈금 그리기: 칸마다 꺼진 색을 채우고 켜진 만큼 그 위에 (같은 칸끼리만 겹친다) */
+function perTickTicks(pen: FogPen, p: PointView, r: number): void {
+  const { x: cx, y: cy } = CAPTURE_POINTS[p.id];
+  const accent = p.state === 'blocked' ? OBJ_COLOR.warn : OBJ_COLOR.neon;
+  const lit = litTicks(p.progress, p.state === 'done');
+  for (const [i, q] of oldTickQuads(cx, cy, r).entries()) {
+    pen.fillPoly(q, OBJ_COLOR.tickOff, 1);
+    const on = clamp01(lit - i);
+    if (on > 0) pen.fillPoly(q, accent, on);
+  }
+}
+
 function oldPaintPoints(pen: FogPen, points: readonly PointView[], balance: Balance, now: number): void {
   const r = balance.capturePoint.radius;
   const C = OBJ_COLOR;
@@ -102,15 +128,14 @@ function oldPaintPoints(pen: FogPen, points: readonly PointView[], balance: Bala
     pen.strokeCircle(cx, cy, r, 6, C.neon, 0.07);
     pen.strokeCircle(cx, cy, r, 2, done ? C.neon : C.ring, 0.95);
     const lit = litTicks(p.progress, done);
-    const slot = TAU / OBJ.ticks;
-    for (let i = 0; i < OBJ.ticks; i += 1) {
-      const a0 = TOP + slot * (i + (1 - OBJ.tickArc) / 2);
-      const a1 = a0 + slot * OBJ.tickArc;
-      const q = arcQuad(cx, cy, r - OBJ.tickIn, r - OBJ.tickOut, a0, a1);
-      pen.fillPoly(q, C.tickOff, 1);
-      const on = clamp01(lit - i);
-      if (on > 0) pen.fillPoly(q, accent, on);
-    }
+    // 눈금 칸 (주기마다 새로 계산한 꼭짓점): 꺼진 칸 24를 한 경로 → 다 켜진 칸을 한 경로 → 차오르는 칸 하나
+    const flat = oldTickQuads(cx, cy, r).flatMap((q) => q.flatMap((v) => [v.x, v.y]));
+    pen.fillPolysFlat(flat, 0, OBJ.ticks, 4, C.tickOff, 1);
+    let full = 0;
+    while (full < OBJ.ticks && clamp01(lit - full) === 1) full += 1;
+    if (full > 0) pen.fillPolysFlat(flat, 0, full, 4, accent, 1);
+    const on = clamp01(lit - full);
+    if (full < OBJ.ticks && on > 0) pen.fillPolyFlat(flat, full * 8, 4, accent, on);
     if (st === 'capturing') {
       const a = TOP + TAU * ((((now % OBJ.scanMs) + OBJ.scanMs) % OBJ.scanMs) / OBJ.scanMs);
       const rr = r - OBJ.tickIn - 0.05;
@@ -446,9 +471,41 @@ class LogPen implements FogPen {
     for (let i = 0; i < n; i += 1) pts.push([xy[start + i * 2] ?? NaN, xy[start + i * 2 + 1] ?? NaN]);
     this.calls.push(['fillPoly', pts, color, alpha]);
   }
+  fillPolysFlat(
+    xy: readonly number[],
+    start: number,
+    count: number,
+    n: number,
+    color: number,
+    alpha: number,
+  ): void {
+    const polys: number[][][] = [];
+    for (let q = 0; q < count; q += 1) {
+      const pts: number[][] = [];
+      for (let i = 0; i < n; i += 1) {
+        const s = start + (q * n + i) * 2;
+        pts.push([xy[s] ?? NaN, xy[s + 1] ?? NaN]);
+      }
+      polys.push(pts);
+    }
+    this.calls.push(['fillPolys', polys, color, alpha]);
+  }
   line(...a: number[]): void {
     this.calls.push(['line', ...a]);
   }
+}
+
+/** 한 경로 채우기(fillPolys)를 다각형 하나씩 채우기(fillPoly)로 펼친다 (칠한 다각형 · 색 · 알파를 견줄 때) */
+function expandPolys(calls: readonly unknown[][]): unknown[][] {
+  const out: unknown[][] = [];
+  for (const c of calls) {
+    if (c[0] !== 'fillPolys') {
+      out.push(c);
+      continue;
+    }
+    for (const poly of c[1] as number[][][]) out.push(['fillPoly', poly, c[2], c[3]]);
+  }
+  return out;
 }
 
 /** 2D 컨텍스트 호출 기록기 (경로 · 채우기 · 합성 방식 · 그라디언트) */
@@ -496,14 +553,14 @@ const EXIT_STATES: ExitView['state'][] = ['inactive', 'active', 'open'];
 // ───────────── 시험 ─────────────
 
 describe('paintPoints: 미리 계산한 눈금 띠 · 고쳐 쓰는 스캔 조각이 예전과 같은 펜 호출', () => {
-  it('거점 A · B × 상태 넷 × 진행(범위 밖 포함) × 시각(음수 포함) × 반경 여러 개 (반경을 오가며 캐시가 바뀌는 경우 포함)', () => {
+  it('거점 A · B · C × 상태 넷 × 진행(범위 밖 포함) × 시각(음수 포함) × 반경 여러 개 (반경을 오가며 캐시가 바뀌는 경우 포함)', () => {
     const rand = rng(7);
     const radii = [b.capturePoint.radius, 2, 3.25, b.capturePoint.radius, 1.5];
     let cases = 0;
     for (const radius of radii) {
       const bal = withRadii(radius, b.exit.radius);
       for (let k = 0; k < 120; k += 1) {
-        const points: PointView[] = (['A', 'B'] as const).map((id) => ({
+        const points: PointView[] = (['A', 'B', 'C'] as const).map((id) => ({
           id,
           state: STATES[Math.floor(rand() * STATES.length)] ?? 'idle',
           progress: k % 10 === 0 ? ([0, 1, -0.2, 1.3, 0.5][k % 5] ?? 0) : rand(),
@@ -528,7 +585,11 @@ describe('paintPoints: 미리 계산한 눈금 띠 · 고쳐 쓰는 스캔 조�
     const rand = rng(11);
     for (let k = 0; k < 200; k += 1) {
       const points: PointView[] = [
-        { id: k % 2 === 0 ? 'A' : 'B', state: STATES[k % 4] ?? 'idle', progress: rand() * 1.2 - 0.1 },
+        {
+          id: (['A', 'B', 'C'] as const)[k % 3]!,
+          state: STATES[k % 4] ?? 'idle',
+          progress: rand() * 1.2 - 0.1,
+        },
       ];
       const now = rand() * 50000 - 1000;
       const a = new PenRecord();
@@ -537,6 +598,91 @@ describe('paintPoints: 미리 계산한 눈금 띠 · 고쳐 쓰는 스캔 조�
       paintPoints(c, points, b, now);
       expect(c.ops.length).toBe(a.ops.length);
       for (let i = 0; i < a.ops.length; i += 1) expect(Object.is(c.ops[i], a.ops[i])).toBe(true);
+    }
+  });
+
+  it('눈금 합치기 (플레이테스트 반영 b): 칸끼리 겹치지 않고, 칸마다 따로 채우던 예전과 같은 다각형 · 색 · 알파를 채운다 (같은 칸은 꺼진 색 위에 켜진 색) — 그림이 같고 칠하기만 준다', () => {
+    const rand = rng(53);
+    const key = (c: unknown[]): string => JSON.stringify(c);
+    for (let k = 0; k < 300; k += 1) {
+      const id = (['A', 'B', 'C'] as const)[k % 3]!;
+      const state = STATES[Math.floor(rand() * STATES.length)] ?? 'idle';
+      const progress = k % 10 === 0 ? ([0, 1, -0.2, 1.3, 0.5, 0.25][k % 6] ?? 0) : rand();
+      const p: PointView = { id, state, progress };
+      const r = [b.capturePoint.radius, 2, 3.25][k % 3]!;
+      const nu = new LogPen();
+      paintPoints(nu, [p], withRadii(r, b.exit.radius), 1000);
+      const ticks = expandPolys(nu.calls).filter(
+        (c) => c[0] === 'fillPoly' && (c[1] as unknown[]).length === 4,
+      );
+      const old = new LogPen();
+      perTickTicks(old, p, r);
+      // 칠한 눈금 다각형 · 색 · 알파의 모음이 예전과 같다 (스캔 조각은 꼭짓점 3개라 빠진다)
+      expect(ticks.map(key).sort()).toEqual(old.calls.map(key).sort());
+      // 같은 칸에서는 꺼진 색이 먼저 (켜진 색이 그 위)
+      const first = new Map<string, number>();
+      ticks.forEach((c, i) => {
+        const poly = JSON.stringify(c[1]);
+        if (c[2] === OBJ_COLOR.tickOff) first.set(poly, i);
+        else expect(first.get(poly)).toBeLessThan(i);
+      });
+      // 칠하기 명령 수: 칸마다(24 + 켜진 칸) → 한 경로 1~2 + 차오르는 칸 하나
+      expect(old.calls.length).toBeGreaterThanOrEqual(OBJ.ticks);
+      expect(nu.calls.filter((c) => c[0] === 'fillPolys' || c[0] === 'fillPoly').length).toBeLessThanOrEqual(
+        3 + (state === 'capturing' ? OBJ.scanTrail.length : 0),
+      );
+    }
+    // 칸끼리 겹치지 않는다: 이웃 칸 사이 각 틈이 0보다 크고, 안쪽 원에서 이웃 칸 가장 가까운 꼭짓점이 0.15타일 넘게 떨어진다 (반지름 2타일)
+    expect(OBJ.tickArc).toBeLessThan(1);
+    for (const r of [b.capturePoint.radius, 2]) {
+      const q = oldTickQuads(0, 0, r);
+      for (let i = 0; i < q.length; i += 1) {
+        const a0 = q[i]!;
+        const a1 = q[(i + 1) % q.length]!;
+        const gap = Math.hypot(a0[3]!.x - a1[0]!.x, a0[3]!.y - a1[0]!.y);
+        expect(gap).toBeGreaterThan(0.15);
+      }
+    }
+  });
+
+  it('꺼짐(플레이테스트 b의 새 상태 — 옛 그리기에 없다): 셋 중 어느 것이 꺼져도 나머지 거점은 예전과 같은 호출이고, 꺼진 거점만 회색으로 따로 그린다 (한 장 합성 = 조각마다 하나씩 = 기록 재생)', () => {
+    const rand = rng(31);
+    for (let k = 0; k < 60; k += 1) {
+      const offId = (['A', 'B', 'C'] as const)[k % 3]!;
+      const points: PointView[] = (['A', 'B', 'C'] as const).map((id) => ({
+        id,
+        state: id === offId ? 'off' : 'done',
+        progress: id === offId ? rand() : 1,
+      }));
+      const now = rand() * 100000;
+      const all = new LogPen();
+      paintPoints(all, points, b, now);
+      // 예전 그리기 (꺼진 것 빼고) + 꺼진 것 = 같은 순서로 이어 붙인 것
+      const expected = new LogPen();
+      for (const p of points) {
+        if (p.state === 'off') paintPoints(expected, [p], b, now);
+        else oldPaintPoints(expected, [p], b, now);
+      }
+      expect(all.calls).toEqual(expected.calls);
+      // 꺼진 거점 그림은 회색 하나뿐 (청록 · 주황 · 꺼진 눈금 색 없음)
+      const offOnly = new LogPen();
+      paintPoints(
+        offOnly,
+        points.filter((p) => p.state === 'off'),
+        b,
+        now,
+      );
+      expect(offOnly.calls.length).toBeGreaterThan(0);
+      for (const c of offOnly.calls) expect(c).toContain(OBJ_COLOR.off);
+      for (const c of offOnly.calls)
+        for (const col of [OBJ_COLOR.neon, OBJ_COLOR.ring, OBJ_COLOR.tickOff, OBJ_COLOR.warn, OBJ_COLOR.pad])
+          expect(c).not.toContain(col);
+      // GPU 조각 기록을 재생해도 같은 호출
+      const rec = new PenRecord();
+      for (const p of points) paintPoints(rec, [p], b, now);
+      const replayed = new LogPen();
+      rec.replay(replayed);
+      expect(replayed.calls).toEqual(all.calls);
     }
   });
 });
@@ -615,7 +761,7 @@ describe('조각 범위: (자리, 반경)마다 한 번 계산해 같은 객체�
     const radii = [b.capturePoint.radius, b.exit.radius, 1, 2.5, 3.75];
     for (let k = 0; k < 50; k += 1) radii.push(0.5 + rand() * 4);
     for (const r of radii) {
-      for (const id of ['A', 'B'] as const) {
+      for (const id of ['A', 'B', 'C'] as const) {
         const box = pointPaintBounds(id, r);
         expect(box).toEqual(oldPointPaintBounds(id, r));
         expect(pointPaintBounds(id, r)).toBe(box);
@@ -702,6 +848,101 @@ describe('PenRecord.replay: 평평한 다각형 (꼭짓점 객체를 다시 만�
     const e = new CtxLog();
     new CanvasPen(e.ctx, 10, 1).fillPolyFlat([1, 2, 3, 4], 0, 2, 0, 1);
     expect(e.calls).toEqual([]);
+  });
+
+  it('캔버스 펜 fillPolysFlat = 다각형마다 fillPolyFlat의 경로를 한 경로에 이어 그리고 한 번만 채운다 (플레이테스트 반영 b)', () => {
+    const rand = rng(43);
+    for (let k = 0; k < 40; k += 1) {
+      const count = 1 + Math.floor(rand() * 24);
+      const n = 3 + Math.floor(rand() * 4);
+      const flat = [5, 5];
+      for (let i = 0; i < count * n; i += 1) flat.push(rand() * 48, rand() * 32);
+      const color = Math.floor(rand() * 0xffffff);
+      const alpha = rand();
+      const scale = 1 + rand() * 60;
+      const a = new CtxLog();
+      new CanvasPen(a.ctx, scale, 1.5).fillPolysFlat(flat, 2, count, n, color, alpha);
+      // 다각형 하나씩 그린 호출에서 beginPath · fillStyle · fill을 한 번만 남긴 것
+      const one = new CtxLog();
+      const pen = new CanvasPen(one.ctx, scale, 1.5);
+      for (let q = 0; q < count; q += 1) pen.fillPolyFlat(flat, 2 + q * n * 2, n, color, alpha);
+      const paths = one.calls.filter((c) => c[0] === 'moveTo' || c[0] === 'lineTo' || c[0] === 'closePath');
+      expect(a.calls[0]).toEqual(['beginPath']);
+      expect(a.calls.slice(1, -2)).toEqual(paths);
+      expect(a.calls.slice(-2)).toEqual(one.calls.slice(-2));
+      expect(a.calls.filter((c) => c[0] === 'fill')).toHaveLength(1);
+    }
+    // 빈 것 · 꼭짓점 2개 이하는 그리지 않는다
+    const e = new CtxLog();
+    new CanvasPen(e.ctx, 10, 1).fillPolysFlat([1, 2, 3, 4], 0, 1, 2, 0, 1);
+    new CanvasPen(e.ctx, 10, 1).fillPolysFlat([1, 2, 3, 4, 5, 6], 0, 0, 3, 0, 1);
+    expect(e.calls).toEqual([]);
+  });
+
+  it('기록 펜 fillPolysFlat: 재생하면 같은 호출, 기록 펜에 옮겨도 같은 수, 자르기 밖이면 통째로 건너뛰고 걸치면 그린다', () => {
+    const flat = [0, 0, 1, 0, 1, 1, 10, 10, 11, 10, 11, 11];
+    const rec = new PenRecord();
+    rec.fillCircle(3, 3, 1, 0xff, 1);
+    rec.fillPolysFlat(flat, 0, 2, 3, 0x123456, 0.5);
+    rec.line(0, 0, 1, 1, 2, 0xff, 1);
+    const direct = new LogPen();
+    direct.fillCircle(3, 3, 1, 0xff, 1);
+    direct.fillPolysFlat(flat, 0, 2, 3, 0x123456, 0.5);
+    direct.line(0, 0, 1, 1, 2, 0xff, 1);
+    const replayed = new LogPen();
+    rec.replay(replayed);
+    expect(replayed.calls).toEqual(direct.calls);
+    const copy = new PenRecord();
+    rec.replay(copy);
+    expect(copy.ops).toEqual(rec.ops);
+    // 두 다각형 상자 (0~11)가 자르기 (20~30) 밖이면 건너뛰고, 다음 명령은 그대로
+    const out = new LogPen();
+    rec.replay(out, { x0: 20, y0: 20, x1: 30, y1: 30 });
+    expect(out.calls).toEqual([]);
+    // 걸친 명령은 자르기 밖에 통째로 있는 다각형만 빼고 그린다 (둘째 다각형만)
+    const part = new LogPen();
+    rec.replay(part, { x0: 10.5, y0: 10.5, x1: 30, y1: 30 });
+    expect(part.calls).toEqual([
+      [
+        'fillPolys',
+        [
+          [
+            [10, 10],
+            [11, 10],
+            [11, 11],
+          ],
+        ],
+        0x123456,
+        0.5,
+      ],
+    ]);
+  });
+
+  it('자르기 재생의 여러 다각형: 다각형마다 따로 기록해 자르던 것과 같은 다각형만 같은 순서로 그리고, 이어진 것끼리 한 경로 (거점 고리가 영역에 걸칠 때)', () => {
+    const rand = rng(61);
+    for (let k = 0; k < 200; k += 1) {
+      const count = 1 + Math.floor(rand() * 24);
+      const flat: number[] = [];
+      for (let q = 0; q < count; q += 1) {
+        const cx = rand() * 48;
+        const cy = rand() * 32;
+        flat.push(cx, cy, cx + rand(), cy, cx + rand(), cy + rand(), cx, cy + rand());
+      }
+      const clip = { x0: rand() * 30, y0: rand() * 20, x1: 0, y1: 0 };
+      clip.x1 = clip.x0 + rand() * 20;
+      clip.y1 = clip.y0 + rand() * 15;
+      const merged = new PenRecord();
+      merged.fillPolysFlat(flat, 0, count, 4, 0xabcdef, 0.7);
+      const each = new PenRecord();
+      for (let q = 0; q < count; q += 1) each.fillPolyFlat(flat, q * 8, 4, 0xabcdef, 0.7);
+      const a = new LogPen();
+      const c = new LogPen();
+      merged.replay(c, clip);
+      each.replay(a, clip);
+      expect(expandPolys(c.calls)).toEqual(a.calls);
+      // 칠하기 수 = 이어진 묶음 수 (다각형 수 이하)
+      expect(c.calls.length).toBeLessThanOrEqual(a.calls.length);
+    }
   });
 });
 
