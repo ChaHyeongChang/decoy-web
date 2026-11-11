@@ -24,6 +24,11 @@ export interface NearMissInput {
   /** 내 상태 · 보호 남은 시간 (스냅샷 you.surv) */
   status: SurvivorStatus | null;
   protectLeft: number;
+  /**
+   * 지난 스냅샷의 보호 남은 시간. 서버 한 틱은 타격 판정(보호 > 0이면 무효) 뒤에 보호를 깎으므로, 보호가 (0, dt] 남은 틱에 막힌 타격은
+   * protectLeft 0인 스냅샷에 실려 온다(그 틱에 스냅샷이 없으면 다음 틱 — 두 틱까지). 지난 스냅샷이 보호 중이었으면 회피로 보지 않는다
+   */
+  prevProtectLeft: number;
   /** 그 스냅샷의 내 서버 자리 (you.move) */
   me: Vec2;
   /** 같은 스냅샷의 이벤트 (hit{you:true}가 있으면 회피가 아니다) */
@@ -35,12 +40,13 @@ export interface NearMissInput {
 }
 
 /**
- * 이 스냅샷의 타격(attackHit) 가운데 나를 아슬아슬하게 비껴간 것 (없으면 null). 조건: 내가 생존자 · 자유 · 보호 중 아님 ·
+ * 이 스냅샷의 타격(attackHit) 가운데 나를 아슬아슬하게 비껴간 것 (없으면 null). 조건: 내가 생존자 · 자유 · 보호 중 아님(이번 · 지난 스냅샷 모두 —
+ * 보호가 막아 준 것은 회피가 아니다. 보호가 막 끝난 직후의 진짜 회피도 드물게 놓치지만 판정과 어긋난 표시보다 안전하다) ·
  * 같은 스냅샷에 내 피격 없음 · 타격 자리와 내 자리 사이가 벽 · 철창(blocksStrike)에 막히지 않음 · 몸 원(반지름 + δ)이 판정
  * 부채꼴과 겹침. 판정 부채꼴 안인데 안 맞은 경우(타격 직후 한 틱 사이에 들어온 가장 가까운 회피)도 참이다
  */
 export function nearMissStrike(p: NearMissInput): Extract<GameEvent, { k: 'attackHit' }> | null {
-  if (p.role === 'monster' || p.status !== 'free' || p.protectLeft > 0) return null;
+  if (p.role === 'monster' || p.status !== 'free' || p.protectLeft > 0 || p.prevProtectLeft > 0) return null;
   let strike: Extract<GameEvent, { k: 'attackHit' }> | null = null;
   for (const ev of p.events) {
     if (ev.k === 'hit' && ev.you) return null;

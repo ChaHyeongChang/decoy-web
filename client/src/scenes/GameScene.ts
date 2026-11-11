@@ -379,9 +379,10 @@ export class GameScene extends Phaser.Scene {
   private nextAdaptWindowAt = 0;
   /** 지금 처리하는 스냅샷이 서버에서 만들어진 뒤 지난 시간 (ms, 진동: 오래된 일은 울리지 않는다) */
   private eventAgeMs = 0;
-  /** 손맛 (플레이테스트 반영 c): 지금 처리하는 스냅샷의 계획 (onEvent가 구조자 배너를 고른다) · 지난 스냅샷의 내 상태 · 팀원 상태 */
+  /** 손맛 (플레이테스트 반영 c): 지금 처리하는 스냅샷의 계획 (onEvent가 구조자 배너를 고른다) · 지난 스냅샷의 내 상태 · 보호 · 팀원 상태 */
   private juiceNow: JuicePlan | null = null;
   private prevSelfStatus: SurvivorStatus | null = null;
+  private prevProtectLeft = 0;
   private readonly prevTeam = new Map<string, SurvivorStatus>();
   private teamKnown = false;
   /** 아슬아슬 회피: 횟수(디버그) · 마지막 시각 · 글자 방향 · 글자 (처음 쓸 때 한 번 만든다) · 이웃 몸 그릇 */
@@ -593,6 +594,7 @@ export class GameScene extends Phaser.Scene {
     this.shakeOverride = null;
     this.juiceNow = null;
     this.prevSelfStatus = null;
+    this.prevProtectLeft = 0;
     this.prevTeam.clear();
     this.teamKnown = false;
     this.nearMisses = 0;
@@ -1333,6 +1335,7 @@ export class GameScene extends Phaser.Scene {
           role: snap.you.role,
           status: surv?.status ?? null,
           protectLeft: surv?.protectLeft ?? 0,
+          prevProtectLeft: this.prevProtectLeft,
           me,
           events: snap.events,
           range: b.monster.attack.range,
@@ -1372,9 +1375,10 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  /** 다음 스냅샷의 손맛 비교용: 내 상태 · 팀원 상태 (오래된 스냅샷도 센다) */
+  /** 다음 스냅샷의 손맛 비교용: 내 상태 · 보호 · 팀원 상태 (오래된 스냅샷도 센다) */
   private noteTeam(snap: Snapshot): void {
     this.prevSelfStatus = snap.you.surv?.status ?? null;
+    this.prevProtectLeft = snap.you.surv?.protectLeft ?? 0;
     this.prevTeam.clear();
     for (const s of snap.survivors) this.prevTeam.set(s.id, s.status);
     this.teamKnown = true;

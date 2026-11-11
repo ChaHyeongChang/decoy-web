@@ -24,6 +24,7 @@ function input(over: Partial<NearMissInput> = {}): NearMissInput {
     role: 'runner',
     status: 'free',
     protectLeft: 0,
+    prevProtectLeft: 0,
     me: { x: MON.x + 1.7, y: MON.y },
     events: [strike()],
     range: ATK.range,
@@ -84,6 +85,11 @@ describe('아슬아슬 회피 판단 (nearMiss.ts)', () => {
     expect(nearMissStrike(input({ status: 'escaped' }))).toBeNull();
     expect(nearMissStrike(input({ status: null }))).toBeNull();
     expect(nearMissStrike(input({ protectLeft: 0.5 }))).toBeNull();
+    // 보호 마지막 틱(스냅샷 없는 틱이면 두 틱)에 막힌 타격: 이번 스냅샷 protectLeft는 이미 0이지만 지난 스냅샷은 0보다 컸다 —
+    // 보호가 막아 준 것은 회피가 아니다 (부채꼴 정중앙 1.0타일이라도)
+    expect(nearMissStrike(input({ prevProtectLeft: 0.05, me: at(1.0) }))).toBeNull();
+    expect(nearMissStrike(input({ prevProtectLeft: 0.05, me: at(1.7) }))).toBeNull();
+    expect(nearMissStrike(input({ prevProtectLeft: 0, me: at(1.0) }))).not.toBeNull();
     const hitMe: GameEvent = { k: 'hit', you: true, x: 31.7, y: 21 };
     const hitMate: GameEvent = { k: 'hit', you: false, x: 31, y: 21 };
     expect(nearMissStrike(input({ events: [hitMe, strike(1)] }))).toBeNull();
@@ -186,6 +192,35 @@ describe('아슬아슬이 기대는 서버 규칙: 받는 사람 · 시야', () 
     d.run(d.seconds(ATK.windup) + 2);
     expect(kinds(game.drainOutbox('p1'))).not.toContain('hit');
     expect(kinds(game.drainOutbox('p2'))).toContain('hit');
+  });
+
+  it('보호 마지막 틱에 막힌 타격: 서버는 hits 0 · 내 피격 없음이고 그 틱 뒤 protectLeft는 0 — 지난 스냅샷의 보호를 보고 아슬아슬이 아니다', () => {
+    // 한 틱은 combatTick(보호 > 0이면 무효) → prisonTick(보호를 dt 깎음) 순서라, 보호가 (0, dt] 남은 틱에 막힌 타격은 protectLeft 0인
+    // 스냅샷에 실려 온다 (그 틱에 스냅샷이 없으면 다음 틱 스냅샷 — 창은 두 틱까지)
+    const game = readyGame();
+    const d = new Driver(game);
+    place(game, 'p1', 30, 18.5, 0);
+    place(game, 'p2', 31, 18.5); // 정면 1.0타일 — 보호가 없으면 맞는 자리
+    place(game, 'p3', 8, 16);
+    place(game, 'p4', 9, 16);
+    for (const id of ['p1', 'p2', 'p3', 'p4']) game.drainOutbox(id);
+    d.run(1, { p1: [0, 0, { pressed: BTN.ATTACK }] });
+    const runner = game.survivorById('p2')!;
+    while (game.monster.windupLeft > game.dt + 1e-9) d.run(1);
+    // 타격 틱 시작에 보호가 한 틱 남았다 (지난 스냅샷이 실어 보낸 값)
+    runner.protectLeft = game.dt;
+    const prevProtectLeft = runner.protectLeft;
+    game.drainOutbox('p2');
+    d.run(1);
+    const evs = game.drainOutbox('p2');
+    expect(evs.find((e) => e.k === 'attackHit')).toMatchObject({ k: 'attackHit', hits: 0 });
+    expect(kinds(evs)).not.toContain('hit');
+    expect(runner.hp).toBe(balance.survivor.maxHp);
+    expect(runner.protectLeft).toBe(0);
+    // 이번 스냅샷 값만 보면 정중앙 타격이 아슬아슬로 잡힌다 — 지난 스냅샷의 보호도 본다
+    const now = { me: runner.move, events: evs, protectLeft: runner.protectLeft };
+    expect(nearMissStrike(input(now))).not.toBeNull();
+    expect(nearMissStrike(input({ ...now, prevProtectLeft }))).toBeNull();
   });
 
   it('띠 안이고 타격선이 막히지 않으면 본인은 늘 괴물을 본다 — 아슬아슬은 이미 보이는 것 이상을 알리지 않는다 (맵 전체 격자 표본)', () => {
