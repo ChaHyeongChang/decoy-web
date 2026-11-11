@@ -1,6 +1,11 @@
 {
   "margin": 1.05,
   "measuredAt": "플레이테스트 반영 c (봇 동선 바뀜 — 손맛은 평소 프레임 일 0, artifacts/perf/playtest-c-oldbots)",
+  "sceneAt": {
+    "webgl-high-runner-s25": "입체감 (WebGL 장면만 — 입체 레이어 그리기 +1 · 정점 버퍼 +26%, artifacts/perf/depth-after)",
+    "webgl-high-runner-s25-new": "입체감 (WebGL 장면만 — 입체 레이어 그리기 +1 · 정점 버퍼 +26%, artifacts/perf/depth-after)",
+    "webgl-medium-runner-s25": "입체감 (WebGL 장면만 — 입체 레이어 그리기 +1 · 정점 버퍼 +26%, artifacts/perf/depth-after)"
+  },
   "scenes": {
     "canvas-high-runner": {
       "pathMainPerFrame": 892.88,
@@ -25,10 +30,10 @@
       "readbackPerSec": 0.8
     },
     "webgl-high-runner-s25": {
-      "drawsPerFrame": 8,
+      "drawsPerFrame": 9,
       "uploadsPerSec": 86.7,
       "uploadPxPerFrame": 91501.73,
-      "bufferBytesPerFrame": 114743.54,
+      "bufferBytesPerFrame": 144261.7,
       "programsPerFrame": 4,
       "framebuffersPerFrame": 3,
       "pathOffPerFrame": 325.44,
@@ -60,10 +65,10 @@
       "readbackPerSec": 0.8
     },
     "webgl-high-runner-s25-new": {
-      "drawsPerFrame": 8,
+      "drawsPerFrame": 9,
       "uploadsPerSec": 86.7,
       "uploadPxPerFrame": 91501.73,
-      "bufferBytesPerFrame": 114165.34,
+      "bufferBytesPerFrame": 143683.5,
       "programsPerFrame": 4,
       "framebuffersPerFrame": 3,
       "pathOffPerFrame": 325.44,
@@ -76,7 +81,7 @@
       "drawsPerFrame": 9,
       "uploadsPerSec": 86.7,
       "uploadPxPerFrame": 52197.19,
-      "bufferBytesPerFrame": 113380.78,
+      "bufferBytesPerFrame": 142898.94,
       "programsPerFrame": 4,
       "framebuffersPerFrame": 3,
       "pathOffPerFrame": 325.44,
