@@ -60,8 +60,6 @@ const FLEE_DIST: Readonly<Record<RoleId, number>> = { runner: 6.5, guard: 6.0, s
 const FLEE_INJURED_BONUS = 1.0;
 /** 이미 달아나는 중이면 이만큼 더 멀어질 때까지 계속 (타일) */
 const FLEE_HYST = 1.5;
-/** 밀치기가 준비된 가드는 이 거리까지 버틴다 (타일) */
-const GUARD_HOLD_DIST = 2.4;
 /** 괴물이 안 보인 뒤에도 이만큼(초) 계속 달아난다 */
 const FLEE_MEMORY = 2.0;
 /** 괴물은 안 보이는데 내가 발각 중이면, 이만큼(초) 안에 본 괴물 위치에서 달아난다 */
@@ -85,11 +83,12 @@ const SPLIT_RADIUS = 3;
 /** 갈라지기: ID 순서로 한쪽은 왼쪽, 한쪽은 오른쪽 도주 지점에 주는 점수 */
 const SPLIT_BIAS = 4;
 /**
- * 지켜지는 목표: 괴물을 그 목표 이 거리(타일) 안에서 본 지 이만큼(초) 안 (예전 HOT_RADIUS 7 · HOT_TIME 10).
+ * 지켜지는 목표: 괴물을 그 목표 이 거리(타일) 안에서 본 지 이만큼(초) 안 (예전 HOT_RADIUS 7 · HOT_TIME 10). 거점 밖 매복
+ * (반경 + 0.7)은 안에 든다. 7이면 감옥 감시 자리(구조 지점에서 5~6.7타일)까지 막혀 구조 · 점령을 너무 미뤘다 (봇끼리 300판 괴물 승률 53.0% → 47.0%)
  * 지켜지는 목표는 버리고 다른 할 일로 간다. 그 목표 근처에서 기다리는 중이면 반경에 이력을 더한다 (괴물이 경계를 오갈 때
  * 기다리기 ↔ 들어가기가 흔들리지 않게)
  */
-const GUARD_RADIUS = 7;
+const GUARD_RADIUS = 5;
 const GUARD_MEMORY = 8;
 const GUARD_HYST = 1.5;
 /**
@@ -956,10 +955,9 @@ export class PracticeSurvivorBrain implements BotBrain {
       this.fleeing = false;
       return null;
     }
+    // 밀치기가 준비된 가드도 다른 생존자처럼 달아난다 (예전에는 2.4타일까지 버텼다 — 밀치기 반응 지연이 생긴 뒤로는 버티면 맞고,
+    // 괴물 화면에서 '다가가도 안 도망가는 흰 사람 = 가드'라는 움직임 단서였다). 밀치기는 쫓아온 괴물이 사거리에 들면 누른다
     let radius = FLEE_DIST[this.role] + (surv.hp < b.survivor.maxHp ? FLEE_INJURED_BONUS : 0);
-    if (this.role === 'guard' && surv.abilityCd <= 0 && !(snap.monster?.stunned ?? false)) {
-      radius = Math.min(radius, GUARD_HOLD_DIST);
-    }
     if (this.fleeing) radius += FLEE_HYST;
     const age = this.now - t.tick;
     let threatened = false;
