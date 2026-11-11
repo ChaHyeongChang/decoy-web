@@ -5,7 +5,10 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { validateBalance } from '../../shared/src/balance';
 import { segmentBlocked } from '../../shared/src/geometry';
-import { blocksStrike } from '../../shared/src/map';
+import { BTN } from '../../shared/src/types';
+import { MAP_H, MAP_W, blocksStrike } from '../../shared/src/map';
+import { inCircleVision } from '../../shared/src/visibility';
+import { Driver, place, readyGame } from '../helpers/fixtures';
 import type { GameEvent } from '../../shared/src/types';
 import { NEAR_MISS, labelSlot, nearMissStrike, type NearMissInput } from '../../client/src/nearMiss';
 
@@ -125,5 +128,89 @@ describe('"아슬아슬" 글자 자리 (labelSlot)', () => {
 
   it('지난 방향이 아직 비어 있으면 그대로 (글자가 옮겨 다니지 않게)', () => {
     expect(labelSlot(me, R, [], Math.PI / 2)).toBe(Math.PI / 2);
+  });
+});
+
+// ───── 아슬아슬 판단이 기대는 서버 규칙 (c-juice.md 1.2 표 · 5.1, 서버 · 공유 코드는 그대로 — 시험으로 굳힌다) ─────
+
+/** 몸 원(반지름 r)이 벽 · 철창 칸과 겹치지 않는 자리인가 (몸이 실제로 설 수 있는 자리만 표본으로) */
+function bodyFree(p: { x: number; y: number }, r: number): boolean {
+  for (let j = Math.floor(p.y - r); j <= Math.floor(p.y + r); j += 1)
+    for (let i = Math.floor(p.x - r); i <= Math.floor(p.x + r); i += 1) {
+      if (!blocksStrike(i, j)) continue;
+      const cx = Math.max(i, Math.min(p.x, i + 1));
+      const cy = Math.max(j, Math.min(p.y, j + 1));
+      if (Math.hypot(p.x - cx, p.y - cy) < r) return false;
+    }
+  return true;
+}
+
+describe('아슬아슬이 기대는 서버 규칙: 받는 사람 · 시야', () => {
+  const kinds = (evs: readonly GameEvent[]): string[] => evs.map((e) => e.k);
+
+  it('팀 시야 밖 타격은 생존자 outbox에 attackStart · attackHit이 0개, 보이면 생존자 전원에게 간다 · hit은 괴물에게 가지 않는다', () => {
+    const game = readyGame();
+    const d = new Driver(game);
+    // 괴물 (30, 18.5) 동쪽, 생존자 셋은 멀리 (팀 시야 밖)
+    place(game, 'p1', 30, 18.5, 0);
+    place(game, 'p2', 8, 16);
+    place(game, 'p3', 8, 17);
+    place(game, 'p4', 9, 16);
+    for (const id of ['p1', 'p2', 'p3', 'p4']) game.drainOutbox(id);
+    d.run(1, { p1: [0, 0, { pressed: BTN.ATTACK }] });
+    d.run(d.seconds(ATK.windup) + 2);
+    expect(kinds(game.drainOutbox('p1'))).toEqual(expect.arrayContaining(['attackStart', 'attackHit']));
+    for (const id of ['p2', 'p3', 'p4']) {
+      const got = kinds(game.drainOutbox(id));
+      expect(got).not.toContain('attackStart');
+      expect(got).not.toContain('attackHit');
+    }
+    // 러너가 괴물 정면 1.7타일(괴물이 보인다): 빗나간 타격도 생존자 전원에게 attackHit, 괴물에게 hit은 없다
+    place(game, 'p2', 31.7, 18.5);
+    d.run(d.seconds(ATK.cooldown) + 2);
+    for (const id of ['p1', 'p2', 'p3', 'p4']) game.drainOutbox(id);
+    d.run(1, { p1: [0, 0, { pressed: BTN.ATTACK }] });
+    d.run(d.seconds(ATK.windup) + 2);
+    const mine = game.drainOutbox('p2');
+    const strikeEv = mine.find((e) => e.k === 'attackHit');
+    expect(strikeEv).toMatchObject({ k: 'attackHit', hits: 0 });
+    for (const id of ['p3', 'p4']) expect(kinds(game.drainOutbox(id))).toContain('attackHit');
+    // 그 스냅샷으로 판단하면 러너는 아슬아슬
+    const runner = game.survivorById('p2')!;
+    expect(nearMissStrike(input({ me: runner.move, events: mine }))).not.toBeNull();
+    // 맞는 타격: hit은 생존자에게만
+    place(game, 'p2', 31, 18.5);
+    d.run(d.seconds(ATK.cooldown) + 2);
+    for (const id of ['p1', 'p2', 'p3', 'p4']) game.drainOutbox(id);
+    d.run(1, { p1: [0, 0, { pressed: BTN.ATTACK }] });
+    d.run(d.seconds(ATK.windup) + 2);
+    expect(kinds(game.drainOutbox('p1'))).not.toContain('hit');
+    expect(kinds(game.drainOutbox('p2'))).toContain('hit');
+  });
+
+  it('띠 안이고 타격선이 막히지 않으면 본인은 늘 괴물을 본다 — 아슬아슬은 이미 보이는 것 이상을 알리지 않는다 (맵 전체 격자 표본)', () => {
+    const radius = Math.min(balance.survivor.visionRadius, balance.roles.scout.visionRadius);
+    let checked = 0;
+    // 표본은 칸 모서리를 정확히 지나는 광선(45° · 정수 + 0.5 자리)을 피해 조금씩 비튼다 — 모서리를 정확히 스치는 광선은 쏘는 방향에 따라
+    // 막힘 판단이 갈릴 수 있다(넓이 0인 경우). 어느 쪽이든 생존자 화면은 attackHit을 괴물이 팀 시야 안일 때만 받는다(위 시험)
+    for (let j = 1.5 + 0.0137; j < MAP_H; j += 2)
+      for (let i = 1.5 + 0.0291; i < MAP_W; i += 2) {
+        const mon = { x: i, y: j };
+        if (!bodyFree(mon, balance.monster.radius)) continue;
+        for (let k = 0; k < 8; k += 1) {
+          const dir = (k * Math.PI) / 4 + 0.0113;
+          for (let a = -110; a <= 110; a += 10)
+            for (const dist of [0.6, 1.0, 1.4, 1.6, 1.75, 1.85]) {
+              const ang = dir + (a * Math.PI) / 180;
+              const me = { x: i + Math.cos(ang) * dist, y: j + Math.sin(ang) * dist };
+              if (!bodyFree(me, R)) continue;
+              const ev: GameEvent = { k: 'attackHit', x: i, y: j, dir, hits: 0 };
+              if (!nearMissStrike(input({ me, events: [ev] }))) continue;
+              checked += 1;
+              expect(inCircleVision(me, radius, mon), `${i},${j} dir ${dir} → ${me.x},${me.y}`).toBe(true);
+            }
+        }
+      }
+    expect(checked).toBeGreaterThan(10_000);
   });
 });
