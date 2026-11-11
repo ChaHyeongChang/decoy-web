@@ -122,7 +122,9 @@ describe('edgeTargets 정보 규칙', () => {
     edgeTargets(input({ points: ended, exits: exitsOn }), out);
     expect(out.some((x) => x.kind === 'point')).toBe(false);
     expect(kinds(out)).toEqual(['exit:N', 'exit:S']);
-    // 꺼진 거점 안에 생존자가 서 있어도 괴물 화면에 아무 화살표가 없다 (꺼진 거점은 점령 중이 되지 않는다)
+    // 괴물 화면: 괴물 갈래는 b 전부터 점령 중('capturing')인 거점만 화살표를 낸다 — 'off'는 점령 중이 아니라 화살표가 없다.
+    // 이 부분은 b에서 바뀐 생존자 갈래를 지키지 않는다(b 전 코드에서도 통과). 꺼진 거점 안에 생존자가 서도 점령 중이 되지 않는
+    // 성질은 서버가 지킨다(capture-exit.test '꺼진 거점: 생존자가 서 있어도 …'). 여기서는 괴물 갈래가 'off'를 내지 않는 것만 본다
     edgeTargets(
       input({
         role: 'monster',
