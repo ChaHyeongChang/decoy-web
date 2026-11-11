@@ -55,7 +55,7 @@ import type { NeonRun, TileRect } from '../art/mapArtGeom';
 import { gfxState } from '../gfx/state';
 import { MAP_X, MAP_Y, WORLD_SCALE } from '../ui/layout';
 import type { ViewRect } from './camera';
-import { createCanvasTexture, nextFogKey, removeCanvasTexture } from './fogPaint';
+import { DEPTH_LAYER_NAME, createCanvasTexture, nextFogKey, removeCanvasTexture } from './fogPaint';
 
 /** 시험 · 디버그 (__DECOY__.getDepth — grade · cast는 worldRenderer가 채운다) */
 export type DepthDebug = DepthDebugInfo;
@@ -119,6 +119,7 @@ export class DepthLayer {
     this.box = scene.make
       .container({ x: MAP_X, y: MAP_Y }, false)
       .setScale(TILE_PX * WORLD_SCALE)
+      .setName(DEPTH_LAYER_NAME)
       .setVisible(false);
     this.g = scene.make.graphics({}, false).clear();
     this.box.add(this.g);

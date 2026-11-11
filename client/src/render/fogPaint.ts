@@ -1494,6 +1494,7 @@ export interface CanvasTextureLike {
 
 /** 표시 목록 중 세는 데 쓰는 부분 (Phaser Container.list · Graphics.commandBuffer) */
 interface CountNode {
+  readonly name?: unknown;
   readonly list?: readonly unknown[];
   readonly commandBuffer?: readonly unknown[];
 }
@@ -1501,6 +1502,9 @@ interface CountNode {
 function asNode(v: unknown): CountNode | null {
   return typeof v === 'object' && v !== null ? (v as CountNode) : null;
 }
+
+/** 입체감 레이어 그릇 이름 (render/depthLayer.ts — 맵 레이어 Graphics 셈에서 뺀다) */
+export const DEPTH_LAYER_NAME = 'depthLayer';
 
 /**
  * 표시 목록(컨테이너는 안까지)에서 Graphics 명령 버퍼 길이 합. Phaser WebGL Graphics는 이 버퍼를 프레임마다 다시
@@ -1517,6 +1521,8 @@ function addGraphicsCmds(list: readonly unknown[], out: { objects: number; cmds:
   for (let i = 0; i < list.length; i += 1) {
     const n = asNode(list[i]);
     if (!n) continue;
+    // 입체감 레이어는 맵 그림이 아니다: 프레임마다 삼각형만 싣는 레이어라 따로 센다(gfx.features.depthTris, 일의 양 예산 정점 버퍼)
+    if (n.name === DEPTH_LAYER_NAME) continue;
     out.objects += 1;
     if (Array.isArray(n.commandBuffer)) out.cmds += n.commandBuffer.length;
     if (Array.isArray(n.list)) addGraphicsCmds(n.list, out);
