@@ -443,7 +443,7 @@ function touchShape(
   const column = Math.max(U.band * ui, fitMap, fitSide);
   if (column <= U.bandStack * ui) return { kind: 'touchNarrow', band: column, mode: 'column' };
   const band = Math.max(U.bandStack * ui, fitMap);
-  // 위 띠 한 줄(팀 카드 · 타이머 · 게이지 셋)이 시스템 버튼 왼쪽에 들어가지 않으면(폭 약 920 미만 — iPad 가로 Split View 1/2 등,
+  // 위 띠 한 줄(팀 카드 · 타이머 · 게이지 셋)이 시스템 버튼 왼쪽에 들어가지 않으면(UI 크기 1 · 판 중 시스템 버튼 세 칸에서 폭 약 944 미만 — iPad 가로 Split View 1/2 등,
   // 거점 셋) 띠를 두 줄 높이로 키운다. 그만큼 띠를 키우면 좌우 칸이 팀 카드 폭 이상 생기는 화면은 좌우 칸 배치(띠 column)가 맵이 크다.
   // 폭은 1px 덜 보고 잰다: 판 화면 논리 폭은 정수로 반올림해 planCss가 보는 폭이 0.5 CSS px 안에서 다르다(넓을수록 들어간다)
   const sys = thumbReserve(w - 1, h, true, { sysSlots });
