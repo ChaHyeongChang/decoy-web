@@ -9,6 +9,7 @@ import {
   TILE_PX,
   type AnimDebug,
   type CameraDebug,
+  type DepthDebugInfo,
   type DrawnEntity,
   type SurvivorView,
   type FxTarget,
@@ -572,6 +573,11 @@ export class GameScene extends Phaser.Scene {
   /** 디버그 · 테스트: 지금 입력 방식 (터치 화면이 있으면 'touch') */
   get inputMode(): 'keyboard' | 'touch' {
     return this.sampler.mode;
+  }
+
+  /** 디버그 · 테스트: 입체감 레이어 상태 (getDepth) */
+  get depthDebug(): DepthDebugInfo | null {
+    return this.world ? this.world.depthDebug : null;
   }
 
   /** 디버그 · 테스트: 지금 보이는 연출 */

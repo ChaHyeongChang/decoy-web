@@ -247,6 +247,7 @@
 | 켜고 끄는 줄 · 비율 | 켜기 · 끄기 · 60% | `on` · `off` · `percent` |
 | 그래픽 | 품질 · 자동은 기기에 맞춰 고르고, 판 중에 느리면 한 단계 낮춰요 | `quality` · `qualityHint` |
 | 그래픽 | 그림만 바뀌어요 — 규칙 · 판정은 같아요 | `charStyleHint` |
+| 그래픽 | 입체감 · 벽 높이 · 그림자 · 등불 빛 — 품질 높음 · 중간에서 보여요 (그림만 바뀌어요) | `depth` · `depthHint` |
 | 화면 | UI 크기 · 보통 / 크게 / 아주 크게 | `uiSize` · `uiSizeNormal` · `uiSizeLarge` · `uiSizeXlarge` |
 | 화면 (휴대폰) | 로비 · 메뉴 글자와 휴대폰 판 HUD 크기 (판 중에 바꾸면 다음 판부터) | `uiSizeHint` |
 | 화면 (PC) | 로비 · 메뉴 글자 크기 (PC 판 HUD는 창 크기를 따라요) | `uiSizeHintPc` |

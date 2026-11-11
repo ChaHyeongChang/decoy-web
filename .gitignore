@@ -13,6 +13,8 @@ artifacts/*
 artifacts/characters/_preview/
 # 따라가는 카메라: 확대 수준 후보 비교 · 최종 확인 화면 (사용자 요청, 2026-10-23)
 !artifacts/camera/
+# 입체감: 시안 비교 · 전후 그림 (사용자 요청, 2026-11-11)
+!artifacts/depth/
 test-results/
 playwright-report/
 tests/e2e/.results/
@@ -21,6 +23,7 @@ tests/store/.results/
 tests/perf/.results/
 tests/char-art/.results/
 tests/camera/.results/
+tests/depth/.results/
 *.log
 .DS_Store
 # 공개 저장소: 키 · 인증 파일이 실수로 들어가지 않게

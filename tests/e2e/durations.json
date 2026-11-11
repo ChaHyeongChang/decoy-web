@@ -11,6 +11,7 @@
   "countdown.spec.ts": 126,
   "debug-overlay.spec.ts": 55,
   "deploy-wake.spec.ts": 75,
+  "depth.webgl.spec.ts": 90,
   "fog-follow.webgl.spec.ts": 260,
   "frame-independence.spec.ts": 65,
   "frame-limit.spec.ts": 45,

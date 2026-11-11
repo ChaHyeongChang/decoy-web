@@ -219,7 +219,9 @@ test('GPU 안개(품질 높음 · 중간)가 Canvas 합성과 같은 밝기를 �
   expect(canvas.haloLit).toBeGreaterThanOrEqual(canvas.haloDark * 2);
   expect(canvas.neonDark).toBeGreaterThan(canvas.wall + 3);
   for (const q of ['high', 'medium'] as const) {
-    const gl = await measure(browser, `&renderer=webgl&quality=${q}${CAM1}`);
+    // 입체감은 끈다: 안개 합성 두 경로(GPU · Canvas)가 같은 밝기인지 보는 시험이다 — 입체감(등불 · 가라앉히기 · 띄운 벽)은 GPU 쪽에만
+    // 있어 밝기를 일부러 바꾼다. 입체감 켬의 대비 · 정보는 depth.webgl · tests/unit/depth.test.ts (DECISIONS 17절 '시험')
+    const gl = await measure(browser, `&renderer=webgl&quality=${q}&depth=0${CAM1}`);
     console.log(`[m10-fog.webgl] ${q}: ${JSON.stringify(gl)} / canvas: ${JSON.stringify(canvas)}`);
     expect(gl.renderer).toBe('webgl');
     expect(gl.fogMode).toBe('gpu');

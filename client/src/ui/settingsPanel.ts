@@ -53,6 +53,7 @@ import {
   type TabId,
 } from '../settingsModel';
 import { onCharStyleChange } from '../gfx/charStyle';
+import { urlDepth } from '../gfx/depth';
 import { h, icon } from './uiArt';
 
 /** 연 손가락의 click을 버리는 시간 (ms, 연 뒤 설정 화면 안에서 누른 적 없는 포인터 click만 — ghostUntil) */
@@ -529,6 +530,26 @@ export class SettingsPanel {
         reset: resetCharStyleSetting,
         hint: T.charStyleHint,
         lock: () => urlLock('charStyle'),
+      }),
+      // 입체감 (VISUAL_SPEC 14장): 품질 높음 · 중간의 WebGL에서만 그린다 — 낮음에서는 켜 두어도 지금 그대로
+      this.segRow<'on' | 'off'>({
+        id: 'depth',
+        tab: 'graphics',
+        label: T.depth,
+        options: [
+          { value: 'on', label: T.on },
+          { value: 'off', label: T.off },
+        ],
+        testid: (v) => `depth-${v}`,
+        get: () => (pref('depth3d') ? 'on' : 'off'),
+        set: (v) => setPref('depth3d', v === 'on'),
+        isDefault: () => isDefaultPref('depth3d'),
+        reset: () => resetPref('depth3d'),
+        hint: T.depthHint,
+        lock: () => {
+          const u = urlDepth();
+          return u === null ? null : `?depth=${u ? 1 : 0}`;
+        },
       }),
     );
     // ── 화면 ──

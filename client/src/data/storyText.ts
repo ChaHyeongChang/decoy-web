@@ -434,6 +434,8 @@ export const SETTINGS_TEXT = {
   quality: '품질',
   qualityHint: '자동은 기기에 맞춰 고르고, 판 중에 느리면 한 단계 낮춰요',
   charStyleHint: '그림만 바뀌어요 — 규칙 · 판정은 같아요',
+  depth: '입체감',
+  depthHint: '벽 높이 · 그림자 · 등불 빛 — 품질 높음 · 중간에서 보여요 (그림만 바뀌어요)',
   // ── 화면 ──
   uiSize: 'UI 크기',
   uiSizeNormal: '보통',

@@ -26,7 +26,10 @@ import {
 } from './m10-map.shared';
 
 // 따라가는 카메라: 맵 곳곳의 고정 자리(배지 · 거점 · 탈출구 · 어둠 속 벽)를 한 화면에서 재는 그림 시험이라 맵 전체 고정 화면(?cam=1)
-const QUERY = `&renderer=webgl&quality=high${CAM1}`;
+// 입체감은 끈다: 맵 곳곳 고정 탐침(벽 · 기둥 테두리 · 인접 바닥 · 시야 안 바닥)이 평평한 맵 그림 자리에 있다 — 입체감은 윗면을 북쪽으로
+// 띄우고 빛 받은 옆면을 그려 탐침 자리의 그림이 다르다. 입체감 켬의 어둠 속 대비(R14) · 정보는 tests/unit/depth.test.ts ·
+// depth.webgl.spec.ts가 본다 (DECISIONS 17절 '시험')
+const QUERY = `&renderer=webgl&quality=high&depth=0${CAM1}`;
 const HIGH_TEXTURE_BUDGET = 32 * 1024 * 1024;
 const WARN = 0xf59e0b;
 const balance = validateBalance(JSON.parse(readFileSync('config/balance.json', 'utf8')));

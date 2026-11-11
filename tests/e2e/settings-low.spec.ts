@@ -319,7 +319,7 @@ for (const [width, height] of [
   [844, 300],
   [844, 340],
 ] as const) {
-  test(`아이폰 가로 ${width}×${height}(안전 영역): 설명 12px · 판 중 그래픽 세 줄이 스크롤 없이 · 버튼은 작게 보이고 48px로 눌린다`, async ({
+  test(`아이폰 가로 ${width}×${height}(안전 영역): 설명 12px · 판 중 그래픽 네 줄(입체감 포함)이 스크롤 없이 · 버튼은 작게 보이고 48px로 눌린다`, async ({
     browser,
   }) => {
     test.setTimeout(120_000);
@@ -332,7 +332,8 @@ for (const [width, height] of [
       const m = await measure(page);
       expectCompact(m, `${name} 로비 ${tab}`, tab !== 'sound');
       if (tab === 'graphics') {
-        expect(m.rows.map((r) => r.id)).toEqual(['quality', 'frame-limit', 'char-style']);
+        expect(m.rows.map((r) => r.id)).toEqual(['quality', 'frame-limit', 'char-style', 'depth']);
+        // 그래픽 네 줄(입체감 포함)이 스크롤 없이 — 높이 320 이하 넓은 화면은 줄 여백을 뗀다(settings.css)
         expect(m.bodyScroll, `${name} 로비 그래픽 스크롤`).toBe(0);
         expect(m.rows.every((r) => r.inside)).toBe(true);
         // 설명이 이름 아래 왼쪽 칸에 있어 줄 높이를 더하지 않는다: 고르는 칸(52px) + 여백
@@ -380,7 +381,7 @@ for (const [width, height] of [
     await openSettingsTab(page, 'graphics');
     const g = await measure(page);
     expectCompact(g, `${name} 판 중 graphics`);
-    expect(g.rows.map((r) => r.id)).toEqual(['quality', 'frame-limit', 'char-style']);
+    expect(g.rows.map((r) => r.id)).toEqual(['quality', 'frame-limit', 'char-style', 'depth']);
     expect(g.bodyScroll, `${name} 판 중 그래픽 스크롤`).toBe(0);
     expect(
       g.rows.every((r) => r.inside),
@@ -425,7 +426,7 @@ for (const [width, height] of [
   });
 }
 
-test('좁은 휴대폰 가로 667×330(안전 영역): 설명 12px · 고르는 칸 넷이 한 줄 · 로비 그래픽 세 줄이 다 보이고 · 버튼은 작게 보이고 48px로 눌린다', async ({
+test('좁은 휴대폰 가로 667×330(안전 영역): 설명 12px · 고르는 칸 넷이 한 줄 · 로비 그래픽 앞 세 줄이 다 보이고(넷째 줄은 짧은 스크롤) · 버튼은 작게 보이고 48px로 눌린다', async ({
   browser,
 }) => {
   test.setTimeout(120_000);
@@ -435,14 +436,18 @@ test('좁은 휴대폰 가로 667×330(안전 영역): 설명 12px · 고르는 
     const m = await measure(page);
     expectCompact(m, `667x330 로비 ${tab}`, tab !== 'sound');
     if (tab === 'graphics') {
-      // 고치기 전: 품질 · 프레임 제한의 네 칸이 두 줄로 접혀 1.6줄만 보였다. 세 줄이 본문 안에 온전히 보인다
-      // (넘치는 것은 본문 아래 여백 4px뿐이다)
-      expect(m.rows.map((r) => r.id)).toEqual(['quality', 'frame-limit', 'char-style']);
+      // 고치기 전: 품질 · 프레임 제한의 네 칸이 두 줄로 접혀 1.6줄만 보였다. 앞 세 줄이 본문 안에 온전히 보인다.
+      // 넷째 줄 '입체감'(입체감 작업에서 더함)은 이 좁고 낮은 화면에서만 짧게 스크롤해서 본다 — 폭 739 이하는 설명이 칸 아래 전체 폭
+      // 줄이라 네 줄이 본문(249px)에 다 들지 않는다(DECISIONS 17절 '설정 줄'). 스크롤하면 온전히 보인다
+      expect(m.rows.map((r) => r.id)).toEqual(['quality', 'frame-limit', 'char-style', 'depth']);
       expect(
-        m.rows.every((r) => r.inside),
-        '667x330 로비 그래픽 세 줄',
+        m.rows.slice(0, 3).every((r) => r.inside),
+        '667x330 로비 그래픽 앞 세 줄',
       ).toBe(true);
-      expect(m.bodyScroll, '667x330 로비 그래픽 스크롤').toBeLessThanOrEqual(4);
+      await page.getByTestId('row-depth').scrollIntoViewIfNeeded();
+      const after = await measure(page);
+      expect(after.rows.find((r) => r.id === 'depth')?.inside, '667x330 입체감 줄 (스크롤 뒤)').toBe(true);
+      expect(after.bodyScroll, '667x330 로비 그래픽 스크롤 (넷째 줄 몫)').toBeLessThanOrEqual(96);
       for (const id of ['quality', 'frame-limit']) {
         const tops = await page
           .getByTestId(`row-${id}`)
@@ -477,12 +482,13 @@ test('좁은 휴대폰 가로 667×330(안전 영역): 설명 12px · 고르는 
   await openSettingsTab(page, 'graphics');
   const g = await measure(page);
   expectCompact(g, '667x330 판 중 graphics');
-  expect(g.rows.map((r) => r.id)).toEqual(['quality', 'frame-limit', 'char-style']);
+  expect(g.rows.map((r) => r.id)).toEqual(['quality', 'frame-limit', 'char-style', 'depth']);
+  // 앞 세 줄이 온전히 보이고, 넷째 줄 '입체감'은 짧게 스크롤해서 본다 (로비와 같다 — DECISIONS 17절 '설정 줄')
   expect(
-    g.rows.every((r) => r.inside),
-    '667x330 판 중 그래픽 세 줄',
+    g.rows.slice(0, 3).every((r) => r.inside),
+    '667x330 판 중 그래픽 앞 세 줄',
   ).toBe(true);
-  expect(g.bodyScroll, '667x330 판 중 그래픽 스크롤').toBeLessThanOrEqual(4);
+  expect(g.bodyScroll, '667x330 판 중 그래픽 스크롤 (넷째 줄 몫)').toBeLessThanOrEqual(96);
   if (!g.note) throw new Error('판 중 안내 없음');
   expect(g.note.top, '667x330 판 중 안내가 머리 줄 안').toBeGreaterThanOrEqual(g.close.top - 0.5);
   expect(g.note.bottom, '667x330 판 중 안내가 머리 줄 안').toBeLessThanOrEqual(g.close.bottom + 0.5);
