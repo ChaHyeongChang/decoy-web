@@ -8,7 +8,7 @@
         "captureSec": 1,
         "exitSec": 3
       },
-      "tiers": [10, 24, 38, 52]
+      "tiers": [30, 42, 50, 58]
     },
     "rescue": {
       "team": "survivor",
