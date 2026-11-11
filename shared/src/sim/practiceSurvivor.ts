@@ -581,6 +581,8 @@ export class PracticeSurvivorBrain implements BotBrain {
   private readonly routeCache = new Map<number, { me: number; t: number; r: number; res: boolean }>();
   /** 거점별 내가 서는 자리 (판 시드 · 장소로 정해진다 — standSlot) */
   private readonly pointStands: Readonly<Record<PointId, Vec2>>;
+  /** 목표로 가던 나를 도주로 끊은 서 있는 괴물의 자리 (standingThreat의 기억을 늘린다 — 괴물을 다른 자리에서 보면 잊는다) */
+  private chasedAt: Vec2 | null = null;
 
   constructor(
     private readonly role: RoleId,
@@ -637,9 +639,13 @@ export class PracticeSurvivorBrain implements BotBrain {
     const me = snap.you.move;
     const out: InputFrame = { seq, mx: 0, my: 0, aim: Number.NaN, held: 0, pressed: 0 };
     this.fleeR = fleeStartRadius(surv.hp, surv.imprisonCount, b);
+    // 쫓겨난 목표는 앞 틱까지 하던 할 일로 센다 (괴물이 새로 보인 이 틱에는 그 목표가 이미 막혀 다른 할 일로 바뀌어 있다)
+    const prevTask = this.lastTask;
+    const wasFleeing = this.fleeing;
     const task = this.task(snap, info, b);
     this.lastTask = task;
     const danger = this.danger(snap, b, task);
+    if (danger && !wasFleeing && prevTask) this.noteChase(prevTask);
     out.pressed |= this.ability(snap, b, danger, task);
     let mv: { mx: number; my: number; arrived: boolean };
     if (danger) {
@@ -697,6 +703,9 @@ export class PracticeSurvivorBrain implements BotBrain {
         this.now - prev.tick <= this.sec(GUARD_MEMORY) &&
         Math.hypot(pos.x - this.standAt.x, pos.y - this.standAt.y) <= DETOUR_THREAT_MOVE;
       if (!same) this.standAt = { x: pos.x, y: pos.y, tick: this.now };
+      // 괴물을 쫓겨난 자리 밖에서 봤다: 그 기억을 잊는다
+      const c = this.chasedAt;
+      if (c && Math.hypot(pos.x - c.x, pos.y - c.y) > DETOUR_THREAT_MOVE) this.chasedAt = null;
       this.threat = { x: pos.x, y: pos.y, tick: this.now };
       this.lastInfo = this.now;
     }
@@ -764,8 +773,16 @@ export class PracticeSurvivorBrain implements BotBrain {
     return t.tick - this.standAt.tick >= this.sec(FLEE_ZONE_STAND);
   }
 
-  /** 최근(FLEE_ZONE_MEMORY) 본 괴물이 서 있다 */
+  /**
+   * 최근(FLEE_ZONE_MEMORY) 본 괴물이 서 있다. 그 자리에 서 있던 괴물이 목표로 가던 나를 도주로 끊었으면(chasedAt) 그 자리에서 본 지
+   * GUARD_MEMORY초 안까지 (지켜지는 목표의 기억과 같다). 2초만 기억하면 동료가 있어 점령으로 넘어가는 팀 장면(기다리기의 sticky를
+   * 거치지 않는다)에서 2초가 지나자마자 다시 구조하러 가다 감옥 벽 너머에서 괴물이 보이자마자 달아나기를 3.2초마다 되풀이했다.
+   * 끊긴 기억은 괴물이 다른 자리에서 보일 때까지 이어진다 — 8초 넘게 안 보이다 같은 자리에서 다시 보이면 '서 있음'(standAt)은
+   * 처음부터 다시 재지만 이 기억으로 바로 서 있는 괴물로 본다. 목표 전체를 막지 않고 fleeZone · fleeRoute의 자리 · 길 판단에만
+   * 쓴다 (목표에서 먼 곳에서 쫓겨났으면 돌아가는 길은 그대로)
+   */
   private standingThreat(t: Threat): boolean {
+    if (this.chasedAt) return this.now - t.tick <= this.sec(GUARD_MEMORY);
     return this.now - t.tick <= this.sec(FLEE_ZONE_MEMORY) && this.stood(t);
   }
 
@@ -801,6 +818,14 @@ export class PracticeSurvivorBrain implements BotBrain {
     const res = routeNear(fieldFrom(p), me, t, r);
     this.routeCache.set(key, { me: meCell, t: tCell, r, res });
     return res;
+  }
+
+  /** 도주를 막 시작했다: 목표로 가던 중(구조 · 점령 · 탈출구, 들어가 보기 빼고)이었고 괴물이 서 있었으면 그 자리를 기억한다 */
+  private noteChase(task: Task): void {
+    const t = this.threat;
+    if (!t || this.chasedAt || task.probe || !this.stood(t)) return;
+    if (task.kind !== 'rescue' && task.kind !== 'capture' && task.kind !== 'exit') return;
+    this.chasedAt = { x: t.x, y: t.y };
   }
 
   /** 가는 길에 괴물: 최근(ROUTE_MEMORY) 본 괴물이 내 근처(ROUTE_DANGER)에서 목표 쪽(나보다 목표에 가까운 곳)에 있었다 */
@@ -1150,6 +1175,11 @@ export class PracticeSurvivorBrain implements BotBrain {
         // 다음 자리로 가는 길이 도주 반경을 지나면(괴물이 기다리는 자리 사이에 섰다) 지금 자리에서 다시 고른다
         if (this.legNear(spot, me)) {
           this.repickWait(w, anchor, me);
+          // 다시 고른 첫 자리가 지금 자리면(막다른 구석: 갈 수 있는 다음 자리마다 길이 도주 반경을 지난다) 거기 또 머물지 않고
+          // 가장 덜 나쁜 다음 자리로 걷는다 (가다가 달아나는 것은 도주가 맡는다). 머물면 이어 머물기(0틱) → 또 다시 고르기를
+          // 매 틱 되풀이해 막힘이 풀릴 때까지 2.5~2.9초씩 한자리에 섰다
+          const first = w.spots[0];
+          if (first && w.spots.length > 1 && dist(me, first) <= WAIT_TOL) w.idx = 1;
           spot = w.spots[w.idx] ?? spot;
         }
       }
