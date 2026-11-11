@@ -1,5 +1,6 @@
 // M5: 거점 → 탈출구 → 탈출 → 결과 화면 → 다시 하기 (테스트 훅으로 시간을 줄여 브라우저에서 끝까지)
 import { expect, test } from '@playwright/test';
+import type { Snapshot } from '@decoy/shared';
 import { closeAll, lastSnapshot, sendTest, startFourPlayerMatch } from './helpers';
 
 test('거점 점령 → 탈출구 개방 → 2명 탈출 → 결과 화면 → 다시 하기', { tag: '@core' }, async ({ browser }) => {
@@ -20,10 +21,14 @@ test('거점 점령 → 탈출구 개방 → 2명 탈출 → 결과 화면 → �
   await runner.page.waitForFunction(() =>
     (window.__DECOY__?.getLastSnapshot()?.world.exits ?? []).every((e) => e.state === 'active'),
   );
-  // 괴물 화면에도 거점 완료 · 꺼짐이 같은 값으로 보인다 (탈출구 진행도는 없다)
+  // 괴물 화면에도 거점 완료 · 꺼짐이 같은 값으로 보인다 (탈출구 진행도는 없다). 위 기다림은 러너 탭만 본 것이라 괴물 탭도 그
+  // 상태가 올 때까지 기다린다: 같은 틱 스냅샷이라도 느린 탭은 늦게 처리한다(괴물 탭 CPU를 늦추면 C:capturing · B:idle을 읽었다)
+  const states = (s: Snapshot | null): string[] => (s?.world.points ?? []).map((p) => `${p.id}:${p.state}`);
+  await expect
+    .poll(async () => states(await lastSnapshot(monster.page)))
+    .toEqual(['A:done', 'B:off', 'C:done']);
   const ms = await lastSnapshot(monster.page);
   const rs = await lastSnapshot(runner.page);
-  const states = (s: typeof ms): string[] => (s?.world.points ?? []).map((p) => `${p.id}:${p.state}`);
   expect(states(ms)).toEqual(['A:done', 'B:off', 'C:done']);
   expect(states(rs)).toEqual(states(ms));
 
