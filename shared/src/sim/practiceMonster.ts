@@ -16,6 +16,9 @@
 //  - '아무도 못 본 시간'은 판 시작 카운트다운이 끝난 때부터 센다
 //  - 조정 A (손): 공격을 겨누고 누를지 정하고 준비 동안 따라갈 때는 판마다 0.05~0.15초 전에 본 표적 모습을 이어 짐작한다 (방향을 튼
 //    것은 늦게 안다). 공격마다 조준 오차 ±0.08라디안, 12%는 닿는 거리를 0.15~0.4타일 길게 보고 이르게 누른다. 쫓기 · 돌진은 그대로
+// 통합 조정 d (감옥 지키기 강도 — 봇끼리 판 괴물 승률이 사람 괴물보다 높아서):
+//  - 한 명을 가둔 직후 감옥 감시는 반반. 감시로 안 가면 감옥을 비우고 다른 생존자를 찾으러 가며, 감시 간격만큼 '가끔 감시'도 미룬다
+//  - 둘 이상 갇혀 있을 때 감시 자리 넷을 오가는 감시도 감시 간격마다만 (할 일이 없을 때마다 되풀이하지 않는다)
 import {
   BTN,
   CAPTURE_POINTS,
@@ -170,15 +173,19 @@ const PATROL_LEGS_SPAN = 3;
 const WATCH_LOOK_MIN = 1.2;
 const WATCH_LOOK_SPAN = 0.8;
 const WATCH_STOPS = 2;
-/** 둘 이상 갇혀 있을 때(한 명만 더 잡으면 이긴다) 한 번에 들르는 감시 자리 수 (셋을 오간다) */
+/** 둘 이상 갇혀 있을 때(한 명만 더 잡으면 이긴다) 한 번에 들르는 감시 자리 수 (셋을 오간다). 감시 간격마다 한 번 */
 const WATCH_STOPS_GUARD = 4;
 /** 감시 자리에 이미 서 있다고 보는 거리 (타일) */
 const WATCH_HERE = 1.0;
 /** 다음 감시까지 (초, 최소 + 시드 범위) — 예전 감시 길이(4~8초)를 더한 간격 그대로 */
 const WATCH_GAP_MIN = 20;
 const WATCH_GAP_SPAN = 12;
-/** 생존자를 가둔 직후 감옥 감시로 갈 확률 (구조하러 올 것이다) */
-const WATCH_AFTER_JAIL_PROB = 0.85;
+/**
+ * 생존자를 가둔 직후 감옥 감시로 갈 확률 (구조하러 올 것이다). 갇힌 사람이 하나면 반반 — 사람 괴물은 가둔 뒤 다른 생존자를
+ * 쫓아 감옥을 비우기도 한다. 둘 이상이면(한 명만 더 잡으면 이긴다) 거의 늘 감시. 감시로 안 가면 감시 간격(최소)만큼 감시를 미룬다
+ */
+const WATCH_AFTER_JAIL_PROB = 0.5;
+const WATCH_AFTER_JAIL_PROB_GUARD = 0.85;
 /** 감옥 캠핑 경고 전에 스스로 나가는 시간 (초, 규칙의 경고 3초 · 감속 5초보다 앞) */
 const CAMP_LEAVE = 2.5;
 /** 거점 안에 이만큼(초) 있으면 반경 밖으로 한 번 나갔다 온다 (규칙의 유예 5초보다 앞) */
@@ -435,10 +442,13 @@ export class PracticeMonsterBrain implements BotBrain {
           });
         }
       } else if (ev.k === 'imprisoned') {
-        // 방금 가둔 표적은 놓친 것이 아니다. 구조하러 올 테니 자주 곧장 감옥 감시로
+        // 방금 가둔 표적은 놓친 것이 아니다. 구조하러 올 테니 감옥 감시로 가거나(둘 이상 갇혔으면 거의 늘),
+        // 감옥을 비우고 다른 생존자를 찾으러 간다 — 그때는 '가끔 감시'도 감시 간격만큼 미뤄 곧바로 되돌아오지 않는다
         this.chase = null;
         this.chaseIds = new Set<string>();
-        if (this.rng.next() < WATCH_AFTER_JAIL_PROB) this.goal = this.watchGoal(me);
+        const watchProb = snap.world.imprisoned >= 2 ? WATCH_AFTER_JAIL_PROB_GUARD : WATCH_AFTER_JAIL_PROB;
+        if (this.rng.next() < watchProb) this.goal = this.watchGoal(me);
+        else this.nextWatchAt = Math.max(this.nextWatchAt, this.now + this.sec(WATCH_GAP_MIN));
       }
     }
     // 보이는 생존자: 같은 임시 ID가 이어서 보이면 속도를 잰다
@@ -825,11 +835,13 @@ export class PracticeMonsterBrain implements BotBrain {
       this.act = 'stepout';
       return 'search';
     }
-    // 둘 이상 갇혀 있으면 할 일이 없을 때마다 감시 자리 셋을 오간다 (한 명만 더 잡으면 이긴다). 알림 · 핑 · 수색은 그대로
+    // 둘 이상 갇혀 있으면 감시 간격마다 감시 자리 셋을 오간다 (한 명만 더 잡으면 이긴다 — 거점 둘레 돌기도 끊는다).
+    // 간격 사이에는 감옥을 비운다 (할 일이 없을 때마다 되풀이하면 사람 괴물보다 빈틈이 없다). 알림 · 핑 · 수색은 그대로
     const guardPrison = snap.world.imprisoned >= 2;
     const g0 = this.goal;
     const idleGoal = !g0 || g0.kind === 'ring' || (g0.kind === 'point' && !g0.alerted);
-    if (guardPrison && idleGoal) this.goal = this.watchGoal(me, WATCH_STOPS_GUARD);
+    if (guardPrison && idleGoal && this.now >= this.nextWatchAt)
+      this.goal = this.watchGoal(me, WATCH_STOPS_GUARD);
     // 새 정보가 먼저: 기억하는 점령 알림 → 점령 중 배지(진행 큰 쪽) → 포효 핑 (놓친 곳 수색 · 둘레 돌기 · 감시보다 앞)
     const curPrio = this.goal ? GOAL_PRIORITY[this.goal.kind] : -1;
     if (!leavingCamp && curPrio < GOAL_PRIORITY.point && !(guardPrison && this.goal?.kind === 'watch')) {

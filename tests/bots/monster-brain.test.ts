@@ -560,7 +560,8 @@ describe('실전 괴물 봇: 알림 · 핑 · 거점 · 감시 행동 하나씩 
     }
   });
 
-  it('둘 이상 갇혀 있으면 할 일이 없을 때 감옥 감시 자리 셋을 계속 오간다 (거점 · 순찰로 떠나지 않는다)', () => {
+  it('둘 이상 갇혀 있으면 할 일이 없을 때 감시 한 번에 감옥 감시 자리 셋을 모두 오간다 (그동안 거점 · 순찰로 떠나지 않는다)', () => {
+    // 감시를 마친 뒤 다음 감시는 감시 간격 뒤다 (통합 조정 d — tests/bots/tune-td.test.ts). 여기서는 감시 한 번만 본다
     const { snap: base, info } = baseSnap();
     for (const seed of [1, 2, 3]) {
       const brain = monsterBrain(seed);
@@ -577,6 +578,7 @@ describe('실전 괴물 봇: 알림 · 핑 · 거점 · 감시 행동 하나씩 
         25 * HZ,
         () => ({ imprisoned: 2 }),
         (t) => {
+          if (t.act !== 'go:watch' && t.act !== 'look:watch') return true;
           WATCH_SPOTS.forEach((w, i) => {
             if (dist(t.at, w) <= 0.6) {
               seenSpots.add(i);
