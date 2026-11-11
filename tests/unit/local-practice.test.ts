@@ -1,10 +1,25 @@
-// M13b 기기 안 연습 서버(LocalTransport)와 첫 화면 상태 줄(serverStatus). 가짜 시계로 30Hz 루프 · 숨김 · JSON 왕복을 본다
+// M13b 기기 안 연습 서버(LocalTransport)와 첫 화면 상태 줄(serverStatus). 가짜 시계로 30Hz 루프 · 숨김 · JSON 왕복 · 다시 하기의 판마다 봇 시드를 본다
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PROTOCOL_VERSION, type ServerMessage } from '@decoy/shared';
+import { PROTOCOL_VERSION, type Role, type ServerMessage } from '@decoy/shared';
+import type * as Sim from '@decoy/shared/sim';
+import { decoyOrder, splitOrder, standSlot, teamPlan } from '../../shared/src/sim/practiceSurvivor';
 import { LocalTransport } from '../../client/src/localServer';
 import { PRACTICE_BALANCE } from '../../client/src/practiceBalance';
 import { UNREACHABLE_AFTER_MS, serverStatus } from '../../client/src/serverStatus';
 import { loadTestBalance } from '../helpers/fixtures';
+
+/** 연습 봇 두뇌를 만든 기록 (역할 · 시드): 진짜 두뇌를 그대로 만들고 부른 값만 적는다 */
+const brainCalls = vi.hoisted(() => [] as { role: Role; seed: number }[]);
+vi.mock('@decoy/shared/sim', async (importOriginal) => {
+  const sim = await importOriginal<typeof Sim>();
+  return {
+    ...sim,
+    practiceBrain: (role: Role, seed?: number) => {
+      brainCalls.push({ role, seed: seed ?? 1 });
+      return sim.practiceBrain(role, seed);
+    },
+  };
+});
 
 describe('첫 화면 서버 상태 줄', () => {
   const base = { connected: false, offline: false, waitingSince: 1000, nowMs: 1000 };
@@ -124,6 +139,43 @@ describe('기기 안 연습 서버 (LocalTransport)', () => {
     local.send({ t: 'test', cmd: { kind: 'setTime', timeLeft: 0.05 } });
     await vi.advanceTimersByTimeAsync(300);
     expect(inbox.some((m) => m.t === 'result')).toBe(true);
+    local.close();
+  });
+
+  it('다시 하기: 판마다 봇 시드가 바뀐다 — 첫 판은 주어진 시드 그대로(?seed= 재현), 한 판의 봇끼리는 같은 시드 (서는 자리 · 계획이 판마다 달라 자리로 역할을 짐작하지 못한다)', async () => {
+    brainCalls.length = 0;
+    const { local, inbox } = start('monster');
+    await vi.advanceTimersByTimeAsync(300);
+    for (let k = 0; k < 2; k += 1) {
+      const results = inbox.filter((m) => m.t === 'result').length;
+      local.send({ t: 'test', cmd: { kind: 'setTime', timeLeft: 0.05 } });
+      await vi.advanceTimersByTimeAsync(300);
+      expect(inbox.filter((m) => m.t === 'result')).toHaveLength(results + 1);
+      local.send({ t: 'rematch' });
+      await vi.advanceTimersByTimeAsync(300);
+    }
+    expect(inbox.filter((m) => m.t === 'match')).toHaveLength(3);
+    // 판마다 생존자 봇 셋 (사람이 괴물)
+    expect(brainCalls).toHaveLength(9);
+    expect(brainCalls.every((c) => c.role !== 'monster')).toBe(true);
+    const seeds = [0, 1, 2].map((m) => brainCalls.slice(m * 3, m * 3 + 3).map((c) => c.seed));
+    for (const s of seeds) expect(new Set(s).size, '한 판의 봇은 같은 시드').toBe(1);
+    const perMatch = seeds.map((s) => s[0]!);
+    expect(perMatch[0], '첫 판은 주어진 시드').toBe(5);
+    expect(new Set(perMatch).size, '판마다 다른 시드').toBe(3);
+    // 판정 함수로도: 세 판의 서는 자리 · 계획이 모두 같지는 않다
+    const layout = (seed: number): string =>
+      JSON.stringify({
+        plan: teamPlan(seed),
+        slots: (['runner', 'guard', 'scout'] as const).map((r) => [
+          standSlot(seed, 'A', r),
+          standSlot(seed, 'B', r),
+          standSlot(seed, 'C', r),
+        ]),
+        decoy: decoyOrder(seed),
+        split: splitOrder(seed),
+      });
+    expect(new Set(perMatch.map(layout)).size).toBeGreaterThan(1);
     local.close();
   });
 });
