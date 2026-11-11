@@ -10,7 +10,10 @@ export interface TextEntry {
 }
 
 export const STORY_TEXT: Record<TextId, TextEntry> = {
-  INTRO_WALL: { text: '비밀번호는 세 곳에 새겨져 있다. 두 곳이면 충분하다. 문은 혼자서는 열리지 않는다.', seconds: 4 },
+  INTRO_WALL: {
+    text: '비밀번호는 세 곳에 새겨져 있다. 두 곳이면 충분하다. 문은 혼자서는 열리지 않는다.',
+    seconds: 4,
+  },
   INTRO_MONSTER: { text: '감옥을 빠져나간 자들을 다시 가둬라.', seconds: 3 },
   NOTE_FIRST: {
     text: '숫자를 새겼다. 저것은 앞만 본다. 등 뒤로 돌아라. — 비밀번호 앞자리 {code} · 문에 입력된다',
