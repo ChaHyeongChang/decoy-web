@@ -168,8 +168,9 @@ void main ()
     float v = uVignette * t * t * (3.0 - 2.0 * t);
     if (uDepth > 0.5)
     {
-        vec2 px = vec2(outTexCoord.x, 1.0 - outTexCoord.y) * uView;
-        float lt = smoothstep(uLantern.z, uLantern.w, distance(px, uLantern.xy));
+        // 거리는 바깥 반경(uLantern.w)으로 나눈 비율로 잰다: 논리 px 그대로 제곱하면 mediump가 fp16인 GPU에서 약 256px부터 넘친다
+        vec2 dn = (vec2(outTexCoord.x, 1.0 - outTexCoord.y) * uView - uLantern.xy) / uLantern.w;
+        float lt = smoothstep(uLantern.z / uLantern.w, 1.0, length(dn));
         float sink = 1.0 - uCrush * (1.0 - smoothstep(${DEPTH_SINK.lo.toFixed(3)}, ${DEPTH_SINK.hi.toFixed(3)}, L));
         straight *= mix(1.0, uLanternMin, lt) * sink;
         straight *= mix(vec3(1.0), uWarm, 1.0 - lt);

@@ -134,6 +134,7 @@ export class DepthLayer {
     this.box.setVisible(look !== null);
     if (!look) {
       this.g.clear();
+      gfxState.features.depthTris = 0;
       this.debug.cells = 0;
       this.debug.pillars = 0;
       this.debug.tris = 0;
@@ -294,6 +295,7 @@ export class DepthLayer {
       if (p !== undefined) this.drawPillar(p, bodies, objectives, i0, i1, j0, j1);
       nextPillar += 1;
     }
+    this.drawSideNeon(i0, i1, j0, j1);
     gfxState.features.depthTris = dbg.tris;
   }
 
@@ -456,7 +458,7 @@ export class DepthLayer {
   }
 
   /**
-   * 줄 j에서 끝나는 네온 (맵 그림 네온 자리): 앞면 네온은 남쪽 면의 같은 높이 비율에, 윗면 가장자리 네온은 투영한 윗면에.
+   * 줄 j의 앞면 네온 (맵 그림 네온 자리): 남쪽 면의 같은 높이 비율에 (윗면 세로 네온은 drawSideNeon).
    * 발광이라 빛 0에서도 neonFloor만큼 밝다(맵 그림 네온처럼 어둠 속에서 보인다) — 시간에 따라 변하지 않는다(R9)
    */
   private drawRowNeon(j: number, i0: number, i1: number): void {
@@ -465,9 +467,9 @@ export class DepthLayer {
     const cam = this.cam;
     const amb = this.ambient;
     const hw = DEPTH.neonWidth / 2;
-    for (const n of NEON_BY_ROW[j] ?? NO_NEON) {
+    for (const n of FRONT_NEON_BY_ROW[j] ?? NO_NEON) {
       if (n.x1 < i0 || n.x0 > i1 + 1) continue;
-      if (n.face === 'front') {
+      {
         const ci = Math.floor((n.x0 + n.x1) / 2);
         const o = this.lit(ci, j);
         const l = this.light[o + 1] ?? 0;
@@ -478,11 +480,24 @@ export class DepthLayer {
         const xa = projX(n.x0, cam, look) + (n.x0 - projX(n.x0, cam, look)) * f;
         const xb = projX(n.x1, cam, look) + (n.x1 - projX(n.x1, cam, look)) * f;
         this.rect(xa, y - hw, xb, y + hw, c, 1);
-      } else {
-        const c = litColor(DEPTH_COLOR.neon, amb, DEPTH.neonFloor);
-        const x = projX(n.x0, cam, look);
-        this.rect(x - hw, projY(n.y0, cam, look), x + hw, projY(n.y1, cam, look), c, 1);
       }
+    }
+  }
+
+  /**
+   * 윗면 세로 네온 (모든 줄을 그린 뒤 한 번에): 여러 줄에 걸친 선이라 보이는 줄 범위와 겹치면 그린다 — 끝나는 줄로만 고르면 창
+   * 아래쪽에서 끝나는 긴 선이 사라졌다 나타난다. 자기 벽 윗면 안이라 남쪽 덩어리 그림과 겹치지 않는다(벽 사이 바닥 1칸 > 띄운 높이)
+   */
+  private drawSideNeon(i0: number, i1: number, j0: number, j1: number): void {
+    const look = this.look;
+    if (!look) return;
+    const cam = this.cam;
+    const hw = DEPTH.neonWidth / 2;
+    const c = litColor(DEPTH_COLOR.neon, this.ambient, DEPTH.neonFloor);
+    for (const n of SIDE_NEON) {
+      if (n.x1 < i0 || n.x0 > i1 + 1 || n.y1 < j0 || n.y0 > j1 + 1) continue;
+      const x = projX(n.x0, cam, look);
+      this.rect(x - hw, projY(n.y0, cam, look), x + hw, projY(n.y1, cam, look), c, 1);
     }
   }
 
@@ -721,6 +736,7 @@ export class DepthLayer {
   }
 
   destroy(): void {
+    gfxState.features.depthTris = 0;
     for (const h of this.halos) if (h.scene) h.destroy();
     this.halos = [];
     this.box.destroy();
@@ -752,15 +768,15 @@ const LAMPS_BY_ROW: readonly (readonly (typeof WALL_LAMPS)[number][])[] = (() =>
 })();
 const NO_LAMPS: readonly (typeof WALL_LAMPS)[number][] = [];
 
-/** 네온을 끝나는 줄로 (앞면 = 그 벽 줄, 윗면 세로 = 마지막 칸 줄) */
-const NEON_BY_ROW: readonly (readonly NeonRun[])[] = (() => {
+/** 앞면 네온을 그 벽 줄로 */
+const FRONT_NEON_BY_ROW: readonly (readonly NeonRun[])[] = (() => {
   const rows: NeonRun[][] = Array.from({ length: MAP_H }, () => []);
-  for (const n of DEPTH_NEON) {
-    const j = n.face === 'front' ? Math.floor(n.y0) : Math.floor(n.y1 - 1e-6);
-    rows[Math.max(0, Math.min(MAP_H - 1, j))]?.push(n);
-  }
+  for (const n of DEPTH_NEON)
+    if (n.face === 'front') rows[Math.max(0, Math.min(MAP_H - 1, Math.floor(n.y0)))]?.push(n);
   return rows;
 })();
+/** 윗면 세로 네온 (여러 줄에 걸친다) */
+const SIDE_NEON: readonly NeonRun[] = DEPTH_NEON.filter((n) => n.face === 'side');
 const NO_NEON: readonly NeonRun[] = [];
 
 /** 점을 중심 쪽으로 d만큼 (윗테두리 안쪽 변) */

@@ -384,6 +384,8 @@ export class WorldRenderer {
     red: 0,
     vignette: 0,
   };
+  /** 등불 가운데 색 그릇 (프레임마다 고쳐 쓴다) */
+  private readonly warm: [number, number, number] = [1, 1, 1];
   /** 괴물 화면: 자기 시야(부채꼴 ∪ 근접 원) 테두리 선분 (안개와 같은 주기로 계산) */
   private outline: [Vec2, Vec2][] = [];
   /** outline을 만든 다각형 (부채꼴 · 근접 원). 같은 참조면 다시 계산하지 않는다 */
@@ -932,10 +934,9 @@ export class WorldRenderer {
     const me = v.meBody ?? v.me;
     const cx = me ? me.x : v.view.x + v.view.w / 2;
     const cy = me ? me.y : v.view.y + v.view.h / 2;
-    const R = isMonster
-      ? (coneRange ?? v.balance.monster.visionModes.search.range)
-      : v.role === 'monster'
-        ? 6
+    const R =
+      v.role === 'monster'
+        ? (coneRange ?? v.balance.monster.visionModes.search.range)
         : survivorVisionRadius(v.balance, v.role);
     g.on = true;
     g.x = MAP_X + (cx - v.view.x) * k;
@@ -943,7 +944,7 @@ export class WorldRenderer {
     g.r0 = R * mod.DEPTH.lanternIn * k;
     g.r1 = R * mod.DEPTH.lanternOut * k;
     g.lanternMin = look.lanternMin;
-    g.warm = mod.lanternWarm(look, isMonster);
+    g.warm = mod.lanternWarm(look, isMonster, this.warm);
     g.crush = look.crush;
     g.red = isMonster ? look.monsterRed : 0;
     g.vignette = look.vignette;

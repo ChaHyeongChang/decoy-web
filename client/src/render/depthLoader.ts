@@ -9,11 +9,13 @@ let loading: Promise<typeof DepthChunk | null> | null = null;
 let failedAt = Number.NEGATIVE_INFINITY;
 /** 받지 못하면 이만큼 기다렸다 다시 (ms) — 판 장면이 프레임마다 부르므로 끊긴 회선에서 요청을 쏟지 않게 */
 export const DEPTH_RETRY_MS = 15_000;
+/** 기다리는 동안 돌려주는 값 (프레임마다 새 약속을 만들지 않게) */
+const NOT_YET: Promise<null> = Promise.resolve(null);
 
 /** 조각을 받는다 (한 번만, 실패하면 DEPTH_RETRY_MS 뒤에 다시) */
 export function loadDepth(now: number = performance.now()): Promise<typeof DepthChunk | null> {
   if (mod) return Promise.resolve(mod);
-  if (!loading && now - failedAt < DEPTH_RETRY_MS) return Promise.resolve(null);
+  if (!loading && now - failedAt < DEPTH_RETRY_MS) return NOT_YET;
   loading ??= import('./depthChunk').then(
     (m) => {
       mod = m;

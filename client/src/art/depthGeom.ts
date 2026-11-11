@@ -551,11 +551,19 @@ export function rimColor(ambientRgb: number, light: number): number {
 }
 
 /**
- * 등불 가운데 색 배율 (화소를 밝히지 않게 1 이하 — 초록 · 파랑을 줄여 따뜻하게, 괴물 화면은 더 붉게). 셰이더 uWarm
+ * 등불 가운데 색 배율 (화소를 밝히지 않게 1 이하 — 초록 · 파랑을 줄여 따뜻하게, 괴물 화면은 더 붉게). 셰이더 uWarm.
+ * out에 쓴다 (프레임마다 배열을 만들지 않게)
  */
-export function lanternWarm(look: DepthLook, monster: boolean): [number, number, number] {
+export function lanternWarm(
+  look: DepthLook,
+  monster: boolean,
+  out: [number, number, number] = [1, 1, 1],
+): [number, number, number] {
   const w = look.lanternWarm;
-  return monster ? [1, 1 - 0.9 * w, 1 - w] : [1, 1 - 0.45 * w, 1 - 0.9 * w];
+  out[0] = 1;
+  out[1] = monster ? 1 - 0.9 * w : 1 - 0.45 * w;
+  out[2] = monster ? 1 - w : 1 - 0.9 * w;
+  return out;
 }
 
 function smoothstep(e0: number, e1: number, x: number): number {
@@ -660,10 +668,3 @@ export const DEPTH_NEON: readonly NeonRun[] = neonRuns().filter((n) => {
 
 /** 앞면 네온의 남쪽 면 위 높이 비율 (윗면 쪽 0 → 바닥 1) — 맵 그림 앞면(0.34타일) 안 자리와 같은 비율 */
 export const NEON_FRONT_AT = MAP_ART.neonFrontAt;
-
-// ───────────────────────── 자기 빛 (거점 · 감옥 · 탈출구) ─────────────────────────
-
-/** 캐릭터 비스듬 그림자 오프셋 (타일): 몸 반지름 r의 함수뿐 — 역할 · 체력 · 능력과 무관 */
-export function castOffset(look: DepthLook, r: number): { dx: number; dy: number } {
-  return { dx: look.castDx * r, dy: look.castDy * r };
-}

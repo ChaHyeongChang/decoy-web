@@ -616,9 +616,10 @@ function schedulePrebake(): void {
     app.hub.prefetch();
     app.settings.prefetch();
     app.prefetchPractice();
-    // 입체감 조각: 그릴 수 있는 렌더러 · 품질 · 설정일 때만 (낮음 · Canvas는 받지 않는다)
-    if (activeDepthLook(gfxState.quality, gfxState.renderer)) void loadDepth();
     if (!game.isBooted) return;
+    // 입체감 조각: 그릴 수 있는 렌더러 · 품질 · 설정일 때만 (낮음 · Canvas는 받지 않는다). 부팅 뒤라 gfxState.renderer가 실제
+    // 렌더러다(WebGL을 못 만들어 Canvas로 내려간 기기는 받지 않는다)
+    if (activeDepthLook(gfxState.quality, gfxState.renderer)) void loadDepth();
     // 터치: 판 배치(논리 크기 → 배율 · HUD 서명)로 굽는다. 아니면 첫 판 시작 때 맵 · 캐릭터 · HUD를 모두 다시 굽는다
     if (device.touch) applyMatchLayout();
     // welcome 전(첫 화면 · 봇과 연습 고르기)에는 빌드에 넣은 수치의 반지름으로 굽는다: 연습은 고르자마자 판이 시작돼

@@ -21,7 +21,6 @@ import {
   DEPTH_NEON,
   PILLAR_PRISMS,
   WALL_LAMPS,
-  castOffset,
   cellHull,
   clipConvex,
   diskHitsRect,
@@ -59,6 +58,7 @@ import {
   resetDepthForTest,
 } from '../../client/src/gfx/depth';
 import { PREF_DEFAULTS, resetPrefsForTest, setPref } from '../../client/src/prefs';
+import type { setCastShadow } from '../../client/src/render/characters';
 
 const LOOKS: readonly DepthLook[] = Object.values(DEPTH_LOOKS);
 const AMB = ambientRgb(FOG.ambient, FOG.tint);
@@ -369,14 +369,19 @@ describe('입체감 후처리 (등불 · 가라앉히기)는 어둡게만 하고
 });
 
 describe('입체감: 괴물 화면 생존자 셋이 똑같다', () => {
-  it('비스듬 그림자 오프셋은 시안 · 몸 반지름 두 인자만 받는다 — 역할 · 체력 · 능력 자리가 없다 (인자 수 · 같은 반지름이면 같은 값)', () => {
-    expect(castOffset.length).toBe(2);
+  it('비스듬 그림자는 시안 값 셋(동 · 남 오프셋 · 알파)만 받는다 — 역할 · 체력 · 능력 자리가 없다 (타입 검사, 실제 그리기 경로 characters.setCastShadow)', () => {
+    type CastInput = NonNullable<Parameters<typeof setCastShadow>[0]>;
+    // 받는 칸이 정확히 이 셋이다: 칸이 늘면 아래 두 줄 중 하나가 타입 오류
+    const keys: Record<keyof CastInput, true> = { castDx: true, castDy: true, castAlpha: true };
+    const exact: CastInput = { castDx: 0, castDy: 0, castAlpha: 0 };
+    expect(Object.keys(keys).sort()).toEqual(['castAlpha', 'castDx', 'castDy']);
+    expect(exact.castAlpha).toBe(0);
+    // 시안 값 셋은 그림자를 몸 동 · 남쪽으로 (화면 오른쪽 아래)
     for (const look of LOOKS) {
-      const a = castOffset(look, 0.3);
-      const b = castOffset(look, 0.3);
-      expect(a).toEqual(b);
-      expect(a.dx).toBeGreaterThan(0);
-      expect(a.dy).toBeGreaterThan(0);
+      expect(look.castDx).toBeGreaterThan(0);
+      expect(look.castDy).toBeGreaterThan(0);
+      expect(look.castAlpha).toBeGreaterThan(0);
+      expect(look.castAlpha).toBeLessThan(0.5);
     }
   });
 });
