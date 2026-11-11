@@ -199,6 +199,8 @@ export const UI_TEXT = {
   // ── 새 버전 (M13d) ──
   updateAvailable: '새 버전이 있어요',
   updateReload: '새로고침',
+  /** 프로토콜 관문 거절 (docs/DEPLOY.md 7장). 서버가 보내는 문구(UPDATE_REQUIRED_MESSAGE, shared/src/sim/core.ts)와 같다 */
+  updateRequired: '새 버전이 나왔어요. 새로고침해 주세요',
   // ── 처리방침 (M15) ──
   privacy: '개인정보 처리방침',
 } as const;

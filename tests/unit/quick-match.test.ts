@@ -1,7 +1,7 @@
 // M13c 빠른 매칭 (GAME_DESIGN 11장): 가짜 연결 + 수동 시계로 대기열 · 자동 시작 · 역할 배정 · 판 뒤 해산 ·
 // 이름 가림 · 판 중 나가기 · 봇 방 상한 · 서버 로그
 import { describe, expect, it } from 'vitest';
-import type { ClientMessage, Role, ServerMessage } from '@decoy/shared';
+import { PROTOCOL_VERSION, type ClientMessage, type Role, type ServerMessage } from '@decoy/shared';
 import {
   BotDriver,
   QUICK_STALE_MS,
@@ -67,7 +67,7 @@ function setup(opts: { canFillBots?: (room: Room) => boolean } = {}): {
 }
 
 function quick(c: Client): void {
-  c.link.receive(raw({ t: 'quick', name: c.name }));
+  c.link.receive(raw({ t: 'quick', proto: PROTOCOL_VERSION, name: c.name }));
 }
 
 function roomOf(core: ServerCore, c: Client): Room {
@@ -83,7 +83,16 @@ function rejoin(env: ReturnType<typeof setup>, c: Client, code: string): Client 
   c.link.close();
   const fresh = env.client(c.name);
   fresh.link.receive(
-    raw({ t: 'join', room: code, create: false, name: c.name, token, altTokens: [], bots: false }),
+    raw({
+      t: 'join',
+      proto: PROTOCOL_VERSION,
+      room: code,
+      create: false,
+      name: c.name,
+      token,
+      altTokens: [],
+      bots: false,
+    }),
   );
   return fresh;
 }
@@ -203,7 +212,16 @@ describe('빠른 매칭: 대기열 · 자동 시작', () => {
     const { core, client } = setup();
     const host = client('방장');
     host.link.receive(
-      raw({ t: 'join', room: null, create: true, name: '방장', token: null, altTokens: [], bots: false }),
+      raw({
+        t: 'join',
+        proto: PROTOCOL_VERSION,
+        room: null,
+        create: true,
+        name: '방장',
+        token: null,
+        altTokens: [],
+        bots: false,
+      }),
     );
     const codeRoom = roomOf(core, host);
     const q = client('매칭');
@@ -214,6 +232,7 @@ describe('빠른 매칭: 대기열 · 자동 시작', () => {
     intruder.link.receive(
       raw({
         t: 'join',
+        proto: PROTOCOL_VERSION,
         room: quickRoom.code,
         create: false,
         name: '끼어',
@@ -750,7 +769,16 @@ describe('봇 이름 (?bots=1 방 코드 방도)', () => {
     const { core, client, run } = setup();
     const host = client('방장');
     host.link.receive(
-      raw({ t: 'join', room: null, create: true, name: '방장', token: null, altTokens: [], bots: true }),
+      raw({
+        t: 'join',
+        proto: PROTOCOL_VERSION,
+        room: null,
+        create: true,
+        name: '방장',
+        token: null,
+        altTokens: [],
+        bots: true,
+      }),
     );
     host.link.receive(raw({ t: 'role', role: 'monster' }));
     host.link.receive(raw({ t: 'ready', ready: true }));

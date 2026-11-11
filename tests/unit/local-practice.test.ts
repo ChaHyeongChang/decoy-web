@@ -1,6 +1,6 @@
 // M13b 기기 안 연습 서버(LocalTransport)와 첫 화면 상태 줄(serverStatus). 가짜 시계로 30Hz 루프 · 숨김 · JSON 왕복을 본다
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ServerMessage } from '@decoy/shared';
+import { PROTOCOL_VERSION, type ServerMessage } from '@decoy/shared';
 import { LocalTransport } from '../../client/src/localServer';
 import { PRACTICE_BALANCE } from '../../client/src/practiceBalance';
 import { UNREACHABLE_AFTER_MS, serverStatus } from '../../client/src/serverStatus';
@@ -43,7 +43,16 @@ describe('기기 안 연습 서버 (LocalTransport)', () => {
     const local = new LocalTransport({ testHooks: true, seed: 5 });
     const inbox: ServerMessage[] = [];
     local.subscribe((m) => inbox.push(m));
-    local.send({ t: 'join', room: null, create: true, name: '나', token: null, altTokens: [], bots: true });
+    local.send({
+      t: 'join',
+      proto: PROTOCOL_VERSION,
+      room: null,
+      create: true,
+      name: '나',
+      token: null,
+      altTokens: [],
+      bots: true,
+    });
     local.send({ t: 'role', role });
     local.send({ t: 'ready', ready: true });
     local.send({ t: 'start' });

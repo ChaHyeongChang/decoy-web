@@ -4,6 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
+  PROTOCOL_VERSION,
   CAPTURE_POINTS,
   POINT_IDS,
   PRISON_RECT,
@@ -297,7 +298,16 @@ describe('실전 봇 두뇌: 기기 안 연습 방 (BotDriver)', () => {
       throw err;
     });
     link.receive(
-      raw({ t: 'join', room: null, create: true, name: '나', token: null, altTokens: [], bots: true }),
+      raw({
+        t: 'join',
+        proto: PROTOCOL_VERSION,
+        room: null,
+        create: true,
+        name: '나',
+        token: null,
+        altTokens: [],
+        bots: true,
+      }),
     );
     link.receive(raw({ t: 'role', role: 'scout' }));
     link.receive(raw({ t: 'ready', ready: true }));

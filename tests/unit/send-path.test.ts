@@ -3,6 +3,7 @@
 // 그 메모가 다시 오지 않으므로 보낸다. 스냅샷이 아닌 메시지는 늘 보내고, 8MB를 넘으면 끊는다
 import { describe, expect, it } from 'vitest';
 import {
+  PROTOCOL_VERSION,
   CAPTURE_POINTS,
   type ClientMessage,
   type GameEvent,
@@ -47,7 +48,16 @@ class FakeSocket implements SendSocket {
 }
 
 function joinMsg(room: string | null): Extract<ClientMessage, { t: 'join' }> {
-  return { t: 'join', room, create: room === null, name: '', token: null, altTokens: [], bots: false };
+  return {
+    t: 'join',
+    proto: PROTOCOL_VERSION,
+    room,
+    create: room === null,
+    name: '',
+    token: null,
+    altTokens: [],
+    bots: false,
+  };
 }
 
 const hasNote = (events: GameEvent[]): boolean =>

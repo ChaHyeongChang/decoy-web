@@ -1,6 +1,6 @@
 // 연결 처리와 틱 스케줄러 (M13a). 서버(server/src/index.ts: HTTP · ws 소켓 · setInterval)와
 // 기기 안 연습(M13b)이 같은 코드를 쓴다. 소켓 · 타이머는 바깥이 맡고, 여기서는 받은 원문을 방에 잇고 틱을 돌린다
-import type { ClientMessage } from '../types';
+import { PROTOCOL_VERSION, type ClientMessage } from '../types';
 import {
   RoomManager,
   type Conn,
@@ -13,6 +13,12 @@ import {
 
 /** 한 번에 따라잡는 최대 틱 수. 그보다 밀리면 시간을 버린다 */
 export const MAX_CATCHUP_TICKS = 5;
+
+/**
+ * 프로토콜 관문 거절 문구 (docs/DEPLOY.md 7장). 옛 화면은 모르는 오류 코드도 이 문구를 오류 줄에 그대로 띄운다.
+ * 화면 문구 UI_TEXT.updateRequired(client/src/data/storyText.ts) · docs/STORY_TEXT.md와 같아야 한다 (tests/unit/protocol-gate.test.ts)
+ */
+export const UPDATE_REQUIRED_MESSAGE = '새 버전이 나왔어요. 새로고침해 주세요';
 
 /** 연결 하나: 바깥(소켓 · 기기 안 전송)이 받은 원문을 넣고, 닫히면 알린다 */
 export interface CoreLink {
@@ -34,6 +40,8 @@ export class ServerCore {
   private nextTickAt: number;
   /** 서버 빌드 ID (M13d, 없으면 null) */
   private readonly buildId: string | null;
+  /** 기기 안 연습 서버 (M13b): 화면과 같은 빌드라 프로토콜 관문을 보지 않는다 */
+  private readonly practice: boolean;
 
   constructor(
     config: RoomConfig,
@@ -43,6 +51,7 @@ export class ServerCore {
   ) {
     this.manager = new RoomManager(config, hooks);
     this.buildId = config.buildId ?? null;
+    this.practice = config.practice === true;
     this.tickMs = 1000 / config.balance.network.serverTickHz;
     this.nextTickAt = now() + this.tickMs;
   }
@@ -79,6 +88,12 @@ export class ServerCore {
       // 다시 묶이는 길은 join · quick뿐이고 그때 새로 넣는다
       if (!live) bound = null;
       if (msg.t === 'join' || msg.t === 'quick') {
+        // 프로토콜 관문 (docs/DEPLOY.md 7장): proto가 없거나(옛 화면) 다르면 자리에 묶지 않고 거절한다 — 맵 · 스냅샷 뜻이 다른
+        // 화면이 판에 들어가 깨지지 않게. 기기 안 연습은 같은 빌드라 보지 않는다(오프라인 연습이 막히지 않게)
+        if (!this.practice && msg.proto !== PROTOCOL_VERSION) {
+          conn.send({ t: 'error', code: 'update-required', message: UPDATE_REQUIRED_MESSAGE });
+          return;
+        }
         if (live) return;
         declared = typeof msg.account === 'string' ? msg.account : null;
         const r =

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ClientMessage, Role } from '@decoy/shared';
+import { PROTOCOL_VERSION, type ClientMessage, type Role } from '@decoy/shared';
 import { RoomManager, type Room, type Seat } from '@decoy/shared/sim';
 import { FakeConn } from '../helpers/fakeConn';
 import { loadTestBalance } from '../helpers/fixtures';
@@ -12,6 +12,7 @@ function joinMsg(
 ): Extract<ClientMessage, { t: 'join' }> {
   return {
     t: 'join',
+    proto: PROTOCOL_VERSION,
     room,
     create: room === null,
     name: '',

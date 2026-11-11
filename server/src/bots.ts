@@ -1,6 +1,7 @@
 // 개발 · 테스트용 봇. 실제 WebSocket 클라이언트로 접속해 자기에게 온 (걸러진) 스냅샷만 보고 움직인다.
 import WebSocket from 'ws';
 import {
+  PROTOCOL_VERSION,
   validateBalance,
   type Balance,
   type ClientMessage,
@@ -44,6 +45,7 @@ export class BotClient {
     this.ws.on('open', () => {
       this.send({
         t: 'join',
+        proto: PROTOCOL_VERSION,
         room: opts.create ? null : opts.room,
         create: opts.create === true,
         name: opts.name ?? '봇',

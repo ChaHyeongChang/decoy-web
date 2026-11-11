@@ -4,6 +4,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
+  PROTOCOL_VERSION,
   BTN,
   Rng,
   validateBalance,
@@ -217,7 +218,16 @@ describe('Game: 판 시작 카운트다운 (사전 단계)', () => {
 // ───────────────────────── 방 ─────────────────────────
 
 function joinMsg(room: string | null, token: string | null = null): Extract<ClientMessage, { t: 'join' }> {
-  return { t: 'join', room, create: room === null, name: '', token, altTokens: [], bots: false };
+  return {
+    t: 'join',
+    proto: PROTOCOL_VERSION,
+    room,
+    create: room === null,
+    name: '',
+    token,
+    altTokens: [],
+    bots: false,
+  };
 }
 
 function fourRoom(config: Partial<RoomConfig> = {}): {
@@ -490,7 +500,16 @@ describe('연습 방(같은 프로세스 봇)과 카운트다운', () => {
       throw err;
     });
     link.receive(
-      raw({ t: 'join', room: null, create: true, name: '나', token: null, altTokens: [], bots: true }),
+      raw({
+        t: 'join',
+        proto: PROTOCOL_VERSION,
+        room: null,
+        create: true,
+        name: '나',
+        token: null,
+        altTokens: [],
+        bots: true,
+      }),
     );
     link.receive(raw({ t: 'role', role: 'runner' }));
     link.receive(raw({ t: 'ready', ready: true }));
