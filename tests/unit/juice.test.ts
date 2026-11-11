@@ -310,6 +310,38 @@ describe('효과 수명 · 모양 (fx.ts)', () => {
   });
 });
 
+describe('이벤트 없는 스냅샷 (판 장면은 계획을 만들지 않고 건너뛴다)', () => {
+  it('이벤트가 없으면 계획은 늘 비어 있다 — 내 상태 · 팀원 상태가 바뀐 스냅샷이어도 (소리 · 진동 · 배너는 이벤트를 받았을 때만)', () => {
+    const empty: JuicePlan = {
+      sounds: [],
+      haptic: null,
+      shakes: [],
+      hitFlash: false,
+      imprisonFade: false,
+      rescueRim: false,
+      anonPulse: false,
+      rescuer: false,
+      banners: [],
+    };
+    const STATUSES: readonly (SurvivorStatus | null)[] = [null, 'free', 'imprisoned', 'escaped', 'dead'];
+    const prevTeam = new Map<string, SurvivorStatus>([
+      ['a', 'free'],
+      ['b', 'imprisoned'],
+    ]);
+    const team = [
+      { id: 'a', role: 'guard' as const, status: 'imprisoned' as const },
+      { id: 'b', role: 'scout' as const, status: 'free' as const },
+    ];
+    for (const role of ['runner', 'guard', 'scout', 'monster'] as const)
+      for (const prevStatus of STATUSES)
+        for (const status of STATUSES)
+          expect(
+            snapshotJuice({ role, events: [], status, prevStatus, team, prevTeam, nearMiss: false }),
+            `${role} ${String(prevStatus)} → ${String(status)}`,
+          ).toEqual(empty);
+  });
+});
+
 describe('괴물 화면 그림 고르기 (art/fx.ts — worldRenderer가 이 판단을 부른다, 0장 ③)', () => {
   const STATUSES: readonly SurvivorStatus[] = ['free', 'imprisoned', 'escaped', 'dead'];
 

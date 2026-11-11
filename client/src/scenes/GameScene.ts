@@ -727,8 +727,9 @@ export class GameScene extends Phaser.Scene {
       this.noteSelfReconcile(performance.now());
       // 진동 (터치 기기): 발각 꺼짐 → 켜짐 전환만 울린다(판단은 haptics, 지난 일은 그 시간으로 거른다)
       if (device.touch) haptics.spotted(e.snap.you.surv?.spotted === true, age);
-      // 손맛: 이 스냅샷의 소리 · 진동 · 흔들림 · 화면 효과 · 배너를 한 번에 정한다 (지난 일이면 내지 않는다, juice.ts)
-      const juice = stale ? null : this.planJuice(e.snap);
+      // 손맛: 이 스냅샷의 소리 · 진동 · 흔들림 · 화면 효과 · 배너를 한 번에 정한다 (지난 일이면 내지 않는다, juice.ts).
+      // 이벤트가 없으면 계획은 늘 비어 있어 만들지 않는다 (juice.test 「이벤트가 없으면 계획은 늘 비어 있다…」) — 지난 상태 기록(noteTeam)은 그대로
+      const juice = stale || e.snap.events.length === 0 ? null : this.planJuice(e.snap);
       this.juiceNow = juice?.plan ?? null;
       for (const ev of e.snap.events) {
         if (!stale || isKeptNote(ev)) this.onEvent(ev);

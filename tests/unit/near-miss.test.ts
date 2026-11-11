@@ -96,8 +96,9 @@ describe('아슬아슬 회피 판단 (nearMiss.ts)', () => {
     expect(nearMissStrike(input({ events: [strike(1), hitMe] }))).toBeNull();
     // 동료가 맞은 타격을 내가 아슬아슬하게 비껴간 것은 참
     expect(nearMissStrike(input({ events: [hitMate, strike(1)] }))).not.toBeNull();
-    // 타격이 없으면 거짓
+    // 타격이 없으면 거짓 (이벤트가 없는 스냅샷도 — 판 장면은 그런 스냅샷의 손맛 계획을 건너뛴다)
     expect(nearMissStrike(input({ events: [hitMate] }))).toBeNull();
+    expect(nearMissStrike(input({ events: [] }))).toBeNull();
   });
 
   it('괴물 역할이면 어떤 자리 · 이벤트에서도 늘 거짓 (괴물 화면에는 어떤 형태로도 알리지 않는다)', () => {
