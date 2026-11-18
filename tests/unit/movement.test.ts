@@ -22,14 +22,14 @@ function run(s: MoveState, e: MoveEnv, ticks: number, mx: number, my: number, ai
 }
 
 describe('이동 속도', () => {
-  it('생존자 5타일/초, 괴물 5.5타일/초 (110%)', () => {
+  it('생존자 5타일/초, 괴물 5.6타일/초 (112%, 11/18 시연 뒤 5.5 → 5.6)', () => {
     const s = createMoveState({ x: 20, y: 18.5 }, 0);
     run(s, env('survivor'), 30, 1, 0);
     expect(s.x - 20).toBeCloseTo(b.survivor.moveSpeed, 5);
     const m = createMoveState({ x: 20, y: 18.5 }, 0);
     run(m, env('monster'), 30, 1, 0);
     expect(m.x - 20).toBeCloseTo(b.monster.moveSpeed, 5);
-    expect(b.monster.moveSpeed / b.survivor.moveSpeed).toBeCloseTo(1.1);
+    expect(b.monster.moveSpeed / b.survivor.moveSpeed).toBeCloseTo(1.12);
   });
 
   it('대각선 입력도 속도는 같다', () => {
