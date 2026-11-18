@@ -258,6 +258,28 @@ export function circleIntersectsSector(o: Vec2, s: SectorShape, c: Vec2, r: numb
 }
 
 /**
+ * 괴물 공격 타격 모양 (GAME_DESIGN 5.1): 앞 부채꼴(dir · arc 라디안 · range) + 몸 둘레 근접 원(close).
+ * 반지름은 모두 괴물 중심에서 재고, 생존자 몸 원(반지름 r)이 어느 쪽과든 겹치면 맞는다. close = 0이면 부채꼴만
+ */
+export interface StrikeShape extends SectorShape {
+  close: number;
+}
+
+/** balance 공격 값(arc는 도)과 준비 방향으로 타격 모양을 만든다. 서버 판정 · 범위 그림 · 손맛 표시가 모두 이것을 쓴다 */
+export function strikeShape(
+  attack: { range: number; arc: number; closeRange: number },
+  dir: number,
+): StrikeShape {
+  return { dir, arc: (attack.arc * Math.PI) / 180, range: attack.range, close: attack.closeRange };
+}
+
+/** 원(c, r)이 타격 모양과 겹치는가 (벽 무시 — 시선은 부르는 쪽이 segmentBlocked로 따로 본다) */
+export function circleIntersectsStrike(o: Vec2, s: StrikeShape, c: Vec2, r: number): boolean {
+  if (s.close > 0 && dist(o, c) <= s.close + r) return true;
+  return circleIntersectsSector(o, s, c, r);
+}
+
+/**
  * 시야 다각형: 중심에서 벽 모서리 방향과 일정 간격 방향으로 광선을 쏴서 만든다.
  * sector가 없으면 원형. 반환 점들은 각도 순서(원형) 또는 [중심, 호 점들…](부채꼴).
  */

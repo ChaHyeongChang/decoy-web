@@ -5,7 +5,7 @@
 // 띠 폭 δ는 판정 · 정보와 무관한 그림 값이라 balance.json이 아니라 여기 둔다(선례 camera.SHAKE · charFrames.NEW_POSE_MS)
 import {
   blocksStrike,
-  circleIntersectsSector,
+  circleIntersectsStrike,
   segmentBlocked,
   type GameEvent,
   type Vec2,
@@ -33,9 +33,10 @@ export interface NearMissInput {
   me: Vec2;
   /** 같은 스냅샷의 이벤트 (hit{you:true}가 있으면 회피가 아니다) */
   events: readonly GameEvent[];
-  /** balance: 공격 사거리(타일) · 각도(도) · 생존자 몸 반지름 */
+  /** balance: 공격 사거리(타일) · 각도(도) · 근접 판정 반경(타일, 괴물 중심에서) · 생존자 몸 반지름 */
   range: number;
   arcDeg: number;
+  closeRange: number;
   bodyR: number;
 }
 
@@ -43,7 +44,8 @@ export interface NearMissInput {
  * 이 스냅샷의 타격(attackHit) 가운데 나를 아슬아슬하게 비껴간 것 (없으면 null). 조건: 내가 생존자 · 자유 · 보호 중 아님(이번 · 지난 스냅샷 모두 —
  * 보호가 막아 준 것은 회피가 아니다. 보호가 막 끝난 직후의 진짜 회피도 드물게 놓치지만 판정과 어긋난 표시보다 안전하다) ·
  * 같은 스냅샷에 내 피격 없음 · 타격 자리와 내 자리 사이가 벽 · 철창(blocksStrike)에 막히지 않음 · 몸 원(반지름 + δ)이 판정
- * 부채꼴과 겹침. 판정 부채꼴 안인데 안 맞은 경우(타격 직후 한 틱 사이에 들어온 가장 가까운 회피)도 참이다
+ * 모양(앞 부채꼴 + 몸 둘레 근접 원 — 서버 strike와 같은 circleIntersectsStrike)과 겹침. 판정 모양 안인데 안 맞은 경우
+ * (타격 직후 한 틱 사이에 들어온 가장 가까운 회피)도 참이다
  */
 export function nearMissStrike(p: NearMissInput): Extract<GameEvent, { k: 'attackHit' }> | null {
   if (p.role === 'monster' || p.status !== 'free' || p.protectLeft > 0 || p.prevProtectLeft > 0) return null;
@@ -53,8 +55,8 @@ export function nearMissStrike(p: NearMissInput): Extract<GameEvent, { k: 'attac
     if (ev.k === 'attackHit' && !strike) strike = ev;
   }
   if (!strike) return null;
-  const sector = { dir: strike.dir, arc: (p.arcDeg * Math.PI) / 180, range: p.range };
-  if (!circleIntersectsSector(strike, sector, p.me, p.bodyR + NEAR_MISS.delta)) return null;
+  const shape = { dir: strike.dir, arc: (p.arcDeg * Math.PI) / 180, range: p.range, close: p.closeRange };
+  if (!circleIntersectsStrike(strike, shape, p.me, p.bodyR + NEAR_MISS.delta)) return null;
   return segmentBlocked(strike, p.me, blocksStrike) ? null : strike;
 }
 

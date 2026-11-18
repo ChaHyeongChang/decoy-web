@@ -75,7 +75,15 @@ export interface Balance {
     nearVisionRadius: number;
     visionModes: Record<VisionModeId, VisionModeBalance>;
     visionModeSwitchTime: number;
-    attack: { windup: number; cooldown: number; range: number; arc: number; windupMoveMultiplier: number };
+    attack: {
+      windup: number;
+      cooldown: number;
+      range: number;
+      arc: number;
+      windupMoveMultiplier: number;
+      /** 근접 판정 반경 (괴물 중심에서, range와 같은 잣대): 타격 순간 이 원에 몸이 닿은 생존자는 방향과 상관없이 맞는다. 0이면 끔 */
+      closeRange: number;
+    };
     dash: { distance: number; duration: number; cooldown: number };
     roar: { radius: number; revealDuration: number; selfRevealDuration: number; cooldown: number };
   };
@@ -192,6 +200,7 @@ const SCHEMA: Shape = {
       range: 'pos',
       arc: 'pos',
       windupMoveMultiplier: 'nonneg',
+      closeRange: 'nonneg',
     },
     dash: { distance: 'nonneg', duration: 'pos', cooldown: 'nonneg' },
     roar: { radius: 'nonneg', revealDuration: 'nonneg', selfRevealDuration: 'nonneg', cooldown: 'nonneg' },

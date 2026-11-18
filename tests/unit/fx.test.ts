@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { validateBalance } from '../../shared/src/balance';
 import { survivorVisionPolygon } from '../../shared/src/visibility';
-import { circleIntersectsSector, pointInPolygon } from '../../shared/src/geometry';
+import { circleIntersectsStrike, pointInPolygon } from '../../shared/src/geometry';
 import {
   DASH_GAP_MS,
   DASH_GHOST_MS,
@@ -136,14 +136,18 @@ describe('매 프레임 그리는 점 · 고리는 반지름에 맞춘 다각형
   });
 });
 
-describe('괴물 화면 수감 흩어짐 자리 (타격 부채꼴 안의 후보만)', () => {
-  const atk = { range: balance.monster.attack.range, arc: (balance.monster.attack.arc * Math.PI) / 180 };
+describe('괴물 화면 수감 흩어짐 자리 (타격 모양 안의 후보만 — 앞 부채꼴 + 몸 둘레 근접 원)', () => {
+  const atk = {
+    range: balance.monster.attack.range,
+    arc: (balance.monster.attack.arc * Math.PI) / 180,
+    close: balance.monster.attack.closeRange,
+  };
   const r = balance.survivor.radius;
   const hit = { x: 42, y: 12, dir: Math.PI, hits: 1 };
 
-  it('같은 순간 시야를 벗어난 다른 생존자(공격 부채꼴 밖)는 고르지 않는다 (검토 장면: 괴물 옆 0.75타일 가드)', () => {
+  it('같은 순간 시야를 벗어난 다른 생존자(타격 모양 밖)는 고르지 않는다 (검토 장면: 괴물 옆 가드 — 근접 원 + 여유 0.95타일 밖 1.0타일)', () => {
     const runner = { id: 'r', x: 41, y: 12 };
-    const guard = { id: 'g', x: 42, y: 12.75 };
+    const guard = { id: 'g', x: 42, y: 13 };
     expect(pickDissolveTarget([guard, runner], hit, atk, r)?.id).toBe('r');
     expect(pickDissolveTarget([runner, guard], hit, atk, r)?.id).toBe('r');
     // 맞은 사람이 후보에 없으면 (가드만 사라짐) 연출 생략
@@ -154,18 +158,22 @@ describe('괴물 화면 수감 흩어짐 자리 (타격 부채꼴 안의 후보�
     const runner = { id: 'r', x: 41, y: 12 };
     expect(pickDissolveTarget([runner], null, atk, r)).toBeNull();
     expect(pickDissolveTarget([runner], { ...hit, hits: 0 }, atk, r)).toBeNull();
-    // 격자 위 후보들: 고른 것은 늘 부채꼴(범위 + 몸 반지름 + 여유)과 겹친다. 부채꼴 안 후보가 있으면 반드시 고른다
-    const sector = { dir: hit.dir, arc: atk.arc, range: atk.range };
+    // 격자 위 후보들: 고른 것은 늘 타격 모양(범위 + 몸 반지름 + 여유)과 겹친다. 모양 안 후보가 있으면 반드시 고른다
+    const shape = { dir: hit.dir, arc: atk.arc, range: atk.range, close: atk.close };
+    let behindPicked = 0;
     for (let y = 10; y <= 14; y += 0.25)
       for (let x = 39.5; x <= 44.5; x += 0.25) {
         const c = { id: `${x},${y}`, x, y };
         const pick = pickDissolveTarget([c], hit, atk, r);
-        const inside = circleIntersectsSector(hit, sector, c, r);
+        const inside = circleIntersectsStrike(hit, shape, c, r);
         if (inside) expect(pick, c.id).not.toBeNull();
-        if (pick) expect(circleIntersectsSector(hit, sector, c, r + 0.1), c.id).toBe(true);
+        if (pick) expect(circleIntersectsStrike(hit, shape, c, r + 0.1), c.id).toBe(true);
+        // 바로 등 뒤에 붙은 자리(근접 원 안)는 고른다
+        if (pick && x > hit.x) behindPicked += 1;
         // 뒤쪽 (조준 반대편 1타일 넘게)은 절대 고르지 않는다
         if (x > 43) expect(pick, c.id).toBeNull();
       }
+    expect(behindPicked).toBeGreaterThan(0);
   });
 
   it('여럿이면 조준 방향에 가까운 것', () => {

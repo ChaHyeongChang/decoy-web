@@ -415,8 +415,9 @@ export interface CostumeChoice {
  * 프로토콜 버전 (docs/DEPLOY.md 7장). 옛 화면과 맞지 않는 배포(맵 · 이동 · 스냅샷 · 메시지 뜻 · balance 키 삭제 · 개명)마다 1씩 올린다.
  * 화면은 join · quick에 싣고, 서버(ServerCore.connect)는 없거나 다르면 자리에 묶지 않고 'update-required'로 거절한다(기기 안 연습은 통과).
  * 1: 플레이테스트 반영 b (거점 C · 옮긴 기둥 · PointState 'off')
+ * 2: 근접 판정 (11/18 시연 — 옛 화면은 공격 준비 범위를 부채꼴만 그려 옆 · 등 뒤 판정을 숨긴다, DECISIONS 18절)
  */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 export type TestCommand =
   | { kind: 'teleport'; target: string; x: number; y: number; face?: number }

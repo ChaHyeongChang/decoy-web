@@ -28,7 +28,7 @@ import {
 import { newGame } from '../helpers/fixtures';
 
 /** 기대 해시. 규칙 · 판정을 일부러 바꿨을 때만 GAME_DESIGN 변경 이력과 함께 갱신한다 */
-const GOLDEN_HASH = '7beff4b9752912443e490a1457edcbfac08497ff587ae8a962103b9c48d60117';
+const GOLDEN_HASH = 'a0bc2db570b8acedd6dd1027e9fa5dc19f3ea1000da0ab51997a751cefe7bb3d';
 const SEED = 20261008;
 /** 총 틱 수 (30Hz, 32초). 판은 913틱쯤 괴물 승리(3명 동시 수감)로 끝난다 */
 const TOTAL_TICKS = 960;

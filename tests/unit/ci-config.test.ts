@@ -13,6 +13,7 @@ interface Step {
 interface Job {
   if?: string;
   name: string;
+  'runs-on': string;
   needs?: string[];
   'timeout-minutes': number;
   strategy?: { 'fail-fast'?: boolean; matrix: { shard: number[] } };
@@ -29,6 +30,13 @@ const DISPATCH_ONLY = "github.event_name == 'workflow_dispatch'";
 describe('ci.yml', () => {
   it('push(main) · PR · 수동 실행에서 돈다', () => {
     expect(Object.keys(ci.on).sort()).toEqual(['pull_request', 'push', 'workflow_dispatch']);
+  });
+
+  it('Playwright 브라우저를 받는 작업(빠른 검사 · 전체 E2E)은 ubuntu-24.04 고정 (1.56.1은 26.04에서 Chromium을 받지 못한다)', () => {
+    for (const job of [ci.jobs.quick, ci.jobs.e2e]) {
+      expect(job.steps.some((s) => s.run?.includes('playwright install'))).toBe(true);
+      expect(job['runs-on']).toBe('ubuntu-24.04');
+    }
   });
 
   it('빠른 검사는 언제나: 타입 · 린트 · 단위 · 핵심 E2E', () => {

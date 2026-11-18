@@ -1,6 +1,7 @@
 // 아슬아슬 회피 판단 (플레이테스트 반영 c 손맛, docs/playtest/c-juice.md 5.4절): 생존자 화면이 자기 스냅샷만으로 판단한다.
 // 괴물 (30, 21) 정면(동쪽) 기준 — 사거리 1.2 · 몸 반지름 0.3이라 중심 거리 1.5까지 맞는 경계, 1.5 초과 ~ 1.5 + δ(0.3) 띠, 그 밖은 거짓.
-// 판정 부채꼴 안인데 안 맞은 경우도 참, 벽 · 철창 사이 · 수감 · 사망 · 보호 중 · hit{you:true} · 괴물 역할은 거짓
+// 판정 부채꼴 안인데 안 맞은 경우도 참, 벽 · 철창 사이 · 수감 · 사망 · 보호 중 · hit{you:true} · 괴물 역할은 거짓.
+// 몸 둘레 근접 원(closeRange 0.55 — 중심 거리 0.85까지 맞음)도 판정 모양이라 등 뒤 · 옆은 0.85 초과 ~ 0.85 + δ 띠가 참
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { validateBalance } from '../../shared/src/balance';
@@ -29,14 +30,17 @@ function input(over: Partial<NearMissInput> = {}): NearMissInput {
     events: [strike()],
     range: ATK.range,
     arcDeg: ATK.arc,
+    closeRange: ATK.closeRange,
     bodyR: R,
     ...over,
   };
 }
-const at = (d: number, deg = 0): { x: number; y: number } => ({
-  x: MON.x + d * Math.cos((deg * Math.PI) / 180),
-  y: MON.y + d * Math.sin((deg * Math.PI) / 180),
+const at = (d: number, deg = 0, o = MON): { x: number; y: number } => ({
+  x: o.x + d * Math.cos((deg * Math.PI) / 180),
+  y: o.y + d * Math.sin((deg * Math.PI) / 180),
 });
+/** 사방이 트인 자리 (동쪽 방 x 35–46, y 10–13) — 등 뒤 · 옆 근접 원 띠를 볼 때. (30, 21)은 서쪽 1타일에 벽(x 27–28)이 있다 */
+const OPEN = { x: 39.5, y: 12 };
 
 describe('아슬아슬 회피 판단 (nearMiss.ts)', () => {
   it('시험 자리 전제: 괴물 (30, 21) 동쪽 2.2타일까지 타격선이 막히지 않는다', () => {
@@ -58,15 +62,36 @@ describe('아슬아슬 회피 판단 (nearMiss.ts)', () => {
     expect(nearMissStrike(input({ me: at(edge) }))).not.toBeNull();
   });
 
-  it('옆 각도 경계: 거리 1에서 부채꼴 변(45°)과의 거리가 몸 반지름 + δ 안이면 참', () => {
-    // 거리 1 · 각도 θ의 점과 45° 변 사이 거리 = sin(θ − 45°) → 0.6 이하면 겹침 (θ ≤ 45° + asin 0.6 ≈ 81.9°)
-    const limit = 45 + (Math.asin(R + NEAR_MISS.delta) * 180) / Math.PI;
+  it('옆 각도 경계: 거리 1.3(근접 원 띠 1.15 밖)에서 부채꼴 변(45°)과의 거리가 몸 반지름 + δ 안이면 참', () => {
+    // 거리 1.3 · 각도 θ의 점과 45° 변 사이 거리 = 1.3 sin(θ − 45°) → 0.6 이하면 겹침 (θ ≤ 45° + asin(0.6 / 1.3) ≈ 72.5°)
+    expect(ATK.closeRange + R + NEAR_MISS.delta).toBeLessThan(1.3);
+    const limit = 45 + (Math.asin((R + NEAR_MISS.delta) / 1.3) * 180) / Math.PI;
     for (const sign of [1, -1]) {
-      expect(nearMissStrike(input({ me: at(1, sign * (limit - 1)) }))).not.toBeNull();
-      expect(nearMissStrike(input({ me: at(1, sign * (limit + 1)) }))).toBeNull();
+      expect(nearMissStrike(input({ me: at(1.3, sign * (limit - 1)) }))).not.toBeNull();
+      expect(nearMissStrike(input({ me: at(1.3, sign * (limit + 1)) }))).toBeNull();
     }
-    // 등 뒤는 가까워도 거짓
-    expect(nearMissStrike(input({ me: at(0.9, 180) }))).toBeNull();
+  });
+
+  it('등 뒤 · 옆 근접 원 띠: 중심 거리 closeRange + 몸 반지름(0.85) 초과 ~ + δ는 참, 그 밖은 거짓 — 근접 원 안인데 안 맞은 것도 참', () => {
+    const edge = ATK.closeRange + R;
+    const ev = [strike(0, OPEN)];
+    for (const d of [0.5, 1, 1.5])
+      for (const deg of [180, 120, -100])
+        expect(segmentBlocked(OPEN, at(d, deg, OPEN), blocksStrike)).toBe(false);
+    for (const deg of [180, 120, -100]) {
+      expect(nearMissStrike(input({ me: at(edge + 0.01, deg, OPEN), events: ev })), `${deg}°`).not.toBeNull();
+      expect(
+        nearMissStrike(input({ me: at(edge + NEAR_MISS.delta - 0.01, deg, OPEN), events: ev })),
+        `${deg}°`,
+      ).not.toBeNull();
+      expect(
+        nearMissStrike(input({ me: at(edge + NEAR_MISS.delta + 0.01, deg, OPEN), events: ev })),
+        `${deg}°`,
+      ).toBeNull();
+      expect(nearMissStrike(input({ me: at(edge - 0.1, deg, OPEN), events: ev })), `${deg}°`).not.toBeNull();
+    }
+    // 근접 판정을 끄면 (closeRange 0) 등 뒤는 가까워도 거짓 — 예전 모양
+    expect(nearMissStrike(input({ me: at(0.9, 180, OPEN), events: ev, closeRange: 0 }))).toBeNull();
   });
 
   it('벽 · 철창이 타격선을 막으면 거짓 (같은 거리 · 각도라도)', () => {
@@ -111,8 +136,12 @@ describe('아슬아슬 회피 판단 (nearMiss.ts)', () => {
     expect(nearMissStrike(input({ me: at(2.05) }))).toBeNull();
     expect(nearMissStrike(input({ me: at(2.05), range: 1.5 }))).not.toBeNull();
     expect(nearMissStrike(input({ me: at(1.85), bodyR: 0.4 }))).not.toBeNull();
-    expect(nearMissStrike(input({ me: at(1, 100) }))).toBeNull();
-    expect(nearMissStrike(input({ me: at(1, 100), arcDeg: 150 }))).not.toBeNull();
+    expect(nearMissStrike(input({ me: at(1.3, 100) }))).toBeNull();
+    expect(nearMissStrike(input({ me: at(1.3, 100), arcDeg: 150 }))).not.toBeNull();
+    expect(nearMissStrike(input({ me: at(1.25, 180, OPEN), events: [strike(0, OPEN)] }))).toBeNull();
+    expect(
+      nearMissStrike(input({ me: at(1.25, 180, OPEN), events: [strike(0, OPEN)], closeRange: 0.7 })),
+    ).not.toBeNull();
   });
 
   it('돌려주는 것은 같은 스냅샷의 타격 이벤트 (글자 · 효과 방향을 그 자리에서 잰다)', () => {

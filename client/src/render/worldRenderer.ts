@@ -1506,6 +1506,7 @@ export class WorldRenderer {
         r: atk.range,
         dir: ang3(windupDir),
         arc: r3((atk.arc * Math.PI) / 180),
+        inner: atk.closeRange,
         value: null,
         color: ATTACK_RANGE.color,
         alpha: ATTACK_RANGE.edge,
@@ -2107,7 +2108,7 @@ export class WorldRenderer {
         const best = pickDissolveTarget(
           cands,
           strike,
-          { range: atk.range, arc: (atk.arc * Math.PI) / 180 },
+          { range: atk.range, arc: (atk.arc * Math.PI) / 180, close: atk.closeRange },
           sR,
         );
         if (best) {
