@@ -1,13 +1,14 @@
-// 괴물 공격 (GAME_DESIGN 5.1): 좌클릭 → 준비 0.4초(조준 고정, 이동 가능) → 전방 90° · 1.2타일 타격 → 쿨 1.5초
+// 괴물 공격 (GAME_DESIGN 5.1): 좌클릭 → 준비 0.4초(조준 고정, 이동 가능) → 전방 90° · 1.2타일 + 몸 둘레 근접 판정 타격 → 쿨 1.5초
 // 체력과 수감 (6.1): 두 번 맞으면 감옥으로, 수감 2회 뒤 세 번째로 잡히면 사망
 import {
   BTN,
   PRISON_SLOTS,
   blocksStrike,
-  circleIntersectsSector,
+  circleIntersectsStrike,
   countdown,
   inCircleVision,
   segmentBlocked,
+  strikeShape,
   survivorVisionRadius,
   type GameEvent,
   type InputFrame,
@@ -68,15 +69,19 @@ export function combatTick(game: Game): void {
   strike(game, m);
 }
 
-/** 생존자 몸 원이 부채꼴(1.2타일, 90°)과 겹치고 시선이 이동 차단 타일에 막히지 않으면 맞는다. 범위 안 전원 */
+/**
+ * 생존자 몸 원이 타격 모양(앞 부채꼴 1.2타일 · 90° 또는 몸 둘레 근접 원 closeRange — 방향 무관)과 겹치고
+ * 시선이 타격 차단 타일(벽 · 기둥 · 철창)에 막히지 않으면 맞는다. 범위 안 전원.
+ * 근접 원은 '매미 붙기'(몸에 붙어 옆 · 등 뒤로 돌면 고정된 조준을 빠져나가던 것, 11/18 시연) 때문에 더했다 — 벽 너머는 여전히 안 맞는다
+ */
 export function strike(game: Game, m: MonsterState): void {
   const a = game.balance.monster.attack;
-  const sector = { dir: m.windupDir, arc: (a.arc * Math.PI) / 180, range: a.range };
+  const shape = strikeShape(a, m.windupDir);
   const r = game.balance.survivor.radius;
   let hits = 0;
   for (const s of game.survivors) {
     if (s.status !== 'free') continue;
-    if (!circleIntersectsSector(m.move, sector, s.move, r)) continue;
+    if (!circleIntersectsStrike(m.move, shape, s.move, r)) continue;
     if (segmentBlocked(m.move, s.move, blocksStrike)) continue;
     if (hitSurvivor(game, s)) hits += 1;
   }

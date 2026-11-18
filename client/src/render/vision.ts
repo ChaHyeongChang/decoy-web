@@ -284,8 +284,30 @@ function sectorPath(g: PathPen, cx: number, cy: number, r: number, a0: number, a
 }
 
 /**
- * 공격 준비 범위 (정보 항목 'attack': x · y · r = attack.range · dir · arc = 라디안). 바깥 경계(판정값)는 처음부터 다 보이고,
- * 채움은 준비 시간에 맞춰 꼭짓점에서 바깥으로 0 → 100% 쓸려 차오른다(fill = 0~1, 정확히 attack.windup에 1).
+ * 공격 타격 모양 경로 = 앞 부채꼴(반지름 r, a0 → a1) ∪ 몸 둘레 원(반지름 rc). 한 경로로 바깥 경계만 돈다:
+ * 변 a0의 rc → r, 앞 호 a0 → a1, 변 a1의 r → rc, 뒤 호 a1 → a0 + 2π. rc가 0이면 부채꼴 그대로, rc ≥ r이면 원
+ */
+function strikePath(g: PathPen, cx: number, cy: number, r: number, rc: number, a0: number, a1: number): void {
+  if (rc <= 0) {
+    sectorPath(g, cx, cy, r, a0, a1);
+    return;
+  }
+  g.beginPath();
+  if (rc >= r) {
+    penArc(g, cx, cy, rc, 0, Math.PI * 2);
+    g.closePath();
+    return;
+  }
+  g.moveTo(cx + Math.cos(a0) * rc, cy + Math.sin(a0) * rc);
+  penArc(g, cx, cy, r, a0, a1, false);
+  penArc(g, cx, cy, rc, a1, a0 + Math.PI * 2, false);
+  g.closePath();
+}
+
+/**
+ * 공격 준비 범위 (정보 항목 'attack': x · y · r = attack.range · dir · arc = 라디안 · inner = 몸 둘레 근접 판정 closeRange).
+ * 모양 = 앞 부채꼴 ∪ 몸 둘레 원 (서버 타격 판정 circleIntersectsStrike와 같은 모양). 바깥 경계(판정값)는 처음부터 다 보이고,
+ * 채움은 준비 시간에 맞춰 괴물 중심에서 바깥으로 0 → 100% 쓸려 차오른다(fill = 0~1, 정확히 attack.windup에 1 — 두 반지름을 같은 비율로).
  * 밑판 · 채움은 fillPen(캐릭터 그림자 아래), 차오르는 앞머리 · 판정 경계는 linePen(그림자 위, 몸 아래)
  */
 export function drawAttackRange(fillPen: PathPen, linePen: PathPen, item: InfoItem, fill: number): void {
@@ -294,25 +316,29 @@ export function drawAttackRange(fillPen: PathPen, linePen: PathPen, item: InfoIt
   const cx = item.x * T;
   const cy = item.y * T;
   const R = (item.r ?? 0) * T;
+  const Rc = (item.inner ?? 0) * T;
+  const a0 = dir - half;
+  const a1 = dir + half;
   const k = Math.max(0, Math.min(1, fill));
   // 밑판 (옅게) + 차오르는 채움
   fillPen.fillStyle(ATTACK_RANGE.color, 0.08);
-  sectorPath(fillPen, cx, cy, R, dir - half, dir + half);
+  strikePath(fillPen, cx, cy, R, Rc, a0, a1);
   fillPen.fillPath();
   if (k > 0) {
     fillPen.fillStyle(ATTACK_RANGE.color, ATTACK_RANGE.fill);
-    sectorPath(fillPen, cx, cy, R * k, dir - half, dir + half);
+    strikePath(fillPen, cx, cy, R * k, Rc * k, a0, a1);
     fillPen.fillPath();
-    // 차오르는 앞머리 (밝은 호): 그림자에 묻히지 않게 경계와 같은 층
+    // 차오르는 앞머리 (밝은 호 — 앞 호, 근접 원이 있으면 뒤 호까지): 그림자에 묻히지 않게 경계와 같은 층
     linePen.lineStyle(2.5, ATTACK_RANGE.color, 0.5 + 0.4 * k);
     linePen.beginPath();
-    penArc(linePen, cx, cy, R * k, dir - half, dir + half);
+    penArc(linePen, cx, cy, R * k, a0, a1);
+    if (Rc > 0 && Rc < R) penArc(linePen, cx, cy, Rc * k, a1, a0 + Math.PI * 2);
     linePen.strokePath();
   }
   // 판정 경계 (어두운 받침 + 흰 선)
   for (const [w, color, a] of ATTACK_EDGE_PASSES) {
     linePen.lineStyle(w, color, a);
-    sectorPath(linePen, cx, cy, R, dir - half, dir + half);
+    strikePath(linePen, cx, cy, R, Rc, a0, a1);
     linePen.strokePath();
   }
 }

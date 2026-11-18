@@ -59,6 +59,8 @@ export interface InfoItem {
   dir: number | null;
   /** 전체 각도 (부채꼴 · 공격 범위, 없으면 null) */
   arc: number | null;
+  /** 안쪽 원 반지름 (공격 준비: 몸 둘레 근접 판정 monster.attack.closeRange — 판정값. 다른 항목은 없음) */
+  inner?: number;
   /** 진행 0~1 또는 상태 이름 (없으면 null) */
   value: number | string | null;
   color: number;

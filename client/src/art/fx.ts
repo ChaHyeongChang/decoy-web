@@ -10,7 +10,7 @@
 import {
   Rng,
   angleDiff,
-  circleIntersectsSector,
+  circleIntersectsStrike,
   pointInPolygon,
   type SurvivorStatus,
   type Vec2,
@@ -631,21 +631,22 @@ export const DISSOLVE_SLACK = 0.1;
 
 /**
  * 괴물 화면 수감 흩어짐 자리 고르기: 잡힘 알림 직전까지 보이던 생존자(이번에 사라졌거나 더 이상 자유가 아닌 별칭) 중
- * 같은 순간의 타격 부채꼴(attack.range · arc 라디안, 몸 반지름 겹침 — 서버 타격 판정 circleIntersectsSector와 같은 모양) 안에
+ * 같은 순간의 타격 모양(attack.range · arc 라디안 앞 부채꼴 + close 몸 둘레 근접 원, 몸 반지름 겹침 — 서버 타격 판정
+ * circleIntersectsStrike와 같은 모양) 안에
  * 있던 것만 후보로 둔다. 타격이 없거나(hits = 0) 맞는 후보가 없으면 null(연출 생략: 같은 순간 시야를 벗어난 다른 생존자 자리에서
  * 흩어지지 않게). 여럿이면 조준 방향에 가장 가까운 것 → 타격 중심에 가까운 것
  */
 export function pickDissolveTarget<T extends { x: number; y: number }>(
   cands: readonly T[],
   hit: StrikeHit | null,
-  attack: { range: number; arc: number },
+  attack: { range: number; arc: number; close: number },
   bodyR: number,
 ): T | null {
   if (!hit || hit.hits <= 0) return null;
-  const sector = { dir: hit.dir, arc: attack.arc, range: attack.range };
+  const shape = { dir: hit.dir, arc: attack.arc, range: attack.range, close: attack.close };
   let best: { c: T; da: number; d: number } | null = null;
   for (const c of cands) {
-    if (!circleIntersectsSector(hit, sector, c, bodyR + DISSOLVE_SLACK)) continue;
+    if (!circleIntersectsStrike(hit, shape, c, bodyR + DISSOLVE_SLACK)) continue;
     const da = Math.abs(angleDiff(hit.dir, Math.atan2(c.y - hit.y, c.x - hit.x)));
     const d = Math.hypot(c.x - hit.x, c.y - hit.y);
     if (!best || da < best.da - 1e-9 || (Math.abs(da - best.da) <= 1e-9 && d < best.d)) best = { c, da, d };

@@ -42,7 +42,7 @@
       "hunt":   { "name": "추적", "angle": 50,  "range": 9.0 }
     },
     "visionModeSwitchTime": 0.4,
-    "attack": { "windup": 0.4, "cooldown": 1.5, "range": 1.2, "arc": 90, "windupMoveMultiplier": 1.0 },
+    "attack": { "windup": 0.4, "cooldown": 1.5, "range": 1.2, "arc": 90, "windupMoveMultiplier": 1.0, "closeRange": 0.55 },
     "dash": { "distance": 4.0, "duration": 0.25, "cooldown": 12 },
     "roar": { "radius": 10.0, "revealDuration": 1.5, "selfRevealDuration": 1.0, "cooldown": 30 }
   },

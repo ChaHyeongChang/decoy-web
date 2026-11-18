@@ -191,6 +191,49 @@ describe('범위 표시 반지름 = 판정값 (정보 항목에서 그린다)', 
       expect(r).toBeLessThanOrEqual(atk.range + 1e-9);
   });
 
+  it('공격 준비 근접 원 (inner = closeRange): 경계 = 앞 호(range, ± arc/2) ∪ 뒤 호(closeRange) ∪ 두 변(closeRange ~ range), 채움 · 앞머리도 그 안', () => {
+    const atk = balance.monster.attack;
+    expect(atk.closeRange).toBeGreaterThan(0);
+    const dir = -2.1;
+    const arc = (atk.arc * Math.PI) / 180;
+    const it = item('attack', 30, 12, atk.range, { dir, arc, inner: atk.closeRange });
+    const fillPen = recorder();
+    const linePen = recorder();
+    drawAttackRange(fillPen, linePen, it, 0.6);
+    const edges = linePen.out.filter((s) => s.kind === 'stroke' && s.color === 0xffffff && s.alpha === 0.85);
+    expect(edges.length).toBe(1);
+    const pts = edges[0]!.subs.flat().map((p) => ({ x: p.x / T - 30, y: p.y / T - 12 }));
+    const wrap = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
+    let front = 0;
+    let back = 0;
+    for (const p of pts) {
+      const d = Math.hypot(p.x, p.y);
+      const a = Math.abs(wrap(Math.atan2(p.y, p.x) - dir));
+      // 모든 경계 점은 근접 원 위이거나 부채꼴 쪽(± arc/2 안, closeRange ~ range)
+      expect(d).toBeGreaterThanOrEqual(atk.closeRange - 1e-9);
+      expect(d).toBeLessThanOrEqual(atk.range + 1e-9);
+      if (Math.abs(d - atk.range) < 1e-9) {
+        expect(a).toBeLessThanOrEqual(arc / 2 + 1e-9);
+        front += 1;
+      } else if (Math.abs(d - atk.closeRange) < 1e-9) {
+        if (a > arc / 2 + 1e-6) back += 1;
+      } else expect(a).toBeCloseTo(arc / 2, 9);
+    }
+    expect(front).toBeGreaterThan(4);
+    expect(back).toBeGreaterThan(8);
+    // 채움 · 앞머리는 범위 밖으로 나가지 않고, 등 뒤로는 근접 원 밖으로 나가지 않는다
+    for (const s of [...fillPen.out, ...linePen.out])
+      for (const sub of s.subs)
+        for (const q of sub) {
+          const x = q.x / T - 30;
+          const y = q.y / T - 12;
+          const d = Math.hypot(x, y);
+          expect(d).toBeLessThanOrEqual(atk.range + 1e-9);
+          if (Math.abs(wrap(Math.atan2(y, x) - dir)) > arc / 2 + 1e-6)
+            expect(d).toBeLessThanOrEqual(atk.closeRange + 1e-9);
+        }
+  });
+
   it('밀치기 2 · 구조 1.2 · 포효 10(끝) · 캠핑 4: 그린 점선 · 고리가 판정 반지름 위', () => {
     const g = balance.roles.guard.shoveRange;
     const shove = recorder();

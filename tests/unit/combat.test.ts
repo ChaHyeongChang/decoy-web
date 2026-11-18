@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BTN, PRISON_RECT, countdown, inRect } from '@decoy/shared';
-import { Driver, place, readyGame } from '../helpers/fixtures';
+import { Driver, loadTestBalance, newGame, place, readyGame } from '../helpers/fixtures';
 
 const ATTACK = { pressed: BTN.ATTACK };
 
@@ -131,6 +131,89 @@ describe('괴물 공격 (GAME_DESIGN 5.1)', () => {
     d.run(1, { p1: [0, 0, ATTACK] });
     d.run(d.seconds(0.4));
     expect(runner.hp).toBe(2);
+  });
+});
+
+describe('근접 판정 (매미 붙기, GAME_DESIGN 5.1)', () => {
+  /** 괴물 (30, 18.5) 동쪽을 보고 준비 → 타격. 러너를 각도 deg(조준 기준) · 중심 거리 d에 둔다 */
+  function strikeAt(deg: number, d: number, closeRange?: number) {
+    const balance = loadTestBalance();
+    if (closeRange !== undefined) balance.monster.attack.closeRange = closeRange;
+    const game = newGame(1, balance);
+    game.monster.move.frozen = 0;
+    const drv = new Driver(game);
+    const a = (deg * Math.PI) / 180;
+    place(game, 'p1', 30, 18.5, 0);
+    place(game, 'p2', 30 + Math.cos(a) * d, 18.5 + Math.sin(a) * d);
+    place(game, 'p3', 8, 16);
+    place(game, 'p4', 8, 17);
+    drv.run(1, { p1: [0, 0, ATTACK] });
+    drv.run(drv.seconds(0.4));
+    return { game, runner: game.survivorById('p2')! };
+  }
+
+  it('몸에 닿은 생존자는 옆 · 등 뒤에 있어도 맞는다 (조준 방향과 무관)', () => {
+    const b = loadTestBalance();
+    const contact = b.monster.radius + b.survivor.radius + 0.01;
+    for (const deg of [60, 90, 135, 180, -90, -150])
+      expect(strikeAt(deg, contact).runner.hp, `${deg}°`).toBe(1);
+  });
+
+  it('근접 원 경계: 중심 거리 closeRange + 몸 반지름까지 맞고, 그보다 조금이라도 멀면 등 뒤는 안 맞는다', () => {
+    const b = loadTestBalance();
+    const edge = b.monster.attack.closeRange + b.survivor.radius;
+    expect(strikeAt(180, edge - 0.01).runner.hp).toBe(1);
+    expect(strikeAt(180, edge + 0.01).runner.hp).toBe(2);
+    expect(strikeAt(100, edge + 0.01).runner.hp).toBe(2);
+  });
+
+  it('앞 부채꼴은 그대로: 앞 1.2타일 + 몸 반지름 안은 맞고 옆으로 비켜 근접 원 밖이면 안 맞는다', () => {
+    const b = loadTestBalance();
+    expect(strikeAt(0, b.monster.attack.range + b.survivor.radius - 0.01).runner.hp).toBe(1);
+    expect(strikeAt(80, 1.2).runner.hp).toBe(2);
+  });
+
+  it('closeRange 0이면 예전 판정 (옆에 닿은 생존자는 안 맞는다)', () => {
+    const b = loadTestBalance();
+    const contact = b.monster.radius + b.survivor.radius + 0.01;
+    expect(strikeAt(90, contact, 0).runner.hp).toBe(2);
+  });
+
+  it('근접 원도 벽 · 기둥 너머는 맞지 않는다 (시선 검사를 함께 거친다)', () => {
+    // 반경을 일부러 3타일로 키워도 벽(타일 27–28 × 20–23) 너머 생존자는 안 맞고, 같은 거리의 트인 쪽은 맞는다
+    const balance = loadTestBalance();
+    balance.monster.attack.closeRange = 3;
+    const game = newGame(1, balance);
+    game.monster.move.frozen = 0;
+    const drv = new Driver(game);
+    place(game, 'p1', 26.4, 21.5, Math.PI);
+    place(game, 'p2', 29.3, 21.5);
+    place(game, 'p3', 26.4, 18.6);
+    place(game, 'p4', 8, 17);
+    drv.run(1, { p1: [0, 0, ATTACK] });
+    drv.run(drv.seconds(0.4));
+    expect(game.survivorById('p2')!.hp).toBe(2);
+    expect(game.survivorById('p3')!.hp).toBe(1);
+  });
+
+  it('보호 중 · 수감 중 생존자는 근접 원 안이어도 맞지 않는다', () => {
+    const b = loadTestBalance();
+    const contact = b.monster.radius + b.survivor.radius + 0.01;
+    const game = readyGame();
+    const drv = new Driver(game);
+    place(game, 'p1', 30, 18.5, 0);
+    place(game, 'p2', 30 - contact, 18.5);
+    place(game, 'p3', 30, 18.5 + contact);
+    place(game, 'p4', 8, 17);
+    game.survivorById('p2')!.protectLeft = 2;
+    const guard = game.survivorById('p3')!;
+    guard.status = 'imprisoned';
+    guard.hp = 0;
+    drv.run(1, { p1: [0, 0, ATTACK] });
+    drv.run(drv.seconds(0.4));
+    expect(game.survivorById('p2')!.hp).toBe(2);
+    expect(guard.hp).toBe(0);
+    expect(game.monster.stats.hitsLanded).toBe(0);
   });
 });
 

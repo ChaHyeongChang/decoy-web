@@ -1347,6 +1347,7 @@ export class GameScene extends Phaser.Scene {
           events: snap.events,
           range: b.monster.attack.range,
           arcDeg: b.monster.attack.arc,
+          closeRange: b.monster.attack.closeRange,
           bodyR: b.survivor.radius,
         })
       : null;
