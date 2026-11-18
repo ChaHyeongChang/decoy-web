@@ -1,4 +1,4 @@
-// 프로토콜 관문 (docs/DEPLOY.md 7장, 플레이테스트 반영 b에서 넣음 — PROTOCOL_VERSION 1).
+// 프로토콜 관문 (docs/DEPLOY.md 7장, 플레이테스트 반영 b에서 넣음 — PROTOCOL_VERSION 1, 근접 판정에서 2).
 // 옛 화면과 맞지 않는 배포(맵 · 스냅샷 뜻 변경)에서 옛 화면이 판에 들어가 깨지지 않게, 서버는 join · quick의 proto가 없거나 다르면
 // 자리에 묶지 않고 'update-required'로 거절한다. 기기 안 연습 서버(RoomConfig.practice)는 화면과 같은 빌드라 검사하지 않는다
 import { describe, expect, it } from 'vitest';
@@ -125,6 +125,17 @@ describe('프로토콜 관문 (docs/DEPLOY.md 7장)', () => {
   it('거절 문구는 화면 문구(UI_TEXT.updateRequired · docs/STORY_TEXT.md)와 같은 새로고침 안내다 — 옛 화면은 이 문구를 오류 줄에 그대로 띄운다', () => {
     expect(UPDATE_REQUIRED_MESSAGE).toBe(UI_TEXT.updateRequired);
     expect(UPDATE_REQUIRED_MESSAGE).toContain('새로고침');
+  });
+
+  it('근접 판정 배포(PROTOCOL_VERSION 2): 그 앞 화면(proto 1 — 공격 범위를 부채꼴만 그린다)의 join · quick은 거절된다', () => {
+    expect(PROTOCOL_VERSION).toBeGreaterThanOrEqual(2);
+    for (const msg of [join(), quick()]) {
+      const { conn, link } = connect(newCore());
+      link.receive(withProto(msg, 1));
+      expect(conn.last('error')?.code).toBe('update-required');
+      expect(conn.count('welcome')).toBe(0);
+      expect(link.boundRoom).toBeNull();
+    }
   });
 
   it('PROTOCOL_VERSION은 1 이상의 정수다 (비호환 배포마다 1씩 올린다)', () => {

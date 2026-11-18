@@ -231,7 +231,7 @@ Railway 같은 서비스도 Dockerfile로 배포된다. 다만 아시아 리전�
 
 이 관문은 **플레이테스트 반영 b에서 넣었다(`PROTOCOL_VERSION` 1)** — 거점 C · 옮긴 기둥(맵)과 거점 상태 `'off'`(스냅샷 뜻)를 바꾼 첫 비호환 배포다. 그 앞 화면은 `proto`를 보내지 않으므로 모두 "없음 = 옛 화면"으로 걸러진다. 지금 들어 있는 것:
 
-1. `shared/src/types.ts`의 `export const PROTOCOL_VERSION` (지금 1)
+1. `shared/src/types.ts`의 `export const PROTOCOL_VERSION` (지금 2 — 근접 판정에서 올렸다: 옛 화면은 공격 준비 범위를 부채꼴만 그려 옆 · 등 뒤 판정을 숨긴다. 키 추가라 판은 깨지지 않지만 '범위 = 판정값'이 어긋나 같은 배포에서 올렸다, DECISIONS 18절)
 2. 화면이 보내는 `join` · `quick`에 `proto: PROTOCOL_VERSION`을 싣는다 (`ClientMessage` 타입의 필수 필드 — 서버 봇 클라이언트 `server/src/bots.ts` · 시험 · `scripts/verify-deploy.mjs`도 싣는다. 이 스크립트는 `shared/src/types.ts`에서 값을 읽는다)
 3. 서버 `ServerCore.connect()`(`shared/src/sim/core.ts`)의 join · quick 분기 맨 앞에서 `proto`가 없거나 다르면 자리에 묶지 않고(방도 만들지 않고 남의 자리를 넘겨받지도 않는다) `{ t: 'error', code: 'update-required' }`로 거절한다. 문구는 새로고침 안내 "새 버전이 나왔어요. 새로고침해 주세요"(`UPDATE_REQUIRED_MESSAGE`)이고 `docs/STORY_TEXT.md` · `client/src/data/storyText.ts`(`UI_TEXT.updateRequired`)와 같다 (`tests/unit/protocol-gate.test.ts`)
 4. 새 화면은 `update-required`를 받으면 "새 버전이 있어요" 띠를 띄우고 첫 화면으로 돌아가 그 문구를 오류 줄에 띄운다(`client/src/app.ts` error 처리). 그 코드를 모르는 옛 화면도 받은 문구를 오류 줄에 띄운다(error 처리의 마지막 줄)
