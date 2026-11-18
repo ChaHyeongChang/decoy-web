@@ -28,8 +28,10 @@ env:
 jobs:
   quick:
     # 작업 하나로 묶는다: Actions는 작업마다 분 단위로 올려 세므로 나누면 그만큼 더 든다
+    # 러너 고정: ubuntu-latest가 26.04로 바뀌자 고정된 Playwright 1.56.1이 Chromium을 받지 못했다('does not support chromium on
+    # ubuntu26.04-x64', 2026-11-18 PR #37). 브라우저를 받는 두 작업(quick · e2e)만 24.04로 둔다 (DECISIONS 18절)
     name: 빠른 검사 (타입 · 린트 · 단위 · 핵심 E2E)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
@@ -72,7 +74,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     # 이름에 matrix를 넣지 않는다: 건너뛸 때(push · PR) 식이 풀리지 않은 채 보인다. GitHub가 "전체 E2E (1)"처럼 붙인다
     name: 전체 E2E
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
