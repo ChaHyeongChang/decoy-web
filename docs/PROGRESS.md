@@ -18,6 +18,7 @@
 
 **작업 방식 (이번에 쓴 것)**
 - 이 세션의 브랜치는 `claude/decoy-cicada-balance-wxu3gr`(main 05e9580에서 시작). 병합 기록 커밋은 병합 뒤 이 브랜치에만 있을 수 있다
+- **CI 러너**: GitHub `ubuntu-latest`가 Ubuntu 26.04로 바뀌어 Playwright 1.56.1이 Chromium을 받지 못한다. 이 PR에서 브라우저를 받는 작업(빠른 검사 · 전체 E2E)만 `ubuntu-24.04`로 고정했다(DECISIONS 18절). 24.04 러너가 없어지기 전에 Playwright를 올리는 작업이 따로 필요하다(크롬 판이 바뀌므로 화소 시험 · 일의 양 기준값을 다시 본다)
 - 후보 측정: 수치 사본마다 `npx tsx scripts/bot-stats.ts --matches 1200 --seed 1 --balance <사본> [--monster novice|mid] --quiet --out <결과>` — 1,200판 한 묶음 약 5분(4코어에 넷씩). 같은 코드 · 같은 명령은 같은 결과(근접 판정 0 사본이 c 최종 1,200판과 판마다 같았다)
 - 이 컨테이너의 헤드리스 크롬(Playwright가 찾는 1194 경로를 1243 파일로 링크)은 WebGL 시험에서 콘솔에 'GPU stall due to ReadPixels' 경고를 내 `problems` 검사로 main(05e9580)도 실패한다 — WebGL E2E는 CI 전체 검사로 확인했다. 측정값(흰 위장 · 범위 경계)은 로그로 통과를 봤다
 - 매 마일스톤 순서는 아래 '입체감' 절 '작업 방식'과 같다(브랜치 → PR → 빠른 검사 → Codex 리뷰 확인 → 병합 전 전체 샤딩 검사 → main 병합 → 배포판 검증, 새 빌드인지는 빌드 ID와 첫 화면 JS 원본 크기 — 빌드 ID 길이가 고정이라 원본 크기는 코드 지문이다)
